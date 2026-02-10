@@ -225,10 +225,11 @@ export class PartialError extends Error {
    * @param {Headers} [headers] Response headers
    */
   constructor(stage, status, parsedResponse, headers) {
+    const detail = typeof parsedResponse?.detail === "string" ? parsedResponse.detail : undefined;
     const message =
       status === 500
         ? "Upstream server error"
-        : (parsedResponse?.message ?? "See details for more info.");
+        : (parsedResponse?.message ?? detail ?? "See details for more info.");
     super(message);
     /** @type {any | undefined} Server response parsed as JSON object (if possible). */
     this.detail = parsedResponse;

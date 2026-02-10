@@ -11,6 +11,9 @@ from intric.integration.infrastructure.preview_service.base_preview_service impo
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
+    from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
+        TenantSharePointAppRepository,
+    )
     from intric.integration.infrastructure.oauth_token_service import OauthTokenService
     from intric.integration.domain.entities.tenant_sharepoint_app import TenantSharePointApp
     from intric.integration.infrastructure.auth_service.tenant_app_auth_service import TenantAppAuthService
@@ -25,10 +28,12 @@ class SharePointPreviewService(BasePreviewService):
         oauth_token_service: "OauthTokenService",
         tenant_app_auth_service: Optional["TenantAppAuthService"] = None,
         service_account_auth_service: Optional["ServiceAccountAuthService"] = None,
+        tenant_sharepoint_app_repo: Optional["TenantSharePointAppRepository"] = None,
     ):
         super().__init__(oauth_token_service)
         self.tenant_app_auth_service = tenant_app_auth_service
         self.service_account_auth_service = service_account_auth_service
+        self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
 
     async def get_preview_info(
         self,
@@ -84,6 +89,11 @@ class SharePointPreviewService(BasePreviewService):
                 extra={"tenant_app_id": str(tenant_app.id), "auth_method": tenant_app.auth_method}
             )
             token_data = await self.service_account_auth_service.refresh_access_token(tenant_app)
+            new_refresh_token = token_data.get("refresh_token")
+            if new_refresh_token and new_refresh_token != tenant_app.service_account_refresh_token:
+                tenant_app.update_refresh_token(new_refresh_token)
+                if self.tenant_sharepoint_app_repo:
+                    await self.tenant_sharepoint_app_repo.update(tenant_app)
             access_token = token_data["access_token"]
             logger.info(
                 "Service account token refreshed successfully",

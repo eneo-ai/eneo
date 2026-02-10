@@ -64,3 +64,7 @@ class TenantIntegrationService:
         obj = TenantIntegration(integration=integration, tenant_id=self.user.tenant_id)
         tenant_integration = await self.tenant_integration_repo.add(obj=obj)
         return tenant_integration
+
+    async def remove_tenant_integration(self, tenant_integration_id: "UUID") -> None:
+        """Remove an existing tenant integration."""
+        await self.tenant_integration_repo.delete(id=tenant_integration_id)

@@ -29,9 +29,11 @@ export class ChatService {
   partner = $derived(this.#chatPartner);
   hasCompletionModel = $derived(
     this.#chatPartner &&
-    'completion_model' in this.#chatPartner &&
-    this.#chatPartner.completion_model !== null &&
-    this.#chatPartner.completion_model !== undefined
+    ('completion_model' in this.#chatPartner
+      ? this.#chatPartner.completion_model !== null &&
+        this.#chatPartner.completion_model !== undefined
+      : 'tools' in this.#chatPartner &&
+        this.#chatPartner.tools?.assistants?.length > 0)
   );
   #intric: Intric;
   currentConversation = $state<Conversation>(emptyConversation());

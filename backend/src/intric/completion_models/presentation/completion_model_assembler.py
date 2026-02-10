@@ -45,6 +45,10 @@ class CompletionModelAssembler:
                 completion_model.security_classification,
                 return_none_if_not_enabled=False,
             ),
+            tenant_id=completion_model.tenant_id,
+            provider_id=completion_model.provider_id,
+            provider_name=completion_model.provider_name,
+            provider_type=completion_model.provider_type,
         )
 
     @staticmethod

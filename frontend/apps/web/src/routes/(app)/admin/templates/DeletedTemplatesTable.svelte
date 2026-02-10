@@ -12,6 +12,7 @@
   import TemplateDeletedActions from "./TemplateDeletedActions.svelte";
   import TemplateNameCell from "./TemplateNameCell.svelte";
   import TemplateCategoryBadge from "./TemplateCategoryBadge.svelte";
+  import dayjs from "dayjs";
 
   type AssistantTemplate = components["schemas"]["AssistantTemplateAdminPublic"];
   type AppTemplate = components["schemas"]["AppTemplateAdminPublic"];
@@ -96,8 +97,7 @@
       header: m.deleted_date(),
       cell: (item) => {
         if (!item.value) return "-";
-        const date = new Date(item.value);
-        return date.toLocaleDateString();
+        return dayjs(item.value).format("YYYY-MM-DD HH:mm");
       },
       plugins: {
         sort: {

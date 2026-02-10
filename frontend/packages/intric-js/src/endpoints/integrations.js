@@ -129,6 +129,56 @@ export function initIntegrations(client) {
       },
 
       /**
+       * Import multiple knowledge items in one request.
+       * @param {Object} args
+       * @param {{id: string}} args.integration UserIntegration
+       * @param {Array<{
+       *   key?: string,
+       *   name: string,
+       *   url: string,
+       *   folder_id?: string,
+       *   folder_path?: string,
+       *   type?: string,
+       *   resource_type?: string
+       * }>} args.items
+       * @param {string=} args.wrapper_name
+       * @param {{id: string}} args.space Space to add this to
+       * @param {{id: string}} args.embedding_model Embedding model to use
+       *
+       * @throws {IntricError}
+       * */
+      importBatch: async ({ integration, items, wrapper_name, space, embedding_model }) => {
+        const { id: user_integration_id } = integration;
+        const { id } = space;
+
+        const response = await client.fetch(
+          "/api/v1/spaces/{id}/knowledge/integrations/add/{user_integration_id}/batch/",
+          {
+            method: "post",
+            params: {
+              path: { user_integration_id, id }
+            },
+            requestBody: {
+              "application/json": {
+                embedding_model,
+                wrapper_name,
+                items: items.map((item) => ({
+                  key: item.key,
+                  name: item.name,
+                  url: item.url,
+                  folder_id: item.folder_id,
+                  folder_path: item.folder_path,
+                  selected_item_type: item.type,
+                  resource_type: item.resource_type || "site"
+                }))
+              }
+            }
+          }
+        );
+        return response;
+      },
+
+      /**
        * Preview to knowledge items that can be imported through this integration
        * @param {Object} args
        * @param {{id: string}} args.knowledge UserIntegration
@@ -145,6 +195,51 @@ export function initIntegrations(client) {
             method: "delete",
             params: {
               path: { integration_knowledge_id, id }
+            }
+          }
+        );
+      },
+
+      /**
+       * Rename a SharePoint wrapper (updates all items in the wrapper).
+       * @param {Object} args
+       * @param {{id: string}} args.space Space where the wrapper belongs
+       * @param {string} args.wrapper_id Wrapper id
+       * @param {string} args.name New wrapper name
+       * @throws {IntricError}
+       */
+      renameWrapper: async ({ space, wrapper_id, name }) => {
+        const { id } = space;
+        const res = await client.fetch(
+          "/api/v1/spaces/{id}/knowledge/integrations/wrappers/{wrapper_id}/",
+          {
+            method: "patch",
+            params: {
+              path: { id, wrapper_id }
+            },
+            requestBody: {
+              "application/json": { name }
+            }
+          }
+        );
+        return res;
+      },
+
+      /**
+       * Delete all integration knowledge items in a SharePoint wrapper.
+       * @param {Object} args
+       * @param {{id: string}} args.space Space where the wrapper belongs
+       * @param {string} args.wrapper_id Wrapper id
+       * @throws {IntricError}
+       */
+      deleteWrapper: async ({ space, wrapper_id }) => {
+        const { id } = space;
+        await client.fetch(
+          "/api/v1/spaces/{id}/knowledge/integrations/wrappers/{wrapper_id}/",
+          {
+            method: "delete",
+            params: {
+              path: { id, wrapper_id }
             }
           }
         );
@@ -181,6 +276,30 @@ export function initIntegrations(client) {
        * @param {string} args.name New name for the knowledge
        * @throws {IntricError}
        * */
+      /**
+       * Trigger a full resync for a SharePoint integration knowledge
+       * @param {Object} args
+       * @param {{id: string}} args.knowledge IntegrationKnowledge to sync
+       * @param {{id: string}} args.space Space where the knowledge belongs
+       *
+       * @returns {Promise<Job>} The background job processing this sync
+       * @throws {IntricError}
+       * */
+      triggerFullSync: async ({ knowledge, space }) => {
+        const { id: integration_knowledge_id } = knowledge;
+        const { id } = space;
+        const job = await client.fetch(
+          "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/sync/",
+          {
+            method: "post",
+            params: {
+              path: { id, integration_knowledge_id }
+            }
+          }
+        );
+        return job;
+      },
+
       rename: async ({ knowledge, space, name }) => {
         const { id: integration_knowledge_id } = knowledge;
         const { id } = space;

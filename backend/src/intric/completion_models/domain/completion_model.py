@@ -49,6 +49,8 @@ class CompletionModel(AIModel):
         security_classification: Optional[SecurityClassification] = None,
         tenant_id: Optional["UUID"] = None,
         provider_id: Optional["UUID"] = None,
+        provider_name: Optional[str] = None,
+        provider_type: Optional[str] = None,
     ):
         super().__init__(
             user=user,
@@ -80,6 +82,8 @@ class CompletionModel(AIModel):
         self.nr_billion_parameters = nr_billion_parameters
         self.tenant_id = tenant_id
         self.provider_id = provider_id
+        self.provider_name = provider_name
+        self.provider_type = provider_type
 
     def get_credential_provider_name(self) -> str:
         """Get the credential provider name for this model."""
@@ -95,6 +99,8 @@ class CompletionModel(AIModel):
         cls,
         completion_model_db: "CompletionModels",
         user: "UserInDB",
+        provider_name: Optional[str] = None,
+        provider_type: Optional[str] = None,
     ):
         # Settings are now directly on the model table
         return cls(
@@ -127,4 +133,6 @@ class CompletionModel(AIModel):
             ),
             tenant_id=completion_model_db.tenant_id,
             provider_id=completion_model_db.provider_id,
+            provider_name=provider_name,
+            provider_type=provider_type,
         )

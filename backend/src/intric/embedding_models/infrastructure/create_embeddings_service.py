@@ -9,6 +9,7 @@ from intric.embedding_models.infrastructure.adapters.litellm_embeddings import (
 from intric.files.chunk_embedding_list import ChunkEmbeddingList
 from intric.info_blobs.info_blob import InfoBlobChunk
 from intric.main.config import SETTINGS, Settings
+from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -116,10 +117,16 @@ class CreateEmbeddingsService:
             provider_db = result.scalar_one_or_none()
 
             if provider_db is None:
-                raise ValueError(f"Model provider {model.provider_id} not found")
+                raise ProviderNotFoundException(
+                    f"Model provider '{model.provider_id}' not found. "
+                    "The provider may have been deleted or is not accessible."
+                )
 
             if not provider_db.is_active:
-                raise ValueError(f"Model provider {model.provider_id} is not active")
+                raise ProviderInactiveException(
+                    f"The model provider '{provider_db.name}' is currently inactive. "
+                    "Please contact your administrator to enable the provider."
+                )
 
             credential_resolver = TenantModelCredentialResolver(
                 provider_id=provider_db.id,

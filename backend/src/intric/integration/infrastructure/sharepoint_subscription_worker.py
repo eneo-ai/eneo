@@ -61,6 +61,10 @@ async def get_token_for_subscription(
             if tenant_app.is_service_account():
                 service_account_auth_service = container.service_account_auth_service()
                 token_data = await service_account_auth_service.refresh_access_token(tenant_app)
+                new_refresh_token = token_data.get("refresh_token")
+                if new_refresh_token and new_refresh_token != tenant_app.service_account_refresh_token:
+                    tenant_app.update_refresh_token(new_refresh_token)
+                    await tenant_sharepoint_app_repo.update(tenant_app)
                 access_token = token_data["access_token"]
             else:
                 tenant_app_auth_service = container.tenant_app_auth_service()
@@ -210,9 +214,10 @@ async def cleanup_orphaned_subscriptions(container: Container):
                 continue
 
             # Orphaned subscription - delete it
+            resource_id = subscription.site_id or subscription.drive_id or "unknown"
             logger.info(
                 f"Found orphaned subscription {subscription.subscription_id}, "
-                f"site={subscription.site_id[:30]}..."
+                f"resource={resource_id[:30]}..."
             )
 
             # Get token using unified helper (supports both OAuth and tenant app)

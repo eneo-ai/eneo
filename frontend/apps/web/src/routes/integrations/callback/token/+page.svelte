@@ -17,6 +17,23 @@
   let serviceAccountEmail = $state<string | null>(null);
   let flowType = $state<FlowType>("unknown");
 
+  function getActionErrorMessage(errorKey?: string, errorDetail?: string): string {
+    switch (errorKey) {
+      case "integration_callback_missing_required_fields":
+        return m.integration_callback_missing_required_fields();
+      case "integration_callback_backend_url_not_configured":
+        return m.integration_callback_backend_url_not_configured();
+      case "integration_callback_not_authenticated":
+        return m.integration_callback_not_authenticated();
+      case "integration_callback_failed_to_complete_authentication":
+        return errorDetail
+          ? `${m.integration_callback_failed_to_complete_authentication()}: ${errorDetail}`
+          : m.integration_callback_failed_to_complete_authentication();
+      default:
+        return m.integration_callback_failed_to_complete_authentication();
+    }
+  }
+
   // Service account stored data interface
   interface ServiceAccountStoredData {
     state: string;
@@ -67,7 +84,7 @@
     // Validate required params
     if (!code || !state) {
       status = "error";
-      errorMessage = "Missing authorization code or state parameter";
+      errorMessage = m.integration_callback_missing_authorization_code_or_state();
       return;
     }
 
@@ -75,7 +92,7 @@
     const storedDataStr = sessionStorage.getItem(SERVICE_ACCOUNT_STORAGE_KEY);
     if (!storedDataStr) {
       status = "error";
-      errorMessage = "OAuth session expired. Please try again.";
+      errorMessage = m.integration_callback_oauth_session_expired();
       return;
     }
 
@@ -84,14 +101,14 @@
       storedData = JSON.parse(storedDataStr);
     } catch {
       status = "error";
-      errorMessage = "Invalid OAuth session data";
+      errorMessage = m.integration_callback_invalid_oauth_session_data();
       return;
     }
 
     // Verify state matches (CSRF protection)
     if (storedData.state !== state) {
       status = "error";
-      errorMessage = "OAuth state mismatch. This may be a security issue.";
+      errorMessage = m.integration_callback_oauth_state_mismatch();
       return;
     }
 
@@ -148,7 +165,7 @@
 
       case "unknown":
         status = "error";
-        errorMessage = "Unable to determine authentication flow. Please try again from the application.";
+        errorMessage = m.integration_callback_unable_to_determine_flow();
         break;
     }
   });
@@ -157,12 +174,12 @@
 <svelte:head>
   <title>
     {status === "processing"
-      ? "Processing..."
+      ? m.processing()
       : status === "service_success"
-        ? "Success"
+        ? m.success()
         : status === "error"
-          ? "Error"
-          : "Integration Authentication"}
+          ? m.error()
+          : m.integration_authentication()}
   </title>
 </svelte:head>
 
@@ -178,14 +195,14 @@
         {m.please_wait()}
       </p>
     {:else}
-      <h1>Finishing sign-in…</h1>
-      <p>You can close this window.</p>
+      <h1>{m.integration_callback_finishing_sign_in()}</h1>
+      <p>{m.integration_callback_close_window()}</p>
     {/if}
 
   {:else if status === "popup_complete"}
     <!-- Popup complete state (fallback if window doesn't close) -->
-    <h1>Finishing sign-in…</h1>
-    <p>You can close this window.</p>
+    <h1>{m.integration_callback_finishing_sign_in()}</h1>
+    <p>{m.integration_callback_close_window()}</p>
 
   {:else if status === "service_success"}
     <!-- Service account success -->
@@ -264,10 +281,13 @@
             }, 2000);
           } else if (result.type === "failure") {
             status = "error";
-            errorMessage = result.data?.error || "Failed to complete authentication";
+            const data = (result as any).data || {};
+            errorMessage = data.error
+              ? data.error
+              : getActionErrorMessage(data.error_key, data.error_detail);
           } else {
             status = "error";
-            errorMessage = "Unexpected error during authentication";
+            errorMessage = m.integration_callback_unexpected_error();
           }
         };
       }}

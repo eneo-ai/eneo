@@ -11,6 +11,7 @@ from intric.files import audio
 from intric.files.audio import AudioMimeTypes
 from intric.files.file_models import File
 from intric.main.config import SETTINGS, Settings
+from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
 from intric.main.logging import get_logger
 from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
@@ -111,10 +112,16 @@ class Transcriber:
         provider_db = result.scalar_one_or_none()
 
         if provider_db is None:
-            raise ValueError(f"Model provider {model.provider_id} not found")
+            raise ProviderNotFoundException(
+                f"Model provider '{model.provider_id}' not found. "
+                "The provider may have been deleted or is not accessible."
+            )
 
         if not provider_db.is_active:
-            raise ValueError(f"Model provider {model.provider_id} is not active")
+            raise ProviderInactiveException(
+                f"The model provider '{provider_db.name}' is currently inactive. "
+                "Please contact your administrator to enable the provider."
+            )
 
         # Create credential resolver
         credential_resolver = TenantModelCredentialResolver(
