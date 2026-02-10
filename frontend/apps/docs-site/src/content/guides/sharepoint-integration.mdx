@@ -312,6 +312,14 @@ If imported files aren't updating:
 - Check webhook status in the admin panel
 - Verify that the service account (when using service account method) still has access to the files
 
+### Site Not Visible in Eneo
+
+If a SharePoint site doesn't appear in the site list when importing:
+
+- **New sites or recently added members:** SharePoint's search index may take up to 24 hours to reflect new sites or permission changes. Wait and try again later.
+- **Search disabled on the site:** A site administrator may have disabled the site from appearing in search results. Go to the site → **Site settings** → **Search and offline availability** → ensure "Allow this site to appear in search results" is set to **Yes**.
+- **Service account not a member:** Verify that the service account has at least read access to the site. Add it as a member via **Site settings** → **Site permissions** → **Add members**.
+
 ### Users Can't Import
 
 If users get error messages when importing:
