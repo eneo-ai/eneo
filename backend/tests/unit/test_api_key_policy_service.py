@@ -5,7 +5,13 @@ from types import SimpleNamespace
 from intric.authentication.api_key_policy import ApiKeyPolicyService
 from intric.authentication.api_key_request_context import resolve_client_ip
 from intric.authentication.api_key_resolver import ApiKeyValidationError
-from intric.authentication.auth_models import ApiKeyType
+from intric.authentication.auth_models import (
+    ApiKeyCreateRequest,
+    ApiKeyPermission,
+    ApiKeyScopeType,
+    ApiKeyType,
+)
+from intric.roles.permissions import Permission
 
 
 class DummyOrigin:
@@ -158,6 +164,78 @@ async def test_allowed_origins_subset_allows_empty_list():
     await service.validate_allowed_origins_subset(
         allowed_origins=[], tenant_id=tenant_id
     )
+
+
+@pytest.mark.asyncio
+async def test_create_request_rejects_empty_allowed_origins_for_pk():
+    service = _service_with_user([], permissions=[Permission.ADMIN])
+
+    request = ApiKeyCreateRequest(
+        name="Public key",
+        key_type=ApiKeyType.PK,
+        permission=ApiKeyPermission.READ,
+        scope_type=ApiKeyScopeType.TENANT,
+        scope_id=None,
+        allowed_origins=[],
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_create_request(request=request)
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "at least one allowed origin" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_update_request_rejects_empty_allowed_origins_for_pk():
+    tenant_id = uuid4()
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=DummyOriginRepo(["https://example.com"]),
+        space_service=DummySpaceService(),
+        user=None,
+    )
+    key = SimpleNamespace(
+        key_type=ApiKeyType.PK.value,
+        tenant_id=tenant_id,
+        permission=ApiKeyPermission.READ.value,
+        resource_permissions=None,
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_update_request(
+            key=key,
+            updates={"allowed_origins": []},
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "at least one allowed origin" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_update_request_rejects_admin_permission_for_pk():
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=DummyOriginRepo([]),
+        space_service=DummySpaceService(),
+        user=None,
+    )
+    key = SimpleNamespace(
+        key_type=ApiKeyType.PK.value,
+        tenant_id=uuid4(),
+        permission=ApiKeyPermission.READ.value,
+        resource_permissions=None,
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_update_request(
+            key=key,
+            updates={"permission": ApiKeyPermission.ADMIN.value},
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "cannot have admin permission" in exc.value.message
 
 
 @pytest.mark.asyncio

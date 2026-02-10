@@ -278,7 +278,7 @@ class Settings(BaseSettings):
     api_key_rotation_grace_hours: int = 24
     api_key_legacy_endpoints_enabled: bool = True
     api_key_rate_limit_window_seconds: int = 3600
-    api_key_rate_limit_fail_open: bool = True
+    api_key_rate_limit_fail_open: bool = False
     api_key_rate_limit_tenant_default: int = 10000
     api_key_rate_limit_space_default: int = 5000
     api_key_rate_limit_assistant_default: int = 1000

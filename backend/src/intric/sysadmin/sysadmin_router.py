@@ -30,6 +30,7 @@ from intric.allowed_origins.allowed_origin_models import (
     AllowedOriginCreate,
     AllowedOriginInDB,
 )
+from intric.authentication.api_key_policy import ApiKeyPolicyService
 from intric.database.database import AsyncSession
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
@@ -63,6 +64,15 @@ from intric.audit.domain.entity_types import EntityType
 logger = get_logger(__name__)
 
 router = APIRouter(dependencies=[Security(auth.authenticate_super_api_key)])
+
+
+def _invalidate_api_key_origin_cache(container: Container, tenant_id: UUID) -> None:
+    policy_service = ApiKeyPolicyService(
+        allowed_origin_repo=container.allowed_origin_repo(),
+        space_service=None,
+        user=None,
+    )
+    policy_service.invalidate_tenant_origin_cache(tenant_id)
 
 
 class OIDCDebugToggleRequest(BaseModel):
@@ -644,6 +654,7 @@ async def add_origin(
     created = await allowed_origin_repo.add_origin(
         origin=origin.url, tenant_id=origin.tenant_id
     )
+    _invalidate_api_key_origin_cache(container, origin.tenant_id)
     audit_service = container.audit_service()
     if audit_service is not None:
         await audit_service.log_async(
@@ -688,6 +699,7 @@ async def delete_origin(
     await allowed_origin_repo.delete(id)
     if origin is None:
         return
+    _invalidate_api_key_origin_cache(container, origin.tenant_id)
     audit_service = container.audit_service()
     if audit_service is not None:
         await audit_service.log_async(

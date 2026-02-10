@@ -62,6 +62,8 @@ from intric.users.user_repo import UsersRepository
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.group_chats_table import GroupChatsTable
+from intric.database.tables.info_blobs_table import InfoBlobs
+from intric.database.tables.integration_table import IntegrationKnowledge
 from intric.database.tables.service_table import Services
 from intric.database.tables.users_table import Users
 from intric.database.tables.app_table import AppRuns, Apps
@@ -769,6 +771,7 @@ class UserService:
                 user.tenant_id
             )
             if scope_enforcement_enabled:
+                strict_mode_enabled = await self._is_strict_mode_enabled(user.tenant_id)
                 scope_config = getattr(request.state, "_scope_check_config", None)
                 if (
                     scope_config is not None
@@ -776,7 +779,7 @@ class UserService:
                 ):
                     try:
                         await self._enforce_api_key_scope(
-                            request, resolved.key, scope_config
+                            request, resolved.key, scope_config, strict_mode=strict_mode_enabled
                         )
                     except ApiKeyValidationError as exc:
                         await self._log_api_key_auth_failed(
@@ -793,6 +796,7 @@ class UserService:
             ip_address=ip_address,
             request_id=request_id,
             user_agent=user_agent,
+            request=request,
         )
 
         logger.info(
@@ -896,22 +900,30 @@ class UserService:
     async def _is_scope_enforcement_enabled(self, tenant_id: UUID) -> bool:
         """Check if scope enforcement is enabled for tenant.
 
-        Deliberately bypasses check_is_feature_enabled() which returns False
-        on missing row. Security controls must fail-closed: missing flag = enforced.
+        Security controls fail-closed: missing flag row defaults to enforced.
         """
         if self.feature_flag_service is None:
             logger.warning("feature_flag_service not available, defaulting to scope enforced")
             return True
 
-        flag = await self.feature_flag_service.feature_flag_repo.one_or_none(
-            name="api_key_scope_enforcement"
+        return await self.feature_flag_service.check_is_feature_enabled_fail_closed(
+            feature_name="api_key_scope_enforcement",
+            tenant_id=tenant_id,
         )
-        if flag is None:
-            logger.warning(
-                "api_key_scope_enforcement feature flag not found, defaulting to enforced"
-            )
-            return True
-        return flag.is_enabled(tenant_id=tenant_id)
+
+    async def _is_strict_mode_enabled(self, tenant_id: UUID) -> bool:
+        """Check if strict mode is enabled for tenant.
+
+        Strict mode defaults OFF when the flag row is missing to support staged rollout.
+        """
+        if self.feature_flag_service is None:
+            logger.warning("feature_flag_service not available, defaulting strict mode to disabled")
+            return False
+
+        return await self.feature_flag_service.check_is_feature_enabled(
+            feature_name="api_key_strict_mode",
+            tenant_id=tenant_id,
+        )
 
     async def _resolve_space_id_for_resource(
         self,
@@ -969,6 +981,31 @@ class UserService:
             return await self._resolve_app_run_space_id(resource_id)
         elif resource_type == "crawl_run":
             return await self._resolve_crawl_run_space_id(resource_id)
+        elif resource_type == "info_blob":
+            stmt = (
+                sa.select(
+                    sa.func.coalesce(
+                        CollectionsTable.space_id,
+                        Websites.space_id,
+                        IntegrationKnowledge.space_id,
+                    )
+                )
+                .select_from(InfoBlobs)
+                .outerjoin(
+                    CollectionsTable,
+                    CollectionsTable.id == InfoBlobs.group_id,
+                )
+                .outerjoin(
+                    Websites,
+                    Websites.id == InfoBlobs.website_id,
+                )
+                .outerjoin(
+                    IntegrationKnowledge,
+                    IntegrationKnowledge.id == InfoBlobs.integration_knowledge_id,
+                )
+                .where(InfoBlobs.id == resource_id)
+            )
+            return await session.scalar(stmt)
         else:
             return None
 
@@ -1007,11 +1044,49 @@ class UserService:
         result = await self.repo.session.scalar(stmt)
         return result
 
+    def _parse_uuid(self, raw_value: object) -> UUID | None:
+        if raw_value is None:
+            return None
+        try:
+            return UUID(str(raw_value))
+        except (ValueError, AttributeError):
+            return None
+
+    def _extract_scoped_resource_id(
+        self,
+        *,
+        request: Request,
+        resource_type: str,
+        path_param: str | None,
+    ) -> tuple[UUID | None, str | None]:
+        path_params = request.scope.get("path_params", {})
+
+        if path_param is not None:
+            return self._parse_uuid(path_params.get(path_param)), path_param
+
+        # Only info-blobs has deterministic mount-level routes that can
+        # safely infer scoped identifiers when path_param=None.
+        if resource_type == "info_blob":
+            for candidate in ("id", "space_id"):
+                if candidate in path_params:
+                    return self._parse_uuid(path_params.get(candidate)), candidate
+
+        return None, None
+
+    def _strict_scope_hint(self, *, resource_type: str, path_param: str | None) -> str:
+        if path_param is not None:
+            return f"path parameter '{path_param}'"
+        if resource_type == "info_blob":
+            return "path parameter 'id' or 'space_id'"
+        return "a deterministic scoped path parameter"
+
     async def _enforce_api_key_scope(
         self,
         request: Request,
         key: ApiKeyV2InDB,
         scope_config: dict,
+        *,
+        strict_mode: bool = False,
     ) -> None:
         """Enforce API key scope restrictions.
 
@@ -1038,18 +1113,25 @@ class UserService:
             )
 
         # 3. Extract resource_id from path params
-        resource_id: UUID | None = None
-        if path_param is not None:
-            path_params = request.scope.get("path_params", {})
-            raw_id = path_params.get(path_param)
-            if raw_id is not None:
-                try:
-                    resource_id = UUID(str(raw_id))
-                except (ValueError, AttributeError):
-                    resource_id = None
+        resource_id, resolved_param = self._extract_scoped_resource_id(
+            request=request,
+            resource_type=resource_type,
+            path_param=path_param,
+        )
 
         # 4. LIST-ENDPOINT RULES (no resource_id in path)
         if resource_id is None:
+            if strict_mode:
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        f"API key is scoped to {key.scope_type} '{key.scope_id}'. "
+                        f"Strict mode requires deterministic scope filtering for "
+                        f"resource type '{resource_type}'. "
+                        f"Expected {self._strict_scope_hint(resource_type=resource_type, path_param=path_param)}."
+                    ),
+                )
             if scope_type == ApiKeyScopeType.SPACE:
                 # Space-scoped: pass — service layer filters by space membership
                 return
@@ -1080,9 +1162,12 @@ class UserService:
         # 5. SINGLE-RESOURCE RULES (resource_id found in path)
 
         if scope_type == ApiKeyScopeType.SPACE:
-            target_space_id = await self._resolve_space_id_for_resource(
-                resource_type, resource_id
-            )
+            if resource_type == "info_blob" and resolved_param == "space_id":
+                target_space_id = resource_id
+            else:
+                target_space_id = await self._resolve_space_id_for_resource(
+                    resource_type, resource_id
+                )
             if target_space_id is None:
                 # Fail-closed: can't prove scope → deny
                 raise ApiKeyValidationError(
@@ -1180,6 +1265,7 @@ class UserService:
         ip_address: str | None = None,
         request_id: UUID | None = None,
         user_agent: str | None = None,
+        request: Request | None = None,
     ) -> None:
         if self.audit_service is None:
             return
@@ -1194,6 +1280,13 @@ class UserService:
             "key_type": key.key_type,
             "key_prefix": key.key_prefix,
         }
+        if request is not None:
+            route = request.scope.get("route")
+            extra["request_path"] = route.path if route else request.url.path
+            extra["method"] = request.method
+            origin = request.headers.get("origin")
+            if origin:
+                extra["origin"] = origin
 
         await self.audit_service.log_async(
             tenant_id=user.tenant_id,

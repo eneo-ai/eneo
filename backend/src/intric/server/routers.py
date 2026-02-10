@@ -63,7 +63,10 @@ from intric.security_classifications.presentation.security_classification_router
 )
 from intric.server.websockets.websocket_router import router as websocket_router
 from intric.services.service_router import router as services_router
-from intric.settings.settings_router import router as settings_router
+from intric.settings.settings_router import (
+    router as settings_router,
+    settings_admin_router,
+)
 from intric.spaces.api.space_router import router as space_router
 from intric.storage.presentation.storage_router import router as storage_router
 from intric.templates.api.templates_router import router as template_router
@@ -116,6 +119,14 @@ from intric.model_providers.presentation.model_provider_router import (
 from intric.api.audit.routes import router as audit_router
 
 router = APIRouter()
+
+TENANT_ADMIN_SCOPE_GUARDS = (
+    Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+)
+TENANT_ADMIN_API_KEY_GUARDS = (
+    *TENANT_ADMIN_SCOPE_GUARDS,
+    Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+)
 
 router.include_router(
     crawl_run_router,
@@ -174,7 +185,7 @@ router.include_router(
     tags=["info-blobs"],
     dependencies=[
         Depends(require_resource_permission_for_method("knowledge")),
-        Depends(require_api_key_scope_check(resource_type="space", path_param=None)),
+        Depends(require_api_key_scope_check(resource_type="info_blob", path_param=None)),
     ],
 )
 router.include_router(
@@ -191,6 +202,15 @@ router.include_router(
     ],
 )
 router.include_router(settings_router, prefix="/settings", tags=["settings"])
+router.include_router(
+    settings_admin_router,
+    prefix="/settings",
+    tags=["settings"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+        Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    ],
+)
 router.include_router(
     assistants_router,
     prefix="/assistants",
@@ -245,33 +265,25 @@ router.include_router(
     admin_router,
     prefix="/admin",
     tags=["admin"],
-    dependencies=[
-        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-    ],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
     tenant_self_credentials_router,
     prefix="/admin",
     tags=["admin"],
-    dependencies=[
-        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-    ],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
     assistant_template_admin_router,
     prefix="",
     tags=["admin-templates"],
-    dependencies=[
-        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-    ],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
     app_template_admin_router,
     prefix="",
     tags=["admin-templates"],
-    dependencies=[
-        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-    ],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
 router.include_router(user_groups_router, prefix="/user-groups", tags=["user-groups"])
@@ -282,57 +294,43 @@ router.include_router(
     completion_models_router,
     prefix="/completion-models",
     tags=["completion-models"],
-    dependencies=[
-        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-    ],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
     embedding_models_router,
     prefix="/embedding-models",
     tags=["embedding-models"],
-    dependencies=[
-        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-    ],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
     transcription_models_router,
     prefix="/transcription-models",
     tags=["transcription-models"],
-    dependencies=[
-        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-    ],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
     model_providers_router,
     prefix="/admin/model-providers",
     tags=["admin", "model-providers"],
-    dependencies=[
-        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-    ],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
     tenant_completion_models_router,
     prefix="/admin/tenant-models/completion",
     tags=["admin", "tenant-models"],
-    dependencies=[
-        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-    ],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
     tenant_embedding_models_router,
     prefix="/admin/tenant-models/embedding",
     tags=["admin", "tenant-models"],
-    dependencies=[
-        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-    ],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
     tenant_transcription_models_router,
     prefix="/admin/tenant-models/transcription",
     tags=["admin", "tenant-models"],
-    dependencies=[
-        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-    ],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
     files_router,
@@ -396,9 +394,7 @@ router.include_router(
     audit_router,
     prefix="",
     tags=["audit"],
-    dependencies=[
-        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-    ],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(integration_router, prefix="/integrations", tags=["integrations"])
 router.include_router(
@@ -408,9 +404,7 @@ router.include_router(
     admin_sharepoint_router,
     prefix="/admin",
     tags=["admin"],
-    dependencies=[
-        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-    ],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(ai_models_router, prefix="/ai-models", tags=["ai-models"])
 

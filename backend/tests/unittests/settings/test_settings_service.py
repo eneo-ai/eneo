@@ -34,6 +34,14 @@ class MockFeatureFlagService:
         # Return False for using_templates by default (feature disabled)
         return False
 
+    async def check_is_feature_enabled_fail_closed(
+        self, feature_name: str, tenant_id=None
+    ):
+        # Scope enforcement is fail-closed by default when no explicit flag exists.
+        if feature_name == "api_key_scope_enforcement":
+            return True
+        return False
+
 
 class MockTenantRepo:
     """Mock tenant repo for testing."""

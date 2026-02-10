@@ -42,6 +42,19 @@ class ApiKeyType(str, Enum):
     SK = "sk_"
 
 
+class ApiKeyUserRelation(str, Enum):
+    OWNER = "owner"
+    CREATOR = "creator"
+
+
+class ApiKeySearchMatchReason(str, Enum):
+    EXACT_SECRET = "exact_secret"
+    KEY_SUFFIX = "key_suffix"
+    NAME_OR_DESCRIPTION = "name_or_description"
+    OWNER = "owner"
+    CREATOR = "creator"
+
+
 class ApiKeyPermission(str, Enum):
     READ = "read"
     WRITE = "write"
@@ -162,6 +175,7 @@ class ApiKeyCreateRequest(BaseModel):
 class ApiKeyUpdateRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    permission: Optional[ApiKeyPermission] = None
     allowed_origins: Optional[list[str]] = None
     allowed_ips: Optional[list[str]] = None
     expires_at: Optional[datetime] = None
@@ -169,8 +183,21 @@ class ApiKeyUpdateRequest(BaseModel):
     resource_permissions: Optional[ResourcePermissions] = None
 
 
+class ApiKeyExactLookupRequest(BaseModel):
+    secret: str
+
+
+class ApiKeyUserSnapshot(BaseModel):
+    id: UUID
+    email: Optional[str] = None
+    username: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ApiKeyV2(BaseModel):
     id: UUID
+    owner_user_id: UUID
     key_prefix: str
     key_suffix: str
     name: str
@@ -196,14 +223,16 @@ class ApiKeyV2(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     rotated_from_key_id: Optional[UUID] = None
+    created_by_user_id: Optional[UUID] = None
+    owner_user: Optional[ApiKeyUserSnapshot] = None
+    created_by_user: Optional[ApiKeyUserSnapshot] = None
+    search_match_reasons: Optional[list[ApiKeySearchMatchReason]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class ApiKeyV2InDB(ApiKeyV2):
     tenant_id: UUID
-    owner_user_id: UUID
-    created_by_user_id: Optional[UUID] = None
     created_by_key_id: Optional[UUID] = None
     delegation_depth: int = 0
     key_hash: str
@@ -283,6 +312,42 @@ class ApiKeyCreationConstraints(BaseModel):
 class ApiKeyCreatedResponse(BaseModel):
     api_key: ApiKeyV2
     secret: str
+
+
+class ApiKeyExactLookupResponse(BaseModel):
+    api_key: ApiKeyV2
+    match_reason: ApiKeySearchMatchReason = ApiKeySearchMatchReason.EXACT_SECRET
+
+
+class ApiKeyUsageEvent(BaseModel):
+    id: UUID
+    timestamp: datetime
+    action: str
+    outcome: str
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    request_id: Optional[UUID] = None
+    request_path: Optional[str] = None
+    method: Optional[str] = None
+    origin: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class ApiKeyUsageSummary(BaseModel):
+    total_events: int
+    used_events: int
+    auth_failed_events: int
+    last_seen_at: Optional[datetime] = None
+    last_success_at: Optional[datetime] = None
+    last_failure_at: Optional[datetime] = None
+    sampled_used_events: bool = False
+
+
+class ApiKeyUsageResponse(BaseModel):
+    summary: ApiKeyUsageSummary
+    items: list[ApiKeyUsageEvent]
+    limit: int
+    next_cursor: Optional[datetime] = None
 
 
 class ApiKeyPublic(BaseModel):

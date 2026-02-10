@@ -229,6 +229,7 @@ class ApiKeyLifecycleService:
         *,
         key_id: UUID,
         request: ApiKeyUpdateRequest,
+        skip_manage_authorization: bool = False,
         ip_address: str | None = None,
         request_id: UUID | None = None,
         user_agent: str | None = None,
@@ -237,7 +238,8 @@ class ApiKeyLifecycleService:
         key: ApiKeyV2InDB | None = None
         try:
             key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
-            await self.policy_service.ensure_manage_authorized(key=key)
+            if not skip_manage_authorization:
+                await self.policy_service.ensure_manage_authorized(key=key)
         except ApiKeyValidationError as exc:
             await self._log_lifecycle_failure(
                 action=ActionType.API_KEY_UPDATED,
@@ -335,6 +337,7 @@ class ApiKeyLifecycleService:
             for field in (
                 "name",
                 "description",
+                "permission",
                 "allowed_origins",
                 "allowed_ips",
                 "expires_at",

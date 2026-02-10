@@ -71,6 +71,20 @@ export function initSettings(client) {
         requestBody: { "application/json": { enabled } }
       });
       return res;
+    },
+
+    /**
+     * Update API key strict mode setting for the tenant
+     * @param {boolean} enabled Whether to enable strict mode
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').Settings>}
+     */
+    updateStrictMode: async (enabled) => {
+      const res = await client.fetch("/api/v1/settings/strict-mode", {
+        method: "patch",
+        requestBody: { "application/json": { enabled } }
+      });
+      return res;
     }
   };
 }

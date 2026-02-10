@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 from intric.allowed_origins.allowed_origin_repo import AllowedOriginRepository
+from intric.allowed_origins.origin_matching import origin_matches_pattern
 from intric.authentication.api_key_request_context import resolve_client_ip
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.auth_models import (
@@ -39,6 +40,8 @@ class _TenantOriginCacheEntry:
 
 
 class ApiKeyPolicyService:
+    _shared_tenant_origin_cache: dict[UUID, _TenantOriginCacheEntry] = {}
+
     def __init__(
         self,
         allowed_origin_repo: AllowedOriginRepository,
@@ -49,7 +52,7 @@ class ApiKeyPolicyService:
         self.space_service = space_service
         self.user = user
         self.settings = get_settings()
-        self._tenant_origin_cache: dict[UUID, _TenantOriginCacheEntry] = {}
+        self._tenant_origin_cache = self._shared_tenant_origin_cache
         self._tenant_origin_cache_ttl_seconds = max(
             int(self.settings.api_key_origin_cache_ttl_seconds), 0
         )
@@ -94,6 +97,12 @@ class ApiKeyPolicyService:
                     status_code=400,
                     code="invalid_request",
                     message="pk_ keys require allowed_origins.",
+                )
+            if len(request.allowed_origins) == 0:
+                raise ApiKeyValidationError(
+                    status_code=400,
+                    code="invalid_request",
+                    message="pk_ keys require at least one allowed origin.",
                 )
             if request.allowed_ips is not None:
                 raise ApiKeyValidationError(
@@ -258,6 +267,22 @@ class ApiKeyPolicyService:
             return
 
         key_type = ApiKeyType(key.key_type)
+        new_permission: ApiKeyPermission | None = None
+        if "permission" in updates:
+            raw_permission = updates.get("permission")
+            if raw_permission is not None:
+                new_permission = (
+                    raw_permission
+                    if isinstance(raw_permission, ApiKeyPermission)
+                    else ApiKeyPermission(raw_permission)
+                )
+                if key_type == ApiKeyType.PK and new_permission == ApiKeyPermission.ADMIN:
+                    raise ApiKeyValidationError(
+                        status_code=400,
+                        code="invalid_request",
+                        message="pk_ keys cannot have admin permission.",
+                    )
+
         if "allowed_origins" in updates:
             allowed_origins = cast(list[str] | None, updates.get("allowed_origins"))
             if key_type != ApiKeyType.PK and allowed_origins is not None:
@@ -267,6 +292,12 @@ class ApiKeyPolicyService:
                     message="allowed_origins is only supported for pk_ keys.",
                 )
             if key_type == ApiKeyType.PK and allowed_origins is not None:
+                if len(allowed_origins) == 0:
+                    raise ApiKeyValidationError(
+                        status_code=400,
+                        code="invalid_request",
+                        message="pk_ keys require at least one allowed origin.",
+                    )
                 if allowed_origins:
                     for origin in allowed_origins:
                         if not self._origin_has_scheme(
@@ -316,20 +347,15 @@ class ApiKeyPolicyService:
                     else ResourcePermissions.model_validate(raw_rp)
                 )
                 # Use incoming permission if both are changing, else key's existing
-                ceiling = ApiKeyPermission(
-                    updates["permission"]
-                    if "permission" in updates
-                    else key.permission
-                )
+                ceiling = new_permission or ApiKeyPermission(key.permission)
                 self._validate_resource_permissions_ceiling(
                     resource_permissions=rp,
                     permission=ceiling,
                 )
-        elif "permission" in updates:
+        elif new_permission is not None:
             # Permission is being lowered — check existing resource_permissions still fit
             if key.resource_permissions is not None:
                 existing_rp = ResourcePermissions.model_validate(key.resource_permissions)
-                new_permission = ApiKeyPermission(updates["permission"])
                 self._validate_resource_permissions_ceiling(
                     resource_permissions=existing_rp,
                     permission=new_permission,
@@ -602,45 +628,7 @@ class ApiKeyPolicyService:
         return False
 
     def _origin_matches(self, origin: str, pattern: str) -> bool:
-        origin_parsed = urlparse(origin)
-        if not origin_parsed.scheme or not origin_parsed.hostname:
-            return False
-
-        origin_scheme = origin_parsed.scheme.lower()
-        origin_host = origin_parsed.hostname.lower()
-        origin_port = origin_parsed.port or (443 if origin_scheme == "https" else 80)
-
-        if "://" not in pattern:
-            pattern_host = pattern.lower()
-            if pattern_host.startswith("*."):
-                base = pattern_host[2:]
-                if not origin_host.endswith(f".{base}"):
-                    return False
-                origin_labels = origin_host.split(".")
-                base_labels = base.split(".")
-                return len(origin_labels) == len(base_labels) + 1
-            return origin_host == pattern_host
-
-        pattern_parsed = urlparse(pattern)
-        if not pattern_parsed.scheme or not pattern_parsed.hostname:
-            return False
-
-        pattern_scheme = pattern_parsed.scheme.lower()
-        pattern_host = pattern_parsed.hostname.lower()
-        pattern_port = pattern_parsed.port or (443 if pattern_scheme == "https" else 80)
-
-        if pattern_scheme != origin_scheme or pattern_port != origin_port:
-            return False
-
-        if pattern_host.startswith("*."):
-            base = pattern_host[2:]
-            if not origin_host.endswith(f".{base}"):
-                return False
-            origin_labels = origin_host.split(".")
-            base_labels = base.split(".")
-            return len(origin_labels) == len(base_labels) + 1
-
-        return origin_host == pattern_host
+        return origin_matches_pattern(origin, pattern)
 
     def _require_user(self) -> "UserInDB":
         if self.user is None:

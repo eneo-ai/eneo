@@ -114,6 +114,63 @@ async def _filter_manageable_keys(
     return filtered_keys, auth_cache
 
 
+async def _collect_manageable_keys_for_page(
+    *,
+    repo: ApiKeysV2Repository,
+    policy: ApiKeyPolicyService,
+    tenant_id: UUID,
+    limit: int,
+    cursor: datetime | None,
+    scope_type: ApiKeyScopeType | None,
+    scope_id: UUID | None,
+    state: ApiKeyState | None,
+    key_type: ApiKeyType | None,
+) -> list[ApiKeyV2InDB]:
+    """Collect enough manageable keys to produce one filtered page.
+
+    Filtering happens after retrieval because manageability is actor-dependent.
+    This collector fetches multiple forward batches when needed so low-permission
+    users still receive full pages where possible.
+    """
+    collected: list[ApiKeyV2InDB] = []
+    auth_cache: dict[tuple[str, UUID | None], bool] = {}
+    next_cursor = cursor
+    max_batches = 20
+
+    for _ in range(max_batches):
+        raw_keys = await repo.list_paginated(
+            tenant_id=tenant_id,
+            limit=limit,
+            cursor=next_cursor,
+            previous=False,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            state=state,
+            key_type=key_type.value if key_type else None,
+        )
+        if not raw_keys:
+            break
+
+        filtered_keys, auth_cache = await _filter_manageable_keys(
+            keys=raw_keys,
+            policy=policy,
+            cache=auth_cache,
+        )
+        collected.extend(filtered_keys)
+
+        if len(collected) > limit:
+            break
+
+        # The repository returns at most limit+1 rows. If we got <= limit,
+        # there are no further rows to scan.
+        if len(raw_keys) <= limit:
+            break
+
+        next_cursor = raw_keys[-1].created_at
+
+    return collected
+
+
 @router.get(
     "/api-keys/creation-constraints",
     response_model=ApiKeyCreationConstraints,
@@ -199,21 +256,34 @@ async def list_api_keys(
     repo: ApiKeysV2Repository = container.api_key_v2_repo()
     policy: ApiKeyPolicyService = container.api_key_policy_service()
 
-    raw_keys = await repo.list_paginated(
-        tenant_id=user.tenant_id,
-        limit=limit,
-        cursor=cursor,
-        previous=previous,
-        scope_type=scope_type,
-        scope_id=scope_id,
-        state=state,
-        key_type=key_type.value if key_type else None,
-    )
+    if limit is not None and not previous:
+        filtered_keys = await _collect_manageable_keys_for_page(
+            repo=repo,
+            policy=policy,
+            tenant_id=user.tenant_id,
+            limit=limit,
+            cursor=cursor,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            state=state,
+            key_type=key_type,
+        )
+    else:
+        raw_keys = await repo.list_paginated(
+            tenant_id=user.tenant_id,
+            limit=limit,
+            cursor=cursor,
+            previous=previous,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            state=state,
+            key_type=key_type.value if key_type else None,
+        )
 
-    filtered_keys, _auth_cache = await _filter_manageable_keys(
-        keys=raw_keys,
-        policy=policy,
-    )
+        filtered_keys, _auth_cache = await _filter_manageable_keys(
+            keys=raw_keys,
+            policy=policy,
+        )
 
     total_count: int | None = None
     if Permission.ADMIN in user.permissions:

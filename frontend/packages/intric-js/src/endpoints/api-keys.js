@@ -165,7 +165,7 @@ export function initApiKeys(client) {
     admin: {
       /**
        * List all API keys in the tenant (admin only).
-       * @param {{limit?: number, cursor?: string, previous?: boolean, scope_type?: ApiKeyScopeType | null, scope_id?: string, state?: ApiKeyState | null, key_type?: ApiKeyType | null, created_by_user_id?: string}} [params]
+       * @param {{limit?: number, cursor?: string, previous?: boolean, scope_type?: ApiKeyScopeType | null, scope_id?: string, state?: ApiKeyState | null, key_type?: ApiKeyType | null, owner_user_id?: string, created_by_user_id?: string, user_relation?: "owner"|"creator", search?: string}} [params]
        * @returns {Promise<AdminApiKeyPage>}
        * @throws {IntricError}
        * */
@@ -173,6 +173,22 @@ export function initApiKeys(client) {
         const res = await client.fetch("/api/v1/admin/api-keys", {
           method: "get",
           params: { query: params }
+        });
+        return res;
+      },
+
+      /**
+       * Find an API key by exact full secret within current tenant (admin only).
+       * @param {{secret: string}} params
+       * @returns {Promise<{api_key: ApiKeyV2, match_reason: string}>}
+       * @throws {IntricError}
+       * */
+      lookup: async ({ secret }) => {
+        const res = await client.fetch("/api/v1/admin/api-keys/lookup", {
+          method: "post",
+          requestBody: {
+            "application/json": { secret }
+          }
         });
         return res;
       },
@@ -187,6 +203,23 @@ export function initApiKeys(client) {
         const res = await client.fetch("/api/v1/admin/api-keys/{id}", {
           method: "get",
           params: { path: { id } }
+        });
+        return res;
+      },
+
+      /**
+       * Update an API key (admin only).
+       * @param {{id: string, update: ApiKeyUpdateRequest}} params
+       * @returns {Promise<ApiKeyV2>}
+       * @throws {IntricError}
+       * */
+      update: async ({ id, update }) => {
+        const res = await client.fetch("/api/v1/admin/api-keys/{id}", {
+          method: "patch",
+          params: { path: { id } },
+          requestBody: {
+            "application/json": update
+          }
         });
         return res;
       },
@@ -257,6 +290,23 @@ export function initApiKeys(client) {
         const res = await client.fetch("/api/v1/admin/api-keys/{id}/rotate", {
           method: "post",
           params: { path: { id } }
+        });
+        return res;
+      },
+
+      /**
+       * Get API key usage timeline for a key (admin only).
+       * @param {{id: string, limit?: number, cursor?: string}} params
+       * @returns {Promise<{summary: object, items: object[], limit: number, next_cursor?: string | null}>}
+       * @throws {IntricError}
+       * */
+      getUsage: async ({ id, limit, cursor }) => {
+        const res = await client.fetch("/api/v1/admin/api-keys/{id}/usage", {
+          method: "get",
+          params: {
+            path: { id },
+            query: { limit, cursor }
+          }
         });
         return res;
       },

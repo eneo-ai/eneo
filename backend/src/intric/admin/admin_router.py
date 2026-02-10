@@ -3,6 +3,7 @@ from typing import List, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.admin.admin_models import (
@@ -19,6 +20,8 @@ from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse
 from intric.predefined_roles.predefined_role import PredefinedRoleInDB
+from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
+from intric.database.tables.users_table import Users
 from intric.server.dependencies.container import get_container
 from intric.tenants.tenant import TenantPublic
 from intric.users.user import (
@@ -41,13 +44,22 @@ from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_dependencies import require_api_key_permission
 from intric.authentication.auth_models import (
     ApiKeyCreatedResponse,
+    ApiKeyExactLookupRequest,
+    ApiKeyExactLookupResponse,
     ApiKeyPermission,
     ApiKeyPolicyResponse,
     ApiKeyPolicyUpdate,
+    ApiKeySearchMatchReason,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyStateChangeRequest,
     ApiKeyType,
+    ApiKeyUpdateRequest,
+    ApiKeyUsageEvent,
+    ApiKeyUsageResponse,
+    ApiKeyUsageSummary,
+    ApiKeyUserRelation,
+    ApiKeyUserSnapshot,
     ApiKeyV2,
     SuperApiKeyStatus,
 )
@@ -1071,6 +1083,147 @@ _ADMIN_ROTATED_RESPONSE_EXAMPLE = {
 }
 
 
+def _build_search_match_reasons(key: ApiKeyV2, search: str | None) -> list[ApiKeySearchMatchReason]:
+    if not search:
+        return []
+
+    normalized = search.strip().lower()
+    if not normalized:
+        return []
+
+    reasons: list[ApiKeySearchMatchReason] = []
+    if key.key_suffix and normalized in key.key_suffix.lower():
+        reasons.append(ApiKeySearchMatchReason.KEY_SUFFIX)
+    if normalized in key.name.lower() or normalized in (key.description or "").lower():
+        reasons.append(ApiKeySearchMatchReason.NAME_OR_DESCRIPTION)
+    owner_identity = " ".join(
+        filter(
+            None,
+            [
+                key.owner_user.username if key.owner_user else None,
+                key.owner_user.email if key.owner_user else None,
+                str(key.owner_user_id),
+            ],
+        )
+    ).lower()
+    if normalized in owner_identity:
+        reasons.append(ApiKeySearchMatchReason.OWNER)
+    creator_identity = " ".join(
+        filter(
+            None,
+            [
+                key.created_by_user.username if key.created_by_user else None,
+                key.created_by_user.email if key.created_by_user else None,
+                str(key.created_by_user_id) if key.created_by_user_id else None,
+            ],
+        )
+    ).lower()
+    if creator_identity and normalized in creator_identity:
+        reasons.append(ApiKeySearchMatchReason.CREATOR)
+
+    deduped: list[ApiKeySearchMatchReason] = []
+    for reason in reasons:
+        if reason not in deduped:
+            deduped.append(reason)
+    return deduped
+
+
+async def _enrich_api_keys_with_user_snapshots(
+    *,
+    session: AsyncSession,
+    tenant_id: UUID,
+    keys: list[ApiKeyV2],
+    search: str | None = None,
+) -> list[ApiKeyV2]:
+    if not keys:
+        return []
+
+    user_ids: set[UUID] = set()
+    for key in keys:
+        user_ids.add(key.owner_user_id)
+        if key.created_by_user_id is not None:
+            user_ids.add(key.created_by_user_id)
+
+    snapshot_map: dict[UUID, ApiKeyUserSnapshot] = {}
+    if user_ids:
+        query = (
+            sa.select(Users.id, Users.email, Users.username)
+            .where(Users.tenant_id == tenant_id)
+            .where(Users.id.in_(user_ids))
+        )
+        for row in (await session.execute(query)).all():
+            snapshot_map[row.id] = ApiKeyUserSnapshot(
+                id=row.id,
+                email=row.email,
+                username=row.username,
+            )
+
+    enriched: list[ApiKeyV2] = []
+    for key in keys:
+        updated = key.model_copy(
+            update={
+                "owner_user": snapshot_map.get(key.owner_user_id),
+                "created_by_user": (
+                    snapshot_map.get(key.created_by_user_id)
+                    if key.created_by_user_id
+                    else None
+                ),
+            }
+        )
+        reasons = _build_search_match_reasons(updated, search)
+        if reasons:
+            updated = updated.model_copy(update={"search_match_reasons": reasons})
+        enriched.append(updated)
+
+    return enriched
+
+
+async def _build_api_key_usage_summary(
+    *,
+    session: AsyncSession,
+    tenant_id: UUID,
+    key_id: UUID,
+) -> ApiKeyUsageSummary:
+    stmt = (
+        sa.select(
+            sa.func.count(AuditLogTable.id).label("total_events"),
+            sa.func.count(AuditLogTable.id)
+            .filter(AuditLogTable.action == ActionType.API_KEY_USED.value)
+            .label("used_events"),
+            sa.func.count(AuditLogTable.id)
+            .filter(AuditLogTable.action == ActionType.API_KEY_AUTH_FAILED.value)
+            .label("auth_failed_events"),
+            sa.func.max(AuditLogTable.timestamp).label("last_seen_at"),
+            sa.func.max(AuditLogTable.timestamp)
+            .filter(AuditLogTable.action == ActionType.API_KEY_USED.value)
+            .label("last_success_at"),
+            sa.func.max(AuditLogTable.timestamp)
+            .filter(AuditLogTable.action == ActionType.API_KEY_AUTH_FAILED.value)
+            .label("last_failure_at"),
+        )
+        .where(AuditLogTable.tenant_id == tenant_id)
+        .where(AuditLogTable.entity_type == EntityType.API_KEY.value)
+        .where(AuditLogTable.entity_id == key_id)
+        .where(
+            AuditLogTable.action.in_(
+                [ActionType.API_KEY_USED.value, ActionType.API_KEY_AUTH_FAILED.value]
+            )
+        )
+        .where(AuditLogTable.deleted_at.is_(None))
+    )
+    row = (await session.execute(stmt)).one()
+
+    return ApiKeyUsageSummary(
+        total_events=int(row.total_events or 0),
+        used_events=int(row.used_events or 0),
+        auth_failed_events=int(row.auth_failed_events or 0),
+        last_seen_at=row.last_seen_at,
+        last_success_at=row.last_success_at,
+        last_failure_at=row.last_failure_at,
+        sampled_used_events=get_settings().api_key_used_audit_sample_rate < 1.0,
+    )
+
+
 @router.get(
     "/api-key-policy",
     response_model=ApiKeyPolicyResponse,
@@ -1232,7 +1385,17 @@ async def list_api_keys_admin(
     scope_id: UUID | None = Query(None, description="Scope id filter"),
     state: ApiKeyState | None = Query(None, description="State filter"),
     key_type: ApiKeyType | None = Query(None, description="Key type filter"),
+    owner_user_id: UUID | None = Query(None, description="Owner user id filter"),
     created_by_user_id: UUID | None = Query(None, description="Creator user id filter"),
+    user_relation: ApiKeyUserRelation = Query(
+        ApiKeyUserRelation.OWNER,
+        description="How UI user filter should be interpreted when a single user filter is provided.",
+    ),
+    search: str | None = Query(
+        None,
+        min_length=2,
+        description="Case-insensitive search over key name, suffix, description, owner, and creator identity.",
+    ),
     container: Container = Depends(get_container(with_user=True)),
 ):
     admin_service = container.admin_service()
@@ -1240,6 +1403,9 @@ async def list_api_keys_admin(
 
     repo: ApiKeysV2Repository = container.api_key_v2_repo()
     tenant_id = admin_service.user.tenant_id
+    normalized_search = search.strip() if search else None
+    owner_filter = owner_user_id
+    creator_filter = created_by_user_id
 
     keys = await repo.list_paginated(
         tenant_id=tenant_id,
@@ -1250,7 +1416,9 @@ async def list_api_keys_admin(
         scope_id=scope_id,
         state=state,
         key_type=key_type.value if key_type else None,
-        created_by_user_id=created_by_user_id,
+        owner_user_id=owner_filter,
+        created_by_user_id=creator_filter,
+        search=normalized_search,
     )
     total_count = await repo.count(
         tenant_id=tenant_id,
@@ -1258,15 +1426,174 @@ async def list_api_keys_admin(
         scope_id=scope_id,
         state=state,
         key_type=key_type.value if key_type else None,
-        created_by_user_id=created_by_user_id,
+        owner_user_id=owner_filter,
+        created_by_user_id=creator_filter,
+        search=normalized_search,
     )
 
-    return paginate_keys(
+    paginated = paginate_keys(
         keys,
         total_count=total_count,
         limit=limit,
         cursor=cursor,
         previous=previous,
+    )
+    session = cast(AsyncSession, container.session())
+    items = cast(list[ApiKeyV2], paginated["items"])
+    paginated["items"] = await _enrich_api_keys_with_user_snapshots(
+        session=session,
+        tenant_id=tenant_id,
+        keys=items,
+        search=normalized_search,
+    )
+    return paginated
+
+
+@router.post(
+    "/api-keys/lookup",
+    response_model=ApiKeyExactLookupResponse,
+    tags=["Admin API Keys"],
+    summary="Find API key by exact secret",
+    description="Resolve a full API key secret within the current tenant and return the matching key metadata.",
+    responses={
+        200: {
+            "description": "Matching API key found.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "match_reason": "exact_secret",
+                        "api_key": _ADMIN_API_KEY_EXAMPLE,
+                    }
+                }
+            },
+        },
+        **error_responses([400, 401, 403, 404, 429]),
+    },
+)
+async def lookup_api_key_admin(
+    payload: ApiKeyExactLookupRequest,
+    container: Container = Depends(get_container(with_user=True)),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+):
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+
+    secret = payload.secret.strip()
+    if not secret:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_request", "message": "secret must not be empty."},
+        )
+
+    resolver = container.api_key_auth_resolver()
+    try:
+        resolved = await resolver.resolve(
+            secret,
+            expected_tenant_id=admin_service.user.tenant_id,
+        )
+    except ApiKeyValidationError:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "resource_not_found", "message": "API key not found."},
+        )
+
+    api_key = ApiKeyV2.model_validate(resolved.key).model_copy(
+        update={"search_match_reasons": [ApiKeySearchMatchReason.EXACT_SECRET]}
+    )
+    session = cast(AsyncSession, container.session())
+    enriched = await _enrich_api_keys_with_user_snapshots(
+        session=session,
+        tenant_id=admin_service.user.tenant_id,
+        keys=[api_key],
+    )
+    return ApiKeyExactLookupResponse(api_key=enriched[0])
+
+
+@router.get(
+    "/api-keys/{id}/usage",
+    response_model=ApiKeyUsageResponse,
+    tags=["Admin API Keys"],
+    summary="Get API key usage timeline",
+    description="Returns key-centric usage and auth-failure audit events for a single API key.",
+    responses={
+        200: {
+            "description": "API key usage response.",
+        },
+        **error_responses([401, 403, 404, 429]),
+    },
+)
+async def get_api_key_usage_admin(
+    id: UUID,
+    limit: int = Query(50, ge=1, le=200, description="Usage events per page."),
+    cursor: datetime | None = Query(None, description="Usage pagination cursor."),
+    container: Container = Depends(get_container(with_user=True)),
+):
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+
+    repo: ApiKeysV2Repository = container.api_key_v2_repo()
+    key = await repo.get(key_id=id, tenant_id=admin_service.user.tenant_id)
+    if key is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "resource_not_found", "message": "API key not found."},
+        )
+
+    session = cast(AsyncSession, container.session())
+    summary = await _build_api_key_usage_summary(
+        session=session,
+        tenant_id=admin_service.user.tenant_id,
+        key_id=id,
+    )
+
+    stmt = (
+        sa.select(AuditLogTable)
+        .where(AuditLogTable.tenant_id == admin_service.user.tenant_id)
+        .where(AuditLogTable.entity_type == EntityType.API_KEY.value)
+        .where(AuditLogTable.entity_id == id)
+        .where(
+            AuditLogTable.action.in_(
+                [ActionType.API_KEY_USED.value, ActionType.API_KEY_AUTH_FAILED.value]
+            )
+        )
+        .where(AuditLogTable.deleted_at.is_(None))
+    )
+    if cursor is not None:
+        stmt = stmt.where(AuditLogTable.timestamp < cursor)
+    stmt = stmt.order_by(AuditLogTable.timestamp.desc(), AuditLogTable.id.desc()).limit(
+        limit + 1
+    )
+
+    records = list(await session.scalars(stmt))
+    page = records[:limit]
+    next_cursor = records[limit].timestamp if len(records) > limit else None
+
+    usage_events: list[ApiKeyUsageEvent] = []
+    for record in page:
+        metadata = record.log_metadata if isinstance(record.log_metadata, dict) else {}
+        extra = metadata.get("extra") if isinstance(metadata, dict) else {}
+        extra = extra if isinstance(extra, dict) else {}
+        usage_events.append(
+            ApiKeyUsageEvent(
+                id=record.id,
+                timestamp=record.timestamp,
+                action=record.action,
+                outcome=record.outcome,
+                ip_address=str(record.ip_address) if record.ip_address else None,
+                user_agent=record.user_agent,
+                request_id=record.request_id,
+                request_path=cast(str | None, extra.get("request_path")),
+                method=cast(str | None, extra.get("method")),
+                origin=cast(str | None, extra.get("origin")),
+                error_message=record.error_message,
+            )
+        )
+
+    return ApiKeyUsageResponse(
+        summary=summary,
+        items=usage_events,
+        limit=limit,
+        next_cursor=next_cursor,
     )
 
 
@@ -1299,7 +1626,52 @@ async def get_api_key_admin(
             detail={"code": "resource_not_found", "message": "API key not found."},
         )
 
-    return ApiKeyV2.model_validate(key)
+    api_key = ApiKeyV2.model_validate(key)
+    session = cast(AsyncSession, container.session())
+    enriched = await _enrich_api_keys_with_user_snapshots(
+        session=session,
+        tenant_id=admin_service.user.tenant_id,
+        keys=[api_key],
+    )
+    return enriched[0]
+
+
+@router.patch(
+    "/api-keys/{id}",
+    response_model=ApiKeyV2,
+    tags=["Admin API Keys"],
+    summary="Update tenant API key",
+    description="Update API key metadata and guardrails as tenant admin.",
+    responses={
+        200: {
+            "description": "Updated tenant API key.",
+            "content": {"application/json": {"example": _ADMIN_API_KEY_EXAMPLE}},
+        },
+        **error_responses([400, 401, 403, 404, 429]),
+    },
+)
+async def update_api_key_admin(
+    id: UUID,
+    http_request: Request,
+    payload: ApiKeyUpdateRequest,
+    container: Container = Depends(get_container(with_user=True)),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+):
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+    ip_address, request_id, user_agent = extract_audit_context(http_request)
+    try:
+        return await lifecycle.update_key(
+            key_id=id,
+            request=payload,
+            skip_manage_authorization=True,
+            ip_address=ip_address,
+            request_id=request_id,
+            user_agent=user_agent,
+        )
+    except ApiKeyValidationError as exc:
+        raise_api_key_http_error(exc)
 
 
 @router.delete(

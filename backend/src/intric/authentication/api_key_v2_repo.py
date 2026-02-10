@@ -10,6 +10,7 @@ from sqlalchemy.sql import Select
 
 from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyState, ApiKeyV2InDB
 from intric.database.tables.api_keys_v2_table import ApiKeysV2
+from intric.database.tables.users_table import Users
 
 
 class ApiKeysV2Repository:
@@ -87,7 +88,9 @@ class ApiKeysV2Repository:
         scope_id: UUID | None = None,
         state: ApiKeyState | None = None,
         key_type: str | None = None,
+        owner_user_id: UUID | None = None,
         created_by_user_id: UUID | None = None,
+        search: str | None = None,
     ) -> list[ApiKeyV2InDB]:
         query = cast(
             Select[Any],
@@ -99,7 +102,9 @@ class ApiKeysV2Repository:
             scope_id=scope_id,
             state=state,
             key_type=key_type,
+            owner_user_id=owner_user_id,
             created_by_user_id=created_by_user_id,
+            search=search,
         )
         if cursor is not None:
             if previous:
@@ -126,7 +131,9 @@ class ApiKeysV2Repository:
         scope_id: UUID | None = None,
         state: ApiKeyState | None = None,
         key_type: str | None = None,
+        owner_user_id: UUID | None = None,
         created_by_user_id: UUID | None = None,
+        search: str | None = None,
     ) -> list[ApiKeyV2InDB]:
         query = cast(
             Select[Any],
@@ -138,7 +145,9 @@ class ApiKeysV2Repository:
             scope_id=scope_id,
             state=state,
             key_type=key_type,
+            owner_user_id=owner_user_id,
             created_by_user_id=created_by_user_id,
+            search=search,
         )
         query = query.order_by(self.table.created_at.desc())
         records = await self.session.scalars(query)
@@ -152,7 +161,9 @@ class ApiKeysV2Repository:
         scope_id: UUID | None = None,
         state: ApiKeyState | None = None,
         key_type: str | None = None,
+        owner_user_id: UUID | None = None,
         created_by_user_id: UUID | None = None,
+        search: str | None = None,
     ) -> int:
         query = cast(
             Select[Any],
@@ -166,7 +177,9 @@ class ApiKeysV2Repository:
             scope_id=scope_id,
             state=state,
             key_type=key_type,
+            owner_user_id=owner_user_id,
             created_by_user_id=created_by_user_id,
+            search=search,
         )
         result = await self.session.scalar(query)
         return int(result or 0)
@@ -179,7 +192,9 @@ class ApiKeysV2Repository:
         scope_id: UUID | None,
         state: ApiKeyState | None,
         key_type: str | None,
+        owner_user_id: UUID | None,
         created_by_user_id: UUID | None,
+        search: str | None,
     ) -> Select[Any]:
         if scope_type is not None:
             query = query.where(self.table.scope_type == scope_type.value)
@@ -189,8 +204,45 @@ class ApiKeysV2Repository:
             query = query.where(self.table.state == state.value)
         if key_type is not None:
             query = query.where(self.table.key_type == key_type)
+        if owner_user_id is not None:
+            query = query.where(self.table.owner_user_id == owner_user_id)
         if created_by_user_id is not None:
             query = query.where(self.table.created_by_user_id == created_by_user_id)
+        if search is not None:
+            term = f"%{search.strip().lower()}%"
+            owner_match = (
+                sa.select(sa.literal(1))
+                .select_from(Users)
+                .where(Users.id == self.table.owner_user_id)
+                .where(
+                    sa.or_(
+                        sa.func.lower(sa.func.coalesce(Users.email, "")).like(term),
+                        sa.func.lower(sa.func.coalesce(Users.username, "")).like(term),
+                    )
+                )
+                .exists()
+            )
+            creator_match = (
+                sa.select(sa.literal(1))
+                .select_from(Users)
+                .where(Users.id == self.table.created_by_user_id)
+                .where(
+                    sa.or_(
+                        sa.func.lower(sa.func.coalesce(Users.email, "")).like(term),
+                        sa.func.lower(sa.func.coalesce(Users.username, "")).like(term),
+                    )
+                )
+                .exists()
+            )
+            query = query.where(
+                sa.or_(
+                    sa.func.lower(self.table.name).like(term),
+                    sa.func.lower(self.table.key_suffix).like(term),
+                    sa.func.lower(sa.func.coalesce(self.table.description, "")).like(term),
+                    owner_match,
+                    creator_match,
+                )
+            )
         return query
 
     async def get_latest_active_by_owner(

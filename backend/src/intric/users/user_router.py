@@ -14,11 +14,6 @@ from pydantic import ValidationError
 from starlette.exceptions import HTTPException
 
 from intric.authentication import auth_dependencies
-from intric.authentication.auth_dependencies import (
-    require_api_key_permission,
-    require_api_key_scope_check,
-)
-from intric.authentication.auth_models import ApiKeyPermission
 from intric.roles.permissions import Permission, validate_permission
 from intric.authentication.api_key_router_helpers import (
     error_responses as api_key_error_responses,
@@ -564,7 +559,7 @@ async def get_currently_authenticated_user(
     return UserPublic(**current_user.model_dump(), truncated_api_key=truncated_key)
 
 
-@router.post(
+@users_admin_router.post(
     "/api-keys/",
     response_model=ApiKey,
     tags=["Legacy API Keys"],
@@ -596,12 +591,11 @@ async def get_currently_authenticated_user(
 async def generate_api_key(
     current_user: UserInDB = Depends(auth_dependencies.get_current_active_user),
     container: Container = Depends(get_container()),
-    _scope_guard: None = Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-    _key_guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     """Generating a new api key will delete the old key.
     Make sure to copy the key since it will only be showed once,
     after which only the truncated key will be shown."""
+    validate_permission(current_user, Permission.ADMIN)
     settings = config.get_settings()
     if not settings.api_key_legacy_endpoints_enabled:
         raise HTTPException(
@@ -658,11 +652,10 @@ async def get_current_user_tenant(
     return TenantPublic(**tenant.model_dump())
 
 
-@router.post("/admin/invite/", response_model=UserAdminView, status_code=201)
+@users_admin_router.post("/admin/invite/", response_model=UserAdminView, status_code=201)
 async def invite_user(
     user_invite: PropUserInvite,
     container: Container = Depends(get_container(with_user=True)),
-    _scope_guard: None = Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
 ):
     validate_permission(container.user(), Permission.ADMIN)
     user_service = container.user_service()
@@ -733,12 +726,11 @@ async def invite_user(
     return new_user
 
 
-@router.patch("/admin/{id}/", response_model=UserAdminView)
+@users_admin_router.patch("/admin/{id}/", response_model=UserAdminView)
 async def update_user(
     id: UUID,
     user_update: PropUserUpdate,
     container: Container = Depends(get_container(with_user=True)),
-    _scope_guard: None = Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
 ):
     validate_permission(container.user(), Permission.ADMIN)
     user_service = container.user_service()
@@ -854,11 +846,10 @@ async def update_user(
     return updated_user
 
 
-@router.delete("/admin/{id}/", status_code=204)
+@users_admin_router.delete("/admin/{id}/", status_code=204)
 async def delete_user(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
-    _scope_guard: None = Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
 ):
     validate_permission(container.user(), Permission.ADMIN)
     user_service = container.user_service()

@@ -38,9 +38,11 @@ def get_model_provider_service(
     response_model=list[ModelProviderPublic],
 )
 async def list_providers(
+    user: UserInDB = Depends(get_current_active_user),
     service: ModelProviderService = Depends(get_model_provider_service),
 ):
     """List all model providers for the tenant."""
+    validate_permission(user, Permission.ADMIN)
     providers = await service.get_all()
     return [ModelProviderPublic(**provider.to_dict()) for provider in providers]
 
@@ -52,9 +54,11 @@ async def list_providers(
 )
 async def get_provider(
     provider_id: UUID,
+    user: UserInDB = Depends(get_current_active_user),
     service: ModelProviderService = Depends(get_model_provider_service),
 ):
     """Get a specific model provider."""
+    validate_permission(user, Permission.ADMIN)
     provider = await service.get_by_id(provider_id)
     return ModelProviderPublic(**provider.to_dict())
 

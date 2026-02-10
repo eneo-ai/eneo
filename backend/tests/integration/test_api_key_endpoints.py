@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 import pytest
+import sqlalchemy as sa
 
+from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 from intric.main.config import get_settings, set_settings
 from intric.users.user import UserAdd, UserState
 
 # Authenticated endpoint for guardrail/enforcement tests.
 # Must trigger the full API key auth chain (unlike /version which is public).
-_AUTH_ENDPOINT = "/api/v1/assistants"
+_AUTH_ENDPOINT = "/api/v1/assistants/"
 
 
 @pytest.fixture
@@ -134,7 +136,7 @@ async def test_legacy_user_api_key_endpoints_still_work(client, default_user_tok
     assert post_payload["key"].startswith("inp_")
 
     post_auth = await client.get(
-        "/api/v1/assistants",
+        "/api/v1/assistants/",
         headers={"X-API-Key": post_payload["key"]},
     )
     assert post_auth.status_code == 200
@@ -486,7 +488,7 @@ async def test_invalid_api_key_denied(client):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_admin_api_key_management_flow(client, default_user_token):
+async def test_admin_api_key_management_flow(client, default_user_token, default_user):
     create_response = await client.post(
         "/api/v1/api-keys",
         json={
@@ -513,7 +515,23 @@ async def test_admin_api_key_management_flow(client, default_user_token):
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert get_response.status_code == 200, get_response.text
-    assert get_response.json()["id"] == key_id
+    get_payload = get_response.json()
+    assert get_payload["id"] == key_id
+    assert get_payload["owner_user_id"] == str(default_user.id)
+    assert get_payload["created_by_user_id"] == str(default_user.id)
+
+    update_response = await client.patch(
+        f"/api/v1/admin/api-keys/{key_id}",
+        json={
+            "name": "Admin Flow Key Updated",
+            "permission": "write",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert update_response.status_code == 200, update_response.text
+    update_payload = update_response.json()
+    assert update_payload["name"] == "Admin Flow Key Updated"
+    assert update_payload["permission"] == "write"
 
     suspend_response = await client.post(
         f"/api/v1/admin/api-keys/{key_id}/suspend",
@@ -547,6 +565,23 @@ async def test_admin_api_key_management_flow(client, default_user_token):
     assert revoke_response.status_code == 200, revoke_response.text
     assert revoke_response.json()["state"] == "revoked"
 
+    disallowed_update_response = await client.patch(
+        f"/api/v1/admin/api-keys/{key_id}",
+        json={"permission": "admin"},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert disallowed_update_response.status_code == 400, disallowed_update_response.text
+    disallowed_payload = disallowed_update_response.json()
+    assert disallowed_payload["code"] == "invalid_request"
+
+    metadata_update_response = await client.patch(
+        f"/api/v1/admin/api-keys/{key_id}",
+        json={"name": "Revoked Name Update Allowed"},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert metadata_update_response.status_code == 200, metadata_update_response.text
+    assert metadata_update_response.json()["name"] == "Revoked Name Update Allowed"
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -566,6 +601,16 @@ async def test_admin_api_key_endpoints_require_auth(client, method: str, path: s
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_admin_api_key_update_requires_auth(client):
+    response = await client.patch(
+        f"/api/v1/admin/api-keys/{uuid4()}",
+        json={"name": "Updated by admin"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_admin_api_key_endpoints_reject_non_admin(
     client, default_user_token, regular_user_token
 ):
@@ -580,7 +625,9 @@ async def test_admin_api_key_endpoints_reject_non_admin(
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert create_response.status_code == 201, create_response.text
-    key_id = create_response.json()["api_key"]["id"]
+    created_payload = create_response.json()
+    key_id = created_payload["api_key"]["id"]
+    secret = created_payload["secret"]
 
     list_response = await client.get(
         "/api/v1/admin/api-keys",
@@ -593,6 +640,26 @@ async def test_admin_api_key_endpoints_reject_non_admin(
         headers={"Authorization": f"Bearer {regular_user_token}"},
     )
     assert get_response.status_code == 403, get_response.text
+
+    update_response = await client.patch(
+        f"/api/v1/admin/api-keys/{key_id}",
+        json={"name": "Should fail"},
+        headers={"Authorization": f"Bearer {regular_user_token}"},
+    )
+    assert update_response.status_code == 403, update_response.text
+
+    lookup_response = await client.post(
+        "/api/v1/admin/api-keys/lookup",
+        json={"secret": secret},
+        headers={"Authorization": f"Bearer {regular_user_token}"},
+    )
+    assert lookup_response.status_code == 403, lookup_response.text
+
+    usage_response = await client.get(
+        f"/api/v1/admin/api-keys/{key_id}/usage",
+        headers={"Authorization": f"Bearer {regular_user_token}"},
+    )
+    assert usage_response.status_code == 403, usage_response.text
 
     policy_response = await client.patch(
         "/api/v1/admin/api-key-policy",
@@ -698,6 +765,252 @@ async def test_admin_list_filtering_and_total_count(client, default_user_token):
     assert payload["total_count"] >= len(payload["items"])
     assert any(item["id"] == key_id for item in payload["items"])
     assert all(item["key_type"] == "sk_" for item in payload["items"])
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_admin_list_supports_search_and_creator_filters(
+    client, default_user_token, default_user
+):
+    unique_fragment = f"admin-search-{uuid4().hex[:8]}"
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": f"Admin Search Key {unique_fragment}",
+            "description": f"Search marker {unique_fragment}",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    created_key = create_response.json()["api_key"]
+    key_id = created_key["id"]
+    key_suffix = created_key["key_suffix"]
+    creator_user_id = str(default_user.id)
+
+    search_by_name = await client.get(
+        f"/api/v1/admin/api-keys?search={unique_fragment}",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert search_by_name.status_code == 200, search_by_name.text
+    name_items = search_by_name.json()["items"]
+    assert any(item["id"] == key_id for item in name_items)
+
+    search_by_suffix = await client.get(
+        f"/api/v1/admin/api-keys?search={key_suffix}",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert search_by_suffix.status_code == 200, search_by_suffix.text
+    suffix_items = search_by_suffix.json()["items"]
+    suffix_match = next((item for item in suffix_items if item["id"] == key_id), None)
+    assert suffix_match is not None
+    assert "key_suffix" in (suffix_match.get("search_match_reasons") or [])
+
+    # Tenant admins often only have a short visible suffix in UI; partial suffix
+    # searches should still surface matching keys.
+    search_by_suffix_last4 = await client.get(
+        f"/api/v1/admin/api-keys?search={key_suffix[-4:]}",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert search_by_suffix_last4.status_code == 200, search_by_suffix_last4.text
+    suffix_last4_items = search_by_suffix_last4.json()["items"]
+    assert any(item["id"] == key_id for item in suffix_last4_items)
+
+    search_by_creator = await client.get(
+        f"/api/v1/admin/api-keys?search={unique_fragment}&created_by_user_id={creator_user_id}",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert search_by_creator.status_code == 200, search_by_creator.text
+    creator_items = search_by_creator.json()["items"]
+    assert any(item["id"] == key_id for item in creator_items)
+
+    no_results = await client.get(
+        f"/api/v1/admin/api-keys?search={unique_fragment}&created_by_user_id={uuid4()}",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert no_results.status_code == 200, no_results.text
+    assert no_results.json()["items"] == []
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_admin_list_supports_owner_relation_filters(
+    client, default_user_token, default_user
+):
+    unique_fragment = f"owner-search-{uuid4().hex[:8]}"
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": f"Owner Search Key {unique_fragment}",
+            "description": f"Owner marker {unique_fragment}",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    by_owner_id = await client.get(
+        f"/api/v1/admin/api-keys?owner_user_id={default_user.id}&user_relation=owner",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert by_owner_id.status_code == 200, by_owner_id.text
+    owner_items = by_owner_id.json()["items"]
+    assert any(item["id"] == key_id for item in owner_items)
+
+    by_owner_search = await client.get(
+        f"/api/v1/admin/api-keys?search={default_user.email}",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert by_owner_search.status_code == 200, by_owner_search.text
+    search_items = by_owner_search.json()["items"]
+    matched = next((item for item in search_items if item["id"] == key_id), None)
+    assert matched is not None
+    assert matched["owner_user"]["id"] == str(default_user.id)
+    assert "owner" in (matched.get("search_match_reasons") or [])
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_admin_lookup_finds_exact_secret(client, default_user_token, default_user):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Exact Lookup Key",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    payload = create_response.json()
+    key_id = payload["api_key"]["id"]
+    secret = payload["secret"]
+
+    lookup_response = await client.post(
+        "/api/v1/admin/api-keys/lookup",
+        json={"secret": secret},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert lookup_response.status_code == 200, lookup_response.text
+    lookup_payload = lookup_response.json()
+    assert lookup_payload["match_reason"] == "exact_secret"
+    assert lookup_payload["api_key"]["id"] == key_id
+    assert lookup_payload["api_key"]["owner_user"]["id"] == str(default_user.id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_admin_lookup_returns_404_for_unknown_secret(client, default_user_token):
+    response = await client.post(
+        "/api/v1/admin/api-keys/lookup",
+        json={"secret": "sk_deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert response.status_code == 404
+    assert response.json()["code"] == "resource_not_found"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_admin_usage_endpoint_returns_key_events(
+    client, default_user_token, db_container
+):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Usage Endpoint Key",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    payload = create_response.json()
+    key_id = payload["api_key"]["id"]
+    key_uuid = UUID(key_id)
+    owner_user_id = UUID(payload["api_key"]["owner_user_id"])
+
+    settings = get_settings()
+    previous_sample_rate = settings.api_key_used_audit_sample_rate
+    patched = settings.model_copy(update={"api_key_used_audit_sample_rate": 1.0})
+    set_settings(patched)
+
+    try:
+        async with db_container() as container:
+            session = container.session()
+            tenant_id = container.user().tenant_id
+            now = datetime.now(timezone.utc)
+            await session.execute(
+                sa.insert(AuditLogTable),
+                [
+                    {
+                        "tenant_id": tenant_id,
+                        "actor_id": owner_user_id,
+                        "actor_type": "user",
+                        "action": "api_key_used",
+                        "entity_type": "api_key",
+                        "entity_id": key_uuid,
+                        "timestamp": now,
+                        "description": "API key used",
+                        "metadata": {
+                            "extra": {
+                                "method": "GET",
+                                "request_path": "/api/v1/assistants/",
+                            }
+                        },
+                        "outcome": "success",
+                    },
+                    {
+                        "tenant_id": tenant_id,
+                        "actor_id": owner_user_id,
+                        "actor_type": "user",
+                        "action": "api_key_auth_failed",
+                        "entity_type": "api_key",
+                        "entity_id": key_uuid,
+                        "timestamp": now - timedelta(seconds=1),
+                        "description": "API key authentication failed",
+                        "metadata": {
+                            "extra": {
+                                "method": "POST",
+                                "request_path": "/api/v1/admin/api-keys/{id}/revoke",
+                            }
+                        },
+                        "outcome": "failure",
+                        "error_message": "insufficient_permission",
+                    },
+                ],
+            )
+            await session.commit()
+
+        usage_response = await client.get(
+            f"/api/v1/admin/api-keys/{key_id}/usage?limit=10",
+            headers={"Authorization": f"Bearer {default_user_token}"},
+        )
+        assert usage_response.status_code == 200, usage_response.text
+        usage_payload = usage_response.json()
+
+        assert usage_payload["summary"]["total_events"] >= 2
+        assert usage_payload["summary"]["used_events"] >= 1
+        assert usage_payload["summary"]["auth_failed_events"] >= 1
+        assert usage_payload["summary"]["sampled_used_events"] is False
+        assert usage_payload["items"], "expected usage event rows"
+        assert any(item["action"] == "api_key_used" for item in usage_payload["items"])
+        assert any(
+            item["action"] == "api_key_auth_failed" for item in usage_payload["items"]
+        )
+    finally:
+        set_settings(
+            settings.model_copy(
+                update={"api_key_used_audit_sample_rate": previous_sample_rate}
+            )
+        )
 
 
 @pytest.mark.integration

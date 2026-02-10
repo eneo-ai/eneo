@@ -110,6 +110,28 @@ export interface paths {
      */
     post: operations["reactivate_api_key_api_v1_api_keys__id__reactivate_post"];
   };
+  "/api/v1/users/": {
+    /** Get Tenant Users */
+    get: operations["get_tenant_users_api_v1_users__get"];
+  };
+  "/api/v1/users/api-keys/": {
+    /**
+     * Generate legacy user API key
+     * @deprecated
+     * @description Legacy API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This endpoint rotates the old legacy key immediately.
+     */
+    post: operations["generate_api_key_api_v1_users_api_keys__post"];
+  };
+  "/api/v1/users/admin/invite/": {
+    /** Invite User */
+    post: operations["invite_user_api_v1_users_admin_invite__post"];
+  };
+  "/api/v1/users/admin/{id}/": {
+    /** Delete User */
+    delete: operations["delete_user_api_v1_users_admin__id___delete"];
+    /** Update User */
+    patch: operations["update_user_api_v1_users_admin__id___patch"];
+  };
   "/api/v1/users/login/token/": {
     /**
      * Login
@@ -124,41 +146,13 @@ export interface paths {
      */
     post: operations["login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post"];
   };
-  "/api/v1/users/": {
-    /** Get Tenant Users */
-    get: operations["get_tenant_users_api_v1_users__get"];
-  };
   "/api/v1/users/me/": {
     /** Get Current User */
     get: operations["Get_current_user_api_v1_users_me__get"];
   };
-  "/api/v1/users/api-keys/": {
-    /**
-     * Generate legacy user API key (GET alias)
-     * @deprecated
-     * @description Legacy API key endpoint (GET alias). Use `/api/v1/api-keys` for scoped v2 keys. This endpoint rotates the old legacy key immediately.
-     */
-    get: operations["generate_api_key_api_v1_users_api_keys__get"];
-    /**
-     * Generate legacy user API key
-     * @deprecated
-     * @description Legacy API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This endpoint rotates the old legacy key immediately.
-     */
-    post: operations["generate_api_key_api_v1_users_api_keys__post"];
-  };
   "/api/v1/users/tenant/": {
     /** Get Current User Tenant */
     get: operations["Get_current_user_tenant_api_v1_users_tenant__get"];
-  };
-  "/api/v1/users/admin/invite/": {
-    /** Invite User */
-    post: operations["invite_user_api_v1_users_admin_invite__post"];
-  };
-  "/api/v1/users/admin/{id}/": {
-    /** Delete User */
-    delete: operations["delete_user_api_v1_users_admin__id___delete"];
-    /** Update User */
-    patch: operations["update_user_api_v1_users_admin__id___patch"];
   };
   "/api/v1/users/provision/": {
     /** Provision User */
@@ -368,9 +362,26 @@ export interface paths {
      * - Updates the `api_key_scope_enforcement` feature flag for your tenant
      * - When enabled: API keys are restricted to resources within their configured scope
      * - When disabled: All API keys can access resources beyond their configured scope
+     * - Disabling scope enforcement also disables strict mode for consistency
      * - Change takes effect immediately for all API key requests
      */
     patch: operations["update_scope_enforcement_setting_api_v1_settings_scope_enforcement_patch"];
+  };
+  "/api/v1/settings/strict-mode": {
+    /**
+     * Toggle API key strict mode
+     * @description Toggle API key strict mode for your tenant.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Behavior:**
+     * - Updates the `api_key_strict_mode` feature flag for your tenant
+     * - When enabled: scoped API keys are enforced with strict fail-closed semantics
+     * - When disabled: default scope enforcement behavior applies
+     * - Enabling strict mode requires `api_key_scope_enforcement` to be enabled
+     * - Change takes effect immediately for API key requests
+     */
+    patch: operations["update_strict_mode_setting_api_v1_settings_strict_mode_patch"];
   };
   "/api/v1/assistants/": {
     /**
@@ -3104,6 +3115,7 @@ export interface components {
       name?: string | null;
       /** Description */
       description?: string | null;
+      permission?: components["schemas"]["ApiKeyPermission"];
       /** Allowed Origins */
       allowed_origins?: string[] | null;
       /** Allowed Ips */
@@ -3164,6 +3176,16 @@ export interface components {
       updated_at?: string | null;
       /** Rotated From Key Id */
       rotated_from_key_id?: string | null;
+      /**
+       * Owner User Id
+       * Format: uuid
+       */
+      owner_user_id?: string | null;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id?: string | null;
     };
     /** AppInTemplatePublic */
     AppInTemplatePublic: {
@@ -8724,6 +8746,11 @@ export interface components {
        * @default true
        */
       api_key_scope_enforcement?: boolean;
+      /**
+       * Api Key Strict Mode
+       * @default false
+       */
+      api_key_strict_mode?: boolean;
     };
     /**
      * SharePointSubscriptionPublic
@@ -9228,11 +9255,6 @@ export interface components {
       )[];
       /** Count */
       count: number;
-    };
-    /** TemplateSettingUpdate */
-    TemplateSettingUpdate: {
-      /** Enabled */
-      enabled: boolean;
     };
     /** TemplateWizard */
     TemplateWizard: {
@@ -9886,6 +9908,11 @@ export interface components {
       api_key_policy?: {
         [key: string]: unknown;
       };
+    };
+    /** ToggleSettingUpdate */
+    ToggleSettingUpdate: {
+      /** Enabled */
+      enabled: boolean;
     };
     /**
      * TokenEstimateBreakdown
@@ -12291,62 +12318,6 @@ export interface operations {
       };
     };
   };
-  /**
-   * Login
-   * @description OAuth2 Login with comprehensive error handling and logging
-   */
-  Login_api_v1_users_login_token__post: {
-    requestBody: {
-      content: {
-        "application/x-www-form-urlencoded": components["schemas"]["Body_Login_api_v1_users_login_token__post"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["AccessToken"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /**
-   * Login With Mobilityguard
-   * @description OpenID Connect Login (generic OIDC provider).
-   */
-  login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["OpenIdConnectLogin"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["AccessToken"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
   /** Get Tenant Users */
   get_tenant_users_api_v1_users__get: {
     parameters: {
@@ -12372,56 +12343,6 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /** Get Current User */
-  Get_current_user_api_v1_users_me__get: {
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["UserPublic"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  /**
-   * Generate legacy user API key (GET alias)
-   * @deprecated
-   * @description Legacy API key endpoint (GET alias). Use `/api/v1/api-keys` for scoped v2 keys. This endpoint rotates the old legacy key immediately.
-   */
-  generate_api_key_api_v1_users_api_keys__get: {
-    responses: {
-      /** @description Legacy API key created and returned once. */
-      200: {
-        content: {
-          "application/json": components["schemas"]["ApiKey"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
-        };
-      };
-      /** @description Legacy endpoint disabled. Migrate to v2 endpoint. */
-      410: {
-        content: {
-          "application/json": unknown;
         };
       };
     };
@@ -12455,23 +12376,6 @@ export interface operations {
       410: {
         content: {
           "application/json": unknown;
-        };
-      };
-    };
-  };
-  /** Get Current User Tenant */
-  Get_current_user_tenant_api_v1_users_tenant__get: {
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["TenantPublic"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -12541,6 +12445,96 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Login
+   * @description OAuth2 Login with comprehensive error handling and logging
+   */
+  Login_api_v1_users_login_token__post: {
+    requestBody: {
+      content: {
+        "application/x-www-form-urlencoded": components["schemas"]["Body_Login_api_v1_users_login_token__post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessToken"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Login With Mobilityguard
+   * @description OpenID Connect Login (generic OIDC provider).
+   */
+  login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OpenIdConnectLogin"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessToken"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Current User */
+  Get_current_user_api_v1_users_me__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UserPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /** Get Current User Tenant */
+  Get_current_user_tenant_api_v1_users_tenant__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -13103,7 +13097,7 @@ export interface operations {
   update_template_setting_api_v1_settings_templates_patch: {
     requestBody: {
       content: {
-        "application/json": components["schemas"]["TemplateSettingUpdate"];
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
       };
     };
     responses: {
@@ -13153,7 +13147,7 @@ export interface operations {
   update_audit_logging_setting_api_v1_settings_audit_logging_patch: {
     requestBody: {
       content: {
-        "application/json": components["schemas"]["TemplateSettingUpdate"];
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
       };
     };
     responses: {
@@ -13203,7 +13197,7 @@ export interface operations {
   update_provisioning_setting_api_v1_settings_provisioning_patch: {
     requestBody: {
       content: {
-        "application/json": components["schemas"]["TemplateSettingUpdate"];
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
       };
     };
     responses: {
@@ -13231,12 +13225,47 @@ export interface operations {
    * - Updates the `api_key_scope_enforcement` feature flag for your tenant
    * - When enabled: API keys are restricted to resources within their configured scope
    * - When disabled: All API keys can access resources beyond their configured scope
+   * - Disabling scope enforcement also disables strict mode for consistency
    * - Change takes effect immediately for all API key requests
    */
   update_scope_enforcement_setting_api_v1_settings_scope_enforcement_patch: {
     requestBody: {
       content: {
-        "application/json": components["schemas"]["TemplateSettingUpdate"];
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Toggle API key strict mode
+   * @description Toggle API key strict mode for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Behavior:**
+   * - Updates the `api_key_strict_mode` feature flag for your tenant
+   * - When enabled: scoped API keys are enforced with strict fail-closed semantics
+   * - When disabled: default scope enforcement behavior applies
+   * - Enabling strict mode requires `api_key_scope_enforcement` to be enabled
+   * - Change takes effect immediately for API key requests
+   */
+  update_strict_mode_setting_api_v1_settings_strict_mode_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
       };
     };
     responses: {
@@ -16104,6 +16133,8 @@ export interface operations {
         key_type?: components["schemas"]["ApiKeyType"] | null;
         /** @description Creator user id filter */
         created_by_user_id?: string | null;
+        /** @description Case-insensitive search over key name, suffix, and description. */
+        search?: string | null;
       };
     };
     responses: {

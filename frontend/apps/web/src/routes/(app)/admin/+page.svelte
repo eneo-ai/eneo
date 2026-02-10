@@ -24,6 +24,7 @@
   let auditLoggingEnabled = $state(data.settings.audit_logging_enabled);
   let provisioningEnabled = $state(data.settings.provisioning ?? false);
   let scopeEnforcementEnabled = $state(data.settings.api_key_scope_enforcement ?? true);
+  let strictModeEnabled = $state(data.settings.api_key_strict_mode ?? false);
 
   // Handle toggle change - receives new value from Switch component
   async function handleToggleTemplates({ current, next }: { current: boolean; next: boolean }) {
@@ -111,6 +112,41 @@
     }
   }
 
+  // Handle strict mode toggle change
+  const showDisableStrictModeDialog = writable(false);
+  let pendingStrictModeToggle: { current: boolean; next: boolean } | null = null;
+
+  async function handleToggleStrictMode({ current, next }: { current: boolean; next: boolean }) {
+    if (next === false) {
+      pendingStrictModeToggle = { current, next };
+      $showDisableStrictModeDialog = true;
+      return;
+    }
+    await applyStrictModeToggle(next);
+  }
+
+  async function confirmDisableStrictMode() {
+    $showDisableStrictModeDialog = false;
+    if (pendingStrictModeToggle) {
+      await applyStrictModeToggle(pendingStrictModeToggle.next);
+      pendingStrictModeToggle = null;
+    }
+  }
+
+  async function applyStrictModeToggle(next: boolean) {
+    const previousValue = strictModeEnabled;
+    strictModeEnabled = next; // Optimistic UI update
+
+    try {
+      const updatedSettings = await intric.settings.updateStrictMode(next);
+      strictModeEnabled = updatedSettings.api_key_strict_mode ?? false;
+      await invalidateAll();
+    } catch (error) {
+      console.error("[Admin] Error updating strict mode setting:", error);
+      strictModeEnabled = previousValue; // Revert on error
+    }
+  }
+
   // Handle provisioning toggle change
   async function handleToggleProvisioning({ current, next }: { current: boolean; next: boolean }) {
     console.log(`[Admin] Toggling provisioning from ${current} to ${next}`);
@@ -162,6 +198,16 @@
         <Settings.Row title={m.enable_scope_enforcement()} description={m.enable_scope_enforcement_description()}>
           <Input.Switch bind:value={scopeEnforcementEnabled} sideEffect={handleToggleScopeEnforcement} />
         </Settings.Row>
+        <Settings.Row
+          title={m.enable_strict_mode()}
+          description={scopeEnforcementEnabled ? m.enable_strict_mode_description() : m.enable_strict_mode_requires_scope_enforcement()}
+        >
+          <Input.Switch
+            bind:value={strictModeEnabled}
+            sideEffect={handleToggleStrictMode}
+            disabled={!scopeEnforcementEnabled}
+          />
+        </Settings.Row>
       </Settings.Group>
     </Settings.Page>
   </Page.Main>
@@ -176,6 +222,19 @@
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={confirmDisableScopeEnforcement}>{m.disable()}</Button>
+    </Dialog.Controls>
+  </Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root alert openController={showDisableStrictModeDialog}>
+  <Dialog.Content width="small">
+    <Dialog.Title>{m.disable_strict_mode_warning_title()}</Dialog.Title>
+    <Dialog.Description>
+      {m.disable_strict_mode_warning_body()}
+    </Dialog.Description>
+    <Dialog.Controls let:close>
+      <Button is={close}>{m.cancel()}</Button>
+      <Button variant="destructive" on:click={confirmDisableStrictMode}>{m.disable()}</Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

@@ -199,9 +199,9 @@ class TestLegacyGetApiKeysRemoved:
             endpoint = getattr(route, "endpoint", None)
             methods = getattr(route, "methods", set())
             if endpoint and endpoint.__name__ == "generate_api_key" and "POST" in methods:
-                assert _endpoint_has_dependency_named(
-                    endpoint, "_api_key_permission_dep"
-                ), "generate_api_key missing require_api_key_permission guard"
+                assert _route_has_dependency_named(
+                    route, "_api_key_permission_dep"
+                ), "generate_api_key route missing require_api_key_permission guard"
                 return
         pytest.fail("generate_api_key endpoint not found")
 

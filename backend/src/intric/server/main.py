@@ -25,6 +25,21 @@ from intric.server.routers import router as api_router
 logger = get_logger(__name__)
 
 
+def _log_api_key_security_overrides() -> None:
+    settings = get_settings()
+
+    if not settings.api_key_enforce_resource_permissions:
+        logger.critical(
+            "API key resource permission enforcement is disabled by configuration"
+        )
+    if not settings.api_key_enforce_scope:
+        logger.critical("API key scope enforcement is disabled by configuration")
+    if settings.api_key_rate_limit_fail_open:
+        logger.warning(
+            "API key rate limiting is configured fail-open; requests may bypass limits when Redis is unavailable"
+        )
+
+
 # Pydantic models for /api/healthz/crawler endpoint
 
 
@@ -151,11 +166,13 @@ def get_application():
         lifespan=lifespan,
     )
 
+    _log_api_key_security_overrides()
+
     app.add_middleware(RequestContextMiddleware)
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=[],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -286,7 +303,7 @@ def get_application():
             # all the config, then update our response headers
             cors = CORSMiddleware(
                 app=app,
-                allow_origins=["*"],
+                allow_origins=[],
                 allow_credentials=True,
                 allow_methods=["*"],
                 allow_headers=["*"],
@@ -359,7 +376,7 @@ def get_application():
         if origin:
             cors = CORSMiddleware(
                 app=app,
-                allow_origins=["*"],
+                allow_origins=[],
                 allow_credentials=True,
                 allow_methods=["*"],
                 allow_headers=["*"],

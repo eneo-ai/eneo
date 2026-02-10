@@ -40,6 +40,15 @@ def _route_has_resource_permission_dep(route) -> bool:
     )
 
 
+def _route_has_scope_check_dep(route) -> bool:
+    deps = getattr(route, "dependencies", [])
+    return any(
+        hasattr(dep, "dependency")
+        and getattr(dep.dependency, "__name__", "") == "_scope_check_dep"
+        for dep in deps
+    )
+
+
 def _get_all_endpoint_names():
     """Collect all registered endpoint function names from the router."""
     router = _get_router()
@@ -74,9 +83,9 @@ def _get_intric_src_path() -> pathlib.Path:
 # Route prefixes that intentionally lack require_resource_permission_for_method()
 # Each entry has a rationale — no silent omissions.
 INTENTIONALLY_UNGUARDED = {
-    "/settings":                "Internal admin_service role check + endpoint-level scope guards",
-    "/users":                   "Router-level admin scope + permission guard on listing; endpoint-level scope guards on admin mutations; /me/ and /tenant/ safe for any scoped key",
-    "/admin":                   "admin_service.validate_admin_permission() internally",
+    "/settings":                "Admin settings endpoints are mounted on a dedicated router with admin scope + admin key guards",
+    "/users":                   "Admin user endpoints are mounted on users_admin_router with admin scope + admin key guards; /me/ and /tenant/ safe for any scoped key",
+    "/admin":                   "Admin endpoints are mounted with admin scope + admin key guards",
     "/dashboard":               "Read-only aggregation endpoint",
     "/icons":                   "Public static assets",
     "/limits":                  "Authenticated limit info (with_user=True)",
@@ -85,9 +94,9 @@ INTENTIONALLY_UNGUARDED = {
     "/jobs":                    "Authenticated via get_container(with_user=True)",
     "/analysis":                "Authenticated via get_container(with_user=True), service-layer role checks",
     "/logging":                 "Router-level Depends(get_current_active_user) auth",
-    "/completion-models":       "Model listing with admin scope guard",
-    "/embedding-models":        "Model listing with admin scope guard",
-    "/transcription-models":    "Model listing with admin scope guard",
+    "/completion-models":       "Model catalog endpoints are mounted with admin scope + admin key guards",
+    "/embedding-models":        "Model catalog endpoints are mounted with admin scope + admin key guards",
+    "/transcription-models":    "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/ai-models":               "Model listing aggregation",
     "/user-groups":             "Internal admin role checks",
     "/allowed-origins":         "Internal admin role checks",
@@ -100,9 +109,36 @@ INTENTIONALLY_UNGUARDED = {
     "/roles":                   "Internal role-based access management",
     "/api-keys":                "Self-management with ensure_manage_authorized() + scope guard",
     "/ws":                      "WebSocket endpoint — separate auth",
-    "/audit":                   "Admin audit endpoints with scope guard",
+    "/audit":                   "Admin audit endpoints with admin scope + admin key guards",
     "/auth":                    "Public federation/auth endpoints — no user auth required",
     "/api-docs":                "Public API documentation endpoint",
+}
+
+# Route prefixes that intentionally do NOT have scope guards.
+# These are authenticated by bearer/super-key flows or are public endpoints.
+INTENTIONALLY_SCOPE_FREE = {
+    "/users": "User profile/login/provisioning endpoints and legacy compatibility flows",
+    "/settings": "Tenant settings read/models endpoints",
+    "/logging": "Logging route has its own auth dependency",
+    "/analysis": "Analysis endpoints rely on service-level actor checks",
+    "/jobs": "Job endpoints rely on service-level authorization",
+    "/user-groups": "User-group authorization handled in service/actor layer",
+    "/allowed-origins": "Tenant allowed-origin endpoints enforce admin in service layer",
+    "/icons": "Static icon catalog",
+    "/limits": "Tenant/user limits endpoint",
+    "/dashboard": "Dashboard aggregate endpoint",
+    "/ws": "WebSocket auth path",
+    "/prompts": "Prompt endpoints handle authorization internally",
+    "/templates": "Template listing/discovery endpoints",
+    "/storage": "Storage usage endpoints",
+    "/security-classifications": "Security classification endpoints enforce admin permissions",
+    "/integrations": "Integration endpoints enforce authorization in service layer",
+    "/ai-models": "Model listing endpoint",
+    "/sysadmin": "Protected by super API key dependency",
+    "/modules": "Protected by super-duper API key dependency",
+    "/auth": "Public federation auth endpoints",
+    "/api-docs": "Public API documentation endpoint",
+    "/roles": "Access-management endpoints use role authorization",
 }
 
 
@@ -155,6 +191,29 @@ class TestRouteCoverage:
         ]
         assert len(guarded) >= 20, (
             f"Expected at least 20 guarded routes, found {len(guarded)}"
+        )
+
+    def test_all_routes_have_scope_guard_or_allowlist(self):
+        """Fails CI when routes are added without scope-check classification."""
+        router = _get_router()
+        unaccounted_prefixes = set()
+
+        for route in router.routes:
+            path = getattr(route, "path", "")
+            if not path or path == "/":
+                continue
+            if _route_has_scope_check_dep(route):
+                continue
+
+            prefix = _extract_path_prefix(path)
+            if prefix in INTENTIONALLY_SCOPE_FREE:
+                continue
+
+            unaccounted_prefixes.add(prefix)
+
+        assert not unaccounted_prefixes, (
+            f"Route prefixes without scope guard or allowlist: {sorted(unaccounted_prefixes)}. "
+            "Either add require_api_key_scope_check() or add to INTENTIONALLY_SCOPE_FREE with rationale."
         )
 
 
@@ -312,6 +371,71 @@ class TestReadOverrideWiring:
 
 
 # ---------------------------------------------------------------------------
+# Tenant-admin API key guard consistency
+# ---------------------------------------------------------------------------
+
+
+class TestTenantAdminApiKeyGuards:
+    """Tenant-admin mounts must include both scope and admin key guards.
+
+    Exception: /api-keys remains self-service for GET/list/detail by design.
+    """
+
+    def _has_dependency(self, route, dep_name: str) -> bool:
+        deps = getattr(route, "dependencies", [])
+        return any(
+            hasattr(dep, "dependency")
+            and getattr(dep.dependency, "__name__", "") == dep_name
+            for dep in deps
+        )
+
+    def _routes_for_prefix(self, prefix: str):
+        router = _get_router()
+        return [
+            route
+            for route in router.routes
+            if getattr(route, "path", "").startswith(prefix)
+        ]
+
+    def test_admin_surfaces_have_scope_and_admin_key_guards(self):
+        prefixes = [
+            "/admin",
+            "/completion-models",
+            "/embedding-models",
+            "/transcription-models",
+            "/audit",
+        ]
+        for prefix in prefixes:
+            routes = self._routes_for_prefix(prefix)
+            assert routes, f"No routes found for prefix {prefix}"
+            for route in routes:
+                assert self._has_dependency(route, "_scope_check_dep"), (
+                    f"{route.path} missing _scope_check_dep"
+                )
+                assert self._has_dependency(route, "_api_key_permission_dep"), (
+                    f"{route.path} missing _api_key_permission_dep"
+                )
+
+    def test_api_keys_list_remains_self_service(self):
+        router = _get_router()
+        list_route = None
+        for route in router.routes:
+            if getattr(route, "path", "") == "/api-keys":
+                methods = getattr(route, "methods", set())
+                if "GET" in methods:
+                    list_route = route
+                    break
+
+        assert list_route is not None, "GET /api-keys route not found"
+        assert self._has_dependency(list_route, "_scope_check_dep"), (
+            "GET /api-keys must retain admin scope guard"
+        )
+        assert not self._has_dependency(list_route, "_api_key_permission_dep"), (
+            "GET /api-keys should remain self-service and must not require admin key permission"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Phase 8D: Feature flag contract
 # ---------------------------------------------------------------------------
 
@@ -393,3 +517,65 @@ class TestFeatureFlagContract:
         with pytest.raises(ApiKeyValidationError) as exc_info:
             _check_management_permission(key, "admin")
         assert exc_info.value.code == "insufficient_permission"
+
+
+# ---------------------------------------------------------------------------
+# Strict mode hardening: no endpoint-level stash dependencies
+# ---------------------------------------------------------------------------
+
+
+class TestNoEndpointLevelStashDependencies:
+    """Scope/management stash dependencies must be mounted at router level only."""
+
+    def _find_endpoint_level_stash_usage(self, rel_path: str) -> list[str]:
+        intric_src = _get_intric_src_path()
+        source_path = intric_src / rel_path
+        tree = ast.parse(source_path.read_text())
+        hits: list[str] = []
+
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for arg in [*node.args.args, *node.args.kwonlyargs]:
+                default = None
+                # positional defaults align to last N args
+                if arg in node.args.kwonlyargs:
+                    idx = node.args.kwonlyargs.index(arg)
+                    default = node.args.kw_defaults[idx]
+                elif node.args.defaults:
+                    pos_args = node.args.args
+                    first_default = len(pos_args) - len(node.args.defaults)
+                    try:
+                        idx = pos_args.index(arg)
+                    except ValueError:
+                        idx = -1
+                    if idx >= first_default:
+                        default = node.args.defaults[idx - first_default]
+
+                if not isinstance(default, ast.Call):
+                    continue
+                if getattr(default.func, "id", "") != "Depends":
+                    continue
+                if not default.args:
+                    continue
+                dep = default.args[0]
+                if not isinstance(dep, ast.Call):
+                    continue
+                dep_name = getattr(dep.func, "id", getattr(dep.func, "attr", ""))
+                if dep_name in {"require_api_key_scope_check", "require_api_key_permission"}:
+                    hits.append(f"{node.name}:{arg.arg}")
+        return hits
+
+    def test_users_router_has_no_endpoint_level_stash_dependencies(self):
+        hits = self._find_endpoint_level_stash_usage("users/user_router.py")
+        assert not hits, (
+            "users/user_router.py contains endpoint-level stash dependencies. "
+            f"Move to router mount level: {hits}"
+        )
+
+    def test_settings_router_has_no_endpoint_level_stash_dependencies(self):
+        hits = self._find_endpoint_level_stash_usage("settings/settings_router.py")
+        assert not hits, (
+            "settings/settings_router.py contains endpoint-level stash dependencies. "
+            f"Move to router mount level: {hits}"
+        )

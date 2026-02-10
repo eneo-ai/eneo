@@ -26,7 +26,7 @@ class CORSMiddleware:
         allow_origin_regex: str | None = None,
         expose_headers: typing.Sequence[str] = (),
         max_age: int = 600,
-        callback: typing.Optional[typing.Callable[[str], bool]] = None,
+        callback: typing.Optional[typing.Callable[[str], typing.Awaitable[bool]]] = None,
     ) -> None:
         if "*" in allow_methods:
             allow_methods = ALL_METHODS

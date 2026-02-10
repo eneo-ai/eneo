@@ -17,6 +17,7 @@ import pytest
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.main.exceptions import BadRequestException
 from intric.settings.setting_service import SettingService
 
 
@@ -53,6 +54,7 @@ def _make_service(user: SimpleNamespace | None = None) -> tuple[SettingService, 
     feature_flag_service = AsyncMock()
     feature_flag_service.feature_flag_repo = AsyncMock()
     feature_flag_service.check_is_feature_enabled = AsyncMock(return_value=False)
+    feature_flag_service.check_is_feature_enabled_fail_closed = AsyncMock(return_value=False)
 
     tenant_repo = AsyncMock()
     tenant_repo.get = AsyncMock(return_value=SimpleNamespace(
@@ -147,6 +149,53 @@ class TestSettingToggleAuditLogging:
         assert call_kwargs["metadata"]["changes"]["api_key_scope_enforcement"]["new"] is True
         # old value comes from check_is_feature_enabled mock (returns False)
         assert call_kwargs["metadata"]["changes"]["api_key_scope_enforcement"]["old"] is False
+
+    @pytest.mark.asyncio
+    async def test_disabling_scope_enforcement_forces_strict_mode_off(self):
+        service, _ = _make_service()
+        service.feature_flag_service.feature_flag_repo.one_or_none = AsyncMock(
+            return_value=_make_feature_flag("api_key_scope_enforcement")
+        )
+        service.feature_flag_service.check_is_feature_enabled = AsyncMock(return_value=True)
+        service.feature_flag_service.check_is_feature_enabled_fail_closed = AsyncMock(
+            return_value=True
+        )
+
+        response = await service.update_scope_enforcement_setting(enabled=False)
+
+        assert response.api_key_scope_enforcement is False
+        assert response.api_key_strict_mode is False
+
+    @pytest.mark.asyncio
+    async def test_update_strict_mode_setting_logs_audit(self):
+        service, audit_mock = _make_service()
+        service.feature_flag_service.feature_flag_repo.one_or_none = AsyncMock(
+            return_value=_make_feature_flag("api_key_strict_mode")
+        )
+        service.feature_flag_service.check_is_feature_enabled_fail_closed = AsyncMock(
+            return_value=True
+        )
+
+        await service.update_strict_mode_setting(enabled=True)
+
+        audit_mock.log_async.assert_called_once()
+        call_kwargs = audit_mock.log_async.call_args[1]
+        assert call_kwargs["action"] == ActionType.TENANT_SETTINGS_UPDATED
+        assert call_kwargs["metadata"]["setting"] == "api_key_strict_mode"
+        assert call_kwargs["metadata"]["changes"]["api_key_strict_mode"]["new"] is True
+        assert call_kwargs["metadata"]["changes"]["api_key_strict_mode"]["old"] is False
+
+    @pytest.mark.asyncio
+    async def test_update_strict_mode_requires_scope_enforcement(self):
+        service, audit_mock = _make_service()
+        service.feature_flag_service.check_is_feature_enabled_fail_closed = AsyncMock(
+            return_value=False
+        )
+
+        with pytest.raises(BadRequestException):
+            await service.update_strict_mode_setting(enabled=True)
+
+        audit_mock.log_async.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_audit_log_includes_actor_id(self):
