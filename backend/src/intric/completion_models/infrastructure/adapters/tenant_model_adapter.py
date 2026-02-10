@@ -280,11 +280,6 @@ class TenantModelAdapter(CompletionModelAdapter):
             if value:
                 kwargs[field] = value
 
-        # Handle Azure deployment name if present
-        if self.model.deployment_name and self.provider_type == "azure":
-            # Azure models use deployment_name instead of model name
-            kwargs["deployment_name"] = self.model.deployment_name
-
         # Process model kwargs with provider-specific adjustments
         if model_kwargs:
             # Convert Pydantic ModelKwargs to dict if needed

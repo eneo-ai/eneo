@@ -27,6 +27,7 @@ from intric.ai_models.model_enums import (
 )
 from intric.completion_models.infrastructure.completion_service import CompletionService
 from intric.database.tables.model_providers_table import ModelProviders
+from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
 
 
 @pytest.fixture
@@ -131,7 +132,7 @@ async def test_model_with_inactive_provider_raises_error(
     test_settings,
     admin_user,
 ):
-    """When a model's provider is inactive, raise ValueError."""
+    """When a model's provider is inactive, raise ProviderInactiveException."""
     from unittest.mock import Mock
 
     async with db_container() as container:
@@ -184,10 +185,68 @@ async def test_model_with_inactive_provider_raises_error(
             session=session,
         )
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ProviderInactiveException) as exc_info:
             await service._get_adapter(model)
 
-        assert "not active" in str(exc_info.value)
+        assert "inactive" in str(exc_info.value).lower()
+        assert "Inactive Provider" in str(exc_info.value)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_model_with_nonexistent_provider_raises_error(
+    db_container,
+    test_tenant,
+    test_settings,
+    admin_user,
+):
+    """When a model's provider doesn't exist, raise ProviderNotFoundException."""
+    from unittest.mock import Mock
+
+    async with db_container() as container:
+        session = container.session()
+
+        # Create model with a non-existent provider ID
+        non_existent_provider_id = uuid4()
+        model = CompletionModel(
+            user=admin_user,
+            id=uuid4(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            nickname="gpt4",
+            name="GPT-4",
+            token_limit=8192,
+            vision=False,
+            family=ModelFamily.OPEN_AI,
+            hosting=ModelHostingLocation.USA,
+            org=ModelOrg.OPENAI,
+            stability=ModelStability.STABLE,
+            open_source=False,
+            description="OpenAI GPT-4 model",
+            nr_billion_parameters=None,
+            hf_link=None,
+            is_deprecated=False,
+            deployment_name=None,
+            is_org_enabled=True,
+            is_org_default=False,
+            reasoning=False,
+            base_url=None,
+            litellm_model_name=None,
+            provider_id=non_existent_provider_id,
+        )
+
+        service = CompletionService(
+            context_builder=Mock(),
+            tenant=test_tenant,
+            config=test_settings,
+            session=session,
+        )
+
+        with pytest.raises(ProviderNotFoundException) as exc_info:
+            await service._get_adapter(model)
+
+        assert "not found" in str(exc_info.value).lower()
+        assert str(non_existent_provider_id) in str(exc_info.value)
 
 
 @pytest.mark.integration

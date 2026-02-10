@@ -162,7 +162,9 @@ class Settings(BaseSettings):
         20  # Base pool size (permanent connections) - default: current behavior
     )
     db_pool_max_overflow: int = 10  # Extra connections above pool_size (total max = 30)
-    db_pool_timeout: int = 30  # Seconds to wait for connection before raising error - default: SQLAlchemy default
+    db_pool_timeout: int = (
+        30  # Seconds to wait for connection before raising error - default: SQLAlchemy default
+    )
     db_pool_pre_ping: bool = (
         True  # Verify connections before use - prevents stale connection errors
     )
@@ -253,6 +255,9 @@ class Settings(BaseSettings):
     transcription_max_file_size: int
     max_in_question: int
 
+    # Temporary directory for file uploads
+    upload_tmp_dir: Path = Path("/tmp")
+
     # Azure models
     using_azure_models: bool = False
     azure_api_key: Optional[str] = None
@@ -339,6 +344,9 @@ class Settings(BaseSettings):
     sharepoint_scopes: Optional[str] = None
     sharepoint_webhook_client_state: Optional[str] = None
     sharepoint_webhook_notification_url: Optional[str] = None
+    # Max SharePoint/OneDrive file size to download and process (bytes)
+    # Default: 50 MB
+    sharepoint_max_download_bytes: int = 50 * 1024 * 1024
 
     # Generic encryption key for sensitive data (HTTP auth, tenant API keys, etc.)
     # Required when TENANT_CREDENTIALS_ENABLED=true or FEDERATION_PER_TENANT_ENABLED=true
@@ -361,6 +369,13 @@ class Settings(BaseSettings):
         """
         if v is None or (isinstance(v, str) and not v.strip()):
             return Path("exports")
+        return v
+
+    @field_validator("sharepoint_max_download_bytes")
+    @classmethod
+    def validate_sharepoint_max_download_bytes(cls, v: int):
+        if v <= 0:
+            raise ValueError("sharepoint_max_download_bytes must be greater than 0")
         return v
 
     @model_validator(mode="after")

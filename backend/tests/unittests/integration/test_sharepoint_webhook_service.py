@@ -622,3 +622,84 @@ def test_parse_site_id_from_various_formats(setup: Setup):
 
     # Invalid format
     assert setup.service._parse_site_id("invalid/format") is None
+
+
+async def test_onedrive_notifications_use_drive_lookup(setup: Setup):
+    """Drive-scoped notifications must query integrations by drive_id."""
+    notification = {
+        "subscriptionId": "sub-123",
+        "clientState": "test-client-state-123",
+        "resource": "drives/drive-456/root",
+        "changeType": "updated",
+        "resourceData": {
+            "@odata.type": "#Microsoft.Graph.driveItem",
+            "id": "item-123",
+            "changeKey": "change-key-789",
+        },
+    }
+
+    setup.service._fetch_knowledge_by_drive = AsyncMock(return_value=[])
+    setup.service._fetch_knowledge_by_site = AsyncMock(return_value=[])
+
+    await setup.service.handle_notifications({"value": [notification]})
+
+    setup.service._fetch_knowledge_by_drive.assert_called_once_with(drive_id="drive-456")
+    setup.service._fetch_knowledge_by_site.assert_not_called()
+
+
+async def test_onedrive_queued_job_contains_drive_id(
+    setup: Setup, mock_user, mock_oauth_token
+):
+    """Queued task params should preserve OneDrive identity."""
+    knowledge = MagicMock()
+    knowledge.id = uuid4()
+    knowledge.user_integration_id = uuid4()
+    knowledge.site_id = None
+    knowledge.drive_id = "drive-456"
+    knowledge.resource_type = "onedrive"
+    knowledge.folder_id = None
+    knowledge.folder_path = None
+    knowledge.selected_item_type = "site_root"
+    knowledge.delta_token = None
+    knowledge.name = "OneDrive Integration"
+
+    user_integration = MagicMock()
+    user_integration.id = uuid4()
+    user_integration.user_id = uuid4()
+    user_integration.tenant_id = uuid4()
+    user_integration.auth_type = "user_oauth"
+    user_integration.tenant_app_id = None
+
+    notification = {
+        "subscriptionId": "sub-123",
+        "clientState": "test-client-state-123",
+        "resource": "drives/drive-456/root",
+        "changeType": "updated",
+        "changeKey": "change-key-789",
+        "resourceData": {
+            "@odata.type": "#Microsoft.Graph.driveItem",
+            "id": "item-123",
+            "changeKey": "change-key-789",
+        },
+    }
+
+    setup.service._fetch_knowledge_by_drive = AsyncMock(return_value=[(knowledge, user_integration)])
+    setup.oauth_token_repo.one_or_none.return_value = mock_oauth_token
+    setup.user_repo.get_user_by_id.return_value = mock_user
+    setup.change_key_service.should_process.return_value = True
+    setup.change_key_service.update_change_key.return_value = None
+
+    mock_job_service = AsyncMock()
+    mock_job_service.queue_job = AsyncMock()
+
+    with patch(
+        "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
+        return_value=mock_job_service
+    ):
+        await setup.service.handle_notifications({"value": [notification]})
+
+    call_args = mock_job_service.queue_job.call_args
+    task_params = call_args.kwargs["task_params"]
+    assert task_params.drive_id == "drive-456"
+    assert task_params.site_id is None
+    assert task_params.resource_type == "onedrive"

@@ -1221,6 +1221,7 @@ class Container(containers.DeclarativeContainer):
         oauth_token_service=oauth_token_service,
         tenant_app_auth_service=tenant_app_auth_service,
         service_account_auth_service=service_account_auth_service,
+        tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
     )
     integration_preview_service = providers.Factory(
         IntegrationPreviewService,

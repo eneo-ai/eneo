@@ -119,7 +119,7 @@ export function getAvailableKnowledge(
       // Now that the model is set up we can exit, same goes for websites below
       if (!isCompatible) return;
       if (selectedIntegerationKnowledgeIds.includes(integrationKnowledge.id)) return;
-      if (!matchesFilter(integrationKnowledge.name)) return;
+      if (!(matchesFilter(integrationKnowledge.name) || matchesFilter(integrationKnowledge.wrapper_name))) return;
 
       availableKnowledge[integrationKnowledge.embedding_model.id].integrationKnowledge.push(
         integrationKnowledge

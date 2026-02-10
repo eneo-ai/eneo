@@ -6,11 +6,15 @@ from uuid import UUID
 
 import redis.asyncio as redis
 
-from intric.integration.application.tenant_sharepoint_app_service import TenantSharePointAppService
+from intric.integration.application.tenant_sharepoint_app_service import (
+    TenantSharePointAppService,
+)
 from intric.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountAuthService,
 )
-from intric.integration.infrastructure.auth_service.tenant_app_auth_service import TenantAppAuthService
+from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
+    TenantAppAuthService,
+)
 from intric.settings.encryption_service import EncryptionService
 from intric.integration.presentation.admin_models import (
     TenantSharePointAppCreate,
@@ -33,6 +37,29 @@ router = APIRouter()
 
 OAUTH_STATE_TTL_SECONDS = 600  # 10 minutes
 OAUTH_STATE_PREFIX = "sharepoint:oauth_state:"
+
+
+def _require_sharepoint_webhook_client_state() -> str:
+    """Require webhook clientState to be configured before enabling SharePoint."""
+    settings = get_settings()
+    client_state = settings.sharepoint_webhook_client_state
+    if not client_state or not client_state.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "SHAREPOINT_WEBHOOK_CLIENT_STATE must be configured before enabling "
+                "SharePoint integration."
+            ),
+        )
+    return client_state.strip()
+
+
+class _SimpleGraphToken:
+    """Lightweight token wrapper compatible with subscription service."""
+
+    def __init__(self, access_token: str):
+        self.access_token = access_token
+        self.base_url = "https://graph.microsoft.com"
 
 
 async def _get_redis_client() -> redis.Redis:
@@ -69,6 +96,67 @@ async def _pop_oauth_state(state: str) -> Optional[dict]:
         await client.close()
 
 
+def _is_onedrive_subscription(subscription) -> bool:
+    """Infer OneDrive subscriptions from stored identifiers.
+
+    OneDrive subscriptions store drive_id in both site_id and drive_id fields.
+    """
+    return bool(
+        subscription.site_id
+        and subscription.drive_id
+        and subscription.site_id == subscription.drive_id
+    )
+
+
+async def _get_sharepoint_token_for_user_integration(
+    user_integration,
+    container: Container,
+):
+    """Resolve token for both user_oauth and tenant_app integrations."""
+    oauth_token_service = container.oauth_token_service()
+
+    if user_integration.auth_type == "tenant_app":
+        if not user_integration.tenant_app_id:
+            raise ValueError("tenant_app integration is missing tenant_app_id")
+
+        tenant_app_repo = container.tenant_sharepoint_app_repo()
+        tenant_app = await tenant_app_repo.get_by_id(user_integration.tenant_app_id)
+        if not tenant_app:
+            raise ValueError(
+                f"TenantSharePointApp {user_integration.tenant_app_id} not found"
+            )
+
+        if tenant_app.is_service_account():
+            service_account_auth = container.service_account_auth_service()
+            token_result = await service_account_auth.refresh_access_token(tenant_app)
+            new_refresh_token = token_result.get("refresh_token")
+            if (
+                new_refresh_token
+                and new_refresh_token != tenant_app.service_account_refresh_token
+            ):
+                tenant_app.update_refresh_token(new_refresh_token)
+                await tenant_app_repo.update(tenant_app)
+            return _SimpleGraphToken(token_result["access_token"])
+
+        tenant_app_auth = container.tenant_app_auth_service()
+        access_token = await tenant_app_auth.get_access_token(tenant_app)
+        return _SimpleGraphToken(access_token)
+
+    token = await oauth_token_service.get_oauth_token_by_user_integration(
+        user_integration_id=user_integration.id
+    )
+    if not token:
+        raise ValueError(
+            f"No OAuth token found for user_integration {user_integration.id}"
+        )
+    if not token.token_type.is_sharepoint:
+        raise ValueError(
+            f"Token for user_integration {user_integration.id} is not a SharePoint token"
+        )
+
+    return await oauth_token_service.refresh_and_update_token(token_id=token.id)
+
+
 @router.post(
     "/sharepoint/app",
     response_model=TenantSharePointAppPublic,
@@ -85,24 +173,32 @@ async def _pop_oauth_state(state: str) -> Optional[dict]:
         400: {"description": "Invalid credentials or configuration"},
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
-    }
+    },
 )
 async def configure_sharepoint_app(
     app_config: TenantSharePointAppCreate,
-    container: Container = Depends(get_container(with_user=True))
+    container: Container = Depends(get_container(with_user=True)),
 ) -> TenantSharePointAppPublic:
     """Configure or update the tenant's SharePoint application credentials."""
     try:
         user = container.user()
         validate_permission(user, Permission.ADMIN)
+        _require_sharepoint_webhook_client_state()
 
-        tenant_app_service: TenantSharePointAppService = container.tenant_sharepoint_app_service()
-        tenant_app_auth_service: TenantAppAuthService = container.tenant_app_auth_service()
+        tenant_app_service: TenantSharePointAppService = (
+            container.tenant_sharepoint_app_service()
+        )
+        tenant_app_auth_service: TenantAppAuthService = (
+            container.tenant_app_auth_service()
+        )
         encryption_service: EncryptionService = container.encryption_service()
 
         tenant_id = user.tenant_id
 
-        from intric.integration.domain.entities.tenant_sharepoint_app import TenantSharePointApp
+        from intric.integration.domain.entities.tenant_sharepoint_app import (
+            TenantSharePointApp,
+        )
+
         temp_app = TenantSharePointApp(
             tenant_id=tenant_id,
             client_id=app_config.client_id,
@@ -115,7 +211,7 @@ async def configure_sharepoint_app(
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid credentials: {error_msg}"
+                detail=f"Invalid credentials: {error_msg}",
             )
 
         app = await tenant_app_service.configure_tenant_app(
@@ -127,21 +223,30 @@ async def configure_sharepoint_app(
             created_by=user.id,
         )
 
-        logger.info(f"Configured SharePoint app for tenant {tenant_id} by user {user.id}")
+        logger.info(
+            f"Configured SharePoint app for tenant {tenant_id} by user {user.id}"
+        )
 
         user_integration_repo = container.user_integration_repo()
         tenant_integration_repo = container.tenant_integration_repo()
         integration_repo = container.integration_repo()
 
-        sharepoint_integrations = await tenant_integration_repo.query(tenant_id=tenant_id)
+        sharepoint_integrations = await tenant_integration_repo.query(
+            tenant_id=tenant_id
+        )
         sharepoint_integration = next(
-            (ti for ti in sharepoint_integrations
-             if ti.integration.integration_type == "sharepoint"),
-            None
+            (
+                ti
+                for ti in sharepoint_integrations
+                if ti.integration.integration_type == "sharepoint"
+            ),
+            None,
         )
 
         if not sharepoint_integration:
-            logger.info(f"SharePoint TenantIntegration not found for tenant {tenant_id}, creating it")
+            logger.info(
+                f"SharePoint TenantIntegration not found for tenant {tenant_id}, creating it"
+            )
 
             sharepoint_system_integration = await integration_repo.one_or_none(
                 integration_type="sharepoint"
@@ -150,23 +255,30 @@ async def configure_sharepoint_app(
             if not sharepoint_system_integration:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="SharePoint integration not found in system"
+                    detail="SharePoint integration not found in system",
                 )
 
-            from intric.integration.domain.entities.tenant_integration import TenantIntegration
+            from intric.integration.domain.entities.tenant_integration import (
+                TenantIntegration,
+            )
+
             sharepoint_integration = TenantIntegration(
                 tenant_id=tenant_id,
                 integration=sharepoint_system_integration,
             )
-            sharepoint_integration = await tenant_integration_repo.add(sharepoint_integration)
-            logger.info(f"Created SharePoint TenantIntegration {sharepoint_integration.id} for tenant {tenant_id}")
+            sharepoint_integration = await tenant_integration_repo.add(
+                sharepoint_integration
+            )
+            logger.info(
+                f"Created SharePoint TenantIntegration {sharepoint_integration.id} for tenant {tenant_id}"
+            )
 
         if sharepoint_integration:
             # Tenant app integrations are person-independent (user_id=None)
             existing_integration = await user_integration_repo.one_or_none(
                 tenant_integration_id=sharepoint_integration.id,
                 auth_type="tenant_app",
-                tenant_app_id=app.id
+                tenant_app_id=app.id,
             )
 
             if existing_integration:
@@ -176,16 +288,21 @@ async def configure_sharepoint_app(
                 try:
                     existing_integration.authenticated = True
                     await user_integration_repo.update(existing_integration)
-                    logger.info(f"Updated tenant_app integration {existing_integration.id}")
+                    logger.info(
+                        f"Updated tenant_app integration {existing_integration.id}"
+                    )
                 except Exception as update_error:
                     logger.error(
                         f"Failed to update tenant_app integration: {type(update_error).__name__}: {str(update_error)}",
-                        exc_info=True
+                        exc_info=True,
                     )
                     raise
             else:
                 # Create new person-independent tenant_app integration
-                from intric.integration.domain.entities.user_integration import UserIntegration
+                from intric.integration.domain.entities.user_integration import (
+                    UserIntegration,
+                )
+
                 new_user_integration = UserIntegration(
                     tenant_integration=sharepoint_integration,
                     user_id=None,  # Person-independent! Not tied to any specific user
@@ -219,7 +336,7 @@ async def configure_sharepoint_app(
         logger.error(f"Failed to configure SharePoint app: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to configure SharePoint app: {str(e)}"
+            detail=f"Failed to configure SharePoint app: {str(e)}",
         )
 
 
@@ -233,20 +350,24 @@ async def configure_sharepoint_app(
         "Requires admin role."
     ),
     responses={
-        200: {"description": "SharePoint app configuration retrieved (may be null if not configured)"},
+        200: {
+            "description": "SharePoint app configuration retrieved (may be null if not configured)"
+        },
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
-    }
+    },
 )
 async def get_sharepoint_app(
-    container: Container = Depends(get_container(with_user=True))
+    container: Container = Depends(get_container(with_user=True)),
 ) -> Optional[TenantSharePointAppPublic]:
     """Get the tenant's SharePoint app configuration."""
     try:
         user = container.user()
         validate_permission(user, Permission.ADMIN)
 
-        tenant_app_service: TenantSharePointAppService = container.tenant_sharepoint_app_service()
+        tenant_app_service: TenantSharePointAppService = (
+            container.tenant_sharepoint_app_service()
+        )
         encryption_service: EncryptionService = container.encryption_service()
 
         tenant_id = user.tenant_id
@@ -275,7 +396,7 @@ async def get_sharepoint_app(
         logger.error(f"Failed to get SharePoint app: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get SharePoint app: {str(e)}"
+            detail=f"Failed to get SharePoint app: {str(e)}",
         )
 
 
@@ -292,23 +413,34 @@ async def get_sharepoint_app(
         200: {"description": "Test completed (check success field in response)"},
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
-    }
+    },
 )
 async def test_sharepoint_app_credentials(
     app_config: TenantSharePointAppCreate = Body(...),
-    container: Container = Depends(get_container(with_user=True))
+    container: Container = Depends(get_container(with_user=True)),
 ) -> TenantAppTestResult:
     """Test SharePoint app credentials without saving them."""
     try:
         user = container.user()
         validate_permission(user, Permission.ADMIN)
+        logger.info(
+            "Received SharePoint app test request for tenant %s by user %s "
+            "(client_id_prefix=%s, tenant_domain=%s)",
+            user.tenant_id,
+            user.id,
+            app_config.client_id[:6],
+            app_config.tenant_domain,
+        )
 
-        logger.info(f"Received test request with app_config: {app_config}")
-
-        tenant_app_auth_service: TenantAppAuthService = container.tenant_app_auth_service()
+        tenant_app_auth_service: TenantAppAuthService = (
+            container.tenant_app_auth_service()
+        )
         tenant_id = user.tenant_id
 
-        from intric.integration.domain.entities.tenant_sharepoint_app import TenantSharePointApp
+        from intric.integration.domain.entities.tenant_sharepoint_app import (
+            TenantSharePointApp,
+        )
+
         temp_app = TenantSharePointApp(
             tenant_id=tenant_id,
             client_id=app_config.client_id,
@@ -322,14 +454,15 @@ async def test_sharepoint_app_credentials(
         return TenantAppTestResult(
             success=success,
             error_message=error_msg,
-            details="Token acquired successfully" if success else None
+            details="Token acquired successfully" if success else None,
         )
 
     except Exception as e:
         logger.error(f"Failed to test SharePoint app credentials: {e}")
         return TenantAppTestResult(
             success=False,
-            error_message=str(e)
+            error_message=str(e),
+            details=None,
         )
 
 
@@ -354,17 +487,19 @@ async def test_sharepoint_app_credentials(
         404: {"description": "No SharePoint app configured"},
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
-    }
+    },
 )
 async def delete_sharepoint_app(
-    container: Container = Depends(get_container(with_user=True))
+    container: Container = Depends(get_container(with_user=True)),
 ) -> Dict[str, str]:
     """Permanently delete the tenant's SharePoint app and all associated data."""
     try:
         user = container.user()
         validate_permission(user, Permission.ADMIN)
 
-        tenant_app_service: TenantSharePointAppService = container.tenant_sharepoint_app_service()
+        tenant_app_service: TenantSharePointAppService = (
+            container.tenant_sharepoint_app_service()
+        )
         user_integration_repo = container.user_integration_repo()
 
         tenant_id = user.tenant_id
@@ -373,7 +508,7 @@ async def delete_sharepoint_app(
         if not app:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="No SharePoint app configured for this tenant"
+                detail="No SharePoint app configured for this tenant",
             )
 
         # CRITICAL: Delete all user_integrations that use this tenant app first
@@ -400,7 +535,7 @@ async def delete_sharepoint_app(
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to delete SharePoint app after cleaning up integrations"
+                detail="Failed to delete SharePoint app after cleaning up integrations",
             )
 
         logger.warning(
@@ -416,7 +551,7 @@ async def delete_sharepoint_app(
         logger.error(f"Failed to delete SharePoint app: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete SharePoint app: {str(e)}"
+            detail=f"Failed to delete SharePoint app: {str(e)}",
         )
 
 
@@ -433,10 +568,10 @@ async def delete_sharepoint_app(
         200: {"description": "List of subscriptions retrieved"},
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
-    }
+    },
 )
 async def list_sharepoint_subscriptions(
-    container: Container = Depends(get_container(with_user=True))
+    container: Container = Depends(get_container(with_user=True)),
 ):
     """List all SharePoint subscriptions for the tenant."""
     try:
@@ -449,8 +584,8 @@ async def list_sharepoint_subscriptions(
         user_integration_repo = container.user_integration_repo()
         user_repo = container.user_repo()
 
-        # Get all subscriptions
-        all_subscriptions = await subscription_repo.list_all()
+        # Tenant-scoped lookup to avoid cross-tenant disclosure
+        all_subscriptions = await subscription_repo.list_by_tenant(user.tenant_id)
 
         from datetime import datetime, timezone
 
@@ -477,7 +612,9 @@ async def list_sharepoint_subscriptions(
         result = []
         for sub in all_subscriptions:
             now = datetime.now(timezone.utc)
-            expires_in_hours = max(0, int((sub.expires_at - now).total_seconds() / 3600))
+            expires_in_hours = max(
+                0, int((sub.expires_at - now).total_seconds() / 3600)
+            )
 
             # Determine owner info
             owner_email = None
@@ -493,19 +630,21 @@ async def list_sharepoint_subscriptions(
                 else:
                     owner_type = "organization"
 
-            result.append(SharePointSubscriptionPublic(
-                id=sub.id,
-                user_integration_id=sub.user_integration_id,
-                site_id=sub.site_id,
-                subscription_id=sub.subscription_id,
-                drive_id=sub.drive_id,
-                expires_at=sub.expires_at,
-                created_at=sub.created_at,
-                is_expired=sub.is_expired(),
-                expires_in_hours=expires_in_hours,
-                owner_email=owner_email,
-                owner_type=owner_type,
-            ))
+            result.append(
+                SharePointSubscriptionPublic(
+                    id=sub.id,
+                    user_integration_id=sub.user_integration_id,
+                    site_id=sub.site_id,
+                    subscription_id=sub.subscription_id,
+                    drive_id=sub.drive_id,
+                    expires_at=sub.expires_at,
+                    created_at=sub.created_at,
+                    is_expired=sub.is_expired(),
+                    expires_in_hours=expires_in_hours,
+                    owner_email=owner_email,
+                    owner_type=owner_type,
+                )
+            )
 
         return result
 
@@ -513,7 +652,7 @@ async def list_sharepoint_subscriptions(
         logger.error(f"Failed to list SharePoint subscriptions: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list SharePoint subscriptions: {str(e)}"
+            detail=f"Failed to list SharePoint subscriptions: {str(e)}",
         )
 
 
@@ -531,10 +670,10 @@ async def list_sharepoint_subscriptions(
         200: {"description": "Renewal operation completed (check result for details)"},
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
-    }
+    },
 )
 async def renew_expired_subscriptions(
-    container: Container = Depends(get_container(with_user=True))
+    container: Container = Depends(get_container(with_user=True)),
 ):
     """Renew all expired SharePoint subscriptions for the tenant."""
     try:
@@ -545,10 +684,10 @@ async def renew_expired_subscriptions(
 
         subscription_repo = container.sharepoint_subscription_repo()
         subscription_service = container.sharepoint_subscription_service()
-        oauth_token_service = container.oauth_token_service()
+        user_integration_repo = container.user_integration_repo()
 
-        # Get all subscriptions
-        all_subscriptions = await subscription_repo.list_all()
+        # Tenant-scoped lookup to avoid cross-tenant operations
+        all_subscriptions = await subscription_repo.list_by_tenant(user.tenant_id)
 
         # Filter expired ones
         expired_subscriptions = [sub for sub in all_subscriptions if sub.is_expired()]
@@ -564,32 +703,29 @@ async def renew_expired_subscriptions(
 
         for sub in expired_subscriptions:
             try:
-                # Get token for this user integration
-                token = await oauth_token_service.get_oauth_token_by_user_integration(
-                    user_integration_id=sub.user_integration_id
+                user_integration = await user_integration_repo.one_or_none(
+                    id=sub.user_integration_id
                 )
-
-                if not token:
-                    error_msg = f"No token found for subscription {sub.id} (user_integration={sub.user_integration_id})"
+                if not user_integration:
+                    error_msg = f"User integration {sub.user_integration_id} not found for subscription {sub.id}"
+                    logger.warning(error_msg)
+                    errors.append(error_msg)
+                    failed += 1
+                    continue
+                if user_integration.tenant_integration.tenant_id != user.tenant_id:
+                    error_msg = f"User integration {sub.user_integration_id} does not belong to tenant {user.tenant_id}"
                     logger.warning(error_msg)
                     errors.append(error_msg)
                     failed += 1
                     continue
 
-                # Ensure it's a SharePoint token
-                if not token.token_type.is_sharepoint:
-                    error_msg = f"Token for subscription {sub.id} is not a SharePoint token"
-                    logger.warning(error_msg)
-                    errors.append(error_msg)
-                    failed += 1
-                    continue
-
-                # Refresh token if needed (expired tokens can't be used)
                 try:
-                    token = await oauth_token_service.refresh_and_update_token(token_id=token.id)
-                    logger.debug(f"Refreshed OAuth token for subscription {sub.id}")
-                except Exception as refresh_error:
-                    error_msg = f"Failed to refresh token for subscription {sub.id}: {str(refresh_error)}"
+                    token = await _get_sharepoint_token_for_user_integration(
+                        user_integration=user_integration,
+                        container=container,
+                    )
+                except Exception as token_error:
+                    error_msg = f"Failed to resolve token for subscription {sub.id}: {token_error}"
                     logger.error(error_msg)
                     errors.append(error_msg)
                     failed += 1
@@ -598,7 +734,8 @@ async def renew_expired_subscriptions(
                 # Recreate subscription
                 success = await subscription_service.recreate_expired_subscription(
                     subscription=sub,
-                    token=token
+                    token=token,
+                    is_onedrive=_is_onedrive_subscription(sub),
                 )
 
                 if success:
@@ -608,7 +745,9 @@ async def renew_expired_subscriptions(
                     errors.append(f"Failed to recreate subscription {sub.id}")
 
             except Exception as exc:
-                logger.error(f"Error recreating subscription {sub.id}: {exc}", exc_info=True)
+                logger.error(
+                    f"Error recreating subscription {sub.id}: {exc}", exc_info=True
+                )
                 failed += 1
                 errors.append(f"Subscription {sub.id}: {str(exc)}")
 
@@ -617,7 +756,7 @@ async def renew_expired_subscriptions(
             expired_count=len(expired_subscriptions),
             recreated=recreated,
             failed=failed,
-            errors=errors
+            errors=errors,
         )
 
         logger.info(
@@ -630,11 +769,11 @@ async def renew_expired_subscriptions(
     except Exception as e:
         logger.error(
             f"Failed to renew expired subscriptions: {e}",
-            exc_info=True  # This logs the full stack trace
+            exc_info=True,  # This logs the full stack trace
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to renew expired subscriptions: {str(e)}"
+            detail=f"Failed to renew expired subscriptions: {str(e)}",
         )
 
 
@@ -653,11 +792,10 @@ async def renew_expired_subscriptions(
         404: {"description": "Subscription not found"},
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
-    }
+    },
 )
 async def recreate_subscription(
-    subscription_id: UUID,
-    container: Container = Depends(get_container(with_user=True))
+    subscription_id: UUID, container: Container = Depends(get_container(with_user=True))
 ):
     """Recreate a specific SharePoint subscription."""
     try:
@@ -668,16 +806,18 @@ async def recreate_subscription(
 
         subscription_repo = container.sharepoint_subscription_repo()
         subscription_service = container.sharepoint_subscription_service()
-        oauth_token_service = container.oauth_token_service()
         user_integration_repo = container.user_integration_repo()
 
-        # Get subscription
-        subscription = await subscription_repo.one_or_none(id=subscription_id)
+        # Tenant-scoped lookup to avoid cross-tenant access
+        subscription = await subscription_repo.one_by_tenant(
+            subscription_id=subscription_id,
+            tenant_id=user.tenant_id,
+        )
 
         if not subscription:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Subscription {subscription_id} not found"
+                detail=f"Subscription {subscription_id} not found",
             )
 
         # Get user_integration to check auth type
@@ -688,100 +828,54 @@ async def recreate_subscription(
         if not user_integration:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"User integration {subscription.user_integration_id} not found"
+                detail=f"User integration {subscription.user_integration_id} not found",
+            )
+        if user_integration.tenant_integration.tenant_id != user.tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Subscription {subscription_id} not found",
             )
 
-        # Handle different auth types
-        token = None
-
-        if user_integration.tenant_app_id:
-            # Tenant app authentication - get token from TenantSharePointApp
-            logger.info(f"Subscription {subscription_id} uses tenant_app_id: {user_integration.tenant_app_id}")
-            tenant_app_repo = container.tenant_sharepoint_app_repo()
-
-            tenant_app = await tenant_app_repo.get_by_id(user_integration.tenant_app_id)
-            if not tenant_app:
-                logger.error(f"TenantSharePointApp {user_integration.tenant_app_id} not found")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"TenantSharePointApp {user_integration.tenant_app_id} not found"
-                )
-
-            logger.info(f"TenantSharePointApp found: auth_method={tenant_app.auth_method}")
-
-            # Create a simple token-like object for the subscription service
-            class SimpleToken:
-                def __init__(self, access_token: str):
-                    self.access_token = access_token
-                    self.base_url = "https://graph.microsoft.com"
-
-            try:
-                if tenant_app.is_service_account():
-                    # Service account uses delegated permissions with refresh token
-                    service_account_auth = container.service_account_auth_service()
-                    token_result = await service_account_auth.refresh_access_token(tenant_app)
-                    logger.info(f"Refreshed service account token for subscription {subscription_id}")
-                    token = SimpleToken(token_result["access_token"])
-                else:
-                    # Tenant app uses client credentials flow (application permissions)
-                    tenant_app_auth = container.tenant_app_auth_service()
-                    access_token = await tenant_app_auth.get_access_token(tenant_app)
-                    logger.info(f"Got tenant app token for subscription {subscription_id}")
-                    token = SimpleToken(access_token)
-            except Exception as auth_error:
-                logger.error(f"Failed to get token for subscription {subscription_id}: {auth_error}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to get access token: {str(auth_error)}"
-                )
-        else:
-            # Personal OAuth token authentication
-            token = await oauth_token_service.get_oauth_token_by_user_integration(
-                user_integration_id=subscription.user_integration_id
+        try:
+            token = await _get_sharepoint_token_for_user_integration(
+                user_integration=user_integration,
+                container=container,
             )
-
-            if not token:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"No OAuth token found for user_integration {subscription.user_integration_id}"
-                )
-
-            # Ensure it's a SharePoint token
-            if not token.token_type.is_sharepoint:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Token for user_integration {subscription.user_integration_id} is not a SharePoint token"
-                )
-
-            # Refresh token if needed (expired tokens can't be used)
-            try:
-                token = await oauth_token_service.refresh_and_update_token(token_id=token.id)
-                logger.info(f"Refreshed OAuth token for subscription {subscription_id}")
-            except Exception as refresh_error:
-                logger.error(f"Failed to refresh token for subscription {subscription_id}: {refresh_error}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to refresh OAuth token: {str(refresh_error)}"
-                )
+        except Exception as token_error:
+            logger.error(
+                "Failed to resolve token for subscription %s: %s",
+                subscription_id,
+                token_error,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to get access token: {token_error}",
+            )
 
         # Recreate subscription
         success = await subscription_service.recreate_expired_subscription(
             subscription=subscription,
-            token=token
+            token=token,
+            is_onedrive=_is_onedrive_subscription(subscription),
         )
 
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to recreate subscription {subscription_id}"
+                detail=f"Failed to recreate subscription {subscription_id}",
             )
 
-        logger.info(f"Admin {user.id} manually recreated subscription {subscription_id}")
+        logger.info(
+            f"Admin {user.id} manually recreated subscription {subscription_id}"
+        )
 
         # Return updated subscription
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc)
-        expires_in_hours = max(0, int((subscription.expires_at - now).total_seconds() / 3600))
+        expires_in_hours = max(
+            0, int((subscription.expires_at - now).total_seconds() / 3600)
+        )
 
         # Determine owner info (user_integration already fetched above)
         owner_email = None
@@ -812,15 +906,16 @@ async def recreate_subscription(
     except Exception as e:
         logger.error(
             f"Failed to recreate subscription {subscription_id}: {e}",
-            exc_info=True  # This logs the full stack trace
+            exc_info=True,  # This logs the full stack trace
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to recreate subscription: {str(e)}"
+            detail=f"Failed to recreate subscription: {str(e)}",
         )
 
 
 # Service Account OAuth Endpoints
+
 
 @router.post(
     "/sharepoint/service-account/auth/start",
@@ -836,28 +931,32 @@ async def recreate_subscription(
         200: {"description": "OAuth authorization URL generated"},
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
-    }
+    },
 )
 async def start_service_account_auth(
     app_config: ServiceAccountAuthStart,
-    container: Container = Depends(get_container(with_user=True))
+    container: Container = Depends(get_container(with_user=True)),
 ) -> ServiceAccountAuthStartResponse:
     """Start OAuth flow for service account configuration."""
     try:
         user = container.user()
         validate_permission(user, Permission.ADMIN)
+        _require_sharepoint_webhook_client_state()
 
         # Generate a secure state token
         state = secrets.token_urlsafe(32)
 
         # Store state with credentials in Redis for callback verification
-        await _store_oauth_state(state, {
-            "client_id": app_config.client_id,
-            "client_secret": app_config.client_secret,
-            "tenant_domain": app_config.tenant_domain,
-            "tenant_id": str(user.tenant_id),
-            "user_id": str(user.id),
-        })
+        await _store_oauth_state(
+            state,
+            {
+                "client_id": app_config.client_id,
+                "client_secret": app_config.client_secret,
+                "tenant_domain": app_config.tenant_domain,
+                "tenant_id": str(user.tenant_id),
+                "user_id": str(user.id),
+            },
+        )
 
         # Generate OAuth URL
         service_account_auth_service = ServiceAccountAuthService()
@@ -884,7 +983,7 @@ async def start_service_account_auth(
         logger.error(f"Failed to start service account OAuth: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to start service account OAuth: {str(e)}"
+            detail=f"Failed to start service account OAuth: {str(e)}",
         )
 
 
@@ -903,30 +1002,31 @@ async def start_service_account_auth(
         400: {"description": "Invalid state or auth code"},
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
-    }
+    },
 )
 async def service_account_auth_callback(
     callback: ServiceAccountAuthCallback,
-    container: Container = Depends(get_container(with_user=True))
+    container: Container = Depends(get_container(with_user=True)),
 ) -> TenantSharePointAppPublic:
     """Complete OAuth flow and configure service account."""
     try:
         user = container.user()
         validate_permission(user, Permission.ADMIN)
+        _require_sharepoint_webhook_client_state()
 
         # Verify state (atomically retrieve and delete from Redis)
         stored_state = await _pop_oauth_state(callback.state)
         if stored_state is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired OAuth state. Please restart the authentication flow."
+                detail="Invalid or expired OAuth state. Please restart the authentication flow.",
             )
 
         # Verify tenant matches
         if stored_state["tenant_id"] != str(user.tenant_id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="OAuth state was initiated by a different tenant"
+                detail="OAuth state was initiated by a different tenant",
             )
 
         # Exchange auth code for tokens
@@ -939,7 +1039,9 @@ async def service_account_auth_callback(
         )
 
         # Configure service account
-        tenant_app_service: TenantSharePointAppService = container.tenant_sharepoint_app_service()
+        tenant_app_service: TenantSharePointAppService = (
+            container.tenant_sharepoint_app_service()
+        )
         encryption_service: EncryptionService = container.encryption_service()
 
         app = await tenant_app_service.configure_service_account(
@@ -957,15 +1059,22 @@ async def service_account_auth_callback(
         tenant_integration_repo = container.tenant_integration_repo()
         integration_repo = container.integration_repo()
 
-        sharepoint_integrations = await tenant_integration_repo.query(tenant_id=user.tenant_id)
+        sharepoint_integrations = await tenant_integration_repo.query(
+            tenant_id=user.tenant_id
+        )
         sharepoint_integration = next(
-            (ti for ti in sharepoint_integrations
-             if ti.integration.integration_type == "sharepoint"),
-            None
+            (
+                ti
+                for ti in sharepoint_integrations
+                if ti.integration.integration_type == "sharepoint"
+            ),
+            None,
         )
 
         if not sharepoint_integration:
-            logger.info(f"SharePoint TenantIntegration not found for tenant {user.tenant_id}, creating it")
+            logger.info(
+                f"SharePoint TenantIntegration not found for tenant {user.tenant_id}, creating it"
+            )
 
             sharepoint_system_integration = await integration_repo.one_or_none(
                 integration_type="sharepoint"
@@ -974,30 +1083,42 @@ async def service_account_auth_callback(
             if not sharepoint_system_integration:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="SharePoint integration not found in system"
+                    detail="SharePoint integration not found in system",
                 )
 
-            from intric.integration.domain.entities.tenant_integration import TenantIntegration
+            from intric.integration.domain.entities.tenant_integration import (
+                TenantIntegration,
+            )
+
             sharepoint_integration = TenantIntegration(
                 tenant_id=user.tenant_id,
                 integration=sharepoint_system_integration,
             )
-            sharepoint_integration = await tenant_integration_repo.add(sharepoint_integration)
-            logger.info(f"Created SharePoint TenantIntegration {sharepoint_integration.id}")
+            sharepoint_integration = await tenant_integration_repo.add(
+                sharepoint_integration
+            )
+            logger.info(
+                f"Created SharePoint TenantIntegration {sharepoint_integration.id}"
+            )
 
         if sharepoint_integration:
             existing_integration = await user_integration_repo.one_or_none(
                 tenant_integration_id=sharepoint_integration.id,
                 auth_type="tenant_app",
-                tenant_app_id=app.id
+                tenant_app_id=app.id,
             )
 
             if existing_integration:
                 existing_integration.authenticated = True
                 await user_integration_repo.update(existing_integration)
-                logger.info(f"Updated service account integration {existing_integration.id}")
+                logger.info(
+                    f"Updated service account integration {existing_integration.id}"
+                )
             else:
-                from intric.integration.domain.entities.user_integration import UserIntegration
+                from intric.integration.domain.entities.user_integration import (
+                    UserIntegration,
+                )
+
                 new_user_integration = UserIntegration(
                     tenant_integration=sharepoint_integration,
                     user_id=None,
@@ -1036,5 +1157,5 @@ async def service_account_auth_callback(
         logger.error(f"Failed to complete service account OAuth: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to complete service account OAuth: {str(e)}"
+            detail=f"Failed to complete service account OAuth: {str(e)}",
         )

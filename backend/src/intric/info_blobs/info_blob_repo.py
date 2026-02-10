@@ -126,6 +126,51 @@ class InfoBlobRepository:
             # Create new blob
             return await self.add(info_blob)
 
+    async def upsert_by_sharepoint_item_and_integration_knowledge(
+        self,
+        info_blob: InfoBlobAdd,
+    ) -> InfoBlobInDB:
+        """Idempotent upsert keyed by sharepoint_item_id + integration_knowledge_id."""
+        if not info_blob.integration_knowledge_id or not info_blob.sharepoint_item_id:
+            raise ValueError(
+                "sharepoint_item_id and integration_knowledge_id are required for SharePoint upsert"
+            )
+
+        stmt = sa.select(InfoBlobs).where(
+            sa.and_(
+                InfoBlobs.sharepoint_item_id == info_blob.sharepoint_item_id,
+                InfoBlobs.integration_knowledge_id == info_blob.integration_knowledge_id,
+            )
+        )
+        result = await self.session.execute(stmt)
+        existing = result.scalars().all()
+
+        if existing:
+            primary = existing[0]
+
+            # Cleanup any historical duplicates for the same SharePoint item.
+            for duplicate in existing[1:]:
+                await self.delegate.delete(duplicate.id)
+
+            update_stmt = (
+                sa.update(InfoBlobs)
+                .where(InfoBlobs.id == primary.id)
+                .values(
+                    text=info_blob.text,
+                    title=info_blob.title,
+                    url=info_blob.url,
+                    size=info_blob.size,
+                    sharepoint_item_id=info_blob.sharepoint_item_id,
+                    updated_at=sa.func.now(),
+                )
+                .returning(InfoBlobs)
+            )
+            update_result = await self.session.execute(update_stmt)
+            updated_blob = update_result.scalar_one()
+            return InfoBlobInDB.model_validate(updated_blob)
+
+        return await self.add(info_blob)
+
     async def update(self, info_blob: InfoBlobUpdate) -> InfoBlobInDB:
         record = await self.delegate.update(info_blob)
         return InfoBlobInDB.model_validate(record)
@@ -290,6 +335,28 @@ class InfoBlobRepository:
 
         return deleted
 
+    async def delete_by_sharepoint_item_and_integration_knowledge(
+        self,
+        sharepoint_item_id: str,
+        integration_knowledge_id: UUID,
+    ) -> List[InfoBlobInDB]:
+        """Delete all info_blobs for a SharePoint item in one integration."""
+        stmt = sa.select(InfoBlobs).where(
+            sa.and_(
+                InfoBlobs.sharepoint_item_id == sharepoint_item_id,
+                InfoBlobs.integration_knowledge_id == integration_knowledge_id,
+            )
+        )
+        result = await self.session.execute(stmt)
+        blobs_to_delete = result.scalars().all()
+
+        deleted = []
+        for blob in blobs_to_delete:
+            deleted_blob = await self.delegate.delete(blob.id)
+            deleted.append(deleted_blob)
+
+        return deleted
+
     async def delete_by_website(self, website_id: UUID):
         await self.delegate.delete_by(conditions={InfoBlobs.website_id: website_id})
 
@@ -310,6 +377,19 @@ class InfoBlobRepository:
             }
         )
         return InfoBlobInDB.model_validate(record) if record is not None else None
+
+    async def get_by_sharepoint_item_and_integration_knowledge(
+        self,
+        sharepoint_item_id: str,
+        integration_knowledge_id: UUID,
+    ) -> InfoBlobInDB:
+        """Get an info_blob by sharepoint_item_id and integration_knowledge_id."""
+        return await self.delegate.get_by(
+            conditions={
+                InfoBlobs.sharepoint_item_id: sharepoint_item_id,
+                InfoBlobs.integration_knowledge_id: integration_knowledge_id,
+            }
+        )
 
     async def get_by_group(self, group_id: UUID) -> list[InfoBlobInDB]:
         query = (

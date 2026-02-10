@@ -80,13 +80,14 @@ CATEGORY_MAPPINGS = {
     # File Operations (2 actions)
     ActionType.FILE_UPLOADED.value: "file_operations",
     ActionType.FILE_DELETED.value: "file_operations",
-    # Integration Events (11 actions)
+    # Integration Events (12 actions)
     ActionType.INTEGRATION_ADDED.value: "integration_events",
     ActionType.INTEGRATION_REMOVED.value: "integration_events",
     ActionType.INTEGRATION_CONNECTED.value: "integration_events",
     ActionType.INTEGRATION_DISCONNECTED.value: "integration_events",
     ActionType.INTEGRATION_KNOWLEDGE_CREATED.value: "integration_events",
     ActionType.INTEGRATION_KNOWLEDGE_DELETED.value: "integration_events",
+    ActionType.INTEGRATION_KNOWLEDGE_SYNCED.value: "integration_events",
     ActionType.WEBSITE_CREATED.value: "integration_events",
     ActionType.WEBSITE_UPDATED.value: "integration_events",
     ActionType.WEBSITE_DELETED.value: "integration_events",
@@ -111,7 +112,7 @@ def get_category_for_action(action: str) -> str:
         action: ActionType constant (string value)
 
     Returns:
-        Category name ('admin_actions', 'user_actions', etc.)
-        Defaults to 'user_actions' if action not found.
+        Category name (admin_actions, user_actions, etc.)
+        Defaults to user_actions if action not found.
     """
     return CATEGORY_MAPPINGS.get(action, "user_actions")

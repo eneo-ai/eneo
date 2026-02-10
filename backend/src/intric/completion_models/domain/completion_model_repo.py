@@ -5,6 +5,7 @@ from sqlalchemy.orm import selectinload
 
 from intric.completion_models.domain import CompletionModel
 from intric.database.tables.ai_models_table import CompletionModels
+from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.security_classifications_table import (
     SecurityClassification as SecurityClassificationDBModel,
 )
@@ -24,7 +25,8 @@ class CompletionModelRepository:
 
     async def all(self, with_deprecated: bool = False):
         stmt = (
-            sa.select(CompletionModels)
+            sa.select(CompletionModels, ModelProviders.name, ModelProviders.provider_type)
+            .outerjoin(ModelProviders, CompletionModels.provider_id == ModelProviders.id)
             .options(
                 selectinload(CompletionModels.security_classification),
                 selectinload(CompletionModels.security_classification).options(
@@ -51,20 +53,23 @@ class CompletionModelRepository:
             stmt = stmt.where(CompletionModels.is_deprecated == False)  # noqa
 
         result = await self.session.execute(stmt)
-        completion_models = result.scalars().all()
+        rows = result.all()
 
         return [
             CompletionModel.create_from_db(
                 completion_model_db=completion_model,
                 user=self.user,
+                provider_name=provider_name,
+                provider_type=provider_type,
             )
-            for completion_model in completion_models
+            for completion_model, provider_name, provider_type in rows
         ]
 
     async def one_or_none(self, model_id: "UUID") -> Optional["CompletionModel"]:
         # When fetching by ID, return ANY model (global or tenant) that the user can access
         stmt = (
-            sa.select(CompletionModels)
+            sa.select(CompletionModels, ModelProviders.name, ModelProviders.provider_type)
+            .outerjoin(ModelProviders, CompletionModels.provider_id == ModelProviders.id)
             .options(
                 selectinload(CompletionModels.security_classification),
                 selectinload(CompletionModels.security_classification).options(
@@ -82,14 +87,17 @@ class CompletionModelRepository:
         )
 
         result = await self.session.execute(stmt)
-        completion_model = result.scalars().one_or_none()
+        row = result.one_or_none()
 
-        if completion_model is None:
+        if row is None:
             return
 
+        completion_model, provider_name, provider_type = row
         return CompletionModel.create_from_db(
             completion_model_db=completion_model,
             user=self.user,
+            provider_name=provider_name,
+            provider_type=provider_type,
         )
 
     async def one(self, model_id: "UUID") -> "CompletionModel":

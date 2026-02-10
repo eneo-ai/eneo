@@ -1,7 +1,9 @@
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 import redis.asyncio as redis
+import sqlalchemy as sa
 
+from intric.database.tables.model_providers_table import ModelProviders
 from intric.main.exceptions import NotFoundException
 from intric.main.logging import get_logger
 from intric.main.models import ChannelType
@@ -9,6 +11,9 @@ from intric.main.config import get_settings
 from intric.worker.worker import Worker
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from intric.integration.domain.entities.integration_knowledge import IntegrationKnowledge
     from intric.integration.presentation.models import (
         ConfluenceContentTaskParam,
         SharepointContentTaskParam,
@@ -39,11 +44,31 @@ async def _get_knowledge_with_retry(container: "Container", knowledge_id, *, ret
             await asyncio.sleep(delay)
 
 
+async def _validate_embedding_provider(container: "Container", knowledge: "IntegrationKnowledge"):
+    provider_id = knowledge.embedding_model.provider_id
+    if provider_id is None:
+        return
+
+    session = cast("AsyncSession", container.session())
+    result = await session.execute(
+        sa.select(ModelProviders.is_active).where(ModelProviders.id == provider_id)
+    )
+    row = result.one_or_none()
+
+    if row is None or not row.is_active:
+        raise ValueError(
+            f"Embedding model provider (id={provider_id}) for knowledge '{knowledge.name}' "
+            f"is not available. Please ensure the provider is configured and active "
+            f"before syncing content."
+        )
+
+
 @worker.task(channel_type=ChannelType.PULL_CONFLUENCE_CONTENT)
 async def pull_confluence_content(
     params: "ConfluenceContentTaskParam", container: "Container", **kw
 ):
     knowledge = await _get_knowledge_with_retry(container, params.integration_knowledge_id)
+    await _validate_embedding_provider(container, knowledge)
 
     service = container.confluence_content_service()
 
@@ -92,6 +117,7 @@ async def pull_sharepoint_content(
 
         try:
             knowledge = await _get_knowledge_with_retry(container, params.integration_knowledge_id)
+            await _validate_embedding_provider(container, knowledge)
             service = container.sharepoint_content_service()
 
             result = await service.pull_content(
@@ -165,6 +191,7 @@ async def sync_sharepoint_delta(
 
         try:
             knowledge = await _get_knowledge_with_retry(container, params.integration_knowledge_id)
+            await _validate_embedding_provider(container, knowledge)
             service = container.sharepoint_content_service()
 
             result = await service.process_delta_changes(

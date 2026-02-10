@@ -1,16 +1,20 @@
 <script lang="ts">
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { getIntric } from "$lib/core/Intric";
-  import { IconChevronUp } from "@intric/icons/chevron-up";
+  import { IconChevronRight } from "@intric/icons/chevron-right";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import { IconWeb } from "@intric/icons/web";
+  import { IconUploadCloud } from "@intric/icons/upload-cloud";
   import SharePointFolderTreeNode from "./SharePointFolderTreeNode.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { buildSharePointSelectionKey } from "./selectionKey";
 
   type TreeItem = {
     id: string;
     name: string;
-    type: "file" | "folder";
+    type: "file" | "folder" | "site_root";
     path: string;
+    web_url?: string;
     has_children: boolean;
     size?: number;
     modified?: string;
@@ -21,31 +25,50 @@
     spaceId: string;
     siteId?: string;
     driveId?: string;
-    onSelect: (item: TreeItem) => void;
+    siteName: string;
+    isOneDrive: boolean;
+    selectedItemKeys?: string[];
+    onToggleSelect: (item: TreeItem) => void;
   }
 
-  let { userIntegrationId, spaceId, siteId, driveId, onSelect }: Props = $props();
+  let {
+    userIntegrationId,
+    spaceId,
+    siteId,
+    driveId,
+    siteName,
+    isOneDrive,
+    selectedItemKeys,
+    onToggleSelect
+  }: Props = $props();
 
   const intric = getIntric();
 
   let currentItems = $state<TreeItem[]>([]);
-  let currentPath = $state<string>("/");
-  let currentFolderId = $state<string | null>(null);
-  let currentDriveId = $state<string>("");
-  let expandedNodes = $state<Set<string>>(new Set());
-  let loadingNodes = $state<Set<string>>(new Set());
-  let navigationStack = $state<Array<{ folderId: string | null; path: string }>>(
-    [{ folderId: null, path: "/" }]
+  let navigationStack = $state<Array<{ folderId: string | null; path: string; name: string }>>(
+    [{ folderId: null, path: "/", name: siteName }]
   );
+  let selectedItemKeySet = $derived.by(() => new Set(selectedItemKeys ?? []));
+  const siteRootSelectionKey = buildSharePointSelectionKey({
+    id: "",
+    type: "site_root",
+    path: "/"
+  });
+
+  function getItemSelectionKey(item: TreeItem): string {
+    return buildSharePointSelectionKey(item);
+  }
+
+  // Guard against stale responses when navigating quickly
+  let requestId = 0;
 
   const loadFolders = createAsyncState(async (folderId: string | null = null, folderPath: string = "") => {
+    const thisRequest = ++requestId;
     try {
-      // Build query params, only including defined values
       const queryParams: Record<string, string> = {
         space_id: spaceId
       };
 
-      // Pass either site_id or drive_id based on what's provided
       if (siteId) {
         queryParams.site_id = siteId;
       }
@@ -71,82 +94,80 @@
         }
       );
 
-      currentItems = response.items || [];
-      currentPath = response.current_path || "/";
-      currentFolderId = folderId;
-      currentDriveId = response.drive_id;
+      // Ignore stale responses from earlier navigations
+      if (thisRequest !== requestId) return;
 
-      if (folderId) {
-        loadingNodes.delete(folderId);
-      }
+      currentItems = response.items || [];
     } catch (error) {
+      if (thisRequest !== requestId) return;
       console.error("Error loading folder tree:", error);
-      if (folderId) {
-        loadingNodes.delete(folderId);
-      }
     }
   });
 
-  const handleNodeToggle = async (nodeId: string) => {
-    if (expandedNodes.has(nodeId)) {
-      expandedNodes.delete(nodeId);
-    } else {
-      expandedNodes.add(nodeId);
-      loadingNodes.add(nodeId);
-
-      const node = currentItems.find((item) => item.id === nodeId);
-      if (node) {
-        await loadFolders(nodeId, node.path);
-      }
-    }
-  };
-
   const handleNodeSelect = (item: TreeItem) => {
-    onSelect(item);
+    onToggleSelect(item);
   };
 
   const handleNodeNavigate = (item: TreeItem) => {
     if (item.type === "folder") {
-      navigationStack.push({ folderId: item.id, path: item.path });
-      currentFolderId = item.id;
-      expandedNodes.clear();
+      navigationStack.push({ folderId: item.id, path: item.path, name: item.name });
       loadFolders(item.id, item.path);
     }
   };
 
-  const navigateBack = () => {
-    if (navigationStack.length > 1) {
-      navigationStack.pop();
-      const previous = navigationStack[navigationStack.length - 1];
-      currentFolderId = previous.folderId;
-      expandedNodes.clear();
-      loadFolders(previous.folderId, previous.path);
+  const navigateTo = (index: number) => {
+    if (index < navigationStack.length - 1) {
+      navigationStack = navigationStack.slice(0, index + 1);
+      const target = navigationStack[index];
+      const targetFolderPath = target.path === "/" ? "" : target.path;
+      loadFolders(target.folderId, targetFolderPath);
     }
   };
 
+  const handleImportEntireSite = () => {
+    onToggleSelect({
+      id: "",
+      name: siteName,
+      type: "site_root",
+      path: "/",
+      has_children: true
+    });
+  };
+
+  const handleImportEntireSiteCheckboxClick = (event: MouseEvent) => {
+    event.stopPropagation();
+    handleImportEntireSite();
+  };
+
   $effect(() => {
-    // Load folders when either siteId or driveId is provided
     if (siteId || driveId) {
       loadFolders();
     }
   });
 </script>
 
-<div class="flex flex-col gap-3 p-4">
-  <div class="flex items-center justify-between">
-    <div class="flex items-center gap-2">
-      {#if navigationStack.length > 1}
-        <button
-          onclick={navigateBack}
-          class="flex items-center gap-1 px-2 py-1 hover:bg-hover-default rounded-md text-sm"
-        >
-          <IconChevronUp class="w-4 h-4" />
-          {m.back()}
-        </button>
-      {/if}
-      <span class="text-sm text-secondary truncate">{currentPath}</span>
-    </div>
-  </div>
+<div class="flex flex-col gap-2 p-4">
+  <!-- Breadcrumb -->
+  {#if navigationStack.length > 1}
+    <nav class="flex items-center gap-0.5 text-sm flex-wrap min-h-[28px]">
+      {#each navigationStack as segment, i}
+        {#if i > 0}
+          <IconChevronRight class="w-3 h-3 text-secondary flex-shrink-0" />
+        {/if}
+        {#if i < navigationStack.length - 1}
+          <button
+            type="button"
+            class="text-secondary hover:text-primary hover:underline px-1 py-0.5 rounded truncate max-w-[150px]"
+            onclick={() => navigateTo(i)}
+          >
+            {segment.name}
+          </button>
+        {:else}
+          <span class="text-primary font-medium px-1 py-0.5 truncate max-w-[200px]">{segment.name}</span>
+        {/if}
+      {/each}
+    </nav>
+  {/if}
 
   <div class="border border-default rounded-md overflow-y-auto max-h-96 bg-primary">
     {#if loadFolders.isLoading && currentItems.length === 0}
@@ -160,13 +181,39 @@
       </div>
     {:else}
       <div class="flex flex-col">
-        {#each currentItems as item (item.id)}
+        <!-- Import entire site row -->
+        {#if navigationStack.length <= 1}
+          <div
+            class="flex items-center gap-2 px-3 py-1.5 cursor-pointer text-left w-full border-b border-default transition-colors
+              {selectedItemKeySet.has(siteRootSelectionKey) ? 'bg-accent-dimmer border-accent' : 'hover:bg-hover-default'}"
+          >
+            <div class="w-3.5"></div>
+            <input
+              type="checkbox"
+              class="h-4 w-4 accent-accent-default flex-shrink-0"
+              checked={selectedItemKeySet.has(siteRootSelectionKey)}
+              onclick={handleImportEntireSiteCheckboxClick}
+            />
+            {#if isOneDrive}
+              <IconUploadCloud class="w-4 h-4 flex-shrink-0 text-secondary" />
+            {:else}
+              <IconWeb class="w-4 h-4 flex-shrink-0 text-secondary" />
+            {/if}
+            <button
+              type="button"
+              class="text-sm font-medium text-left w-full"
+              onclick={handleImportEntireSite}
+            >
+              {isOneDrive ? m.import_entire_onedrive() : m.import_entire_site()}
+            </button>
+          </div>
+        {/if}
+
+        {#each currentItems as item (getItemSelectionKey(item))}
           <SharePointFolderTreeNode
             node={item}
-            isExpanded={expandedNodes.has(item.id)}
-            isLoading={loadingNodes.has(item.id)}
-            onToggle={handleNodeToggle}
-            onSelect={handleNodeSelect}
+            isSelected={selectedItemKeySet.has(getItemSelectionKey(item))}
+            onToggleSelect={handleNodeSelect}
             onNavigate={handleNodeNavigate}
           />
         {/each}

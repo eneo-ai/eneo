@@ -65,6 +65,7 @@ class ActionType(str, Enum):
     INTEGRATION_DISCONNECTED = "integration_disconnected"
     INTEGRATION_KNOWLEDGE_CREATED = "integration_knowledge_created"
     INTEGRATION_KNOWLEDGE_DELETED = "integration_knowledge_deleted"
+    INTEGRATION_KNOWLEDGE_SYNCED = "integration_knowledge_synced"
     COMPLETION_MODEL_UPDATED = "completion_model_updated"
     EMBEDDING_MODEL_UPDATED = "embedding_model_updated"
     TRANSCRIPTION_MODEL_UPDATED = "transcription_model_updated"

@@ -145,10 +145,14 @@ class TestGetTokenForSubscription:
         # Setup tenant app (is service account)
         tenant_app = MagicMock()
         tenant_app.is_service_account = MagicMock(return_value=True)
+        tenant_app.service_account_refresh_token = "old-refresh-token"
 
         mock_container.tenant_sharepoint_app_repo().one = AsyncMock(return_value=tenant_app)
         mock_container.service_account_auth_service().refresh_access_token = AsyncMock(
-            return_value={"access_token": "service-account-access-token"}
+            return_value={
+                "access_token": "service-account-access-token",
+                "refresh_token": "new-refresh-token",
+            }
         )
 
         # Execute
@@ -160,6 +164,8 @@ class TestGetTokenForSubscription:
         mock_container.service_account_auth_service().refresh_access_token.assert_called_once_with(
             tenant_app
         )
+        tenant_app.update_refresh_token.assert_called_once_with("new-refresh-token")
+        mock_container.tenant_sharepoint_app_repo().update.assert_called_once_with(tenant_app)
 
     @pytest.mark.asyncio
     async def test_returns_none_when_no_oauth_token_found(self, mock_subscription, mock_container):
