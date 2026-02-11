@@ -307,7 +307,7 @@ async def get_spaces(
     service = container.space_service()
     assembler = container.space_assembler()
 
-    spaces = await service.get_spaces(include_personal=include_personal)
+    spaces = await service.get_spaces(include_personal=include_personal, include_applications=include_applications)
     spaces = [assembler.from_space_to_sparse_model(space, include_applications=include_applications) for space in spaces]
 
     return protocol.to_paginated_response(spaces)
