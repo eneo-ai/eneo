@@ -751,6 +751,22 @@ def update_transcription_model_references(conn, tenant_id: str, model_mapping: d
                 WHERE tenant_id = :tenant_id AND transcription_model_id = :old_id
             """), {"tenant_id": tenant_id, "old_id": old_id, "new_id": new_id, "now": now})
 
+        # Apps
+        conn.execute(text("""
+            UPDATE apps
+            SET transcription_model_id = :new_id, updated_at = :now
+            WHERE transcription_model_id = :old_id
+            AND tenant_id = :tenant_id
+        """), {"old_id": old_id, "new_id": new_id, "tenant_id": tenant_id, "now": now})
+
+        # Spaces Transcription Models (many-to-many)
+        conn.execute(text("""
+            UPDATE spaces_transcription_models
+            SET transcription_model_id = :new_id, updated_at = :now
+            WHERE transcription_model_id = :old_id
+            AND space_id IN (SELECT id FROM spaces WHERE tenant_id = :tenant_id)
+        """), {"old_id": old_id, "new_id": new_id, "tenant_id": tenant_id, "now": now})
+
 
 # =============================================================================
 # PHASE 5: VALIDATION
@@ -835,6 +851,11 @@ def cleanup_global_model_settings(conn, cm_ids: list, em_ids: list, tm_ids: list
         ids_array = "{" + ",".join(tm_ids) + "}"
         conn.execute(text("""
             DELETE FROM transcription_model_settings
+            WHERE transcription_model_id = ANY(CAST(:ids AS uuid[]))
+        """), {"ids": ids_array})
+
+        conn.execute(text("""
+            DELETE FROM spaces_transcription_models
             WHERE transcription_model_id = ANY(CAST(:ids AS uuid[]))
         """), {"ids": ids_array})
 

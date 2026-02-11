@@ -289,35 +289,37 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
         """, (assistant_id, user_id, space_id, name, model_id, now, now))
 
     # =====================================================================
-    # APPS - Linked to global completion models
+    # APPS - Linked to global completion models (and some to transcription models)
     # =====================================================================
     app_ids = {}
     apps_data = [
-        (tenant1_id, "Chatbot App", "gpt-4o"),
-        (tenant1_id, "Summarizer App", "gpt-3.5-turbo"),
-        (tenant2_id, "Q&A App", "gpt-4-turbo"),
-        (tenant3_id, "Translation App", "claude-3-sonnet"),
+        # (tenant_id, name, completion_model_name, transcription_model_name or None)
+        (tenant1_id, "Chatbot App", "gpt-4o", "whisper-1"),
+        (tenant1_id, "Summarizer App", "gpt-3.5-turbo", None),
+        (tenant2_id, "Q&A App", "gpt-4-turbo", "whisper-1"),
+        (tenant3_id, "Translation App", "claude-3-sonnet", "kb-whisper"),
     ]
 
-    for tenant_id, name, model_name in apps_data:
+    for tenant_id, name, cm_name, tm_name in apps_data:
         app_id = str(uuid4())
         app_ids.setdefault(tenant_id, []).append(app_id)
-        model_id = completion_model_ids[model_name]
+        cm_id = completion_model_ids[cm_name]
+        tm_id = transcription_model_ids[tm_name] if tm_name else None
         user_id = user_ids[tenant_id]
         space_id = space_ids[tenant_id][0]
 
         cur.execute("""
             INSERT INTO apps (
                 id, tenant_id, user_id, space_id, name, completion_model_id,
-                published,
+                transcription_model_id, published,
                 created_at, updated_at
             )
             VALUES (
                 %s, %s, %s, %s, %s, %s,
-                false,
+                %s, false,
                 %s, %s
             )
-        """, (app_id, tenant_id, user_id, space_id, name, model_id, now, now))
+        """, (app_id, tenant_id, user_id, space_id, name, cm_id, tm_id, now, now))
 
     # =====================================================================
     # SERVICES - Linked to global completion models
@@ -411,6 +413,19 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
                 """, (space_id, model_id, now, now))
 
     # =====================================================================
+    # SPACES_TRANSCRIPTION_MODELS - Many-to-many
+    # =====================================================================
+    for tenant_id in [tenant1_id, tenant2_id, tenant3_id]:
+        for space_id in space_ids[tenant_id]:
+            for model_name in ["whisper-1", "kb-whisper"]:
+                model_id = transcription_model_ids[model_name]
+                cur.execute("""
+                    INSERT INTO spaces_transcription_models (space_id, transcription_model_id, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT DO NOTHING
+                """, (space_id, model_id, now, now))
+
+    # =====================================================================
     # COMPLETION_MODEL_SETTINGS - Per tenant settings for global models
     # =====================================================================
     for tenant_id in [tenant1_id, tenant2_id, tenant3_id]:
@@ -435,6 +450,21 @@ def create_legacy_database_state(cur, now: datetime) -> dict:
             cur.execute("""
                 INSERT INTO embedding_model_settings (
                     tenant_id, embedding_model_id, is_org_enabled, is_org_default,
+                    created_at, updated_at
+                )
+                VALUES (%s, %s, true, %s, %s, %s)
+                ON CONFLICT DO NOTHING
+            """, (tenant_id, model_id, is_default, now, now))
+
+    # =====================================================================
+    # TRANSCRIPTION_MODEL_SETTINGS - Per tenant settings for global models
+    # =====================================================================
+    for tenant_id in [tenant1_id, tenant2_id, tenant3_id]:
+        for model_name, model_id in transcription_model_ids.items():
+            is_default = model_name == "whisper-1"
+            cur.execute("""
+                INSERT INTO transcription_model_settings (
+                    tenant_id, transcription_model_id, is_org_enabled, is_org_default,
                     created_at, updated_at
                 )
                 VALUES (%s, %s, true, %s, %s, %s)
@@ -546,6 +576,8 @@ def migration_test_db(test_settings):
             cur.execute("DELETE FROM embedding_model_settings")
             cur.execute("DELETE FROM spaces_completion_models")
             cur.execute("DELETE FROM spaces_embedding_models")
+            cur.execute("DELETE FROM spaces_transcription_models")
+            cur.execute("DELETE FROM transcription_model_settings")
             cur.execute("DELETE FROM assistants")
             cur.execute("DELETE FROM apps")
             cur.execute("DELETE FROM services")
@@ -733,6 +765,65 @@ class TestGlobalToTenantModelsMigration:
             orphan_count = cur.fetchone()[0]
             assert orphan_count == 0, \
                 f"Found {orphan_count} space-model links still referencing global models"
+
+    def test_migration_updates_app_transcription_model_references(self, migration_test_db):
+        """
+        Test that app.transcription_model_id references are updated to tenant-specific models.
+        """
+        conn = migration_test_db["conn"]
+
+        with conn.cursor() as cur:
+            # Check no apps reference global transcription models
+            cur.execute("""
+                SELECT COUNT(*)
+                FROM apps a
+                JOIN transcription_models tm ON a.transcription_model_id = tm.id
+                WHERE tm.tenant_id IS NULL
+            """)
+            orphan_count = cur.fetchone()[0]
+            assert orphan_count == 0, \
+                f"Found {orphan_count} apps still referencing global transcription models"
+
+            # Verify apps with transcription models reference the correct tenant's model
+            cur.execute("""
+                SELECT a.name, tm.tenant_id as model_tenant_id, a.tenant_id as app_tenant_id
+                FROM apps a
+                JOIN transcription_models tm ON a.transcription_model_id = tm.id
+            """)
+            for row in cur.fetchall():
+                app_name, model_tenant_id, app_tenant_id = row
+                assert str(model_tenant_id) == str(app_tenant_id), \
+                    f"App '{app_name}' references transcription model from wrong tenant"
+
+    def test_migration_updates_spaces_transcription_models(self, migration_test_db):
+        """
+        Test that spaces_transcription_models references are updated to tenant-specific models.
+        """
+        conn = migration_test_db["conn"]
+
+        with conn.cursor() as cur:
+            # Check no spaces_transcription_models reference global models
+            cur.execute("""
+                SELECT COUNT(*)
+                FROM spaces_transcription_models stm
+                JOIN transcription_models tm ON stm.transcription_model_id = tm.id
+                WHERE tm.tenant_id IS NULL
+            """)
+            orphan_count = cur.fetchone()[0]
+            assert orphan_count == 0, \
+                f"Found {orphan_count} space-transcription-model links still referencing global models"
+
+            # Verify each space's transcription model belongs to the same tenant
+            cur.execute("""
+                SELECT s.tenant_id as space_tenant, tm.tenant_id as model_tenant
+                FROM spaces_transcription_models stm
+                JOIN spaces s ON stm.space_id = s.id
+                JOIN transcription_models tm ON stm.transcription_model_id = tm.id
+            """)
+            for row in cur.fetchall():
+                space_tenant, model_tenant = row
+                assert str(space_tenant) == str(model_tenant), \
+                    "Space-transcription-model link crosses tenant boundary"
 
     def test_migration_updates_groups_embedding_model_references(self, migration_test_db):
         """
