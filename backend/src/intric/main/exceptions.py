@@ -41,6 +41,9 @@ class ErrorCodes(int, Enum):
     FILE_ENCRYPTED = 9028
     FILE_CORRUPT = 9029
     FILE_FORMAT_UNSUPPORTED = 9030
+    # Provider errors
+    PROVIDER_INACTIVE = 9031
+    PROVIDER_NOT_FOUND = 9032
 
 
 class NotFoundException(Exception):
@@ -188,6 +191,18 @@ class APIKeyNotConfiguredException(Exception):
     pass
 
 
+class ProviderInactiveException(Exception):
+    """Raised when attempting to use a model whose provider is inactive/disabled."""
+
+    pass
+
+
+class ProviderNotFoundException(Exception):
+    """Raised when the model's provider cannot be found in the database."""
+
+    pass
+
+
 # Map exceptions to response codes
 # Set message to None to use the internal message
 # Set error codes in the range 9000 - 9999
@@ -240,4 +255,7 @@ EXCEPTION_MAP = {
     EncryptedFileError: (400, None, ErrorCodes.FILE_ENCRYPTED),
     CorruptFileError: (400, None, ErrorCodes.FILE_CORRUPT),
     UnsupportedFormatError: (415, None, ErrorCodes.FILE_FORMAT_UNSUPPORTED),
+    # Provider errors - use None to pass through the exception's own message
+    ProviderInactiveException: (503, None, ErrorCodes.PROVIDER_INACTIVE),
+    ProviderNotFoundException: (404, None, ErrorCodes.PROVIDER_NOT_FOUND),
 }

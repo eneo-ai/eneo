@@ -13,6 +13,10 @@ const meta: MetaRecord = {
     title: 'Guides',
     type: 'page',
   },
+  contributing: {
+    title: 'Contributing',
+    type: 'page',
+  },
   about: {
     title: 'About',
     type: 'page',

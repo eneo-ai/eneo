@@ -44,6 +44,8 @@ class TranscriptionModel(AIModel):
         security_classification: Optional["SecurityClassification"] = None,
         tenant_id: Optional["UUID"] = None,
         provider_id: Optional["UUID"] = None,
+        provider_name: Optional[str] = None,
+        provider_type: Optional[str] = None,
     ):
         super().__init__(
             user=user,
@@ -68,6 +70,8 @@ class TranscriptionModel(AIModel):
         self.security_classification = security_classification
         self.tenant_id = tenant_id
         self.provider_id = provider_id
+        self.provider_name = provider_name
+        self.provider_type = provider_type
 
     @property
     def model_name(self) -> str:
@@ -83,6 +87,8 @@ class TranscriptionModel(AIModel):
         cls,
         transcription_model_db: "TranscriptionModelsDB",
         user: "UserInDB",
+        provider_name: Optional[str] = None,
+        provider_type: Optional[str] = None,
     ):
         # Settings are now directly on the model table
         return cls(
@@ -108,4 +114,6 @@ class TranscriptionModel(AIModel):
             ),
             tenant_id=transcription_model_db.tenant_id,
             provider_id=transcription_model_db.provider_id,
+            provider_name=provider_name,
+            provider_type=provider_type,
         )

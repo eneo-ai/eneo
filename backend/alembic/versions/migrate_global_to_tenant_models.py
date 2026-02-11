@@ -21,7 +21,7 @@ import json
 
 # revision identifiers, used by Alembic
 revision = 'migrate_global_to_tenant_models'
-down_revision = 'f7f7647d5327'
+down_revision = ('f7f7647d5327', 'tenant_scoped_templates')
 branch_labels = None
 depends_on = None
 
@@ -378,6 +378,17 @@ def create_tenant_completion_models(conn, tenant_id: str, global_models: list,
 
         new_model_id = str(uuid4())
 
+        # Determine model name with fallback chain:
+        # 1. Use litellm_model_name if available (extract last part if it has a prefix)
+        #    e.g., 'azure/gpt-4' -> 'gpt-4', 'berget/org/model' -> 'model', 'gpt-4' -> 'gpt-4'
+        # 2. For Azure models, use deployment_name if available
+        # 3. Fall back to original model.name
+        model_name = model.name
+        if model.litellm_model_name:
+            model_name = model.litellm_model_name.split("/")[-1]
+        elif provider_type == "azure" and model.deployment_name:
+            model_name = model.deployment_name
+
         conn.execute(text("""
             INSERT INTO completion_models (
                 id, tenant_id, provider_id,
@@ -399,7 +410,7 @@ def create_tenant_completion_models(conn, tenant_id: str, global_models: list,
             "new_id": new_model_id,
             "tenant_id": tenant_id,
             "provider_id": provider_id,
-            "name": model.name,
+            "name": model_name,
             "nickname": model.nickname,
             "family": model.family,
             "token_limit": model.token_limit,
@@ -442,6 +453,16 @@ def create_tenant_embedding_models(conn, tenant_id: str, global_models: list,
 
         new_model_id = str(uuid4())
 
+        # Determine model name with fallback chain:
+        # 1. Use litellm_model_name if available (extract last part if it has a prefix)
+        #    e.g., 'azure/text-embedding-3-large' -> 'text-embedding-3-large'
+        #    e.g., 'berget/intfloat/multilingual-e5-large' -> 'multilingual-e5-large'
+        # 2. Fall back to original model.name
+        # Note: embedding_models don't have deployment_name field
+        model_name = model.name
+        if model.litellm_model_name:
+            model_name = model.litellm_model_name.split("/")[-1]
+
         conn.execute(text("""
             INSERT INTO embedding_models (
                 id, tenant_id, provider_id,
@@ -459,7 +480,7 @@ def create_tenant_embedding_models(conn, tenant_id: str, global_models: list,
             "new_id": new_model_id,
             "tenant_id": tenant_id,
             "provider_id": provider_id,
-            "name": model.name,
+            "name": model_name,
             "family": model.family,
             "open_source": model.open_source,
             "dimensions": model.dimensions,
@@ -730,6 +751,22 @@ def update_transcription_model_references(conn, tenant_id: str, model_mapping: d
                 WHERE tenant_id = :tenant_id AND transcription_model_id = :old_id
             """), {"tenant_id": tenant_id, "old_id": old_id, "new_id": new_id, "now": now})
 
+        # Apps
+        conn.execute(text("""
+            UPDATE apps
+            SET transcription_model_id = :new_id, updated_at = :now
+            WHERE transcription_model_id = :old_id
+            AND tenant_id = :tenant_id
+        """), {"old_id": old_id, "new_id": new_id, "tenant_id": tenant_id, "now": now})
+
+        # Spaces Transcription Models (many-to-many)
+        conn.execute(text("""
+            UPDATE spaces_transcription_models
+            SET transcription_model_id = :new_id, updated_at = :now
+            WHERE transcription_model_id = :old_id
+            AND space_id IN (SELECT id FROM spaces WHERE tenant_id = :tenant_id)
+        """), {"old_id": old_id, "new_id": new_id, "tenant_id": tenant_id, "now": now})
+
 
 # =============================================================================
 # PHASE 5: VALIDATION
@@ -814,6 +851,11 @@ def cleanup_global_model_settings(conn, cm_ids: list, em_ids: list, tm_ids: list
         ids_array = "{" + ",".join(tm_ids) + "}"
         conn.execute(text("""
             DELETE FROM transcription_model_settings
+            WHERE transcription_model_id = ANY(CAST(:ids AS uuid[]))
+        """), {"ids": ids_array})
+
+        conn.execute(text("""
+            DELETE FROM spaces_transcription_models
             WHERE transcription_model_id = ANY(CAST(:ids AS uuid[]))
         """), {"ids": ids_array})
 

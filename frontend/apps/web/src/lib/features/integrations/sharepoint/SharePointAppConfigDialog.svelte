@@ -108,11 +108,11 @@
 
       testResult = result;
 
-      if (!result.success) {
-        alert(
-          m.connection_test_failed({ message: result.error_message || "Unknown error" })
-        );
-      }
+        if (!result.success) {
+          alert(
+          m.connection_test_failed({ message: result.error_message || m.unknown_error() })
+          );
+        }
     } catch (error) {
       const errorMessage =
         error instanceof IntricError ? error.getReadableMessage() : String(error);
@@ -213,12 +213,9 @@
       oauthState = result.state;
       isOAuthInProgress = true;
 
-      // Store credentials in sessionStorage for callback
+      // Store state in sessionStorage for callback verification
       sessionStorage.setItem("sharepoint_service_account_oauth", JSON.stringify({
         state: result.state,
-        client_id: clientId,
-        client_secret: clientSecret,
-        tenant_domain: tenantDomain,
       }));
 
       // Redirect to Microsoft OAuth
@@ -305,15 +302,15 @@
             <!-- Update secret form -->
             <div class="rounded-md border border-accent-default bg-accent-dimmer p-4">
               <div class="text-sm font-medium text-accent-stronger mb-3">{m.update_client_secret()}</div>
-              <Input.Text
-                label={m.new_client_secret()}
-                bind:value={newClientSecret}
-                required
-                type="password"
-                placeholder="Enter new client secret"
-                description={m.new_client_secret_description()}
-                autocomplete="off"
-              />
+                <Input.Text
+                  label={m.new_client_secret()}
+                  bind:value={newClientSecret}
+                  required
+                  type="password"
+                  placeholder={m.enter_new_client_secret()}
+                  description={m.new_client_secret_description()}
+                  autocomplete="off"
+                />
             </div>
           {:else}
             <!-- Warning about changing auth method -->

@@ -7,24 +7,21 @@ export const actions: Actions = {
     const data = await request.formData();
     const authCode = data.get("auth_code") as string;
     const state = data.get("state") as string;
-    const clientId = data.get("client_id") as string;
-    const clientSecret = data.get("client_secret") as string;
-    const tenantDomain = data.get("tenant_domain") as string;
 
-    if (!authCode || !state || !clientId || !clientSecret || !tenantDomain) {
-      return fail(400, { error: "Missing required fields" });
+    if (!authCode || !state) {
+      return fail(400, { error_key: "integration_callback_missing_required_fields" });
     }
 
     // Use internal Docker URL if available, otherwise fall back to external URL
     const backendUrl = env.INTRIC_BACKEND_SERVER_URL || env.INTRIC_BACKEND_URL;
     if (!backendUrl) {
-      return fail(500, { error: "Backend URL not configured" });
+      return fail(500, { error_key: "integration_callback_backend_url_not_configured" });
     }
 
     // Get auth token from locals (set by hooks.server.ts)
     const idToken = locals.id_token;
     if (!idToken) {
-      return fail(401, { error: "Not authenticated. Please log in and try again." });
+      return fail(401, { error_key: "integration_callback_not_authenticated" });
     }
 
     try {
@@ -39,9 +36,6 @@ export const actions: Actions = {
           body: JSON.stringify({
             auth_code: authCode,
             state,
-            client_id: clientId,
-            client_secret: clientSecret,
-            tenant_domain: tenantDomain,
           }),
         }
       );
@@ -61,7 +55,8 @@ export const actions: Actions = {
     } catch (error) {
       console.error("Service account auth callback error:", error);
       return fail(500, {
-        error: error instanceof Error ? error.message : "Failed to complete authentication",
+        error_key: "integration_callback_failed_to_complete_authentication",
+        error_detail: error instanceof Error ? error.message : undefined,
       });
     }
   },

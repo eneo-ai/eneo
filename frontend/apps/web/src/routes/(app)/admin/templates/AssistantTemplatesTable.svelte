@@ -12,6 +12,7 @@
   import TemplateActions from "./TemplateActions.svelte";
   import TemplateNameCell from "./TemplateNameCell.svelte";
   import TemplateCategoryBadge from "./TemplateCategoryBadge.svelte";
+  import dayjs from "dayjs";
 
   type AssistantTemplate = components["schemas"]["AssistantTemplateAdminPublic"];
 
@@ -87,8 +88,7 @@
       accessor: "created_at",
       header: m.created_date(),
       cell: (item) => {
-        const date = new Date(item.value);
-        return date.toLocaleDateString();
+        return dayjs(item.value).format("YYYY-MM-DD HH:mm");
       },
       plugins: {
         sort: {

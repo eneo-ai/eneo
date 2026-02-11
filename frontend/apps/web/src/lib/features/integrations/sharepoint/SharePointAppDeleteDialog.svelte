@@ -39,7 +39,7 @@
       window.location.reload();
     } catch (error: any) {
       console.error("Error deleting SharePoint app:", error);
-      errorMessage = error.message || "Failed to delete SharePoint app";
+      errorMessage = error.message || m.failed_to_delete_sharepoint_app();
     } finally {
       isLoading = false;
     }

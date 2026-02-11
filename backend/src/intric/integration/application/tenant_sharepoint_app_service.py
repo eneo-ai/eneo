@@ -50,9 +50,9 @@ class TenantSharePointAppService:
 
         Args:
             tenant_id: The tenant ID
-            client_id: Azure AD application (client) ID
-            client_secret: Azure AD application client secret
-            tenant_domain: Azure AD tenant domain (e.g., "contoso.onmicrosoft.com")
+            client_id: Microsoft Entra ID application (client) ID
+            client_secret: Microsoft Entra ID application client secret
+            tenant_domain: Microsoft Entra ID tenant domain (e.g., "contoso.onmicrosoft.com")
             created_by: User ID of the admin configuring the app
             certificate_path: Optional path to certificate for cert-based auth
 
@@ -153,9 +153,9 @@ class TenantSharePointAppService:
 
         Args:
             tenant_id: The tenant ID
-            client_id: Azure AD application (client) ID
-            client_secret: Azure AD application client secret
-            tenant_domain: Azure AD tenant domain (e.g., "contoso.onmicrosoft.com")
+            client_id: Microsoft Entra ID application (client) ID
+            client_secret: Microsoft Entra ID application client secret
+            tenant_domain: Microsoft Entra ID tenant domain (e.g., "contoso.onmicrosoft.com")
             refresh_token: OAuth refresh token from service account login
             service_account_email: Email of the service account
             created_by: User ID of the admin configuring the app

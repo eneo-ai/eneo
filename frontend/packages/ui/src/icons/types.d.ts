@@ -261,6 +261,9 @@ declare module "@intric/icons/lock-open" {
 declare module "@intric/icons/history" {
   export { Icon as IconHistory } from "@intric/icons/*";
 }
+declare module "@intric/icons/folder" {
+  export { Icon as IconFolder } from "@intric/icons/*";
+}
 declare module "@intric/icons/chevron-up-down" {
   export { Icon as IconChevronUpDown } from "@intric/icons/*";
 }

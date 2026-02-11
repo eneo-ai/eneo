@@ -229,6 +229,8 @@ class SpaceFactory:
                     selected_item_type=getattr(i, "selected_item_type", None),
                     resource_type=getattr(i, "resource_type", None),
                     drive_id=getattr(i, "drive_id", None),
+                    wrapper_id=getattr(i, "wrapper_id", None),
+                    wrapper_name=getattr(i, "wrapper_name", None),
                 )
             )
 

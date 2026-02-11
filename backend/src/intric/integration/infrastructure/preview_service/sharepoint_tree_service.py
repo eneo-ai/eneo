@@ -110,8 +110,7 @@ class SharePointTreeService:
                     )
                 else:
                     if folder_id == "root":
-                        response = await content_client.get_drive_root_children(actual_drive_id)
-                        items = response.get("value", [])
+                        items = await content_client.get_drive_root_children(actual_drive_id)
                     else:
                         items = await content_client.get_drive_folder_items(
                             drive_id=actual_drive_id,

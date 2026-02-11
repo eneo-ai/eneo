@@ -339,8 +339,8 @@ async def get_sharepoint_folder_tree(
     if not site_id and not drive_id:
         raise BadRequestException("Either site_id or drive_id must be provided")
 
-    # Convert string "null" to actual None
-    if folder_id == "null":
+    # Convert string "null" or empty string to actual None
+    if folder_id == "null" or folder_id == "":
         folder_id = None
 
     try:

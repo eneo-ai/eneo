@@ -22,6 +22,7 @@ class CrawlRunBase(BaseModel):
     files_downloaded: Optional[int] = None
     pages_failed: Optional[int] = None
     files_failed: Optional[int] = None
+    failure_summary: Optional[dict[str, int]] = None
 
 
 class CrawlRunCreate(BaseModel):

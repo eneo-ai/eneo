@@ -20,6 +20,7 @@ from intric.websites.presentation.website_models import (
     BulkCrawlResponse,
     CrawlRunPublic,
     WebsiteCreateRequestDeprecated,
+    WebsiteExistsResponse,
     WebsitePublic,
     WebsiteUpdate,
 )
@@ -41,6 +42,40 @@ async def create_website(
     container: Container = Depends(get_container(with_user=True)),
 ):
     return HTTPException(status_code=410, detail="This endpoint is deprecated")
+
+
+@router.get(
+    "/check-url/",
+    response_model=WebsiteExistsResponse | None,
+    summary="Check if URL exists on Organization space",
+    description="""
+    Check if a website URL already exists on the user's Organization space.
+
+    **Use case:**
+    When creating a new website on a Personal or Shared space, call this endpoint
+    to check if the URL is already being crawled on the Organization space.
+    This helps avoid duplicate crawls and informs users that the knowledge
+    might already be available for import.
+
+    **Returns:**
+    - Website info if URL exists on Organization space
+    - `null` if URL not found or user has no Organization space
+
+    **Note:** This does not block website creation - it's informational only.
+    """,
+)
+async def check_existing_website_url(
+    url: str = Query(description="The website URL to check"),
+    container: Container = Depends(get_container(with_user=True)),
+) -> WebsiteExistsResponse | None:
+    """Check if URL exists on the Organization space."""
+    service = container.website_crud_service()
+    result = await service.find_on_organization_space(url)
+
+    if result is None:
+        return None
+
+    return WebsiteExistsResponse(**result)
 
 
 @router.post(

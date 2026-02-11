@@ -51,6 +51,8 @@ class IntegrationKnowledgeAssembler:
             folder_id=getattr(item, "folder_id", None),
             folder_path=getattr(item, "folder_path", None),
             selected_item_type=getattr(item, "selected_item_type", None),
+            wrapper_id=getattr(item, "wrapper_id", None),
+            wrapper_name=getattr(item, "wrapper_name", None),
             metadata=IntegrationKnowledgeMetaData(
                 size=item.size,
                 last_sync_summary=getattr(item, "last_sync_summary", None),

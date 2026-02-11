@@ -8,6 +8,7 @@ from intric.database.tables.sharepoint_subscription_table import (
     SharePointSubscription as SharePointSubscriptionDBModel
 )
 from intric.database.tables.integration_table import IntegrationKnowledge as IntegrationKnowledgeDBModel
+from intric.database.tables.integration_table import UserIntegration as UserIntegrationDBModel
 from intric.integration.domain.entities.sharepoint_subscription import SharePointSubscription
 from intric.integration.domain.repositories.sharepoint_subscription_repo import (
     SharePointSubscriptionRepository
@@ -90,6 +91,51 @@ class SharePointSubscriptionRepositoryImpl(
         db_objs = result.scalars().all()
 
         return self.mapper.to_entities(db_objs)
+
+    async def list_by_tenant(
+        self,
+        tenant_id: UUID,
+    ) -> List[SharePointSubscription]:
+        """List all subscriptions for a tenant."""
+        stmt = (
+            sa.select(SharePointSubscriptionDBModel)
+            .join(
+                UserIntegrationDBModel,
+                SharePointSubscriptionDBModel.user_integration_id == UserIntegrationDBModel.id,
+            )
+            .where(UserIntegrationDBModel.tenant_id == tenant_id)
+            .order_by(SharePointSubscriptionDBModel.created_at.desc())
+        )
+
+        result = await self.session.execute(stmt)
+        db_objs = result.scalars().all()
+        return self.mapper.to_entities(db_objs)
+
+    async def one_by_tenant(
+        self,
+        subscription_id: UUID,
+        tenant_id: UUID,
+    ) -> Optional[SharePointSubscription]:
+        """Get a subscription by ID scoped to tenant."""
+        stmt = (
+            sa.select(SharePointSubscriptionDBModel)
+            .join(
+                UserIntegrationDBModel,
+                SharePointSubscriptionDBModel.user_integration_id == UserIntegrationDBModel.id,
+            )
+            .where(
+                sa.and_(
+                    SharePointSubscriptionDBModel.id == subscription_id,
+                    UserIntegrationDBModel.tenant_id == tenant_id,
+                )
+            )
+        )
+
+        result = await self.session.execute(stmt)
+        db_obj = result.scalar_one_or_none()
+        if db_obj is None:
+            return None
+        return self.mapper.to_entity(db_obj)
 
     async def count_references(
         self,

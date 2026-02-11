@@ -2,11 +2,13 @@
   import type { CompletionModel, TranscriptionModel } from "@intric/intric-js";
   import ModelNameAndVendor from "./ModelNameAndVendor.svelte";
   import { sortModels } from "../sortModels";
+  import { groupModelsByProvider } from "../groupModels";
   import { createSelect } from "@melt-ui/svelte";
   import { IconCheck } from "@intric/icons/check";
   import { IconCancel } from "@intric/icons/cancel";
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { m } from "$lib/paraglide/messages";
+  import ProviderGlyph from "../../../../routes/(app)/admin/models/components/ProviderGlyph.svelte";
 
   /** An array of models the user can choose from, this component will sort in-place the models by vendor */
   export let availableModels: T[];
@@ -15,6 +17,18 @@
   export let selectedModel: T | undefined | null;
 
   export let aria: AriaProps = { "aria-label": m.select_ai_model() };
+
+  // Check if models have provider info (provider_name field exists and at least one model has a provider)
+  function hasProviderInfo(models: T[]): boolean {
+    if (models.length === 0) return false;
+    // Check if provider_name field exists in the model type
+    return "provider_name" in models[0];
+  }
+
+  // Group models by provider if they have provider info
+  $: modelGroups = hasProviderInfo(availableModels)
+    ? groupModelsByProvider(availableModels as (T & { provider_id?: string | null; provider_name?: string | null; provider_type?: string | null })[], m.model_group_system())
+    : null;
 
   const {
     elements: { trigger, menu, option },
@@ -80,18 +94,43 @@
   >
     {m.select_completion_model()}
   </div>
-  {#each availableModels as model (model.id)}
-    <div
-      class="border-default hover:bg-hover-default flex min-h-16 items-center justify-between border-b px-4 hover:cursor-pointer"
-      {...$option({ value: model, label: model.nickname })}
-      use:option
-    >
-      <ModelNameAndVendor {model}></ModelNameAndVendor>
-      <div class="check {$isSelected(model) ? 'block' : 'hidden'}">
-        <IconCheck class="text-positive-default" />
+  {#if modelGroups}
+    {#each modelGroups as group (group.id ?? "system")}
+      <div
+        class="bg-surface-dimmer border-default sticky top-10 flex items-center gap-2 border-b px-4 py-2 font-mono text-xs uppercase tracking-wide"
+      >
+        {#if group.providerType}
+          <ProviderGlyph providerType={group.providerType} size="sm" />
+        {/if}
+        <span class="text-secondary">{group.label}</span>
       </div>
-    </div>
-  {/each}
+      {#each group.models as model (model.id)}
+        <div
+          class="border-default hover:bg-hover-default flex min-h-16 items-center justify-between border-b px-4 hover:cursor-pointer"
+          {...$option({ value: model, label: model.nickname })}
+          use:option
+        >
+          <ModelNameAndVendor {model}></ModelNameAndVendor>
+          <div class="check {$isSelected(model) ? 'block' : 'hidden'}">
+            <IconCheck class="text-positive-default" />
+          </div>
+        </div>
+      {/each}
+    {/each}
+  {:else}
+    {#each availableModels as model (model.id)}
+      <div
+        class="border-default hover:bg-hover-default flex min-h-16 items-center justify-between border-b px-4 hover:cursor-pointer"
+        {...$option({ value: model, label: model.nickname })}
+        use:option
+      >
+        <ModelNameAndVendor {model}></ModelNameAndVendor>
+        <div class="check {$isSelected(model) ? 'block' : 'hidden'}">
+          <IconCheck class="text-positive-default" />
+        </div>
+      </div>
+    {/each}
+  {/if}
 </div>
 
 <style lang="postcss">
