@@ -5,19 +5,15 @@
 	import { browser } from '$app/environment';
 	import { onDestroy } from 'svelte';
 
-	type Props = {
-		onTranscriptionComplete: (text: string) => void;
-		onInterimUpdate: (text: string) => void;
-	};
-
-	const { onTranscriptionComplete, onInterimUpdate }: Props = $props();
+	export let onTranscriptionComplete: (text: string) => void;
+	export let onInterimUpdate: (text: string) => void;
 
 	type State = 'idle' | 'starting' | 'recording';
-	let state = $state<State>('idle');
-	let error = $state<string | null>(null);
+	let state: State = 'idle';
+	let error: string | null = null;
 
 	// Audio level visualization (same approach as AudioRecorder.svelte)
-	let volumeLevel = $state(0);
+	let volumeLevel = 0;
 	let audioContext: AudioContext | null = null;
 	let analyserNode: AnalyserNode | null = null;
 	let levelBuffer = new Float32Array();
@@ -194,10 +190,9 @@
 
 {#if isSupported}
 	{#if state === 'idle'}
-		<Tooltip text={error || m.voice_input_start()} placement="top" let:trigger asFragment>
+		<Tooltip text={error || m.voice_input_start()} placement="top">
 			<button
 				type="button"
-				use:trigger
 				onclick={handleStart}
 				class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex h-8 w-8 items-center justify-center rounded-full border transition-colors"
 				class:text-negative-stronger={!!error}
@@ -208,10 +203,9 @@
 		</Tooltip>
 	{:else if state === 'recording'}
 		<div class="flex items-center gap-1.5">
-			<Tooltip text={m.voice_input_stop()} placement="top" let:trigger asFragment>
+			<Tooltip text={m.voice_input_stop()} placement="top">
 				<button
 					type="button"
-					use:trigger
 					onclick={handleStop}
 					class="voice-record-btn bg-negative-dimmer text-negative-stronger border-negative-default flex h-8 w-8 items-center justify-center rounded-full border"
 					aria-label={m.voice_input_stop()}

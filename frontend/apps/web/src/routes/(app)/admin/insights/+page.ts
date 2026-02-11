@@ -16,10 +16,26 @@ export const load = async (event) => {
     end: new Date().toISOString()
   };
 
-  const [assistants] = await Promise.all([intric.assistants.list()]);
+  const [assistants, spaces] = await Promise.all([
+    intric.assistants.list(),
+    intric.spaces.list()
+  ]);
+
+  const spaceNameById = new Map(spaces.map((space) => [space.id, space.name]));
+
+  const assistantsWithSpace = assistants.map((assistant) => {
+    const resolvedSpaceName = spaceNameById.get(assistant.space_id);
+    const hasSpaceName = Boolean(resolvedSpaceName);
+    return {
+      ...assistant,
+      space_name: resolvedSpaceName ?? "Okänd",
+      space_short_id: assistant.space_id?.slice(0, 8) ?? "",
+      has_space_name: hasSpaceName
+    };
+  });
 
   return {
-    assistants,
+    assistants: assistantsWithSpace,
     data: intric.analytics.getAggregated(timeframe),
     timeframe
   };

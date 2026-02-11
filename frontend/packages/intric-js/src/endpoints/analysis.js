@@ -85,6 +85,35 @@ export function initAnalytics(client) {
     },
 
     /**
+     * List questions of an assistant in a specific period (cursor-paginated).
+     * @param {Object} params
+     * @param {{id: string} | Assistant} params.assistant
+     * @param {{ start?: string, end?: string, includeFollowups?: boolean, limit?: number, cursor?: string, query?: string } | undefined} params.options
+     * @throws {IntricError}
+     * */
+    listQuestionsPaginated: async ({ assistant, options }) => {
+      const include_followups = options?.includeFollowups ?? false;
+      const { id } = assistant;
+      const endpoint =
+        /** @type {any} */ ("/api/v1/analysis/assistants/{assistant_id}/questions/");
+      const res = await client.fetch(endpoint, {
+        method: "get",
+        params: {
+          path: { assistant_id: id },
+          query: {
+            from_date: options?.start,
+            to_date: options?.end,
+            include_followups,
+            limit: options?.limit,
+            cursor: options?.cursor,
+            q: options?.query
+          }
+        }
+      });
+      return res;
+    },
+
+    /**
      * Ask an assistant a question. By default the answer is streamed from the backend, you can act on partial answer updates
      * with the onChunk callback. Once the answer has been fully received a complete `Session` object will be returned.
      * @param {Object} params Ask parameters
@@ -182,10 +211,11 @@ export function initAnalytics(client) {
          * @param {string} [args.endDate] Define start and end date for data; Expects UTC time string.
          * @param {string} [args.nextCursor] Where to start getting conversations
          * @param {number} [args.limit] How many conversations to load
+         * @param {string} [args.nameFilter] Optional server-side name filter
          * @throws {IntricError}
          *
          */
-        list: async ({ chatPartner, startDate, endDate, nextCursor, limit }) => {
+        list: async ({ chatPartner, startDate, endDate, nextCursor, limit, nameFilter }) => {
           /**  @type {{assistant_id?: string, group_chat_id?: string}} */
           const target = { assistant_id: undefined, group_chat_id: undefined };
 
@@ -210,7 +240,8 @@ export function initAnalytics(client) {
                 start_date: startDate,
                 end_date: endDate,
                 cursor: nextCursor,
-                limit
+                limit,
+                name_filter: nameFilter
               }
             }
           });
@@ -246,8 +277,16 @@ export function initAnalytics(client) {
        * @param {(answer: string) => void} [args.onAnswer]
        * @param {string} [args.startDate] Define start and end date for data; Expects UTC time string.
        * @param {string} [args.endDate] Define start and end date for data; Expects UTC time string.
+       * @param {"sync" | "auto"} [args.processingMode]
        */
-      ask: async ({ chatPartner, startDate, endDate, question, onAnswer }) => {
+      ask: async ({
+        chatPartner,
+        startDate,
+        endDate,
+        question,
+        onAnswer,
+        processingMode = "sync"
+      }) => {
         /**  @type {{assistant_id?: string, group_chat_id?: string}} */
         const target = { assistant_id: undefined, group_chat_id: undefined };
 
@@ -262,6 +301,33 @@ export function initAnalytics(client) {
             0,
             0
           );
+        }
+
+        if (processingMode === "auto") {
+          const response = await client.fetch("/api/v1/analysis/conversation-insights/", {
+            method: "post",
+            params: {
+              query: {
+                ...target,
+                from_date: startDate,
+                to_date: endDate,
+                include_followups: true,
+                processing_mode: "auto"
+              }
+            },
+            requestBody: { "application/json": { question, stream: false } }
+          });
+
+          if (response?.is_async && response?.job_id) {
+            return { answer: "", isAsync: true, jobId: response.job_id, status: response.status };
+          }
+
+          return {
+            answer: response?.answer ?? "",
+            isAsync: false,
+            jobId: null,
+            status: response?.status ?? "completed"
+          };
         }
 
         let answer = "";
@@ -296,6 +362,20 @@ export function initAnalytics(client) {
         );
 
         return { answer };
+      },
+
+      /**
+       * Get async conversation-insights analysis job status.
+       * @param {{ jobId: string }} args
+       */
+      getJobStatus: async ({ jobId }) => {
+        const res = await client.fetch("/api/v1/analysis/conversation-insights/jobs/{job_id}/", {
+          method: "get",
+          params: {
+            path: { job_id: jobId }
+          }
+        });
+        return res;
       }
     }
   };

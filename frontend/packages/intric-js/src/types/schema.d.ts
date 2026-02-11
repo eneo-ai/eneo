@@ -255,6 +255,38 @@ export interface paths {
      */
     patch: operations["update_audit_logging_setting_api_v1_settings_audit_logging_patch"];
   };
+  "/api/v1/settings/provisioning": {
+    /**
+     * Toggle JIT user provisioning
+     * @description Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Behavior:**
+     * - When enabled: Users are automatically created on first SSO login
+     * - When disabled: Only pre-existing users can log in via SSO
+     * - New users get the "User" role by default
+     * - Change takes effect immediately for all SSO logins
+     *
+     * **Example Request:**
+     * ```json
+     * {
+     *   "enabled": true
+     * }
+     * ```
+     *
+     * **Example Response:**
+     * ```json
+     * {
+     *   "chatbot_widget": {},
+     *   "using_templates": true,
+     *   "audit_logging_enabled": true,
+     *   "provisioning": true
+     * }
+     * ```
+     */
+    patch: operations["update_provisioning_setting_api_v1_settings_provisioning_patch"];
+  };
   "/api/v1/assistants/": {
     /**
      * Get Assistants
@@ -478,6 +510,30 @@ export interface paths {
      */
     get: operations["get_metadata_api_v1_analysis_metadata_statistics__get"];
   };
+  "/api/v1/analysis/assistant-activity/": {
+    /**
+     * Get Assistant Activity
+     * @description Get assistant activity statistics for the tenant.
+     *
+     * Returns:
+     * - active_assistant_count: Number of assistants with sessions in the period
+     * - total_trackable_assistants: Number of published assistants with insights enabled
+     * - active_assistant_pct: Percentage of trackable assistants that are active
+     * - active_user_count: Number of unique users with sessions (excluding service sessions
+     *   and deleted users)
+     *
+     * Note on datetime parameters:
+     * - If no time is provided in the datetime, time components default to 00:00:00
+     */
+    get: operations["get_assistant_activity_api_v1_analysis_assistant_activity__get"];
+  };
+  "/api/v1/analysis/metadata-statistics/aggregated/": {
+    /**
+     * Get Metadata Aggregated
+     * @description Aggregated data for analytics (hourly buckets).
+     */
+    get: operations["get_metadata_aggregated_api_v1_analysis_metadata_statistics_aggregated__get"];
+  };
   "/api/v1/analysis/assistants/{assistant_id}/": {
     /**
      * Get Most Recent Questions
@@ -547,6 +603,10 @@ export interface paths {
      *     AnalysisAnswer containing the AI response
      */
     post: operations["ask_unified_questions_about_questions_api_v1_analysis_conversation_insights__post"];
+  };
+  "/api/v1/analysis/conversation-insights/jobs/{job_id}/": {
+    /** Get Conversation Insight Job */
+    get: operations["get_conversation_insight_job_api_v1_analysis_conversation_insights_jobs__job_id___get"];
   };
   "/api/v1/analysis/conversation-insights/sessions/": {
     /**
@@ -1334,6 +1394,36 @@ export interface paths {
     delete: operations["remove_space_member_api_v1_spaces__id__members__user_id___delete"];
     /** Change Role Of Member */
     patch: operations["change_role_of_member_api_v1_spaces__id__members__user_id___patch"];
+  };
+  "/api/v1/spaces/{id}/group-members/": {
+    /**
+     * Get Space Group Members
+     * @description List all user groups that are members of this space.
+     */
+    get: operations["get_space_group_members_api_v1_spaces__id__group_members__get"];
+    /**
+     * Add Space Group Member
+     * @description Add a user group to a space with the specified role.
+     *
+     * All members of the group will gain access to the space at that role level.
+     * Groups cannot be added to personal spaces.
+     */
+    post: operations["add_space_group_member_api_v1_spaces__id__group_members__post"];
+  };
+  "/api/v1/spaces/{id}/group-members/{group_id}/": {
+    /**
+     * Remove Space Group Member
+     * @description Remove a user group from a space.
+     *
+     * All members of the group will lose access through this group membership.
+     * Note: Users may still have access through direct membership or other groups.
+     */
+    delete: operations["remove_space_group_member_api_v1_spaces__id__group_members__group_id___delete"];
+    /**
+     * Change Group Member Role
+     * @description Change the role of a user group in a space.
+     */
+    patch: operations["change_group_member_role_api_v1_spaces__id__group_members__group_id___patch"];
   };
   "/api/v1/spaces/type/personal/": {
     /** Get Personal Space */
@@ -2636,6 +2726,15 @@ export interface components {
      * @enum {string}
      */
     ActorType: "user" | "system" | "api_key";
+    /** AddSpaceGroupMemberRequest */
+    AddSpaceGroupMemberRequest: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      role: components["schemas"]["SpaceRoleValue"];
+    };
     /** AddSpaceMemberRequest */
     AddSpaceMemberRequest: {
       /**
@@ -2696,6 +2795,39 @@ export interface components {
       /** Url */
       url: string;
     };
+    /**
+     * AnalysisJobStatus
+     * @enum {string}
+     */
+    AnalysisJobStatus: "queued" | "processing" | "completed" | "failed";
+    /** AnalysisJobStatusResponse */
+    AnalysisJobStatusResponse: {
+      /**
+       * Job Id
+       * Format: uuid
+       */
+      job_id: string;
+      status: components["schemas"]["AnalysisJobStatus"];
+      /** Answer */
+      answer?: string | null;
+      /** Error */
+      error?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * AnalysisProcessingMode
+     * @enum {string}
+     */
+    AnalysisProcessingMode: "sync" | "auto";
     /** ApiKey */
     ApiKey: {
       /** Truncated Key */
@@ -3126,6 +3258,20 @@ export interface components {
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
       model?: components["schemas"]["CompletionModelPublic"] | null;
+    };
+    /**
+     * AssistantActivityStats
+     * @description Statistics about assistant activity within a period.
+     */
+    AssistantActivityStats: {
+      /** Active Assistant Count */
+      active_assistant_count: number;
+      /** Total Trackable Assistants */
+      total_trackable_assistants: number;
+      /** Active Assistant Pct */
+      active_assistant_pct: number;
+      /** Active User Count */
+      active_user_count: number;
     };
     /** AssistantCreatePublic */
     AssistantCreatePublic: {
@@ -6076,6 +6222,16 @@ export interface components {
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
       logging_details: components["schemas"]["LoggingDetailsPublic"];
     };
+    /** MetadataCount */
+    MetadataCount: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Count */
+      count: number;
+    };
     /** MetadataStatistics */
     MetadataStatistics: {
       /** Assistants */
@@ -6084,6 +6240,15 @@ export interface components {
       sessions: components["schemas"]["SessionMetadata"][];
       /** Questions */
       questions: components["schemas"]["QuestionMetadata"][];
+    };
+    /** MetadataStatisticsAggregated */
+    MetadataStatisticsAggregated: {
+      /** Assistants */
+      assistants: components["schemas"]["MetadataCount"][];
+      /** Sessions */
+      sessions: components["schemas"]["MetadataCount"][];
+      /** Questions */
+      questions: components["schemas"]["MetadataCount"][];
     };
     /**
      * MigrationResult
@@ -6705,6 +6870,24 @@ export interface components {
        */
       count: number;
     };
+    /** PaginatedPermissions[SpaceGroupMember] */
+    PaginatedPermissions_SpaceGroupMember_: {
+      /**
+       * Permissions
+       * @default []
+       */
+      permissions?: components["schemas"]["ResourcePermission"][];
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["SpaceGroupMember"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
     /** PaginatedPermissions[SpaceMember] */
     PaginatedPermissions_SpaceMember_: {
       /**
@@ -7037,6 +7220,19 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["SpaceDashboard"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
+    /** PaginatedResponse[SpaceGroupMember] */
+    PaginatedResponse_SpaceGroupMember_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["SpaceGroupMember"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -7973,13 +8169,7 @@ export interface components {
     /** ServiceOutput */
     ServiceOutput: {
       /** Output */
-      output:
-        | {
-            [key: string]: unknown;
-          }
-        | unknown[]
-        | string
-        | boolean;
+      output: unknown;
       /**
        * Files
        * @default []
@@ -8213,6 +8403,11 @@ export interface components {
        * @default true
        */
       audit_logging_enabled?: boolean;
+      /**
+       * Provisioning
+       * @default false
+       */
+      provisioning?: boolean;
     };
     /**
      * SharePointSubscriptionPublic
@@ -8361,6 +8556,29 @@ export interface components {
       /** Data Retention Days */
       data_retention_days?: number | null;
     };
+    /**
+     * SpaceGroupMember
+     * @description A user group that is a member of a space with a specific role.
+     */
+    SpaceGroupMember: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      role: components["schemas"]["SpaceRoleValue"];
+      /**
+       * User Count
+       * @default 0
+       */
+      user_count?: number;
+    };
     /** SpaceMember */
     SpaceMember: {
       /** Created At */
@@ -8422,6 +8640,7 @@ export interface components {
       transcription_models: components["schemas"]["TranscriptionModelPublic"][];
       knowledge: components["schemas"]["Knowledge"];
       members: components["schemas"]["PaginatedPermissions_SpaceMember_"];
+      group_members: components["schemas"]["PaginatedPermissions_SpaceGroupMember_"];
       /** Available Roles */
       available_roles: components["schemas"]["SpaceRole"][];
       security_classification: components["schemas"]["SecurityClassificationPublic"] | null;
@@ -8666,7 +8885,8 @@ export interface components {
       | "pull_confluence_content"
       | "pull_sharepoint_content"
       | "sync_sharepoint_delta"
-      | "update_model_usage_stats";
+      | "update_model_usage_stats"
+      | "analyze_conversation_insights";
     /** TemplateCreate */
     TemplateCreate: {
       /**
@@ -8727,6 +8947,7 @@ export interface components {
       display_name?: string | null;
       /**
        * Quota Limit
+       * Format: int64
        * @description Size in bytes. Default is 10 GB
        * @default 10737418240
        */
@@ -8785,6 +9006,12 @@ export interface components {
        */
       reasoning?: boolean;
       /**
+       * Hosting
+       * @description Hosting location (swe, eu, usa)
+       * @default swe
+       */
+      hosting?: string;
+      /**
        * Is Active
        * @description Enable in organization
        * @default true
@@ -8831,7 +9058,7 @@ export interface components {
       reasoning?: boolean | null;
       /**
        * Hosting
-       * @description Hosting location (eu, usa)
+       * @description Hosting location (swe, eu, usa)
        */
       hosting?: string | null;
       /**
@@ -8880,6 +9107,12 @@ export interface components {
        */
       max_input?: number | null;
       /**
+       * Hosting
+       * @description Hosting location (swe, eu, usa)
+       * @default swe
+       */
+      hosting?: string;
+      /**
        * Is Active
        * @description Enable in organization
        * @default true
@@ -8921,7 +9154,7 @@ export interface components {
       max_input?: number | null;
       /**
        * Hosting
-       * @description Hosting location (eu, usa)
+       * @description Hosting location (swe, eu, usa)
        */
       hosting?: string | null;
       /**
@@ -9066,6 +9299,7 @@ export interface components {
       display_name?: string | null;
       /**
        * Quota Limit
+       * Format: int64
        * @description Size in bytes. Default is 10 GB
        * @default 10737418240
        */
@@ -9195,6 +9429,12 @@ export interface components {
        */
       display_name: string;
       /**
+       * Hosting
+       * @description Hosting location (swe, eu, usa)
+       * @default swe
+       */
+      hosting?: string;
+      /**
        * Is Active
        * @description Enable in organization
        * @default true
@@ -9221,7 +9461,7 @@ export interface components {
       description?: string | null;
       /**
        * Hosting
-       * @description Hosting location (eu, usa)
+       * @description Hosting location (swe, eu, usa)
        */
       hosting?: string | null;
       /**
@@ -9593,6 +9833,10 @@ export interface components {
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelPublic"][];
     };
+    /** UpdateSpaceGroupMemberRequest */
+    UpdateSpaceGroupMemberRequest: {
+      role: components["schemas"]["SpaceRoleValue"];
+    };
     /** UpdateSpaceMemberRequest */
     UpdateSpaceMemberRequest: {
       role: components["schemas"]["SpaceRoleValue"];
@@ -9802,7 +10046,7 @@ export interface components {
       /** Modules */
       modules: readonly string[];
       /** User Groups Ids */
-      user_groups_ids: readonly number[];
+      user_groups_ids: readonly string[];
       /** Permissions */
       permissions: readonly components["schemas"]["Permission"][];
     };
@@ -10018,7 +10262,7 @@ export interface components {
       /** Modules */
       modules: readonly string[];
       /** User Groups Ids */
-      user_groups_ids: readonly number[];
+      user_groups_ids: readonly string[];
       /** Permissions */
       permissions: readonly components["schemas"]["Permission"][];
     };
@@ -10304,7 +10548,7 @@ export interface components {
        * Predefined Roles
        * @description List of predefined role IDs to assign (replaces existing predefined roles)
        */
-      predefined_roles?: components["schemas"]["ModelId"][];
+      predefined_roles?: components["schemas"]["ModelId"][] | null;
       /** @description User state (invited/active/inactive) */
       state?: components["schemas"]["UserState"] | null;
     };
@@ -11972,6 +12216,56 @@ export interface operations {
    * ```
    */
   update_audit_logging_setting_api_v1_settings_audit_logging_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TemplateSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Toggle JIT user provisioning
+   * @description Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Behavior:**
+   * - When enabled: Users are automatically created on first SSO login
+   * - When disabled: Only pre-existing users can log in via SSO
+   * - New users get the "User" role by default
+   * - Change takes effect immediately for all SSO logins
+   *
+   * **Example Request:**
+   * ```json
+   * {
+   *   "enabled": true
+   * }
+   * ```
+   *
+   * **Example Response:**
+   * ```json
+   * {
+   *   "chatbot_widget": {},
+   *   "using_templates": true,
+   *   "audit_logging_enabled": true,
+   *   "provisioning": true
+   * }
+   * ```
+   */
+  update_provisioning_setting_api_v1_settings_provisioning_patch: {
     requestBody: {
       content: {
         "application/json": components["schemas"]["TemplateSettingUpdate"];
@@ -13930,8 +14224,8 @@ export interface operations {
   get_metadata_api_v1_analysis_metadata_statistics__get: {
     parameters: {
       query?: {
-        start_date?: string;
-        end_date?: string;
+        start_date?: string | null;
+        end_date?: string | null;
       };
     };
     responses: {
@@ -13939,6 +14233,68 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["MetadataStatistics"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Assistant Activity
+   * @description Get assistant activity statistics for the tenant.
+   *
+   * Returns:
+   * - active_assistant_count: Number of assistants with sessions in the period
+   * - total_trackable_assistants: Number of published assistants with insights enabled
+   * - active_assistant_pct: Percentage of trackable assistants that are active
+   * - active_user_count: Number of unique users with sessions (excluding service sessions
+   *   and deleted users)
+   *
+   * Note on datetime parameters:
+   * - If no time is provided in the datetime, time components default to 00:00:00
+   */
+  get_assistant_activity_api_v1_analysis_assistant_activity__get: {
+    parameters: {
+      query?: {
+        start_date?: string | null;
+        end_date?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AssistantActivityStats"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Metadata Aggregated
+   * @description Aggregated data for analytics (hourly buckets).
+   */
+  get_metadata_aggregated_api_v1_analysis_metadata_statistics_aggregated__get: {
+    parameters: {
+      query?: {
+        start_date?: string | null;
+        end_date?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MetadataStatisticsAggregated"];
         };
       };
       /** @description Validation Error */
@@ -14107,6 +14463,7 @@ export interface operations {
         include_followups?: boolean;
         assistant_id?: string | null;
         group_chat_id?: string | null;
+        processing_mode?: components["schemas"]["AnalysisProcessingMode"];
       };
     };
     requestBody: {
@@ -14119,6 +14476,28 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Conversation Insight Job */
+  get_conversation_insight_job_api_v1_analysis_conversation_insights_jobs__job_id___get: {
+    parameters: {
+      path: {
+        job_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AnalysisJobStatusResponse"];
         };
       };
       /** @description Validation Error */
@@ -16444,12 +16823,6 @@ export interface operations {
           "application/json": unknown;
         };
       };
-      /** @description Bad Request */
-      400: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
       /** @description Not Found */
       404: {
         content: {
@@ -16558,12 +16931,6 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -16682,12 +17049,6 @@ export interface operations {
           "application/json": unknown;
         };
       };
-      /** @description Bad Request */
-      400: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
       /** @description Forbidden */
       403: {
         content: {
@@ -16802,12 +17163,6 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -17813,6 +18168,188 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["SpaceMember"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Space Group Members
+   * @description List all user groups that are members of this space.
+   */
+  get_space_group_members_api_v1_spaces__id__group_members__get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_SpaceGroupMember_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Add Space Group Member
+   * @description Add a user group to a space with the specified role.
+   *
+   * All members of the group will gain access to the space at that role level.
+   * Groups cannot be added to personal spaces.
+   */
+  add_space_group_member_api_v1_spaces__id__group_members__post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AddSpaceGroupMemberRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["SpaceGroupMember"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Remove Space Group Member
+   * @description Remove a user group from a space.
+   *
+   * All members of the group will lose access through this group membership.
+   * Note: Users may still have access through direct membership or other groups.
+   */
+  remove_space_group_member_api_v1_spaces__id__group_members__group_id___delete: {
+    parameters: {
+      path: {
+        id: string;
+        group_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Change Group Member Role
+   * @description Change the role of a user group in a space.
+   */
+  change_group_member_role_api_v1_spaces__id__group_members__group_id___patch: {
+    parameters: {
+      path: {
+        id: string;
+        group_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateSpaceGroupMemberRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SpaceGroupMember"];
         };
       };
       /** @description Bad Request */

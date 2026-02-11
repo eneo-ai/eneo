@@ -3,8 +3,10 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import AliasPath, BaseModel, Field
+from enum import Enum
 from typing import Optional
+
+from pydantic import AliasPath, BaseModel, Field
 
 
 class AssistantMetadata(BaseModel):
@@ -58,6 +60,11 @@ class AnalysisAnswer(BaseModel):
     answer: str
 
 
+class AnalysisProcessingMode(str, Enum):
+    SYNC = "sync"
+    AUTO = "auto"
+
+
 class ConversationInsightRequest(BaseModel):
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
@@ -68,6 +75,36 @@ class ConversationInsightRequest(BaseModel):
 class ConversationInsightResponse(BaseModel):
     total_conversations: int
     total_questions: int
+
+
+class AssistantInsightQuestion(BaseModel):
+    id: UUID
+    question: str
+    created_at: datetime
+    session_id: UUID
+
+
+class AnalysisJobStatus(str, Enum):
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class AnalysisJobCreateResponse(BaseModel):
+    job_id: UUID | None = None
+    status: AnalysisJobStatus
+    is_async: bool
+    answer: str | None = None
+
+
+class AnalysisJobStatusResponse(BaseModel):
+    job_id: UUID
+    status: AnalysisJobStatus
+    answer: str | None = None
+    error: str | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class AssistantActivityStats(BaseModel):

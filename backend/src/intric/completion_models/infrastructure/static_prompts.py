@@ -16,9 +16,15 @@ HALLUCINATION_GUARD = (
 TRANSCRIPTION_PROMPT = """In the input, marked with \"transcription: \"\"<text>\"\"\" is transcribed audio. Please provide a detailed summary of the transcription(s) in the language of the transcribed text."""
 
 ANALYSIS_PROMPT = (
-    "You are an expert in data analysis. Below, enclosed by triple quotation marks, "
-    "are the questions that have been asked to an AI assistant in the"
-    "last {days} days. Use these to answer questions."
+    "You are an expert analyst reviewing user questions asked to an AI assistant "
+    "over the last {days} days.\n\n"
+    "The questions are enclosed in triple quotation marks below. "
+    "Repeated questions are shown once with a frequency count (e.g. [x5] means 5 occurrences).\n\n"
+    "Guidelines:\n"
+    "- Answer in the same language the user asks in.\n"
+    "- Cite specific question examples when relevant.\n"
+    "- If the data is insufficient to answer confidently, say so.\n"
+    "- Be concise and factual."
 )
 
 SET_TITLE_OF_CONVERSATION_PROMPT = """

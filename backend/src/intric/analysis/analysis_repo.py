@@ -54,6 +54,23 @@ class CountBucketRow(NamedTuple):
     total: int
 
 
+class QuestionTextRow(NamedTuple):
+    """Lightweight question row for insights analysis."""
+
+    question: str
+    created_at: datetime.datetime
+    session_id: UUID
+
+
+class AssistantInsightQuestionRow(NamedTuple):
+    """Lightweight admin insights question-history row."""
+
+    id: UUID
+    question: str
+    created_at: datetime.datetime
+    session_id: UUID
+
+
 class AnalysisRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -119,6 +136,9 @@ class AnalysisRepository:
         to_date: datetime = None,
         tenant_id: UUID = None,
     ):
+        if tenant_id is None:
+            raise ValueError("tenant_id is required for insights session queries")
+
         stmt = (
             sa.select(Sessions)
             .join(
@@ -128,10 +148,9 @@ class AnalysisRepository:
             .where(Assistants.id == assistant_id)
         )
 
-        if tenant_id is not None:
-            stmt = stmt.join(Users, Sessions.user_id == Users.id).where(
-                Users.tenant_id == tenant_id
-            )
+        stmt = stmt.join(Users, Sessions.user_id == Users.id).where(
+            Users.tenant_id == tenant_id
+        )
 
         if from_date is not None:
             stmt = stmt.where(Sessions.created_at >= from_date)
@@ -190,12 +209,14 @@ class AnalysisRepository:
         to_date: datetime = None,
         tenant_id: UUID = None,
     ):
+        if tenant_id is None:
+            raise ValueError("tenant_id is required for insights session queries")
+
         stmt = sa.select(Sessions).where(Sessions.group_chat_id == group_chat_id)
 
-        if tenant_id is not None:
-            stmt = stmt.join(Users, Sessions.user_id == Users.id).where(
-                Users.tenant_id == tenant_id
-            )
+        stmt = stmt.join(Users, Sessions.user_id == Users.id).where(
+            Users.tenant_id == tenant_id
+        )
 
         if from_date is not None:
             stmt = stmt.where(Sessions.created_at >= from_date)
@@ -242,6 +263,207 @@ class AnalysisRepository:
         sessions = await self.session.scalars(stmt)
 
         return [SessionInDB.model_validate(session) for session in sessions]
+
+    async def get_assistant_question_texts_since(
+        self,
+        *,
+        assistant_id: UUID,
+        from_date: datetime,
+        to_date: datetime,
+        include_followups: bool,
+        tenant_id: UUID,
+    ) -> list[QuestionTextRow]:
+        return await self._get_question_texts_since(
+            from_date=from_date,
+            to_date=to_date,
+            include_followups=include_followups,
+            tenant_id=tenant_id,
+            assistant_id=assistant_id,
+            group_chat_id=None,
+        )
+
+    async def get_group_chat_question_texts_since(
+        self,
+        *,
+        group_chat_id: UUID,
+        from_date: datetime,
+        to_date: datetime,
+        include_followups: bool,
+        tenant_id: UUID,
+    ) -> list[QuestionTextRow]:
+        return await self._get_question_texts_since(
+            from_date=from_date,
+            to_date=to_date,
+            include_followups=include_followups,
+            tenant_id=tenant_id,
+            assistant_id=None,
+            group_chat_id=group_chat_id,
+        )
+
+    async def _get_question_texts_since(
+        self,
+        *,
+        from_date: datetime,
+        to_date: datetime,
+        include_followups: bool,
+        tenant_id: UUID,
+        assistant_id: UUID | None,
+        group_chat_id: UUID | None,
+    ) -> list[QuestionTextRow]:
+        if tenant_id is None:
+            raise ValueError("tenant_id is required for insights question queries")
+
+        if assistant_id is None and group_chat_id is None:
+            raise ValueError("Either assistant_id or group_chat_id is required")
+
+        if assistant_id is not None and group_chat_id is not None:
+            raise ValueError("Only one of assistant_id or group_chat_id can be set")
+
+        question_rank = sa.func.row_number().over(
+            partition_by=Questions.session_id,
+            order_by=(Questions.created_at.asc(), Questions.id.asc()),
+        ).label("question_rank")
+
+        base_stmt = (
+            sa.select(
+                Questions.question.label("question"),
+                Questions.created_at.label("created_at"),
+                Questions.session_id.label("session_id"),
+                question_rank,
+            )
+            .join(Sessions, Questions.session_id == Sessions.id)
+            .join(Users, Sessions.user_id == Users.id)
+            .where(Users.tenant_id == tenant_id)
+            .where(Sessions.created_at >= from_date)
+            .where(Sessions.created_at <= to_date)
+            .where(Questions.question.isnot(None))
+        )
+
+        if assistant_id is not None:
+            base_stmt = base_stmt.where(Sessions.assistant_id == assistant_id)
+        else:
+            base_stmt = base_stmt.where(Sessions.group_chat_id == group_chat_id)
+
+        ranked_questions = base_stmt.subquery()
+
+        stmt = sa.select(
+            ranked_questions.c.question,
+            ranked_questions.c.created_at,
+            ranked_questions.c.session_id,
+        )
+        if not include_followups:
+            stmt = stmt.where(ranked_questions.c.question_rank == 1)
+
+        stmt = stmt.order_by(
+            ranked_questions.c.created_at.asc(),
+            ranked_questions.c.session_id.asc(),
+        )
+
+        result = await self.session.execute(stmt)
+        return [
+            QuestionTextRow(
+                question=row.question,
+                created_at=row.created_at,
+                session_id=row.session_id,
+            )
+            for row in result
+            if row.question
+        ]
+
+    async def get_assistant_question_history_page(
+        self,
+        *,
+        assistant_id: UUID,
+        from_date: datetime,
+        to_date: datetime,
+        include_followups: bool,
+        tenant_id: UUID,
+        limit: int,
+        query: str | None = None,
+        cursor_created_at: datetime.datetime | None = None,
+        cursor_id: UUID | None = None,
+    ) -> tuple[list[AssistantInsightQuestionRow], int, bool]:
+        if tenant_id is None:
+            raise ValueError("tenant_id is required for insights question queries")
+
+        question_rank = sa.func.row_number().over(
+            partition_by=Questions.session_id,
+            order_by=(Questions.created_at.asc(), Questions.id.asc()),
+        ).label("question_rank")
+
+        base_stmt = (
+            sa.select(
+                Questions.id.label("id"),
+                Questions.question.label("question"),
+                Questions.created_at.label("created_at"),
+                Questions.session_id.label("session_id"),
+                question_rank,
+            )
+            .join(Sessions, Questions.session_id == Sessions.id)
+            .join(Users, Sessions.user_id == Users.id)
+            .where(Users.tenant_id == tenant_id)
+            .where(Sessions.assistant_id == assistant_id)
+            .where(Sessions.created_at >= from_date)
+            .where(Sessions.created_at <= to_date)
+            .where(Questions.question.isnot(None))
+        )
+        if query:
+            normalized_query = query.strip()
+            if normalized_query:
+                base_stmt = base_stmt.where(
+                    Questions.question.ilike(f"%{normalized_query}%")
+                )
+
+        ranked_questions = base_stmt.subquery()
+        filtered_stmt = sa.select(
+            ranked_questions.c.id,
+            ranked_questions.c.question,
+            ranked_questions.c.created_at,
+            ranked_questions.c.session_id,
+        )
+        if not include_followups:
+            filtered_stmt = filtered_stmt.where(ranked_questions.c.question_rank == 1)
+
+        total_stmt = sa.select(sa.func.count()).select_from(filtered_stmt.subquery())
+        total_count = int((await self.session.scalar(total_stmt)) or 0)
+
+        page_stmt = filtered_stmt.order_by(
+            ranked_questions.c.created_at.desc(), ranked_questions.c.id.desc()
+        )
+
+        if cursor_created_at is not None:
+            if cursor_id is not None:
+                page_stmt = page_stmt.where(
+                    sa.or_(
+                        ranked_questions.c.created_at < cursor_created_at,
+                        sa.and_(
+                            ranked_questions.c.created_at == cursor_created_at,
+                            ranked_questions.c.id < cursor_id,
+                        ),
+                    )
+                )
+            else:
+                page_stmt = page_stmt.where(
+                    ranked_questions.c.created_at < cursor_created_at
+                )
+
+        page_stmt = page_stmt.limit(limit + 1)
+
+        result = await self.session.execute(page_stmt)
+        rows = list(result)
+        items = [
+            AssistantInsightQuestionRow(
+                id=row.id,
+                question=row.question,
+                created_at=row.created_at,
+                session_id=row.session_id,
+            )
+            for row in rows[:limit]
+            if row.question
+        ]
+
+        has_more = len(rows) > limit
+        return items, total_count, has_more
 
     async def get_assistant_conversation_counts(
         self,
@@ -300,6 +522,25 @@ class AnalysisRepository:
         question_count = await self.session.scalar(question_count_stmt) or 0
 
         return session_count, question_count
+
+    async def count_assistant_questions_since(
+        self,
+        *,
+        assistant_id: UUID,
+        from_date: datetime,
+        to_date: datetime,
+        tenant_id: UUID,
+    ) -> int:
+        stmt = (
+            sa.select(sa.func.count(Questions.id))
+            .join(Sessions, Questions.session_id == Sessions.id)
+            .join(Users, Sessions.user_id == Users.id)
+            .where(Users.tenant_id == tenant_id)
+            .where(Sessions.assistant_id == assistant_id)
+            .where(Sessions.created_at >= from_date)
+            .where(Sessions.created_at <= to_date)
+        )
+        return await self.session.scalar(stmt) or 0
 
     async def get_assistant_metadata_for_tenant(
         self,
@@ -541,6 +782,25 @@ class AnalysisRepository:
         question_count = await self.session.scalar(question_count_stmt) or 0
 
         return session_count, question_count
+
+    async def count_group_chat_questions_since(
+        self,
+        *,
+        group_chat_id: UUID,
+        from_date: datetime,
+        to_date: datetime,
+        tenant_id: UUID,
+    ) -> int:
+        stmt = (
+            sa.select(sa.func.count(Questions.id))
+            .join(Sessions, Questions.session_id == Sessions.id)
+            .join(Users, Sessions.user_id == Users.id)
+            .where(Users.tenant_id == tenant_id)
+            .where(Sessions.group_chat_id == group_chat_id)
+            .where(Sessions.created_at >= from_date)
+            .where(Sessions.created_at <= to_date)
+        )
+        return await self.session.scalar(stmt) or 0
 
     async def get_active_assistant_count_for_tenant(
         self,
