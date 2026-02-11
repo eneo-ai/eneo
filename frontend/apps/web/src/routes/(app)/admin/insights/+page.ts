@@ -28,7 +28,7 @@ export const load = async (event) => {
     const hasSpaceName = Boolean(resolvedSpaceName);
     return {
       ...assistant,
-      space_name: resolvedSpaceName ?? "Okänd",
+      space_name: resolvedSpaceName ?? "—",
       space_short_id: assistant.space_id?.slice(0, 8) ?? "",
       has_space_name: hasSpaceName
     };

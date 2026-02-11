@@ -965,9 +965,10 @@ class AnalysisService:
             await self._check_insight_access(group_chat_id=group_chat_id)
 
         # Use default date range if not provided
-        if not start_time or not end_time:
+        if start_time is None:
+            start_time = datetime.now(timezone.utc) - timedelta(days=30)
+        if end_time is None:
             end_time = datetime.now(timezone.utc)
-            start_time = end_time - timedelta(days=30)
 
         started = perf_counter()
         # Use optimized count queries instead of fetching full session data

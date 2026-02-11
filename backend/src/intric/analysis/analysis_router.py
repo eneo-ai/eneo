@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, Query
 from sse_starlette import EventSourceResponse
 
+from intric.ai_models.completion_models.completion_model import Completion
 from intric.analysis import analysis_protocol
 from intric.analysis.analysis import (
     AnalysisAnswer,
@@ -305,7 +306,10 @@ async def ask_question_about_questions(
 
         return EventSourceResponse(event_stream())
 
-    return AnalysisAnswer(answer=ai_response.completion.text)
+    completion = ai_response.completion
+    if not isinstance(completion, Completion):
+        raise ValueError("Expected Completion object for non-streaming response")
+    return AnalysisAnswer(answer=completion.text or "")
 
 
 @router.post("/conversation-insights/")
@@ -418,15 +422,20 @@ async def ask_unified_questions_about_questions(
 
         return EventSourceResponse(event_stream())
 
+    completion = ai_response.completion
+    if not isinstance(completion, Completion):
+        raise ValueError("Expected Completion object for non-streaming response")
+    answer_text = completion.text or ""
+
     if processing_mode == AnalysisProcessingMode.AUTO:
         return AnalysisJobCreateResponse(
             job_id=None,
             status=AnalysisJobStatus.COMPLETED,
             is_async=False,
-            answer=ai_response.completion.text,
+            answer=answer_text,
         )
 
-    return AnalysisAnswer(answer=ai_response.completion.text)
+    return AnalysisAnswer(answer=answer_text)
 
 
 @router.get(

@@ -122,7 +122,8 @@ class SessionRepository:
         if end_date is not None:
             query = query.where(Sessions.created_at <= end_date)
 
-        return await self.session.scalar(query)
+        count = await self.session.scalar(query)
+        return count if count is not None else 0
 
     async def get_by_assistant(
         self,

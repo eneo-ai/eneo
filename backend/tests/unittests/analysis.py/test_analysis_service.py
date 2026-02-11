@@ -25,7 +25,7 @@ def _make_completion_model() -> CompletionModel:
         id=uuid4(),
         name="test-model",
         nickname="test",
-        family=ModelFamily.GPT,
+        family=ModelFamily.OPEN_AI,
         token_limit=4096,
         is_deprecated=False,
         stability=ModelStability.STABLE,

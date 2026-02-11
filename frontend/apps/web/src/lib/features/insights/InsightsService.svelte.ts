@@ -290,7 +290,7 @@ class InsightsService {
     if (!this.#nextCursor) {
       return;
     }
-    await this.#updateConversations(this.dateRange, true);
+    await this.#updateConversations(this.#activeDateRange, true);
   });
 
   searchConversations = createAsyncState(async (nameFilter: string) => {
@@ -302,7 +302,7 @@ class InsightsService {
     this.#nextCursor = undefined;
     this.previewedConversation = null;
     this.previewLoadError = null;
-    await this.#updateConversations(this.dateRange);
+    await this.#updateConversations(this.#activeDateRange);
   });
 
   loadConversationPreview = createAsyncState(async (conversation: { id: string }) => {
@@ -334,9 +334,9 @@ class InsightsService {
     let response;
     try {
       response = await this.#intric.analytics.insights.ask({
-        startDate: this.dateRange.start?.toString(),
+        startDate: this.#activeDateRange.start?.toString(),
         // We add one day so the end day includes the whole day. otherwise this would be interpreted as 00:00
-        endDate: this.dateRange.end?.add({ days: 1 }).toString(),
+        endDate: this.#activeDateRange.end?.add({ days: 1 }).toString(),
         chatPartner: this.#chatPartner,
         question,
         processingMode: "auto",

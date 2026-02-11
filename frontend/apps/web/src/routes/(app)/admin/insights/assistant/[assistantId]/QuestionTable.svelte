@@ -193,16 +193,16 @@ $: table.update(questions ?? []);
       {#if isLoadingMore}
         {m.loading()}
       {:else}
-        {m.load_more_conversations()}
+        {m.load_more_questions()}
       {/if}
     </Button>
     <p class="text-muted text-xs tabular-nums" role="status" aria-live="polite">
-      {m.loaded_conversations_count({ loaded: questions.length, total: totalCount })}
+      {m.loaded_questions_count({ loaded: questions.length, total: totalCount })}
     </p>
   {:else if totalCount > 0}
     <div class="mx-auto my-2 h-px w-16 border-t border-dimmer"></div>
     <p class="text-muted text-xs tabular-nums" role="status" aria-live="polite">
-      {m.loaded_all_conversations({ total: totalCount })}
+      {m.loaded_all_questions({ total: totalCount })}
     </p>
   {/if}
 </div>
