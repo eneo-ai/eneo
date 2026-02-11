@@ -7,12 +7,14 @@ from intric.groups_legacy.group_service import GroupService
 from intric.info_blobs.info_blob import (
     InfoBlobAdd,
     InfoBlobInDB,
+    InfoBlobInDBNoText,
     InfoBlobMetadataFilter,
     InfoBlobMetadataFilterPublic,
     InfoBlobUpdate,
 )
 from intric.info_blobs.info_blob_repo import InfoBlobRepository
 from intric.main.exceptions import (
+    BadRequestException,
     NameCollisionException,
     NotFoundException,
     UnauthorizedException,
@@ -54,7 +56,9 @@ class InfoBlobService:
         self.space_service = space_service
         self.actor_manager = actor_manager
 
-    async def _get_actor(self, info_blob: Optional[InfoBlobInDB], group_id: Optional[UUID]):
+    async def _get_actor(
+        self, info_blob: Optional[InfoBlobInDB], group_id: Optional[UUID]
+    ):
         if info_blob is None and group_id is None:
             raise ValueError("One of info_blob and group_id has to exist")
 
@@ -62,6 +66,7 @@ class InfoBlobService:
             space = await self.space_repo.get_space_by_collection(collection_id=group_id)
 
         else:
+            assert info_blob is not None
             if info_blob.group_id is not None:
                 space = await self.space_repo.get_space_by_collection(info_blob.group_id)
             elif info_blob.website_id is not None:
@@ -70,6 +75,8 @@ class InfoBlobService:
                 space = await self.space_repo.get_space_by_integration_knowledge(
                     info_blob.integration_knowledge_id
                 )
+            else:
+                raise ValueError("InfoBlob missing scope reference")
 
         return self.actor_manager.get_space_actor_from_space(space)
 
@@ -136,7 +143,9 @@ class InfoBlobService:
                         f"from integration {info_blob.integration_knowledge_id}"
                     )
 
-    async def add_info_blob_without_validation(self, info_blob: InfoBlobAdd):
+    async def add_info_blob_without_validation(
+        self, info_blob: InfoBlobAdd
+    ) -> InfoBlobInDB:
         await self._delete_if_same_title(info_blob)
         size_of_text = await self.quota_service.add_text(info_blob.text)
         info_blob.size = size_of_text
@@ -168,14 +177,16 @@ class InfoBlobService:
         info_blob.size = size_of_text
         return await self.repo.upsert_by_sharepoint_item_and_integration_knowledge(info_blob)
 
-    async def add_info_blob(self, info_blob: InfoBlobAdd):
+    async def add_info_blob(self, info_blob: InfoBlobAdd) -> InfoBlobInDB:
         info_blob_in_db = await self.add_info_blob_without_validation(info_blob)
 
         await self._validate(info_blob_in_db)
 
         return info_blob_in_db
 
-    async def add_info_blobs(self, group_id: UUID, info_blobs: list[InfoBlobAdd]):
+    async def add_info_blobs(
+        self, group_id: UUID, info_blobs: list[InfoBlobAdd]
+    ) -> list[InfoBlobInDB]:
         await self._can_perform_action(group_id=group_id, action=SpaceAction.CREATE)
 
         return [await self.add_info_blob(blob) for blob in info_blobs]
@@ -184,8 +195,12 @@ class InfoBlobService:
         current_info_blob = await self.repo.get(info_blob.id)
 
         if info_blob.title:
+            if current_info_blob.group_id is None:
+                raise BadRequestException(
+                    "Cannot update title for info blobs without a group."
+                )
             info_blob_with_same_name = await self.repo.get_by_title_and_group(
-                info_blob.title, current_info_blob.group.id
+                info_blob.title, current_info_blob.group_id
             )
 
             if info_blob_with_same_name is not None:
@@ -226,7 +241,7 @@ class InfoBlobService:
                 item_dict = item.model_dump()
                 return filter_dict.items() <= item_dict.items()
 
-            info_blobs = list(filter(filter_func, info_blobs))
+            info_blobs = [blob for blob in info_blobs if filter_func(blob)]
 
         return [blob for blob in info_blobs]
 
@@ -235,7 +250,7 @@ class InfoBlobService:
         metadata_filter: InfoBlobMetadataFilterPublic,
     ):
         metadata_filter_with_user = InfoBlobMetadataFilter(
-            **metadata_filter.model_dump(), user_id=self.user.id
+            **metadata_filter.model_dump(exclude_none=True), user_id=self.user.id
         )
         return await self.get_by_user(metadata_filter_with_user)
 
@@ -259,7 +274,9 @@ class InfoBlobService:
 
         return info_blob_deleted
     
-    async def get_for_space(self, space_id: UUID, *, limit: int | None = None) -> list[InfoBlobInDB]:
+    async def get_for_space(
+        self, space_id: UUID, *, limit: int | None = None
+    ) -> list[InfoBlobInDBNoText]:
         space = await self.space_repo.one(space_id)
 
         actor = self.actor_manager.get_space_actor_from_space(space)
@@ -275,5 +292,4 @@ class InfoBlobService:
             include_integrations=True,
             limit=limit,
             order_desc=True,
-            load_text=False,
         )

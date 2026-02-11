@@ -63,6 +63,12 @@
     label={m.security()}
   />
   <Navigation.Link
+    href={localizeHref("/admin/api-keys")}
+    isActive={isSelected("/admin/api-keys", currentRoute)}
+    icon={IconKey}
+    label={m.api_keys()}
+  />
+  <Navigation.Link
     href="/admin/audit-logs"
     isActive={isSelected("/admin/audit-logs", currentRoute)}
     icon={IconHistory}

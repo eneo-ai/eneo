@@ -45,6 +45,93 @@ export interface paths {
     /** Delete App Run */
     delete: operations["delete_app_run_api_v1_app_runs__id___delete"];
   };
+  "/api/v1/api-keys/creation-constraints": {
+    /**
+     * Get API key creation constraints
+     * @description Returns tenant policy limits relevant to key creation UX (expiration, rate limit).
+     */
+    get: operations["get_creation_constraints_api_v1_api_keys_creation_constraints_get"];
+  };
+  "/api/v1/api-keys": {
+    /**
+     * List API keys
+     * @description List manageable API keys in the current tenant with cursor pagination and filters.
+     */
+    get: operations["list_api_keys_api_v1_api_keys_get"];
+    /**
+     * Create API key
+     * @description Create a v2 API key with scoped permission, guardrails, and optional rate limits.
+     */
+    post: operations["create_api_key_api_v1_api_keys_post"];
+  };
+  "/api/v1/api-keys/{id}": {
+    /**
+     * Get API key
+     * @description Get a single API key by ID if the current user is authorized to manage it.
+     */
+    get: operations["get_api_key_api_v1_api_keys__id__get"];
+    /**
+     * Revoke API key (deprecated alias)
+     * @deprecated
+     * @description Deprecated. Use POST /api/v1/api-keys/{id}/revoke with reason body.
+     */
+    delete: operations["revoke_api_key_deprecated_api_v1_api_keys__id__delete"];
+    /**
+     * Update API key
+     * @description Update API key metadata and guardrail fields supported by policy.
+     */
+    patch: operations["update_api_key_api_v1_api_keys__id__patch"];
+  };
+  "/api/v1/api-keys/{id}/revoke": {
+    /**
+     * Revoke API key
+     * @description Revoke an API key and optionally include reason metadata for audit logs.
+     */
+    post: operations["revoke_api_key_api_v1_api_keys__id__revoke_post"];
+  };
+  "/api/v1/api-keys/{id}/rotate": {
+    /**
+     * Rotate API key
+     * @description Rotate an API key, issuing a new secret and starting the grace overlap window.
+     */
+    post: operations["rotate_api_key_api_v1_api_keys__id__rotate_post"];
+  };
+  "/api/v1/api-keys/{id}/suspend": {
+    /**
+     * Suspend API key
+     * @description Suspend an API key temporarily. Suspended keys cannot authenticate.
+     */
+    post: operations["suspend_api_key_api_v1_api_keys__id__suspend_post"];
+  };
+  "/api/v1/api-keys/{id}/reactivate": {
+    /**
+     * Reactivate API key
+     * @description Reactivate a previously suspended API key.
+     */
+    post: operations["reactivate_api_key_api_v1_api_keys__id__reactivate_post"];
+  };
+  "/api/v1/users/": {
+    /** Get Tenant Users */
+    get: operations["get_tenant_users_api_v1_users__get"];
+  };
+  "/api/v1/users/api-keys/": {
+    /**
+     * Generate legacy user API key
+     * @deprecated
+     * @description Legacy API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This endpoint rotates the old legacy key immediately.
+     */
+    post: operations["generate_api_key_api_v1_users_api_keys__post"];
+  };
+  "/api/v1/users/admin/invite/": {
+    /** Invite User */
+    post: operations["invite_user_api_v1_users_admin_invite__post"];
+  };
+  "/api/v1/users/admin/{id}/": {
+    /** Delete User */
+    delete: operations["delete_user_api_v1_users_admin__id___delete"];
+    /** Update User */
+    patch: operations["update_user_api_v1_users_admin__id___patch"];
+  };
   "/api/v1/users/login/token/": {
     /**
      * Login
@@ -59,36 +146,13 @@ export interface paths {
      */
     post: operations["login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post"];
   };
-  "/api/v1/users/": {
-    /** Get Tenant Users */
-    get: operations["get_tenant_users_api_v1_users__get"];
-  };
   "/api/v1/users/me/": {
     /** Get Current User */
     get: operations["Get_current_user_api_v1_users_me__get"];
   };
-  "/api/v1/users/api-keys/": {
-    /**
-     * Generate Api Key
-     * @description Generating a new api key will delete the old key.
-     * Make sure to copy the key since it will only be showed once,
-     * after which only the truncated key will be shown.
-     */
-    get: operations["generate_api_key_api_v1_users_api_keys__get"];
-  };
   "/api/v1/users/tenant/": {
     /** Get Current User Tenant */
     get: operations["Get_current_user_tenant_api_v1_users_tenant__get"];
-  };
-  "/api/v1/users/admin/invite/": {
-    /** Invite User */
-    post: operations["invite_user_api_v1_users_admin_invite__post"];
-  };
-  "/api/v1/users/admin/{id}/": {
-    /** Delete User */
-    delete: operations["delete_user_api_v1_users_admin__id___delete"];
-    /** Update User */
-    patch: operations["update_user_api_v1_users_admin__id___patch"];
   };
   "/api/v1/users/provision/": {
     /** Provision User */
@@ -125,13 +189,13 @@ export interface paths {
     /**
      * Get Groups
      * @deprecated
+     * @description Legacy groups endpoint. Use collections/spaces instead for new integrations.
      */
     get: operations["get_groups_api_v1_groups__get"];
     /**
      * Create Group
      * @deprecated
-     * @description Valid values for `embedding_model` are the provided by `GET /api/v1/settings/models/`.
-     * Use the `name` field of the response from this endpoint.
+     * @description Legacy groups endpoint. Use collections/spaces instead for new integrations.
      */
     post: operations["create_group_api_v1_groups__post"];
   };
@@ -255,16 +319,77 @@ export interface paths {
      */
     patch: operations["update_audit_logging_setting_api_v1_settings_audit_logging_patch"];
   };
+  "/api/v1/settings/provisioning": {
+    /**
+     * Toggle JIT user provisioning
+     * @description Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Behavior:**
+     * - When enabled: Users are automatically created on first SSO login
+     * - When disabled: Only pre-existing users can log in via SSO
+     * - New users get the "User" role by default
+     * - Change takes effect immediately for all SSO logins
+     *
+     * **Example Request:**
+     * ```json
+     * {
+     *   "enabled": true
+     * }
+     * ```
+     *
+     * **Example Response:**
+     * ```json
+     * {
+     *   "chatbot_widget": {},
+     *   "using_templates": true,
+     *   "audit_logging_enabled": true,
+     *   "provisioning": true
+     * }
+     * ```
+     */
+    patch: operations["update_provisioning_setting_api_v1_settings_provisioning_patch"];
+  };
+  "/api/v1/settings/scope-enforcement": {
+    /**
+     * Toggle API key scope enforcement
+     * @description Toggle API key scope enforcement for your tenant.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Behavior:**
+     * - Updates the `api_key_scope_enforcement` feature flag for your tenant
+     * - When enabled: API keys are restricted to resources within their configured scope
+     * - When disabled: All API keys can access resources beyond their configured scope
+     * - Disabling scope enforcement also disables strict mode for consistency
+     * - Change takes effect immediately for all API key requests
+     */
+    patch: operations["update_scope_enforcement_setting_api_v1_settings_scope_enforcement_patch"];
+  };
+  "/api/v1/settings/strict-mode": {
+    /**
+     * Toggle API key strict mode
+     * @description Toggle API key strict mode for your tenant.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Behavior:**
+     * - Updates the `api_key_strict_mode` feature flag for your tenant
+     * - When enabled: scoped API keys are enforced with strict fail-closed semantics
+     * - When disabled: default scope enforcement behavior applies
+     * - Enabling strict mode requires `api_key_scope_enforcement` to be enabled
+     * - Change takes effect immediately for API key requests
+     */
+    patch: operations["update_strict_mode_setting_api_v1_settings_strict_mode_patch"];
+  };
   "/api/v1/assistants/": {
     /**
      * Get Assistants
      * @description Requires Admin permission if `for_tenant` is `true`.
      */
     get: operations["get_assistants_api_v1_assistants__get"];
-    /**
-     * Create Assistant
-     * @deprecated
-     */
+    /** Create Assistant */
     post: operations["create_assistant_api_v1_assistants__post"];
   };
   "/api/v1/assistants/{id}/": {
@@ -304,11 +429,9 @@ export interface paths {
   };
   "/api/v1/assistants/{id}/api-keys/": {
     /**
-     * Generate Read Only Assistant Key
-     * @description Generates a read-only api key for this assistant.
-     *
-     * This api key can only be used on `POST /api/v1/assistants/{id}/sessions/`
-     * and `POST /api/v1/assistants/{id}/sessions/{session_id}/`.
+     * Generate legacy assistant API key
+     * @deprecated
+     * @description Legacy assistant API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This returns a legacy assistant-scoped key.
      */
     get: operations["generate_read_only_assistant_key_api_v1_assistants__id__api_keys__get"];
   };
@@ -422,7 +545,6 @@ export interface paths {
     get: operations["get_services_api_v1_services__get"];
     /**
      * Create Service
-     * @deprecated
      * @description Create a service.
      *
      * `json_schema` is required if `output_validation` is 'json'.
@@ -732,6 +854,73 @@ export interface paths {
   "/api/v1/admin/privacy-policy/": {
     /** Update Privacy Policy */
     post: operations["update_privacy_policy_api_v1_admin_privacy_policy__post"];
+  };
+  "/api/v1/admin/api-key-policy": {
+    /**
+     * Get tenant API key policy
+     * @description Get API key policy settings for the current tenant.
+     */
+    get: operations["get_api_key_policy_api_v1_admin_api_key_policy_get"];
+    /**
+     * Update tenant API key policy
+     * @description Update tenant policy guardrails used for API key creation and validation.
+     */
+    patch: operations["update_api_key_policy_api_v1_admin_api_key_policy_patch"];
+  };
+  "/api/v1/admin/super-api-key-status": {
+    /**
+     * Get super API key status
+     * @description Return whether super and super-duper API keys are configured in environment settings.
+     */
+    get: operations["get_super_api_key_status_api_v1_admin_super_api_key_status_get"];
+  };
+  "/api/v1/admin/api-keys": {
+    /**
+     * List tenant API keys
+     * @description List API keys across the tenant with filters and cursor pagination.
+     */
+    get: operations["list_api_keys_admin_api_v1_admin_api_keys_get"];
+  };
+  "/api/v1/admin/api-keys/{id}": {
+    /**
+     * Get tenant API key
+     * @description Get a single API key by ID within the tenant.
+     */
+    get: operations["get_api_key_admin_api_v1_admin_api_keys__id__get"];
+    /**
+     * Revoke API key (deprecated alias)
+     * @deprecated
+     * @description Deprecated. Use POST /api/v1/admin/api-keys/{id}/revoke with reason body.
+     */
+    delete: operations["revoke_api_key_admin_deprecated_api_v1_admin_api_keys__id__delete"];
+  };
+  "/api/v1/admin/api-keys/{id}/revoke": {
+    /**
+     * Revoke tenant API key
+     * @description Revoke an API key as tenant admin with optional reason metadata.
+     */
+    post: operations["revoke_api_key_admin_api_v1_admin_api_keys__id__revoke_post"];
+  };
+  "/api/v1/admin/api-keys/{id}/suspend": {
+    /**
+     * Suspend tenant API key
+     * @description Suspend an API key so it cannot authenticate until reactivated.
+     */
+    post: operations["suspend_api_key_admin_api_v1_admin_api_keys__id__suspend_post"];
+  };
+  "/api/v1/admin/api-keys/{id}/reactivate": {
+    /**
+     * Reactivate tenant API key
+     * @description Reactivate a suspended API key.
+     */
+    post: operations["reactivate_api_key_admin_api_v1_admin_api_keys__id__reactivate_post"];
+  };
+  "/api/v1/admin/api-keys/{id}/rotate": {
+    /**
+     * Rotate tenant API key
+     * @description Rotate an API key and return the new one-time secret.
+     */
+    post: operations["rotate_api_key_admin_api_v1_admin_api_keys__id__rotate_post"];
   };
   "/api/v1/admin/credentials/{provider}": {
     /**
@@ -1345,6 +1534,36 @@ export interface paths {
     /** Change Role Of Member */
     patch: operations["change_role_of_member_api_v1_spaces__id__members__user_id___patch"];
   };
+  "/api/v1/spaces/{id}/group-members/": {
+    /**
+     * Get Space Group Members
+     * @description List all user groups that are members of this space.
+     */
+    get: operations["get_space_group_members_api_v1_spaces__id__group_members__get"];
+    /**
+     * Add Space Group Member
+     * @description Add a user group to a space with the specified role.
+     *
+     * All members of the group will gain access to the space at that role level.
+     * Groups cannot be added to personal spaces.
+     */
+    post: operations["add_space_group_member_api_v1_spaces__id__group_members__post"];
+  };
+  "/api/v1/spaces/{id}/group-members/{group_id}/": {
+    /**
+     * Remove Space Group Member
+     * @description Remove a user group from a space.
+     *
+     * All members of the group will lose access through this group membership.
+     * Note: Users may still have access through direct membership or other groups.
+     */
+    delete: operations["remove_space_group_member_api_v1_spaces__id__group_members__group_id___delete"];
+    /**
+     * Change Group Member Role
+     * @description Change the role of a user group in a space.
+     */
+    patch: operations["change_group_member_role_api_v1_spaces__id__group_members__group_id___patch"];
+  };
   "/api/v1/spaces/type/personal/": {
     /** Get Personal Space */
     get: operations["get_personal_space_api_v1_spaces_type_personal__get"];
@@ -1368,6 +1587,25 @@ export interface paths {
      * @deprecated
      */
     post: operations["create_website_api_v1_websites__post"];
+  };
+  "/api/v1/websites/check-url/": {
+    /**
+     * Check if URL exists on Organization space
+     * @description Check if a website URL already exists on the user's Organization space.
+     *
+     *     **Use case:**
+     *     When creating a new website on a Personal or Shared space, call this endpoint
+     *     to check if the URL is already being crawled on the Organization space.
+     *     This helps avoid duplicate crawls and informs users that the knowledge
+     *     might already be available for import.
+     *
+     *     **Returns:**
+     *     - Website info if URL exists on Organization space
+     *     - `null` if URL not found or user has no Organization space
+     *
+     *     **Note:** This does not block website creation - it's informational only.
+     */
+    get: operations["check_existing_website_url_api_v1_websites_check_url__get"];
   };
   "/api/v1/websites/bulk/run/": {
     /**
@@ -1935,7 +2173,7 @@ export interface paths {
     get: operations["get_sharepoint_app_api_v1_admin_sharepoint_app_get"];
     /**
      * Configure tenant SharePoint app
-     * @description Configure Azure AD application credentials for organization-wide SharePoint access. This eliminates person-dependency for shared and organization spaces by using application permissions instead of delegated user permissions. Requires admin role.
+     * @description Configure Microsoft Entra ID application credentials for organization-wide SharePoint access. This eliminates person-dependency for shared and organization spaces by using application permissions instead of delegated user permissions. Requires admin role.
      */
     post: operations["configure_sharepoint_app_api_v1_admin_sharepoint_app_post"];
     /**
@@ -2565,6 +2803,16 @@ export interface components {
       | "credentials_updated"
       | "federation_updated"
       | "api_key_generated"
+      | "api_key_created"
+      | "api_key_updated"
+      | "api_key_revoked"
+      | "api_key_suspended"
+      | "api_key_reactivated"
+      | "api_key_rotated"
+      | "api_key_expired"
+      | "api_key_used"
+      | "api_key_auth_failed"
+      | "tenant_policy_updated"
       | "module_added"
       | "module_added_to_tenant"
       | "assistant_created"
@@ -2646,6 +2894,15 @@ export interface components {
      * @enum {string}
      */
     ActorType: "user" | "system" | "api_key";
+    /** AddSpaceGroupMemberRequest */
+    AddSpaceGroupMemberRequest: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      role: components["schemas"]["SpaceRoleValue"];
+    };
     /** AddSpaceMemberRequest */
     AddSpaceMemberRequest: {
       /**
@@ -2713,6 +2970,56 @@ export interface components {
       /** Key */
       key: string;
     };
+    /** ApiKeyCreateRequest */
+    ApiKeyCreateRequest: {
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      key_type: components["schemas"]["ApiKeyType"];
+      /** @default read */
+      permission?: components["schemas"]["ApiKeyPermission"];
+      scope_type: components["schemas"]["ApiKeyScopeType"];
+      /** Scope Id */
+      scope_id?: string | null;
+      /** Allowed Origins */
+      allowed_origins?: string[] | null;
+      /** Allowed Ips */
+      allowed_ips?: string[] | null;
+      /** Expires At */
+      expires_at?: string | null;
+      /** Rate Limit */
+      rate_limit?: number | null;
+      resource_permissions?: components["schemas"]["ResourcePermissions"] | null;
+    };
+    /** ApiKeyCreatedResponse */
+    ApiKeyCreatedResponse: {
+      api_key: components["schemas"]["ApiKeyV2"];
+      /** Secret */
+      secret: string;
+    };
+    /**
+     * ApiKeyCreationConstraints
+     * @description Fields relevant to key creation UX, from tenant policy.
+     */
+    ApiKeyCreationConstraints: {
+      /**
+       * Require Expiration
+       * @default false
+       */
+      require_expiration?: boolean;
+      /** Max Expiration Days */
+      max_expiration_days?: number | null;
+      /** Max Rate Limit */
+      max_rate_limit?: number | null;
+    };
+    /** ApiKeyErrorResponse */
+    ApiKeyErrorResponse: {
+      /** Code */
+      code: string;
+      /** Message */
+      message: string;
+    };
     /** ApiKeyInDB */
     ApiKeyInDB: {
       /** Truncated Key */
@@ -2723,6 +3030,172 @@ export interface components {
       user_id: string | null;
       /** Assistant Id */
       assistant_id: string | null;
+    };
+    /**
+     * ApiKeyListResponse
+     * @description Response model for the API key list endpoint. Uses Optional total_count
+     * so non-admin users get null instead of an expensive COUNT query.
+     */
+    ApiKeyListResponse: {
+      /** Items */
+      items: components["schemas"]["ApiKeyV2"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count?: number | null;
+    };
+    /**
+     * ApiKeyPermission
+     * @enum {string}
+     */
+    ApiKeyPermission: "read" | "write" | "admin";
+    /** ApiKeyPolicyResponse */
+    ApiKeyPolicyResponse: {
+      /** Max Delegation Depth */
+      max_delegation_depth?: number | null;
+      /** Revocation Cascade Enabled */
+      revocation_cascade_enabled?: boolean | null;
+      /** Require Expiration */
+      require_expiration?: boolean | null;
+      /** Max Expiration Days */
+      max_expiration_days?: number | null;
+      /** Auto Expire Unused Days */
+      auto_expire_unused_days?: number | null;
+      /** Max Rate Limit Override */
+      max_rate_limit_override?: number | null;
+    };
+    /** ApiKeyPolicyUpdate */
+    ApiKeyPolicyUpdate: {
+      /** Max Delegation Depth */
+      max_delegation_depth?: number | null;
+      /** Revocation Cascade Enabled */
+      revocation_cascade_enabled?: boolean | null;
+      /** Require Expiration */
+      require_expiration?: boolean | null;
+      /** Max Expiration Days */
+      max_expiration_days?: number | null;
+      /** Auto Expire Unused Days */
+      auto_expire_unused_days?: number | null;
+      /** Max Rate Limit Override */
+      max_rate_limit_override?: number | null;
+    };
+    /**
+     * ApiKeyScopeType
+     * @enum {string}
+     */
+    ApiKeyScopeType: "tenant" | "space" | "assistant" | "app";
+    /**
+     * ApiKeyState
+     * @enum {string}
+     */
+    ApiKeyState: "active" | "suspended" | "revoked" | "expired";
+    /** ApiKeyStateChangeRequest */
+    ApiKeyStateChangeRequest: {
+      reason_code?: components["schemas"]["ApiKeyStateReasonCode"] | null;
+      /** Reason Text */
+      reason_text?: string | null;
+    };
+    /**
+     * ApiKeyStateReasonCode
+     * @enum {string}
+     */
+    ApiKeyStateReasonCode:
+      | "security_concern"
+      | "abuse_detected"
+      | "user_request"
+      | "admin_action"
+      | "policy_violation"
+      | "key_compromised"
+      | "user_offboarding"
+      | "rotation_completed"
+      | "scope_removed"
+      | "other";
+    /**
+     * ApiKeyType
+     * @enum {string}
+     */
+    ApiKeyType: "pk_" | "sk_";
+    /** ApiKeyUpdateRequest */
+    ApiKeyUpdateRequest: {
+      /** Name */
+      name?: string | null;
+      /** Description */
+      description?: string | null;
+      permission?: components["schemas"]["ApiKeyPermission"];
+      /** Allowed Origins */
+      allowed_origins?: string[] | null;
+      /** Allowed Ips */
+      allowed_ips?: string[] | null;
+      /** Expires At */
+      expires_at?: string | null;
+      /** Rate Limit */
+      rate_limit?: number | null;
+      resource_permissions?: components["schemas"]["ResourcePermissions"] | null;
+    };
+    /** ApiKeyV2 */
+    ApiKeyV2: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Key Prefix */
+      key_prefix: string;
+      /** Key Suffix */
+      key_suffix: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      key_type: components["schemas"]["ApiKeyType"];
+      permission: components["schemas"]["ApiKeyPermission"];
+      scope_type: components["schemas"]["ApiKeyScopeType"];
+      /** Scope Id */
+      scope_id?: string | null;
+      /** Allowed Origins */
+      allowed_origins?: string[] | null;
+      /** Allowed Ips */
+      allowed_ips?: string[] | null;
+      resource_permissions?: components["schemas"]["ResourcePermissions"] | null;
+      state: components["schemas"]["ApiKeyState"];
+      /** Expires At */
+      expires_at?: string | null;
+      /** Last Used At */
+      last_used_at?: string | null;
+      /** Revoked At */
+      revoked_at?: string | null;
+      revoked_reason_code?: components["schemas"]["ApiKeyStateReasonCode"] | null;
+      /** Revoked Reason Text */
+      revoked_reason_text?: string | null;
+      /** Suspended At */
+      suspended_at?: string | null;
+      suspended_reason_code?: components["schemas"]["ApiKeyStateReasonCode"] | null;
+      /** Suspended Reason Text */
+      suspended_reason_text?: string | null;
+      /** Rotation Grace Until */
+      rotation_grace_until?: string | null;
+      /** Rate Limit */
+      rate_limit?: number | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /** Rotated From Key Id */
+      rotated_from_key_id?: string | null;
+      /**
+       * Owner User Id
+       * Format: uuid
+       */
+      owner_user_id?: string | null;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id?: string | null;
     };
     /** AppInTemplatePublic */
     AppInTemplatePublic: {
@@ -4697,6 +5170,27 @@ export interface components {
        */
       published?: boolean;
       user: components["schemas"]["UserSparse"];
+    };
+    /** CursorPaginatedResponse[ApiKeyV2] */
+    CursorPaginatedResponse_ApiKeyV2_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["ApiKeyV2"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
     };
     /** CursorPaginatedResponse[SessionMetadataPublic] */
     CursorPaginatedResponse_SessionMetadataPublic_: {
@@ -6784,6 +7278,24 @@ export interface components {
        */
       count: number;
     };
+    /** PaginatedPermissions[SpaceGroupMember] */
+    PaginatedPermissions_SpaceGroupMember_: {
+      /**
+       * Permissions
+       * @default []
+       */
+      permissions?: components["schemas"]["ResourcePermission"][];
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["SpaceGroupMember"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
     /** PaginatedPermissions[SpaceMember] */
     PaginatedPermissions_SpaceMember_: {
       /**
@@ -7116,6 +7628,19 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["SpaceDashboard"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
+    /** PaginatedResponse[SpaceGroupMember] */
+    PaginatedResponse_SpaceGroupMember_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["SpaceGroupMember"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -7690,6 +8215,25 @@ export interface components {
       | "insight_view"
       | "insight_toggle";
     /**
+     * ResourcePermissionLevel
+     * @enum {string}
+     */
+    ResourcePermissionLevel: "none" | "read" | "write" | "admin";
+    /**
+     * ResourcePermissions
+     * @description Per-resource-type permission overrides. Each level must not exceed the key's simple permission.
+     */
+    ResourcePermissions: {
+      /** @default none */
+      assistants?: components["schemas"]["ResourcePermissionLevel"];
+      /** @default none */
+      apps?: components["schemas"]["ResourcePermissionLevel"];
+      /** @default none */
+      spaces?: components["schemas"]["ResourcePermissionLevel"];
+      /** @default none */
+      knowledge?: components["schemas"]["ResourcePermissionLevel"];
+    };
+    /**
      * RetentionPolicyResponse
      * @description Schema for audit log retention policy response.
      *
@@ -7973,21 +8517,6 @@ export interface components {
        * @description OAuth state parameter for verification
        */
       state: string;
-      /**
-       * Client Id
-       * @description Azure AD Application (Client) ID (must match auth/start)
-       */
-      client_id: string;
-      /**
-       * Client Secret
-       * @description Azure AD Application Client Secret (must match auth/start)
-       */
-      client_secret: string;
-      /**
-       * Tenant Domain
-       * @description Azure AD Tenant Domain (must match auth/start)
-       */
-      tenant_domain: string;
     };
     /**
      * ServiceAccountAuthStart
@@ -7996,19 +8525,19 @@ export interface components {
     ServiceAccountAuthStart: {
       /**
        * Client Id
-       * @description Azure AD Application (Client) ID
+       * @description Microsoft Entra ID Application (Client) ID
        * @example 12345678-1234-1234-1234-123456789012
        */
       client_id: string;
       /**
        * Client Secret
-       * @description Azure AD Application Client Secret
+       * @description Microsoft Entra ID Application Client Secret
        * @example abc123~xyz789
        */
       client_secret: string;
       /**
        * Tenant Domain
-       * @description Azure AD Tenant Domain (e.g., contoso.onmicrosoft.com)
+       * @description Microsoft Entra ID Tenant Domain (e.g., contoso.onmicrosoft.com)
        * @example contoso.onmicrosoft.com
        */
       tenant_domain: string;
@@ -8052,13 +8581,7 @@ export interface components {
     /** ServiceOutput */
     ServiceOutput: {
       /** Output */
-      output:
-        | {
-            [key: string]: unknown;
-          }
-        | unknown[]
-        | string
-        | boolean;
+      output: unknown;
       /**
        * Files
        * @default []
@@ -8292,6 +8815,21 @@ export interface components {
        * @default true
        */
       audit_logging_enabled?: boolean;
+      /**
+       * Provisioning
+       * @default false
+       */
+      provisioning?: boolean;
+      /**
+       * Api Key Scope Enforcement
+       * @default true
+       */
+      api_key_scope_enforcement?: boolean;
+      /**
+       * Api Key Strict Mode
+       * @default false
+       */
+      api_key_strict_mode?: boolean;
     };
     /**
      * SharePointSubscriptionPublic
@@ -8440,6 +8978,29 @@ export interface components {
       /** Data Retention Days */
       data_retention_days?: number | null;
     };
+    /**
+     * SpaceGroupMember
+     * @description A user group that is a member of a space with a specific role.
+     */
+    SpaceGroupMember: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      role: components["schemas"]["SpaceRoleValue"];
+      /**
+       * User Count
+       * @default 0
+       */
+      user_count?: number;
+    };
     /** SpaceMember */
     SpaceMember: {
       /** Created At */
@@ -8501,6 +9062,7 @@ export interface components {
       transcription_models: components["schemas"]["TranscriptionModelPublic"][];
       knowledge: components["schemas"]["Knowledge"];
       members: components["schemas"]["PaginatedPermissions_SpaceMember_"];
+      group_members: components["schemas"]["PaginatedPermissions_SpaceGroupMember_"];
       /** Available Roles */
       available_roles: components["schemas"]["SpaceRole"][];
       security_classification: components["schemas"]["SecurityClassificationPublic"] | null;
@@ -8658,6 +9220,13 @@ export interface components {
        */
       errors?: string[];
     };
+    /** SuperApiKeyStatus */
+    SuperApiKeyStatus: {
+      /** Super Api Key Configured */
+      super_api_key_configured: boolean;
+      /** Super Duper Api Key Configured */
+      super_duper_api_key_configured: boolean;
+    };
     /**
      * SyncLog
      * @description Detailed sync operation log.
@@ -8766,11 +9335,6 @@ export interface components {
       /** Count */
       count: number;
     };
-    /** TemplateSettingUpdate */
-    TemplateSettingUpdate: {
-      /** Enabled */
-      enabled: boolean;
-    };
     /** TemplateWizard */
     TemplateWizard: {
       /**
@@ -8806,6 +9370,7 @@ export interface components {
       display_name?: string | null;
       /**
        * Quota Limit
+       * Format: int64
        * @description Size in bytes. Default is 10 GB
        * @default 10737418240
        */
@@ -8864,6 +9429,12 @@ export interface components {
        */
       reasoning?: boolean;
       /**
+       * Hosting
+       * @description Hosting location (swe, eu, usa)
+       * @default swe
+       */
+      hosting?: string;
+      /**
        * Is Active
        * @description Enable in organization
        * @default true
@@ -8910,7 +9481,7 @@ export interface components {
       reasoning?: boolean | null;
       /**
        * Hosting
-       * @description Hosting location (eu, usa)
+       * @description Hosting location (swe, eu, usa)
        */
       hosting?: string | null;
       /**
@@ -8959,6 +9530,12 @@ export interface components {
        */
       max_input?: number | null;
       /**
+       * Hosting
+       * @description Hosting location (swe, eu, usa)
+       * @default swe
+       */
+      hosting?: string;
+      /**
        * Is Active
        * @description Enable in organization
        * @default true
@@ -9000,7 +9577,7 @@ export interface components {
       max_input?: number | null;
       /**
        * Hosting
-       * @description Hosting location (eu, usa)
+       * @description Hosting location (swe, eu, usa)
        */
       hosting?: string | null;
       /**
@@ -9066,6 +9643,10 @@ export interface components {
       };
       /** Crawler Settings */
       crawler_settings?: {
+        [key: string]: unknown;
+      };
+      /** Api Key Policy */
+      api_key_policy?: {
         [key: string]: unknown;
       };
     };
@@ -9145,6 +9726,7 @@ export interface components {
       display_name?: string | null;
       /**
        * Quota Limit
+       * Format: int64
        * @description Size in bytes. Default is 10 GB
        * @default 10737418240
        */
@@ -9175,19 +9757,19 @@ export interface components {
     TenantSharePointAppCreate: {
       /**
        * Client Id
-       * @description Azure AD Application (Client) ID
+       * @description Microsoft Entra ID Application (Client) ID
        * @example 12345678-1234-1234-1234-123456789012
        */
       client_id: string;
       /**
        * Client Secret
-       * @description Azure AD Application Client Secret
+       * @description Microsoft Entra ID Application Client Secret
        * @example abc123~xyz789
        */
       client_secret: string;
       /**
        * Tenant Domain
-       * @description Azure AD Tenant Domain (e.g., contoso.onmicrosoft.com)
+       * @description Microsoft Entra ID Tenant Domain (e.g., contoso.onmicrosoft.com)
        * @example contoso.onmicrosoft.com
        */
       tenant_domain: string;
@@ -9274,6 +9856,12 @@ export interface components {
        */
       display_name: string;
       /**
+       * Hosting
+       * @description Hosting location (swe, eu, usa)
+       * @default swe
+       */
+      hosting?: string;
+      /**
        * Is Active
        * @description Enable in organization
        * @default true
@@ -9300,7 +9888,7 @@ export interface components {
       description?: string | null;
       /**
        * Hosting
-       * @description Hosting location (eu, usa)
+       * @description Hosting location (swe, eu, usa)
        */
       hosting?: string | null;
       /**
@@ -9395,6 +9983,15 @@ export interface components {
       crawler_settings?: {
         [key: string]: unknown;
       };
+      /** Api Key Policy */
+      api_key_policy?: {
+        [key: string]: unknown;
+      };
+    };
+    /** ToggleSettingUpdate */
+    ToggleSettingUpdate: {
+      /** Enabled */
+      enabled: boolean;
     };
     /**
      * TokenEstimateBreakdown
@@ -9672,6 +10269,10 @@ export interface components {
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelPublic"][];
     };
+    /** UpdateSpaceGroupMemberRequest */
+    UpdateSpaceGroupMemberRequest: {
+      role: components["schemas"]["SpaceRoleValue"];
+    };
     /** UpdateSpaceMemberRequest */
     UpdateSpaceMemberRequest: {
       role: components["schemas"]["SpaceRoleValue"];
@@ -9881,7 +10482,7 @@ export interface components {
       /** Modules */
       modules: readonly string[];
       /** User Groups Ids */
-      user_groups_ids: readonly number[];
+      user_groups_ids: readonly string[];
       /** Permissions */
       permissions: readonly components["schemas"]["Permission"][];
     };
@@ -10097,7 +10698,7 @@ export interface components {
       /** Modules */
       modules: readonly string[];
       /** User Groups Ids */
-      user_groups_ids: readonly number[];
+      user_groups_ids: readonly string[];
       /** Permissions */
       permissions: readonly components["schemas"]["Permission"][];
     };
@@ -10383,7 +10984,7 @@ export interface components {
        * Predefined Roles
        * @description List of predefined role IDs to assign (replaces existing predefined roles)
        */
-      predefined_roles?: components["schemas"]["ModelId"][];
+      predefined_roles?: components["schemas"]["ModelId"][] | null;
       /** @description User state (invited/active/inactive) */
       state?: components["schemas"]["UserState"] | null;
     };
@@ -10494,6 +11095,41 @@ export interface components {
       /** @default never */
       update_interval?: components["schemas"]["UpdateInterval"];
       embedding_model: components["schemas"]["ModelId"];
+    };
+    /**
+     * WebsiteExistsResponse
+     * @description Response model for checking if a website URL exists on the Organization space.
+     */
+    WebsiteExistsResponse: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Space Name */
+      space_name: string;
+      /** Url */
+      url: string;
+      /** Name */
+      name: string | null;
+      update_interval: components["schemas"]["UpdateInterval"];
+      /** Last Crawled At */
+      last_crawled_at: string | null;
+      /** Pages Crawled */
+      pages_crawled?: number | null;
+      /** Pages Failed */
+      pages_failed?: number | null;
+      /** Files Downloaded */
+      files_downloaded?: number | null;
+      /** Files Failed */
+      files_failed?: number | null;
+      /** Crawl Status */
+      crawl_status?: string | null;
     };
     /** WebsiteMetadata */
     WebsiteMetadata: {
@@ -10838,6 +11474,10 @@ export interface components {
       pages_failed?: number | null;
       /** Files Failed */
       files_failed?: number | null;
+      /** Failure Summary */
+      failure_summary?: {
+        [key: string]: number;
+      } | null;
       /** @default queued */
       status?: components["schemas"]["Status"] | null;
       /** Result Location */
@@ -10864,6 +11504,10 @@ export interface components {
       pages_failed: number | null;
       /** Files Failed */
       files_failed: number | null;
+      /** Failure Summary */
+      failure_summary?: {
+        [key: string]: number;
+      } | null;
       status: components["schemas"]["Status"];
       /** Result Location */
       result_location: string | null;
@@ -11242,57 +11886,513 @@ export interface operations {
     };
   };
   /**
-   * Login
-   * @description OAuth2 Login with comprehensive error handling and logging
+   * Get API key creation constraints
+   * @description Returns tenant policy limits relevant to key creation UX (expiration, rate limit).
    */
-  Login_api_v1_users_login_token__post: {
-    requestBody: {
-      content: {
-        "application/x-www-form-urlencoded": components["schemas"]["Body_Login_api_v1_users_login_token__post"];
-      };
-    };
+  get_creation_constraints_api_v1_api_keys_creation_constraints_get: {
     responses: {
-      /** @description Successful Response */
+      /** @description Creation constraints from tenant policy. */
       200: {
         content: {
-          "application/json": components["schemas"]["AccessToken"];
+          "application/json": components["schemas"]["ApiKeyCreationConstraints"];
         };
       };
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
-      /** @description Validation Error */
-      422: {
+      /** @description Too Many Requests */
+      429: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
   };
   /**
-   * Login With Mobilityguard
-   * @description OpenID Connect Login (generic OIDC provider).
+   * List API keys
+   * @description List manageable API keys in the current tenant with cursor pagination and filters.
    */
-  login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["OpenIdConnectLogin"];
+  list_api_keys_api_v1_api_keys_get: {
+    parameters: {
+      query?: {
+        /** @description Keys per page */
+        limit?: number | null;
+        /** @description Current cursor */
+        cursor?: string | null;
+        /** @description Show previous page */
+        previous?: boolean;
+        /** @description Scope type filter */
+        scope_type?: components["schemas"]["ApiKeyScopeType"] | null;
+        /** @description Scope id filter */
+        scope_id?: string | null;
+        /** @description State filter */
+        state?: components["schemas"]["ApiKeyState"] | null;
+        /** @description Key type filter */
+        key_type?: components["schemas"]["ApiKeyType"] | null;
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Paginated API key list. */
       200: {
         content: {
-          "application/json": components["schemas"]["AccessToken"];
+          "application/json": components["schemas"]["ApiKeyListResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Create API key
+   * @description Create a v2 API key with scoped permission, guardrails, and optional rate limits.
+   */
+  create_api_key_api_v1_api_keys_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description API key created successfully. Secret is shown once. */
+      201: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyCreatedResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Get API key
+   * @description Get a single API key by ID if the current user is authorized to manage it.
+   */
+  get_api_key_api_v1_api_keys__id__get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description API key details. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Revoke API key (deprecated alias)
+   * @deprecated
+   * @description Deprecated. Use POST /api/v1/api-keys/{id}/revoke with reason body.
+   */
+  revoke_api_key_deprecated_api_v1_api_keys__id__delete: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description API key revoked. No response body. */
+      204: {
+        content: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Update API key
+   * @description Update API key metadata and guardrail fields supported by policy.
+   */
+  update_api_key_api_v1_api_keys__id__patch: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated API key. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Revoke API key
+   * @description Revoke an API key and optionally include reason metadata for audit logs.
+   */
+  revoke_api_key_api_v1_api_keys__id__revoke_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyStateChangeRequest"] | null;
+      };
+    };
+    responses: {
+      /** @description Revoked API key. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Rotate API key
+   * @description Rotate an API key, issuing a new secret and starting the grace overlap window.
+   */
+  rotate_api_key_api_v1_api_keys__id__rotate_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Rotated API key and one-time secret. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyCreatedResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Suspend API key
+   * @description Suspend an API key temporarily. Suspended keys cannot authenticate.
+   */
+  suspend_api_key_api_v1_api_keys__id__suspend_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyStateChangeRequest"] | null;
+      };
+    };
+    responses: {
+      /** @description Suspended API key. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Reactivate API key
+   * @description Reactivate a previously suspended API key.
+   */
+  reactivate_api_key_api_v1_api_keys__id__reactivate_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Reactivated API key. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
@@ -11326,52 +12426,35 @@ export interface operations {
       };
     };
   };
-  /** Get Current User */
-  Get_current_user_api_v1_users_me__get: {
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["UserPublic"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
   /**
-   * Generate Api Key
-   * @description Generating a new api key will delete the old key.
-   * Make sure to copy the key since it will only be showed once,
-   * after which only the truncated key will be shown.
+   * Generate legacy user API key
+   * @deprecated
+   * @description Legacy API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This endpoint rotates the old legacy key immediately.
    */
-  generate_api_key_api_v1_users_api_keys__get: {
+  generate_api_key_api_v1_users_api_keys__post: {
     responses: {
-      /** @description Successful Response */
+      /** @description Legacy API key created and returned once. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKey"];
         };
       };
-    };
-  };
-  /** Get Current User Tenant */
-  Get_current_user_tenant_api_v1_users_tenant__get: {
-    responses: {
-      /** @description Successful Response */
-      200: {
+      /** @description Unauthorized */
+      401: {
         content: {
-          "application/json": components["schemas"]["TenantPublic"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
-      /** @description Not Found */
-      404: {
+      /** @description Forbidden */
+      403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Legacy endpoint disabled. Migrate to v2 endpoint. */
+      410: {
+        content: {
+          "application/json": unknown;
         };
       };
     };
@@ -11441,6 +12524,96 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Login
+   * @description OAuth2 Login with comprehensive error handling and logging
+   */
+  Login_api_v1_users_login_token__post: {
+    requestBody: {
+      content: {
+        "application/x-www-form-urlencoded": components["schemas"]["Body_Login_api_v1_users_login_token__post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessToken"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Login With Mobilityguard
+   * @description OpenID Connect Login (generic OIDC provider).
+   */
+  login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OpenIdConnectLogin"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessToken"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Current User */
+  Get_current_user_api_v1_users_me__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UserPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /** Get Current User Tenant */
+  Get_current_user_tenant_api_v1_users_tenant__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -11609,6 +12782,7 @@ export interface operations {
   /**
    * Get Groups
    * @deprecated
+   * @description Legacy groups endpoint. Use collections/spaces instead for new integrations.
    */
   get_groups_api_v1_groups__get: {
     responses: {
@@ -11623,8 +12797,7 @@ export interface operations {
   /**
    * Create Group
    * @deprecated
-   * @description Valid values for `embedding_model` are the provided by `GET /api/v1/settings/models/`.
-   * Use the `name` field of the response from this endpoint.
+   * @description Legacy groups endpoint. Use collections/spaces instead for new integrations.
    */
   create_group_api_v1_groups__post: {
     requestBody: {
@@ -12003,7 +13176,7 @@ export interface operations {
   update_template_setting_api_v1_settings_templates_patch: {
     requestBody: {
       content: {
-        "application/json": components["schemas"]["TemplateSettingUpdate"];
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
       };
     };
     responses: {
@@ -12053,7 +13226,125 @@ export interface operations {
   update_audit_logging_setting_api_v1_settings_audit_logging_patch: {
     requestBody: {
       content: {
-        "application/json": components["schemas"]["TemplateSettingUpdate"];
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Toggle JIT user provisioning
+   * @description Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Behavior:**
+   * - When enabled: Users are automatically created on first SSO login
+   * - When disabled: Only pre-existing users can log in via SSO
+   * - New users get the "User" role by default
+   * - Change takes effect immediately for all SSO logins
+   *
+   * **Example Request:**
+   * ```json
+   * {
+   *   "enabled": true
+   * }
+   * ```
+   *
+   * **Example Response:**
+   * ```json
+   * {
+   *   "chatbot_widget": {},
+   *   "using_templates": true,
+   *   "audit_logging_enabled": true,
+   *   "provisioning": true
+   * }
+   * ```
+   */
+  update_provisioning_setting_api_v1_settings_provisioning_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Toggle API key scope enforcement
+   * @description Toggle API key scope enforcement for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Behavior:**
+   * - Updates the `api_key_scope_enforcement` feature flag for your tenant
+   * - When enabled: API keys are restricted to resources within their configured scope
+   * - When disabled: All API keys can access resources beyond their configured scope
+   * - Disabling scope enforcement also disables strict mode for consistency
+   * - Change takes effect immediately for all API key requests
+   */
+  update_scope_enforcement_setting_api_v1_settings_scope_enforcement_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Toggle API key strict mode
+   * @description Toggle API key strict mode for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Behavior:**
+   * - Updates the `api_key_strict_mode` feature flag for your tenant
+   * - When enabled: scoped API keys are enforced with strict fail-closed semantics
+   * - When disabled: default scope enforcement behavior applies
+   * - Enabling strict mode requires `api_key_scope_enforcement` to be enabled
+   * - Change takes effect immediately for API key requests
+   */
+  update_strict_mode_setting_api_v1_settings_strict_mode_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
       };
     };
     responses: {
@@ -12097,10 +13388,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Create Assistant
-   * @deprecated
-   */
+  /** Create Assistant */
   create_assistant_api_v1_assistants__post: {
     requestBody: {
       content: {
@@ -12941,11 +14229,9 @@ export interface operations {
     };
   };
   /**
-   * Generate Read Only Assistant Key
-   * @description Generates a read-only api key for this assistant.
-   *
-   * This api key can only be used on `POST /api/v1/assistants/{id}/sessions/`
-   * and `POST /api/v1/assistants/{id}/sessions/{session_id}/`.
+   * Generate legacy assistant API key
+   * @deprecated
+   * @description Legacy assistant API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This returns a legacy assistant-scoped key.
    */
   generate_read_only_assistant_key_api_v1_assistants__id__api_keys__get: {
     parameters: {
@@ -12954,10 +14240,28 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Legacy assistant API key created and returned once. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKey"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Legacy endpoint disabled. Migrate to v2 endpoint. */
+      410: {
+        content: {
+          "application/json": unknown;
         };
       };
       /** @description Validation Error */
@@ -13730,7 +15034,6 @@ export interface operations {
   };
   /**
    * Create Service
-   * @deprecated
    * @description Create a service.
    *
    * `json_schema` is required if `output_validation` is 'json'.
@@ -14769,6 +16072,506 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get tenant API key policy
+   * @description Get API key policy settings for the current tenant.
+   */
+  get_api_key_policy_api_v1_admin_api_key_policy_get: {
+    responses: {
+      /** @description Current tenant API key policy. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyPolicyResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Update tenant API key policy
+   * @description Update tenant policy guardrails used for API key creation and validation.
+   */
+  update_api_key_policy_api_v1_admin_api_key_policy_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyPolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Updated tenant API key policy. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyPolicyResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Get super API key status
+   * @description Return whether super and super-duper API keys are configured in environment settings.
+   */
+  get_super_api_key_status_api_v1_admin_super_api_key_status_get: {
+    responses: {
+      /** @description Super key configuration status. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SuperApiKeyStatus"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * List tenant API keys
+   * @description List API keys across the tenant with filters and cursor pagination.
+   */
+  list_api_keys_admin_api_v1_admin_api_keys_get: {
+    parameters: {
+      query?: {
+        /** @description Keys per page */
+        limit?: number | null;
+        /** @description Current cursor */
+        cursor?: string | null;
+        /** @description Show previous page */
+        previous?: boolean;
+        /** @description Scope type filter */
+        scope_type?: components["schemas"]["ApiKeyScopeType"] | null;
+        /** @description Scope id filter */
+        scope_id?: string | null;
+        /** @description State filter */
+        state?: components["schemas"]["ApiKeyState"] | null;
+        /** @description Key type filter */
+        key_type?: components["schemas"]["ApiKeyType"] | null;
+        /** @description Creator user id filter */
+        created_by_user_id?: string | null;
+        /** @description Case-insensitive search over key name, suffix, and description. */
+        search?: string | null;
+      };
+    };
+    responses: {
+      /** @description Paginated tenant API key list. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_ApiKeyV2_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Get tenant API key
+   * @description Get a single API key by ID within the tenant.
+   */
+  get_api_key_admin_api_v1_admin_api_keys__id__get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Tenant API key details. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Revoke API key (deprecated alias)
+   * @deprecated
+   * @description Deprecated. Use POST /api/v1/admin/api-keys/{id}/revoke with reason body.
+   */
+  revoke_api_key_admin_deprecated_api_v1_admin_api_keys__id__delete: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description API key revoked. No response body. */
+      204: {
+        content: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Revoke tenant API key
+   * @description Revoke an API key as tenant admin with optional reason metadata.
+   */
+  revoke_api_key_admin_api_v1_admin_api_keys__id__revoke_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyStateChangeRequest"] | null;
+      };
+    };
+    responses: {
+      /** @description Revoked tenant API key. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Suspend tenant API key
+   * @description Suspend an API key so it cannot authenticate until reactivated.
+   */
+  suspend_api_key_admin_api_v1_admin_api_keys__id__suspend_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyStateChangeRequest"] | null;
+      };
+    };
+    responses: {
+      /** @description Suspended tenant API key. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Reactivate tenant API key
+   * @description Reactivate a suspended API key.
+   */
+  reactivate_api_key_admin_api_v1_admin_api_keys__id__reactivate_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Reactivated tenant API key. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Rotate tenant API key
+   * @description Rotate an API key and return the new one-time secret.
+   */
+  rotate_api_key_admin_api_v1_admin_api_keys__id__rotate_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Rotated tenant API key and one-time secret. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyCreatedResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
@@ -16523,12 +18326,6 @@ export interface operations {
           "application/json": unknown;
         };
       };
-      /** @description Bad Request */
-      400: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
       /** @description Not Found */
       404: {
         content: {
@@ -16637,12 +18434,6 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -16761,12 +18552,6 @@ export interface operations {
           "application/json": unknown;
         };
       };
-      /** @description Bad Request */
-      400: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
       /** @description Forbidden */
       403: {
         content: {
@@ -16881,12 +18666,6 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -17997,6 +19776,188 @@ export interface operations {
       };
     };
   };
+  /**
+   * Get Space Group Members
+   * @description List all user groups that are members of this space.
+   */
+  get_space_group_members_api_v1_spaces__id__group_members__get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_SpaceGroupMember_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Add Space Group Member
+   * @description Add a user group to a space with the specified role.
+   *
+   * All members of the group will gain access to the space at that role level.
+   * Groups cannot be added to personal spaces.
+   */
+  add_space_group_member_api_v1_spaces__id__group_members__post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AddSpaceGroupMemberRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["SpaceGroupMember"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Remove Space Group Member
+   * @description Remove a user group from a space.
+   *
+   * All members of the group will lose access through this group membership.
+   * Note: Users may still have access through direct membership or other groups.
+   */
+  remove_space_group_member_api_v1_spaces__id__group_members__group_id___delete: {
+    parameters: {
+      path: {
+        id: string;
+        group_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Change Group Member Role
+   * @description Change the role of a user group in a space.
+   */
+  change_group_member_role_api_v1_spaces__id__group_members__group_id___patch: {
+    parameters: {
+      path: {
+        id: string;
+        group_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateSpaceGroupMemberRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SpaceGroupMember"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Get Personal Space */
   get_personal_space_api_v1_spaces_type_personal__get: {
     responses: {
@@ -18082,6 +20043,44 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["WebsitePublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Check if URL exists on Organization space
+   * @description Check if a website URL already exists on the user's Organization space.
+   *
+   *     **Use case:**
+   *     When creating a new website on a Personal or Shared space, call this endpoint
+   *     to check if the URL is already being crawled on the Organization space.
+   *     This helps avoid duplicate crawls and informs users that the knowledge
+   *     might already be available for import.
+   *
+   *     **Returns:**
+   *     - Website info if URL exists on Organization space
+   *     - `null` if URL not found or user has no Organization space
+   *
+   *     **Note:** This does not block website creation - it's informational only.
+   */
+  check_existing_website_url_api_v1_websites_check_url__get: {
+    parameters: {
+      query: {
+        /** @description The website URL to check */
+        url: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WebsiteExistsResponse"] | null;
         };
       };
       /** @description Validation Error */
@@ -19855,7 +21854,7 @@ export interface operations {
   };
   /**
    * Configure tenant SharePoint app
-   * @description Configure Azure AD application credentials for organization-wide SharePoint access. This eliminates person-dependency for shared and organization spaces by using application permissions instead of delegated user permissions. Requires admin role.
+   * @description Configure Microsoft Entra ID application credentials for organization-wide SharePoint access. This eliminates person-dependency for shared and organization spaces by using application permissions instead of delegated user permissions. Requires admin role.
    */
   configure_sharepoint_app_api_v1_admin_sharepoint_app_post: {
     requestBody: {

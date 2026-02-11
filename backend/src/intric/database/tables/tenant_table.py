@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, Any, Optional
 
+import sqlalchemy as sa
 from sqlalchemy import BigInteger, Column, ForeignKey, String, Table
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -32,6 +33,20 @@ class Tenants(BasePublic):
     crawler_settings: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default="{}"
     )
+    api_key_policy: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=sa.text(
+            "jsonb_build_object("
+            "'max_delegation_depth', 3, "
+            "'revocation_cascade_enabled', false, "
+            "'require_expiration', false, "
+            "'max_expiration_days', NULL, "
+            "'auto_expire_unused_days', NULL, "
+            "'max_rate_limit_override', NULL"
+            ")"
+        ),
+    )
 
     modules: Mapped[list[Modules]] = relationship(secondary="tenants_modules")
     sharepoint_app: Mapped[Optional["TenantSharePointApp"]] = relationship(
@@ -41,7 +56,7 @@ class Tenants(BasePublic):
 
 tenants_modules_table = Table(
     "tenants_modules",
-    Base.metadata,
+    Base.metadata,  # pyright: ignore[reportAttributeAccessIssue]
     Column("tenant_id", ForeignKey(Tenants.id, ondelete="CASCADE"), primary_key=True),
     Column("module_id", ForeignKey(Modules.id, ondelete="CASCADE"), primary_key=True),
 )

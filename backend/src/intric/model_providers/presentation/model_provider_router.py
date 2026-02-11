@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from intric.authentication.auth_dependencies import get_current_active_user
+from intric.roles.permissions import Permission, validate_permission
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.config import get_settings
 from intric.model_providers.domain.model_provider_service import ModelProviderService
@@ -37,9 +38,11 @@ def get_model_provider_service(
     response_model=list[ModelProviderPublic],
 )
 async def list_providers(
+    user: UserInDB = Depends(get_current_active_user),
     service: ModelProviderService = Depends(get_model_provider_service),
 ):
     """List all model providers for the tenant."""
+    validate_permission(user, Permission.ADMIN)
     providers = await service.get_all()
     return [ModelProviderPublic(**provider.to_dict()) for provider in providers]
 
@@ -51,9 +54,11 @@ async def list_providers(
 )
 async def get_provider(
     provider_id: UUID,
+    user: UserInDB = Depends(get_current_active_user),
     service: ModelProviderService = Depends(get_model_provider_service),
 ):
     """Get a specific model provider."""
+    validate_permission(user, Permission.ADMIN)
     provider = await service.get_by_id(provider_id)
     return ModelProviderPublic(**provider.to_dict())
 
@@ -69,6 +74,7 @@ async def create_provider(
     service: ModelProviderService = Depends(get_model_provider_service),
 ):
     """Create a new model provider."""
+    validate_permission(user, Permission.ADMIN)
     provider = await service.create(
         tenant_id=user.tenant_id,
         name=data.name,
@@ -88,9 +94,11 @@ async def create_provider(
 async def update_provider(
     provider_id: UUID,
     data: ModelProviderUpdate,
+    user: UserInDB = Depends(get_current_active_user),
     service: ModelProviderService = Depends(get_model_provider_service),
 ):
     """Update an existing model provider."""
+    validate_permission(user, Permission.ADMIN)
     provider = await service.update(
         provider_id=provider_id,
         name=data.name,
@@ -108,11 +116,13 @@ async def update_provider(
 )
 async def delete_provider(
     provider_id: UUID,
+    user: UserInDB = Depends(get_current_active_user),
     service: ModelProviderService = Depends(get_model_provider_service),
 ):
     """Delete a model provider.
 
     Will fail if the provider has models attached to it.
     """
+    validate_permission(user, Permission.ADMIN)
     await service.delete(provider_id)
     return {"message": "Provider deleted successfully"}

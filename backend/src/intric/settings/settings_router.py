@@ -7,15 +7,17 @@ from intric.files.text import TextMimeTypes
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.main.models import PaginatedResponse
+from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import to_paginated_response
 from intric.settings import settings_factory
 from intric.settings.setting_service import SettingService
-from intric.settings.settings import GetModelsResponse, SettingsPublic, TemplateSettingUpdate
+from intric.settings.settings import GetModelsResponse, SettingsPublic, ToggleSettingUpdate
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+settings_admin_router = APIRouter()
 
 
 @router.get("/", response_model=SettingsPublic)
@@ -27,12 +29,13 @@ async def get_settings(
     return await service.get_settings()
 
 
-@router.post("/", response_model=SettingsPublic)
+@settings_admin_router.post("/", response_model=SettingsPublic)
 async def upsert_settings(
     settings: SettingsPublic,
     container: Container = Depends(get_container(with_user=True)),
 ):
     """Omitted fields are not updated."""
+    validate_permission(container.user(), Permission.ADMIN)
     service = container.settings_service()
     return await service.update_settings(settings)
 
@@ -68,7 +71,7 @@ def get_formats():
     )
 
 
-@router.patch(
+@settings_admin_router.patch(
     "/templates",
     response_model=SettingsPublic,
     summary="Toggle template feature",
@@ -100,7 +103,7 @@ Enable or disable the template management feature for your tenant.
     """,
 )
 async def update_template_setting(
-    data: TemplateSettingUpdate,
+    data: ToggleSettingUpdate,
     container: Container = Depends(get_container(with_user=True)),
 ):
     """
@@ -113,7 +116,7 @@ async def update_template_setting(
     return await service.update_template_setting(enabled=data.enabled)
 
 
-@router.patch(
+@settings_admin_router.patch(
     "/audit-logging",
     response_model=SettingsPublic,
     summary="Toggle global audit logging",
@@ -147,7 +150,7 @@ Enable or disable global audit logging for your tenant.
     """,
 )
 async def update_audit_logging_setting(
-    data: TemplateSettingUpdate,
+    data: ToggleSettingUpdate,
     container: Container = Depends(get_container(with_user=True)),
 ):
     """
@@ -160,7 +163,7 @@ async def update_audit_logging_setting(
     return await service.update_audit_logging_setting(enabled=data.enabled)
 
 
-@router.patch(
+@settings_admin_router.patch(
     "/provisioning",
     response_model=SettingsPublic,
     summary="Toggle JIT user provisioning",
@@ -194,8 +197,58 @@ Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
     """,
 )
 async def update_provisioning_setting(
-    data: TemplateSettingUpdate,
+    data: ToggleSettingUpdate,
     container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.settings_service()
     return await service.update_provisioning_setting(enabled=data.enabled)
+
+
+@settings_admin_router.patch(
+    "/scope-enforcement",
+    response_model=SettingsPublic,
+    summary="Toggle API key scope enforcement",
+    description="""
+Toggle API key scope enforcement for your tenant.
+
+**Admin Only:** Requires admin permissions.
+
+**Behavior:**
+- Updates the `api_key_scope_enforcement` feature flag for your tenant
+- When enabled: API keys are restricted to resources within their configured scope
+- When disabled: All API keys can access resources beyond their configured scope
+- Disabling scope enforcement also disables strict mode for consistency
+- Change takes effect immediately for all API key requests
+    """,
+)
+async def update_scope_enforcement_setting(
+    data: ToggleSettingUpdate,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.settings_service()
+    return await service.update_scope_enforcement_setting(enabled=data.enabled)
+
+
+@settings_admin_router.patch(
+    "/strict-mode",
+    response_model=SettingsPublic,
+    summary="Toggle API key strict mode",
+    description="""
+Toggle API key strict mode for your tenant.
+
+**Admin Only:** Requires admin permissions.
+
+**Behavior:**
+- Updates the `api_key_strict_mode` feature flag for your tenant
+- When enabled: scoped API keys are enforced with strict fail-closed semantics
+- When disabled: default scope enforcement behavior applies
+- Enabling strict mode requires `api_key_scope_enforcement` to be enabled
+- Change takes effect immediately for API key requests
+    """,
+)
+async def update_strict_mode_setting(
+    data: ToggleSettingUpdate,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.settings_service()
+    return await service.update_strict_mode_setting(enabled=data.enabled)

@@ -43,6 +43,13 @@ from intric.assistants.assistant_repo import AssistantRepository
 from intric.assistants.assistant_service import AssistantService
 from intric.assistants.references import ReferencesService
 from intric.authentication.api_key_repo import ApiKeysRepository
+from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
+from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
+from intric.authentication.api_key_maintenance import ApiKeyMaintenanceService
+from intric.authentication.api_key_policy import ApiKeyPolicyService
+from intric.authentication.api_key_rate_limiter import ApiKeyRateLimiter
+from intric.authentication.api_key_resolver import ApiKeyAuthResolver
+from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from intric.authentication.auth_service import AuthService
 from intric.collections.application.collection_crud_service import CollectionCRUDService
 from intric.completion_models.application import CompletionModelCRUDService
@@ -387,7 +394,7 @@ class SessionProxy:
                 "Cannot call SessionProxy without active session scope. "
                 "Wrap your code in 'async with container.session_scope():'."
             )
-        return session(*args, **kwargs)
+        return session(*args, **kwargs)  # pyright: ignore[reportCallIssue]
 
 
 class Container(containers.DeclarativeContainer):
@@ -530,6 +537,7 @@ class Container(containers.DeclarativeContainer):
     )
 
     api_key_repo = providers.Factory(ApiKeysRepository, session=session)
+    api_key_v2_repo = providers.Factory(ApiKeysV2Repository, session=session)
     group_repo = providers.Factory(GroupRepository, session=session)
     info_blob_repo = providers.Factory(InfoBlobRepository, session=session)
     job_repo = providers.Factory(JobRepository, session=session)
@@ -754,6 +762,7 @@ class Container(containers.DeclarativeContainer):
     auth_service = providers.Factory(
         AuthService,
         api_key_repo=api_key_repo,
+        api_key_v2_repo=api_key_v2_repo,
     )
     tenant_service = providers.Factory(
         TenantService,
@@ -761,15 +770,6 @@ class Container(containers.DeclarativeContainer):
         completion_model_repo=completion_model_repo,
         embedding_model_repo=embedding_model_repo,
         transcription_model_enable_service=transcription_model_enable_service,
-    )
-    user_service = providers.Factory(
-        UserService,
-        user_repo=user_repo,
-        auth_service=auth_service,
-        settings_repo=settings_repo,
-        tenant_repo=tenant_repo,
-        predefined_roles_repo=predefined_roles_repo,
-        info_blob_repo=info_blob_repo,
     )
     security_classification_service = providers.Factory(
         SecurityClassificationService,
@@ -787,6 +787,18 @@ class Container(containers.DeclarativeContainer):
         repository=audit_log_repo,
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
+    )
+    api_key_scope_revoker = providers.Factory(
+        ApiKeyScopeRevoker,
+        api_key_repo=api_key_v2_repo,
+        audit_service=audit_service,
+        user=user,
+    )
+    api_key_auth_resolver = providers.Factory(
+        ApiKeyAuthResolver,
+        api_key_repo=api_key_v2_repo,
+        legacy_repo=api_key_repo,
+        audit_service=audit_service,
     )
     audit_export_service = providers.Factory(
         AuditExportService,
@@ -815,6 +827,30 @@ class Container(containers.DeclarativeContainer):
         actor_manager=actor_manager,
         security_classification_service=security_classification_service,
         icon_repo=icon_repo,
+        api_key_scope_revoker=api_key_scope_revoker,
+    )
+    api_key_policy_service = providers.Factory(
+        ApiKeyPolicyService,
+        allowed_origin_repo=allowed_origin_repo,
+        space_service=space_service,
+        user=user,
+    )
+    api_key_rate_limiter = providers.Factory(
+        ApiKeyRateLimiter,
+        redis_client=redis_client,
+    )
+    api_key_lifecycle_service = providers.Factory(
+        ApiKeyLifecycleService,
+        api_key_repo=api_key_v2_repo,
+        policy_service=api_key_policy_service,
+        audit_service=audit_service,
+        user=user,
+    )
+    api_key_maintenance_service = providers.Factory(
+        ApiKeyMaintenanceService,
+        api_key_repo=api_key_v2_repo,
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
     )
     storage_service = providers.Factory(StorageInfoService, repo=storage_repo)
     job_service = providers.Factory(
@@ -879,6 +915,7 @@ class Container(containers.DeclarativeContainer):
         ai_models_service=ai_models_service,
         feature_flag_service=feature_flag_service,
         tenant_repo=tenant_repo,
+        audit_service=audit_service,
     )
     crawl_service = providers.Factory(
         CrawlService,
@@ -974,6 +1011,7 @@ class Container(containers.DeclarativeContainer):
         completion_service=completion_service,
         references_service=references_service,
         icon_repo=icon_repo,
+        api_key_scope_revoker=api_key_scope_revoker,
     )
     group_chat_service = providers.Factory(
         GroupChatService,
@@ -1009,6 +1047,21 @@ class Container(containers.DeclarativeContainer):
     )
     user_group_service = providers.Factory(
         UserGroupsService, user=user, repo=user_groups_repo
+    )
+    user_service = providers.Factory(
+        UserService,
+        user_repo=user_repo,
+        auth_service=auth_service,
+        api_key_auth_resolver=api_key_auth_resolver,
+        api_key_v2_repo=api_key_v2_repo,
+        allowed_origin_repo=allowed_origin_repo,
+        audit_service=audit_service,
+        settings_repo=settings_repo,
+        tenant_repo=tenant_repo,
+        predefined_roles_repo=predefined_roles_repo,
+        info_blob_repo=info_blob_repo,
+        api_key_rate_limiter=api_key_rate_limiter,
+        feature_flag_service=feature_flag_service,
     )
     admin_service = providers.Factory(
         AdminService,
@@ -1270,6 +1323,7 @@ class Container(containers.DeclarativeContainer):
         app_template_service=app_template_service,
         actor_manager=actor_manager,
         icon_repo=icon_repo,
+        api_key_scope_revoker=api_key_scope_revoker,
     )
     app_run_service = providers.Factory(
         AppRunService,

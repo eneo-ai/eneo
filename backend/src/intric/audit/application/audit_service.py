@@ -10,7 +10,7 @@ Export functionality has been extracted to AuditExportService.
 
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Mapping, Optional
 from uuid import UUID, uuid4
 
 from intric.audit.application.audit_config_service import AuditConfigService
@@ -90,7 +90,7 @@ class AuditService:
         entity_type: EntityType,
         entity_id: UUID,
         description: str,
-        metadata: dict,
+        metadata: Mapping[str, object],
         outcome: Outcome = Outcome.SUCCESS,
         actor_type: ActorType = ActorType.USER,
         ip_address: Optional[str] = None,
@@ -231,7 +231,7 @@ class AuditService:
         entity_type: EntityType,
         entity_id: UUID,
         description: str,
-        metadata: dict,
+        metadata: Mapping[str, object],
         outcome: Outcome = Outcome.SUCCESS,
         actor_type: ActorType = ActorType.USER,
         ip_address: Optional[str] = None,

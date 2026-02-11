@@ -17,7 +17,7 @@ CATEGORY_DESCRIPTIONS = {
 
 # Map all ActionType constants to categories (using string values as keys)
 CATEGORY_MAPPINGS = {
-    # Admin Actions (13 actions)
+    # Admin Actions (23 actions)
     ActionType.USER_CREATED.value: "admin_actions",
     ActionType.USER_DELETED.value: "admin_actions",
     ActionType.USER_UPDATED.value: "admin_actions",
@@ -26,6 +26,16 @@ CATEGORY_MAPPINGS = {
     ActionType.ROLE_DELETED.value: "admin_actions",
     ActionType.PERMISSION_CHANGED.value: "admin_actions",
     ActionType.API_KEY_GENERATED.value: "admin_actions",
+    ActionType.API_KEY_CREATED.value: "admin_actions",
+    ActionType.API_KEY_UPDATED.value: "admin_actions",
+    ActionType.API_KEY_REVOKED.value: "admin_actions",
+    ActionType.API_KEY_SUSPENDED.value: "admin_actions",
+    ActionType.API_KEY_REACTIVATED.value: "admin_actions",
+    ActionType.API_KEY_ROTATED.value: "admin_actions",
+    ActionType.API_KEY_EXPIRED.value: "admin_actions",
+    ActionType.API_KEY_USED.value: "admin_actions",
+    ActionType.API_KEY_AUTH_FAILED.value: "admin_actions",
+    ActionType.TENANT_POLICY_UPDATED.value: "admin_actions",
     ActionType.TENANT_SETTINGS_UPDATED.value: "admin_actions",
     ActionType.CREDENTIALS_UPDATED.value: "admin_actions",
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
@@ -102,7 +112,7 @@ def get_category_for_action(action: str) -> str:
         action: ActionType constant (string value)
 
     Returns:
-        Category name ('admin_actions', 'user_actions', etc.)
-        Defaults to 'user_actions' if action not found.
+        Category name (admin_actions, user_actions, etc.)
+        Defaults to user_actions if action not found.
     """
     return CATEGORY_MAPPINGS.get(action, "user_actions")

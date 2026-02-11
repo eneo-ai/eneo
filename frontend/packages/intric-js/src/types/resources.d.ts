@@ -57,6 +57,32 @@ export type Dashboard = components["schemas"]["Dashboard"];
 export type Prompt = components["schemas"]["PromptPublic"];
 export type PromptSparse = components["schemas"]["PromptSparse"];
 export type IntricErrorCode = components["schemas"]["ErrorCodes"] | 0;
+export type ApiKeyType = components["schemas"]["ApiKeyType"];
+export type ApiKeyPermission = components["schemas"]["ApiKeyPermission"];
+export type ApiKeyScopeType = components["schemas"]["ApiKeyScopeType"];
+export type ApiKeyState = components["schemas"]["ApiKeyState"];
+export type ApiKeyStateReasonCode = components["schemas"]["ApiKeyStateReasonCode"];
+export type ResourcePermissionLevel = components["schemas"]["ResourcePermissionLevel"];
+export type ResourcePermissions = components["schemas"]["ResourcePermissions"];
+export type ApiKeyCreationConstraints = components["schemas"]["ApiKeyCreationConstraints"];
+export type ApiKeyV2 = components["schemas"]["ApiKeyV2"];
+export type ApiKeyCreateRequest = components["schemas"]["ApiKeyCreateRequest"];
+export type ApiKeyUpdateRequest = components["schemas"]["ApiKeyUpdateRequest"];
+export type ApiKeyStateChangeRequest = components["schemas"]["ApiKeyStateChangeRequest"];
+export type ApiKeyCreatedResponse = components["schemas"]["ApiKeyCreatedResponse"];
+export type ApiKeyPolicy = components["schemas"]["ApiKeyPolicyResponse"];
+export type SuperApiKeyStatus = components["schemas"]["SuperApiKeyStatus"];
+
+export type CursorPaginated<T> = {
+  items: T[];
+  total_count: number;
+  limit?: number | null;
+  next_cursor?: string | null;
+  previous_cursor?: string | null;
+};
+
+export type ApiKeyListResponse = components["schemas"]["ApiKeyListResponse"];
+export type ApiKeyAdminListResponse = components["schemas"]["CursorPaginatedResponse_ApiKeyV2_"];
 export type App = components["schemas"]["AppPublic"];
 export type AppSparse = components["schemas"]["AppSparse"];
 export type AppRun = components["schemas"]["AppRunPublic"];

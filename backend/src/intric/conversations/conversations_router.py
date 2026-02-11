@@ -2,12 +2,15 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
 from intric.assistants.api.assistant_protocol import to_conversation_response
 from intric.conversations.conversation_models import ConversationRequest
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.container.container import Container
+from intric.main.config import get_settings
+from intric.main.exceptions import NotFoundException
+from intric.main.logging import get_logger
 from intric.main.models import CursorPaginatedResponse
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
@@ -26,7 +29,215 @@ from intric.sessions.session_protocol import (
     to_sessions_paginated_response,
 )
 
+logger = get_logger(__name__)
+
 router = APIRouter()
+
+
+async def _validate_conversation_scope(
+    http_request: Request,
+    container: Container,
+    assistant_id: UUID | None,
+    group_chat_id: UUID | None,
+    session_id: UUID | None,
+) -> None:
+    """Validate body-driven fields against API key scope.
+
+    Runs after auth (request.state has scope info) but before service call.
+    Only validates when scope enforcement is active and key is non-tenant.
+    Gated by the same env flag + tenant feature flag as _enforce_api_key_scope().
+    """
+    # Check env-level kill switch
+    if not get_settings().api_key_enforce_scope:
+        return
+
+    scope_type = getattr(http_request.state, "api_key_scope_type", None)
+    scope_id = getattr(http_request.state, "api_key_scope_id", None)
+    if scope_type is None or scope_type == "tenant":
+        return
+
+    # Check tenant-level feature flag
+    try:
+        feature_flag_service = container.feature_flag_service()
+        flag = await feature_flag_service.feature_flag_repo.one_or_none(
+            name="api_key_scope_enforcement"
+        )
+        if flag is not None:
+            user = container.user()
+            if not flag.is_enabled(tenant_id=user.tenant_id):
+                return
+    except Exception:
+        # Fail-closed: if we can't check the flag, enforce scope
+        logger.warning("Could not check scope enforcement feature flag, defaulting to enforced")
+
+    scope_id = UUID(str(scope_id)) if scope_id is not None else None
+
+    # App-scoped keys cannot create conversations at all
+    if scope_type == "app":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "insufficient_scope",
+                "message": (
+                    f"API key is scoped to app '{scope_id}'. "
+                    f"It can only access that app and its runs."
+                ),
+            },
+        )
+
+    space_repo = container.space_repo()
+
+    # If continuing an existing session, resolve it to validate scope
+    if session_id is not None:
+        session_service = container.session_service()
+        try:
+            session = await session_service.get_session_by_uuid(session_id)
+        except NotFoundException:
+            # Session doesn't exist — return 403 (not 404) to prevent
+            # scoped keys from enumerating session existence.
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "insufficient_scope",
+                    "message": "Unable to verify API key scope for this session.",
+                },
+            )
+        except Exception:
+            # DB error or unexpected failure — fail-closed: deny access
+            logger.error(
+                "Failed to resolve session for scope validation",
+                extra={"session_id": str(session_id)},
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "insufficient_scope",
+                    "message": "Unable to verify API key scope for this session.",
+                },
+            )
+
+        if scope_type == "assistant":
+            session_assistant_id = session.assistant.id if session.assistant else None
+            if session_assistant_id != scope_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "insufficient_scope",
+                        "message": (
+                            f"API key is scoped to assistant '{scope_id}'. "
+                            f"It can only access that assistant and its conversations."
+                        ),
+                    },
+                )
+        elif scope_type == "space":
+            # Resolve session to space via assistant or group_chat
+            try:
+                space = await space_repo.get_space_by_session(session_id)
+                if space.id != scope_id:
+                    raise HTTPException(
+                        status_code=403,
+                        detail={
+                            "code": "insufficient_scope",
+                            "message": (
+                                f"API key is scoped to space '{scope_id}'. "
+                                f"The requested resource belongs to a different scope."
+                            ),
+                        },
+                    )
+            except NotFoundException:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "insufficient_scope",
+                        "message": (
+                            f"API key is scoped to space '{scope_id}'. "
+                            f"The requested resource belongs to a different scope."
+                        ),
+                    },
+                )
+        return
+
+    # New conversation with assistant_id
+    if assistant_id is not None:
+        if scope_type == "assistant":
+            if assistant_id != scope_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "insufficient_scope",
+                        "message": (
+                            f"API key is scoped to assistant '{scope_id}'. "
+                            f"It can only access that assistant and its conversations."
+                        ),
+                    },
+                )
+        elif scope_type == "space":
+            try:
+                space = await space_repo.get_space_by_assistant(assistant_id)
+                if space.id != scope_id:
+                    raise HTTPException(
+                        status_code=403,
+                        detail={
+                            "code": "insufficient_scope",
+                            "message": (
+                                f"API key is scoped to space '{scope_id}'. "
+                                f"The requested resource belongs to a different scope."
+                            ),
+                        },
+                    )
+            except NotFoundException:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "insufficient_scope",
+                        "message": (
+                            f"API key is scoped to space '{scope_id}'. "
+                            f"The requested resource belongs to a different scope."
+                        ),
+                    },
+                )
+        return
+
+    # New conversation with group_chat_id
+    if group_chat_id is not None:
+        if scope_type == "assistant":
+            # Assistant-scoped keys cannot access group chats
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "insufficient_scope",
+                    "message": (
+                        f"API key is scoped to assistant '{scope_id}'. "
+                        f"It can only access that assistant and its conversations."
+                    ),
+                },
+            )
+        elif scope_type == "space":
+            try:
+                space = await space_repo.get_space_by_group_chat(group_chat_id)
+                if space.id != scope_id:
+                    raise HTTPException(
+                        status_code=403,
+                        detail={
+                            "code": "insufficient_scope",
+                            "message": (
+                                f"API key is scoped to space '{scope_id}'. "
+                                f"The requested resource belongs to a different scope."
+                            ),
+                        },
+                    )
+            except NotFoundException:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "insufficient_scope",
+                        "message": (
+                            f"API key is scoped to space '{scope_id}'. "
+                            f"The requested resource belongs to a different scope."
+                        ),
+                    },
+                )
 
 
 @router.post(
@@ -38,6 +249,7 @@ router = APIRouter()
 )
 async def chat(
     request: ConversationRequest,
+    http_request: Request,
     version: int = Query(default=1, ge=1, le=2),
     container: Container = Depends(get_container(with_user=True)),
     db_session: AsyncSession = Depends(get_session_with_transaction),
@@ -68,6 +280,15 @@ async def chat(
     - SSEFirstChunk: Initial response with metadata
     - SSEError: Error events (API errors, authentication failures, rate limits, etc.)
     """
+    # Body-driven scope validation (before service call)
+    await _validate_conversation_scope(
+        http_request=http_request,
+        container=container,
+        assistant_id=request.assistant_id,
+        group_chat_id=request.group_chat_id,
+        session_id=request.session_id,
+    )
+
     file_ids = [file.id for file in request.files]
     tool_assistant_id = None
     if request.tools is not None and request.tools.assistants:
@@ -98,6 +319,7 @@ async def chat(
     responses=responses.get_responses([400, 404]),
 )
 async def list_conversations(
+    http_request: Request,
     assistant_id: Optional[UUID] = Query(None, description="The UUID of the assistant"),
     group_chat_id: Optional[UUID] = Query(None, description="The UUID of the group chat"),
     limit: int = Query(default=None, gt=0),
@@ -110,10 +332,25 @@ async def list_conversations(
     Provide either assistant_id or group_chat_id (but not both) to filter sessions.
     If neither is provided, an error will be returned.
     """
+    # Query-param scope validation (same rules as body-driven POST)
+    await _validate_conversation_scope(
+        http_request=http_request,
+        container=container,
+        assistant_id=assistant_id,
+        group_chat_id=group_chat_id,
+        session_id=None,
+    )
+
     if assistant_id is None and group_chat_id is None:
-        raise ValueError("Either assistant_id or group_chat_id must be provided")
+        raise HTTPException(
+            status_code=400,
+            detail="Either assistant_id or group_chat_id must be provided",
+        )
     if assistant_id is not None and group_chat_id is not None:
-        raise ValueError("Provide either assistant_id or group_chat_id, not both")
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either assistant_id or group_chat_id, not both",
+        )
 
     session_service = container.session_service()
 

@@ -26,7 +26,6 @@ router = APIRouter()
     "/",
     response_model=ServicePublicWithUser,
     responses=responses.get_responses([400, 404]),
-    deprecated=True,
 )
 async def create_service(
     service_model: ServiceCreatePublic,

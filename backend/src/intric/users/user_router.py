@@ -14,6 +14,10 @@ from pydantic import ValidationError
 from starlette.exceptions import HTTPException
 
 from intric.authentication import auth_dependencies
+from intric.roles.permissions import Permission, validate_permission
+from intric.authentication.api_key_router_helpers import (
+    error_responses as api_key_error_responses,
+)
 from intric.authentication.auth_models import AccessToken, ApiKey, OpenIdConnectLogin
 from intric.main import config
 from intric.main.exceptions import AuthenticationException
@@ -45,6 +49,12 @@ from intric.audit.domain.entity_types import EntityType
 logger = get_logger(__name__)
 
 router = APIRouter()
+users_admin_router = APIRouter()
+
+_LEGACY_USER_API_KEY_EXAMPLE = {
+    "key": "inp_3f5f2f7f7f...d9a1",
+    "truncated_key": "d9a1",
+}
 
 
 @router.post(
@@ -492,7 +502,7 @@ async def login_with_mobilityguard(
     return intric_token
 
 
-@router.get("/", response_model=CursorPaginatedResponse[UserSparse])
+@users_admin_router.get("/", response_model=CursorPaginatedResponse[UserSparse])
 async def get_tenant_users(
     email: Optional[str] = Query(None, description="Email of user"),
     limit: int = Query(None, description="Users per page", ge=1),
@@ -500,6 +510,8 @@ async def get_tenant_users(
     previous: Optional[bool] = Query(False, description="Show previous page"),
     container: Container = Depends(get_container(with_user=True)),
 ):
+    validate_permission(container.user(), Permission.ADMIN)
+
     user = container.user()
     user_assembler = container.user_assembler()
     user_service = container.user_service()
@@ -535,14 +547,47 @@ async def get_currently_authenticated_user(
     current_user: UserInDB = Depends(
         auth_dependencies.get_current_active_user_with_quota
     ),
+    container: Container = Depends(get_container()),
 ):
-    truncated_key = (
-        current_user.api_key.truncated_key if current_user.api_key is not None else None
+    api_key_repo = container.api_key_v2_repo()
+    latest_key = await api_key_repo.get_latest_active_by_owner(
+        tenant_id=current_user.tenant_id, owner_user_id=current_user.id
     )
+    truncated_key = latest_key.key_suffix if latest_key is not None else None
+    if truncated_key is None and current_user.api_key is not None:
+        truncated_key = current_user.api_key.truncated_key
     return UserPublic(**current_user.model_dump(), truncated_api_key=truncated_key)
 
 
-@router.get("/api-keys/", response_model=ApiKey)
+@users_admin_router.post(
+    "/api-keys/",
+    response_model=ApiKey,
+    tags=["Legacy API Keys"],
+    summary="Generate legacy user API key",
+    deprecated=True,
+    description=(
+        "Legacy API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. "
+        "This endpoint rotates the old legacy key immediately."
+    ),
+    responses={
+        200: {
+            "description": "Legacy API key created and returned once.",
+            "content": {"application/json": {"example": _LEGACY_USER_API_KEY_EXAMPLE}},
+        },
+        410: {
+            "description": "Legacy endpoint disabled. Migrate to v2 endpoint.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": "deprecated_endpoint",
+                        "message": "Legacy API key endpoint is disabled. Use /api/v1/api-keys.",
+                    }
+                }
+            },
+        },
+        **api_key_error_responses([401, 403]),
+    },
+)
 async def generate_api_key(
     current_user: UserInDB = Depends(auth_dependencies.get_current_active_user),
     container: Container = Depends(get_container()),
@@ -550,6 +595,16 @@ async def generate_api_key(
     """Generating a new api key will delete the old key.
     Make sure to copy the key since it will only be showed once,
     after which only the truncated key will be shown."""
+    validate_permission(current_user, Permission.ADMIN)
+    settings = config.get_settings()
+    if not settings.api_key_legacy_endpoints_enabled:
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "code": "deprecated_endpoint",
+                "message": "Legacy API key endpoint is disabled. Use /api/v1/api-keys.",
+            },
+        )
     service = container.user_service()
 
     # Generate API key
@@ -597,11 +652,12 @@ async def get_current_user_tenant(
     return TenantPublic(**tenant.model_dump())
 
 
-@router.post("/admin/invite/", response_model=UserAdminView, status_code=201)
+@users_admin_router.post("/admin/invite/", response_model=UserAdminView, status_code=201)
 async def invite_user(
     user_invite: PropUserInvite,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    validate_permission(container.user(), Permission.ADMIN)
     user_service = container.user_service()
     current_user = container.user()
     session = cast(AsyncSession, container.session())
@@ -670,12 +726,13 @@ async def invite_user(
     return new_user
 
 
-@router.patch("/admin/{id}/", response_model=UserAdminView)
+@users_admin_router.patch("/admin/{id}/", response_model=UserAdminView)
 async def update_user(
     id: UUID,
     user_update: PropUserUpdate,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    validate_permission(container.user(), Permission.ADMIN)
     user_service = container.user_service()
     current_user = container.user()
 
@@ -789,10 +846,12 @@ async def update_user(
     return updated_user
 
 
-@router.delete("/admin/{id}/", status_code=204)
+@users_admin_router.delete("/admin/{id}/", status_code=204)
 async def delete_user(
-    id: UUID, container: Container = Depends(get_container(with_user=True))
+    id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
 ):
+    validate_permission(container.user(), Permission.ADMIN)
     user_service = container.user_service()
     current_user = container.user()
 

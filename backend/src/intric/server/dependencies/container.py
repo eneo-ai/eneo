@@ -2,7 +2,9 @@ from typing import Annotated
 from uuid import UUID
 
 from dependency_injector import providers
-from fastapi import Depends, Security, WebSocketException
+from typing import NoReturn
+
+from fastapi import Depends, HTTPException, Request, Security, WebSocketException
 
 from intric.database.database import (
     AsyncSession,
@@ -13,6 +15,7 @@ from intric.database.database import (
 from intric.main.container.container import Container
 from intric.main.container.container_overrides import override_user
 from intric.main.logging import get_logger
+from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.server.dependencies.auth_definitions import (
     API_KEY_HEADER,
     OAUTH2_SCHEME,
@@ -23,15 +26,25 @@ from intric.users.setup import setup_user
 logger = get_logger(__name__)
 
 
+def _raise_api_key_http_error(exc: ApiKeyValidationError) -> NoReturn:
+    logger.warning(
+        "API key authentication failed",
+        extra={"code": exc.code, "error_message": exc.message},
+    )
+    raise HTTPException(
+        status_code=exc.status_code,
+        detail={"code": exc.code, "message": exc.message},
+        headers=exc.headers,
+    ) from exc
+
+
 def get_container(
     with_user: bool = False,
     with_user_from_assistant_api_key: bool = False,
 ):
     if sum([with_user, with_user_from_assistant_api_key]) > 1:
         raise ValueError(
-            "Only one of with_user, "
-            "with_user_from_assistant_api_key "
-            "can be set to True"
+            "Only one of with_user, with_user_from_assistant_api_key can be set to True"
         )
 
     async def _get_container(
@@ -42,11 +55,19 @@ def get_container(
         )
 
     async def _get_container_with_user(
+        request: Request,
         token: str = Security(OAUTH2_SCHEME),
         api_key: str = Security(API_KEY_HEADER),
         container: Container = Depends(_get_container),
     ):
-        user = await container.user_service().authenticate(token=token, api_key=api_key)
+        if request.method == "OPTIONS":
+            return container
+        try:
+            user = await container.user_service().authenticate(
+                token=token, api_key=api_key, request=request
+            )
+        except ApiKeyValidationError as exc:
+            _raise_api_key_http_error(exc)
 
         if not user.is_active:
             await setup_user(container=container, user=user)
@@ -57,13 +78,19 @@ def get_container(
 
     async def _get_container_with_user_from_assistant_api_key(
         id: UUID,
+        request: Request,
         token: str = Security(OAUTH2_SCHEME),
         api_key: str = Security(API_KEY_HEADER),
         container: Container = Depends(_get_container),
     ):
-        user = await container.user_service().authenticate_with_assistant_api_key(
-            token=token, api_key=api_key, assistant_id=id
-        )
+        if request.method == "OPTIONS":
+            return container
+        try:
+            user = await container.user_service().authenticate_with_assistant_api_key(
+                token=token, api_key=api_key, assistant_id=id, request=request
+            )
+        except ApiKeyValidationError as exc:
+            _raise_api_key_http_error(exc)
         override_user(container=container, user=user)
 
         return container
@@ -79,12 +106,13 @@ def get_container(
 
 def get_container_for_sysadmin():
     """Get a container for sysadmin endpoints that manage their own transactions.
-    
+
     This function creates a container with a session that does NOT have a transaction
     already started. This allows worker tasks and services to manage their own
     transactions without running into "A transaction is already begun on this Session"
     errors.
     """
+
     async def _get_container_for_sysadmin(
         session: AsyncSession = Depends(get_session),
     ):

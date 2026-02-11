@@ -130,8 +130,8 @@ CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]] = {
     },
     "tenant_worker_semaphore_ttl_seconds": {
         "type": int,
-        "min": 3600,       # 1 hour minimum
-        "max": 86400,      # 24 hours maximum
+        "min": 3600,  # 1 hour minimum
+        "max": 86400,  # 24 hours maximum
         "env_attr": "tenant_worker_semaphore_ttl_seconds",
         "description": "Concurrency slot TTL in seconds - must be >= crawl_max_length (1h to 24h)",
     },

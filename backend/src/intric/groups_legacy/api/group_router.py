@@ -41,6 +41,9 @@ router = APIRouter()
     "/",
     response_model=PaginatedResponse[GroupPublicWithMetadata],
     deprecated=True,
+    description=(
+        "Legacy groups endpoint. Use collections/spaces instead for new integrations."
+    ),
 )
 async def get_groups(container: Container = Depends(get_container(with_user=True))):
     service = container.group_service()
@@ -56,14 +59,23 @@ async def get_groups(container: Container = Depends(get_container(with_user=True
     response_model=CollectionPublic,
     responses=responses.get_responses([404]),
 )
-async def get_group_by_id(id: UUID, container: Container = Depends(get_container(with_user=True))):
+async def get_group_by_id(
+    id: UUID, container: Container = Depends(get_container(with_user=True))
+):
     service = container.collection_crud_service()
     collection = await service.get_collection(id)
 
     return CollectionPublic.from_domain(collection=collection)
 
 
-@router.post("/", response_model=GroupPublicWithMetadata, deprecated=True)
+@router.post(
+    "/",
+    response_model=GroupPublicWithMetadata,
+    deprecated=True,
+    description=(
+        "Legacy groups endpoint. Use collections/spaces instead for new integrations."
+    ),
+)
 async def create_group(
     group: CreateGroupRequest,
     container: Container = Depends(get_container(with_user=True)),
@@ -73,9 +85,9 @@ async def create_group(
     Use the `name` field of the response from this endpoint.
     """
     service = container.group_service()
-    group = await service.create_group(group)
+    created_group = await service.create_group(group)
 
-    return group_protocol.to_group_public_with_metadata(group, num_info_blobs=0)
+    return group_protocol.to_group_public_with_metadata(created_group, num_info_blobs=0)
 
 
 @router.post(
@@ -95,7 +107,9 @@ async def update_group(
     current_user = container.user()
 
     # Update collection
-    collection_updated = await service.update_collection(collection_id=id, name=group.name)
+    collection_updated = await service.update_collection(
+        collection_id=id, name=group.name
+    )
 
     # Get space for context
     space = None
@@ -190,7 +204,10 @@ async def delete_group_by_id(
         },
     )
 
-    return JSONResponse({"id": str(id), "deletion_info": {"success": True}}, status_code=200)
+    return JSONResponse(
+        {"id": str(id), "deletion_info": {"success": True}}, status_code=200
+    )
+
 
 @router.post(
     "/{id}/info-blobs/",
@@ -226,7 +243,9 @@ async def add_info_blobs(
     ]
 
     service = container.info_blob_service()
-    info_blobs_added = await service.add_info_blobs(group_id=id, info_blobs=info_blobs_to_add)
+    info_blobs_added = await service.add_info_blobs(
+        group_id=id, info_blobs=info_blobs_to_add
+    )
 
     # Add to datastore
     info_blobs_updated = []
@@ -293,7 +312,8 @@ async def get_info_blobs(
     info_blobs_in_db = await service.get_by_group(id)
 
     info_blobs_public = [
-        info_blob_protocol.to_info_blob_public_no_text(blob) for blob in info_blobs_in_db
+        info_blob_protocol.to_info_blob_public_no_text(blob)
+        for blob in info_blobs_in_db
     ]
 
     return protocol.to_paginated_response(info_blobs_public)
@@ -395,4 +415,6 @@ async def transfer_group_to_space(
     container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.resource_mover_service()
-    await service.move_collection_to_space(collection_id=id, space_id=transfer_req.target_space_id)
+    await service.move_collection_to_space(
+        collection_id=id, space_id=transfer_req.target_space_id
+    )

@@ -273,6 +273,23 @@ async def cleanup_old_exports(container: Container):
     }
 
 
+@worker.cron_job(hour=1, minute=0)  # Daily at 01:00 UTC
+async def api_key_maintenance(container: Container):
+    """Daily maintenance for API keys (expiration and rotation cleanup)."""
+    from intric.main.logging import get_logger
+
+    logger = get_logger(__name__)
+    service = container.api_key_maintenance_service()
+    results = await service.run_daily_maintenance()
+
+    if results.get("errors"):
+        logger.warning("API key maintenance completed with errors", extra=results)
+    else:
+        logger.info("API key maintenance completed", extra=results)
+
+    return results
+
+
 @worker.cron_job(hour=2, minute=0)  # Daily at 02:00 UTC
 async def purge_old_audit_logs(container: Container):
     """
@@ -302,6 +319,8 @@ async def purge_old_audit_logs(container: Container):
     from uuid import UUID
 
     from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from typing import cast
 
     from intric.audit.application.audit_config_service import AuditConfigService
     from intric.audit.application.retention_service import RetentionService
@@ -321,7 +340,7 @@ async def purge_old_audit_logs(container: Container):
 
     # Step 1: Get all tenant IDs (retention policy will be created if missing)
     # Uses the container's session (provided by cron_job decorator) for read-only query
-    session = container.session()
+    session = cast(AsyncSession, container.session())
     query = select(Tenants.id)
     result = await session.execute(query)
     tenant_ids: list[UUID] = list(result.scalars().all())

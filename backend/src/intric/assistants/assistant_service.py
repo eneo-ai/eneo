@@ -17,7 +17,8 @@ from intric.completion_models.infrastructure.web_search import WebSearch
 from intric.files.file_service import FileService
 from intric.icons.icon_repo import IconRepository
 from intric.main.exceptions import BadRequestException, UnauthorizedException
-from intric.main.models import NOT_PROVIDED, NotProvided
+from intric.main.logging import get_logger
+from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 from intric.prompts.api.prompt_models import PromptCreate
 from intric.prompts.prompt import Prompt
 from intric.prompts.prompt_service import PromptService
@@ -35,15 +36,19 @@ from intric.templates.assistant_template.assistant_template_service import (
 )
 from intric.users.user import UserInDB
 from intric.workflows.step_repo import StepRepository
+from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
+from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from intric.actors import ActorManager
     from intric.ai_models.completion_models.completion_model import (
-        CompletionModel,
         CompletionModelResponse,
     )
     from intric.assistants.references import ReferencesService
     from intric.completion_models.application import CompletionModelCRUDService
+    from intric.completion_models.domain.completion_model import CompletionModel
     from intric.completion_models.infrastructure.completion_service import (
         CompletionService,
     )
@@ -83,7 +88,9 @@ def get_references(
     info_blob_ids = list(dict.fromkeys(re.findall(REFERENCE_PATTERN, response_string)))
 
     def _get_blob(blob_id):
-        return next((blob for blob in info_blobs if str(get_id_func(blob))[:8] == blob_id), None)
+        return next(
+            (blob for blob in info_blobs if str(get_id_func(blob))[:8] == blob_id), None
+        )
 
     blobs = [_get_blob(blob_id) for blob_id in info_blob_ids]
 
@@ -111,6 +118,7 @@ class AssistantService:
         completion_service: "CompletionService",
         references_service: "ReferencesService",
         icon_repo: IconRepository,
+        api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
         self.repo = repo
         self.space_repo = space_repo
@@ -130,6 +138,7 @@ class AssistantService:
         self.completion_service = completion_service
         self.references_service = references_service
         self.icon_repo = icon_repo
+        self.api_key_scope_revoker = api_key_scope_revoker
 
     @property
     async def web_search(self):
@@ -162,7 +171,7 @@ class AssistantService:
         name: str,
         space_id: UUID,
         template_data: Optional["TemplateCreate"] = None,
-    ) -> Assistant:
+    ) -> tuple[Assistant, list[ResourcePermission]]:
         space = await self.space_service.get_space(space_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
@@ -230,7 +239,9 @@ class AssistantService:
             space_id=space.id,
             prompt=prompt,
             completion_model=completion_model,
-            completion_model_kwargs=ModelKwargs(**(template.completion_model_kwargs or {})),
+            completion_model_kwargs=ModelKwargs(
+                **(template.completion_model_kwargs or {})
+            ),
             attachments=attachments,
             collections=collections,
             template=template,
@@ -292,7 +303,7 @@ class AssistantService:
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
-    ):
+    ) -> tuple[Assistant, list[ResourcePermission]]:
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
 
@@ -309,11 +320,14 @@ class AssistantService:
         if not actor.can_edit_assistants():
             raise UnauthorizedException()
 
+        prompt_obj: Prompt | None = None
         if prompt is not None:
             # Create the prompt if the prompt contains text
             # Update the description if the prompt contains description
             if prompt.text is not None:
-                prompt = await self.prompt_service.create_prompt(prompt.text, prompt.description)
+                prompt_obj = await self.prompt_service.create_prompt(
+                    prompt.text, prompt.description
+                )
 
         completion_model = None
         if completion_model_id is not None:
@@ -323,28 +337,36 @@ class AssistantService:
         if attachment_ids is not None:
             attachments = await self.file_service.get_file_infos(attachment_ids)
 
+        group_entities = None
         if groups is not None:
-            groups = [space.get_collection(collection_id=group_id) for group_id in groups]
+            group_entities = [
+                space.get_collection(collection_id=group_id) for group_id in groups
+            ]
 
+        website_entities = None
         if websites is not None:
-            websites = [space.get_website(website_id=website_id) for website_id in websites]
+            website_entities = [
+                space.get_website(website_id=website_id) for website_id in websites
+            ]
 
         integration_knowledge_list = None
         if integration_knowledge_ids is not None:
             integration_knowledge_list = [
-                space.get_integration_knowledge(integration_knowledge_id=integration_knowledge_id)
+                space.get_integration_knowledge(
+                    integration_knowledge_id=integration_knowledge_id
+                )
                 for integration_knowledge_id in integration_knowledge_ids
             ]
 
         assistant.update(
             name=name,
-            prompt=prompt,
+            prompt=prompt_obj,
             completion_model=completion_model,
             completion_model_kwargs=completion_model_kwargs,
             attachments=attachments,
             logging_enabled=logging_enabled,
-            collections=groups,
-            websites=websites,
+            collections=group_entities,
+            websites=website_entities,
             integration_knowledge_list=integration_knowledge_list,
             description=description,
             insight_enabled=insight_enabled,
@@ -363,7 +385,9 @@ class AssistantService:
 
         return assistant, permissions
 
-    async def get_assistant(self, assistant_id: UUID) -> Assistant:
+    async def get_assistant(
+        self, assistant_id: UUID
+    ) -> tuple[Assistant, list[ResourcePermission]]:
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -376,7 +400,9 @@ class AssistantService:
 
         return assistant, permissions
 
-    async def get_assistants(self, name: str = None, for_tenant: bool = False) -> list[Assistant]:
+    async def get_assistants(
+        self, name: str = None, for_tenant: bool = False
+    ) -> list[Assistant]:
         if for_tenant:
             return await self.get_tenant_assistants(name)
 
@@ -407,6 +433,20 @@ class AssistantService:
         assistant = space.get_assistant(assistant_id=assistant_id)
         icon_id = assistant.icon_id
 
+        if self.api_key_scope_revoker is not None:
+            try:
+                await self.api_key_scope_revoker.revoke_scope(
+                    scope_type=ApiKeyScopeType.ASSISTANT,
+                    scope_id=assistant_id,
+                    reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
+                    reason_text="Assistant deleted",
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to revoke API keys for deleted assistant",
+                    extra={"assistant_id": str(assistant_id)},
+                )
+
         space.remove_assistant(assistant)
         await self.space_repo.update(space)
 
@@ -421,7 +461,9 @@ class AssistantService:
         if not actor.can_edit_assistants():
             raise UnauthorizedException()
 
-        return await self.auth_service.create_assistant_api_key("ina", assistant_id=assistant_id)
+        return await self.auth_service.create_assistant_api_key(
+            "ina", assistant_id=assistant_id
+        )
 
     async def get_prompts_by_assistant(self, assistant_id: UUID) -> list[Prompt]:
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
@@ -466,7 +508,9 @@ class AssistantService:
                         yield chunk
 
                     if chunk.response_type == ResponseType.FILES:
-                        image_file = await self.file_service.save_image_from_bytes(chunk.image_data)
+                        image_file = await self.file_service.save_image_from_bytes(
+                            chunk.image_data
+                        )
 
                         generated_files.append(image_file)
                         chunk.generated_file = image_file
@@ -482,11 +526,14 @@ class AssistantService:
                     version=version,
                     get_id_func=lambda chunk: chunk.info_blob_id,
                 )
-                total_response_tokens = count_tokens(response_string) + reasoning_token_count
+                total_response_tokens = (
+                    count_tokens(response_string) + reasoning_token_count
+                )
                 await self.session_service.add_question_to_session(
                     question=question,
                     answer=response_string,
-                    num_tokens_question=response.total_token_count + assistant_selector_tokens,
+                    num_tokens_question=response.total_token_count
+                    + assistant_selector_tokens,
                     num_tokens_answer=total_response_tokens,
                     session=session,
                     completion_model=completion_model,
@@ -506,8 +553,11 @@ class AssistantService:
 
             if response.completion is not None:
                 answer = response.completion
-                reasoning_token_count = answer.reasoning_token_count
-                final_answer = answer.text
+                if isinstance(answer, str):
+                    final_answer = answer
+                else:
+                    reasoning_token_count = getattr(answer, "reasoning_token_count", 0)
+                    final_answer = getattr(answer, "text", "")
 
             reference_chunks = get_references(
                 response_string=final_answer,
@@ -519,7 +569,8 @@ class AssistantService:
             await self.session_service.add_question_to_session(
                 question=question,
                 answer=final_answer,
-                num_tokens_question=response.total_token_count + assistant_selector_tokens,
+                num_tokens_question=response.total_token_count
+                + assistant_selector_tokens,
                 num_tokens_answer=total_response_tokens,
                 files=files,
                 generated_files=generated_files,
@@ -533,6 +584,9 @@ class AssistantService:
             return final_answer
 
     async def _check_assistant_models(self, assistant: "Assistant", space: "Space"):
+        if assistant.completion_model is None:
+            raise BadRequestException("Assistant has no completion model configured.")
+
         if not assistant.completion_model.can_access:
             raise UnauthorizedException(
                 "Completion model is inaccessible, please contact your administrator"
@@ -615,7 +669,8 @@ class AssistantService:
             _question.question = clean_intric_tag(_question.question)
 
         if use_web_search and version == 2:
-            web_search_results = await self.web_search.search(search_query=question)
+            web_search = await self.web_search
+            web_search_results = await web_search.search(search_query=question)
         else:
             web_search_results = []
 
@@ -664,7 +719,11 @@ class AssistantService:
             completion_model=assistant_to_ask.completion_model,
             tools=(
                 UseTools(
-                    assistants=[ToolAssistant(id=assistant_to_ask.id, handle=assistant_to_ask.name)]
+                    assistants=[
+                        ToolAssistant(
+                            id=assistant_to_ask.id, handle=assistant_to_ask.name
+                        )
+                    ]
                 )
                 if assistant_to_ask.id is not None
                 else UseTools(assistants=[])

@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from intric.ai_models.model_enums import ModelFamily, ModelStability
 from intric.authentication.auth_dependencies import get_current_active_user
+from intric.roles.permissions import Permission, validate_permission
 from intric.completion_models.presentation import CompletionModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.container.container import Container
@@ -56,6 +57,7 @@ async def create_tenant_completion_model(
     container: Container = Depends(get_container(with_user=True)),
 ):
     """Create a new tenant-specific completion model."""
+    validate_permission(user, Permission.ADMIN)
     from intric.database.tables.ai_models_table import CompletionModels
     from intric.database.tables.model_providers_table import ModelProviders
     import sqlalchemy as sa
@@ -143,6 +145,7 @@ async def update_tenant_completion_model(
     container: Container = Depends(get_container(with_user=True)),
 ):
     """Update a tenant-specific completion model."""
+    validate_permission(user, Permission.ADMIN)
     from intric.database.tables.ai_models_table import CompletionModels
     import sqlalchemy as sa
     from intric.main.exceptions import UnauthorizedException, NotFoundException
@@ -206,6 +209,7 @@ async def delete_tenant_completion_model(
     session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Delete a tenant-specific completion model."""
+    validate_permission(user, Permission.ADMIN)
     from intric.database.tables.ai_models_table import CompletionModels
     import sqlalchemy as sa
     from intric.main.exceptions import UnauthorizedException, NotFoundException

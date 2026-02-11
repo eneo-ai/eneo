@@ -21,9 +21,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.fixture(autouse=True)
-def enable_tenant_credentials(test_settings, monkeypatch):
+def enable_tenant_credentials(test_settings):
     """Enable tenant credentials feature for all tests in this module."""
-    monkeypatch.setattr(test_settings, "tenant_credentials_enabled", True)
+    from intric.main.config import set_settings
+
+    enabled_settings = test_settings.model_copy(
+        update={"tenant_credentials_enabled": True}
+    )
+    set_settings(enabled_settings)
+    yield
+    set_settings(test_settings)
 
 
 @pytest.mark.integration

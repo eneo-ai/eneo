@@ -220,8 +220,8 @@ async def update_space(
 
     # Track security classification changes
     if security_classification is not NOT_PROVIDED:
-        old_sc = old_space.security_classification.name if old_space.security_classification else None
-        new_sc = space.security_classification.name if space.security_classification else None
+        old_sc = getattr(old_space.security_classification, "name", None)
+        new_sc = getattr(space.security_classification, "name", None)
         if old_sc != new_sc:
             changes["security_classification"] = {"old": old_sc, "new": new_sc}
 
@@ -307,7 +307,10 @@ async def get_spaces(
     service = container.space_service()
     assembler = container.space_assembler()
 
-    spaces = await service.get_spaces(include_personal=include_personal)
+    spaces = await service.get_spaces(
+        include_personal=include_personal,
+        include_applications=include_applications,
+    )
     spaces = [assembler.from_space_to_sparse_model(space, include_applications=include_applications) for space in spaces]
 
     return protocol.to_paginated_response(spaces)
@@ -316,7 +319,6 @@ async def get_spaces(
     "/{id}/applications/",
     response_model=Applications,
     responses=responses.get_responses([404]),
-    dependencies=[Depends(forbid_org_space)],
 )
 async def get_space_applications(
     id: UUID, container: Container = Depends(get_container(with_user=True))
