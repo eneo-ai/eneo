@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Dialog, Button } from "@intric/ui";
+  import { Dialog, Button, Select } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
   import type { Writable } from "svelte/store";
 
@@ -130,7 +130,7 @@
     </Dialog.Title>
 
     <Dialog.Section scrollable={true}>
-      <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }} class="space-y-5 px-1 py-2">
+      <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }} class="space-y-5 px-4 pt-2 pb-6">
         {#if errorMessage}
           <div class="flex items-start gap-3 rounded-lg border border-negative-default/30 bg-negative-dimmer px-4 py-3" role="alert">
             <svg class="mt-0.5 h-5 w-5 shrink-0 text-negative-default" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -223,19 +223,15 @@
             Autentisering
           </legend>
 
-          <div>
-            <label for="mcp-http_auth_type" class="mb-1.5 block text-sm font-medium text-default">{m.authentication_type()}</label>
-            <select
-              id="mcp-http_auth_type"
-              bind:value={http_auth_type}
-              class="border-default bg-primary ring-accent-default w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:border-accent-default focus:outline-none hover:border-stronger cursor-pointer"
-            >
-              <option value="none">🌐 Publik (ingen autentisering)</option>
-              <option value="bearer">🔐 Bearer Token</option>
-              <option value="api_key">🔑 API-nyckel</option>
-              <option value="custom_headers">⚙️ Anpassade headers</option>
-            </select>
-          </div>
+          <!-- TODO: Add more auth options when OAuth support is implemented -->
+          <Select.Simple
+            options={[
+              { value: "none", label: "Publik (ingen autentisering)" },
+            ]}
+            bind:value={http_auth_type}
+          >
+            {m.authentication_type()}
+          </Select.Simple>
 
           {#if http_auth_type === "bearer"}
             <div>
