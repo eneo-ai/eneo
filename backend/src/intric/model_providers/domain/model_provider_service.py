@@ -192,13 +192,14 @@ class ModelProviderService:
                     **kwargs,
                 )
             return {"success": True, "message": "Model validated successfully"}
-        except litellm.AuthenticationError:
-            return {"success": False, "error": "Invalid API key"}
-        except litellm.NotFoundError:
-            return {"success": False, "error": f"Model not found: {model_name}"}
-        except litellm.APIConnectionError:
-            return {"success": False, "error": "Could not connect to API"}
         except Exception as e:
+            error_name = e.__class__.__name__
+            if error_name == "AuthenticationError":
+                return {"success": False, "error": "Invalid API key"}
+            if error_name == "NotFoundError":
+                return {"success": False, "error": f"Model not found: {model_name}"}
+            if error_name == "APIConnectionError":
+                return {"success": False, "error": "Could not connect to API"}
             return {"success": False, "error": f"Validation failed: {str(e)}"}
 
     async def list_available_models(self, provider_id: UUID) -> list[dict[str, Any]]:
@@ -340,14 +341,15 @@ class ModelProviderService:
             try:
                 await litellm.acompletion(**kwargs)
                 return {"success": True, "message": "Connection successful"}
-            except litellm.AuthenticationError:
-                return {"success": False, "error": "Invalid API key"}
-            except litellm.APIConnectionError:
-                return {"success": False, "error": "Could not connect to the API"}
-            except litellm.NotFoundError:
-                # Model not found — try next candidate
-                continue
             except Exception as e:
+                error_name = e.__class__.__name__
+                if error_name == "AuthenticationError":
+                    return {"success": False, "error": "Invalid API key"}
+                if error_name == "APIConnectionError":
+                    return {"success": False, "error": "Could not connect to the API"}
+                if error_name == "NotFoundError":
+                    # Model not found — try next candidate
+                    continue
                 # For non-model errors, no point retrying with a different model
                 return {"success": False, "error": f"Connection test failed: {str(e)}"}
 
