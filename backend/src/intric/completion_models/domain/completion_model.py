@@ -48,6 +48,8 @@ class CompletionModel(AIModel):
         security_classification: Optional[SecurityClassification] = None,
         tenant_id: Optional["UUID"] = None,
         provider_id: Optional["UUID"] = None,
+        provider_name: Optional[str] = None,
+        provider_type: Optional[str] = None,
     ):
         super().__init__(
             user=user,
@@ -78,14 +80,14 @@ class CompletionModel(AIModel):
         self.nr_billion_parameters = nr_billion_parameters
         self.tenant_id = tenant_id
         self.provider_id = provider_id
+        self.provider_name = provider_name
+        self.provider_type = provider_type
 
     def get_credential_provider_name(self) -> str:
         """Get the credential provider name for this model."""
-        from intric.ai_models.litellm_providers.provider_registry import LiteLLMProviderRegistry
-
-        # If litellm_model_name is set, use it for provider detection
-        if self.litellm_model_name:
-            return LiteLLMProviderRegistry.detect_provider_from_model_name(self.litellm_model_name)
+        # If litellm_model_name is set, extract provider from prefix (e.g. "azure/gpt-4" → "azure")
+        if self.litellm_model_name and "/" in self.litellm_model_name:
+            return self.litellm_model_name.split("/")[0].lower()
 
         # Fall back to base implementation (checks family)
         return super().get_credential_provider_name()
@@ -95,6 +97,8 @@ class CompletionModel(AIModel):
         cls,
         completion_model_db: "CompletionModels",
         user: "UserInDB",
+        provider_name: Optional[str] = None,
+        provider_type: Optional[str] = None,
     ):
         # Settings are now directly on the model table
         return cls(
@@ -126,4 +130,6 @@ class CompletionModel(AIModel):
             ),
             tenant_id=completion_model_db.tenant_id,
             provider_id=completion_model_db.provider_id,
+            provider_name=provider_name,
+            provider_type=provider_type,
         )

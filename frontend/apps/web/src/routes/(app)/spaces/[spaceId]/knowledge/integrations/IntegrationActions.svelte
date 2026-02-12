@@ -3,6 +3,7 @@
   import { IconEllipsis } from "@intric/icons/ellipsis";
   import { IconTrash } from "@intric/icons/trash";
   import { IconEdit } from "@intric/icons/edit";
+  import { IconRefresh } from "@intric/icons/refresh";
   import { Button, Dialog, Dropdown, Input } from "@intric/ui";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getIntric } from "$lib/core/Intric";
@@ -18,6 +19,7 @@
 
   let isDeleting = false;
   let isRenaming = false;
+  let isSyncing = false;
   let newName = knowledgeItem.name;
 
   async function deleteKnowledge() {
@@ -30,7 +32,7 @@
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
-      alert(m.could_not_delete_crawl());
+      alert(m.integration_delete_error());
       console.error(e);
     }
     isDeleting = false;
@@ -53,8 +55,24 @@
     isRenaming = false;
   }
 
+  async function triggerFullSync() {
+    isSyncing = true;
+    try {
+      await intric.integrations.knowledge.triggerFullSync({
+        knowledge: knowledgeItem,
+        space: $currentSpace
+      });
+      refreshCurrentSpace();
+      $showSyncDialog = false;
+    } catch (e) {
+      console.error(e);
+    }
+    isSyncing = false;
+  }
+
   let showDeleteDialog: Dialog.OpenState;
   let showRenameDialog: Dialog.OpenState;
+  let showSyncDialog: Dialog.OpenState;
 </script>
 
 <Dropdown.Root>
@@ -74,6 +92,17 @@
         padding="icon-leading"
       >
         <IconEdit size="sm" />{m.rename()}</Button
+      >
+    {/if}
+    {#if knowledgeItem.integration_type === "sharepoint" && knowledgeItem.permissions?.includes("edit")}
+      <Button
+        is={item}
+        on:click={() => {
+          $showSyncDialog = true;
+        }}
+        padding="icon-leading"
+      >
+        <IconRefresh size="sm" />{m.trigger_full_sync()}</Button
       >
     {/if}
     {#if knowledgeItem.permissions?.includes("delete")}
@@ -101,6 +130,21 @@
       <Button is={close}>{m.cancel()}</Button>
       <Button variant="primary" on:click={renameKnowledge} disabled={!newName.trim()}
         >{isRenaming ? m.saving() : m.save()}</Button
+      >
+    </Dialog.Controls>
+  </Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root alert bind:isOpen={showSyncDialog}>
+  <Dialog.Content width="small">
+    <Dialog.Title>{m.trigger_full_sync()}</Dialog.Title>
+    <Dialog.Description>
+      {m.confirm_full_sync({ knowledgeName: knowledgeItem.name })}
+    </Dialog.Description>
+    <Dialog.Controls let:close>
+      <Button is={close}>{m.cancel()}</Button>
+      <Button variant="primary" on:click={triggerFullSync}
+        >{isSyncing ? m.syncing() : m.start_full_sync()}</Button
       >
     </Dialog.Controls>
   </Dialog.Content>

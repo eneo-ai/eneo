@@ -20,6 +20,7 @@ from intric.embedding_models.presentation.embedding_model_models import (
 from intric.group_chat.presentation.models import GroupChatSparse
 from intric.groups_legacy.api.group_models import GroupMetadata, GroupPublicWithMetadata
 from intric.integration.presentation.models import IntegrationKnowledgePublic
+from intric.jobs.job_models import JobPublic
 from intric.main.models import (
     NOT_PROVIDED,
     InDB,
@@ -66,6 +67,13 @@ class TransferApplicationRequest(TransferRequest):
 
 class SpaceMember(UserSparse):
     role: SpaceRoleValue
+
+
+class SpaceGroupMember(InDB):
+    """A user group that is a member of a space with a specific role."""
+    name: str
+    role: SpaceRoleValue
+    user_count: int = 0
 
 
 # Apps
@@ -182,8 +190,9 @@ class SpacePublic(SpaceDashboard):
     transcription_models: list[TranscriptionModelPublic]
     knowledge: Knowledge
     members: PaginatedPermissions[SpaceMember]
+    group_members: PaginatedPermissions[SpaceGroupMember]
 
-    default_assistant: DefaultAssistant 
+    default_assistant: DefaultAssistant
 
     available_roles: list[SpaceRole]
     security_classification: Optional[SecurityClassificationPublic]
@@ -293,6 +302,18 @@ class UpdateSpaceMemberRequest(BaseModel):
     role: SpaceRoleValue
 
 
+# Group Members
+
+
+class AddSpaceGroupMemberRequest(BaseModel):
+    id: UUID
+    role: SpaceRoleValue
+
+
+class UpdateSpaceGroupMemberRequest(BaseModel):
+    role: SpaceRoleValue
+
+
 class CreateSpaceIntegrationKnowledge(BaseModel):
     name: str
     embedding_model: ModelId
@@ -304,5 +325,40 @@ class CreateSpaceIntegrationKnowledge(BaseModel):
     resource_type: Optional[str] = "site"  # "site" for SharePoint, "onedrive" for OneDrive
 
 
+class CreateSpaceIntegrationKnowledgeBatchItem(BaseModel):
+    name: str
+    url: str
+    key: Optional[str] = None
+    folder_id: Optional[str] = None
+    folder_path: Optional[str] = None
+    selected_item_type: Optional[str] = None  # "file", "folder", or "site_root"
+    resource_type: Optional[str] = "site"  # "site" for SharePoint, "onedrive" for OneDrive
+
+
+class CreateSpaceIntegrationKnowledgeBatchRequest(BaseModel):
+    embedding_model: ModelId
+    wrapper_name: Optional[str] = None
+    items: list[CreateSpaceIntegrationKnowledgeBatchItem] = Field(min_length=1, max_length=50)
+
+
+class CreateSpaceIntegrationKnowledgeBatchResult(BaseModel):
+    index: int
+    name: str
+    status: Literal["created", "failed"]
+    integration_knowledge_id: Optional[UUID] = None
+    job: Optional[JobPublic] = None
+    error: Optional[str] = None
+
+
+class CreateSpaceIntegrationKnowledgeBatchResponse(BaseModel):
+    items: list[CreateSpaceIntegrationKnowledgeBatchResult]
+    created_count: int
+    failed_count: int
+
+
 class UpdateIntegrationKnowledgeRequest(BaseModel):
+    name: str
+
+
+class UpdateIntegrationKnowledgeWrapperRequest(BaseModel):
     name: str

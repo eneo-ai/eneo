@@ -191,10 +191,6 @@ class TenantModelAdapter(CompletionModelAdapter):
         if not context.function_definitions:
             return []
 
-        # Only enable tools for vision models (same logic as other adapters)
-        if not self.model.vision:
-            return []
-
         # Use OpenAI format (compatible with most providers via LiteLLM)
         return [
             {
@@ -283,11 +279,6 @@ class TenantModelAdapter(CompletionModelAdapter):
             value = self.credential_resolver.get_credential_field(field=field)
             if value:
                 kwargs[field] = value
-
-        # Handle Azure deployment name if present
-        if self.model.deployment_name and self.provider_type == "azure":
-            # Azure models use deployment_name instead of model name
-            kwargs["deployment_name"] = self.model.deployment_name
 
         # Process model kwargs with provider-specific adjustments
         if model_kwargs:

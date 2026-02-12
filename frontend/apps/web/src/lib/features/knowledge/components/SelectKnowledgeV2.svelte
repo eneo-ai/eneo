@@ -7,6 +7,8 @@
   import { IconWeb } from "@intric/icons/web";
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { IconChevronRight } from "@intric/icons/chevron-right";
+  import { IconFolder } from "@intric/icons/folder";
+  import { IconFile } from "@intric/icons/file";
   import { Button } from "@intric/ui";
   import type { GroupSparse, IntegrationKnowledge, WebsiteSparse, InfoBlob } from "@intric/intric-js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -17,6 +19,37 @@
   import IntegrationVendorIcon from "$lib/features/integrations/components/IntegrationVendorIcon.svelte";
   import { getIntric } from "$lib/core/Intric";
   import BlobPreview from "./BlobPreview.svelte";
+
+  type IntegrationWrapperOption = {
+    id: string;
+    name: string;
+    items: IntegrationKnowledge[];
+    integration_type: IntegrationKnowledge["integration_type"];
+  };
+
+  type IntegrationKnowledgeOption =
+    | {
+        type: "single";
+        key: string;
+        knowledge: IntegrationKnowledge;
+      }
+    | {
+        type: "wrapper";
+        key: string;
+        wrapper: IntegrationWrapperOption;
+      };
+
+  type SelectedIntegrationDisplay =
+    | {
+        type: "single";
+        key: string;
+        knowledge: IntegrationKnowledge;
+      }
+    | {
+        type: "wrapper";
+        key: string;
+        wrapper: IntegrationWrapperOption;
+      };
 
   /** Bind this variable if you want to be able to select websites */
   export let selectedWebsites: WebsiteSparse[] | undefined = undefined;
@@ -48,6 +81,7 @@
     | { website: WebsiteSparse }
     | { collection: GroupSparse }
     | { integrationKnowledge: IntegrationKnowledge }
+    | { integrationWrapper: IntegrationWrapperOption }
   >({
     forceVisible: false,
     loop: true,
@@ -80,6 +114,7 @@
     | { website: WebsiteSparse }
     | { collection: GroupSparse }
     | { integrationKnowledge: IntegrationKnowledge }
+    | { integrationWrapper: IntegrationWrapperOption }
   >({
     forceVisible: false,
     loop: true,
@@ -106,10 +141,26 @@
   const intric = getIntric();
 
   let expandedItems = new Set<string>();
+  let expandedWrapperSelections = new Set<string>();
+  let expandedWrapperOptions = new Set<string>();
   let blobCache = new Map<string, InfoBlob[]>();
   let loadingBlobs = new Set<string>();
   let currentPages = new Map<string, number>(); 
   const ITEMS_PER_PAGE = 10;
+
+  type MessageFn = (args?: Record<string, unknown>) => string;
+
+  function resolveMessage(
+    key: string,
+    fallback: string,
+    args?: Record<string, unknown>
+  ): string {
+    const maybeFn = (m as unknown as Record<string, MessageFn | undefined>)[key];
+    if (typeof maybeFn === "function") {
+      return maybeFn(args);
+    }
+    return fallback;
+  }
 
   async function toggleExpanded(id: string, type: "collection" | "website" | "integration", item: GroupSparse | WebsiteSparse | IntegrationKnowledge) {
     if (expandedItems.has(id)) {
@@ -139,7 +190,6 @@
             // Integration knowledge - not yet supported
             blobs = [];
           }
-          console.log(`Fetched ${blobs.length} blobs for ${type} ${id}`);
           blobCache.set(id, blobs);
           blobCache = blobCache;
         } catch (error) {
@@ -180,6 +230,119 @@
     return `${mb.toFixed(1)} MB`;
   }
 
+  function toggleWrapperSelectionExpanded(wrapperId: string, event?: MouseEvent) {
+    event?.stopPropagation();
+    if (expandedWrapperSelections.has(wrapperId)) {
+      expandedWrapperSelections.delete(wrapperId);
+    } else {
+      expandedWrapperSelections.add(wrapperId);
+    }
+    expandedWrapperSelections = expandedWrapperSelections;
+  }
+
+  function toggleWrapperOptionExpanded(wrapperId: string, event?: MouseEvent) {
+    event?.stopPropagation();
+    event?.preventDefault();
+    if (expandedWrapperOptions.has(wrapperId)) {
+      expandedWrapperOptions.delete(wrapperId);
+    } else {
+      expandedWrapperOptions.add(wrapperId);
+    }
+    expandedWrapperOptions = expandedWrapperOptions;
+  }
+
+  function getSortedWrapperItems(items: IntegrationKnowledge[]): IntegrationKnowledge[] {
+    return [...items].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function isWrapperFolderItem(item: IntegrationKnowledge): boolean {
+    const itemType = (item.selected_item_type ?? "").toLowerCase();
+    return itemType === "folder" || itemType === "site_root";
+  }
+
+  type WrapperCountBadges = {
+    files: number;
+    folders: number;
+    sites: number;
+    unknown: number;
+    total: number;
+  };
+
+  type WrapperCountType = "files" | "folders" | "sites" | "items";
+
+  function getWrapperCountText(type: WrapperCountType, count: number): string {
+    const form = count === 1 ? "one" : "other";
+    if (type === "files") {
+      return resolveMessage(
+        `sharepoint_wrapper_files_${form}`,
+        `${count} ${count === 1 ? "file" : "files"}`,
+        { count }
+      );
+    }
+    if (type === "folders") {
+      return resolveMessage(
+        `sharepoint_wrapper_folders_${form}`,
+        `${count} ${count === 1 ? "folder" : "folders"}`,
+        { count }
+      );
+    }
+    if (type === "sites") {
+      return resolveMessage(
+        `sharepoint_wrapper_sites_${form}`,
+        `${count} ${count === 1 ? "site" : "sites"}`,
+        { count }
+      );
+    }
+    return resolveMessage(
+      `sharepoint_wrapper_items_${form}`,
+      `${count} ${count === 1 ? "item" : "items"}`,
+      { count }
+    );
+  }
+
+  function getWrapperItemTypeCounts(items: IntegrationKnowledge[]) {
+    let files = 0;
+    let folders = 0;
+    let sites = 0;
+    let unknown = 0;
+
+    for (const item of items) {
+      const itemType = (item.selected_item_type ?? "").toLowerCase();
+      if (itemType === "file") {
+        files += 1;
+      } else if (itemType === "folder") {
+        folders += 1;
+      } else if (itemType === "site_root" || itemType === "site") {
+        sites += 1;
+      } else {
+        unknown += 1;
+      }
+    }
+
+    return { files, folders, sites, unknown, total: items.length };
+  }
+
+  function getWrapperCountBadges(items: IntegrationKnowledge[]): string[] {
+    const counts: WrapperCountBadges = getWrapperItemTypeCounts(items);
+    const badges: string[] = [];
+
+    if (counts.files > 0) {
+      badges.push(getWrapperCountText("files", counts.files));
+    }
+    if (counts.folders > 0) {
+      badges.push(getWrapperCountText("folders", counts.folders));
+    }
+    if (counts.sites > 0) {
+      badges.push(getWrapperCountText("sites", counts.sites));
+    }
+    if (counts.unknown > 0 || badges.length === 0) {
+      const fallbackCount = counts.unknown > 0 ? counts.unknown : counts.total;
+      badges.push(getWrapperCountText("items", fallbackCount));
+    }
+
+    return badges;
+  }
+
   function ownerSpaceId(item: any): string | undefined {
     return (
       item?.space_id ??
@@ -206,11 +369,152 @@
     return Boolean(sid) && sid !== $currentSpace.id;
   }
 
+  function getWrapperId(knowledge: IntegrationKnowledge): string | undefined {
+    return knowledge.wrapper_id ?? undefined;
+  }
+
+  function getWrapperName(knowledge: IntegrationKnowledge): string {
+    const wrapperName = knowledge.wrapper_name;
+    if (typeof wrapperName === "string" && wrapperName.trim().length > 0) {
+      return wrapperName;
+    }
+    return knowledge.name;
+  }
+
+  function groupIntegrationByWrapper(
+    knowledgeItems: IntegrationKnowledge[]
+  ): {
+    wrappers: Map<string, IntegrationKnowledge[]>;
+    singles: IntegrationKnowledge[];
+  } {
+    const wrappers = new Map<string, IntegrationKnowledge[]>();
+    const singles: IntegrationKnowledge[] = [];
+
+    for (const knowledge of knowledgeItems) {
+      const wrapperId = getWrapperId(knowledge);
+      if (!wrapperId) {
+        singles.push(knowledge);
+        continue;
+      }
+
+      const existing = wrappers.get(wrapperId) ?? [];
+      existing.push(knowledge);
+      wrappers.set(wrapperId, existing);
+    }
+
+    return { wrappers, singles };
+  }
+
+  function getIntegrationKnowledgeOptions(
+    knowledgeItems: IntegrationKnowledge[]
+  ): IntegrationKnowledgeOption[] {
+    const selectedIds = new Set((selectedIntegrationKnowledge ?? []).map((item) => item.id));
+    const { wrappers, singles } = groupIntegrationByWrapper(knowledgeItems);
+    const options: IntegrationKnowledgeOption[] = [];
+
+    for (const [wrapperId, items] of wrappers.entries()) {
+      if (items.length === 0) continue;
+      const allSelected = items.every((item) => selectedIds.has(item.id));
+      if (allSelected) continue;
+
+      const first = items[0];
+      options.push({
+        type: "wrapper",
+        key: `wrapper:${wrapperId}`,
+        wrapper: {
+          id: wrapperId,
+          name: getWrapperName(first),
+          items,
+          integration_type: first.integration_type
+        }
+      });
+    }
+
+    for (const knowledge of singles) {
+      if (selectedIds.has(knowledge.id)) continue;
+      options.push({
+        type: "single",
+        key: `integration:${knowledge.id}`,
+        knowledge
+      });
+    }
+
+    return options.sort((a, b) => {
+      const nameA = a.type === "wrapper" ? a.wrapper.name : a.knowledge.name;
+      const nameB = b.type === "wrapper" ? b.wrapper.name : b.knowledge.name;
+      return nameA.localeCompare(nameB);
+    });
+  }
+
+  function getSelectedIntegrationDisplay(
+    selectedItems: IntegrationKnowledge[],
+    allItemsInOrigin: IntegrationKnowledge[]
+  ): SelectedIntegrationDisplay[] {
+    const { wrappers: allWrapperGroups } = groupIntegrationByWrapper(allItemsInOrigin);
+    const { wrappers: selectedWrapperGroups, singles } = groupIntegrationByWrapper(selectedItems);
+    const display: SelectedIntegrationDisplay[] = [];
+
+    for (const [wrapperId, selectedGroupItems] of selectedWrapperGroups.entries()) {
+      const allGroupItems = allWrapperGroups.get(wrapperId) ?? [];
+      const isFullySelected =
+        allGroupItems.length > 0 && selectedGroupItems.length >= allGroupItems.length;
+
+      if (!isFullySelected) {
+        for (const item of selectedGroupItems) {
+          display.push({
+            type: "single",
+            key: `integration:${item.id}`,
+            knowledge: item
+          });
+        }
+        continue;
+      }
+
+      const first = selectedGroupItems[0];
+      display.push({
+        type: "wrapper",
+        key: `wrapper:${wrapperId}`,
+        wrapper: {
+          id: wrapperId,
+          name: getWrapperName(first),
+          items: allGroupItems,
+          integration_type: first.integration_type
+        }
+      });
+    }
+
+    for (const knowledge of singles) {
+      display.push({
+        type: "single",
+        key: `integration:${knowledge.id}`,
+        knowledge
+      });
+    }
+
+    return display.sort((a, b) => {
+      const nameA = a.type === "wrapper" ? a.wrapper.name : a.knowledge.name;
+      const nameB = b.type === "wrapper" ? b.wrapper.name : b.knowledge.name;
+      return nameA.localeCompare(nameB);
+    });
+  }
+
+  function removeIntegrationKnowledgeItemsByIds(ids: string[]) {
+    selectedIntegrationKnowledge = selectedIntegrationKnowledge?.filter(
+      (item) => !ids.includes(item.id)
+    );
+  }
+
+  function focusOpenInput() {
+    if ($openPersonal) inputPersonalEl?.focus();
+    if ($openOrg) inputOrgEl?.focus();
+  }
+
   function addItem(
     item:
       | { website: WebsiteSparse }
       | { collection: GroupSparse }
       | { integrationKnowledge: IntegrationKnowledge }
+      | { integrationWrapper: IntegrationWrapperOption }
   ) {
     if ("collection" in item && selectedCollections) {
       if (!selectedCollections.some(c => c.id === item.collection.id)) {
@@ -225,6 +529,13 @@
     if ("integrationKnowledge" in item && selectedIntegrationKnowledge) {
       if (!selectedIntegrationKnowledge.some(k => k.id === item.integrationKnowledge.id)) {
         selectedIntegrationKnowledge = [...selectedIntegrationKnowledge, item.integrationKnowledge];
+      }
+    }
+    if ("integrationWrapper" in item && selectedIntegrationKnowledge) {
+      const selectedIds = new Set(selectedIntegrationKnowledge.map((k) => k.id));
+      const toAdd = item.integrationWrapper.items.filter((k) => !selectedIds.has(k.id));
+      if (toAdd.length > 0) {
+        selectedIntegrationKnowledge = [...selectedIntegrationKnowledge, ...toAdd];
       }
     }
   }
@@ -286,7 +597,7 @@
     const k = split(section.integrationKnowledge);
 
     const mk = (
-      origin: "Personal" | "Organization",
+      origin: "personal" | "organization",
       groups: any[],
       websites: any[],
       integrationKnowledge: any[]
@@ -302,15 +613,15 @@
 
     const out: Array<[string, any]> = [];
     if (g.personal.length || w.personal.length || k.personal.length)
-      out.push([`${modelId}::personal`, mk("Personal", g.personal, w.personal, k.personal)]);
+      out.push([`${modelId}::personal`, mk("personal", g.personal, w.personal, k.personal)]);
     if (g.org.length || w.org.length || k.org.length)
-      out.push([`${modelId}::org`, mk("Organization", g.org, w.org, k.org)]);
+      out.push([`${modelId}::org`, mk("organization", g.org, w.org, k.org)]);
 
     return out;
   });
 
-  $: partitionedSectionsPersonal = partitionedSections.filter(([, s]) => s.origin === "Personal");
-  $: partitionedSectionsOrg = partitionedSections.filter(([, s]) => s.origin === "Organization");
+  $: partitionedSectionsPersonal = partitionedSections.filter(([, s]) => s.origin === "personal");
+  $: partitionedSectionsOrg = partitionedSections.filter(([, s]) => s.origin === "organization");
 
   $: selectedCollectionsPersonal = (selectedCollections ?? []).filter(isPersonalItem);
   $: selectedCollectionsOrg = (selectedCollections ?? []).filter(isOrgItem);
@@ -320,6 +631,16 @@
   
   $: selectedIntegrationKnowledgePersonal = (selectedIntegrationKnowledge ?? []).filter(isPersonalItem);
   $: selectedIntegrationKnowledgeOrg = (selectedIntegrationKnowledge ?? []).filter(isOrgItem);
+  $: allIntegrationKnowledgePersonal = ($currentSpace?.knowledge?.integrationKnowledge ?? []).filter(isPersonalItem);
+  $: allIntegrationKnowledgeOrg = ($currentSpace?.knowledge?.integrationKnowledge ?? []).filter(isOrgItem);
+  $: selectedIntegrationDisplayPersonal = getSelectedIntegrationDisplay(
+    selectedIntegrationKnowledgePersonal,
+    allIntegrationKnowledgePersonal
+  );
+  $: selectedIntegrationDisplayOrg = getSelectedIntegrationDisplay(
+    selectedIntegrationKnowledgeOrg,
+    allIntegrationKnowledgeOrg
+  );
 
   $: hasOrgSelections =
     selectedCollectionsOrg.length > 0 ||
@@ -363,8 +684,13 @@
           {:else}
             <IconCancel />
           {/if}
-          <span class="truncate px-2">{collection.name}</span>
-          {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
+          <button
+            class="truncate px-2 hover:underline cursor-pointer bg-transparent border-none text-left flex-grow"
+            on:click={() => toggleExpanded(collection.id, "collection", collection)}
+          >
+            {collection.name}
+          </button>
+          {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
           <div class="flex-grow"></div>
           {#if collection.metadata.num_info_blobs > 0}
             <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
@@ -384,7 +710,7 @@
         {#if isExpanded}
           <div class="blob-list">
             {#if isLoading}
-              <div class="blob-item text-muted">Loading...</div>
+              <div class="blob-item text-muted">{m.loading()}</div>
             {:else if blobs && blobs.length > 0}
               {#each blobs as blob (blob.id)}
                 <BlobPreview {blob} let:showBlob>
@@ -434,8 +760,10 @@
       {@const totalPages = getTotalPages(allBlobs)}
       {@const currentPage = currentPages.get(website.id) || 1}
       {@const pagesCrawled = website.latest_crawl?.pages_crawled}
+      {@const pagesFailed = website.latest_crawl?.pages_failed ?? 0}
+      {@const hasFailures = pagesFailed > 0}
       <div class="knowledge-item-container">
-        <div class="knowledge-item">
+        <div class="knowledge-item" class:knowledge-item-warning={hasFailures}>
           {#if pagesCrawled && pagesCrawled > 0}
             <button
               class="expand-button"
@@ -452,12 +780,22 @@
             <div class="expand-button-placeholder"></div>
           {/if}
           {#if isItemModelEnabled}<IconWeb />{:else}<IconCancel />{/if}
-          <span class="truncate px-2">{formatWebsiteName(website)}</span>
-          {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
+          <button
+            class="truncate px-2 hover:underline cursor-pointer bg-transparent border-none text-left flex-grow"
+            on:click={() => toggleExpanded(website.id, "website", website)}
+          >
+            {formatWebsiteName(website)}
+          </button>
+          {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
           <div class="flex-grow"></div>
+          {#if hasFailures}
+            <span class="rounded-full border px-3 py-1 text-sm border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-600 dark:bg-orange-950 dark:text-orange-300">
+              {m.pages_failed({ count: pagesFailed })}
+            </span>
+          {/if}
           {#if pagesCrawled && pagesCrawled > 0}
             <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-              {pagesCrawled} {pagesCrawled === 1 ? 'page' : 'pages'}
+              {m.pageCount({ count: pagesCrawled })}
             </span>
           {/if}
           <Button variant="destructive" padding="icon" on:click={() => {
@@ -469,7 +807,7 @@
         {#if isExpanded}
           <div class="blob-list">
             {#if isLoading}
-              <div class="blob-item text-muted">Loading...</div>
+              <div class="blob-item text-muted">{m.loading()}</div>
             {:else if blobs && blobs.length > 0}
               {#each blobs as blob (blob.id)}
                 <BlobPreview {blob} let:showBlob>
@@ -503,30 +841,89 @@
                 </div>
               {/if}
             {:else}
-              <div class="blob-item text-muted">No pages found</div>
+              <div class="blob-item text-muted">{m.noPagesFound()}</div>
             {/if}
           </div>
         {/if}
       </div>
     {/each}
 
-    {#each selectedIntegrationKnowledgePersonal as knowledge (`integration:${knowledge.id}`)}
-      {@const isItemModelEnabled = enabledModels.includes(knowledge.embedding_model.id)}
-      <div class="knowledge-item">
-        {#if isItemModelEnabled}
-          <IntegrationVendorIcon size="sm" type={knowledge.integration_type}/>
-        {:else}
-          <IconCancel />
-        {/if}
-        <span class="truncate px-2">{knowledge.name}</span>
-        {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
-        <div class="flex-grow"></div>
-        <Button variant="destructive" padding="icon" on:click={() => {
-          selectedIntegrationKnowledge = selectedIntegrationKnowledge?.filter((item) => item.id !== knowledge.id);
-          if ($openPersonal) inputPersonalEl?.focus();
-          if ($openOrg)      inputOrgEl?.focus();
-        }}><IconTrash /></Button>
-      </div>
+    {#each selectedIntegrationDisplayPersonal as selectedEntry (selectedEntry.key)}
+      {#if selectedEntry.type === "wrapper"}
+        {@const wrapper = selectedEntry.wrapper}
+        {@const isItemModelEnabled = enabledModels.includes(wrapper.items[0]?.embedding_model.id)}
+        {@const isExpanded = expandedWrapperSelections.has(wrapper.id)}
+        <div class="knowledge-item-container">
+          <div class="knowledge-item">
+            <button
+              class="expand-button"
+              on:click={(event) => toggleWrapperSelectionExpanded(wrapper.id, event)}
+              aria-label={isExpanded ? "Collapse" : "Expand"}
+            >
+              {#if isExpanded}
+                <IconChevronDown />
+              {:else}
+                <IconChevronRight />
+              {/if}
+            </button>
+            {#if isItemModelEnabled}
+              <IntegrationVendorIcon size="sm" type={wrapper.integration_type}/>
+            {:else}
+              <IconCancel />
+            {/if}
+            <span class="truncate px-2">{wrapper.name}</span>
+            <div class="flex items-center gap-2">
+              {#each getWrapperCountBadges(wrapper.items) as badge, index (`selected-personal-${wrapper.id}-${index}`)}
+                <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+                  {badge}
+                </span>
+              {/each}
+            </div>
+            {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
+            <div class="flex-grow"></div>
+            <Button variant="destructive" padding="icon" on:click={() => {
+              removeIntegrationKnowledgeItemsByIds(wrapper.items.map((item) => item.id));
+              focusOpenInput();
+            }}><IconTrash /></Button>
+          </div>
+          {#if isExpanded}
+            <div class="blob-list">
+              {#each getSortedWrapperItems(wrapper.items) as wrapperItem (wrapperItem.id)}
+                <div class="blob-item">
+                  <span class="flex min-w-0 flex-1 items-center gap-2">
+                    {#if isWrapperFolderItem(wrapperItem)}
+                      <IconFolder class="w-4 h-4 flex-shrink-0 text-secondary" />
+                    {:else}
+                      <IconFile class="w-4 h-4 flex-shrink-0 text-secondary" />
+                    {/if}
+                    <span class="blob-title truncate">{wrapperItem.name}</span>
+                  </span>
+                  {#if wrapperItem.folder_path}
+                    <span class="blob-size text-muted truncate max-w-[50%]">{wrapperItem.folder_path}</span>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {:else}
+        {@const knowledge = selectedEntry.knowledge}
+        {@const isItemModelEnabled = enabledModels.includes(knowledge.embedding_model.id)}
+        <div class="knowledge-item">
+          {#if isItemModelEnabled}
+            <IntegrationVendorIcon size="sm" type={knowledge.integration_type}/>
+          {:else}
+            <IconCancel />
+          {/if}
+          <span class="truncate px-2">{knowledge.name}</span>
+          {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
+          <div class="flex-grow"></div>
+          <Button variant="destructive" padding="icon" on:click={() => {
+            removeIntegrationKnowledgeItemsByIds([knowledge.id]);
+            focusOpenInput();
+          }}><IconTrash /></Button>
+        </div>
+      {/if}
     {/each}
   </section>
 {/if}
@@ -560,8 +957,13 @@
             <div class="expand-button-placeholder"></div>
           {/if}
           {#if isItemModelEnabled}<IconCollections />{:else}<IconCancel />{/if}
-          <span class="truncate px-2">{collection.name}</span>
-          {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
+          <button
+            class="truncate px-2 hover:underline cursor-pointer bg-transparent border-none text-left flex-grow"
+            on:click={() => toggleExpanded(collection.id, "collection", collection)}
+          >
+            {collection.name}
+          </button>
+          {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
           <div class="flex-grow"></div>
           {#if collection.metadata.num_info_blobs > 0}
             <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
@@ -569,7 +971,7 @@
             </span>
           {:else}
             <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-              Empty
+              {m.empty()}
             </span>
           {/if}
           <Button variant="destructive" padding="icon" on:click={() => {
@@ -581,7 +983,7 @@
         {#if isExpanded}
           <div class="blob-list">
             {#if isLoading}
-              <div class="blob-item text-muted">Loading...</div>
+              <div class="blob-item text-muted">{m.loading()}</div>
             {:else if blobs && blobs.length > 0}
               {#each blobs as blob (blob.id)}
                 <BlobPreview {blob} let:showBlob>
@@ -631,8 +1033,10 @@
       {@const totalPages = getTotalPages(allBlobs)}
       {@const currentPage = currentPages.get(website.id) || 1}
       {@const pagesCrawled = website.latest_crawl?.pages_crawled}
+      {@const pagesFailed = website.latest_crawl?.pages_failed ?? 0}
+      {@const hasFailures = pagesFailed > 0}
       <div class="knowledge-item-container">
-        <div class="knowledge-item">
+        <div class="knowledge-item" class:knowledge-item-warning={hasFailures}>
           {#if pagesCrawled && pagesCrawled > 0}
             <button
               class="expand-button"
@@ -649,12 +1053,22 @@
             <div class="expand-button-placeholder"></div>
           {/if}
           {#if isItemModelEnabled}<IconWeb />{:else}<IconCancel />{/if}
-          <span class="truncate px-2">{formatWebsiteName(website)}</span>
-          {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
+          <button
+            class="truncate px-2 hover:underline cursor-pointer bg-transparent border-none text-left flex-grow"
+            on:click={() => toggleExpanded(website.id, "website", website)}
+          >
+            {formatWebsiteName(website)}
+          </button>
+          {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
           <div class="flex-grow"></div>
+          {#if hasFailures}
+            <span class="rounded-full border px-3 py-1 text-sm border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-600 dark:bg-orange-950 dark:text-orange-300">
+              {m.pages_failed({ count: pagesFailed })}
+            </span>
+          {/if}
           {#if pagesCrawled && pagesCrawled > 0}
             <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-              {pagesCrawled} {pagesCrawled === 1 ? 'page' : 'pages'}
+              {m.pageCount({ count: pagesCrawled })}
             </span>
           {/if}
           <Button variant="destructive" padding="icon" on:click={() => {
@@ -666,7 +1080,7 @@
         {#if isExpanded}
           <div class="blob-list">
             {#if isLoading}
-              <div class="blob-item text-muted">Loading...</div>
+              <div class="blob-item text-muted">{m.loading()}</div>
             {:else if blobs && blobs.length > 0}
               {#each blobs as blob (blob.id)}
                 <BlobPreview {blob} let:showBlob>
@@ -700,30 +1114,89 @@
                 </div>
               {/if}
             {:else}
-              <div class="blob-item text-muted">No pages found</div>
+              <div class="blob-item text-muted">{m.noPagesFound()}</div>
             {/if}
           </div>
         {/if}
       </div>
     {/each}
 
-    {#each selectedIntegrationKnowledgeOrg as knowledge (`integration:${knowledge.id}`)}
-      {@const isItemModelEnabled = enabledModels.includes(knowledge.embedding_model.id)}
-      <div class="knowledge-item">
-        {#if isItemModelEnabled}
-          <IntegrationVendorIcon size="sm" type={knowledge.integration_type}/>
-        {:else}
-          <IconCancel />
-        {/if}
-        <span class="truncate px-2">{knowledge.name}</span>
-        {#if !isItemModelEnabled}<span>(model disabled)</span>{/if}
-        <div class="flex-grow"></div>
-        <Button variant="destructive" padding="icon" on:click={() => {
-          selectedIntegrationKnowledge = selectedIntegrationKnowledge?.filter((item) => item.id !== knowledge.id);
-          if ($openPersonal) inputPersonalEl?.focus();
-          if ($openOrg)      inputOrgEl?.focus();
-        }}><IconTrash /></Button>
-      </div>
+    {#each selectedIntegrationDisplayOrg as selectedEntry (selectedEntry.key)}
+      {#if selectedEntry.type === "wrapper"}
+        {@const wrapper = selectedEntry.wrapper}
+        {@const isItemModelEnabled = enabledModels.includes(wrapper.items[0]?.embedding_model.id)}
+        {@const isExpanded = expandedWrapperSelections.has(wrapper.id)}
+        <div class="knowledge-item-container">
+          <div class="knowledge-item">
+            <button
+              class="expand-button"
+              on:click={(event) => toggleWrapperSelectionExpanded(wrapper.id, event)}
+              aria-label={isExpanded ? "Collapse" : "Expand"}
+            >
+              {#if isExpanded}
+                <IconChevronDown />
+              {:else}
+                <IconChevronRight />
+              {/if}
+            </button>
+            {#if isItemModelEnabled}
+              <IntegrationVendorIcon size="sm" type={wrapper.integration_type}/>
+            {:else}
+              <IconCancel />
+            {/if}
+            <span class="truncate px-2">{wrapper.name}</span>
+            <div class="flex items-center gap-2">
+              {#each getWrapperCountBadges(wrapper.items) as badge, index (`selected-org-${wrapper.id}-${index}`)}
+                <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+                  {badge}
+                </span>
+              {/each}
+            </div>
+            {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
+            <div class="flex-grow"></div>
+            <Button variant="destructive" padding="icon" on:click={() => {
+              removeIntegrationKnowledgeItemsByIds(wrapper.items.map((item) => item.id));
+              focusOpenInput();
+            }}><IconTrash /></Button>
+          </div>
+          {#if isExpanded}
+            <div class="blob-list">
+              {#each getSortedWrapperItems(wrapper.items) as wrapperItem (wrapperItem.id)}
+                <div class="blob-item">
+                  <span class="flex min-w-0 flex-1 items-center gap-2">
+                    {#if isWrapperFolderItem(wrapperItem)}
+                      <IconFolder class="w-4 h-4 flex-shrink-0 text-secondary" />
+                    {:else}
+                      <IconFile class="w-4 h-4 flex-shrink-0 text-secondary" />
+                    {/if}
+                    <span class="blob-title truncate">{wrapperItem.name}</span>
+                  </span>
+                  {#if wrapperItem.folder_path}
+                    <span class="blob-size text-muted truncate max-w-[50%]">{wrapperItem.folder_path}</span>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {:else}
+        {@const knowledge = selectedEntry.knowledge}
+        {@const isItemModelEnabled = enabledModels.includes(knowledge.embedding_model.id)}
+        <div class="knowledge-item">
+          {#if isItemModelEnabled}
+            <IntegrationVendorIcon size="sm" type={knowledge.integration_type}/>
+          {:else}
+            <IconCancel />
+          {/if}
+          <span class="truncate px-2">{knowledge.name}</span>
+          {#if !isItemModelEnabled}<span>({m.model_disabled()})</span>{/if}
+          <div class="flex-grow"></div>
+          <Button variant="destructive" padding="icon" on:click={() => {
+            removeIntegrationKnowledgeItemsByIds([knowledge.id]);
+            focusOpenInput();
+          }}><IconTrash /></Button>
+        </div>
+      {/if}
     {/each}
   </section>
   {/if}
@@ -771,20 +1244,20 @@
                 {...$groupLabelPersonal(section.name + '-Personal')}
                 use:groupLabelPersonal>
               <span>
-                {#if availableKnowledge.showHeaders}{section.name}{:else}Select a knowledge source{/if}
+                {#if availableKnowledge.showHeaders}{section.name}{:else}{m.select_knowledge_source()}{/if}
               </span>
               <span class="flex-grow"></span>
               <span class="rounded-full border px-2 py-0.5 text-xs border-label-default bg-label-dimmer text-label-stronger label-blue">
-                Personal
+                {m.personal()}
               </span>
             </div>
 
             {#if !section.isEnabled}
-              <p class="knowledge-message">{section.name} is currently not enabled in this space.</p>
+              <p class="knowledge-message">{m.section_not_enabled({ section: section.name })}</p>
             {:else if !section.isCompatible}
-              <p class="knowledge-message">The sources embedded by this model are not compatible with the currently selected knowledge.</p>
+              <p class="knowledge-message">{m.sources_not_compatible()}</p>
             {:else if section.availableItemsCount === 0}
-              <p class="knowledge-message">No more sources available.</p>
+              <p class="knowledge-message">{m.no_more_sources()}</p>
             {:else}
               {#each section.groups as collection (`group:${collection.id}`)}
                 <div class="knowledge-item cursor-pointer" {...$optionPersonal({ value: { collection } })} use:optionPersonal>
@@ -799,28 +1272,84 @@
                     </span>
                   {:else}
                     <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-                      Empty
+                      {m.empty()}
                     </span>
                   {/if}
                 </div>
               {/each}
 
               {#each section.websites as website (`website:${website.id}`)}
-                <div class="knowledge-item cursor-pointer" {...$optionPersonal({ value: { website } })} use:optionPersonal>
+                {@const wPagesFailed = website.latest_crawl?.pages_failed ?? 0}
+                <div class="knowledge-item cursor-pointer" class:knowledge-item-warning={wPagesFailed > 0} {...$optionPersonal({ value: { website } })} use:optionPersonal>
                   <div class="flex max-w-full flex-grow items-center gap-3">
                     <IconWeb />
                     <span class="truncate">{formatWebsiteName(website)}</span>
                   </div>
+                  {#if wPagesFailed > 0}
+                    <span class="rounded-full border px-3 py-1 text-sm border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-600 dark:bg-orange-950 dark:text-orange-300">
+                      {m.pages_failed({ count: wPagesFailed })}
+                    </span>
+                  {/if}
                 </div>
               {/each}
 
-              {#each section.integrationKnowledge as integrationKnowledge (`integration:${integrationKnowledge.id}`)}
-                <div class="knowledge-item cursor-pointer" {...$optionPersonal({ value: { integrationKnowledge } })} use:optionPersonal>
-                  <div class="flex max-w-full flex-grow items-center gap-3">
-                    <IntegrationVendorIcon size="sm" type={integrationKnowledge.integration_type} />
-                    <span class="truncate">{integrationKnowledge.name}</span>
+              {#each getIntegrationKnowledgeOptions(section.integrationKnowledge) as integrationOption (integrationOption.key)}
+                {#if integrationOption.type === "wrapper"}
+                  {@const isWrapperExpanded = expandedWrapperOptions.has(integrationOption.wrapper.id)}
+                  <div class="knowledge-item-container">
+                    <div class="knowledge-item cursor-pointer" {...$optionPersonal({ value: { integrationWrapper: integrationOption.wrapper } })} use:optionPersonal>
+                      <button
+                        class="expand-button"
+                        on:click={(event) => toggleWrapperOptionExpanded(integrationOption.wrapper.id, event)}
+                        aria-label={isWrapperExpanded ? "Collapse" : "Expand"}
+                      >
+                        {#if isWrapperExpanded}
+                          <IconChevronDown />
+                        {:else}
+                          <IconChevronRight />
+                        {/if}
+                      </button>
+                      <div class="flex max-w-full flex-grow items-center gap-3">
+                        <IntegrationVendorIcon size="sm" type={integrationOption.wrapper.integration_type} />
+                        <span class="truncate">{integrationOption.wrapper.name}</span>
+                      </div>
+                      <div class="flex-grow"></div>
+                      <div class="flex items-center gap-2">
+                        {#each getWrapperCountBadges(integrationOption.wrapper.items) as badge, index (`option-personal-${integrationOption.wrapper.id}-${index}`)}
+                          <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+                            {badge}
+                          </span>
+                        {/each}
+                      </div>
+                    </div>
+                    {#if isWrapperExpanded}
+                      <div class="blob-list">
+                        {#each getSortedWrapperItems(integrationOption.wrapper.items) as wrapperItem (wrapperItem.id)}
+                          <div class="blob-item">
+                            <span class="flex min-w-0 flex-1 items-center gap-2">
+                              {#if isWrapperFolderItem(wrapperItem)}
+                                <IconFolder class="w-4 h-4 flex-shrink-0 text-secondary" />
+                              {:else}
+                                <IconFile class="w-4 h-4 flex-shrink-0 text-secondary" />
+                              {/if}
+                              <span class="blob-title truncate">{wrapperItem.name}</span>
+                            </span>
+                            {#if wrapperItem.folder_path}
+                              <span class="blob-size text-muted truncate max-w-[50%]">{wrapperItem.folder_path}</span>
+                            {/if}
+                          </div>
+                        {/each}
+                      </div>
+                    {/if}
                   </div>
-                </div>
+                {:else}
+                  <div class="knowledge-item cursor-pointer" {...$optionPersonal({ value: { integrationKnowledge: integrationOption.knowledge } })} use:optionPersonal>
+                    <div class="flex max-w-full flex-grow items-center gap-3">
+                      <IntegrationVendorIcon size="sm" type={integrationOption.knowledge.integration_type} />
+                      <span class="truncate">{integrationOption.knowledge.name}</span>
+                    </div>
+                  </div>
+                {/if}
               {/each}
             {/if}
           </div>
@@ -874,7 +1403,7 @@
                 {...$groupLabelOrg(section.name + '-Organization')}
                 use:groupLabelOrg>
               <span>
-                {#if availableKnowledge.showHeaders}{section.name}{:else}Select a knowledge source{/if}
+                {#if availableKnowledge.showHeaders}{section.name}{:else}{m.select_knowledge_source()}{/if}
               </span>
               <span class="flex-grow"></span>
               <span class="rounded-full border px-2 py-0.5 text-xs border-label-default bg-label-dimmer text-label-stronger label-warning">
@@ -883,11 +1412,11 @@
             </div>
 
             {#if !section.isEnabled}
-              <p class="knowledge-message">{section.name} is currently not enabled in this space.</p>
+              <p class="knowledge-message">{m.section_not_enabled({ section: section.name })}</p>
             {:else if !section.isCompatible}
-              <p class="knowledge-message">The sources embedded by this model are not compatible with the currently selected knowledge.</p>
+              <p class="knowledge-message">{m.sources_not_compatible()}</p>
             {:else if section.availableItemsCount === 0}
-              <p class="knowledge-message">No more sources available.</p>
+              <p class="knowledge-message">{m.no_more_sources()}</p>
             {:else}
               {#each section.groups as collection (`group:${collection.id}`)}
                 <div class="knowledge-item cursor-pointer" {...$optionOrg({ value: { collection } })} use:optionOrg>
@@ -902,28 +1431,84 @@
                     </span>
                   {:else}
                     <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
-                      Empty
+                      {m.empty()}
                     </span>
                   {/if}
                 </div>
               {/each}
 
               {#each section.websites as website (`website:${website.id}`)}
-                <div class="knowledge-item cursor-pointer" {...$optionOrg({ value: { website } })} use:optionOrg>
+                {@const wPagesFailed = website.latest_crawl?.pages_failed ?? 0}
+                <div class="knowledge-item cursor-pointer" class:knowledge-item-warning={wPagesFailed > 0} {...$optionOrg({ value: { website } })} use:optionOrg>
                   <div class="flex max-w-full flex-grow items-center gap-3">
                     <IconWeb />
                     <span class="truncate">{formatWebsiteName(website)}</span>
                   </div>
+                  {#if wPagesFailed > 0}
+                    <span class="rounded-full border px-3 py-1 text-sm border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-600 dark:bg-orange-950 dark:text-orange-300">
+                      {m.pages_failed({ count: wPagesFailed })}
+                    </span>
+                  {/if}
                 </div>
               {/each}
 
-              {#each section.integrationKnowledge as integrationKnowledge (`integration:${integrationKnowledge.id}`)}
-                <div class="knowledge-item cursor-pointer" {...$optionOrg({ value: { integrationKnowledge } })} use:optionOrg>
-                  <div class="flex max-w-full flex-grow items-center gap-3">
-                    <IntegrationVendorIcon size="sm" type={integrationKnowledge.integration_type} />
-                    <span class="truncate">{integrationKnowledge.name}</span>
+              {#each getIntegrationKnowledgeOptions(section.integrationKnowledge) as integrationOption (integrationOption.key)}
+                {#if integrationOption.type === "wrapper"}
+                  {@const isWrapperExpanded = expandedWrapperOptions.has(integrationOption.wrapper.id)}
+                  <div class="knowledge-item-container">
+                    <div class="knowledge-item cursor-pointer" {...$optionOrg({ value: { integrationWrapper: integrationOption.wrapper } })} use:optionOrg>
+                      <button
+                        class="expand-button"
+                        on:click={(event) => toggleWrapperOptionExpanded(integrationOption.wrapper.id, event)}
+                        aria-label={isWrapperExpanded ? "Collapse" : "Expand"}
+                      >
+                        {#if isWrapperExpanded}
+                          <IconChevronDown />
+                        {:else}
+                          <IconChevronRight />
+                        {/if}
+                      </button>
+                      <div class="flex max-w-full flex-grow items-center gap-3">
+                        <IntegrationVendorIcon size="sm" type={integrationOption.wrapper.integration_type} />
+                        <span class="truncate">{integrationOption.wrapper.name}</span>
+                      </div>
+                      <div class="flex-grow"></div>
+                      <div class="flex items-center gap-2">
+                        {#each getWrapperCountBadges(integrationOption.wrapper.items) as badge, index (`option-org-${integrationOption.wrapper.id}-${index}`)}
+                          <span class="label-blue border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
+                            {badge}
+                          </span>
+                        {/each}
+                      </div>
+                    </div>
+                    {#if isWrapperExpanded}
+                      <div class="blob-list">
+                        {#each getSortedWrapperItems(integrationOption.wrapper.items) as wrapperItem (wrapperItem.id)}
+                          <div class="blob-item">
+                            <span class="flex min-w-0 flex-1 items-center gap-2">
+                              {#if isWrapperFolderItem(wrapperItem)}
+                                <IconFolder class="w-4 h-4 flex-shrink-0 text-secondary" />
+                              {:else}
+                                <IconFile class="w-4 h-4 flex-shrink-0 text-secondary" />
+                              {/if}
+                              <span class="blob-title truncate">{wrapperItem.name}</span>
+                            </span>
+                            {#if wrapperItem.folder_path}
+                              <span class="blob-size text-muted truncate max-w-[50%]">{wrapperItem.folder_path}</span>
+                            {/if}
+                          </div>
+                        {/each}
+                      </div>
+                    {/if}
                   </div>
-                </div>
+                {:else}
+                  <div class="knowledge-item cursor-pointer" {...$optionOrg({ value: { integrationKnowledge: integrationOption.knowledge } })} use:optionOrg>
+                    <div class="flex max-w-full flex-grow items-center gap-3">
+                      <IntegrationVendorIcon size="sm" type={integrationOption.knowledge.integration_type} />
+                      <span class="truncate">{integrationOption.knowledge.name}</span>
+                    </div>
+                  </div>
+                {/if}
               {/each}
             {/if}
           </div>
@@ -947,6 +1532,10 @@
 
   .knowledge-item {
     @apply border-default bg-primary hover:bg-hover-dimmer flex h-16 w-full items-center gap-2 border-b px-4;
+  }
+
+  .knowledge-item-warning {
+    @apply bg-orange-50 dark:bg-orange-950/30;
   }
 
   div[data-highlighted] {

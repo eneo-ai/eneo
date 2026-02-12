@@ -54,16 +54,22 @@ class InfoBlobService:
         self.space_service = space_service
         self.actor_manager = actor_manager
 
-    async def _get_actor(self, info_blob: Optional[InfoBlobInDB], group_id: Optional[UUID]):
+    async def _get_actor(
+        self, info_blob: Optional[InfoBlobInDB], group_id: Optional[UUID]
+    ):
         if info_blob is None and group_id is None:
             raise ValueError("One of info_blob and group_id has to exist")
 
         if group_id is not None:
-            space = await self.space_repo.get_space_by_collection(collection_id=group_id)
+            space = await self.space_repo.get_space_by_collection(
+                collection_id=group_id
+            )
 
         else:
             if info_blob.group_id is not None:
-                space = await self.space_repo.get_space_by_collection(info_blob.group_id)
+                space = await self.space_repo.get_space_by_collection(
+                    info_blob.group_id
+                )
             elif info_blob.website_id is not None:
                 space = await self.space_repo.get_space_by_website(info_blob.website_id)
             elif info_blob.integration_knowledge_id is not None:
@@ -81,7 +87,9 @@ class InfoBlobService:
         if info_blob is None:
             raise NotFoundException("InfoBlob not found")
 
-        await self._can_perform_action(info_blob=info_blob, group_id=None, action=action)
+        await self._can_perform_action(
+            info_blob=info_blob, group_id=None, action=action
+        )
 
     async def _can_perform_action(
         self,
@@ -126,8 +134,10 @@ class InfoBlobService:
                     )
 
             elif info_blob.integration_knowledge_id:
-                info_blobs_deleted = await self.repo.delete_by_title_and_integration_knowledge(
-                    info_blob.title, info_blob.integration_knowledge_id
+                info_blobs_deleted = (
+                    await self.repo.delete_by_title_and_integration_knowledge(
+                        info_blob.title, info_blob.integration_knowledge_id
+                    )
                 )
 
                 if info_blobs_deleted:
@@ -158,6 +168,15 @@ class InfoBlobService:
 
         # Use repo's upsert method
         return await self.repo.upsert_by_title_and_integration_knowledge(info_blob)
+
+    async def upsert_info_blob_by_sharepoint_item_and_integration(
+        self,
+        info_blob: InfoBlobAdd,
+    ) -> InfoBlobInDB:
+        """Idempotent upsert for SharePoint content keyed by item ID."""
+        size_of_text = await self.quota_service.add_text(info_blob.text)
+        info_blob.size = size_of_text
+        return await self.repo.upsert_by_sharepoint_item_and_integration_knowledge(info_blob)
 
     async def add_info_blob(self, info_blob: InfoBlobAdd):
         info_blob_in_db = await self.add_info_blob_without_validation(info_blob)
@@ -196,7 +215,9 @@ class InfoBlobService:
         if updated_info_blob.group_id is not None:
             await self.group_service.update_group_size(updated_info_blob.group_id)
         if updated_info_blob.website_id is not None:
-            await self.update_website_size_service.update_website_size(updated_info_blob.website_id)
+            await self.update_website_size_service.update_website_size(
+                updated_info_blob.website_id
+            )
 
         return updated_info_blob
 
@@ -244,19 +265,26 @@ class InfoBlobService:
         return await self.repo.get_by_website(website_id=id)
 
     async def delete(self, id: str):
+        # Fetch the blob first to validate authorization BEFORE deleting
+        blob = await self.repo.get(id)
+
+        # Validate authorization before performing deletion
+        await self._validate(blob, action=SpaceAction.DELETE)
+
+        # Only delete if authorization check passes
         info_blob_deleted = await self.repo.delete(id)
 
-        await self._validate(info_blob_deleted, action=SpaceAction.DELETE)
-
         return info_blob_deleted
-    
-    async def get_for_space(self, space_id: UUID, *, limit: int | None = None) -> list[InfoBlobInDB]:
+
+    async def get_for_space(
+        self, space_id: UUID, *, limit: int | None = None
+    ) -> list[InfoBlobInDB]:
         space = await self.space_repo.one(space_id)
 
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_read_info_blobs():
             raise UnauthorizedException()
-        
+
         space_ids = effective_space_ids(space)
 
         return await self.repo.list_by_space_ids(

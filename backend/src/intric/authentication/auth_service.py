@@ -299,7 +299,9 @@ class AuthService:
                     iat_claim = unverified_claims.get("iat")
                     if isinstance(iat_claim, (int, float)):
                         drift_seconds = iat_claim - server_dt.timestamp()
-                        iat_iso = datetime.fromtimestamp(iat_claim, tz=timezone.utc).isoformat()
+                        iat_iso = datetime.fromtimestamp(
+                            iat_claim, tz=timezone.utc
+                        ).isoformat()
                 except Exception:
                     # Best-effort diagnostics only
                     pass

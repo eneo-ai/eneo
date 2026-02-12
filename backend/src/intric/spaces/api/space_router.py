@@ -1,5 +1,7 @@
 from uuid import UUID
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 
 # Audit logging - module level imports for consistency
@@ -19,8 +21,12 @@ from intric.server import protocol
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.spaces.api.space_models import (
+    AddSpaceGroupMemberRequest,
     AddSpaceMemberRequest,
     Applications,
+    CreateSpaceIntegrationKnowledgeBatchRequest,
+    CreateSpaceIntegrationKnowledgeBatchResponse,
+    CreateSpaceIntegrationKnowledgeBatchResult,
     CreateSpaceAppRequest,
     CreateSpaceAssistantRequest,
     CreateSpaceGroupsRequest,
@@ -29,11 +35,14 @@ from intric.spaces.api.space_models import (
     CreateSpaceServiceRequest,
     CreateSpaceServiceResponse,
     Knowledge,
+    SpaceGroupMember,
     SpaceMember,
     SpacePublic,
     SpaceSparse,
     UpdateIntegrationKnowledgeRequest,
+    UpdateIntegrationKnowledgeWrapperRequest,
     UpdateSpaceDryRunResponse,
+    UpdateSpaceGroupMemberRequest,
     UpdateSpaceMemberRequest,
     UpdateSpaceRequest,
 )
@@ -44,7 +53,6 @@ from intric.integration.presentation.assemblers.integration_knowledge_assembler 
 
 from intric.websites.presentation.website_models import WebsiteCreate, WebsitePublic
 from intric.roles.permissions import Permission
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -299,7 +307,7 @@ async def get_spaces(
     service = container.space_service()
     assembler = container.space_assembler()
 
-    spaces = await service.get_spaces(include_personal=include_personal)
+    spaces = await service.get_spaces(include_personal=include_personal, include_applications=include_applications)
     spaces = [assembler.from_space_to_sparse_model(space, include_applications=include_applications) for space in spaces]
 
     return protocol.to_paginated_response(spaces)
@@ -690,6 +698,117 @@ async def create_space_integration_knowledge(
     return job
 
 
+@router.post(
+    "/{id}/knowledge/integrations/add/{user_integration_id}/batch/",
+    response_model=CreateSpaceIntegrationKnowledgeBatchResponse,
+    status_code=202,
+)
+async def create_space_integration_knowledge_batch(
+    id: UUID,
+    user_integration_id: UUID,
+    data: CreateSpaceIntegrationKnowledgeBatchRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.integration_knowledge_service()
+    user = container.user()
+
+    batch_results = await service.create_space_integration_knowledge_batch(
+        user_integration_id=user_integration_id,
+        embedding_model_id=data.embedding_model.id,
+        space_id=id,
+        wrapper_name=data.wrapper_name,
+        items=[
+            {
+                "name": item.name,
+                "key": item.key,
+                "url": item.url,
+                "folder_id": item.folder_id,
+                "folder_path": item.folder_path,
+                "selected_item_type": item.selected_item_type,
+                "resource_type": item.resource_type or "site",
+            }
+            for item in data.items
+        ],
+    )
+
+    # Get space for context (graceful degradation if space fetch fails)
+    space = None
+    try:
+        space_service = container.space_service()
+        space = await space_service.get_space(id)
+    except Exception:
+        pass
+
+    audit_service = container.audit_service()
+    response_items: list[CreateSpaceIntegrationKnowledgeBatchResult] = []
+    created_count = 0
+    failed_count = 0
+
+    for result in batch_results:
+        if (
+            result["status"] == "created"
+            and result["knowledge"] is not None
+            and result["job"] is not None
+        ):
+            created_count += 1
+            knowledge = result["knowledge"]
+
+            response_items.append(
+                CreateSpaceIntegrationKnowledgeBatchResult(
+                    index=result["index"],
+                    name=result["name"],
+                    status="created",
+                    integration_knowledge_id=result["integration_knowledge_id"],
+                    job=JobPublic.model_validate(result["job"]),
+                    error=None,
+                )
+            )
+
+            extra = {
+                "integration_type": knowledge.integration_type,
+                "url": knowledge.url,
+                "embedding_model": {
+                    "id": str(data.embedding_model.id),
+                    "name": getattr(data.embedding_model, "name", None),
+                },
+                "batch": {"total_items": len(data.items)},
+            }
+
+            await audit_service.log_async(
+                tenant_id=user.tenant_id,
+                actor_id=user.id,
+                action=ActionType.INTEGRATION_KNOWLEDGE_CREATED,
+                entity_type=EntityType.INTEGRATION_KNOWLEDGE,
+                entity_id=knowledge.id,
+                description=f"Added {knowledge.integration_type} knowledge '{knowledge.name}' to space '{space.name if space else 'unknown'}' (batch)",
+                metadata=AuditMetadata.standard(
+                    actor=user,
+                    target=knowledge,
+                    space=space,
+                    extra=extra,
+                ),
+            )
+            continue
+
+        failed_count += 1
+        response_items.append(
+            CreateSpaceIntegrationKnowledgeBatchResult(
+                index=result["index"],
+                name=result["name"],
+                status="failed",
+                integration_knowledge_id=None,
+                job=None,
+                error=result["error"],
+            )
+        )
+
+    return CreateSpaceIntegrationKnowledgeBatchResponse(
+        items=response_items,
+        created_count=created_count,
+        failed_count=failed_count,
+    )
+
+
 @router.delete(
     "/{id}/knowledge/integrations/remove/{integration_knowledge_id}/",
     status_code=204,
@@ -729,6 +848,44 @@ async def delete_space_integration_knowledge(
 
 
 @router.patch(
+    "/{id}/knowledge/integrations/wrappers/{wrapper_id}/",
+    response_model=list[IntegrationKnowledgePublic],
+)
+async def update_integration_knowledge_wrapper(
+    id: UUID,
+    wrapper_id: UUID,
+    data: UpdateIntegrationKnowledgeWrapperRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.integration_knowledge_service()
+    updated_items = await service.update_wrapper_name(
+        space_id=id,
+        wrapper_id=wrapper_id,
+        name=data.name,
+    )
+    return [
+        IntegrationKnowledgeAssembler.to_space_knowledge_model(item)
+        for item in updated_items
+    ]
+
+
+@router.delete(
+    "/{id}/knowledge/integrations/wrappers/{wrapper_id}/",
+    status_code=204,
+)
+async def delete_integration_knowledge_wrapper(
+    id: UUID,
+    wrapper_id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.integration_knowledge_service()
+    await service.remove_wrapper_knowledge(
+        space_id=id,
+        wrapper_id=wrapper_id,
+    )
+
+
+@router.patch(
     "/{id}/knowledge/integrations/{integration_knowledge_id}/",
     response_model=IntegrationKnowledgePublic,
 )
@@ -745,6 +902,43 @@ async def update_integration_knowledge(
         name=data.name,
     )
     return IntegrationKnowledgeAssembler.to_space_knowledge_model(knowledge)
+
+
+@router.post(
+    "/{id}/knowledge/integrations/{integration_knowledge_id}/sync/",
+    response_model=JobPublic,
+    status_code=202,
+)
+async def trigger_integration_full_sync(
+    id: UUID,
+    integration_knowledge_id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.integration_knowledge_service()
+    user = container.user()
+
+    job = await service.trigger_full_sync(
+        space_id=id,
+        integration_knowledge_id=integration_knowledge_id,
+    )
+
+    # Audit logging
+    space_repo = container.space_repo()
+    space = await space_repo.one(id=id)
+    knowledge = space.get_integration_knowledge(integration_knowledge_id=integration_knowledge_id)
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.INTEGRATION_KNOWLEDGE_SYNCED,
+        entity_type=EntityType.INTEGRATION_KNOWLEDGE,
+        entity_id=integration_knowledge_id,
+        description=f"Triggered full sync for {knowledge.integration_type} knowledge '{knowledge.name}' in space '{space.name}'",
+        metadata=AuditMetadata.standard(actor=user, target=knowledge, space=space),
+    )
+
+    return job
 
 
 @router.post(
@@ -819,9 +1013,6 @@ async def change_role_of_member(
     update_space_member_req: UpdateSpaceMemberRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    import logging
-    logger = logging.getLogger(__name__)
-
     service = container.space_service()
     current_user = container.user()
 
@@ -899,10 +1090,6 @@ async def remove_space_member(
     user_id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    import logging
-
-    logger = logging.getLogger(__name__)
-
     service = container.space_service()
     current_user = container.user()
 
@@ -947,6 +1134,215 @@ async def remove_space_member(
         entity_type=EntityType.SPACE,
         entity_id=id,
         description=f"Removed {member_name} from {space_name}",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=space if space else type("FallbackTarget", (), {"id": id, "name": None})(),
+            space=space,
+            extra=extra,
+        ),
+    )
+
+
+# Group Member Endpoints
+
+
+@router.get(
+    "/{id}/group-members/",
+    response_model=PaginatedResponse[SpaceGroupMember],
+    responses=responses.get_responses([403, 404]),
+    dependencies=[Depends(forbid_org_space)],
+)
+async def get_space_group_members(
+    id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """List all user groups that are members of this space."""
+    service = container.space_service()
+
+    space = await service.get_space(id)
+    group_members = list(space.group_members.values())
+
+    return protocol.to_paginated_response(group_members)
+
+
+@router.post(
+    "/{id}/group-members/",
+    response_model=SpaceGroupMember,
+    status_code=201,
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(forbid_org_space)],
+)
+async def add_space_group_member(
+    id: UUID,
+    request: AddSpaceGroupMemberRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Add a user group to a space with the specified role.
+
+    All members of the group will gain access to the space at that role level.
+    Groups cannot be added to personal spaces.
+    """
+    service = container.space_service()
+    current_user = container.user()
+
+    group_member = await service.add_group_member(
+        space_id=id,
+        group_id=request.id,
+        role=request.role,
+    )
+
+    # Get space for context (graceful degradation if space fetch fails)
+    space = None
+    try:
+        space = await service.get_space(id)
+    except Exception as e:
+        logger.warning(f"Failed to fetch space context for audit log: {e}")
+
+    extra = {
+        "group": {
+            "id": str(request.id),
+            "name": group_member.name,
+            "user_count": group_member.user_count,
+        },
+        "role": request.role,
+    }
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.SPACE_MEMBER_ADDED,
+        entity_type=EntityType.SPACE,
+        entity_id=id,
+        description=f"Added group '{group_member.name}' to space '{space.name if space else 'unknown'}' with role '{request.role}'",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=space if space else group_member,
+            space=space,
+            extra=extra,
+        ),
+    )
+
+    return group_member
+
+
+@router.patch(
+    "/{id}/group-members/{group_id}/",
+    response_model=SpaceGroupMember,
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(forbid_org_space)],
+)
+async def change_group_member_role(
+    id: UUID,
+    group_id: UUID,
+    request: UpdateSpaceGroupMemberRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Change the role of a user group in a space."""
+    service = container.space_service()
+    current_user = container.user()
+
+    current_group_member = await service.get_group_member(id, group_id)
+    old_role = current_group_member.role
+
+    updated_group_member = await service.change_group_member_role(
+        space_id=id,
+        group_id=group_id,
+        new_role=request.role,
+    )
+
+    # Get space for context (graceful degradation if space fetch fails)
+    space = None
+    try:
+        space = await service.get_space(id)
+    except Exception as e:
+        logger.warning(f"Failed to fetch space context for audit log: {e}")
+
+    extra = {
+        "group": {
+            "id": str(group_id),
+            "name": updated_group_member.name,
+            "user_count": updated_group_member.user_count,
+        },
+    }
+
+    changes = {
+        "role": {
+            "old": old_role,
+            "new": request.role,
+        },
+    }
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.ROLE_MODIFIED,
+        entity_type=EntityType.SPACE,
+        entity_id=id,
+        description=f"Changed role of group '{updated_group_member.name}' in space '{space.name if space else 'unknown'}' from {old_role} to {request.role}",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=space if space else updated_group_member,
+            space=space,
+            changes=changes,
+            extra=extra,
+        ),
+    )
+
+    return updated_group_member
+
+
+@router.delete(
+    "/{id}/group-members/{group_id}/",
+    status_code=204,
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(forbid_org_space)],
+)
+async def remove_space_group_member(
+    id: UUID,
+    group_id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Remove a user group from a space.
+
+    All members of the group will lose access through this group membership.
+    Note: Users may still have access through direct membership or other groups.
+    """
+    service = container.space_service()
+    current_user = container.user()
+
+    # Snapshot data BEFORE deletion
+    group_snapshot = {"id": str(group_id), "name": None, "user_count": 0}
+    space = None
+
+    try:
+        space = await service.get_space(id)
+        group_member = space.group_members.get(group_id)
+        if group_member:
+            group_snapshot = {
+                "id": str(group_id),
+                "name": group_member.name,
+                "user_count": group_member.user_count,
+            }
+    except Exception as e:
+        logger.warning(f"Failed to fetch context for audit log: {e}")
+
+    # Perform the actual deletion
+    await service.remove_group_member(space_id=id, group_id=group_id)
+
+    extra = {
+        "group": group_snapshot,
+    }
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.SPACE_MEMBER_REMOVED,
+        entity_type=EntityType.SPACE,
+        entity_id=id,
+        description=f"Removed group '{group_snapshot['name'] or 'group'}' from space '{space.name if space else 'unknown'}'",
         metadata=AuditMetadata.standard(
             actor=current_user,
             target=space if space else type("FallbackTarget", (), {"id": id, "name": None})(),

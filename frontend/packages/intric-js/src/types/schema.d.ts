@@ -1317,6 +1317,16 @@ export interface paths {
     /** Create Space Integration Knowledge */
     post: operations["create_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_add__user_integration_id___post"];
   };
+  "/api/v1/spaces/{id}/knowledge/integrations/add/{user_integration_id}/batch/": {
+    /** Create Space Integration Knowledge Batch */
+    post: operations["create_space_integration_knowledge_batch_api_v1_spaces__id__knowledge_integrations_add__user_integration_id__batch__post"];
+  };
+  "/api/v1/spaces/{id}/knowledge/integrations/wrappers/{wrapper_id}/": {
+    /** Update Integration Knowledge Wrapper */
+    patch: operations["update_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___patch"];
+    /** Delete Integration Knowledge Wrapper */
+    delete: operations["delete_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___delete"];
+  };
   "/api/v1/spaces/{id}/knowledge/integrations/remove/{integration_knowledge_id}/": {
     /** Delete Space Integration Knowledge */
     delete: operations["delete_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_remove__integration_knowledge_id___delete"];
@@ -4579,6 +4589,68 @@ export interface components {
        */
       resource_type?: string | null;
     };
+    /** CreateSpaceIntegrationKnowledgeBatchItem */
+    CreateSpaceIntegrationKnowledgeBatchItem: {
+      /** Name */
+      name: string;
+      /** Url */
+      url: string;
+      /** Key */
+      key?: string | null;
+      /** Folder Id */
+      folder_id?: string | null;
+      /** Folder Path */
+      folder_path?: string | null;
+      /** Selected Item Type */
+      selected_item_type?: string | null;
+      /**
+       * Resource Type
+       * @default site
+       */
+      resource_type?: string | null;
+    };
+    /** CreateSpaceIntegrationKnowledgeBatchRequest */
+    CreateSpaceIntegrationKnowledgeBatchRequest: {
+      embedding_model: components["schemas"]["ModelId"];
+      /** Wrapper Name */
+      wrapper_name?: string | null;
+      /** Items */
+      items: components["schemas"]["CreateSpaceIntegrationKnowledgeBatchItem"][];
+    };
+    /** CreateSpaceIntegrationKnowledgeBatchResult */
+    CreateSpaceIntegrationKnowledgeBatchResult: {
+      /** Index */
+      index: number;
+      /** Name */
+      name: string;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "created" | "failed";
+      /**
+       * Integration Knowledge Id
+       * Format: uuid
+       */
+      integration_knowledge_id?: string | null;
+      job?: components["schemas"]["JobPublic"] | null;
+      /** Error */
+      error?: string | null;
+    };
+    /** CreateSpaceIntegrationKnowledgeBatchResponse */
+    CreateSpaceIntegrationKnowledgeBatchResponse: {
+      /** Items */
+      items: components["schemas"]["CreateSpaceIntegrationKnowledgeBatchResult"][];
+      /** Created Count */
+      created_count: number;
+      /** Failed Count */
+      failed_count: number;
+    };
+    /** UpdateIntegrationKnowledgeWrapperRequest */
+    UpdateIntegrationKnowledgeWrapperRequest: {
+      /** Name */
+      name: string;
+    };
     /** CreateSpaceRequest */
     CreateSpaceRequest: {
       /** Name */
@@ -5897,6 +5969,13 @@ export interface components {
       folder_path?: string | null;
       /** Selected Item Type */
       selected_item_type?: string | null;
+      /**
+       * Wrapper Id
+       * Format: uuid
+       */
+      wrapper_id?: string | null;
+      /** Wrapper Name */
+      wrapper_name?: string | null;
       /**
        * Permissions
        * @default []
@@ -17708,6 +17787,83 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["IntegrationKnowledgePublic"];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Create Space Integration Knowledge Batch */
+  create_space_integration_knowledge_batch_api_v1_spaces__id__knowledge_integrations_add__user_integration_id__batch__post: {
+    parameters: {
+      path: {
+        id: string;
+        user_integration_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateSpaceIntegrationKnowledgeBatchRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        content: {
+          "application/json": components["schemas"]["CreateSpaceIntegrationKnowledgeBatchResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Update Integration Knowledge Wrapper */
+  update_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___patch: {
+    parameters: {
+      path: {
+        id: string;
+        wrapper_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateIntegrationKnowledgeWrapperRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IntegrationKnowledgePublic"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Delete Integration Knowledge Wrapper */
+  delete_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___delete: {
+    parameters: {
+      path: {
+        id: string;
+        wrapper_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
       };
       /** @description Validation Error */
       422: {

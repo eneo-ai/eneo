@@ -46,6 +46,16 @@
       bg: "bg-[oklch(93%_0.04_290)] dark:bg-[oklch(21%_0.07_290)]",
       fg: "text-[oklch(38%_0.17_290)] dark:text-[oklch(82%_0.16_290)]",
       border: "border-[oklch(83%_0.06_290)] dark:border-[oklch(35%_0.09_290)]"
+    },
+    mistral: {
+      bg: "bg-[oklch(94%_0.04_55)] dark:bg-[oklch(22%_0.06_55)]",
+      fg: "text-[oklch(40%_0.15_55)] dark:text-[oklch(81%_0.14_55)]",
+      border: "border-[oklch(84%_0.05_55)] dark:border-[oklch(35%_0.07_55)]"
+    },
+    hosted_vllm: {
+      bg: "bg-[oklch(93%_0.035_140)] dark:bg-[oklch(21%_0.06_140)]",
+      fg: "text-[oklch(37%_0.14_140)] dark:text-[oklch(80%_0.13_140)]",
+      border: "border-[oklch(83%_0.05_140)] dark:border-[oklch(34%_0.07_140)]"
     }
   };
 
@@ -103,6 +113,14 @@
       <!-- Flowing wave/ribbon - coherence -->
       <path d="M2 12 Q7 6, 12 12 T22 12" />
       <path d="M2 16 Q7 10, 12 16 T22 16" />
+    {:else if providerType === "mistral"}
+      <!-- Diagonal stripes - wind/mistral -->
+      <line x1="4" y1="4" x2="12" y2="20" />
+      <line x1="10" y1="4" x2="18" y2="20" />
+      <line x1="16" y1="4" x2="24" y2="20" />
+    {:else if providerType === "hosted_vllm"}
+      <!-- Chevron/V shape - vLLM -->
+      <polyline points="4,6 12,18 20,6" />
     {:else}
       <!-- Default: simple square grid for unknown providers -->
       <rect x="4" y="4" width="6" height="6" rx="1" />

@@ -48,6 +48,8 @@ class EmbeddingModel(AIModel):
         litellm_model_name: Optional[str] = None,
         tenant_id: Optional["UUID"] = None,
         provider_id: Optional["UUID"] = None,
+        provider_name: Optional[str] = None,
+        provider_type: Optional[str] = None,
     ):
         super().__init__(
             user=user,
@@ -74,14 +76,14 @@ class EmbeddingModel(AIModel):
         self.litellm_model_name = litellm_model_name
         self.tenant_id = tenant_id
         self.provider_id = provider_id
+        self.provider_name = provider_name
+        self.provider_type = provider_type
 
     def get_credential_provider_name(self) -> str:
         """Get the credential provider name for this model."""
-        from intric.ai_models.litellm_providers.provider_registry import LiteLLMProviderRegistry
-
-        # If litellm_model_name is set, use it for provider detection
-        if self.litellm_model_name:
-            return LiteLLMProviderRegistry.detect_provider_from_model_name(self.litellm_model_name)
+        # If litellm_model_name is set, extract provider from prefix (e.g. "azure/gpt-4" → "azure")
+        if self.litellm_model_name and "/" in self.litellm_model_name:
+            return self.litellm_model_name.split("/")[0].lower()
 
         # Fall back to base implementation (checks family)
         return super().get_credential_provider_name()
@@ -91,6 +93,8 @@ class EmbeddingModel(AIModel):
         cls,
         db_model: "EmbeddingModelDB",
         user: "UserInDB",
+        provider_name: Optional[str] = None,
+        provider_type: Optional[str] = None,
     ):
         # Settings are now directly on the model table
         return cls(
@@ -118,6 +122,8 @@ class EmbeddingModel(AIModel):
             litellm_model_name=db_model.litellm_model_name,
             tenant_id=db_model.tenant_id,
             provider_id=db_model.provider_id,
+            provider_name=provider_name,
+            provider_type=provider_type,
         )
 
     def update(self, is_org_enabled: Union[bool, "NotProvided"]):

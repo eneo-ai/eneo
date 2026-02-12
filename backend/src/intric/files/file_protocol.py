@@ -18,6 +18,17 @@ def bytes_extractor(filepath: Path, _mimetype: str, _filename: str | None = None
         return file.read()
 
 
+def sanitize_filename(filename: str | None) -> str:
+    """Sanitize filename to prevent path traversal attacks."""
+    if not filename:
+        return "unnamed"
+
+    filename = filename.replace("\x00", "")
+    filename = os.path.basename(filename).strip()
+
+    return filename or "unnamed"
+
+
 class FileProtocol:
     def __init__(
         self,
@@ -43,7 +54,9 @@ class FileProtocol:
         filepath = Path(filepath)
 
         try:
-            content = extractor(filepath, upload_file.content_type, upload_file.filename)
+            content = extractor(
+                filepath, upload_file.content_type, upload_file.filename
+            )
             checksum = self.file_size_service.get_file_checksum(filepath)
 
             if isinstance(content, str):
@@ -65,8 +78,11 @@ class FileProtocol:
         checksum: str,
         size: int,
     ) -> FileBaseWithContent:
+        # Sanitize filename to prevent path traversal attacks
+        sanitized_filename = sanitize_filename(upload_file.filename)
+
         file_base_kwargs = {
-            "name": upload_file.filename,
+            "name": sanitized_filename,
             "checksum": checksum,
             "size": size,
             "file_type": file_type,
@@ -80,34 +96,49 @@ class FileProtocol:
 
         return FileBaseWithContent(**file_base_kwargs)
 
-    async def text_to_domain(self, upload_file: UploadFile):
+    async def text_to_domain(
+        self, upload_file: UploadFile, max_size: int | None = None
+    ):
+        if max_size is None:
+            max_size = get_settings().upload_file_to_session_max_size
+
         return await self._get_content(
             upload_file,
             file_type=FileType.TEXT,
-            max_size=get_settings().upload_file_to_session_max_size,
+            max_size=max_size,
             extractor=self.text_extractor.extract,
         )
 
-    async def image_to_domain(self, upload_file: UploadFile):
+    async def image_to_domain(
+        self, upload_file: UploadFile, max_size: int | None = None
+    ):
+        if max_size is None:
+            max_size = get_settings().upload_image_to_session_max_size
+
         return await self._get_content(
             upload_file,
             file_type=FileType.IMAGE,
-            max_size=get_settings().upload_image_to_session_max_size,
+            max_size=max_size,
             extractor=self.image_extractor.extract,
         )
 
-    async def audio_to_domain(self, upload_file: UploadFile):
+    async def audio_to_domain(
+        self, upload_file: UploadFile, max_size: int | None = None
+    ):
+        if max_size is None:
+            max_size = get_settings().transcription_max_file_size
+
         return await self._get_content(
             upload_file,
             file_type=FileType.AUDIO,
-            max_size=get_settings().transcription_max_file_size,
+            max_size=max_size,
             extractor=bytes_extractor,
         )
 
-    async def to_domain(self, upload_file: UploadFile):
+    async def to_domain(self, upload_file: UploadFile, max_size: int | None = None):
         if ImageMimeTypes.has_value(upload_file.content_type):
-            return await self.image_to_domain(upload_file)
+            return await self.image_to_domain(upload_file, max_size=max_size)
         elif AudioMimeTypes.has_value(upload_file.content_type):
-            return await self.audio_to_domain(upload_file)
+            return await self.audio_to_domain(upload_file, max_size=max_size)
 
-        return await self.text_to_domain(upload_file)
+        return await self.text_to_domain(upload_file, max_size=max_size)

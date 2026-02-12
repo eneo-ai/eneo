@@ -33,6 +33,7 @@ def service(actor: MagicMock):
         transcription_model_service=AsyncMock(),
         security_classification_service=AsyncMock(),
         icon_repo=AsyncMock(),
+        user_groups_repo=AsyncMock(),
     )
 
     return service
@@ -138,3 +139,27 @@ async def test_get_spaces_and_personal_space_returns_personal_space_first(
     spaces = await service.get_spaces(include_personal=True)
 
     assert spaces == [personal_space] + other_spaces
+
+
+async def test_get_spaces_passes_include_applications_to_repo(
+    service: SpaceService,
+):
+    service.repo.get_spaces_for_member.return_value = []
+
+    await service.get_spaces(include_applications=True)
+
+    service.repo.get_spaces_for_member.assert_called_once_with(
+        include_applications=True
+    )
+
+
+async def test_get_spaces_defaults_include_applications_to_false(
+    service: SpaceService,
+):
+    service.repo.get_spaces_for_member.return_value = []
+
+    await service.get_spaces()
+
+    service.repo.get_spaces_for_member.assert_called_once_with(
+        include_applications=False
+    )

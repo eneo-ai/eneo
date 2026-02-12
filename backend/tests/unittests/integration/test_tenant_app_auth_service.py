@@ -295,6 +295,10 @@ async def test_test_credentials_http_error(service, mock_tenant_app):
     error_response = MagicMock(spec=httpx.Response)
     error_response.status_code = 401
     error_response.text = "Invalid client credentials"
+    error_response.json.return_value = {
+        "error": "invalid_client",
+        "error_description": "AADSTS7000215: Invalid client secret provided. Trace ID: abc",
+    }
     error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
         "Unauthorized",
         request=MagicMock(),
@@ -314,7 +318,9 @@ async def test_test_credentials_http_error(service, mock_tenant_app):
         # Assert
         assert success is False
         assert error is not None
-        assert "401" in error or "Invalid client credentials" in error
+        assert "Invalid client secret provided" in error
+        # Trace IDs should be stripped
+        assert "Trace ID" not in error
 
 
 async def test_test_credentials_network_error(service, mock_tenant_app):

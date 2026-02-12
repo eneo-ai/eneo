@@ -1,0 +1,215 @@
+# Upgrade Guide: Eneo 1.7.0
+
+Tenant-specific AI models migration — what changes, how to upgrade safely, and how to verify the result.
+
+import { Callout, Steps } from 'nextra/components'
+
+<Callout type="warning">
+  **This migration is irreversible.** Take a database backup before upgrading. If something goes wrong, the only recovery path is restoring from backup.
+</Callout>
+
+---
+
+## What Changes
+
+Version 1.7.0 replaces the global AI model architecture with tenant-specific models. Every completion, embedding, and transcription model gets copied to each tenant with its own provider configuration and credentials. The global models are then deleted.
+
+The migration runs in three phases inside a single database transaction:
+
+1. **Infrastructure** — Creates the `model_providers` table and adds `tenant_id`/`provider_id` columns to model tables.
+2. **Data migration** — For each active tenant: creates provider records, copies all global models as tenant-specific rows (new UUIDs), updates every foreign key reference, and validates that no orphaned references remain.
+3. **Consolidation** — Model settings (enabled, default, security classification) move from separate settings tables to columns directly on the model rows. The old settings tables are dropped.
+
+### Affected Tables
+
+| Table | Updated Column |
+|-------|---------------|
+| assistants | `completion_model_id` |
+| apps | `completion_model_id` |
+| app_runs | `completion_model_id` |
+| services | `completion_model_id` |
+| questions | `completion_model_id` |
+| app_templates | `completion_model_id` |
+| assistant_templates | `completion_model_id` |
+| spaces_completion_models | `completion_model_id` |
+| groups (collections) | `embedding_model_id` |
+| info_blobs | `embedding_model_id` |
+| websites | `embedding_model_id` |
+| integration_knowledge | `embedding_model_id` |
+| spaces_embedding_models | `embedding_model_id` |
+
+---
+
+## Prerequisites
+
+<Steps>
+
+### Take a database backup
+
+```bash
+docker exec eneo_db pg_dump -U postgres -Fc eneo > eneo_backup_pre_1.7.0.dump
+```
+
+### Verify docker-compose.yml dependency chain
+
+The `backend` service **must** use `condition: service_completed_successfully` on `db-init`. Without this, Docker only waits for the container to *start*, not for the migration to *finish* — meaning the backend and worker could start while the migration is still running.
+
+```yaml
+backend:
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    db-init:
+      condition: service_completed_successfully
+```
+
+If your `docker-compose.yml` predates this change, update it before upgrading.
+
+### Ensure ENCRYPTION_KEY is set
+
+Should be set in `env_backend.env`. The migration encrypts provider API keys using this key. Without it, credentials are stored in plaintext (a warning is printed during migration).
+
+### Azure provider configuration (if applicable)
+
+If using Azure OpenAI, ensure `AZURE_ENDPOINT` and `AZURE_API_VERSION` are set in your environment. The migration reads these to create the Azure provider record.
+
+</Steps>
+
+---
+
+## Upgrade Procedure
+
+The standard Docker Compose upgrade is safe:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+The startup order guarantees correct sequencing:
+
+1. Old containers receive SIGTERM and stop
+2. `db-init` runs the migration (`alembic upgrade head`)
+3. `backend` starts only after `db-init` completes successfully
+4. `worker` starts after `backend`
+
+The worker is fully stopped before the migration begins and only restarts after it completes.
+
+<Callout type="info">
+  **Wait for active crawls to finish** before upgrading if possible. Long-running crawls will be terminated when the worker stops (Docker's default stop timeout is 10 seconds). Interrupted crawl runs will remain in "running" state and need to be re-triggered after the upgrade.
+</Callout>
+
+<Callout type="error">
+  **Never run `alembic upgrade head` manually** while the worker is active. The migration deletes global models, and any in-flight crawl holding old model IDs will fail with FK constraint violations. If you must run migrations manually, stop the worker first: `docker compose stop worker`.
+</Callout>
+
+---
+
+## Impact on Running Jobs
+
+### Why queued jobs are safe
+
+ARQ job payloads contain **entity IDs** (e.g., `website_id`, `group_id`), not model IDs. When a job executes, it resolves the model by querying the parent entity:
+
+| Job Type | Queued Parameters | Model Resolution |
+|----------|------------------|-----------------|
+| Crawl | `website_id`, `url` | `websites.embedding_model_id` at bootstrap |
+| Upload | `group_id`, `space_id` | `groups.embedding_model_id` at runtime |
+| Transcription | `group_id`, `space_id` | `space.get_default_transcription_model()` at runtime |
+
+Since the migration updates all FK references before the worker restarts, queued jobs will resolve to the new tenant-specific model IDs.
+
+---
+
+## Credential Handling
+
+The migration determines provider credentials in priority order:
+
+1. **Tenant `api_credentials`** (multi-tenant) — Already encrypted in the tenant table, copied directly to the new provider record.
+2. **Environment variables** (single-tenant) — Read from `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc. Encrypted using `ENCRYPTION_KEY` if available.
+3. **Empty credentials** — If neither source has credentials, the provider is created with an empty API key and marked inactive. Configure via the admin UI after migration.
+
+### Provider type mapping
+
+| Model Family | Provider | LiteLLM Type |
+|-------------|----------|-------------|
+| openai | OpenAI | `openai` |
+| azure | Azure OpenAI | `azure` |
+| claude / anthropic | Anthropic | `anthropic` |
+| mistral | Mistral AI | `mistral` |
+| vllm | vLLM | `hosted_vllm` |
+| berget / e5 | Berget.ai | `hosted_vllm` |
+| ovhcloud | OVHcloud | `ovhcloud` |
+| cohere | Cohere | `cohere` |
+| gemini | Google Gemini | `gemini` |
+| gdm | GDM | `hosted_vllm` |
+
+For more details on provider configuration after migration, see the [AI Provider Configuration](/guides/ai-providers) guide.
+
+---
+
+## Verification
+
+After the upgrade, verify:
+
+**1. Migration completed** — Check `db-init` logs for `MIGRATION COMPLETE!`
+
+```bash
+docker logs eneo_db_init
+```
+
+**2. No global models remain**
+
+```bash
+docker exec eneo_db psql -U postgres -d eneo -c \
+  "SELECT count(*) FROM completion_models WHERE tenant_id IS NULL AND provider_id IS NULL;"
+```
+
+Expected result: `0`
+
+**3. Providers created** — Each tenant should have providers for the model families in use
+
+```bash
+docker exec eneo_db psql -U postgres -d eneo -c \
+  "SELECT t.name, mp.name, mp.provider_type, mp.is_active
+   FROM model_providers mp
+   JOIN tenants t ON mp.tenant_id = t.id
+   ORDER BY t.name, mp.name;"
+```
+
+**4. Worker healthy**
+
+```bash
+curl -s http://localhost:8000/api/healthz | python3 -m json.tool
+```
+
+---
+
+## Rollback
+
+The migration cannot be reversed programmatically. If issues are encountered:
+
+1. Stop all services: `docker compose down`
+2. Restore the database backup:
+   ```bash
+   docker exec -i eneo_db pg_restore -U postgres -d eneo --clean < eneo_backup_pre_1.7.0.dump
+   ```
+3. Redeploy the previous version
+
+---
+
+## Troubleshooting
+
+### Migration fails with "duplicate key" on model_providers
+
+The migration uses `ON CONFLICT (tenant_id, name) DO UPDATE` for idempotency. If this error occurs, a previous partial run may have left inconsistent data. Restore from backup and retry.
+
+### Provider shows is_active: false after migration
+
+The provider was created without credentials. Configure the API key via the sysadmin API or admin UI.
+
+### Crawl runs stuck in "running" state
+
+These were interrupted during the upgrade. Re-trigger them from the UI or API.

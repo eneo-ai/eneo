@@ -171,8 +171,8 @@ class TestGenAuthUrl:
 
         assert f"state={state}" in result["auth_url"]
 
-    async def test_includes_prompt_consent(self, service):
-        """Auth URL includes prompt=consent to force consent screen."""
+    async def test_includes_prompt_login(self, service):
+        """Auth URL includes prompt=login to force login without consent screen."""
         tenant_id = uuid4()
 
         with patch("intric.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings") as mock_settings:
@@ -183,7 +183,7 @@ class TestGenAuthUrl:
 
             result = await service.gen_auth_url(state="state", tenant_id=tenant_id)
 
-        assert "prompt=consent" in result["auth_url"]
+        assert "prompt=login" in result["auth_url"]
 
 
 class TestExchangeToken:

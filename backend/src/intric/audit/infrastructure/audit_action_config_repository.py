@@ -2,6 +2,8 @@
 
 from uuid import UUID
 
+from typing import Any, cast
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,12 +46,9 @@ class AuditActionConfigRepository:
         Returns:
             Set of enabled action type values (e.g., {"user_created", "file_uploaded"})
         """
-        stmt = (
-            select(AuditActionConfig.action)
-            .where(
-                AuditActionConfig.tenant_id == tenant_id,
-                AuditActionConfig.enabled == True  # noqa: E712
-            )
+        stmt = select(AuditActionConfig.action).where(
+            AuditActionConfig.tenant_id == tenant_id,
+            AuditActionConfig.enabled == True,  # noqa: E712
         )
         result = await self.session.execute(stmt)
         return set(result.scalars().all())
@@ -64,12 +63,8 @@ class AuditActionConfigRepository:
         Returns:
             True if enabled, False if disabled or not configured (defaults to True)
         """
-        stmt = (
-            select(AuditActionConfig.enabled)
-            .where(
-                AuditActionConfig.tenant_id == tenant_id,
-                AuditActionConfig.action == action
-            )
+        stmt = select(AuditActionConfig.enabled).where(
+            AuditActionConfig.tenant_id == tenant_id, AuditActionConfig.action == action
         )
         result = await self.session.execute(stmt)
         enabled = result.scalar_one_or_none()
@@ -77,7 +72,9 @@ class AuditActionConfigRepository:
         # Default to True if not configured (backward compatibility)
         return enabled if enabled is not None else True
 
-    async def update_action(self, tenant_id: UUID, action: str, enabled: bool) -> AuditActionConfig:
+    async def update_action(
+        self, tenant_id: UUID, action: str, enabled: bool
+    ) -> AuditActionConfig:
         """Update or create a single action configuration.
 
         Args:
@@ -90,8 +87,7 @@ class AuditActionConfigRepository:
         """
         # Try to find existing config
         stmt = select(AuditActionConfig).where(
-            AuditActionConfig.tenant_id == tenant_id,
-            AuditActionConfig.action == action
+            AuditActionConfig.tenant_id == tenant_id, AuditActionConfig.action == action
         )
         result = await self.session.execute(stmt)
         config = result.scalar_one_or_none()
@@ -101,10 +97,10 @@ class AuditActionConfigRepository:
             config.enabled = enabled
         else:
             # Create new
-            config = AuditActionConfig(
+            config = cast(Any, AuditActionConfig)(
                 tenant_id=tenant_id,
                 action=action,
-                enabled=enabled
+                enabled=enabled,
             )
             self.session.add(config)
 
@@ -136,7 +132,7 @@ class AuditActionConfigRepository:
             # Try to find existing config
             stmt = select(AuditActionConfig).where(
                 AuditActionConfig.tenant_id == tenant_id,
-                AuditActionConfig.action == action
+                AuditActionConfig.action == action,
             )
             result = await self.session.execute(stmt)
             config = result.scalar_one_or_none()
@@ -146,10 +142,10 @@ class AuditActionConfigRepository:
                 config.enabled = enabled
             else:
                 # Create new
-                config = AuditActionConfig(
+                config = cast(Any, AuditActionConfig)(
                     tenant_id=tenant_id,
                     action=action,
-                    enabled=enabled
+                    enabled=enabled,
                 )
                 self.session.add(config)
 
@@ -185,10 +181,10 @@ class AuditActionConfigRepository:
         if missing_actions:
             # Create configs for missing actions (default enabled=True)
             for action in missing_actions:
-                config = AuditActionConfig(
+                config = cast(Any, AuditActionConfig)(
                     tenant_id=tenant_id,
                     action=action,
-                    enabled=True
+                    enabled=True,
                 )
                 self.session.add(config)
 

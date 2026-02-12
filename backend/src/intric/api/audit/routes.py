@@ -462,7 +462,7 @@ async def list_audit_logs(
         metadata["access_type"] = "full_audit_review"
 
     # Add context about what period of logs they're seeing
-    if logs:
+    if logs and logs[-1].created_at and logs[0].created_at:
         oldest_log_date = logs[-1].created_at
         newest_log_date = logs[0].created_at
         metadata["date_range_viewed"] = {
@@ -594,7 +594,7 @@ async def get_user_logs(
         metadata["to_date"] = to_date.isoformat()
 
     # Add context about what period of logs they're seeing
-    if logs:
+    if logs and logs[-1].created_at and logs[0].created_at:
         oldest_log_date = logs[-1].created_at
         newest_log_date = logs[0].created_at
         metadata["date_range_viewed"] = {

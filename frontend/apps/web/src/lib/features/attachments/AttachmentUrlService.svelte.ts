@@ -38,12 +38,12 @@ class AttachmentUrlService {
   }
 
   async #generateUrl(fileId: string) {
-    const url = await this.#intric.files.url({
-      id: fileId,
-      download: true,
+    const { url, expires_at } = await this.#intric.files.generateSignedUrl({
+      fileId,
+      contentDisposition: "attachment",
       expiresIn: EXPIRES_AFTER_SECONDS + 60
     });
-    this.#attachmentUrls.set(fileId, { url, expiresAt: Date.now() + EXPIRES_AFTER_SECONDS * 1000 });
+    this.#attachmentUrls.set(fileId, { url, expiresAt: expires_at * 1000 });
     this.#queuedFiles.delete(fileId);
   }
 }

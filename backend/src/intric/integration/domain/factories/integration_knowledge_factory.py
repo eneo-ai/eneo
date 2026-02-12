@@ -52,6 +52,8 @@ class IntegrationKnowledgeFactory:
             selected_item_type=getattr(record, "selected_item_type", None),
             resource_type=getattr(record, "resource_type", None),
             drive_id=getattr(record, "drive_id", None),
+            wrapper_id=getattr(record, "wrapper_id", None),
+            wrapper_name=getattr(record, "wrapper_name", None),
         )
 
     @classmethod
