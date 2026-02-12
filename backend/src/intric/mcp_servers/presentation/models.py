@@ -37,7 +37,7 @@ class MCPServerCreate(BaseModel):
 
     name: str
     http_url: AnyHttpUrl
-    http_auth_type: Literal["none", "bearer", "api_key", "custom_headers"] = "none"
+    http_auth_type: Literal["none", "bearer", "api_key", "custom_headers", "oauth2_client_credentials"] = "none"
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
     tags: Optional[list[str]] = None
@@ -50,7 +50,7 @@ class MCPServerUpdate(BaseModel):
 
     name: Optional[str] = None
     http_url: Optional[AnyHttpUrl] = None
-    http_auth_type: Optional[Literal["none", "bearer", "api_key", "custom_headers"]] = (
+    http_auth_type: Optional[Literal["none", "bearer", "api_key", "custom_headers", "oauth2_client_credentials"]] = (
         None
     )
     description: Optional[str] = None

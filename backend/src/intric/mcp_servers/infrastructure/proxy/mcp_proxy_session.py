@@ -59,6 +59,37 @@ class MCPProxySession:
         self._tools_for_llm: list[dict[str, Any]] = []
         self._build_tool_registry()
 
+    @staticmethod
+    def _fix_schema(schema: dict[str, Any]) -> dict[str, Any]:
+        """Fix JSON Schema issues that cause OpenAI function calling to reject tools.
+
+        OpenAI requires 'items' on every array type. Some MCP servers omit it.
+        """
+        if not isinstance(schema, dict):
+            return schema
+
+        schema = dict(schema)
+
+        if schema.get("type") == "array" and "items" not in schema:
+            schema["items"] = {}
+
+        for key in ("properties", "definitions", "$defs"):
+            if key in schema and isinstance(schema[key], dict):
+                schema[key] = {
+                    k: MCPProxySession._fix_schema(v)
+                    for k, v in schema[key].items()
+                }
+
+        for key in ("items", "additionalProperties"):
+            if key in schema and isinstance(schema[key], dict):
+                schema[key] = MCPProxySession._fix_schema(schema[key])
+
+        for key in ("allOf", "anyOf", "oneOf"):
+            if key in schema and isinstance(schema[key], list):
+                schema[key] = [MCPProxySession._fix_schema(s) for s in schema[key]]
+
+        return schema
+
     def _sanitize_name(self, name: str) -> str:
         """
         Sanitize tool/server name for OpenAI pattern ^[a-zA-Z0-9_-]+$
@@ -110,7 +141,7 @@ class MCPProxySession:
                     "function": {
                         "name": prefixed_name,
                         "description": tool.description or f"Tool from {server.name}",
-                        "parameters": tool.input_schema or {"type": "object", "properties": {}},
+                        "parameters": self._fix_schema(tool.input_schema) if tool.input_schema else {"type": "object", "properties": {}},
                     },
                 })
 
