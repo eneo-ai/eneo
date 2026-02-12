@@ -2457,5 +2457,17 @@
   "api_keys_admin_discard": "Förkasta",
   "api_keys_admin_save_changes": "Spara ändringar",
   "api_keys_admin_saving": "Sparar...",
-  "api_keys_admin_policy_updated": "Policy uppdaterad"
+  "api_keys_admin_policy_updated": "Policy uppdaterad",
+
+  "api_access": "API-åtkomst",
+  "api_keys_scope_locked": "Avgränsning låst",
+  "api_keys_assistant_settings_desc": "Skapa och hantera API-nycklar kopplade till denna assistent.",
+  "api_keys_app_settings_desc": "Skapa och hantera API-nycklar kopplade till denna app.",
+  "api_keys_space_settings_desc": "Skapa och hantera API-nycklar kopplade till denna delade yta.",
+  "api_keys_empty_assistant": "Skapa en API-nyckel för att integrera denna assistent i dina applikationer via Eneo API.",
+  "api_keys_empty_space": "Skapa en API-nyckel för att komma åt alla assistenter och appar i denna yta programmatiskt.",
+  "api_keys_empty_app": "Skapa en API-nyckel för att köra denna app via Eneo API.",
+  "api_keys_manage_all": "Hantera alla API-nycklar",
+  "api_keys_summary": "{active} aktiva, {suspended} pausade",
+  "api_keys_load_error": "Kunde inte ladda API-nycklar."
 }

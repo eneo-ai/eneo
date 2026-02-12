@@ -22,6 +22,7 @@
   import { m } from "$lib/paraglide/messages";
   import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
+  import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
 
   let { data } = $props();
 
@@ -425,6 +426,22 @@
           />
         </Settings.Row>
       </Settings.Group>
+
+      {#if data.assistant.permissions?.includes("edit")}
+        <Settings.Group title={m.api_access()}>
+          <Settings.Row
+            title={m.api_keys()}
+            description={m.api_keys_assistant_settings_desc()}
+            fullWidth
+          >
+            <ApiKeysSettingsSection
+              scopeType="assistant"
+              scopeId={data.assistant.id}
+              scopeName={$resource.name}
+            />
+          </Settings.Row>
+        </Settings.Group>
+      {/if}
 
       {#if data.assistant.permissions?.some((permission) => permission === "insight_toggle" || permission === "publish")}
         <Settings.Group title={m.publishing()}>

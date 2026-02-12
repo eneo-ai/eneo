@@ -42,7 +42,21 @@
 
   const intric = getIntric();
 
-  let { onCreated }: { onCreated?: () => void } = $props();
+  let {
+    onCreated,
+    lockedScopeType,
+    lockedScopeId,
+    lockedScopeName,
+    triggerVariant = "primary"
+  }: {
+    onCreated?: () => void;
+    lockedScopeType?: ApiKeyScopeType;
+    lockedScopeId?: string;
+    lockedScopeName?: string;
+    triggerVariant?: "primary" | "outlined";
+  } = $props();
+
+  const scopeLocked = $derived(!!lockedScopeType && !!lockedScopeId);
 
   const showDialog = writable(false);
   let isSubmitting = $state(false);
@@ -63,8 +77,8 @@
 
   // Step 2: Scope & permissions
   let permission = $state<ApiKeyPermission>("read");
-  let scopeType = $state<ApiKeyScopeType>("tenant");
-  let scopeId = $state<string | null>(null);
+  let scopeType = $state<ApiKeyScopeType>(lockedScopeType ?? "tenant");
+  let scopeId = $state<string | null>(lockedScopeId ?? null);
   let manualScopeId = $state("");
 
   // Fine-grained permissions (HuggingFace-style)
@@ -149,9 +163,9 @@
     }
   });
 
-  // Effect: Reset scope ID when scope type changes
+  // Effect: Reset scope ID when scope type changes (skip when scope is locked)
   $effect(() => {
-    if (scopeType) {
+    if (scopeType && !scopeLocked) {
       scopeId = null;
       manualScopeId = "";
     }
@@ -275,7 +289,9 @@
   }
 
   onMount(() => {
-    void loadResources();
+    if (!scopeLocked) {
+      void loadResources();
+    }
     void loadCreationConstraints();
   });
 
@@ -285,7 +301,7 @@
         if (!name.trim()) return m.api_keys_name_required();
         return null;
       case 2:
-        if (scopeType !== "tenant" && !scopeId && !manualScopeId.trim()) {
+        if (!scopeLocked && scopeType !== "tenant" && !scopeId && !manualScopeId.trim()) {
           return m.api_keys_select_scope({ scopeType });
         }
         return null;
@@ -415,8 +431,8 @@
     appsPermission = "none";
     spacesPermission = "none";
     knowledgePermission = "none";
-    scopeType = "tenant";
-    scopeId = null;
+    scopeType = lockedScopeType ?? "tenant";
+    scopeId = lockedScopeId ?? null;
     manualScopeId = "";
     allowedOrigins = [];
     allowedIps = [];
@@ -487,6 +503,25 @@
     }
   }
 
+  // Scope icon helper for locked-scope display
+  function getScopeIcon(type: ApiKeyScopeType | undefined) {
+    switch (type) {
+      case "space": return Building2;
+      case "assistant": return MessageSquare;
+      case "app": return AppWindow;
+      default: return Building2;
+    }
+  }
+
+  function getScopeLabel(type: ApiKeyScopeType | undefined) {
+    switch (type) {
+      case "space": return m.api_keys_scope_space();
+      case "assistant": return m.api_keys_scope_assistant();
+      case "app": return m.api_keys_scope_app();
+      default: return m.api_keys_scope_tenant();
+    }
+  }
+
   // Permission level ordering for ceiling enforcement
   const permissionOrder: Record<string, number> = {
     none: 0,
@@ -510,7 +545,7 @@
 
 <Dialog.Root openController={showDialog} on:close={() => handleOpenChange(false)}>
   <Dialog.Trigger asFragment let:trigger>
-    <Button is={trigger} variant="primary" class="gap-2">
+    <Button is={trigger} variant={triggerVariant} class="gap-2">
       <Key class="h-4 w-4" />
       {m.generate_api_key()}
     </Button>
@@ -524,7 +559,9 @@
     <!-- Header with subtle gradient -->
     <div class="from-subtle to-primary flex-shrink-0 rounded-t-2xl bg-gradient-to-b px-6 pt-6 pb-5">
       <Dialog.Title class="text-default text-2xl font-bold tracking-tight">
-        {m.generate_new_api_key_title()}
+        {scopeLocked && lockedScopeName
+          ? `${m.generate_new_api_key_title()} — ${lockedScopeName}`
+          : m.generate_new_api_key_title()}
       </Dialog.Title>
       <div class="text-secondary mt-2 max-w-xl text-sm leading-relaxed">
         <Dialog.Description>
@@ -852,6 +889,22 @@
                 {#if permissionMode === "simple"}
                   <!-- Simple Mode -->
                   <div class="space-y-6">
+                    {#if scopeLocked}
+                      <!-- Locked scope indicator — contextual creation mode -->
+                      <div class="rounded-xl border border-accent-default/20 bg-accent-default/5 p-4">
+                        <div class="flex items-center gap-3">
+                          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-default/15">
+                            <svelte:component this={getScopeIcon(lockedScopeType)} class="h-5 w-5 text-accent-default" />
+                          </div>
+                          <div>
+                            <p class="text-sm font-semibold text-default">{lockedScopeName}</p>
+                            <p class="text-xs text-muted">
+                              {getScopeLabel(lockedScopeType)} · {m.api_keys_scope_locked()}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    {:else}
                     <!-- Scope Type Selection -->
                     <fieldset>
                       <legend
@@ -946,6 +999,7 @@
                           </div>
                         {/if}
                       </div>
+                    {/if}
                     {/if}
 
                     <!-- Simple Permission Level -->
