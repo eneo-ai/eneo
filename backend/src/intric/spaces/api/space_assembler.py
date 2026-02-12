@@ -430,6 +430,7 @@ class SpaceAssembler:
         )
 
         if include_applications:
+            self._set_permissions_on_resources(space)
             default_assistant = None
             if getattr(space, "default_assistant", None) is not None:
                 default_assistant = self.assistant_assembler.from_assistant_to_default_assistant_model(
