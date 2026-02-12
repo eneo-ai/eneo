@@ -633,6 +633,9 @@
   "model": "Modell",
   "model_disabled": "modell inaktiverad",
   "model_settings": "Modellinställningar",
+  "model_test_connection_error": "Kunde inte nå modellen",
+  "model_test_failed": "Modelltestet misslyckades",
+  "model_test_success": "Modellen svarade korrekt",
   "models": "Modeller",
   "monthly": "Månadsvis",
   "more": "Mer",
@@ -2181,5 +2184,6 @@
   "voice_input_stop": "Stoppa inspelning",
   "voice_input_error_no_mic": "Mikrofonåtkomst nekad",
   "voice_input_error_transcription": "Transkribering misslyckades",
-  "voice_input_unsupported_browser": "Röstinmatning stöds inte i denna webbläsare"
+  "voice_input_unsupported_browser": "Röstinmatning stöds inte i denna webbläsare",
+  "test_model": "Testa modell"
 }

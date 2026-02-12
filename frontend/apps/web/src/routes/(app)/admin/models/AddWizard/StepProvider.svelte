@@ -41,45 +41,9 @@
   let hoveredProvider: string | null = null;
   let selectedNewProviderType: string | null = null;
 
-  const providerOrigins: Record<string, string> = {
-    openai: "🇺🇸 USA",
-    azure: "🇺🇸 USA",
-    anthropic: "🇺🇸 USA",
-    gemini: "🇺🇸 USA",
-    cohere: "🇨🇦 Canada",
-    mistral: "🇫🇷 France",
-    hosted_vllm: "",
-    deepseek: "🇨🇳 China",
-    ai21: "🇮🇱 Israel",
-    aleph_alpha: "🇩🇪 Germany",
-    amazon: "🇺🇸 USA",
-    bedrock: "🇺🇸 USA",
-    cerebras: "🇺🇸 USA",
-    cloudflare: "🇺🇸 USA",
-    databricks: "🇺🇸 USA",
-    fireworks_ai: "🇺🇸 USA",
-    friendliai: "🇰🇷 South Korea",
-    groq: "🇺🇸 USA",
-    huggingface: "🇺🇸 USA",
-    nscale: "🇬🇧 UK",
-    nvidia_nim: "🇺🇸 USA",
-    ollama: "",
-    perplexity: "🇺🇸 USA",
-    replicate: "🇺🇸 USA",
-    sambanova: "🇺🇸 USA",
-    together_ai: "🇺🇸 USA",
-    vertex_ai: "🇺🇸 USA",
-    voyage: "🇺🇸 USA",
-    xai: "🇺🇸 USA",
-    zhipuai: "🇨🇳 China",
-    moonshot: "🇨🇳 China",
-    baidu: "🇨🇳 China",
-    volcengine: "🇨🇳 China",
-  };
-
   // Browse all providers dialog
   const browseDialogOpen = writable(false);
-  let allProviders: { type: string; label: string; origin: string }[] = [];
+  let allProviders: { type: string; label: string }[] = [];
   let searchQuery = "";
   let loadingCapabilities = false;
   let capabilitiesLoaded = false;
@@ -98,8 +62,7 @@
           .filter(([type]) => !featuredTypes.has(type))
           .map(([type]) => ({
             type,
-            label: formatProviderName(type),
-            origin: providerOrigins[type] ?? ""
+            label: formatProviderName(type)
           }))
           .sort((a, b) => a.label.localeCompare(b.label));
         capabilitiesLoaded = true;
@@ -237,9 +200,6 @@
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
                 <span class="font-medium text-primary">{label}</span>
-                {#if providerOrigins[type]}
-                  <span class="inline-flex items-center rounded-full bg-surface-dimmer px-2 py-0.5 text-xs text-muted">{providerOrigins[type]}</span>
-                {/if}
               </div>
               <p class="text-sm text-muted mt-0.5">{description}</p>
             </div>
@@ -303,7 +263,7 @@
         <p class="text-sm text-muted text-center py-8">{m.no_providers_found()}</p>
       {:else}
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-80 overflow-y-auto">
-          {#each filteredProviders as { type, label, origin }}
+          {#each filteredProviders as { type, label }}
             <button
               type="button"
               class="group flex items-center gap-3 rounded-lg border p-3 text-left transition-all duration-150
@@ -318,9 +278,6 @@
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2">
                   <span class="font-medium text-primary text-sm">{label}</span>
-                  {#if origin}
-                    <span class="inline-flex items-center rounded-full bg-surface-dimmer px-1.5 py-0.5 text-xs text-muted leading-none">{origin}</span>
-                  {/if}
                 </div>
                 <p class="text-xs text-muted font-mono">{type}</p>
               </div>

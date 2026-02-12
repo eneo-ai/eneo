@@ -4,7 +4,7 @@
   import { Button, Input } from "@intric/ui";
   import { createEventDispatcher, onMount } from "svelte";
   import { m } from "$lib/paraglide/messages";
-  import { ArrowLeft, Plus, Trash2, Sparkles, Check, ListPlus, TriangleAlert, Search } from "lucide-svelte";
+  import { ArrowLeft, Plus, Trash2, Sparkles, Check, ListPlus, TriangleAlert, Search, Loader2, CircleCheck, CircleX, Zap } from "lucide-svelte";
   import HelpTooltip from "../components/HelpTooltip.svelte";
   import { getIntric } from "$lib/core/Intric";
 
@@ -195,8 +195,44 @@
     currentModel = createEmptyModel();
   }
 
+  // Validation state per model index
+  type ValidationState = { status: "idle" | "testing" | "success" | "error"; message?: string };
+  let validationStates: Record<number, ValidationState> = {};
+
+  async function testModel(index: number) {
+    if (!providerId) return;
+    const model = models[index];
+    if (!model) return;
+
+    validationStates[index] = { status: "testing" };
+    validationStates = validationStates;
+
+    try {
+      const result = await intric.modelProviders.validateModel(
+        { id: providerId },
+        { model_name: model.name, model_type: modelType }
+      );
+      if (result.success) {
+        validationStates[index] = { status: "success", message: m.model_test_success() };
+      } else {
+        validationStates[index] = { status: "error", message: result.error || m.model_test_failed() };
+      }
+    } catch {
+      validationStates[index] = { status: "error", message: m.model_test_connection_error() };
+    }
+    validationStates = validationStates;
+  }
+
   function removeModel(index: number) {
     models = models.filter((_, i) => i !== index);
+    // Re-index validation states
+    const newStates: Record<number, ValidationState> = {};
+    for (const [key, val] of Object.entries(validationStates)) {
+      const k = Number(key);
+      if (k < index) newStates[k] = val;
+      else if (k > index) newStates[k - 1] = val;
+    }
+    validationStates = newStates;
   }
 
   function useSuggestion(suggestion: typeof suggestions[0]) {
@@ -510,20 +546,51 @@
 
       <div class="flex flex-col gap-2">
         {#each models as model, index}
+          {@const vs = validationStates[index] ?? { status: "idle" }}
           <div class="flex items-center justify-between rounded-lg border border-dimmer bg-surface p-3">
-            <div class="flex flex-col">
+            <div class="flex flex-col min-w-0 flex-1">
               <span class="font-medium text-primary">{model.displayName}</span>
               <span class="text-sm text-muted">{model.name}</span>
+              {#if vs.status === "error" && vs.message}
+                <span class="text-xs text-negative-default mt-1">{vs.message}</span>
+              {/if}
             </div>
 
-            <Button
-              variant="ghost"
-              padding="icon"
-              on:click={() => removeModel(index)}
-              class="text-muted hover:text-negative-default focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-negative-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
-            >
-              <Trash2 class="h-4 w-4" />
-            </Button>
+            <div class="flex items-center gap-1 flex-shrink-0 ml-2">
+              {#if vs.status === "testing"}
+                <div class="p-2 text-muted">
+                  <Loader2 class="h-4 w-4 animate-spin" />
+                </div>
+              {:else if vs.status === "success"}
+                <div class="p-2 text-positive-default" title={vs.message}>
+                  <CircleCheck class="h-4 w-4" />
+                </div>
+              {:else if vs.status === "error"}
+                <div class="p-2 text-negative-default" title={vs.message}>
+                  <CircleX class="h-4 w-4" />
+                </div>
+              {/if}
+
+              <Button
+                variant="ghost"
+                padding="icon"
+                on:click={() => testModel(index)}
+                disabled={vs.status === "testing" || !providerId}
+                class="text-muted hover:text-accent-default focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
+                title={m.test_model()}
+              >
+                <Zap class="h-4 w-4" />
+              </Button>
+
+              <Button
+                variant="ghost"
+                padding="icon"
+                on:click={() => removeModel(index)}
+                class="text-muted hover:text-negative-default focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-negative-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
+              >
+                <Trash2 class="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         {/each}
       </div>

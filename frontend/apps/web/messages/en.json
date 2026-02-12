@@ -636,6 +636,9 @@
   "model": "Model",
   "model_disabled": "model disabled",
   "model_settings": "Model Settings",
+  "model_test_connection_error": "Could not reach the model",
+  "model_test_failed": "Model test failed",
+  "model_test_success": "Model responded successfully",
   "models": "Models",
   "monthly": "Monthly",
   "more": "More",
@@ -2146,5 +2149,6 @@
   "voice_input_stop": "Stop recording",
   "voice_input_error_no_mic": "Microphone access denied",
   "voice_input_error_transcription": "Transcription failed",
-  "voice_input_unsupported_browser": "Voice input is not supported in this browser"
+  "voice_input_unsupported_browser": "Voice input is not supported in this browser",
+  "test_model": "Test model"
 }
