@@ -11,6 +11,7 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.COLLECTIONS: "Management of Collections. Create, Update, and Delete Collections.",
     Permission.WEBSITES: "Management of Websites. Create, Update, and Delete Websites",
     Permission.INSIGHTS: "See Insights about your Organization.",
+    Permission.INTEGRATIONS: "Management of Integrations. Create, Update, and Delete Integration Knowledge.",
     Permission.AI: "More in-depth AI configuration.",
     Permission.ADMIN: "Organization owner. Management of Users, Roles, and Groups.",
 }

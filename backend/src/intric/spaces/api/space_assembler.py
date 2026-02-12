@@ -78,7 +78,7 @@ class SpaceAssembler:
             website.permissions = actor.get_website_permissions()
 
         for knowledge in space.integration_knowledge_list:
-            knowledge.permissions = actor.get_integration_knowledge_list_permissions()
+            knowledge.permissions = actor.get_integrations_permissions()
 
     def _get_assistant_permissions(self, space: Space):
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -156,11 +156,11 @@ class SpaceAssembler:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
         permissions = []
 
-        if actor.can_read_integration_knowledge_list():
+        if actor.can_read_integrations():
             permissions.append(ResourcePermission.READ)
-        if actor.can_create_integration_knowledge_list():
+        if actor.can_create_integrations():
             permissions.append(ResourcePermission.CREATE)
-        if actor.can_delete_integration_knowledge_list():
+        if actor.can_delete_integrations():
             permissions.append(ResourcePermission.DELETE)
 
         return permissions

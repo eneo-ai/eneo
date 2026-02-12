@@ -127,6 +127,10 @@
     <Page.Flex>
       {#if $selectedTab === "collections" && $currentSpace.hasPermission("create", "collection")}
         <CollectionEditor mode="create" collection={undefined}></CollectionEditor>
+      {:else if $selectedTab === "collections" && !$currentSpace.hasPermission("create", "collection")}
+        <p class="text-secondary max-w-72 text-right text-xs">
+          {m.knowledge_create_no_permission({ resourceType: m.collections().toLowerCase() })}
+        </p>
       {:else if $selectedTab === "websites" && $currentSpace.hasPermission("create", "website")}
         {#if $selectedWebsiteIds.size > 0}
           <Button
@@ -142,6 +146,10 @@
         {:else}
           <WebsiteEditor mode="create"></WebsiteEditor>
         {/if}
+      {:else if $selectedTab === "websites" && !$currentSpace.hasPermission("create", "website")}
+        <p class="text-secondary max-w-72 text-right text-xs">
+          {m.knowledge_create_no_permission({ resourceType: m.websites().toLowerCase() })}
+        </p>
       {:else if $selectedTab === "integrations" && $currentSpace.hasPermission("create", "integrationKnowledge")}
         {#if data.availableIntegrations.length > 0}
           <ImportKnowledgeDialog></ImportKnowledgeDialog>
@@ -162,6 +170,10 @@
             </Button>
           {/if}
         {/if}
+      {:else if $selectedTab === "integrations" && !$currentSpace.hasPermission("create", "integrationKnowledge")}
+        <p class="text-secondary max-w-72 text-right text-xs">
+          {m.knowledge_create_no_permission({ resourceType: m.integrations().toLowerCase() })}
+        </p>
       {/if}
     </Page.Flex>
   </Page.Header>

@@ -119,6 +119,7 @@
   "capabilities": "Kapaciteter",
   "cards": "Kort",
   "knowledge": "Kunskap",
+  "knowledge_create_no_permission": "Du har inte behörighet att lägga till {resourceType}. Kontakta din administratör för att ändra din roll.",
   "noPagesFound": "Inga sidor hittades",
   "pageCount": "{count} sidor",
   "collections": "Samlingar",

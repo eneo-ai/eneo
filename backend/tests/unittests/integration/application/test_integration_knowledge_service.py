@@ -93,7 +93,7 @@ class TestUpdateKnowledgeName:
         integration_knowledge: MagicMock,
     ):
         """Test successful rename of integration knowledge."""
-        actor.can_edit_integration_knowledge_list.return_value = True
+        actor.can_edit_integrations.return_value = True
         new_name = "New Knowledge Name"
 
         await service.update_knowledge_name(
@@ -116,7 +116,7 @@ class TestUpdateKnowledgeName:
         integration_knowledge: MagicMock,
     ):
         """Test that users without edit permission cannot rename."""
-        actor.can_edit_integration_knowledge_list.return_value = False
+        actor.can_edit_integrations.return_value = False
 
         with pytest.raises(UnauthorizedException):
             await service.update_knowledge_name(
@@ -136,7 +136,7 @@ class TestUpdateKnowledgeName:
         integration_knowledge: MagicMock,
     ):
         """Test that knowledge cannot be renamed from a different space."""
-        actor.can_edit_integration_knowledge_list.return_value = True
+        actor.can_edit_integrations.return_value = True
         # Knowledge belongs to a different space
         integration_knowledge.space_id = uuid4()
 
@@ -158,7 +158,7 @@ class TestUpdateKnowledgeName:
         integration_knowledge: MagicMock,
     ):
         """Test that renaming does not change the original_name field."""
-        actor.can_edit_integration_knowledge_list.return_value = True
+        actor.can_edit_integrations.return_value = True
         original = integration_knowledge.original_name
         new_name = "New Knowledge Name"
 
@@ -180,7 +180,7 @@ class TestUpdateKnowledgeName:
         integration_knowledge: MagicMock,
     ):
         """Test that knowledge is fetched from repo for update (to get created_at)."""
-        actor.can_edit_integration_knowledge_list.return_value = True
+        actor.can_edit_integrations.return_value = True
 
         await service.update_knowledge_name(
             space_id=integration_knowledge.space_id,
@@ -196,7 +196,7 @@ class TestUpdateKnowledgeName:
 
 class TestWrapperOperations:
     async def test_update_wrapper_name_updates_all_owned_items(self, actor, space):
-        actor.can_edit_integration_knowledge_list.return_value = True
+        actor.can_edit_integrations.return_value = True
 
         wrapper_id = uuid4()
         first = MagicMock(spec=IntegrationKnowledge)
@@ -249,7 +249,7 @@ class TestWrapperOperations:
         assert len(result) == 2
 
     async def test_remove_wrapper_knowledge_deletes_all_owned_items(self, actor, space):
-        actor.can_delete_integration_knowledge_list.return_value = True
+        actor.can_delete_integrations.return_value = True
 
         wrapper_id = uuid4()
         first = MagicMock(spec=IntegrationKnowledge)
@@ -369,7 +369,7 @@ class TestRemoveKnowledge:
         self, actor, space, sharepoint_knowledge_user_oauth
     ):
         """Test that user_oauth integration uses oauth_token_repo for token."""
-        actor.can_delete_integration_knowledge_list.return_value = True
+        actor.can_delete_integrations.return_value = True
         space.get_integration_knowledge.return_value = sharepoint_knowledge_user_oauth
         space.tenant_space_id = uuid4()  # Not an org space
 
@@ -418,7 +418,7 @@ class TestRemoveKnowledge:
         tenant_app_client_credentials,
     ):
         """Test that tenant_app integration uses tenant_app_auth_service for token."""
-        actor.can_delete_integration_knowledge_list.return_value = True
+        actor.can_delete_integrations.return_value = True
         space.get_integration_knowledge.return_value = sharepoint_knowledge_tenant_app
         space.tenant_space_id = uuid4()  # Not an org space
 
@@ -463,7 +463,7 @@ class TestRemoveKnowledge:
         self, actor, space, sharepoint_knowledge_tenant_app, tenant_app_service_account
     ):
         """Test that service account integration uses service_account_auth_service for token."""
-        actor.can_delete_integration_knowledge_list.return_value = True
+        actor.can_delete_integrations.return_value = True
         space.get_integration_knowledge.return_value = sharepoint_knowledge_tenant_app
         space.tenant_space_id = uuid4()  # Not an org space
 
@@ -521,7 +521,7 @@ class TestRemoveKnowledge:
         The subscription cleanup failure is caught and logged, but does not
         prevent the knowledge from being deleted.
         """
-        actor.can_delete_integration_knowledge_list.return_value = True
+        actor.can_delete_integrations.return_value = True
         space.get_integration_knowledge.return_value = sharepoint_knowledge_tenant_app
         space.tenant_space_id = uuid4()  # Not an org space
 
@@ -1322,7 +1322,7 @@ class TestTriggerFullSync:
     async def test_trigger_full_sync_user_oauth_queues_job(
         self, actor, space, sharepoint_knowledge_user_oauth
     ):
-        actor.can_edit_integration_knowledge_list.return_value = True
+        actor.can_edit_integrations.return_value = True
         space.get_integration_knowledge.return_value = sharepoint_knowledge_user_oauth
 
         space_repo = AsyncMock()
@@ -1391,7 +1391,7 @@ class TestTriggerFullSync:
     async def test_trigger_full_sync_continues_if_subscription_ensure_fails(
         self, actor, space, sharepoint_knowledge_user_oauth
     ):
-        actor.can_edit_integration_knowledge_list.return_value = True
+        actor.can_edit_integrations.return_value = True
         space.get_integration_knowledge.return_value = sharepoint_knowledge_user_oauth
 
         space_repo = AsyncMock()
@@ -1441,7 +1441,7 @@ class TestTriggerFullSync:
     async def test_trigger_full_sync_tenant_app_requires_admin_permission(
         self, actor, space, sharepoint_knowledge_tenant_app
     ):
-        actor.can_edit_integration_knowledge_list.return_value = True
+        actor.can_edit_integrations.return_value = True
         space.get_integration_knowledge.return_value = sharepoint_knowledge_tenant_app
 
         non_admin_user = MagicMock()
@@ -1486,7 +1486,7 @@ class TestTriggerFullSync:
     async def test_trigger_full_sync_rejects_non_sharepoint_knowledge(
         self, actor, space
     ):
-        actor.can_edit_integration_knowledge_list.return_value = True
+        actor.can_edit_integrations.return_value = True
 
         knowledge = MagicMock(spec=IntegrationKnowledge)
         knowledge.id = uuid4()
