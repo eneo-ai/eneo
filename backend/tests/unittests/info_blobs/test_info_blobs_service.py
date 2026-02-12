@@ -53,7 +53,8 @@ async def test_update_info_blob_does_not_exist(setup: Setup):
 
 
 async def test_delete_info_blob_does_not_exist(setup: Setup):
-    setup.repo.delete.return_value = None
+    # With secure delete, we fetch the blob first to validate authorization
+    setup.repo.get.return_value = None
 
     with pytest.raises(NotFoundException, match="InfoBlob not found"):
         await setup.service.delete("UUID")

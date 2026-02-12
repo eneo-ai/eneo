@@ -1,4 +1,5 @@
 from collections import defaultdict
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
@@ -45,8 +46,10 @@ def count_tokens(text: str):
 
 def _build_files_string(files: list[File]):
     if files:
+        # Use json.dumps() to properly escape special characters in filenames and text
+        # This prevents broken JSON if the content contains quotes or other special chars
         files_string = "\n".join(
-            f'{{"filename": "{file.name}", "text": "{file.text}"}}' for file in files
+            json.dumps({"filename": file.name, "text": file.text}) for file in files
         )
 
         return (
