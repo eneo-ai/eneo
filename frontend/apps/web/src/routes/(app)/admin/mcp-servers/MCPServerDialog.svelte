@@ -22,7 +22,7 @@
   let name = $state("");
   let description = $state("");
   let http_url = $state("");
-  let http_auth_type = $state<"none" | "bearer" | "api_key" | "custom_headers">("none");
+  let http_auth_type = $state<"none" | "bearer" | "api_key" | "custom_headers" | "oauth2_client_credentials">("none");
   let documentation_url = $state("");
 
   // Authentication credentials
@@ -30,6 +30,12 @@
   let api_key = $state("");
   let api_key_header = $state("X-API-Key");
   let custom_headers = $state("");
+
+  // OAuth2 Client Credentials
+  let oauth_token_url = $state("");
+  let oauth_client_id = $state("");
+  let oauth_client_secret = $state("");
+  let oauth_scope = $state("");
 
   let submitting = $state(false);
   let errorMessage = $state("");
@@ -54,6 +60,16 @@
     api_key = "";
     api_key_header = "X-API-Key";
     custom_headers = "";
+    // For OAuth2 CC, token_url and scope are config (show when editing), but secrets are cleared
+    if (mcpServer?.http_auth_config_schema) {
+      oauth_token_url = mcpServer.http_auth_config_schema.token_url || "";
+      oauth_scope = mcpServer.http_auth_config_schema.scope || "";
+    } else {
+      oauth_token_url = "";
+      oauth_scope = "";
+    }
+    oauth_client_id = "";
+    oauth_client_secret = "";
     errorMessage = "";
   });
 
@@ -88,6 +104,14 @@
           submitting = false;
           return;
         }
+      } else if (http_auth_type === "oauth2_client_credentials" && oauth_token_url) {
+        const oauthConfig: Record<string, string> = {
+          token_url: oauth_token_url,
+        };
+        if (oauth_client_id) oauthConfig.client_id = oauth_client_id;
+        if (oauth_client_secret) oauthConfig.client_secret = oauth_client_secret;
+        if (oauth_scope) oauthConfig.scope = oauth_scope;
+        data.http_auth_config_schema = oauthConfig;
       }
 
       await onSubmit(data, mcpServer?.mcp_server_id);
@@ -103,6 +127,10 @@
         api_key = "";
         api_key_header = "X-API-Key";
         custom_headers = "";
+        oauth_token_url = "";
+        oauth_client_id = "";
+        oauth_client_secret = "";
+        oauth_scope = "";
       }
 
       $openController = false;
@@ -223,10 +251,13 @@
             Autentisering
           </legend>
 
-          <!-- TODO: Add more auth options when OAuth support is implemented -->
           <Select.Simple
             options={[
               { value: "none", label: "Publik (ingen autentisering)" },
+              { value: "oauth2_client_credentials", label: m.oauth2_client_credentials_label() },
+              { value: "bearer", label: m.bearer_token() },
+              { value: "api_key", label: m.api_key() },
+              { value: "custom_headers", label: m.custom_headers_json() },
             ]}
             bind:value={http_auth_type}
           >
@@ -295,6 +326,74 @@
                 {#if isEditMode}<span class="text-warning-default">{m.leave_empty_keep_existing()}.</span>{/if}
                 {m.provide_headers_json()}
               </p>
+            </div>
+          {/if}
+
+          {#if http_auth_type === "oauth2_client_credentials"}
+            <div class="space-y-4">
+              <div>
+                <label for="mcp-oauth_token_url" class="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-default">
+                  {m.oauth2_token_url()}
+                  <span class="text-negative-default" aria-hidden="true">*</span>
+                </label>
+                <input
+                  id="mcp-oauth_token_url"
+                  type="url"
+                  bind:value={oauth_token_url}
+                  required
+                  placeholder="https://example.com/oauth2/token"
+                  class="border-default bg-primary ring-accent-default w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:border-accent-default focus:outline-none hover:border-stronger"
+                />
+                <p class="mt-1.5 text-xs text-muted">{m.oauth2_token_url_hint()}</p>
+              </div>
+              <div>
+                <label for="mcp-oauth_client_id" class="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-default">
+                  {m.oauth2_client_id()}
+                  <span class="text-negative-default" aria-hidden="true">*</span>
+                </label>
+                <input
+                  id="mcp-oauth_client_id"
+                  type="text"
+                  bind:value={oauth_client_id}
+                  placeholder={authPlaceholder || "client_id"}
+                  autocomplete="off"
+                  class="border-default bg-primary ring-accent-default w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:border-accent-default focus:outline-none hover:border-stronger"
+                />
+                {#if isEditMode}
+                  <p class="mt-1.5 text-xs text-warning-default">{m.leave_empty_keep_existing()}</p>
+                {/if}
+              </div>
+              <div>
+                <label for="mcp-oauth_client_secret" class="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-default">
+                  {m.oauth2_client_secret()}
+                  <span class="text-negative-default" aria-hidden="true">*</span>
+                </label>
+                <input
+                  id="mcp-oauth_client_secret"
+                  type="password"
+                  bind:value={oauth_client_secret}
+                  placeholder={authPlaceholder || "client_secret"}
+                  autocomplete="off"
+                  class="border-default bg-primary ring-accent-default w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:border-accent-default focus:outline-none hover:border-stronger"
+                />
+                {#if isEditMode}
+                  <p class="mt-1.5 text-xs text-warning-default">{m.leave_empty_keep_existing()}</p>
+                {/if}
+              </div>
+              <div>
+                <label for="mcp-oauth_scope" class="mb-1.5 block text-sm font-medium text-default">
+                  {m.oauth2_scope()}
+                  <span class="ml-1 text-xs font-normal text-muted">(valfritt)</span>
+                </label>
+                <input
+                  id="mcp-oauth_scope"
+                  type="text"
+                  bind:value={oauth_scope}
+                  placeholder="openid profile"
+                  class="border-default bg-primary ring-accent-default w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:border-accent-default focus:outline-none hover:border-stronger"
+                />
+                <p class="mt-1.5 text-xs text-muted">{m.oauth2_scope_hint()}</p>
+              </div>
             </div>
           {/if}
         </fieldset>

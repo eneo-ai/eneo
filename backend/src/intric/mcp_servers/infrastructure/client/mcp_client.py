@@ -1,9 +1,12 @@
 """MCP Client for connecting to and executing HTTP-based MCP servers."""
 
 import asyncio
+import base64
+import time
 from types import TracebackType
 from typing import Any, Optional
 
+import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
@@ -15,6 +18,9 @@ logger = get_logger(__name__)
 # Default connection timeout in seconds
 MCP_CONNECTION_TIMEOUT_DEFAULT = 30
 
+# Buffer before token expiry to trigger refresh (seconds)
+_TOKEN_EXPIRY_BUFFER = 30
+
 
 class MCPClientError(Exception):
     """Base exception for MCP client errors."""
@@ -24,6 +30,11 @@ class MCPClientError(Exception):
 
 class MCPClient:
     """Client for interacting with HTTP-based MCP servers."""
+
+    # Process-wide OAuth2 token cache: cache_key -> (access_token, expires_at_timestamp)
+    _token_cache: dict[str, tuple[str, float]] = {}
+    _token_locks: dict[str, asyncio.Lock] = {}
+    _token_locks_guard = asyncio.Lock()
 
     def __init__(
         self,
@@ -45,6 +56,103 @@ class MCPClient:
         self.session: Optional[ClientSession] = None
         self._streams_context = None
         self._session_context = None
+        self._resolved_bearer_token: str | None = None
+
+    @classmethod
+    async def _get_token_lock(cls, cache_key: str) -> asyncio.Lock:
+        async with cls._token_locks_guard:
+            lock = cls._token_locks.get(cache_key)
+            if lock is None:
+                lock = asyncio.Lock()
+                cls._token_locks[cache_key] = lock
+            return lock
+
+    async def _acquire_oauth_token(self) -> str:
+        """Acquire an OAuth2 access token using client credentials grant.
+
+        Uses HTTP Basic auth with client_id:client_secret to the token endpoint.
+        Tokens are cached process-wide and reused until near expiry.
+
+        Returns:
+            Access token string
+
+        Raises:
+            MCPClientError: If token acquisition fails
+        """
+        token_url = self.auth_credentials.get("token_url")
+        client_id = self.auth_credentials.get("client_id")
+        client_secret = self.auth_credentials.get("client_secret")
+        scope = self.auth_credentials.get("scope")
+
+        if not token_url or not client_id or not client_secret:
+            raise MCPClientError(
+                "OAuth2 client credentials requires token_url, client_id, and client_secret"
+            )
+
+        cache_key = f"{token_url}:{client_id}"
+        lock = await self._get_token_lock(cache_key)
+
+        async with lock:
+            # Check cache
+            cached = self._token_cache.get(cache_key)
+            if cached:
+                token, expires_at = cached
+                if time.time() < expires_at - _TOKEN_EXPIRY_BUFFER:
+                    logger.debug(
+                        f"Using cached OAuth2 token for {self.mcp_server.name}"
+                    )
+                    return token
+
+            # Fetch new token
+            logger.info(
+                f"Acquiring OAuth2 token for {self.mcp_server.name} from {token_url}"
+            )
+
+            basic_auth = base64.b64encode(
+                f"{client_id}:{client_secret}".encode()
+            ).decode()
+
+            data: dict[str, str] = {"grant_type": "client_credentials"}
+            if scope:
+                data["scope"] = scope
+
+            try:
+                async with httpx.AsyncClient() as http_client:
+                    response = await http_client.post(
+                        token_url,
+                        data=data,
+                        headers={
+                            "Authorization": f"Basic {basic_auth}",
+                            "Content-Type": "application/x-www-form-urlencoded",
+                        },
+                        timeout=10,
+                    )
+                    response.raise_for_status()
+                    token_data = response.json()
+            except httpx.HTTPStatusError as e:
+                raise MCPClientError(
+                    f"OAuth2 token request failed with status {e.response.status_code}: "
+                    f"{e.response.text}"
+                )
+            except Exception as e:
+                raise MCPClientError(f"OAuth2 token request failed: {e}")
+
+            access_token = token_data.get("access_token")
+            if not access_token:
+                raise MCPClientError(
+                    "OAuth2 token response missing access_token"
+                )
+
+            # Cache with expiry (default 1 hour if not provided)
+            expires_in = token_data.get("expires_in", 3600)
+            expires_at = time.time() + expires_in
+            self._token_cache[cache_key] = (access_token, expires_at)
+
+            logger.info(
+                f"Acquired OAuth2 token for {self.mcp_server.name} "
+                f"(expires in {expires_in}s)"
+            )
+            return access_token
 
     def _build_auth_headers(self) -> dict[str, str]:
         """Build authentication headers based on server auth type."""
@@ -64,6 +172,10 @@ class MCPClient:
         elif self.mcp_server.http_auth_type == "custom_headers":
             # Custom headers are passed directly from credentials
             headers.update(self.auth_credentials)
+
+        elif self.mcp_server.http_auth_type == "oauth2_client_credentials":
+            if self._resolved_bearer_token:
+                headers["Authorization"] = f"Bearer {self._resolved_bearer_token}"
 
         return headers
 
@@ -105,6 +217,10 @@ class MCPClient:
 
     async def _connect_internal(self) -> None:
         """Internal connection logic."""
+        # For OAuth2 client credentials, acquire token before building headers
+        if self.mcp_server.http_auth_type == "oauth2_client_credentials":
+            self._resolved_bearer_token = await self._acquire_oauth_token()
+
         headers = self._build_auth_headers()
 
         # Create the streamable HTTP context manager
