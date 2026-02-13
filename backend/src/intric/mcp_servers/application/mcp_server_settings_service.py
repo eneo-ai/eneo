@@ -5,7 +5,9 @@ from intric.main.exceptions import NotFoundException, UnauthorizedException
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 
 if TYPE_CHECKING:
-    from intric.mcp_servers.domain.repositories.mcp_server_repo import MCPServerRepository
+    from intric.mcp_servers.domain.repositories.mcp_server_repo import (
+        MCPServerRepository,
+    )
     from intric.users.user import UserInDB
 
 
@@ -84,9 +86,7 @@ class MCPServerSettingsService:
 
         await self.mcp_server_repo.delete(id=mcp_server_id)
 
-    async def is_enabled_for_tenant(
-        self, mcp_server_id: UUID, tenant_id: UUID
-    ) -> bool:
+    async def is_enabled_for_tenant(self, mcp_server_id: UUID, tenant_id: UUID) -> bool:
         """Check if an MCP server is enabled for a specific tenant."""
         try:
             mcp_server = await self.mcp_server_repo.one(id=mcp_server_id)

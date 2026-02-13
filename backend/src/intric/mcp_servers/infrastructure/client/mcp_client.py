@@ -139,9 +139,7 @@ class MCPClient:
 
             access_token = token_data.get("access_token")
             if not access_token:
-                raise MCPClientError(
-                    "OAuth2 token response missing access_token"
-                )
+                raise MCPClientError("OAuth2 token response missing access_token")
 
             # Cache with expiry (default 1 hour if not provided)
             expires_in = token_data.get("expires_in", 3600)
@@ -182,12 +180,11 @@ class MCPClient:
     async def connect(self) -> None:
         """Connect to the HTTP-based MCP server."""
         try:
-            await asyncio.wait_for(
-                self._connect_internal(),
-                timeout=self.timeout
-            )
+            await asyncio.wait_for(self._connect_internal(), timeout=self.timeout)
         except asyncio.TimeoutError:
-            logger.error(f"Connection to MCP server {self.mcp_server.name} timed out after {self.timeout}s")
+            logger.error(
+                f"Connection to MCP server {self.mcp_server.name} timed out after {self.timeout}s"
+            )
             # Clean up any partially initialized contexts
             await self._cleanup_contexts()
             raise MCPClientError(f"Connection timed out after {self.timeout}s")
@@ -225,8 +222,7 @@ class MCPClient:
 
         # Create the streamable HTTP context manager
         streams_context = streamablehttp_client(
-            url=self.mcp_server.http_url,
-            headers=headers
+            url=self.mcp_server.http_url, headers=headers
         )
 
         # Enter the streams context - only save reference after successful entry
@@ -279,11 +275,15 @@ class MCPClient:
             tools: list[dict[str, Any]] = []
 
             for tool in response.tools:
-                tools.append({
+                tool_def: dict[str, Any] = {
                     "name": tool.name,
                     "description": tool.description,
                     "input_schema": tool.inputSchema,
-                })
+                }
+                # Capture _meta from tool definition (MCP Apps standard)
+                if hasattr(tool, "meta") and tool.meta:
+                    tool_def["meta"] = tool.meta
+                tools.append(tool_def)
 
             logger.debug(f"Listed {len(tools)} tools from {self.mcp_server.name}")
             return tools
@@ -292,7 +292,9 @@ class MCPClient:
             logger.error(f"Failed to list tools from {self.mcp_server.name}: {e}")
             raise MCPClientError(f"Failed to list tools: {e}")
 
-    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def call_tool(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Call a tool on the MCP server.
 
@@ -314,34 +316,77 @@ class MCPClient:
 
             for content_item in response.content:
                 if content_item.type == "text":
-                    content_list.append({
-                        "type": "text",
-                        "text": content_item.text,
-                    })
+                    content_list.append(
+                        {
+                            "type": "text",
+                            "text": content_item.text,
+                        }
+                    )
                 elif content_item.type == "image":
-                    content_list.append({
-                        "type": "image",
-                        "data": content_item.data,
-                        "mime_type": content_item.mimeType,
-                    })
+                    content_list.append(
+                        {
+                            "type": "image",
+                            "data": content_item.data,
+                            "mime_type": content_item.mimeType,
+                        }
+                    )
                 elif content_item.type == "resource":
-                    content_list.append({
-                        "type": "resource",
-                        "uri": getattr(content_item, "uri", None),
-                        "text": getattr(content_item, "text", None),
-                    })
+                    content_list.append(
+                        {
+                            "type": "resource",
+                            "uri": getattr(content_item, "uri", None),
+                            "text": getattr(content_item, "text", None),
+                        }
+                    )
 
             result: dict[str, Any] = {
                 "content": content_list,
                 "is_error": bool(response.isError),
             }
 
+            # Preserve _meta from tool result (used by MCP Apps for UI data)
+            if hasattr(response, "meta") and response.meta:
+                result["_meta"] = response.meta
+
             logger.info(f"Called tool {tool_name} on {self.mcp_server.name}")
             return result
 
         except Exception as e:
-            logger.error(f"Failed to call tool {tool_name} on {self.mcp_server.name}: {e}")
+            logger.error(
+                f"Failed to call tool {tool_name} on {self.mcp_server.name}: {e}"
+            )
             raise MCPClientError(f"Tool call failed: {e}")
+
+    async def read_resource(self, uri: str) -> dict[str, Any]:
+        """
+        Read a resource from the MCP server.
+
+        Args:
+            uri: Resource URI (e.g., "ui://infocaption/guide-viewer")
+
+        Returns:
+            Dict with "content" (string) and "mime_type"
+        """
+        if not self.session:
+            raise MCPClientError("Not connected to MCP server")
+
+        try:
+            response = await self.session.read_resource(uri)
+
+            # Return first content item
+            for content_item in response.contents:
+                text = getattr(content_item, "text", None)
+                mime_type = getattr(content_item, "mimeType", "text/html")
+                if text is not None:
+                    return {"content": text, "mime_type": mime_type}
+
+            return {"content": "", "mime_type": "text/html"}
+
+        except Exception as e:
+            logger.error(
+                f"Failed to read resource {uri} from {self.mcp_server.name}: {e}"
+            )
+            raise MCPClientError(f"Resource read failed: {e}")
 
     async def disconnect(self) -> None:
         """Disconnect from the MCP server.

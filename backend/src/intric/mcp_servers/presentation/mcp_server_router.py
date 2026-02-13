@@ -7,6 +7,7 @@ from intric.main.exceptions import BadRequestException
 from intric.main.models import PaginatedResponse
 from intric.mcp_servers.presentation.models import (
     MCPConnectionStatus,
+    MCPResourceReadResponse,
     MCPServerCreate,
     MCPServerCreateResponse,
     MCPServerPublic,
@@ -194,7 +195,9 @@ async def create_mcp_server(
         http_auth_config_schema=data.http_auth_config_schema,
         tags=data.tags,
         icon_url=str(data.icon_url) if data.icon_url else None,
-        documentation_url=str(data.documentation_url) if data.documentation_url else None,
+        documentation_url=str(data.documentation_url)
+        if data.documentation_url
+        else None,
     )
 
     # If connection failed, return 400 error with message
@@ -236,7 +239,9 @@ async def update_mcp_server(
         http_auth_config_schema=data.http_auth_config_schema,
         tags=data.tags,
         icon_url=str(data.icon_url) if data.icon_url else None,
-        documentation_url=str(data.documentation_url) if data.documentation_url else None,
+        documentation_url=str(data.documentation_url)
+        if data.documentation_url
+        else None,
     )
     return assembler.from_domain_to_model(mcp_server)
 
@@ -311,6 +316,33 @@ async def sync_mcp_server_tools(
             error_message=connection_result.error_message,
         ),
     )
+
+
+@router.get(
+    "/{id}/resources/read",
+    response_model=MCPResourceReadResponse,
+    responses=responses.get_responses([400, 404]),
+)
+async def read_mcp_resource(
+    id: UUID,
+    uri: str = Query(..., description="Resource URI to read"),
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Read a resource from an MCP server (e.g., UI resource HTML for MCP Apps)."""
+    from intric.mcp_servers.infrastructure.client.mcp_client import MCPClientError
+
+    service = container.mcp_server_service()
+
+    try:
+        result = await service.read_resource(mcp_server_id=id, uri=uri)
+    except MCPClientError as e:
+        raise BadRequestException(str(e))
+
+    return MCPResourceReadResponse(
+        content=result["content"],
+        mime_type=result.get("mime_type", "text/html"),
+    )
+
 
 
 @router.put(
