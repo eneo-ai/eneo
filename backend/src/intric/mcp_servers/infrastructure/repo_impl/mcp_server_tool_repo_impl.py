@@ -5,11 +5,17 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.future import select
 
-from intric.database.tables.mcp_server_table import MCPServerTools as MCPServerToolsTable
+from intric.database.tables.mcp_server_table import (
+    MCPServerTools as MCPServerToolsTable,
+)
 from intric.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
 from intric.mcp_servers.domain.entities.mcp_server import MCPServerTool
-from intric.mcp_servers.domain.repositories.mcp_server_tool_repo import MCPServerToolRepository
-from intric.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerToolMapper
+from intric.mcp_servers.domain.repositories.mcp_server_tool_repo import (
+    MCPServerToolRepository,
+)
+from intric.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
+    MCPServerToolMapper,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,12 +51,14 @@ class MCPServerToolRepoImpl(
 
         return self.mapper.to_entities(records)
 
-    async def find_by_name(self, mcp_server_id: UUID, name: str) -> MCPServerTool | None:
+    async def find_by_name(
+        self, mcp_server_id: UUID, name: str
+    ) -> MCPServerTool | None:
         """Find a tool by server ID and name."""
         query = select(self._db_model).where(
             sa.and_(
                 self._db_model.mcp_server_id == mcp_server_id,
-                self._db_model.name == name
+                self._db_model.name == name,
             )
         )
         result = await self.session.scalar(query)
@@ -82,12 +90,13 @@ class MCPServerToolRepoImpl(
             insert(self._db_model)
             .values(db_dict)
             .on_conflict_do_update(
-                index_elements=['mcp_server_id', 'name'],
+                index_elements=["mcp_server_id", "name"],
                 set_={
-                    'description': db_dict['description'],
-                    'input_schema': db_dict['input_schema'],
-                    'is_enabled_by_default': db_dict['is_enabled_by_default'],
-                }
+                    "description": db_dict["description"],
+                    "input_schema": db_dict["input_schema"],
+                    "is_enabled_by_default": db_dict["is_enabled_by_default"],
+                    "meta": db_dict["meta"],
+                },
             )
             .returning(self._db_model)
         )

@@ -11,6 +11,7 @@
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight, Check, X, Wrench } from "lucide-svelte";
   import { SvelteSet } from "svelte/reactivity";
+  import McpAppFrame from "./McpAppFrame.svelte";
 
   const chat = getChatService();
   const attachmentUrls = getAttachmentUrlService();
@@ -26,7 +27,7 @@
   // - mcp_tool_calls: runtime property added during streaming
   // - tool_calls: persisted field from API response (chat history)
   const mcpToolCalls = $derived(
-    ((message as any).mcp_tool_calls ?? message.tool_calls) as Array<{ server_name: string; tool_name: string; arguments?: Record<string, unknown>; tool_call_id?: string; approved?: boolean }> | undefined
+    ((message as any).mcp_tool_calls ?? message.tool_calls) as Array<{ server_name: string; tool_name: string; arguments?: Record<string, unknown>; tool_call_id?: string; approved?: boolean; ui_resource_uri?: string; mcp_server_id?: string; result?: string; result_meta?: Record<string, unknown> }> | undefined
   );
 
   // Check if there's a pending tool approval for this message (only on last message)
@@ -218,6 +219,17 @@
             </div>
           {/if}
         </div>
+
+        <!-- MCP App iframe for tools with UI resource -->
+        {#if toolCall.ui_resource_uri && toolCall.mcp_server_id && !isDenied && !isPendingTool}
+          <McpAppFrame
+            resourceUri={toolCall.ui_resource_uri}
+            mcpServerId={toolCall.mcp_server_id}
+            toolArguments={toolCall.arguments}
+            toolResult={toolCall.result}
+            toolResultMeta={toolCall.result_meta}
+          />
+        {/if}
       {/each}
 
       <!-- Bulk approval actions -->

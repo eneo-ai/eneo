@@ -37,7 +37,9 @@ class ToolApprovalManager:
 
     def __init__(self):
         self._pending_events: dict[str, asyncio.Event] = {}
-        self._decisions: dict[str, dict[str, ToolApprovalDecision]] = {}  # approval_id -> {tool_call_id -> decision}
+        self._decisions: dict[
+            str, dict[str, ToolApprovalDecision]
+        ] = {}  # approval_id -> {tool_call_id -> decision}
         self._tool_call_ids: dict[str, list[str]] = {}
 
     def request_approval(self, approval_id: str, tool_call_ids: list[str]) -> None:

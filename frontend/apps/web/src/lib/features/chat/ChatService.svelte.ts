@@ -416,9 +416,13 @@ export class ChatService {
                   (t: { tool_call_id?: string }) => t.tool_call_id && t.tool_call_id === tool.tool_call_id
                 );
                 if (existingIndex >= 0) {
-                  // Update existing entry with approval status
+                  // Merge: only overwrite with non-null values so result events
+                  // don't erase arguments from the initial event
+                  const filtered = Object.fromEntries(
+                    Object.entries(tool).filter(([, v]) => v != null)
+                  );
                   // @ts-expect-error
-                  ref.mcp_tool_calls[existingIndex] = { ...ref.mcp_tool_calls[existingIndex], ...tool };
+                  ref.mcp_tool_calls[existingIndex] = { ...ref.mcp_tool_calls[existingIndex], ...filtered };
                 } else {
                   // @ts-expect-error
                   ref.mcp_tool_calls.push(tool);

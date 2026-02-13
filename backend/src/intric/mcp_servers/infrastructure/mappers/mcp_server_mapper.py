@@ -7,7 +7,9 @@ from intric.database.tables.mcp_server_table import MCPServers as MCPServersTabl
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 
 if TYPE_CHECKING:
-    from intric.database.tables.mcp_server_table import MCPServerTools as MCPServerToolsTable
+    from intric.database.tables.mcp_server_table import (
+        MCPServerTools as MCPServerToolsTable,
+    )
 
 
 class MCPServerToolMapper:
@@ -26,6 +28,7 @@ class MCPServerToolMapper:
             description=db_model.description,
             input_schema=db_model.input_schema,
             is_enabled_by_default=db_model.is_enabled_by_default,
+            meta=db_model.meta,
         )
 
     @staticmethod
@@ -43,6 +46,7 @@ class MCPServerToolMapper:
             "description": entity.description,
             "input_schema": entity.input_schema,
             "is_enabled_by_default": entity.is_enabled_by_default,
+            "meta": entity.meta,
         }
 
 
