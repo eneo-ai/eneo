@@ -20,13 +20,21 @@
     | undefined = undefined;
 
   let isOpen: Dialog.OpenState;
+  let isUpdating = false;
+  let updateError = "";
 
   async function update() {
+    if (isUpdating) return;
+    isUpdating = true;
+    updateError = "";
     try {
       await onUpdate?.(includeFollowups, dateRange);
       $isOpen = false;
     } catch (error) {
-      alert(error);
+      console.error(error);
+      updateError = m.error_connecting_to_server();
+    } finally {
+      isUpdating = false;
     }
   }
 </script>
@@ -54,11 +62,16 @@
         >{m.include_follow_up_questions()}</Input.Switch
       >
     </Dialog.Section>
+    {#if updateError}
+      <p class="px-4 pt-2 text-sm text-red-700" role="alert">{updateError}</p>
+    {/if}
 
     <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
+      <Button is={close} disabled={isUpdating}>{m.cancel()}</Button>
 
-      <Button variant="primary" on:click={update}>{m.update()}</Button>
+      <Button variant="primary" on:click={update} disabled={isUpdating}>
+        {isUpdating ? m.loading() : m.update()}
+      </Button>
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>

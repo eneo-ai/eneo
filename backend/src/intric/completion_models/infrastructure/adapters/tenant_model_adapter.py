@@ -368,19 +368,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                 **litellm_kwargs,
             )
 
-            # DEBUG: Log raw response
-            logger.debug(f"[DEBUG] Raw response: {response}")
-
             # Parse response
             completion = Completion()
             if response.choices and len(response.choices) > 0:
                 choice = response.choices[0]
-
-                # DEBUG: Log message details
-                logger.debug(f"[DEBUG] Message: {choice.message}")
-                logger.debug(f"[DEBUG] Message attrs: {dir(choice.message)}")
-                if hasattr(choice.message, "reasoning_content"):
-                    logger.debug(f"[DEBUG] reasoning_content: {choice.message.reasoning_content}")
 
                 if hasattr(choice.message, "content"):
                     content = choice.message.content
@@ -480,10 +471,6 @@ class TenantModelAdapter(CompletionModelAdapter):
             APIKeyNotConfiguredException: If credentials are invalid
             OpenAIException: For API errors, rate limits, network issues
         """
-        # DEBUG: Log incoming parameters
-        logger.debug(f"[DEBUG] model_kwargs received: {model_kwargs}")
-        logger.debug(f"[DEBUG] extra kwargs received: {kwargs}")
-
         # Prepare LiteLLM kwargs with credentials and provider-specific handling
         litellm_kwargs = self._prepare_kwargs(model_kwargs=model_kwargs, **kwargs)
 
@@ -504,11 +491,6 @@ class TenantModelAdapter(CompletionModelAdapter):
         )
 
         try:
-            # DEBUG: Log what we're sending (with masked credentials)
-            logger.debug(f"[DEBUG] litellm_model: {self.litellm_model}")
-            logger.debug(f"[DEBUG] messages: {messages}")
-            logger.debug(f"[DEBUG] litellm_kwargs (effective): {self._get_effective_params(litellm_kwargs, dropped)}")
-
             # Create stream with drop_params=True to handle unsupported params gracefully
             stream = await litellm.acompletion(
                 model=self.litellm_model,
@@ -617,14 +599,8 @@ class TenantModelAdapter(CompletionModelAdapter):
             thinking_stripped = False
 
             async for chunk in stream:
-                # DEBUG: Log raw chunk to diagnose empty responses
-                logger.debug(f"[DEBUG] Raw chunk: {chunk}")
-
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
-
-                    # DEBUG: Log delta details
-                    logger.debug(f"[DEBUG] Delta: {delta}")
 
                     content = ""
                     if hasattr(delta, "content") and delta.content:

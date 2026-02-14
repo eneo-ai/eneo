@@ -2,7 +2,11 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 
 from intric.sessions.session import SessionInDB
-from intric.sessions.session_protocol import to_sessions_paginated_response
+from intric.sessions.session import SessionMetadataPublic
+from intric.sessions.session_protocol import (
+    to_session_metadata_paginated_response,
+    to_sessions_paginated_response,
+)
 
 
 def test_no_limit():
@@ -90,3 +94,24 @@ def test_limit_matches_session_count():
     )
     assert len(response.items) == limit
     assert response.next_cursor is None
+
+
+def test_metadata_pagination_forward_limit():
+    base_datetime = datetime.now()
+    test_sessions = [
+        SessionMetadataPublic(
+            id=uuid4(),
+            name=f"test-{i}",
+            created_at=base_datetime - timedelta(days=i),
+            updated_at=base_datetime - timedelta(days=i),
+        )
+        for i in range(6)
+    ]
+    limit = 5
+    response = to_session_metadata_paginated_response(
+        sessions=test_sessions,
+        limit=limit,
+        total_count=len(test_sessions),
+    )
+    assert len(response.items) == limit
+    assert response.next_cursor == test_sessions[limit].created_at

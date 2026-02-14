@@ -41,3 +41,12 @@ class UploadInfoBlob(UploadTask):
 
 class Transcription(UploadTask):
     pass
+
+
+class AnalyzeConversationInsightsTask(TaskParams):
+    question: str
+    from_date: str
+    to_date: str
+    include_followups: bool = False
+    assistant_id: UUID | None = None
+    group_chat_id: UUID | None = None

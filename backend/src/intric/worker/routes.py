@@ -1,7 +1,12 @@
-from intric.jobs.task_models import Transcription, UploadInfoBlob
+from intric.jobs.task_models import (
+    AnalyzeConversationInsightsTask,
+    Transcription,
+    UploadInfoBlob,
+)
 from intric.main.container.container import Container
 from intric.websites.crawl_dependencies.crawl_models import CrawlTask
 from intric.worker.crawl_tasks import crawl_task, queue_website_crawls
+from intric.worker.analysis_tasks import analyze_conversation_insights_task
 from intric.worker.upload_tasks import transcription_task, upload_info_blob_task
 from intric.worker.worker import Worker
 from intric.worker.usage_stats_tasks import (
@@ -133,6 +138,17 @@ async def export_audit_logs(job_id: str, params: dict, container: Container):
     redis = container.redis_client()
     return await export_audit_logs_task(
         job_id=job_id, params=params, session=session, redis=redis
+    )
+
+
+@worker.function()
+async def analyze_conversation_insights(
+    job_id: str,
+    params: AnalyzeConversationInsightsTask,
+    container: Container,
+):
+    return await analyze_conversation_insights_task(
+        job_id=job_id, params=params, container=container
     )
 
 
