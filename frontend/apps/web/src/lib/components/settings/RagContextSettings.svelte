@@ -77,6 +77,8 @@
       ragContextValue = 50;
     } else if (internalType === "fixed_chunks" && ragContextValue === null) {
       ragContextValue = 30;
+    } else if (internalType === "default" || internalType === "auto_relevance") {
+      ragContextValue = null;
     }
   });
 </script>
