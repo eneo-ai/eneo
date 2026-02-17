@@ -2118,9 +2118,5 @@
   "could_not_remove_user_from_group": "Could not remove user from group.",
   "no_users_in_group": "No users in this group",
   "no_users_found": "No users found",
-  "voice_input_start": "Record voice message",
-  "voice_input_stop": "Stop recording",
-  "voice_input_error_no_mic": "Microphone access denied",
-  "voice_input_error_transcription": "Transcription failed",
-  "voice_input_unsupported_browser": "Voice input is not supported in this browser"
+  "test_model": "Test model"
 }
