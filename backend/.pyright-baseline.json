@@ -2611,22 +2611,6 @@
       }
     },
     {
-      "file": "src/intric/completion_models/infrastructure/completion_service.py",
-      "rule": "reportAttributeAccessIssue",
-      "message": "Cannot access attribute \"get_logging_details\" for class \"CompletionModelAdapter\"\n\u00a0\u00a0Attribute \"get_logging_details\" is unknown",
-      "severity": "error",
-      "range": {
-        "start": {
-          "line": 219,
-          "character": 44
-        },
-        "end": {
-          "line": 219,
-          "character": 63
-        }
-      }
-    },
-    {
       "file": "src/intric/completion_models/infrastructure/get_response_claude.py",
       "rule": "reportAssignmentType",
       "message": "Type \"dict[Unknown, Unknown] | NotGiven\" is not assignable to declared type \"dict[Unknown, Unknown]\"\n\u00a0\u00a0Type \"dict[Unknown, Unknown] | NotGiven\" is not assignable to type \"dict[Unknown, Unknown]\"\n\u00a0\u00a0\u00a0\u00a0\"NotGiven\" is not assignable to \"dict[Unknown, Unknown]\"",
