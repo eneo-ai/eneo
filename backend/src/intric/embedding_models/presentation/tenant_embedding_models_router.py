@@ -194,7 +194,7 @@ async def delete_tenant_embedding_model(
     """Delete a tenant-specific embedding model."""
     from intric.database.tables.ai_models_table import EmbeddingModels
     import sqlalchemy as sa
-    from intric.main.exceptions import UnauthorizedException, NotFoundException
+    from intric.main.exceptions import UnauthorizedException, NotFoundException, BadRequestException
 
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(EmbeddingModels).where(
@@ -212,7 +212,11 @@ async def delete_tenant_embedding_model(
         raise UnauthorizedException("Cannot delete global models")
 
     # Delete the model (settings are now on the model itself)
-    await session.delete(model)
-    await session.commit()
+    try:
+        await session.delete(model)
+        await session.commit()
+    except sa.exc.IntegrityError:
+        await session.rollback()
+        raise BadRequestException("MODEL_IN_USE")
 
     return {"success": True}

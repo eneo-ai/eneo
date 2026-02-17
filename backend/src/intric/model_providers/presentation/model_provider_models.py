@@ -25,6 +25,16 @@ class ModelProviderUpdate(BaseModel):
     is_active: Optional[bool] = Field(None, description="Whether the provider is active")
 
 
+class ValidateModelRequest(BaseModel):
+    """Request model for validating a model against a provider."""
+
+    model_name: str = Field(..., description="Model name to validate")
+    model_type: str = Field(
+        default="completion",
+        description="Model type: completion, embedding, or transcription",
+    )
+
+
 class ModelProviderPublic(BaseModel):
     """Public response model for a model provider (without credentials)."""
 

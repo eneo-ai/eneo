@@ -40,7 +40,15 @@
   const hostingOptions = [
     { value: "swe", label: m.hosting_swe() },
     { value: "eu", label: m.hosting_eu() },
-    { value: "usa", label: m.hosting_usa() }
+    { value: "usa", label: m.hosting_usa() },
+    { value: "chn", label: m.hosting_chn() },
+    { value: "can", label: m.hosting_can() },
+    { value: "gbr", label: m.hosting_gbr() },
+    { value: "isr", label: m.hosting_isr() },
+    { value: "kor", label: m.hosting_kor() },
+    { value: "deu", label: m.hosting_deu() },
+    { value: "fra", label: m.hosting_fra() },
+    { value: "jpn", label: m.hosting_jpn() }
   ];
 
   // Initialize form values when dialog opens or model changes

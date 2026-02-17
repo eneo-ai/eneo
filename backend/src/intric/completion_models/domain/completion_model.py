@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 from intric.ai_models.ai_model import AIModel
 from intric.ai_models.model_enums import (
@@ -30,7 +30,7 @@ class CompletionModel(AIModel):
         name: str,
         token_limit: int,
         vision: bool,
-        family: ModelFamily,
+        family: Union[ModelFamily, str],
         hosting: ModelHostingLocation,
         org: Optional[ModelOrg],
         stability: ModelStability,

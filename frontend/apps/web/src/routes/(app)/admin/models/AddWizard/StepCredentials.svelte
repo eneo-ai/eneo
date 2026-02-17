@@ -9,11 +9,16 @@
   import ProviderGlyph from "../components/ProviderGlyph.svelte";
   import { ArrowLeft, Loader2 } from "lucide-svelte";
 
-  // Auto-focus first input on mount
+  // Auto-focus first input on mount and prefill provider name
   onMount(() => {
+    if (!providerName) {
+      providerName = providerLabels[providerType] ??
+        providerType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    }
     setTimeout(() => {
       const input = document.getElementById("cred-provider-name") as HTMLInputElement;
       input?.focus();
+      input?.select();
     }, 100);
   });
 
@@ -49,6 +54,7 @@
   // Validation
   $: isAzure = providerType === "azure";
   $: isVllm = providerType === "hosted_vllm";
+  $: isKnownProvider = ["openai", "azure", "anthropic", "gemini", "cohere", "mistral", "hosted_vllm"].includes(providerType);
   $: requiresEndpoint = isAzure || isVllm;
   $: isValid =
     providerName.trim() !== "" &&
@@ -144,7 +150,7 @@
     </div>
 
     <!-- Endpoint -->
-    {#if requiresEndpoint || providerType === "openai"}
+    {#if requiresEndpoint || providerType === "openai" || !isKnownProvider}
       <div class="flex flex-col gap-2">
         <label for="cred-endpoint" class="text-sm font-medium">{m.endpoint_url()}</label>
         <Input.Text
@@ -154,7 +160,9 @@
             ? "https://your-resource.openai.azure.com"
             : isVllm
               ? "https://your-vllm-server.com"
-              : "https://api.openai.com/v1 (default)"}
+              : !isKnownProvider
+                ? m.endpoint_optional_generic()
+                : "https://api.openai.com/v1 (default)"}
           required={requiresEndpoint}
         />
         <p class="text-muted-foreground text-xs">
@@ -162,6 +170,8 @@
             {m.endpoint_required_azure()}
           {:else if isVllm}
             {m.endpoint_required_vllm()}
+          {:else if !isKnownProvider}
+            {m.endpoint_optional_generic()}
           {:else}
             {m.endpoint_optional_openai()}
           {/if}

@@ -97,6 +97,53 @@ export function initModelProviders(client) {
     },
 
     /**
+     * List available models/deployments from the provider's own API.
+     * @param {{id: string}} provider
+     * @returns {Promise<Array<{name: string, model?: string, status?: string, owned_by?: string, display_name?: string}>>}
+     * @throws {IntricError}
+     * */
+    listModels: async ({ id }) => {
+      const res = await client.fetch("/api/v1/admin/model-providers/{id}/models/", {
+        method: "get",
+        params: { path: { id } }
+      });
+
+      return res;
+    },
+
+    /**
+     * Get supported model types and top models per provider type from LiteLLM.
+     * @returns {Promise<Record<string, {modes: string[], models: Record<string, string[]>}>>}
+     * @throws {IntricError}
+     * */
+    getCapabilities: async () => {
+      const res = await client.fetch("/api/v1/admin/model-providers/capabilities/", {
+        method: "get"
+      });
+
+      return res;
+    },
+
+    /**
+     * Validate that a model works with a provider by making a minimal API call.
+     * @param {{id: string}} provider
+     * @param {{model_name: string, model_type?: string}} body
+     * @returns {Promise<{success: boolean, message?: string, error?: string}>}
+     * @throws {IntricError}
+     * */
+    validateModel: async ({ id }, { model_name, model_type = "completion" }) => {
+      const res = await client.fetch("/api/v1/admin/model-providers/{id}/validate-model/", {
+        method: "post",
+        params: { path: { id } },
+        requestBody: {
+          "application/json": { model_name, model_type }
+        }
+      });
+
+      return res;
+    },
+
+    /**
      * Test provider connection.
      * @param {{id: string}} provider
      * @throws {IntricError}
