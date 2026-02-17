@@ -30,40 +30,6 @@
   let showRenameDialog: Dialog.OpenState;
   let showDeleteDialog: Dialog.OpenState;
 
-  type MessageFn = (args?: Record<string, unknown>) => string;
-
-  function resolveMessage(
-    key: string,
-    fallback: string,
-    args?: Record<string, unknown>
-  ): string {
-    const maybeFn = (m as unknown as Record<string, MessageFn | undefined>)[key];
-    if (typeof maybeFn === "function") {
-      return maybeFn(args);
-    }
-    return fallback;
-  }
-
-  function renameWrapperLabel(): string {
-    return resolveMessage("rename_wrapper", m.rename());
-  }
-
-  function deleteWrapperLabel(): string {
-    return resolveMessage("delete_wrapper", m.delete());
-  }
-
-  function wrapperNameLabel(): string {
-    return resolveMessage("sharepoint_wrapper_name_label", m.name());
-  }
-
-  function confirmDeleteWrapperMessage(): string {
-    return resolveMessage(
-      "confirm_delete_sharepoint_wrapper",
-      m.confirm_delete_integration_knowledge({ knowledgeName: wrapperName }),
-      { wrapperName, count: itemCount }
-    );
-  }
-
   async function renameWrapper() {
     const nextName = newWrapperName.trim();
     if (!nextName) return;
@@ -122,7 +88,7 @@
           on:click={openRenameDialog}
           padding="icon-leading"
         >
-          <IconEdit size="sm" />{renameWrapperLabel()}
+          <IconEdit size="sm" />{m.rename_wrapper()}
         </Button>
       {/if}
       {#if canDelete}
@@ -134,7 +100,7 @@
           }}
           padding="icon-leading"
         >
-          <IconTrash size="sm" />{deleteWrapperLabel()}
+          <IconTrash size="sm" />{m.delete_wrapper()}
         </Button>
       {/if}
     </Dropdown.Menu>
@@ -143,9 +109,9 @@
 
 <Dialog.Root bind:isOpen={showRenameDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>{renameWrapperLabel()}</Dialog.Title>
+    <Dialog.Title>{m.rename_wrapper()}</Dialog.Title>
     <Dialog.Section scrollable={false}>
-      <Input.Text bind:value={newWrapperName} label={wrapperNameLabel()} class="px-4 py-4" />
+      <Input.Text bind:value={newWrapperName} label={m.sharepoint_wrapper_name_label()} class="px-4 py-4" />
     </Dialog.Section>
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>
@@ -158,9 +124,9 @@
 
 <Dialog.Root alert bind:isOpen={showDeleteDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>{deleteWrapperLabel()}</Dialog.Title>
+    <Dialog.Title>{m.delete_wrapper()}</Dialog.Title>
     <Dialog.Description>
-      {confirmDeleteWrapperMessage()}
+      {m.confirm_delete_sharepoint_wrapper({ wrapperName, count: itemCount })}
     </Dialog.Description>
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>

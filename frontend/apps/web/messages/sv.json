@@ -499,6 +499,8 @@
   "sharepoint_in_wrapper": "I grupp: {name}",
   "sharepoint_ungrouped_items": "Enskilda objekt",
   "other_integrations": "Övriga integrationer",
+  "wrapper_items_count_one": "{count} objekt",
+  "wrapper_items_count_other": "{count} objekt",
   "loading_available_sites": "Laddar tillgängliga webbplatser...",
   "no_matching_sites_found": "Inga matchande webbplatser hittades.",
   "import_site": "Importera webbplats",

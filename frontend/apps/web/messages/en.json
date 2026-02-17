@@ -502,6 +502,8 @@
   "sharepoint_in_wrapper": "In group: {name}",
   "sharepoint_ungrouped_items": "Individual items",
   "other_integrations": "Other integrations",
+  "wrapper_items_count_one": "{count} item",
+  "wrapper_items_count_other": "{count} items",
   "loading_available_sites": "Loading available sites...",
   "no_matching_sites_found": "No matching sites found.",
   "import_site": "Import site",
