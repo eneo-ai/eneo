@@ -37,7 +37,9 @@ function initAssistantEditor(data: {
       groups: ["id"],
       integration_knowledge_list: ["id"],
       attachments: ["id"],
-      data_retention_days: true
+      data_retention_days: true,
+      rag_context_type: true,
+      rag_context_value: true
     },
     manageAttachements: "attachments"
   });

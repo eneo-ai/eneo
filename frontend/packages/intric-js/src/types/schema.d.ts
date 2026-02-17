@@ -3310,6 +3310,16 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
+      /**
+       * Rag Context Type
+       * @description The type of RAG context limit to use. Options: 'percentage', 'fixed_chunks', or 'auto_relevance'. If null, defaults to 50% of context.
+       */
+      rag_context_type?: components["schemas"]["RagContextType"] | null;
+      /**
+       * Rag Context Value
+       * @description The value for the context limit. For 'percentage', this is 1-100. For 'fixed_chunks', this is the number of chunks.
+       */
+      rag_context_value?: number | null;
     };
     /** AssistantSparse */
     AssistantSparse: {
@@ -3561,6 +3571,12 @@ export interface components {
      * @enum {string}
      */
     AssistantType: "assistant" | "default-assistant";
+    /**
+     * RagContextType
+     * @description Type of RAG context limit configuration.
+     * @enum {string}
+     */
+    RagContextType: "percentage" | "fixed_chunks" | "auto_relevance";
     /** AttachmentLimits */
     AttachmentLimits: {
       /** Formats */
@@ -4840,6 +4856,16 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
+      /**
+       * Rag Context Type
+       * @description The type of RAG context limit to use. Options: 'percentage', 'fixed_chunks', or 'auto_relevance'. If null, defaults to 50% of context.
+       */
+      rag_context_type?: components["schemas"]["RagContextType"] | null;
+      /**
+       * Rag Context Value
+       * @description The value for the context limit. For 'percentage', this is 1-100. For 'fixed_chunks', this is the number of chunks.
+       */
+      rag_context_value?: number | null;
     };
     /**
      * DeleteCredentialResponse
@@ -7378,6 +7404,16 @@ export interface components {
        * @description Icon ID referencing an uploaded icon. Set to null to remove.
        */
       icon_id?: string | null;
+      /**
+       * Rag Context Type
+       * @description The type of RAG context limit to use. Options: 'percentage', 'fixed_chunks', or 'auto_relevance'.
+       */
+      rag_context_type?: components["schemas"]["RagContextType"] | null;
+      /**
+       * Rag Context Value
+       * @description The value for the context limit. For 'percentage', this is 1-100. For 'fixed_chunks', this is the number of chunks.
+       */
+      rag_context_value?: number | null;
     };
     /** PartialCompletionModelUpdate */
     PartialCompletionModelUpdate: {

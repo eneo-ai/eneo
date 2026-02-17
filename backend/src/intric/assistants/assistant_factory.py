@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import ModelKwargs
+from intric.assistants.api.assistant_models import RagContextType
 from intric.assistants.assistant import Assistant
 from intric.completion_models.domain.completion_model import CompletionModel
 from intric.database.tables.assistant_table import Assistants
@@ -55,6 +56,8 @@ class AssistantFactory:
         data_retention_days: int | None = None,
         metadata_json: dict | None = None,
         description: str | None = None,
+        rag_context_type: RagContextType | None = None,
+        rag_context_value: int | None = None,
     ) -> Assistant:
         # Avoid mutable default anti-pattern
         if completion_model_kwargs is None:
@@ -80,6 +83,8 @@ class AssistantFactory:
             data_retention_days=data_retention_days,
             metadata_json=metadata_json,
             description=description,
+            rag_context_type=rag_context_type,
+            rag_context_value=rag_context_value,
         )
 
     def create_assistant_from_db(
@@ -119,6 +124,17 @@ class AssistantFactory:
             else None
         )
 
+        # Parse rag_context_type from string to enum
+        rag_context_type = None
+        if assistant_in_db.rag_context_type:
+            try:
+                rag_context_type = RagContextType(assistant_in_db.rag_context_type)
+            except ValueError:
+                logger.warning(
+                    "Unknown RagContextType value from DB, using None",
+                    extra={"rag_context_type": assistant_in_db.rag_context_type},
+                )
+
         return Assistant(
             id=assistant_in_db.id,
             user=user,
@@ -140,6 +156,8 @@ class AssistantFactory:
             description=assistant_in_db.description,
             insight_enabled=assistant_in_db.insight_enabled,
             icon_id=assistant_in_db.icon_id,
+            rag_context_type=rag_context_type,
+            rag_context_value=assistant_in_db.rag_context_value,
         )
 
     def create_space_assistant_from_db(
@@ -197,6 +215,17 @@ class AssistantFactory:
             else None
         )
 
+        # Parse rag_context_type from string to enum
+        rag_context_type = None
+        if assistant_in_db.rag_context_type:
+            try:
+                rag_context_type = RagContextType(assistant_in_db.rag_context_type)
+            except ValueError:
+                logger.warning(
+                    "Unknown RagContextType value from DB, using None",
+                    extra={"rag_context_type": assistant_in_db.rag_context_type},
+                )
+
         return Assistant(
             id=assistant_in_db.id,
             user=user,
@@ -220,4 +249,6 @@ class AssistantFactory:
             data_retention_days=assistant_in_db.data_retention_days,
             metadata_json=assistant_in_db.metadata_json,
             icon_id=assistant_in_db.icon_id,
+            rag_context_type=rag_context_type,
+            rag_context_value=assistant_in_db.rag_context_value,
         )

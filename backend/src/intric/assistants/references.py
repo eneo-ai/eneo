@@ -39,13 +39,14 @@ class ReferencesService:
         websites: list["Website"],
         integration_knowledge_list: list["IntegrationKnowledge"] = [],
         num_chunks: Optional[int] = None,
+        autocut_cutoff: Optional[int] = None,
         version: int = 1,
     ) -> list["InfoBlobChunkInDBWithScore"]:
         if (collections or websites or integration_knowledge_list) and input_string:
             if version == 1:
                 search_params = dict(autocut_cutoff=3, num_chunks=30)
             elif version == 2:
-                search_params = dict(autocut_cutoff=None, num_chunks=num_chunks)
+                search_params = dict(autocut_cutoff=autocut_cutoff, num_chunks=num_chunks)
 
             embedding_model = None
             if collections:
@@ -132,6 +133,7 @@ class ReferencesService:
         integration_knowledge_list: list["IntegrationKnowledge"] = [],
         embed_method: EmbedMethod = EmbedMethod.CONCATENATE,
         num_chunks: Optional[int] = None,
+        autocut_cutoff: Optional[int] = None,
         version: int = 1,
     ) -> "DatastoreResult":
         if embed_method == EmbedMethod.CONCATENATE:
@@ -147,6 +149,7 @@ class ReferencesService:
             websites=websites,
             integration_knowledge_list=integration_knowledge_list,
             num_chunks=num_chunks,
+            autocut_cutoff=autocut_cutoff,
             version=version,
         )
         no_duplicate_chunks = self._get_info_blob_chunks_without_duplicates(chunks)

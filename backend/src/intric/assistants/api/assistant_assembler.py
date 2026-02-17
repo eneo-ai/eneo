@@ -138,6 +138,8 @@ class AssistantAssembler:
             metadata_json=assistant.metadata_json,
             model_info=model_info,
             icon_id=assistant.icon_id,
+            rag_context_type=assistant.rag_context_type,
+            rag_context_value=assistant.rag_context_value,
         )
 
     def from_assistant_to_default_assistant_model(

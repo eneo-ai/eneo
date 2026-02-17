@@ -7,7 +7,7 @@ from intric.ai_models.completion_models.completion_model import (
     ModelKwargs,
     ResponseType,
 )
-from intric.assistants.api.assistant_models import AssistantResponse
+from intric.assistants.api.assistant_models import AssistantResponse, RagContextType
 from intric.assistants.assistant import Assistant
 from intric.assistants.assistant_factory import AssistantFactory
 from intric.assistants.assistant_repo import AssistantRepository
@@ -292,6 +292,8 @@ class AssistantService:
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        rag_context_type: Union[RagContextType, None, NotProvided] = NOT_PROVIDED,
+        rag_context_value: Union[int, None, NotProvided] = NOT_PROVIDED,
     ):
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
@@ -351,6 +353,8 @@ class AssistantService:
             data_retention_days=data_retention_days,
             metadata_json=metadata_json,
             icon_id=icon_id,
+            rag_context_type=rag_context_type,
+            rag_context_value=rag_context_value,
         )
 
         self.validate_space_assistant(space=space, assistant=assistant)

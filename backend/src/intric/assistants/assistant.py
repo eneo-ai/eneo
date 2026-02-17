@@ -6,7 +6,7 @@ from intric.ai_models.completion_models.completion_model import (
     CompletionModelPublic,
     ModelKwargs,
 )
-from intric.assistants.api.assistant_models import AssistantType
+from intric.assistants.api.assistant_models import AssistantType, RagContextType
 from intric.base.base_entity import Entity
 from intric.completion_models.domain.completion_model import CompletionModel
 from intric.completion_models.infrastructure.completion_service import CompletionService
@@ -66,6 +66,8 @@ class Assistant(Entity):
         data_retention_days: Optional[int] = None,
         metadata_json: Optional[dict] = {},
         icon_id: Optional[UUID] = None,
+        rag_context_type: Optional[RagContextType] = None,
+        rag_context_value: Optional[int] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
 
@@ -92,6 +94,8 @@ class Assistant(Entity):
         self.type = AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
         self._metadata_json = metadata_json
         self.icon_id = icon_id
+        self.rag_context_type = rag_context_type
+        self.rag_context_value = rag_context_value
 
     def _validate_embedding_model(self, items: _KnowledgeItemList):
         embedding_model_id_set = set([item.embedding_model.id for item in items])
@@ -225,6 +229,8 @@ class Assistant(Entity):
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        rag_context_type: Union[RagContextType, None, NotProvided] = NOT_PROVIDED,
+        rag_context_value: Union[int, None, NotProvided] = NOT_PROVIDED,
     ):
         if name is not None:
             self.name = name
@@ -266,12 +272,62 @@ class Assistant(Entity):
 
         if icon_id is not NOT_PROVIDED:
             self.icon_id = icon_id
+        
+        if rag_context_type is not NOT_PROVIDED:
+            self.rag_context_type = rag_context_type
+
+        if rag_context_value is not NOT_PROVIDED:
+            self.rag_context_value = rag_context_value
 
     def get_prompt_text(self):
         if self.prompt is not None:
             return self.prompt.text
 
         return ""
+    
+    def _get_retrieval_params(self, version: int = 1) -> dict:
+        """
+        Get retrieval parameters for RAG based on context settings.
+
+        Returns a dict with:
+        - num_chunks: number of chunks to retrieve
+        - autocut_cutoff: if set, use autocut to filter by relevance jumps
+
+        The calculation depends on the rag_context_type:
+        - None (default): Use half of model's context length (50%)
+        - PERCENTAGE: Use a percentage (1-100) of model's context length
+        - FIXED_CHUNKS: Use a fixed number of chunks
+        - AUTO_RELEVANCE: Fetch many chunks and use autocut to filter by relevance
+
+        For version 1, always returns 30 chunks with autocut_cutoff=3 (legacy behavior).
+        """
+        if version != 2:
+            return dict(num_chunks=30, autocut_cutoff=3)
+
+        token_limit = self.completion_model.token_limit
+        tokens_per_chunk = 200  # Approximate tokens per chunk
+
+        # Use a percentage of the context
+        if self.rag_context_type == RagContextType.PERCENTAGE:
+            percentage = self.rag_context_value or 50  # Default to 50% if not set
+            percentage = max(1, min(100, percentage))  # Clamp to 1-100
+            num_chunks = token_limit // tokens_per_chunk * percentage // 100
+            return dict(num_chunks=num_chunks, autocut_cutoff=None)
+
+        # Use a fixed number of chunks
+        if self.rag_context_type == RagContextType.FIXED_CHUNKS:
+            num_chunks = self.rag_context_value or 30  # Default to 30 chunks if not set
+            return dict(num_chunks=num_chunks, autocut_cutoff=None)
+
+        # Auto-relevance: fetch generously and let autocut prune by score jumps
+        if self.rag_context_type == RagContextType.AUTO_RELEVANCE:
+            # Fetch up to half the context worth of chunks; autocut will trim
+            num_chunks = token_limit // tokens_per_chunk // 2
+            return dict(num_chunks=num_chunks, autocut_cutoff=3)
+
+        # Default behavior (None): use half the context
+        num_chunks = token_limit // tokens_per_chunk // 2
+        return dict(num_chunks=num_chunks, autocut_cutoff=None)
 
     async def get_response(
         self,
@@ -318,8 +374,8 @@ class Assistant(Entity):
                     f"Completion model {self.completion_model.name} do not support vision."
                 )
 
-        # Fill half the context
-        num_chunks = self.completion_model.token_limit // 200 // 2 if version == 2 else 30
+        # Calculate retrieval params based on RAG context settings
+        retrieval_params = self._get_retrieval_params(version=version)
 
         datastore_result = await references_service.get_references(
             question=question,
@@ -327,7 +383,8 @@ class Assistant(Entity):
             collections=self.collections,
             websites=self.websites,
             integration_knowledge_list=self.integration_knowledge_list,
-            num_chunks=num_chunks,
+            num_chunks=retrieval_params["num_chunks"],
+            autocut_cutoff=retrieval_params["autocut_cutoff"],
             version=version,
         )
 
