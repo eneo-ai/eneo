@@ -258,7 +258,7 @@ class SharePointPreviewService(BasePreviewService):
 
         mapped_sites: List[Dict[str, str]] = []
         for result in results:
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 logger.debug(
                     "Failed to load team root site during classification: %s",
                     result,
