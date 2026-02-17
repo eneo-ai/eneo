@@ -12,7 +12,7 @@ from intric.integration.infrastructure.preview_service.sharepoint_preview_servic
 async def test_classifies_my_teams_and_public_non_member_teams():
     service = SharePointPreviewService(oauth_token_service=MagicMock())
     content_client = MagicMock()
-    content_client.get_teams = AsyncMock(
+    content_client.get_m365_groups = AsyncMock(
         return_value=[
             {"id": "group-my", "visibility": "Private"},
             {"id": "group-public", "visibility": "Public"},
@@ -70,7 +70,7 @@ async def test_classifies_my_teams_and_public_non_member_teams():
 async def test_classification_falls_back_to_unknown_when_graph_membership_fails():
     service = SharePointPreviewService(oauth_token_service=MagicMock())
     content_client = MagicMock()
-    content_client.get_teams = AsyncMock(side_effect=RuntimeError("Forbidden"))
+    content_client.get_m365_groups = AsyncMock(side_effect=RuntimeError("Forbidden"))
     content_client.get_my_member_group_ids = AsyncMock(return_value=[])
 
     site_previews = [
@@ -101,7 +101,7 @@ async def test_classification_falls_back_to_unknown_when_graph_membership_fails(
 async def test_classification_falls_back_to_visibility_only_when_memberof_unavailable():
     service = SharePointPreviewService(oauth_token_service=MagicMock())
     content_client = MagicMock()
-    content_client.get_teams = AsyncMock(
+    content_client.get_m365_groups = AsyncMock(
         return_value=[
             {"id": "group-public", "visibility": "Public"},
             {"id": "group-private", "visibility": "Private"},

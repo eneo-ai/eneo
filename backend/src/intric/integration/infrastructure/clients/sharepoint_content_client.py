@@ -186,18 +186,18 @@ class SharePointContentClient(BaseClient):
                 return [g["id"] for g in groups if g.get("id")]
             raise
 
-    async def get_teams(self) -> List[Dict[str, Any]]:
-        """List Microsoft Teams-backed groups."""
+    async def get_m365_groups(self) -> List[Dict[str, Any]]:
+        """List Microsoft 365 (Unified) groups, including Teams-backed groups."""
         endpoint = (
             "v1.0/groups?"
-            "$filter=resourceProvisioningOptions/Any(x:x eq 'Team')&"
+            "$filter=groupTypes/any(c:c eq 'Unified')&"
             "$select=id,displayName,visibility"
         )
         try:
             return await self._get_all_paged_items(endpoint)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
-                logger.info("SharePoint token expired while listing teams, refreshing...")
+                logger.info("SharePoint token expired while listing M365 groups, refreshing...")
                 await self.refresh_token()
                 return await self._get_all_paged_items(endpoint)
             raise
