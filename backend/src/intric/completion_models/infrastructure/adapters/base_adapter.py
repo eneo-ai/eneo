@@ -7,6 +7,7 @@ if TYPE_CHECKING:
         Context,
         ModelKwargs,
     )
+    from intric.logging.logging import LoggingDetails
 
 
 class CompletionModelAdapter(ABC):
@@ -14,6 +15,11 @@ class CompletionModelAdapter(ABC):
         self.model = model
 
     def get_token_limit_of_model(self):
+        raise NotImplementedError()
+
+    def get_logging_details(
+        self, context: "Context", model_kwargs: "ModelKwargs"
+    ) -> "LoggingDetails":
         raise NotImplementedError()
 
     async def get_response(self, context: "Context", model_kwargs: "ModelKwargs"):
