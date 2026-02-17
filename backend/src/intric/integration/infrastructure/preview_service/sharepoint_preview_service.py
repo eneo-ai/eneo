@@ -1,4 +1,5 @@
-from typing import TYPE_CHECKING, List, Optional
+import asyncio
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from intric.integration.domain.entities.integration_preview import IntegrationPreview
 from intric.integration.domain.entities.oauth_token import SharePointToken
@@ -23,6 +24,12 @@ logger = get_logger(__name__)
 
 
 class SharePointPreviewService(BasePreviewService):
+    CATEGORY_MY_TEAMS = "my_teams"
+    CATEGORY_PUBLIC_TEAMS_NOT_MEMBER = "public_teams_not_member"
+    CATEGORY_OTHER_SITES = "other_sites"
+    CATEGORY_ONEDRIVE = "onedrive"
+    CATEGORY_UNKNOWN = "unknown"
+
     def __init__(
         self,
         oauth_token_service: "OauthTokenService",
@@ -51,7 +58,15 @@ class SharePointPreviewService(BasePreviewService):
             # Get SharePoint sites
             try:
                 sites_data = await content_client.get_sites()
-                results.extend(self._to_sharepoint_preview_data(data=sites_data))
+                site_previews = self._to_sharepoint_preview_data(data=sites_data)
+                categories = await self._classify_site_categories(
+                    content_client=content_client, site_previews=site_previews
+                )
+                for preview in site_previews:
+                    preview.category = categories.get(
+                        preview.key, self.CATEGORY_OTHER_SITES
+                    )
+                results.extend(site_previews)
             except Exception as e:
                 logger.error(f"Error fetching SharePoint sites: {e}")
                 raise
@@ -61,12 +76,13 @@ class SharePointPreviewService(BasePreviewService):
                 drive_data = await content_client.get_my_drive()
                 if drive_data:
                     owner = drive_data.get("owner", {}).get("user", {})
-                    display_name = owner.get("displayName", "Min enhet")
+                    display_name = owner.get("displayName", "OneDrive")
                     results.append(IntegrationPreview(
                         name=f"OneDrive - {display_name}",
                         key=drive_data.get("id"),
                         url=drive_data.get("webUrl"),
                         type="onedrive",
+                        category=self.CATEGORY_ONEDRIVE,
                     ))
             except Exception as e:
                 # OneDrive may not be available (e.g., permissions not granted)
@@ -122,7 +138,14 @@ class SharePointPreviewService(BasePreviewService):
                 logger.error(f"Error fetching SharePoint preview data with app auth: {e}")
                 raise
 
-        return self._to_sharepoint_preview_data(data=data)
+            site_previews = self._to_sharepoint_preview_data(data=data)
+            categories = await self._classify_site_categories(
+                content_client=content_client, site_previews=site_previews
+            )
+            for preview in site_previews:
+                preview.category = categories.get(preview.key, self.CATEGORY_OTHER_SITES)
+
+        return site_previews
 
     def _to_sharepoint_preview_data(
         self,
@@ -137,6 +160,141 @@ class SharePointPreviewService(BasePreviewService):
                 key=r.get("id"),
                 url=r.get("webUrl"),
                 type="site",
+                category=self.CATEGORY_OTHER_SITES,
             )
             data.append(item)
         return data
+
+    async def _classify_site_categories(
+        self,
+        content_client: SharePointContentClient,
+        site_previews: List[IntegrationPreview],
+    ) -> Dict[str, str]:
+        categories = {
+            preview.key: self.CATEGORY_OTHER_SITES for preview in site_previews if preview.key
+        }
+        if not site_previews:
+            return categories
+
+        try:
+            teams = await content_client.get_m365_groups()
+        except Exception as e:
+            logger.warning(
+                "Could not classify SharePoint sites by team membership/visibility: %s",
+                e,
+            )
+            return {
+                preview.key: self.CATEGORY_UNKNOWN
+                for preview in site_previews
+                if preview.key
+            }
+
+        if not teams:
+            return categories
+
+        has_membership_context = True
+        try:
+            member_group_ids = set(await content_client.get_my_member_group_ids())
+        except Exception as e:
+            logger.info(
+                "Could not load memberOf groups for SharePoint categorization, "
+                "falling back to visibility-only categorization: %s",
+                e,
+            )
+            has_membership_context = False
+            member_group_ids = set()
+
+        team_site_map = await self._get_team_site_map(
+            content_client=content_client, teams=teams
+        )
+
+        for item in team_site_map:
+            site_key = self._find_preview_site_key(
+                site_previews=site_previews,
+                site_id=item.get("site_id"),
+                web_url=item.get("web_url"),
+            )
+            if not site_key:
+                continue
+
+            group_id = item.get("group_id")
+            if has_membership_context and group_id in member_group_ids:
+                categories[site_key] = self.CATEGORY_MY_TEAMS
+                continue
+
+            visibility = (item.get("visibility") or "").lower()
+            if visibility == "public":
+                categories[site_key] = self.CATEGORY_PUBLIC_TEAMS_NOT_MEMBER
+
+        return categories
+
+    async def _get_team_site_map(
+        self,
+        content_client: SharePointContentClient,
+        teams: List[dict],
+    ) -> List[Dict[str, str]]:
+        semaphore = asyncio.Semaphore(8)
+
+        async def load_group_site(team: dict) -> Optional[Dict[str, str]]:
+            group_id = team.get("id")
+            if not group_id:
+                return None
+
+            async with semaphore:
+                site = await content_client.get_group_root_site(group_id=group_id)
+
+            if not site:
+                return None
+
+            return {
+                "group_id": group_id,
+                "visibility": team.get("visibility") or "",
+                "site_id": site.get("id") or "",
+                "web_url": site.get("webUrl") or "",
+            }
+
+        tasks = [load_group_site(team) for team in teams if team.get("id")]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        mapped_sites: List[Dict[str, str]] = []
+        for result in results:
+            if isinstance(result, BaseException):
+                logger.debug(
+                    "Failed to load team root site during classification: %s",
+                    result,
+                )
+                continue
+            if not result:
+                continue
+            if not result.get("site_id") and not result.get("web_url"):
+                continue
+            mapped_sites.append(result)
+
+        return mapped_sites
+
+    def _find_preview_site_key(
+        self,
+        site_previews: List[IntegrationPreview],
+        site_id: Optional[str],
+        web_url: Optional[str],
+    ) -> Optional[str]:
+        if site_id:
+            for preview in site_previews:
+                if preview.key == site_id:
+                    return preview.key
+
+        normalized_target = self._normalize_web_url(web_url)
+        if not normalized_target:
+            return None
+
+        for preview in site_previews:
+            if self._normalize_web_url(preview.url) == normalized_target:
+                return preview.key
+
+        return None
+
+    @staticmethod
+    def _normalize_web_url(url: Optional[str]) -> str:
+        if not url:
+            return ""
+        return url.rstrip("/").lower()

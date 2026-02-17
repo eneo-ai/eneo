@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from intric.ai_models.model_enums import ModelFamily, ModelStability
+from intric.ai_models.model_enums import ModelStability
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.completion_models.presentation import CompletionModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
@@ -29,6 +29,7 @@ class TenantCompletionModelCreate(BaseModel):
     reasoning: bool = Field(default=False, description="Supports extended reasoning")
     supports_tool_calling: bool = Field(default=False, description="Supports function/tool calling")
     hosting: str = Field(default="swe", description="Hosting location (swe, eu, usa)")
+    family: str = Field(default="openai", description="Model family (e.g., 'openai', 'anthropic', 'deepseek')")
     is_active: bool = Field(default=True, description="Enable in organization")
     is_default: bool = Field(default=False, description="Set as default model")
 
@@ -102,7 +103,7 @@ async def create_tenant_completion_model(
         reasoning=model_create.reasoning,
         supports_tool_calling=model_create.supports_tool_calling,  # type: ignore[call-arg]
         # Simplified defaults - these fields don't matter for tenant models (grouped by provider in UI)
-        family=ModelFamily.OPEN_AI.value,
+        family=model_create.family,
         hosting=model_create.hosting,
         org=None,
         stability=ModelStability.STABLE.value,
@@ -213,7 +214,7 @@ async def delete_tenant_completion_model(
     """Delete a tenant-specific completion model."""
     from intric.database.tables.ai_models_table import CompletionModels
     import sqlalchemy as sa
-    from intric.main.exceptions import UnauthorizedException, NotFoundException
+    from intric.main.exceptions import UnauthorizedException, NotFoundException, BadRequestException
 
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(CompletionModels).where(
@@ -231,7 +232,11 @@ async def delete_tenant_completion_model(
         raise UnauthorizedException("Cannot delete global models")
 
     # Delete the model (settings are now on the model itself)
-    await session.delete(model)
-    await session.commit()
+    try:
+        await session.delete(model)
+        await session.commit()
+    except sa.exc.IntegrityError:
+        await session.rollback()
+        raise BadRequestException("MODEL_IN_USE")
 
     return {"success": True}

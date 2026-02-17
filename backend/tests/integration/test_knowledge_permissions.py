@@ -42,7 +42,7 @@ def _space_from_db(db_space: Spaces) -> Space:
 class TestOrganizationKnowledgePermissions:
     """Test permissions for organization space knowledge operations."""
 
-    @pytest.mark.skip(reason="SpaceActor missing can_create_integration_knowledge method - requires implementation")
+    @pytest.mark.skip(reason="Requires database fixtures - not a unit test")
     async def test_only_org_admin_can_create_knowledge(
         self, db_container, tenant_factory, user_factory, user_integration_factory, embedding_model_factory
     ):
@@ -107,11 +107,11 @@ class TestOrganizationKnowledgePermissions:
             )
 
             # Verify permissions
-            assert admin_actor.can_create_integration_knowledge() is True
-            assert editor_actor.can_create_integration_knowledge() is False
-            assert viewer_actor.can_create_integration_knowledge() is False
+            assert admin_actor.can_create_integrations() is True
+            assert editor_actor.can_create_integrations() is False
+            assert viewer_actor.can_create_integrations() is False
 
-    @pytest.mark.skip(reason="SpaceActor missing can_delete_integration_knowledge_list method - requires implementation")
+    @pytest.mark.skip(reason="Requires database fixtures - not a unit test")
     async def test_only_org_admin_can_delete_knowledge(
         self, db_container, tenant_factory, user_factory, user_integration_factory, embedding_model_factory
     ):
@@ -176,15 +176,15 @@ class TestOrganizationKnowledgePermissions:
             )
 
             # Verify delete permissions
-            assert admin_actor.can_delete_integration_knowledge_list() is True
-            assert editor_actor.can_delete_integration_knowledge_list() is False
-            assert viewer_actor.can_delete_integration_knowledge_list() is False
+            assert admin_actor.can_delete_integrations() is True
+            assert editor_actor.can_delete_integrations() is False
+            assert viewer_actor.can_delete_integrations() is False
 
 
 class TestChildSpaceKnowledgePermissions:
     """Test permissions for distributed knowledge in child spaces."""
 
-    @pytest.mark.skip(reason="SpaceActor missing can_read_integration_knowledge_list method - requires implementation")
+    @pytest.mark.skip(reason="Requires database fixtures - not a unit test")
     async def test_viewer_can_read_distributed_knowledge(
         self, db_container, tenant_factory, user_factory, user_integration_factory, embedding_model_factory
     ):
@@ -237,7 +237,7 @@ class TestChildSpaceKnowledgePermissions:
             )
 
             # VIEWER can read knowledge
-            assert viewer_actor.can_read_integration_knowledge_list() is True
+            assert viewer_actor.can_read_integrations() is True
 
     async def test_viewer_cannot_delete_distributed_knowledge(
         self, db_container, tenant_factory, user_factory, user_integration_factory, embedding_model_factory
@@ -291,9 +291,9 @@ class TestChildSpaceKnowledgePermissions:
             )
 
             # VIEWER cannot delete
-            assert viewer_actor.can_delete_integration_knowledge_list() is False
+            assert viewer_actor.can_delete_integrations() is False
 
-    @pytest.mark.skip(reason="SpaceActor missing can_delete_integration_knowledge_list method - requires implementation")
+    @pytest.mark.skip(reason="Requires database fixtures - not a unit test")
     async def test_editor_can_delete_distributed_knowledge(
         self, db_container, tenant_factory, user_factory
     ):
@@ -346,9 +346,9 @@ class TestChildSpaceKnowledgePermissions:
             )
 
             # EDITOR can delete
-            assert editor_actor.can_delete_integration_knowledge_list() is True
+            assert editor_actor.can_delete_integrations() is True
 
-    @pytest.mark.skip(reason="SpaceActor missing can_delete_integration_knowledge_list method - requires implementation")
+    @pytest.mark.skip(reason="Requires database fixtures - not a unit test")
     async def test_admin_can_delete_distributed_knowledge(
         self, db_container, tenant_factory, user_factory
     ):
@@ -401,4 +401,4 @@ class TestChildSpaceKnowledgePermissions:
             )
 
             # ADMIN can delete
-            assert admin_actor.can_delete_integration_knowledge_list() is True
+            assert admin_actor.can_delete_integrations() is True

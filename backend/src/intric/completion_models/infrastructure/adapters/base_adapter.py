@@ -7,6 +7,7 @@ if TYPE_CHECKING:
         Context,
         ModelKwargs,
     )
+    from intric.logging.logging import LoggingDetails
 
 
 class CompletionModelAdapter(ABC):
@@ -16,7 +17,14 @@ class CompletionModelAdapter(ABC):
     def get_token_limit_of_model(self):
         raise NotImplementedError()
 
-    async def get_response(self, context: "Context", model_kwargs: "ModelKwargs", mcp_proxy=None, **kwargs):
+    def get_logging_details(
+        self, context: "Context", model_kwargs: "ModelKwargs"
+    ) -> "LoggingDetails":
+        raise NotImplementedError()
+
+    async def get_response(
+        self, context: "Context", model_kwargs: "ModelKwargs", mcp_proxy=None, **kwargs
+    ):
         raise NotImplementedError()
 
     def get_response_streaming(self, context: "Context", model_kwargs: "ModelKwargs"):
@@ -33,7 +41,11 @@ class CompletionModelAdapter(ABC):
 
     @abstractmethod
     async def prepare_streaming(
-        self, context: "Context", model_kwargs: "ModelKwargs | None" = None, mcp_proxy=None, **kwargs
+        self,
+        context: "Context",
+        model_kwargs: "ModelKwargs | None" = None,
+        mcp_proxy=None,
+        **kwargs,
     ) -> Any:
         """
         Phase 1 (Pre-flight): Create streaming connection BEFORE EventSourceResponse.
@@ -58,8 +70,12 @@ class CompletionModelAdapter(ABC):
 
     @abstractmethod
     async def iterate_stream(
-        self, stream: Any, context: "Context" = None, model_kwargs: "ModelKwargs | None" = None,
-        require_tool_approval: bool = False, approval_manager=None,
+        self,
+        stream: Any,
+        context: "Context" = None,
+        model_kwargs: "ModelKwargs | None" = None,
+        require_tool_approval: bool = False,
+        approval_manager=None,
     ):
         """
         Phase 2 (Iteration): Iterate pre-created stream INSIDE EventSourceResponse.

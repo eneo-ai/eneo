@@ -170,6 +170,60 @@ class SharePointContentClient(BaseClient):
             else:
                 raise
 
+    async def get_my_member_group_ids(self) -> List[str]:
+        """Get IDs of Microsoft 365 groups the current user belongs to."""
+        endpoint = "v1.0/me/memberOf/microsoft.graph.group?$select=id"
+        try:
+            groups = await self._get_all_paged_items(endpoint)
+            return [g["id"] for g in groups if g.get("id")]
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                logger.info(
+                    "SharePoint token expired while listing memberOf groups, refreshing..."
+                )
+                await self.refresh_token()
+                groups = await self._get_all_paged_items(endpoint)
+                return [g["id"] for g in groups if g.get("id")]
+            raise
+
+    async def get_m365_groups(self) -> List[Dict[str, Any]]:
+        """List Microsoft 365 (Unified) groups, including Teams-backed groups."""
+        endpoint = (
+            "v1.0/groups?"
+            "$filter=groupTypes/any(c:c eq 'Unified')&"
+            "$select=id,displayName,visibility"
+        )
+        try:
+            return await self._get_all_paged_items(endpoint)
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                logger.info("SharePoint token expired while listing M365 groups, refreshing...")
+                await self.refresh_token()
+                return await self._get_all_paged_items(endpoint)
+            raise
+
+    async def get_group_root_site(self, group_id: str) -> Optional[Dict[str, Any]]:
+        """Get root SharePoint site for a Microsoft 365 group."""
+        endpoint = f"v1.0/groups/{group_id}/sites/root?$select=id,webUrl"
+        try:
+            return await self.client.get(endpoint, headers=self.headers)
+        except aiohttp.ClientResponseError as e:
+            if e.status == 401 and self.token_refresh_callback and self.token_id:
+                logger.info(
+                    "SharePoint token expired while getting group root site, refreshing..."
+                )
+                await self.refresh_token()
+                return await self.client.get(endpoint, headers=self.headers)
+
+            # Not all groups have an accessible site in all tenants; treat as non-fatal.
+            if e.status in (403, 404):
+                logger.debug(
+                    "Could not fetch group root site",
+                    extra={"group_id": group_id, "status": e.status},
+                )
+                return None
+            raise
+
     async def get_my_drive(self) -> Dict[str, Any]:
         """Get current user's OneDrive drive info (requires delegated auth)."""
         try:

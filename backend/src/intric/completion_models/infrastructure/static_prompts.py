@@ -1,11 +1,15 @@
 # flake8: noqa
 
 SHOW_REFERENCES_PROMPT = """Use the provided sources delimited by triple quotes to answer questions.
-Only use the sources to answer questions, and reference the source(s) by id using XML self-closing tags: <inref id="<id>"/> replacing the innermost <id> with the source id.
+Only use the sources to answer questions. You MUST reference every source you use by adding an inline XML self-closing tag immediately after the information: <inref id="<source_id>"/>
 
-For instance, if some information is in the source with id a5477f85, reference the source like so: <inref id="a5477f85"/>. The reference should come after the information.
-If the user asks about the sources, always respond with the source_title, and never respond with the source_id.
-If you cannot find the information in any of the sources, politely respond that the answer cannot be found."""
+Rules:
+- Every claim, fact, or piece of information taken from a source MUST be followed by its reference tag.
+- Use the 8-character source_id from the source metadata. Example: if source_id is a5477f85, write <inref id="a5477f85"/> right after the relevant sentence or paragraph.
+- If information comes from multiple sources, include multiple tags: <inref id="a5477f85"/><inref id="b3291cc0"/>
+- If the user asks about the sources, respond with the source_title, never the source_id.
+- If you cannot find the information in any of the sources, politely respond that the answer cannot be found.
+- Never omit references. A response that uses source information without inline reference tags is incorrect."""
 
 HALLUCINATION_GUARD = (
     "Use the provided articles delimited by triple quotes to"

@@ -1307,13 +1307,15 @@ class SpaceRepository:
             if include_applications:
                 assistants = await self._get_assistants(space_id=record.id)
                 apps = await self._get_apps(space_id=record.id)
+                group_chats = await self._get_group_chats(space_id=record.id)
             else:
                 assistants = []
                 apps = []
+                group_chats = []
 
             spaces.append(
                 self.factory.create_space_from_db(
-                    record, user=self.user, assistants_in_db=assistants, apps_in_db=apps
+                    record, user=self.user, assistants_in_db=assistants, apps_in_db=apps, group_chats_in_db=group_chats
                 )
             )
 

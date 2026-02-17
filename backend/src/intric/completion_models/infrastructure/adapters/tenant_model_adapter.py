@@ -23,6 +23,7 @@ from intric.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
 )
 from intric.files.file_models import File
+from intric.logging.logging import LoggingDetails
 from intric.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from intric.main.logging import get_logger
 from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
@@ -328,9 +329,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                         f"Scaled temperature for Anthropic: {temp} -> {temp / 2}"
                     )
 
-            # Only pass reasoning_effort for models that support reasoning
-            if "reasoning_effort" in model_kwargs_dict and not self.model.reasoning:
-                del model_kwargs_dict["reasoning_effort"]
+            # Only pass reasoning_effort if the model actually supports it
+            # (per LiteLLM's supported_openai_params) and the value is meaningful
+            if "reasoning_effort" in model_kwargs_dict:
+                supported_params = litellm.get_supported_openai_params(model=self.litellm_model) or []
+                if "reasoning_effort" not in supported_params or model_kwargs_dict["reasoning_effort"] in (None, "none", ""):
+                    del model_kwargs_dict["reasoning_effort"]
 
             # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)
             # require it explicitly or return empty responses
@@ -998,3 +1002,33 @@ class TenantModelAdapter(CompletionModelAdapter):
             int: Maximum tokens available for input context
         """
         return self.model.token_limit - TOKENS_RESERVED_FOR_COMPLETION
+
+    def get_logging_details(
+        self, context: "Context", model_kwargs: dict
+    ) -> LoggingDetails:
+        """
+        Build logging details for extended logging.
+
+        Args:
+            context: Conversation context
+            model_kwargs: Model parameters
+
+        Returns:
+            LoggingDetails with context, model_kwargs, and json_body
+        """
+        import json
+
+        messages = self._create_messages_from_context(context)
+
+        # Convert model_kwargs to a plain dict
+        if hasattr(model_kwargs, "model_dump"):
+            kwargs_dict = model_kwargs.model_dump(exclude_none=True)
+        elif hasattr(model_kwargs, "dict"):
+            kwargs_dict = model_kwargs.dict(exclude_none=True)
+        else:
+            kwargs_dict = model_kwargs if isinstance(model_kwargs, dict) else {}
+
+        return LoggingDetails(
+            model_kwargs=kwargs_dict,
+            json_body=json.dumps(messages),
+        )
