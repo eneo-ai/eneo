@@ -17,6 +17,7 @@ from intric.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
 )
 from intric.files.file_models import File
+from intric.logging.logging import LoggingDetails
 from intric.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from intric.main.logging import get_logger
 from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
@@ -696,3 +697,33 @@ class TenantModelAdapter(CompletionModelAdapter):
             int: Maximum tokens available for input context
         """
         return self.model.token_limit - TOKENS_RESERVED_FOR_COMPLETION
+
+    def get_logging_details(
+        self, context: "Context", model_kwargs: dict
+    ) -> LoggingDetails:
+        """
+        Build logging details for extended logging.
+
+        Args:
+            context: Conversation context
+            model_kwargs: Model parameters
+
+        Returns:
+            LoggingDetails with context, model_kwargs, and json_body
+        """
+        import json
+
+        messages = self._create_messages_from_context(context)
+
+        # Convert model_kwargs to a plain dict
+        if hasattr(model_kwargs, "model_dump"):
+            kwargs_dict = model_kwargs.model_dump(exclude_none=True)
+        elif hasattr(model_kwargs, "dict"):
+            kwargs_dict = model_kwargs.dict(exclude_none=True)
+        else:
+            kwargs_dict = model_kwargs if isinstance(model_kwargs, dict) else {}
+
+        return LoggingDetails(
+            model_kwargs=kwargs_dict,
+            json_body=json.dumps(messages),
+        )
