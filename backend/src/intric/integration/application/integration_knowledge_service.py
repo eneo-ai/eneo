@@ -150,6 +150,11 @@ class IntegrationKnowledgeService:
         wrapper_name: str | None = None,
     ) -> tuple[IntegrationKnowledge, "JobInDb"]:
         space = await self.space_repo.one(id=space_id)
+
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_create_integrations():
+            raise UnauthorizedException()
+
         if not space.is_embedding_model_in_space(embedding_model_id=embedding_model_id):
             raise BadRequestException("No valid embedding model")
 
@@ -442,7 +447,7 @@ class IntegrationKnowledgeService:
 
         actor = self.actor_manager.get_space_actor_from_space(space)
 
-        if not actor.can_delete_integration_knowledge_list():
+        if not actor.can_delete_integrations():
             raise UnauthorizedException()
 
         # Check if knowledge belongs to this space
@@ -552,7 +557,7 @@ class IntegrationKnowledgeService:
         )
 
         actor = self.actor_manager.get_space_actor_from_space(space)
-        if not actor.can_edit_integration_knowledge_list():
+        if not actor.can_edit_integrations():
             raise UnauthorizedException()
 
         if knowledge.space_id != space.id:
@@ -668,7 +673,7 @@ class IntegrationKnowledgeService:
         )
         actor = self.actor_manager.get_space_actor_from_space(space)
 
-        if not actor.can_edit_integration_knowledge_list():
+        if not actor.can_edit_integrations():
             raise UnauthorizedException()
 
         # Only allow renaming from the space where knowledge was created
@@ -723,7 +728,7 @@ class IntegrationKnowledgeService:
 
         space = await self.space_repo.one(id=space_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
-        if not actor.can_edit_integration_knowledge_list():
+        if not actor.can_edit_integrations():
             raise UnauthorizedException()
 
         owned_items = await self._get_owned_wrapper_knowledge(
@@ -747,7 +752,7 @@ class IntegrationKnowledgeService:
         """Delete all owned knowledge items in a wrapper."""
         space = await self.space_repo.one(id=space_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
-        if not actor.can_delete_integration_knowledge_list():
+        if not actor.can_delete_integrations():
             raise UnauthorizedException()
 
         owned_items = await self._get_owned_wrapper_knowledge(
