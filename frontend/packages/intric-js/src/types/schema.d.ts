@@ -10772,6 +10772,8 @@ export interface components {
       quota_used?: number;
       /** Truncated Api Key */
       truncated_api_key?: string | null;
+      /** Legacy Api Key Suffix */
+      legacy_api_key_suffix?: string | null;
       /** Quota Limit */
       quota_limit?: number | null;
       /** Roles */

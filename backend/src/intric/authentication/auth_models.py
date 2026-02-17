@@ -1,9 +1,16 @@
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    ValidationInfo,
+    field_validator,
+)
 
 from intric.main.config import get_settings
 
@@ -104,6 +111,13 @@ class ApiKeyScopeType(str, Enum):
     SPACE = "space"
     ASSISTANT = "assistant"
     APP = "app"
+
+
+class ApiKeyNotificationTargetType(str, Enum):
+    KEY = "key"
+    ASSISTANT = "assistant"
+    APP = "app"
+    SPACE = "space"
 
 
 class ApiKeyState(str, Enum):
@@ -279,6 +293,119 @@ class ApiKeyPolicyResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+def _validate_day_values(days: list[int], field_name: str) -> list[int]:
+    if not days:
+        raise ValueError(f"{field_name} must contain at least one day value.")
+    normalized = sorted(set(days), reverse=True)
+    for day in normalized:
+        if day <= 0:
+            raise ValueError(f"{field_name} values must be positive integers.")
+    return normalized
+
+
+class ApiKeyNotificationPreferencesResponse(BaseModel):
+    enabled: bool = False
+    days_before_expiry: list[int] = Field(default_factory=lambda: [30, 14, 7, 3, 1])
+    auto_follow_published_assistants: bool = False
+    auto_follow_published_apps: bool = False
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    @field_validator("days_before_expiry")
+    @classmethod
+    def _validate_days_before_expiry(cls, value: list[int]) -> list[int]:
+        return _validate_day_values(value, "days_before_expiry")
+
+
+class ApiKeyNotificationPreferencesUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    days_before_expiry: Optional[list[int]] = None
+    auto_follow_published_assistants: Optional[bool] = None
+    auto_follow_published_apps: Optional[bool] = None
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    @field_validator("days_before_expiry")
+    @classmethod
+    def _validate_days_before_expiry(
+        cls, value: Optional[list[int]]
+    ) -> Optional[list[int]]:
+        if value is None:
+            return value
+        return _validate_day_values(value, "days_before_expiry")
+
+
+class ApiKeyNotificationSubscription(BaseModel):
+    target_type: ApiKeyNotificationTargetType
+    target_id: UUID
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class ApiKeyNotificationSubscriptionListResponse(BaseModel):
+    items: list[ApiKeyNotificationSubscription]
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class ApiKeyNotificationPolicyResponse(BaseModel):
+    enabled: bool = True
+    default_days_before_expiry: list[int] = Field(
+        default_factory=lambda: [30, 14, 7, 3, 1]
+    )
+    max_days_before_expiry: Optional[int] = 365
+    allow_auto_follow_published_assistants: bool = False
+    allow_auto_follow_published_apps: bool = False
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    @field_validator("default_days_before_expiry")
+    @classmethod
+    def _validate_default_days_before_expiry(cls, value: list[int]) -> list[int]:
+        return _validate_day_values(value, "default_days_before_expiry")
+
+    @field_validator("max_days_before_expiry")
+    @classmethod
+    def _validate_max_days_before_expiry(
+        cls, value: Optional[int], info: ValidationInfo
+    ) -> Optional[int]:
+        if value is None:
+            return value
+        if value <= 0:
+            raise ValueError(f"{info.field_name} must be a positive integer.")
+        return value
+
+
+class ApiKeyNotificationPolicyUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    default_days_before_expiry: Optional[list[int]] = None
+    max_days_before_expiry: Optional[int] = None
+    allow_auto_follow_published_assistants: Optional[bool] = None
+    allow_auto_follow_published_apps: Optional[bool] = None
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    @field_validator("default_days_before_expiry")
+    @classmethod
+    def _validate_default_days_before_expiry(
+        cls, value: Optional[list[int]]
+    ) -> Optional[list[int]]:
+        if value is None:
+            return value
+        return _validate_day_values(value, "default_days_before_expiry")
+
+    @field_validator("max_days_before_expiry")
+    @classmethod
+    def _validate_max_days_before_expiry(
+        cls, value: Optional[int], info: ValidationInfo
+    ) -> Optional[int]:
+        if value is None:
+            return value
+        if value <= 0:
+            raise ValueError(f"{info.field_name} must be a positive integer.")
+        return value
+
+
 class SuperApiKeyStatus(BaseModel):
     super_api_key_configured: bool
     super_duper_api_key_configured: bool
@@ -307,6 +434,29 @@ class ApiKeyCreationConstraints(BaseModel):
     require_expiration: bool = False
     max_expiration_days: Optional[int] = None
     max_rate_limit: Optional[int] = None
+
+
+class ExpiringKeySummaryItem(BaseModel):
+    """Lightweight summary of a single expiring API key."""
+
+    id: UUID
+    name: str
+    scope_type: ApiKeyScopeType
+    scope_id: Optional[UUID] = None
+    expires_at: datetime
+    suspended_at: Optional[datetime] = None
+    severity: Literal["notice", "warning", "urgent", "expired"]
+
+
+class ExpiringKeysSummary(BaseModel):
+    """Aggregated expiring-key data for banners and the notification bell."""
+
+    total_count: int
+    counts_by_severity: dict[str, int]
+    earliest_expiration: Optional[datetime] = None
+    items: list[ExpiringKeySummaryItem]
+    truncated: bool
+    generated_at: datetime
 
 
 class ApiKeyCreatedResponse(BaseModel):

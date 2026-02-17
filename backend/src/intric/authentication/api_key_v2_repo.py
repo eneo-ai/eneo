@@ -91,6 +91,7 @@ class ApiKeysV2Repository:
         owner_user_id: UUID | None = None,
         created_by_user_id: UUID | None = None,
         search: str | None = None,
+        expires_within_days: int | None = None,
     ) -> list[ApiKeyV2InDB]:
         query = cast(
             Select[Any],
@@ -105,6 +106,7 @@ class ApiKeysV2Repository:
             owner_user_id=owner_user_id,
             created_by_user_id=created_by_user_id,
             search=search,
+            expires_within_days=expires_within_days,
         )
         if cursor is not None:
             if previous:
@@ -134,6 +136,7 @@ class ApiKeysV2Repository:
         owner_user_id: UUID | None = None,
         created_by_user_id: UUID | None = None,
         search: str | None = None,
+        expires_within_days: int | None = None,
     ) -> list[ApiKeyV2InDB]:
         query = cast(
             Select[Any],
@@ -148,6 +151,7 @@ class ApiKeysV2Repository:
             owner_user_id=owner_user_id,
             created_by_user_id=created_by_user_id,
             search=search,
+            expires_within_days=expires_within_days,
         )
         query = query.order_by(self.table.created_at.desc())
         records = await self.session.scalars(query)
@@ -164,6 +168,7 @@ class ApiKeysV2Repository:
         owner_user_id: UUID | None = None,
         created_by_user_id: UUID | None = None,
         search: str | None = None,
+        expires_within_days: int | None = None,
     ) -> int:
         query = cast(
             Select[Any],
@@ -180,6 +185,7 @@ class ApiKeysV2Repository:
             owner_user_id=owner_user_id,
             created_by_user_id=created_by_user_id,
             search=search,
+            expires_within_days=expires_within_days,
         )
         result = await self.session.scalar(query)
         return int(result or 0)
@@ -195,19 +201,39 @@ class ApiKeysV2Repository:
         owner_user_id: UUID | None,
         created_by_user_id: UUID | None,
         search: str | None,
+        expires_within_days: int | None,
     ) -> Select[Any]:
         if scope_type is not None:
             query = query.where(self.table.scope_type == scope_type.value)
         if scope_id is not None:
             query = query.where(self.table.scope_id == scope_id)
         if state is not None:
-            query = query.where(self.table.state == state.value)
+            if state == ApiKeyState.EXPIRED:
+                # Also match keys where expires_at has passed but the
+                # async maintenance job hasn't updated state yet.
+                query = query.where(
+                    sa.or_(
+                        self.table.state == state.value,
+                        sa.and_(
+                            self.table.expires_at.is_not(None),
+                            self.table.expires_at <= sa.func.now(),
+                            self.table.revoked_at.is_(None),
+                        ),
+                    )
+                )
+            else:
+                query = query.where(self.table.state == state.value)
         if key_type is not None:
             query = query.where(self.table.key_type == key_type)
         if owner_user_id is not None:
             query = query.where(self.table.owner_user_id == owner_user_id)
         if created_by_user_id is not None:
             query = query.where(self.table.created_by_user_id == created_by_user_id)
+        if expires_within_days is not None:
+            horizon = datetime.now(timezone.utc) + timedelta(days=expires_within_days)
+            query = query.where(self.table.expires_at.is_not(None)).where(
+                self.table.expires_at <= horizon
+            )
         if search is not None:
             term = f"%{search.strip().lower()}%"
             owner_match = (
@@ -318,6 +344,107 @@ class ApiKeysV2Repository:
             return None
 
         return ApiKeyV2InDB.model_validate(record)
+
+    async def list_expiring_soon(
+        self,
+        *,
+        tenant_id: UUID,
+        now: datetime,
+        days: int = 30,
+        limit: int = 10,
+        followed_key_ids: list[UUID] | None = None,
+        followed_assistant_scope_ids: list[UUID] | None = None,
+        followed_app_scope_ids: list[UUID] | None = None,
+        followed_space_scope_ids: list[UUID] | None = None,
+    ) -> tuple[list[ApiKeyV2InDB], int]:
+        """Return keys expiring within `days` or expired within the last 30 days.
+
+        Uses durable fields (revoked_at, expires_at) instead of derived ``state``
+        to avoid dependency on the maintenance job.
+
+        Returns ``(items, total_count)`` where items is capped at ``limit``
+        and ordered: expired first, then urgent, warning, notice — nearest
+        expiry first within each tier.
+        """
+        lookback = now - timedelta(days=30)
+        horizon = now + timedelta(days=days)
+
+        base_where = [
+            self.table.tenant_id == tenant_id,
+            self.table.revoked_at.is_(None),
+            self.table.expires_at.is_not(None),
+            self.table.expires_at >= lookback,
+            self.table.expires_at <= horizon,
+        ]
+
+        followed_filters_provided = any(
+            values is not None
+            for values in (
+                followed_key_ids,
+                followed_assistant_scope_ids,
+                followed_app_scope_ids,
+                followed_space_scope_ids,
+            )
+        )
+        if followed_filters_provided:
+            target_filters: list[Any] = []
+            if followed_key_ids:
+                target_filters.append(self.table.id.in_(followed_key_ids))
+            if followed_assistant_scope_ids:
+                target_filters.append(
+                    sa.and_(
+                        self.table.scope_type == ApiKeyScopeType.ASSISTANT.value,
+                        self.table.scope_id.in_(followed_assistant_scope_ids),
+                    )
+                )
+            if followed_app_scope_ids:
+                target_filters.append(
+                    sa.and_(
+                        self.table.scope_type == ApiKeyScopeType.APP.value,
+                        self.table.scope_id.in_(followed_app_scope_ids),
+                    )
+                )
+            if followed_space_scope_ids:
+                target_filters.append(
+                    sa.and_(
+                        self.table.scope_type == ApiKeyScopeType.SPACE.value,
+                        self.table.scope_id.in_(followed_space_scope_ids),
+                    )
+                )
+
+            if not target_filters:
+                return [], 0
+
+            base_where.append(sa.or_(*target_filters))
+
+        # Total count (uncapped)
+        count_query = (
+            sa.select(sa.func.count())
+            .select_from(self.table)
+            .where(*base_where)
+        )
+        total = int(await self.session.scalar(count_query) or 0)
+
+        # Items: order by severity (expired first), then nearest expiry
+        # CASE: expired (<= now) → 0, urgent (<=3d) → 1, warning (<=14d) → 2, notice → 3
+        urgent_bound = now + timedelta(days=3)
+        warning_bound = now + timedelta(days=14)
+        severity_order = sa.case(
+            (self.table.expires_at <= now, 0),
+            (self.table.expires_at <= urgent_bound, 1),
+            (self.table.expires_at <= warning_bound, 2),
+            else_=3,
+        )
+        items_query = (
+            sa.select(self.table)
+            .where(*base_where)
+            .order_by(severity_order.asc(), self.table.expires_at.asc())
+            .limit(limit)
+        )
+        records = await self.session.scalars(items_query)
+        items = [ApiKeyV2InDB.model_validate(record) for record in records]
+
+        return items, total
 
     async def list_expired_candidates(
         self,

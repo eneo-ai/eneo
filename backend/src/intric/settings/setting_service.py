@@ -110,6 +110,14 @@ class SettingService:
                 tenant_id=self.user.tenant_id,
             )
         )
+        api_key_expiry_notifications = (
+            overrides["api_key_expiry_notifications"]
+            if "api_key_expiry_notifications" in overrides
+            else await self.feature_flag_service.check_is_feature_enabled(
+                feature_name="api_key_expiry_notifications",
+                tenant_id=self.user.tenant_id,
+            )
+        )
 
         tenant = await self.tenant_repo.get(self.user.tenant_id)
         provisioning = (
@@ -128,6 +136,7 @@ class SettingService:
             provisioning=provisioning,
             api_key_scope_enforcement=api_key_scope_enforcement,
             api_key_strict_mode=api_key_strict_mode,
+            api_key_expiry_notifications=api_key_expiry_notifications,
         )
 
     async def get_settings(self):
@@ -397,4 +406,50 @@ class SettingService:
         return await self._build_settings_public(
             settings_in_db=settings,
             overrides={"api_key_strict_mode": enabled},
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_api_key_expiry_notifications_setting(
+        self, enabled: bool
+    ) -> SettingsPublic:
+        """Toggle API key expiry notifications for tenant."""
+        logger.info(
+            "Admin user %s toggling API key expiry notifications to %s for tenant %s",
+            self.user.username,
+            enabled,
+            self.user.tenant_id,
+        )
+
+        old_enabled = await self.feature_flag_service.check_is_feature_enabled(
+            feature_name="api_key_expiry_notifications",
+            tenant_id=self.user.tenant_id,
+        )
+        await self._set_feature_flag_for_tenant(
+            name="api_key_expiry_notifications",
+            enabled=enabled,
+        )
+
+        settings = await self.repo.get(self.user.id)
+
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            actor_id=self.user.id,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description=f"Toggled api_key_expiry_notifications to {enabled}",
+            metadata={
+                "setting": "api_key_expiry_notifications",
+                "changes": {
+                    "api_key_expiry_notifications": {
+                        "old": old_enabled,
+                        "new": enabled,
+                    }
+                },
+            },
+        )
+
+        return await self._build_settings_public(
+            settings_in_db=settings,
+            overrides={"api_key_expiry_notifications": enabled},
         )

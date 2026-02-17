@@ -113,5 +113,6 @@
   resource={app}
   endpoints={intric.apps}
   openController={showPublishDialog}
+  resourceKind="app"
   awaitUpdate
 ></PublishingDialog>

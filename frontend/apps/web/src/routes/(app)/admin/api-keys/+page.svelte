@@ -12,7 +12,6 @@
   import ScopeResourceSelector from "../../account/api-keys/ScopeResourceSelector.svelte";
   import ApiKeySecretDialog from "../../account/api-keys/ApiKeySecretDialog.svelte";
   import {
-    Search,
     Filter,
     X,
     Check,
@@ -20,12 +19,15 @@
     AlertCircle,
     ChevronDown,
     RefreshCw,
-    Building2,
-    Shield,
     Lock,
     Globe
   } from "lucide-svelte";
   import { fly, slide } from "svelte/transition";
+  import {
+    getAdminNotificationPolicy,
+    updateAdminNotificationPolicy,
+    type ApiKeyNotificationPolicy
+  } from "$lib/features/api-keys/notificationPreferences";
 
   const intric = getIntric();
 
@@ -52,6 +54,7 @@
   let keyType = $state("");
   let scopeId = $state("");
   let createdByUserId = $state("");
+  let expiresWithinDays = $state("");
   let userRelation = $state<"owner" | "creator">("owner");
   let limit = $state("100");
   let searchQuery = $state("");
@@ -73,6 +76,21 @@
   let trackingConfigLoaded = $state(false);
   let apiKeyUsedTrackingEnabled = $state(false);
   let apiKeyAuthFailedTrackingEnabled = $state(true);
+  let scopeEnforcementEnabled = $state(true);
+  let strictModeEnabled = $state(false);
+  let expiryNotificationsEnabled = $state(true);
+  let tenantSettingsLoading = $state(false);
+  let notificationPolicyLoading = $state(false);
+  let notificationPolicySaving = $state(false);
+  let notificationPolicy = $state<ApiKeyNotificationPolicy>({
+    enabled: true,
+    default_days_before_expiry: [30, 14, 7, 3, 1],
+    max_days_before_expiry: 365,
+    allow_auto_follow_published_assistants: false,
+    allow_auto_follow_published_apps: false
+  });
+  let notificationPolicyDaysInput = $state("30, 14, 7, 3, 1");
+  let notificationPolicyMaxDaysInput = $state("365");
 
   // Quick filter chips
   const quickFilters = $derived([
@@ -153,6 +171,9 @@
   // Active filter count
   const activeFilterCount = $derived.by(() => {
     let count = [scopeType, stateFilter, keyType, scopeId.trim()].filter(Boolean).length;
+    if (expiresWithinDays.trim()) {
+      count += 1;
+    }
     if (searchScope === "entity" && searchQuery.trim()) {
       count += 1;
     }
@@ -176,6 +197,12 @@
     if (stateFilter) params.state = stateFilter;
     if (keyType) params.key_type = keyType;
     if (scopeId.trim()) params.scope_id = scopeId.trim();
+    if (expiresWithinDays.trim()) {
+      const parsed = Number(expiresWithinDays.trim());
+      if (Number.isFinite(parsed) && parsed > 0) {
+        params.expires_within_days = Math.floor(parsed);
+      }
+    }
     if (createdByUserId.trim()) {
       if (userRelation === "owner") {
         params.owner_user_id = createdByUserId.trim();
@@ -449,6 +476,7 @@
     stateFilter = "";
     keyType = "";
     scopeId = "";
+    expiresWithinDays = "";
     limit = "100";
     userRelation = "owner";
     searchQuery = "";
@@ -516,8 +544,146 @@
     }
   }
 
+  async function loadAdminSettings() {
+    tenantSettingsLoading = true;
+    try {
+      const settings = await intric.settings.get();
+      scopeEnforcementEnabled = settings.api_key_scope_enforcement ?? true;
+      strictModeEnabled = settings.api_key_strict_mode ?? false;
+      expiryNotificationsEnabled = settings.api_key_expiry_notifications ?? true;
+    } catch (error) {
+      console.error(error);
+    } finally {
+      tenantSettingsLoading = false;
+    }
+  }
+
+  function parseDayValues(value: string): number[] {
+    return Array.from(
+      new Set(
+        value
+          .split(/[,\s]+/)
+          .map((item) => Number(item))
+          .filter((item) => Number.isFinite(item) && item > 0)
+          .map((item) => Math.floor(item))
+      )
+    ).sort((a, b) => b - a);
+  }
+
+  async function loadNotificationPolicy() {
+    notificationPolicyLoading = true;
+    try {
+      const policy = await getAdminNotificationPolicy(intric);
+      notificationPolicy = policy;
+      notificationPolicyDaysInput = policy.default_days_before_expiry.join(", ");
+      notificationPolicyMaxDaysInput = policy.max_days_before_expiry
+        ? String(policy.max_days_before_expiry)
+        : "";
+    } catch (error) {
+      console.error(error);
+    } finally {
+      notificationPolicyLoading = false;
+    }
+  }
+
+  async function toggleScopeEnforcement({
+    current,
+    next
+  }: {
+    current: boolean;
+    next: boolean;
+  }) {
+    scopeEnforcementEnabled = next;
+    try {
+      const updated = await intric.settings.updateScopeEnforcement(next);
+      scopeEnforcementEnabled = updated.api_key_scope_enforcement ?? true;
+      strictModeEnabled = updated.api_key_strict_mode ?? false;
+    } catch (error) {
+      console.error(error);
+      scopeEnforcementEnabled = current;
+      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+    }
+  }
+
+  async function toggleStrictMode({
+    current,
+    next
+  }: {
+    current: boolean;
+    next: boolean;
+  }) {
+    strictModeEnabled = next;
+    try {
+      const updated = await intric.settings.updateStrictMode(next);
+      strictModeEnabled = updated.api_key_strict_mode ?? false;
+    } catch (error) {
+      console.error(error);
+      strictModeEnabled = current;
+      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+    }
+  }
+
+  async function toggleExpiryNotifications({
+    current,
+    next
+  }: {
+    current: boolean;
+    next: boolean;
+  }) {
+    expiryNotificationsEnabled = next;
+    try {
+      const updated = await intric.settings.updateApiKeyExpiryNotifications(next);
+      expiryNotificationsEnabled = updated.api_key_expiry_notifications ?? true;
+    } catch (error) {
+      console.error(error);
+      expiryNotificationsEnabled = current;
+      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+    }
+  }
+
+  async function saveNotificationPolicy() {
+    const parsedDefaultDays = parseDayValues(notificationPolicyDaysInput);
+    if (parsedDefaultDays.length === 0) {
+      errorMessage = m.api_keys_notifications_policy_days_validation();
+      return;
+    }
+    const parsedMax = Number(notificationPolicyMaxDaysInput);
+    const maxDays =
+      Number.isFinite(parsedMax) && parsedMax > 0
+        ? Math.floor(parsedMax)
+        : null;
+
+    notificationPolicySaving = true;
+    try {
+      const updated = await updateAdminNotificationPolicy(intric, {
+        enabled: notificationPolicy.enabled,
+        default_days_before_expiry: parsedDefaultDays,
+        max_days_before_expiry: maxDays,
+        allow_auto_follow_published_assistants:
+          notificationPolicy.allow_auto_follow_published_assistants,
+        allow_auto_follow_published_apps: notificationPolicy.allow_auto_follow_published_apps
+      });
+      notificationPolicy = updated;
+      notificationPolicyDaysInput = updated.default_days_before_expiry.join(", ");
+      notificationPolicyMaxDaysInput = updated.max_days_before_expiry
+        ? String(updated.max_days_before_expiry)
+        : "";
+    } catch (error) {
+      console.error(error);
+      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+    } finally {
+      notificationPolicySaving = false;
+    }
+  }
+
   onMount(() => {
-    void Promise.all([loadScopeResources(), loadKeys({ reset: true }), loadApiKeyTrackingConfig()]);
+    void Promise.all([
+      loadScopeResources(),
+      loadKeys({ reset: true }),
+      loadApiKeyTrackingConfig(),
+      loadAdminSettings(),
+      loadNotificationPolicy()
+    ]);
     return () => {
       clearTimeout(userSearchTimer);
     };
@@ -541,7 +707,8 @@
   </Page.Header>
 
   <Page.Main>
-    <div class="space-y-6 py-4 pr-4">
+    <Settings.Page>
+    <div class="space-y-6">
       <!-- Filter Section -->
       <div class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm">
         <!-- Filter Header -->
@@ -841,7 +1008,7 @@
               </Select.Simple>
             </div>
 
-            <div class="grid gap-4 md:grid-cols-3">
+            <div class="grid gap-4 md:grid-cols-4">
               {#if scopeSelectorType}
                 <ScopeResourceSelector
                   scopeType={scopeSelectorType}
@@ -859,6 +1026,11 @@
                   ? m.api_keys_admin_label_owner_user_id()
                   : m.api_keys_admin_label_created_by()}
                 placeholder={m.api_keys_enter_uuid()}
+              />
+              <Input.Text
+                bind:value={expiresWithinDays}
+                label={m.api_keys_admin_expires_within_label()}
+                placeholder="14"
               />
               <Select.Simple
                 bind:value={limit}
@@ -958,91 +1130,164 @@
         </div>
       </div>
 
-      <!-- API Key Tracking Section -->
-      <div class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm">
-        <div class="border-default bg-subtle/30 border-b px-6 py-4">
-          <div class="flex items-center gap-3">
-            <div
-              class="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 dark:bg-blue-900/30"
-            >
-              <Search class="h-5 w-5 text-blue-600 dark:text-blue-400" />
-            </div>
-            <div>
-              <h3 class="text-default font-semibold">{m.api_keys_admin_tracking_title()}</h3>
-              <p class="text-muted text-xs">{m.api_keys_admin_tracking_description()}</p>
-            </div>
-          </div>
+      <!-- API key settings and feature flags -->
+      <Settings.Group title={m.api_keys_admin_runtime_settings_title()}>
+        <Settings.Row
+          title={m.enable_scope_enforcement()}
+          description={m.enable_scope_enforcement_description()}
+        >
+          <Input.Switch
+            bind:value={scopeEnforcementEnabled}
+            sideEffect={toggleScopeEnforcement}
+            disabled={tenantSettingsLoading}
+          />
+        </Settings.Row>
+        <Settings.Row
+          title={m.enable_strict_mode()}
+          description={scopeEnforcementEnabled
+            ? m.enable_strict_mode_description()
+            : m.enable_strict_mode_requires_scope_enforcement()}
+        >
+          <Input.Switch
+            bind:value={strictModeEnabled}
+            sideEffect={toggleStrictMode}
+            disabled={!scopeEnforcementEnabled || tenantSettingsLoading}
+          />
+        </Settings.Row>
+        <Settings.Row
+          title={m.api_keys_notifications_feature_flag_title()}
+          description={m.api_keys_notifications_feature_flag_description()}
+        >
+          <Input.Switch
+            bind:value={expiryNotificationsEnabled}
+            sideEffect={toggleExpiryNotifications}
+            disabled={tenantSettingsLoading}
+          />
+        </Settings.Row>
+      </Settings.Group>
+
+      <!-- Notification policy -->
+      <Settings.Group title={m.api_keys_notifications_policy_title()}>
+        <Settings.Row
+          title={m.api_keys_notifications_policy_enabled_title()}
+          description={m.api_keys_notifications_policy_enabled_description()}
+        >
+          <Input.Switch
+            bind:value={notificationPolicy.enabled}
+            sideEffect={({ next }) => (notificationPolicy.enabled = next)}
+            disabled={notificationPolicyLoading || notificationPolicySaving}
+          />
+        </Settings.Row>
+        <Settings.Row
+          title={m.api_keys_notifications_policy_default_days_label()}
+          description={m.api_keys_notifications_policy_default_days_description()}
+        >
+          <Input.Text
+            bind:value={notificationPolicyDaysInput}
+            placeholder="30, 14, 7, 3, 1"
+            disabled={notificationPolicyLoading || notificationPolicySaving}
+            hiddenLabel
+          />
+        </Settings.Row>
+        <Settings.Row
+          title={m.api_keys_notifications_policy_max_days_label()}
+          description={m.api_keys_notifications_policy_max_days_description()}
+        >
+          <Input.Text
+            bind:value={notificationPolicyMaxDaysInput}
+            placeholder="365"
+            disabled={notificationPolicyLoading || notificationPolicySaving}
+            hiddenLabel
+          />
+        </Settings.Row>
+        <Settings.Row
+          title={m.api_keys_notifications_policy_autofollow_assistants_title()}
+          description={m.api_keys_notifications_policy_autofollow_assistants_description()}
+        >
+          <Input.Switch
+            bind:value={notificationPolicy.allow_auto_follow_published_assistants}
+            sideEffect={({ next }) =>
+              (notificationPolicy.allow_auto_follow_published_assistants = next)}
+            disabled={notificationPolicyLoading || notificationPolicySaving}
+          />
+        </Settings.Row>
+        <Settings.Row
+          title={m.api_keys_notifications_policy_autofollow_apps_title()}
+          description={m.api_keys_notifications_policy_autofollow_apps_description()}
+        >
+          <Input.Switch
+            bind:value={notificationPolicy.allow_auto_follow_published_apps}
+            sideEffect={({ next }) =>
+              (notificationPolicy.allow_auto_follow_published_apps = next)}
+            disabled={notificationPolicyLoading || notificationPolicySaving}
+          />
+        </Settings.Row>
+        <div class="flex justify-end px-4">
+          <Button
+            variant="primary"
+            on:click={saveNotificationPolicy}
+            disabled={notificationPolicyLoading || notificationPolicySaving}
+          >
+            {m.save()}
+          </Button>
         </div>
-        <div class="space-y-4 p-6">
-          <Settings.Row
-            title={m.api_keys_admin_tracking_used_title()}
-            description={m.api_keys_admin_tracking_used_description()}
-          >
-            <Input.Switch
-              bind:value={apiKeyUsedTrackingEnabled}
-              sideEffect={({ next }) => updateTrackingAction("api_key_used", next)}
-              disabled={trackingConfigLoading || !trackingConfigLoaded}
-            />
-          </Settings.Row>
-          <Settings.Row
-            title={m.api_keys_admin_tracking_failed_title()}
-            description={m.api_keys_admin_tracking_failed_description()}
-          >
-            <Input.Switch
-              bind:value={apiKeyAuthFailedTrackingEnabled}
-              sideEffect={({ next }) => updateTrackingAction("api_key_auth_failed", next)}
-              disabled={trackingConfigLoading || !trackingConfigLoaded}
-            />
-          </Settings.Row>
+      </Settings.Group>
+
+      <!-- API Key Tracking Section -->
+      <Settings.Group title={m.api_keys_admin_tracking_title()}>
+        <Settings.Row
+          title={m.api_keys_admin_tracking_used_title()}
+          description={m.api_keys_admin_tracking_used_description()}
+        >
+          <Input.Switch
+            bind:value={apiKeyUsedTrackingEnabled}
+            sideEffect={({ next }) => updateTrackingAction("api_key_used", next)}
+            disabled={trackingConfigLoading || !trackingConfigLoaded}
+          />
+        </Settings.Row>
+        <Settings.Row
+          title={m.api_keys_admin_tracking_failed_title()}
+          description={m.api_keys_admin_tracking_failed_description()}
+        >
+          <Input.Switch
+            bind:value={apiKeyAuthFailedTrackingEnabled}
+            sideEffect={({ next }) => updateTrackingAction("api_key_auth_failed", next)}
+            disabled={trackingConfigLoading || !trackingConfigLoaded}
+          />
+        </Settings.Row>
+        <div class="px-4">
           <a
             href="/admin/audit-logs?tab=config"
-            class="text-accent-default hover:text-accent-default/80 inline-flex items-center gap-1.5 text-xs font-medium"
+            class="text-accent-default hover:text-accent-default/80 inline-flex items-center gap-1.5 text-sm font-medium"
           >
             {m.api_keys_admin_tracking_open_audit_config()}
           </a>
         </div>
-      </div>
+      </Settings.Group>
 
       <!-- Policy Section -->
-      <div class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm">
-        <div class="border-default bg-subtle/30 border-b px-6 py-4">
-          <div class="flex items-center gap-3">
-            <div
-              class="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-100 dark:bg-purple-900/30"
-            >
-              <Shield class="h-5 w-5 text-purple-600 dark:text-purple-400" />
-            </div>
-            <div>
-              <h3 class="text-default font-semibold">{m.api_keys_admin_tenant_policy()}</h3>
-              <p class="text-muted text-xs">{m.api_keys_admin_policy_description()}</p>
-            </div>
-          </div>
-        </div>
-        <div class="p-6">
+      <Settings.Group title={m.api_keys_admin_tenant_policy()}>
+        <Settings.Row
+          title={m.api_keys_admin_tenant_policy()}
+          description={m.api_keys_admin_policy_description()}
+          fullWidth
+        >
           <ApiKeyPolicyPanel />
-        </div>
-      </div>
+        </Settings.Row>
+      </Settings.Group>
 
       <!-- Super Key Status Section -->
-      <div class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm">
-        <div class="border-default bg-subtle/30 border-b px-6 py-4">
-          <div class="flex items-center gap-3">
-            <div
-              class="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-100 dark:bg-orange-900/30"
-            >
-              <Building2 class="h-5 w-5 text-orange-600 dark:text-orange-400" />
-            </div>
-            <div>
-              <h3 class="text-default font-semibold">{m.api_keys_admin_super_key_status()}</h3>
-              <p class="text-muted text-xs">{m.api_keys_admin_super_key_description()}</p>
-            </div>
-          </div>
-        </div>
-        <div class="p-6">
+      <Settings.Group title={m.api_keys_admin_super_key_status()}>
+        <Settings.Row
+          title={m.api_keys_admin_super_key_status()}
+          description={m.api_keys_admin_super_key_description()}
+          fullWidth
+        >
           <SuperKeyStatusPanel />
-        </div>
-      </div>
+        </Settings.Row>
+      </Settings.Group>
     </div>
+    </Settings.Page>
   </Page.Main>
 </Page.Root>
 

@@ -2,6 +2,7 @@
   import { Calendar, Clock, AlertTriangle, Infinity } from "lucide-svelte";
   import { fly } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
 
   let {
     value = $bindable<string | null>(null),
@@ -111,7 +112,8 @@
   // Format display date
   function formatDisplayDate(isoString: string): string {
     const date = new Date(isoString);
-    return date.toLocaleDateString("sv-SE", {
+    const locale = getLocale();
+    return date.toLocaleDateString(locale === "sv" ? "sv-SE" : "en-US", {
       year: "numeric",
       month: "short",
       day: "numeric",

@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from typing import cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,7 +15,8 @@ from intric.assistants.api.assistant_models import (
     TokenEstimateResponse,
     TokenEstimateBreakdown,
 )
-from intric.authentication.auth_models import ApiKey
+from intric.authentication.auth_models import ApiKey, ApiKeyNotificationTargetType
+from intric.authentication.api_key_notification_auto_follow import auto_follow_on_publish
 from intric.authentication.api_key_router_helpers import (
     error_responses as api_key_error_responses,
 )
@@ -1063,6 +1065,21 @@ async def publish_assistant(
             extra=extra,
         ),
     )
+
+    if published:
+        try:
+            session = cast(AsyncSession, container.session())
+            await auto_follow_on_publish(
+                session=session,
+                user=user,
+                target_type=ApiKeyNotificationTargetType.ASSISTANT,
+                target_id=id,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to auto-follow API key expiry notifications for published assistant %s",
+                id,
+            )
 
     return assembler.from_assistant_to_model(
         assistant=assistant, permissions=permissions

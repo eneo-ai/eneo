@@ -279,7 +279,7 @@ class Settings(BaseSettings):
     api_key_header_name: str
     api_key_hash_secret: Optional[str] = None
     api_key_last_used_min_interval_seconds: int = 900
-    api_key_used_audit_sample_rate: float = 0.0
+    api_key_used_audit_sample_rate: float = 1.0
     api_key_rotation_grace_hours: int = 24
     api_key_legacy_endpoints_enabled: bool = True
     api_key_rate_limit_window_seconds: int = 3600

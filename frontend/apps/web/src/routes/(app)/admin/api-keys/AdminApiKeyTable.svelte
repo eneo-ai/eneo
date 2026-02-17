@@ -25,6 +25,7 @@
     AlertTriangle
   } from "lucide-svelte";
   import { slide } from "svelte/transition";
+  import { getDaysUntilExpiration, getExpiryLevel, getEffectiveState } from "$lib/features/api-keys/expirationUtils";
 
   type ApiKeyUsageEvent = {
     id: string;
@@ -253,13 +254,6 @@
     return formatter.format(d);
   }
 
-  function getDaysUntilExpiration(date: string | null | undefined): number | null {
-    if (!date) return null;
-    const d = new Date(date);
-    const now = new Date();
-    return Math.ceil((d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-  }
-
   // Scope display helpers
   const scopeConfig = $derived<
     Record<string, { label: string; icon: typeof Building2; color: string }>
@@ -377,7 +371,8 @@
     {#each keys as key (key.id)}
       {@const isExpanded = expandedIds.has(key.id)}
       {@const scope = scopeConfig[key.scope_type] ?? scopeConfig.tenant}
-      {@const state = stateConfig[key.state] ?? stateConfig.active}
+      {@const effectiveState = getEffectiveState(key)}
+      {@const state = stateConfig[effectiveState] ?? stateConfig.active}
       {@const permission = permissionConfig[key.permission] ?? permissionConfig.read}
       {@const keyTypeConf = getKeyTypeConfig(key.key_type)}
       {@const daysUntil = getDaysUntilExpiration(key.expires_at)}
@@ -482,27 +477,37 @@
               <div class="border-default/50 border-l px-4 text-right first:border-l-0 first:pl-0">
                 <p class="text-muted text-xs">{m.api_keys_admin_rate_limit()}</p>
                 <p class="text-default font-medium">
-                  {key.rate_limit ? `${key.rate_limit}/hr` : m.api_keys_default()}
+                  {key.rate_limit ? m.api_keys_rate_limit_value({ count: key.rate_limit }) : m.api_keys_default()}
                 </p>
               </div>
 
               <!-- Expiration -->
               {#if daysUntil !== null}
-                <div class="border-default/50 border-l px-4 text-right first:border-l-0 first:pl-0">
-                  <p class="text-muted text-xs">{m.api_keys_expires()}</p>
-                  <p
-                    class="font-medium {daysUntil <= 7
-                      ? 'text-yellow-600 dark:text-yellow-400'
-                      : daysUntil <= 0
+                {@const expiryLevel = getExpiryLevel(daysUntil)}
+                <div class="border-default/50 border-l px-4 text-right first:border-l-0 first:pl-0 flex items-center gap-1.5">
+                  {#if expiryLevel === "urgent" || expiryLevel === "expired"}
+                    <span class="h-1.5 w-1.5 rounded-full bg-red-500 flex-shrink-0"></span>
+                  {:else if expiryLevel === "warning"}
+                    <span class="h-1.5 w-1.5 rounded-full bg-yellow-500 flex-shrink-0"></span>
+                  {/if}
+                  <div>
+                    <p class="text-muted text-xs">{m.api_keys_expires()}</p>
+                    <p
+                      class="font-medium {expiryLevel === 'expired' || expiryLevel === 'urgent'
                         ? 'text-red-600 dark:text-red-400'
-                        : 'text-default'}"
-                  >
-                    {daysUntil <= 0
-                      ? m.api_keys_admin_expired_label()
-                      : daysUntil === 1
-                        ? m.api_keys_tomorrow()
-                        : m.api_keys_days({ count: daysUntil })}
-                  </p>
+                        : expiryLevel === 'warning' || expiryLevel === 'notice'
+                          ? 'text-yellow-600 dark:text-yellow-400'
+                          : 'text-default'}"
+                    >
+                      {daysUntil < 0
+                        ? m.api_keys_admin_expired_label()
+                        : daysUntil === 0
+                          ? m.api_keys_today()
+                          : daysUntil === 1
+                            ? m.api_keys_tomorrow()
+                            : m.api_keys_days({ count: daysUntil })}
+                    </p>
+                  </div>
                 </div>
               {/if}
 
@@ -536,7 +541,7 @@
           <div
             id={"admin-api-key-details-" + key.id}
             role="region"
-            aria-label={"API key details for " + key.name}
+            aria-label={m.api_keys_admin_details_aria_label({ name: key.name })}
             class="border-default bg-subtle/50 border-t px-5 py-4"
             transition:slide={{ duration: 200 }}
           >
@@ -633,7 +638,7 @@
                               <th class="px-3 py-2 text-left font-medium"
                                 >{m.api_keys_admin_usage_request()}</th
                               >
-                              <th class="px-3 py-2 text-left font-medium">IP / Origin</th>
+                              <th class="px-3 py-2 text-left font-medium">{m.api_keys_admin_usage_ip_origin()}</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -799,7 +804,7 @@
                   <div>
                     <p class="text-muted text-xs">{m.api_keys_rate_limit_label()}</p>
                     <p class="text-default text-sm font-medium">
-                      {key.rate_limit ? `${key.rate_limit}/hr` : m.api_keys_default()}
+                      {key.rate_limit ? m.api_keys_rate_limit_value({ count: key.rate_limit }) : m.api_keys_default()}
                     </p>
                   </div>
                 </div>

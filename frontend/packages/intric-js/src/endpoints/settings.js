@@ -85,6 +85,20 @@ export function initSettings(client) {
         requestBody: { "application/json": { enabled } }
       });
       return res;
+    },
+
+    /**
+     * Update API key expiry notifications setting for the tenant
+     * @param {boolean} enabled Whether to enable API key expiry notifications
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').Settings>}
+     */
+    updateApiKeyExpiryNotifications: async (enabled) => {
+      const res = await client.fetch("/api/v1/settings/api-key-expiry-notifications", {
+        method: "patch",
+        requestBody: { "application/json": { enabled } }
+      });
+      return res;
     }
   };
 }

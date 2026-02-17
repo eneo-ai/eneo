@@ -5,6 +5,7 @@
   import { getAppContext, initAppContext } from "$lib/core/AppContext";
   import JobManagerDropdown from "$lib/features/jobs/components/JobManagerDropdownButton.svelte";
   import { initJobManager } from "$lib/features/jobs/JobManager";
+  import { initExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
   import ProfileMenu from "./ProfileMenu.svelte";
   import { initIntric } from "$lib/core/Intric";
   import { initIntricSocket } from "$lib/core/IntricSocket";
@@ -24,6 +25,7 @@
   initIntric(data);
   initAppContext(data);
   initJobManager(data);
+  initExpiringKeysStore(data);
   initAttachmentUrlService(data);
   initFaviconUrlService();
   const socket = initIntricSocket(data);

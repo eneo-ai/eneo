@@ -1,22 +1,29 @@
 <script lang="ts">
   import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@intric/intric-js";
   import { Button, Dialog, Dropdown, Input } from "@intric/ui";
-  import { Ban, MoreVertical, RefreshCw, RotateCcw } from "lucide-svelte";
+  import { Ban, Bell, BellOff, MoreVertical, RefreshCw, RotateCcw } from "lucide-svelte";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { writable } from "svelte/store";
+  import {
+    followApiKeyNotifications,
+    unfollowApiKeyNotifications
+  } from "$lib/features/api-keys/notificationPreferences";
 
   const intric = getIntric();
 
-  let { apiKey, onChanged, onSecret } = $props<{
+  let { apiKey, onChanged, onSecret, isFollowed = false, onFollowChanged } = $props<{
     apiKey: ApiKeyV2;
     onChanged: () => void;
     onSecret: (response: ApiKeyCreatedResponse) => void;
+    isFollowed?: boolean;
+    onFollowChanged?: () => void | Promise<void>;
   }>();
 
   const showRevokeDialog = writable(false);
   const showSuspendDialog = writable(false);
   let errorMessage = $state<string | null>(null);
+  let followLoading = $state(false);
   let reasonText = $state("");
 
   const isActive = $derived(apiKey.state === "active");
@@ -85,8 +92,27 @@
       errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
     }
   }
+
+  async function toggleFollow() {
+    errorMessage = null;
+    followLoading = true;
+    try {
+      if (isFollowed) {
+        await unfollowApiKeyNotifications(intric, apiKey.id);
+      } else {
+        await followApiKeyNotifications(intric, apiKey.id);
+      }
+      await onFollowChanged?.();
+    } catch (error) {
+      console.error(error);
+      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+    } finally {
+      followLoading = false;
+    }
+  }
 </script>
 
+{#if apiKey.state !== "revoked"}
 <Dropdown.Root>
   <Dropdown.Trigger asFragment let:trigger>
     <Button is={trigger} padding="icon" aria-label={m.actions()}>
@@ -99,6 +125,18 @@
       <Button is={item} padding="icon-leading" on:click={rotateKey}>
         <RotateCcw size={16} />
         {m.api_keys_action_rotate()}
+      </Button>
+    {/if}
+
+    {#if apiKey.state !== "revoked" && apiKey.state !== "expired"}
+      <Button is={item} padding="icon-leading" on:click={toggleFollow} disabled={followLoading}>
+        {#if isFollowed}
+          <BellOff size={16} />
+          {m.api_keys_notifications_unfollow_action()}
+        {:else}
+          <Bell size={16} />
+          {m.api_keys_notifications_follow_action()}
+        {/if}
       </Button>
     {/if}
 
@@ -122,19 +160,22 @@
       </Button>
     {/if}
 
-    <Button
-      is={item}
-      variant="destructive"
-      padding="icon-leading"
-      on:click={() => {
-        $showRevokeDialog = true;
-      }}
-    >
-      <Ban size={16} />
-      {m.api_keys_action_revoke()}
-    </Button>
+    {#if apiKey.state !== "revoked"}
+      <Button
+        is={item}
+        variant="destructive"
+        padding="icon-leading"
+        on:click={() => {
+          $showRevokeDialog = true;
+        }}
+      >
+        <Ban size={16} />
+        {m.api_keys_action_revoke()}
+      </Button>
+    {/if}
   </Dropdown.Menu>
 </Dropdown.Root>
+{/if}
 
 {#if errorMessage}
   <div class="text-xs text-negative">{errorMessage}</div>

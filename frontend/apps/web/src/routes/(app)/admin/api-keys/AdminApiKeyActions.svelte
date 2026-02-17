@@ -256,17 +256,19 @@
       </Button>
     {/if}
 
-    <Button
-      is={item}
-      variant="destructive"
-      padding="icon-leading"
-      on:click={() => {
-        $showRevokeDialog = true;
-      }}
-    >
-      <Ban size={16} />
-      {m.api_keys_admin_action_revoke()}
-    </Button>
+    {#if apiKey.state !== "revoked"}
+      <Button
+        is={item}
+        variant="destructive"
+        padding="icon-leading"
+        on:click={() => {
+          $showRevokeDialog = true;
+        }}
+      >
+        <Ban size={16} />
+        {m.api_keys_admin_action_revoke()}
+      </Button>
+    {/if}
   </Dropdown.Menu>
 </Dropdown.Root>
 

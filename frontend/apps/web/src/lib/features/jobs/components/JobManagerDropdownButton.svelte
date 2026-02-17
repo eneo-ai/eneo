@@ -6,11 +6,13 @@
   import { fly, fade } from "svelte/transition";
   import JobManagerDropdownPanel from "./JobManagerDropdownPanel.svelte";
   import { getJobManager } from "../JobManager";
+  import { getExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
   import { m } from "$lib/paraglide/messages";
 
   const {
     state: { currentlyRunningJobs, showJobManagerPanel }
   } = getJobManager();
+  const { state: { hasUrgent: hasUrgentKeys } } = getExpiringKeysStore();
 
   const {
     elements: { menu, trigger, overlay, arrow },
@@ -36,7 +38,7 @@
   label={m.notifications()}
   class="text-secondary hover:bg-accent-dimmer hover:text-brand-intric flex h-[3.25rem] !min-w-[3.5rem] items-center justify-center pt-[0.1rem]"
 >
-  {#if $currentlyRunningJobs === 0}
+  {#if $currentlyRunningJobs === 0 && !$hasUrgentKeys}
     <IconNotification />
   {:else}
     <IconNotificationDot class="min-w-6" />

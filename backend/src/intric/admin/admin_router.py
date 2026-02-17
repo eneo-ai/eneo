@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, cast
 from uuid import UUID
 
@@ -20,7 +20,6 @@ from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse
 from intric.predefined_roles.predefined_role import PredefinedRoleInDB
-from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 from intric.database.tables.users_table import Users
 from intric.server.dependencies.container import get_container
 from intric.tenants.tenant import TenantPublic
@@ -34,7 +33,10 @@ from intric.users.user import (
 )
 from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
 from intric.authentication.api_key_resolver import ApiKeyValidationError
+from intric.authentication.api_key_router import _build_expiring_summary
 from intric.authentication.api_key_router_helpers import (
+    build_api_key_usage_page,
+    build_api_key_usage_summary,
     error_responses,
     extract_audit_context,
     paginate_keys,
@@ -46,6 +48,8 @@ from intric.authentication.auth_models import (
     ApiKeyCreatedResponse,
     ApiKeyExactLookupRequest,
     ApiKeyExactLookupResponse,
+    ApiKeyNotificationPolicyResponse,
+    ApiKeyNotificationPolicyUpdate,
     ApiKeyPermission,
     ApiKeyPolicyResponse,
     ApiKeyPolicyUpdate,
@@ -55,12 +59,11 @@ from intric.authentication.auth_models import (
     ApiKeyStateChangeRequest,
     ApiKeyType,
     ApiKeyUpdateRequest,
-    ApiKeyUsageEvent,
     ApiKeyUsageResponse,
-    ApiKeyUsageSummary,
     ApiKeyUserRelation,
     ApiKeyUserSnapshot,
     ApiKeyV2,
+    ExpiringKeysSummary,
     SuperApiKeyStatus,
 )
 from intric.main.models import CursorPaginatedResponse
@@ -1178,50 +1181,6 @@ async def _enrich_api_keys_with_user_snapshots(
     return enriched
 
 
-async def _build_api_key_usage_summary(
-    *,
-    session: AsyncSession,
-    tenant_id: UUID,
-    key_id: UUID,
-) -> ApiKeyUsageSummary:
-    stmt = (
-        sa.select(
-            sa.func.count(AuditLogTable.id).label("total_events"),
-            sa.func.count(AuditLogTable.id)
-            .filter(AuditLogTable.action == ActionType.API_KEY_USED.value)
-            .label("used_events"),
-            sa.func.count(AuditLogTable.id)
-            .filter(AuditLogTable.action == ActionType.API_KEY_AUTH_FAILED.value)
-            .label("auth_failed_events"),
-            sa.func.max(AuditLogTable.timestamp).label("last_seen_at"),
-            sa.func.max(AuditLogTable.timestamp)
-            .filter(AuditLogTable.action == ActionType.API_KEY_USED.value)
-            .label("last_success_at"),
-            sa.func.max(AuditLogTable.timestamp)
-            .filter(AuditLogTable.action == ActionType.API_KEY_AUTH_FAILED.value)
-            .label("last_failure_at"),
-        )
-        .where(AuditLogTable.tenant_id == tenant_id)
-        .where(AuditLogTable.entity_type == EntityType.API_KEY.value)
-        .where(AuditLogTable.entity_id == key_id)
-        .where(
-            AuditLogTable.action.in_(
-                [ActionType.API_KEY_USED.value, ActionType.API_KEY_AUTH_FAILED.value]
-            )
-        )
-        .where(AuditLogTable.deleted_at.is_(None))
-    )
-    row = (await session.execute(stmt)).one()
-
-    return ApiKeyUsageSummary(
-        total_events=int(row.total_events or 0),
-        used_events=int(row.used_events or 0),
-        auth_failed_events=int(row.auth_failed_events or 0),
-        last_seen_at=row.last_seen_at,
-        last_success_at=row.last_success_at,
-        last_failure_at=row.last_failure_at,
-        sampled_used_events=get_settings().api_key_used_audit_sample_rate < 1.0,
-    )
 
 
 @router.get(
@@ -1330,6 +1289,96 @@ async def update_api_key_policy(
 
 
 @router.get(
+    "/api-keys/notification-policy",
+    response_model=ApiKeyNotificationPolicyResponse,
+    tags=["Admin API Keys"],
+    summary="Get API key notification policy",
+    description="Get tenant API key notification policy settings.",
+    responses={200: {"description": "Current notification policy."}, **error_responses([401, 403, 429])},
+)
+async def get_api_key_notification_policy(
+    container: Container = Depends(get_container(with_user=True)),
+):
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+
+    user = container.user()
+    tenant_policy = user.tenant.api_key_policy if isinstance(user.tenant.api_key_policy, dict) else {}
+    notification_policy = tenant_policy.get("notification_policy")
+    notification_policy = notification_policy if isinstance(notification_policy, dict) else {}
+    return ApiKeyNotificationPolicyResponse.model_validate(notification_policy)
+
+
+@router.put(
+    "/api-keys/notification-policy",
+    response_model=ApiKeyNotificationPolicyResponse,
+    tags=["Admin API Keys"],
+    summary="Update API key notification policy",
+    description="Update tenant API key notification policy under api_key_policy.notification_policy.",
+    responses={200: {"description": "Updated notification policy."}, **error_responses([400, 401, 403, 429])},
+)
+async def update_api_key_notification_policy(
+    request: ApiKeyNotificationPolicyUpdate = Body(
+        ...,
+        examples=[{"enabled": True, "default_days_before_expiry": [30, 14, 7, 3, 1]}],
+    ),
+    container: Container = Depends(get_container(with_user=True)),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+):
+    admin_service = container.admin_service()
+    user = container.user()
+    await admin_service.validate_admin_permission()
+
+    updates = request.model_dump(exclude_unset=True)
+    tenant_policy = user.tenant.api_key_policy if isinstance(user.tenant.api_key_policy, dict) else {}
+    current_notification_policy = tenant_policy.get("notification_policy")
+    current_notification_policy = (
+        current_notification_policy if isinstance(current_notification_policy, dict) else {}
+    )
+
+    if not updates:
+        return ApiKeyNotificationPolicyResponse.model_validate(current_notification_policy)
+
+    merged_notification_policy = dict(current_notification_policy)
+    merged_notification_policy.update(updates)
+    normalized_policy = ApiKeyNotificationPolicyResponse.model_validate(
+        merged_notification_policy
+    )
+
+    tenant_service = container.tenant_service()
+    before_policy = dict(tenant_policy)
+    updated_tenant = await tenant_service.update_api_key_policy(
+        user.tenant_id,
+        {"notification_policy": normalized_policy.model_dump(mode="json")},
+    )
+    after_policy = (
+        updated_tenant.api_key_policy if isinstance(updated_tenant.api_key_policy, dict) else {}
+    )
+
+    audit_service = container.audit_service()
+    if audit_service is not None:
+        await audit_service.log_async(
+            tenant_id=user.tenant_id,
+            actor_id=user.id,
+            action=ActionType.TENANT_POLICY_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=user.tenant_id,
+            description="Updated tenant API key notification policy",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=updated_tenant,
+                changes={"api_key_policy": {"old": before_policy, "new": after_policy}},
+            ),
+        )
+
+    after_notification_policy = after_policy.get("notification_policy")
+    after_notification_policy = (
+        after_notification_policy if isinstance(after_notification_policy, dict) else {}
+    )
+    return ApiKeyNotificationPolicyResponse.model_validate(after_notification_policy)
+
+
+@router.get(
     "/super-api-key-status",
     response_model=SuperApiKeyStatus,
     tags=["Admin API Keys"],
@@ -1396,6 +1445,11 @@ async def list_api_keys_admin(
         min_length=2,
         description="Case-insensitive search over key name, suffix, description, owner, and creator identity.",
     ),
+    expires_within_days: int | None = Query(
+        None,
+        ge=1,
+        description="Filter to keys with expires_at within this many days.",
+    ),
     container: Container = Depends(get_container(with_user=True)),
 ):
     admin_service = container.admin_service()
@@ -1419,6 +1473,7 @@ async def list_api_keys_admin(
         owner_user_id=owner_filter,
         created_by_user_id=creator_filter,
         search=normalized_search,
+        expires_within_days=expires_within_days,
     )
     total_count = await repo.count(
         tenant_id=tenant_id,
@@ -1429,6 +1484,7 @@ async def list_api_keys_admin(
         owner_user_id=owner_filter,
         created_by_user_id=creator_filter,
         search=normalized_search,
+        expires_within_days=expires_within_days,
     )
 
     paginated = paginate_keys(
@@ -1447,6 +1503,35 @@ async def list_api_keys_admin(
         search=normalized_search,
     )
     return paginated
+
+
+@router.get(
+    "/api-keys/expiring-soon",
+    response_model=ExpiringKeysSummary,
+    tags=["Admin API Keys"],
+    summary="Get expiring API key summary (tenant-wide)",
+    description="Returns all expiring keys in the tenant within the specified window.",
+    responses={
+        200: {"description": "Tenant-wide expiring key summary."},
+        **error_responses([401, 403, 429]),
+    },
+)
+async def get_expiring_keys_admin(
+    days: int = Query(30, ge=1, le=90, description="Look-ahead window in days"),
+    container: Container = Depends(get_container(with_user=True)),
+):
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+
+    repo: ApiKeysV2Repository = container.api_key_v2_repo()
+    tenant_id = admin_service.user.tenant_id
+    now = datetime.now(timezone.utc)
+
+    items, total_count = await repo.list_expiring_soon(
+        tenant_id=tenant_id, now=now, days=days
+    )
+
+    return _build_expiring_summary(items, total_count, now)
 
 
 @router.post(
@@ -1540,54 +1625,13 @@ async def get_api_key_usage_admin(
         )
 
     session = cast(AsyncSession, container.session())
-    summary = await _build_api_key_usage_summary(
-        session=session,
-        tenant_id=admin_service.user.tenant_id,
-        key_id=id,
+    tenant_id = admin_service.user.tenant_id
+    summary = await build_api_key_usage_summary(
+        session=session, tenant_id=tenant_id, key_id=id,
     )
-
-    stmt = (
-        sa.select(AuditLogTable)
-        .where(AuditLogTable.tenant_id == admin_service.user.tenant_id)
-        .where(AuditLogTable.entity_type == EntityType.API_KEY.value)
-        .where(AuditLogTable.entity_id == id)
-        .where(
-            AuditLogTable.action.in_(
-                [ActionType.API_KEY_USED.value, ActionType.API_KEY_AUTH_FAILED.value]
-            )
-        )
-        .where(AuditLogTable.deleted_at.is_(None))
+    usage_events, next_cursor = await build_api_key_usage_page(
+        session=session, tenant_id=tenant_id, key_id=id, limit=limit, cursor=cursor,
     )
-    if cursor is not None:
-        stmt = stmt.where(AuditLogTable.timestamp < cursor)
-    stmt = stmt.order_by(AuditLogTable.timestamp.desc(), AuditLogTable.id.desc()).limit(
-        limit + 1
-    )
-
-    records = list(await session.scalars(stmt))
-    page = records[:limit]
-    next_cursor = records[limit].timestamp if len(records) > limit else None
-
-    usage_events: list[ApiKeyUsageEvent] = []
-    for record in page:
-        metadata = record.log_metadata if isinstance(record.log_metadata, dict) else {}
-        extra = metadata.get("extra") if isinstance(metadata, dict) else {}
-        extra = extra if isinstance(extra, dict) else {}
-        usage_events.append(
-            ApiKeyUsageEvent(
-                id=record.id,
-                timestamp=record.timestamp,
-                action=record.action,
-                outcome=record.outcome,
-                ip_address=str(record.ip_address) if record.ip_address else None,
-                user_agent=record.user_agent,
-                request_id=record.request_id,
-                request_path=cast(str | None, extra.get("request_path")),
-                method=cast(str | None, extra.get("method")),
-                origin=cast(str | None, extra.get("origin")),
-                error_message=record.error_message,
-            )
-        )
 
     return ApiKeyUsageResponse(
         summary=summary,

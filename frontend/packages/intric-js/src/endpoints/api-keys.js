@@ -151,6 +151,23 @@ export function initApiKeys(client) {
     },
 
     /**
+     * Get API key usage timeline.
+     * @param {{id: string, limit?: number, cursor?: string}} params
+     * @returns {Promise<{summary: object, items: object[], limit: number, next_cursor?: string | null}>}
+     * @throws {IntricError}
+     * */
+    getUsage: async ({ id, limit, cursor }) => {
+      const res = await client.fetch("/api/v1/api-keys/{id}/usage", {
+        method: "get",
+        params: {
+          path: { id },
+          query: { limit, cursor }
+        }
+      });
+      return res;
+    },
+
+    /**
      * Get creation constraints (policy limits) for the current user.
      * @returns {Promise<ApiKeyCreationConstraints>}
      * @throws {IntricError}
@@ -162,15 +179,121 @@ export function initApiKeys(client) {
       return res;
     },
 
+    /**
+     * Get expiring API key summary (user-scoped visibility).
+     * @param {{days?: number, mode?: "all"|"subscribed"}} [params]
+     * @returns {Promise<{total_count: number, counts_by_severity: Record<string, number>, earliest_expiration: string | null, items: Array<{id: string, name: string, scope_type: ApiKeyScopeType, scope_id: string | null, expires_at: string, suspended_at: string | null, severity: string}>, truncated: boolean, generated_at: string}>}
+     * @throws {IntricError}
+     * */
+    expiringSoon: async (params) => {
+      const res = await client.fetch("/api/v1/api-keys/expiring-soon", {
+        method: "get",
+        params: { query: params }
+      });
+      return res;
+    },
+
+    /**
+     * Get API key notification preferences for current user.
+     * @returns {Promise<{enabled: boolean, days_before_expiry: number[]}>}
+     * @throws {IntricError}
+     * */
+    getNotificationPreferences: async () => {
+      const res = await client.fetch("/api/v1/api-keys/notification-preferences", {
+        method: "get"
+      });
+      return res;
+    },
+
+    /**
+     * Update API key notification preferences for current user.
+     * @param {{enabled?: boolean, days_before_expiry?: number[]}} updates
+     * @returns {Promise<{enabled: boolean, days_before_expiry: number[]}>}
+     * @throws {IntricError}
+     * */
+    updateNotificationPreferences: async (updates) => {
+      const res = await client.fetch("/api/v1/api-keys/notification-preferences", {
+        method: "put",
+        requestBody: {
+          "application/json": updates
+        }
+      });
+      return res;
+    },
+
+    /**
+     * List followed notification targets for subscribed mode.
+     * @returns {Promise<{items: Array<{target_type: "key"|"assistant"|"app"|"space", target_id: string}>}>}
+     * @throws {IntricError}
+     * */
+    listNotificationSubscriptions: async () => {
+      const res = await client.fetch("/api/v1/api-keys/notification-subscriptions", {
+        method: "get"
+      });
+      return res;
+    },
+
+    /**
+     * Follow a notification target.
+     * @param {{target_type: "key"|"assistant"|"app"|"space", target_id: string}} params
+     * @returns {Promise<{items: Array<{target_type: "key"|"assistant"|"app"|"space", target_id: string}>}>}
+     * @throws {IntricError}
+     * */
+    followNotificationTarget: async ({ target_type, target_id }) => {
+      const res = await client.fetch(
+        "/api/v1/api-keys/notification-subscriptions/{target_type}/{target_id}",
+        {
+          method: "put",
+          params: {
+            path: { target_type, target_id }
+          }
+        }
+      );
+      return res;
+    },
+
+    /**
+     * Unfollow a notification target.
+     * @param {{target_type: "key"|"assistant"|"app"|"space", target_id: string}} params
+     * @returns {Promise<{items: Array<{target_type: "key"|"assistant"|"app"|"space", target_id: string}>}>}
+     * @throws {IntricError}
+     * */
+    unfollowNotificationTarget: async ({ target_type, target_id }) => {
+      const res = await client.fetch(
+        "/api/v1/api-keys/notification-subscriptions/{target_type}/{target_id}",
+        {
+          method: "delete",
+          params: {
+            path: { target_type, target_id }
+          }
+        }
+      );
+      return res;
+    },
+
     admin: {
       /**
        * List all API keys in the tenant (admin only).
-       * @param {{limit?: number, cursor?: string, previous?: boolean, scope_type?: ApiKeyScopeType | null, scope_id?: string, state?: ApiKeyState | null, key_type?: ApiKeyType | null, owner_user_id?: string, created_by_user_id?: string, user_relation?: "owner"|"creator", search?: string}} [params]
+       * @param {{limit?: number, cursor?: string, previous?: boolean, scope_type?: ApiKeyScopeType | null, scope_id?: string, state?: ApiKeyState | null, key_type?: ApiKeyType | null, owner_user_id?: string, created_by_user_id?: string, user_relation?: "owner"|"creator", search?: string, expires_within_days?: number}} [params]
        * @returns {Promise<AdminApiKeyPage>}
        * @throws {IntricError}
        * */
       list: async (params) => {
         const res = await client.fetch("/api/v1/admin/api-keys", {
+          method: "get",
+          params: { query: params }
+        });
+        return res;
+      },
+
+      /**
+       * Get expiring API key summary (tenant-wide, admin only).
+       * @param {{days?: number}} [params]
+       * @returns {Promise<{total_count: number, counts_by_severity: Record<string, number>, earliest_expiration: string | null, items: Array<{id: string, name: string, scope_type: ApiKeyScopeType, scope_id: string | null, expires_at: string, suspended_at: string | null, severity: string}>, truncated: boolean, generated_at: string}>}
+       * @throws {IntricError}
+       * */
+      expiringSoon: async (params) => {
+        const res = await client.fetch("/api/v1/admin/api-keys/expiring-soon", {
           method: "get",
           params: { query: params }
         });
@@ -332,6 +455,34 @@ export function initApiKeys(client) {
       updatePolicy: async (updates) => {
         const res = await client.fetch("/api/v1/admin/api-key-policy", {
           method: "patch",
+          requestBody: {
+            "application/json": updates
+          }
+        });
+        return res;
+      },
+
+      /**
+       * Fetch tenant API key notification policy (admin only).
+       * @returns {Promise<{enabled: boolean, default_days_before_expiry: number[], max_days_before_expiry: number | null}>}
+       * @throws {IntricError}
+       * */
+      getNotificationPolicy: async () => {
+        const res = await client.fetch("/api/v1/admin/api-keys/notification-policy", {
+          method: "get"
+        });
+        return res;
+      },
+
+      /**
+       * Update tenant API key notification policy (admin only).
+       * @param {{enabled?: boolean, default_days_before_expiry?: number[], max_days_before_expiry?: number}} updates
+       * @returns {Promise<{enabled: boolean, default_days_before_expiry: number[], max_days_before_expiry: number | null}>}
+       * @throws {IntricError}
+       * */
+      updateNotificationPolicy: async (updates) => {
+        const res = await client.fetch("/api/v1/admin/api-keys/notification-policy", {
+          method: "put",
           requestBody: {
             "application/json": updates
           }

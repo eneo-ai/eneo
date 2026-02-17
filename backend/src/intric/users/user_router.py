@@ -556,7 +556,16 @@ async def get_currently_authenticated_user(
     truncated_key = latest_key.key_suffix if latest_key is not None else None
     if truncated_key is None and current_user.api_key is not None:
         truncated_key = current_user.api_key.truncated_key
-    return UserPublic(**current_user.model_dump(), truncated_api_key=truncated_key)
+    legacy_suffix = (
+        current_user.api_key.truncated_key
+        if current_user.api_key is not None
+        else None
+    )
+    return UserPublic(
+        **current_user.model_dump(),
+        truncated_api_key=truncated_key,
+        legacy_api_key_suffix=legacy_suffix,
+    )
 
 
 @users_admin_router.post(
@@ -637,6 +646,47 @@ async def generate_api_key(
     )
 
     return api_key
+
+
+@users_admin_router.delete(
+    "/api-keys/legacy",
+    status_code=204,
+    tags=["Legacy API Keys"],
+    summary="Revoke legacy user API key",
+    description="Permanently revokes the caller's legacy (v1) API key.",
+    responses={
+        404: {"description": "No legacy API key found."},
+        **api_key_error_responses([401]),
+    },
+)
+async def revoke_legacy_api_key(
+    current_user: UserInDB = Depends(auth_dependencies.get_current_active_user),
+    container: Container = Depends(get_container()),
+):
+    if current_user.api_key is None:
+        raise HTTPException(status_code=404, detail="No legacy API key found.")
+
+    api_key_repo = container.api_key_repo()
+    await api_key_repo.delete_by_user(current_user.id)
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=ActionType.API_KEY_REVOKED,
+        entity_type=EntityType.API_KEY,
+        entity_id=current_user.id,
+        description=f"Revoked legacy API key for user '{current_user.email}'",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=current_user,
+            extra={
+                "key_type": "legacy",
+                "truncated_key": current_user.api_key.truncated_key,
+                "tenant_id": str(current_user.tenant_id),
+            },
+        ),
+    )
 
 
 @router.get(

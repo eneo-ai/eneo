@@ -40,6 +40,16 @@ export function initUser(client) {
     },
 
     /**
+     * Revoke the caller's legacy (v1) API key. Permanent action.
+     * @returns {Promise<boolean>} Returns true on success
+     * @throws {IntricError}
+     * */
+    revokeLegacyApiKey: async () => {
+      await client.fetch("/api/v1/users/api-keys/legacy", { method: "delete" });
+      return true;
+    },
+
+    /**
      * Lists all users on this tenant.
      * @overload `{includeDetails: true}` requires super user privileges.
      * @param {{includeDetails: true, search_email?: string, search_name?: string, page?: number, page_size?: number, state_filter?: string}} options

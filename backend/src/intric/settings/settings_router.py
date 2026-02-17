@@ -252,3 +252,29 @@ async def update_strict_mode_setting(
 ):
     service = container.settings_service()
     return await service.update_strict_mode_setting(enabled=data.enabled)
+
+
+@settings_admin_router.patch(
+    "/api-key-expiry-notifications",
+    response_model=SettingsPublic,
+    summary="Toggle API key expiry notifications",
+    description="""
+Toggle API key expiry notifications for your tenant.
+
+**Admin Only:** Requires admin permissions.
+
+**Behavior:**
+- Updates the `api_key_expiry_notifications` feature flag for your tenant
+- When enabled: API key expiry notification surfaces are active
+- When disabled: API key expiry notifications are suppressed
+- Change takes effect immediately
+    """,
+)
+async def update_api_key_expiry_notifications_setting(
+    data: ToggleSettingUpdate,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.settings_service()
+    return await service.update_api_key_expiry_notifications_setting(
+        enabled=data.enabled
+    )
