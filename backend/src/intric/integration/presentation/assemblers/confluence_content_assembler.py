@@ -13,18 +13,19 @@ if TYPE_CHECKING:
 
 class ConfluenceContentAssembler:
     @classmethod
-    def to_model(self, item: "IntegrationPreview") -> "IntegrationPreviewData":
+    def to_model(cls, item: "IntegrationPreview") -> "IntegrationPreviewData":
         return IntegrationPreviewData(
             key=item.key,
             type=item.type,
             name=item.name,
             url=item.url,
+            category=item.category,
         )
 
     @classmethod
     def to_paginated_response(
-        self,
+        cls,
         items: list["IntegrationPreview"],
     ) -> IntegrationPreviewDataList:
-        items = [self.to_model(i) for i in items]
+        items = [cls.to_model(i) for i in items]
         return IntegrationPreviewDataList(items=items)

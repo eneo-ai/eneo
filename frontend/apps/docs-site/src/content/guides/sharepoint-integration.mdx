@@ -87,6 +87,12 @@ These permissions are used for personal spaces and the Service Account method. T
 - `Sites.Read.All` – read SharePoint sites
 - `offline_access` – keep the session active without the user needing to log in again
 
+**Optional delegated permissions:**
+
+These permissions are not required for basic functionality but enable additional features in the import dialog.
+
+- `Group.Read.All` – categorize SharePoint sites by Microsoft Teams membership, so users can see which sites belong to teams they are a member of, which belong to public teams, and which are other sites. Without this permission, all sites are shown without categorization.
+
 **Application permissions (only for Tenant App method):**
 
 These permissions are **only required if you choose the Tenant App authentication method** for shared spaces. If you use Service Account (recommended), you do not need application permissions.
@@ -95,6 +101,7 @@ These permissions are **only required if you choose the Tenant App authenticatio
 
 - `Files.Read.All` – read files across the entire organization
 - `Sites.Read.All` – read all SharePoint sites
+- `Group.Read.All` *(optional)* – enable site categorization by Teams membership (see optional delegated permissions above)
 
 After adding the permissions, click **Grant admin consent for [your tenant]** to approve them at the organization level.
 

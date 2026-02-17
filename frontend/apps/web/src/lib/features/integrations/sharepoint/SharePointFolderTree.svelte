@@ -45,9 +45,9 @@
   const intric = getIntric();
 
   let currentItems = $state<TreeItem[]>([]);
-  let navigationStack = $state<Array<{ folderId: string | null; path: string; name: string }>>(
-    [{ folderId: null, path: "/", name: siteName }]
-  );
+  let navigationStack = $state<Array<{ folderId: string | null; path: string; name: string }>>([
+    { folderId: null, path: "/", name: siteName }
+  ]);
   let selectedItemKeySet = $derived.by(() => new Set(selectedItemKeys ?? []));
   const siteRootSelectionKey = buildSharePointSelectionKey({
     id: "",
@@ -62,47 +62,49 @@
   // Guard against stale responses when navigating quickly
   let requestId = 0;
 
-  const loadFolders = createAsyncState(async (folderId: string | null = null, folderPath: string = "") => {
-    const thisRequest = ++requestId;
-    try {
-      const queryParams: Record<string, string> = {
-        space_id: spaceId
-      };
+  const loadFolders = createAsyncState(
+    async (folderId: string | null = null, folderPath: string = "") => {
+      const thisRequest = ++requestId;
+      try {
+        const queryParams: Record<string, string> = {
+          space_id: spaceId
+        };
 
-      if (siteId) {
-        queryParams.site_id = siteId;
-      }
-      if (driveId) {
-        queryParams.drive_id = driveId;
-      }
-
-      if (folderId !== null) {
-        queryParams.folder_id = folderId;
-      }
-
-      if (folderPath) {
-        queryParams.folder_path = folderPath;
-      }
-
-      const response = await intric.client.fetch(
-        `/api/v1/integrations/${userIntegrationId}/sharepoint/tree/`,
-        {
-          method: "get",
-          params: {
-            query: queryParams
-          }
+        if (siteId) {
+          queryParams.site_id = siteId;
         }
-      );
+        if (driveId) {
+          queryParams.drive_id = driveId;
+        }
 
-      // Ignore stale responses from earlier navigations
-      if (thisRequest !== requestId) return;
+        if (folderId !== null) {
+          queryParams.folder_id = folderId;
+        }
 
-      currentItems = response.items || [];
-    } catch (error) {
-      if (thisRequest !== requestId) return;
-      console.error("Error loading folder tree:", error);
+        if (folderPath) {
+          queryParams.folder_path = folderPath;
+        }
+
+        const response = await intric.client.fetch(
+          `/api/v1/integrations/${userIntegrationId}/sharepoint/tree/`,
+          {
+            method: "get",
+            params: {
+              query: queryParams
+            }
+          }
+        );
+
+        // Ignore stale responses from earlier navigations
+        if (thisRequest !== requestId) return;
+
+        currentItems = response.items || [];
+      } catch (error) {
+        if (thisRequest !== requestId) return;
+        console.error("Error loading folder tree:", error);
+      }
     }
-  });
+  );
 
   const handleNodeSelect = (item: TreeItem) => {
     onToggleSelect(item);
@@ -146,37 +148,41 @@
   });
 </script>
 
-<div class="flex flex-col gap-2 p-4">
+<div class="flex min-h-0 flex-col gap-2 overflow-hidden p-4">
   <!-- Breadcrumb -->
   {#if navigationStack.length > 1}
-    <nav class="flex items-center gap-0.5 text-sm flex-wrap min-h-[28px]">
+    <nav class="flex min-h-[28px] flex-wrap items-center gap-0.5 text-sm">
       {#each navigationStack as segment, i}
         {#if i > 0}
-          <IconChevronRight class="w-3 h-3 text-secondary flex-shrink-0" />
+          <IconChevronRight class="text-secondary h-3 w-3 flex-shrink-0" />
         {/if}
         {#if i < navigationStack.length - 1}
           <button
             type="button"
-            class="text-secondary hover:text-primary hover:underline px-1 py-0.5 rounded truncate max-w-[150px]"
+            class="text-secondary hover:text-primary max-w-[150px] truncate rounded px-1 py-0.5 hover:underline"
             onclick={() => navigateTo(i)}
           >
             {segment.name}
           </button>
         {:else}
-          <span class="text-primary font-medium px-1 py-0.5 truncate max-w-[200px]">{segment.name}</span>
+          <span class="text-primary max-w-[200px] truncate px-1 py-0.5 font-medium"
+            >{segment.name}</span
+          >
         {/if}
       {/each}
     </nav>
   {/if}
 
-  <div class="border border-default rounded-md overflow-y-auto max-h-96 bg-primary">
+  <div
+    class="border-default bg-primary max-h-[42vh] min-h-0 overflow-x-hidden overflow-y-auto rounded-md border"
+  >
     {#if loadFolders.isLoading && currentItems.length === 0}
-      <div class="flex items-center gap-2 px-4 py-8 text-secondary">
-        <IconLoadingSpinner class="animate-spin w-4 h-4" />
+      <div class="text-secondary flex items-center gap-2 px-4 py-8">
+        <IconLoadingSpinner class="h-4 w-4 animate-spin" />
         {m.loading_available_sites()}
       </div>
     {:else if currentItems.length === 0}
-      <div class="px-4 py-4 text-secondary text-sm">
+      <div class="text-secondary px-4 py-4 text-sm">
         {m.no_items()}
       </div>
     {:else}
@@ -184,24 +190,26 @@
         <!-- Import entire site row -->
         {#if navigationStack.length <= 1}
           <div
-            class="flex items-center gap-2 px-3 py-1.5 cursor-pointer text-left w-full border-b border-default transition-colors
-              {selectedItemKeySet.has(siteRootSelectionKey) ? 'bg-accent-dimmer border-accent' : 'hover:bg-hover-default'}"
+            class="border-default flex w-full cursor-pointer items-center gap-2 border-b px-3 py-1.5 text-left transition-colors
+              {selectedItemKeySet.has(siteRootSelectionKey)
+              ? 'bg-accent-dimmer border-accent'
+              : 'hover:bg-hover-default'}"
           >
             <div class="w-3.5"></div>
             <input
               type="checkbox"
-              class="h-4 w-4 accent-accent-default flex-shrink-0"
+              class="accent-accent-default h-4 w-4 flex-shrink-0"
               checked={selectedItemKeySet.has(siteRootSelectionKey)}
               onclick={handleImportEntireSiteCheckboxClick}
             />
             {#if isOneDrive}
-              <IconUploadCloud class="w-4 h-4 flex-shrink-0 text-secondary" />
+              <IconUploadCloud class="text-secondary h-4 w-4 flex-shrink-0" />
             {:else}
-              <IconWeb class="w-4 h-4 flex-shrink-0 text-secondary" />
+              <IconWeb class="text-secondary h-4 w-4 flex-shrink-0" />
             {/if}
             <button
               type="button"
-              class="text-sm font-medium text-left w-full"
+              class="w-full min-w-0 truncate text-left text-sm font-medium"
               onclick={handleImportEntireSite}
             >
               {isOneDrive ? m.import_entire_onedrive() : m.import_entire_site()}

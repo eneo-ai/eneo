@@ -118,6 +118,7 @@ class IntegrationPreviewData(BaseModel):
     type: str
     name: str
     url: str
+    category: Optional[str] = None
 
 
 class IntegrationPreviewDataList(BaseListModel[IntegrationPreviewData]):
