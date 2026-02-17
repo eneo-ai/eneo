@@ -29,7 +29,7 @@
 			"settings": {
 				"python.defaultInterpreterPath": "/workspace/backend/.venv/bin/python",
 				"python.pythonPath": "/workspace/backend/.venv/bin/python",
-				"python.terminal.activateEnvironment": true,
+				"python.terminal.activateEnvironment": false,
 				"[python]": {
 					"editor.defaultFormatter": "charliermarsh.ruff"
 				}
