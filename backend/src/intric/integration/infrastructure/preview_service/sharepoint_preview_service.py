@@ -177,7 +177,7 @@ class SharePointPreviewService(BasePreviewService):
             return categories
 
         try:
-            teams = await content_client.get_teams()
+            teams = await content_client.get_m365_groups()
         except Exception as e:
             logger.warning(
                 "Could not classify SharePoint sites by team membership/visibility: %s",
