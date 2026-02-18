@@ -1,6 +1,8 @@
 """Minimal adapter for tenant models using LiteLLM."""
 import base64
+import json
 import re
+import uuid
 from typing import TYPE_CHECKING, AsyncIterator
 
 import litellm
@@ -12,7 +14,11 @@ from litellm import (
     get_supported_openai_params,
 )
 
-from intric.ai_models.completion_models.completion_model import Completion, ResponseType
+from intric.ai_models.completion_models.completion_model import (
+    Completion,
+    ResponseType,
+    ToolCallMetadata,
+)
 from intric.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
 )
@@ -34,6 +40,8 @@ THINKING_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 if TYPE_CHECKING:
     from intric.ai_models.completion_models.completion_model import Context
     from intric.completion_models.domain.completion_model import CompletionModel
+    from intric.mcp_servers.infrastructure.proxy import MCPProxySession
+    from intric.mcp_servers.infrastructure.tool_approval import ToolApprovalManager
 
 
 class TenantModelAdapter(CompletionModelAdapter):
@@ -206,6 +214,27 @@ class TenantModelAdapter(CompletionModelAdapter):
             for func_def in context.function_definitions
         ]
 
+    def _merge_mcp_tools(
+        self,
+        intric_tools: list[dict],
+        mcp_proxy: "MCPProxySession | None",
+    ) -> list[dict]:
+        """Merge Intric built-in tools with MCP proxy tools.
+
+        Only includes MCP tools if the model supports tool calling.
+        Models without tool support (e.g. vLLM without --enable-auto-tool-choice)
+        will reject requests containing tools.
+        """
+        if not self.model.supports_tool_calling:
+            if mcp_proxy:
+                logger.info(
+                    f"[MCP] Skipping MCP tools for model '{self.model.name}' "
+                    f"(supports_tool_calling=False)"
+                )
+            return intric_tools
+        mcp_tools = mcp_proxy.get_tools_for_llm() if mcp_proxy else []
+        return intric_tools + mcp_tools
+
     def _create_messages_from_context(self, context: "Context") -> list[dict]:
         """
         Convert Intric context to OpenAI message format with vision support.
@@ -317,6 +346,10 @@ class TenantModelAdapter(CompletionModelAdapter):
 
             kwargs.update(model_kwargs_dict)
 
+        # Remove non-serializable params that must not reach litellm
+        for key in ("mcp_proxy", "require_tool_approval", "approval_manager"):
+            additional_kwargs.pop(key, None)
+
         # Merge with additional kwargs
         kwargs.update(additional_kwargs)
 
@@ -326,6 +359,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         self,
         context: "Context",
         model_kwargs: dict,
+        mcp_proxy: "MCPProxySession | None" = None,
         **kwargs,
     ) -> Completion:
         """
@@ -334,6 +368,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         Args:
             context: Conversation context with messages
             model_kwargs: Model parameters (temperature, etc.)
+            mcp_proxy: Optional MCP proxy session for tool execution
             **kwargs: Additional kwargs
 
         Returns:
@@ -349,10 +384,11 @@ class TenantModelAdapter(CompletionModelAdapter):
         # Convert messages to OpenAI format (with vision support)
         messages = self._create_messages_from_context(context)
 
-        # Add tools if function definitions are present
-        tools = self._build_tools_from_context(context)
-        if tools:
-            litellm_kwargs["tools"] = tools
+        # Build combined tools (Intric built-in + MCP)
+        intric_tools = self._build_tools_from_context(context)
+        all_tools = self._merge_mcp_tools(intric_tools, mcp_proxy)
+        if all_tools:
+            litellm_kwargs["tools"] = all_tools
 
         # Check which params will be dropped and log effective params
         dropped = self._get_dropped_params(litellm_kwargs)
@@ -379,17 +415,83 @@ class TenantModelAdapter(CompletionModelAdapter):
             completion = Completion()
             if response.choices and len(response.choices) > 0:
                 choice = response.choices[0]
+                msg = choice.message
 
                 # DEBUG: Log message details
-                logger.debug(f"[DEBUG] Message: {choice.message}")
-                logger.debug(f"[DEBUG] Message attrs: {dir(choice.message)}")
-                if hasattr(choice.message, "reasoning_content"):
-                    logger.debug(f"[DEBUG] reasoning_content: {choice.message.reasoning_content}")
+                logger.debug(f"[DEBUG] Message: {msg}")
+                if hasattr(msg, "reasoning_content"):
+                    logger.debug(f"[DEBUG] reasoning_content: {msg.reasoning_content}")
 
-                if hasattr(choice.message, "content"):
-                    content = choice.message.content
-                    # Strip thinking blocks for models like Qwen3
-                    completion.text = self._strip_thinking_content(content)
+                # Check if model wants to call MCP tools
+                if hasattr(msg, 'tool_calls') and msg.tool_calls and mcp_proxy:
+                    allowed_tools = mcp_proxy.get_allowed_tool_names()
+                    for tc in msg.tool_calls:
+                        if tc.function.name not in allowed_tools:
+                            raise OpenAIException(
+                                f"Unauthorized MCP tool call: {tc.function.name}"
+                            )
+
+                    # Add assistant message with tool calls to conversation
+                    messages.append({
+                        "role": "assistant",
+                        "content": msg.content,
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments,
+                                },
+                            }
+                            for tc in msg.tool_calls
+                        ],
+                    })
+
+                    # Execute tools via proxy
+                    proxy_calls = [
+                        (
+                            tc.function.name,
+                            json.loads(tc.function.arguments)
+                            if tc.function.arguments
+                            else {},
+                        )
+                        for tc in msg.tool_calls
+                    ]
+                    results = await mcp_proxy.call_tools_parallel(proxy_calls)
+
+                    # Add tool results to messages
+                    for tc, result in zip(msg.tool_calls, results):
+                        result_text = ""
+                        if result.get("content"):
+                            for ci in result["content"]:
+                                if ci.get("type") == "text":
+                                    result_text += ci.get("text", "")
+                        if result.get("is_error"):
+                            result_text = json.dumps(
+                                {"error": result_text or "Tool execution failed"}
+                            )
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": result_text,
+                        })
+
+                    # Follow-up completion without tools
+                    follow_up_kwargs = {
+                        k: v for k, v in litellm_kwargs.items() if k != "tools"
+                    }
+                    response = await litellm.acompletion(
+                        model=self.litellm_model,
+                        messages=messages,
+                        stream=False,
+                        drop_params=True,
+                        **follow_up_kwargs,
+                    )
+                    msg = response.choices[0].message
+
+                if hasattr(msg, "content") and msg.content:
+                    completion.text = self._strip_thinking_content(msg.content)
                 completion.stop = choice.finish_reason == "stop"
 
             logger.info(f"[TenantModelAdapter] {self.litellm_model}: Completion successful")
@@ -466,6 +568,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         self,
         context: "Context",
         model_kwargs: dict,
+        mcp_proxy: "MCPProxySession | None" = None,
         **kwargs,
     ) -> AsyncIterator:
         """
@@ -475,6 +578,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         Args:
             context: Conversation context with messages
             model_kwargs: Model parameters (temperature, etc.)
+            mcp_proxy: Optional MCP proxy session for tool execution
             **kwargs: Additional kwargs
 
         Returns:
@@ -494,10 +598,11 @@ class TenantModelAdapter(CompletionModelAdapter):
         # Convert messages to OpenAI format (with vision support)
         messages = self._create_messages_from_context(context)
 
-        # Add tools if function definitions are present
-        tools = self._build_tools_from_context(context)
-        if tools:
-            litellm_kwargs["tools"] = tools
+        # Build combined tools (Intric built-in + MCP)
+        intric_tools = self._build_tools_from_context(context)
+        all_tools = self._merge_mcp_tools(intric_tools, mcp_proxy)
+        if all_tools:
+            litellm_kwargs["tools"] = all_tools
 
         # Check which params will be dropped and log effective params
         dropped = self._get_dropped_params(litellm_kwargs)
@@ -521,6 +626,14 @@ class TenantModelAdapter(CompletionModelAdapter):
                 drop_params=True,
                 **litellm_kwargs,
             )
+
+            # Store context for MCP tool execution in iterate_stream
+            setattr(stream, '_eneo_context', {
+                'messages': messages,
+                'kwargs': litellm_kwargs,
+                'has_tools': bool(all_tools),
+                'mcp_proxy': mcp_proxy,
+            })
 
             logger.info(
                 f"[TenantModelAdapter] {self.litellm_model}: Stream connection created successfully"
@@ -598,16 +711,23 @@ class TenantModelAdapter(CompletionModelAdapter):
         self,
         stream: AsyncIterator,
         context: "Context" = None,
-        model_kwargs: dict = None
+        model_kwargs: dict = None,
+        require_tool_approval: bool = False,
+        approval_manager: "ToolApprovalManager | None" = None,
     ) -> AsyncIterator[Completion]:
         """
         Iterate streaming response from tenant model.
         Phase 2: Iterate pre-created stream inside EventSourceResponse.
 
+        Handles both thinking-block stripping (Qwen3) and MCP tool call
+        accumulation/execution with multi-turn loop support.
+
         Args:
             stream: Stream from prepare_streaming()
             context: Optional conversation context (for logging)
             model_kwargs: Optional model parameters (for logging)
+            require_tool_approval: Whether MCP tool calls need user approval
+            approval_manager: Manager for tool approval flow
 
         Yields:
             Completion: Chunks of completion (yields error events for mid-stream failures)
@@ -615,52 +735,79 @@ class TenantModelAdapter(CompletionModelAdapter):
         try:
             logger.info(f"[TenantModelAdapter] {self.litellm_model}: Starting stream iteration")
 
-            # Buffer for handling thinking blocks that span chunks
-            buffer = ""
-            inside_thinking = False
-            thinking_stripped = False
+            # Get MCP context stored by prepare_streaming
+            eneo_ctx = getattr(stream, '_eneo_context', None)
+            mcp_proxy = eneo_ctx.get('mcp_proxy') if eneo_ctx else None
 
-            async for chunk in stream:
-                # DEBUG: Log raw chunk to diagnose empty responses
-                logger.debug(f"[DEBUG] Raw chunk: {chunk}")
+            # Shared state for tool call accumulation across stream draining
+            class _StreamResult:
+                has_tool_calls = False
+                tool_calls_acc: dict = {}
 
-                if chunk.choices and len(chunk.choices) > 0:
+            result = _StreamResult()
+
+            async def _drain_stream(s, res):
+                """Drain a stream: yield text Completions, accumulate tool calls into res."""
+                buffer = ""
+                inside_thinking = False
+                thinking_stripped = False
+                res.has_tool_calls = False
+                res.tool_calls_acc = {}
+
+                async for chunk in s:
+                    logger.debug(f"[DEBUG] Raw chunk: {chunk}")
+
+                    if not (chunk.choices and len(chunk.choices) > 0):
+                        continue
+
                     delta = chunk.choices[0].delta
-
-                    # DEBUG: Log delta details
+                    finish_reason = chunk.choices[0].finish_reason
                     logger.debug(f"[DEBUG] Delta: {delta}")
 
+                    # Accumulate tool call deltas
+                    if delta and hasattr(delta, 'tool_calls') and delta.tool_calls:
+                        res.has_tool_calls = True
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+                            if idx not in res.tool_calls_acc:
+                                res.tool_calls_acc[idx] = {
+                                    'id': getattr(tc_delta, 'id', None),
+                                    'type': 'function',
+                                    'function': {'name': '', 'arguments': ''},
+                                }
+                            if getattr(tc_delta, 'id', None):
+                                res.tool_calls_acc[idx]['id'] = tc_delta.id
+                            if hasattr(tc_delta, 'function'):
+                                fn = tc_delta.function
+                                if getattr(fn, 'name', None):
+                                    res.tool_calls_acc[idx]['function']['name'] = fn.name
+                                if getattr(fn, 'arguments', None):
+                                    res.tool_calls_acc[idx]['function']['arguments'] += fn.arguments
+
+                    # Handle text content with thinking-block stripping
                     content = ""
                     if hasattr(delta, "content") and delta.content:
                         content = delta.content
 
-                    finish_reason = chunk.choices[0].finish_reason
-
-                    # Handle thinking blocks for Qwen3-style models
                     if content:
                         buffer += content
 
-                        # Check if we're entering a thinking block
                         if "<think>" in buffer and not inside_thinking:
                             inside_thinking = True
-                            # Keep content before <think>
                             pre_think = buffer.split("<think>")[0]
                             if pre_think.strip():
                                 yield Completion(text=pre_think)
                             buffer = buffer[buffer.index("<think>"):]
 
-                        # Check if thinking block is complete
                         if inside_thinking and "</think>" in buffer:
                             inside_thinking = False
                             thinking_stripped = True
-                            # Get content after </think>
                             post_think = buffer.split("</think>", 1)[1].lstrip()
                             buffer = post_think
                             if buffer:
                                 yield Completion(text=buffer)
                                 buffer = ""
 
-                        # If not in thinking block, yield content
                         if not inside_thinking and buffer and not thinking_stripped:
                             yield Completion(text=buffer)
                             buffer = ""
@@ -668,21 +815,176 @@ class TenantModelAdapter(CompletionModelAdapter):
                             yield Completion(text=buffer)
                             buffer = ""
 
-                    # Handle final chunk
+                    # Handle final chunk (flush buffer but don't yield stop yet)
                     if finish_reason:
-                        # Yield any remaining buffer (stripped of thinking if incomplete)
                         if buffer and not inside_thinking:
                             cleaned = self._strip_thinking_content(buffer)
                             if cleaned:
                                 yield Completion(text=cleaned)
-                        yield Completion(text="", stop=finish_reason == "stop")
+                        buffer = ""
+
+            # --- Drain initial stream ---
+            async for comp in _drain_stream(stream, result):
+                yield comp
+
+            # --- MCP tool call loop ---
+            if result.has_tool_calls and mcp_proxy and eneo_ctx and eneo_ctx.get('has_tools'):
+                messages = eneo_ctx['messages']
+                litellm_kwargs = eneo_ctx['kwargs']
+                allowed_tools = mcp_proxy.get_allowed_tool_names()
+
+                max_rounds = 10
+                tool_round = 0
+
+                while result.has_tool_calls and tool_round < max_rounds:
+                    tool_round += 1
+                    logger.info(f"[MCP] Tool round {tool_round}")
+
+                    # Reconstruct tool calls from accumulator
+                    tool_calls = [
+                        result.tool_calls_acc[idx]
+                        for idx in sorted(result.tool_calls_acc.keys())
+                    ]
+
+                    # Security validation
+                    for tc in tool_calls:
+                        name = tc['function']['name']
+                        if name not in allowed_tools:
+                            raise OpenAIException(f"Unauthorized MCP tool: {name}")
+
+                    # Build tool metadata for frontend
+                    tool_metadata = []
+                    for tc in tool_calls:
+                        name = tc['function']['name']
+                        try:
+                            args = json.loads(tc['function']['arguments']) if tc['function']['arguments'] else None
+                        except json.JSONDecodeError:
+                            args = None
+                        info = mcp_proxy.get_tool_info(name)
+                        if info:
+                            sname, tname = info
+                        elif "__" in name:
+                            sname, tname = name.split("__", 1)
+                        else:
+                            sname, tname = "", name
+                        tool_metadata.append(ToolCallMetadata(
+                            server_name=sname, tool_name=tname,
+                            arguments=args, tool_call_id=tc['id'],
+                        ))
+
+                    # Approval flow
+                    if require_tool_approval and approval_manager:
+                        approval_id = str(uuid.uuid4())
+                        tool_call_ids = [tc['id'] for tc in tool_calls]
+                        approval_manager.request_approval(approval_id, tool_call_ids)
+
+                        yield Completion(
+                            response_type=ResponseType.TOOL_APPROVAL_REQUIRED,
+                            tool_calls_metadata=tool_metadata,
+                            approval_id=approval_id,
+                        )
+
+                        decisions = await approval_manager.wait_for_approval(approval_id)
+                        approval_map = {d.tool_call_id: d.approved for d in decisions}
+
+                        yield Completion(
+                            response_type=ResponseType.TOOL_CALL,
+                            tool_calls_metadata=[
+                                ToolCallMetadata(
+                                    server_name=tm.server_name, tool_name=tm.tool_name,
+                                    arguments=tm.arguments, tool_call_id=tm.tool_call_id,
+                                    approved=approval_map.get(tm.tool_call_id, False),
+                                ) for tm in tool_metadata
+                            ],
+                        )
+
+                        approved_tcs = [tc for tc in tool_calls if approval_map.get(tc['id'], False)]
+                        denied_tcs = [tc for tc in tool_calls if not approval_map.get(tc['id'], False)]
+                    else:
+                        yield Completion(
+                            response_type=ResponseType.TOOL_CALL,
+                            tool_calls_metadata=tool_metadata,
+                        )
+                        approved_tcs = tool_calls
+                        denied_tcs = []
+
+                    # Add assistant message with tool calls to conversation
+                    messages.append({
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": tc['id'],
+                                "type": "function",
+                                "function": {
+                                    "name": tc['function']['name'],
+                                    "arguments": tc['function']['arguments'],
+                                },
+                            }
+                            for tc in tool_calls
+                        ],
+                    })
+
+                    # Execute approved tools
+                    if approved_tcs:
+                        proxy_calls = [
+                            (
+                                tc['function']['name'],
+                                json.loads(tc['function']['arguments'])
+                                if tc['function']['arguments']
+                                else {},
+                            )
+                            for tc in approved_tcs
+                        ]
+                        results = await mcp_proxy.call_tools_parallel(proxy_calls)
+                        for tc, res in zip(approved_tcs, results):
+                            text = ""
+                            if res.get("content"):
+                                for ci in res["content"]:
+                                    if ci.get("type") == "text":
+                                        text += ci.get("text", "")
+                            if res.get("is_error"):
+                                text = json.dumps({"error": text or "Tool execution failed"})
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc['id'],
+                                "content": text,
+                            })
+
+                    # Add denied tool results
+                    for tc in denied_tcs:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc['id'],
+                            "content": "Tool execution was denied by user.",
+                        })
+
+                    # Follow-up streaming request (keep tools for next round)
+                    follow_up = await litellm.acompletion(
+                        model=self.litellm_model,
+                        messages=messages,
+                        stream=True,
+                        drop_params=True,
+                        **litellm_kwargs,
+                    )
+
+                    # Drain follow-up stream
+                    async for comp in _drain_stream(follow_up, result):
+                        yield comp
+
+                if tool_round >= max_rounds:
+                    logger.warning(f"[MCP] Reached max tool rounds ({max_rounds})")
+
+            # Final stop
+            yield Completion(text="", stop=True)
 
             logger.info(f"[TenantModelAdapter] {self.litellm_model}: Stream iteration completed")
 
         except Exception as exc:
             # Mid-stream errors: yield error event instead of raising
             logger.error(
-                f"[TenantModelAdapter] {self.litellm_model}: Error during stream iteration: {exc}"
+                f"[TenantModelAdapter] {self.litellm_model}: Error during stream iteration: {exc}",
+                exc_info=True,
             )
             yield Completion(
                 text="",

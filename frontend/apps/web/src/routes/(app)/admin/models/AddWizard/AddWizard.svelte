@@ -52,6 +52,7 @@
       tokenLimit?: number;
       vision?: boolean;
       reasoning?: boolean;
+      supportsToolCalling?: boolean;
       family?: string;
       dimensions?: number;
       maxInput?: number;
@@ -268,6 +269,7 @@
             token_limit: model.tokenLimit ?? 128000,
             vision: model.vision ?? false,
             reasoning: model.reasoning ?? false,
+            supports_tool_calling: model.supportsToolCalling ?? false,
             hosting: model.hosting ?? "swe",
             is_active: true
           });

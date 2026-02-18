@@ -27,6 +27,8 @@ if TYPE_CHECKING:
 class ResponseType(str, Enum):
     TEXT = "text"
     INTRIC_EVENT = "intric_event"
+    TOOL_CALL = "tool_call"
+    TOOL_APPROVAL_REQUIRED = "tool_approval_required"
     FILES = "image"
     FIRST_CHUNK = "first_chunk"
     ERROR = "error"
@@ -46,11 +48,23 @@ class FunctionCall:
 
 
 @dataclass
+class ToolCallMetadata:
+    """Metadata for MCP tool calls to be rendered by frontend."""
+    server_name: str
+    tool_name: str
+    arguments: Optional[dict] = None  # The input values provided to the tool
+    tool_call_id: Optional[str] = None  # The tool call ID for approval flow
+    approved: Optional[bool] = None  # True=approved, False=denied, None=pending/auto
+
+
+@dataclass
 class Completion:
     reasoning_token_count: Optional[int] = 0
     text: Optional[str] = None
     reference_chunks: Optional[list[InfoBlobChunkInDBWithScore]] = None
     tool_call: Optional[FunctionCall] = None
+    tool_calls_metadata: Optional[list[ToolCallMetadata]] = None  # For TOOL_CALL events
+    approval_id: Optional[str] = None  # For TOOL_APPROVAL_REQUIRED events
     image_data: Optional[bytes] = None
     response_type: Optional[ResponseType] = None
     generated_file: Optional[File] = None
@@ -76,6 +90,7 @@ class CompletionModelBase(BaseModel):
     org: Optional[Union[Orgs, str]] = None
     vision: bool
     reasoning: bool
+    supports_tool_calling: bool = False
     base_url: Optional[str] = None
     litellm_model_name: Optional[str] = None
 
@@ -135,6 +150,7 @@ class CompletionModelPublic(CompletionModel):
             org=completion_model.org,
             vision=completion_model.vision,
             reasoning=completion_model.reasoning,
+            supports_tool_calling=completion_model.supports_tool_calling,
             base_url=completion_model.base_url,
             litellm_model_name=completion_model.litellm_model_name,
             is_org_enabled=completion_model.is_org_enabled,

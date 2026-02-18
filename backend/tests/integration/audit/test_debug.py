@@ -241,8 +241,8 @@ async def test_debug_container_dependencies(client, admin_user_api_key):
     async def test_custom_header(api_key: str = Security(_get_api_key_from_header)):
         return {"api_key": api_key[:20] if api_key else None}
     
-    from httpx import AsyncClient
-    async with AsyncClient(app=test_app, base_url="http://test") as test_client:
+    from httpx import ASGITransport, AsyncClient
+    async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as test_client:
         # Test API_KEY_HEADER extraction
         response1 = await test_client.get(
             "/test-api-key-header",
@@ -277,8 +277,8 @@ async def test_debug_full_container_flow(client, admin_user_api_key):
         user = container.user()
         return {"user_id": str(user.id), "email": user.email}
     
-    from httpx import AsyncClient
-    async with AsyncClient(app=test_app, base_url="http://test") as test_client:
+    from httpx import ASGITransport, AsyncClient
+    async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as test_client:
         response = await test_client.post(
             "/test-audit-style",
             headers={"X-API-Key": admin_user_api_key.key}

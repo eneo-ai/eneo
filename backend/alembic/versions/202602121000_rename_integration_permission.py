@@ -1,7 +1,7 @@
 """rename integration_knowledge_list permission to integrations
 
 Revision ID: rename_integration_perm
-Revises: add_integration_wrappers
+Revises: cca4dea4841f
 Create Date: 2026-02-12 10:00:00.000000
 
 """
@@ -9,7 +9,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "rename_integration_perm"
-down_revision = "add_integration_wrappers"
+down_revision = "cca4dea4841f"
 branch_labels = None
 depends_on = None
 

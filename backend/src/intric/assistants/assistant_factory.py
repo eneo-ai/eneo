@@ -10,6 +10,7 @@ from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.prompts_table import Prompts
 from intric.files.file_models import File
 from intric.main.logging import get_logger
+from intric.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 from intric.prompts.prompt_factory import PromptFactory
 from intric.users.user import UserInDB, UserSparse
 
@@ -132,6 +133,7 @@ class AssistantFactory:
             websites=[],
             collections=[],
             integration_knowledge_list=[],
+            mcp_servers=[],
             created_at=assistant_in_db.created_at,
             updated_at=assistant_in_db.updated_at,
             published=assistant_in_db.published,
@@ -183,6 +185,14 @@ class AssistantFactory:
             if integration_knowledge.id in integration_knowledge_ids
         ]
 
+        # Use filtered MCP servers if available (set by space repo), otherwise map from DB
+        _mcp_server_entities = getattr(assistant_in_db, '_mcp_server_entities', None)
+        if _mcp_server_entities is not None:
+            mcp_servers = _mcp_server_entities
+        else:
+            # Fallback: Map MCP servers from database to domain entities (without filtering)
+            mcp_servers = MCPServerMapper.to_entities(assistant_in_db.mcp_servers)
+
         completion_model_kwargs = ModelKwargs.model_validate(
             assistant_in_db.completion_model_kwargs or {}
         )
@@ -210,6 +220,7 @@ class AssistantFactory:
             websites=assistant_websites,
             collections=collections,
             integration_knowledge_list=integration_knowledge_list,
+            mcp_servers=mcp_servers,
             created_at=assistant_in_db.created_at,
             updated_at=assistant_in_db.updated_at,
             published=assistant_in_db.published,

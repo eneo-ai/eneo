@@ -27,6 +27,14 @@
       });
     }
 
+    if ("supports_tool_calling" in model && model.supports_tool_calling) {
+      labels.push({
+        tooltip: m.model_tooltip_tool_calling(),
+        label: m.model_label_tool_calling(),
+        color: "blue"
+      });
+    }
+
     if (model.open_source) {
       labels.push({
         tooltip: m.model_tooltip_open_source(),

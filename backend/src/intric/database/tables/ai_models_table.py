@@ -29,6 +29,7 @@ class CompletionModels(BasePublic):
     org: Mapped[Optional[str]] = mapped_column()
     vision: Mapped[bool] = mapped_column(server_default="False")
     reasoning: Mapped[bool] = mapped_column(server_default="False")
+    supports_tool_calling: Mapped[bool] = mapped_column(server_default="False")
     base_url: Mapped[Optional[str]] = mapped_column()
     litellm_model_name: Mapped[Optional[str]] = mapped_column()
 

@@ -22,6 +22,9 @@ from intric.files.text import TextMimeTypes
 from intric.integration.presentation.assemblers.integration_knowledge_assembler import (
     IntegrationKnowledgeAssembler,
 )
+from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
+    MCPServerAssembler,
+)
 from intric.prompts.api.prompt_assembler import PromptAssembler
 from intric.questions.question import ToolAssistant, UseTools
 from intric.users.user import UserInDB
@@ -125,6 +128,11 @@ class AssistantAssembler:
             groups=groups,
             websites=[WebsitePublic.from_domain(website) for website in assistant.websites],
             integration_knowledge_list=integration_knowledge_list,
+            mcp_servers=[
+                MCPServerAssembler.to_dict_with_tools(server)
+                for server in assistant.mcp_servers
+            ],
+            mcp_tools=[],  # Initialize as empty - frontend will track changes from current state
             completion_model=completion_model,
             completion_model_kwargs=assistant.completion_model_kwargs,
             logging_enabled=assistant.logging_enabled,

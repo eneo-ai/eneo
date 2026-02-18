@@ -62,6 +62,7 @@
     tokenLimit?: number;
     vision?: boolean;
     reasoning?: boolean;
+    supportsToolCalling?: boolean;
     family?: string;
     dimensions?: number;
     maxInput?: number;
@@ -165,6 +166,7 @@
       currentModel.tokenLimit = info.max_input_tokens ?? 128000;
       currentModel.vision = info.supports_vision ?? false;
       currentModel.reasoning = info.supports_reasoning ?? false;
+      currentModel.supportsToolCalling = info.supports_function_calling ?? false;
     } else if (modelType === "embedding") {
       currentModel.dimensions = info.output_vector_size;
       currentModel.maxInput = info.max_input_tokens;
@@ -181,6 +183,7 @@
       tokenLimit: 128000,
       vision: false,
       reasoning: false,
+      supportsToolCalling: false,
       family: modelType === "embedding" ? "openai" : (providerType || "openai"),
       dimensions: undefined as number | undefined,
       maxInput: undefined as number | undefined,
@@ -242,6 +245,7 @@
       tokenLimit: suggestion.tokenLimit ?? 128000,
       vision: suggestion.vision ?? false,
       reasoning: suggestion.reasoning ?? false,
+      supportsToolCalling: suggestion.supportsToolCalling ?? false,
       family: modelType === "embedding" ? "openai" : (providerType || "openai"),
       dimensions: undefined,
       maxInput: undefined,
@@ -451,6 +455,18 @@
             <span class="flex items-center gap-1">
               {m.reasoning_support()}
               <HelpTooltip text={m.reasoning_help()} />
+            </span>
+          </label>
+
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              bind:checked={currentModel.supportsToolCalling}
+              class="rounded accent-accent-default h-4 w-4"
+            />
+            <span class="flex items-center gap-1">
+              {m.tool_calling_support()}
+              <HelpTooltip text={m.tool_calling_help()} />
             </span>
           </label>
         </div>

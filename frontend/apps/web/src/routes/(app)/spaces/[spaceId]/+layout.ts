@@ -8,6 +8,9 @@ import type { LayoutLoad } from "./$types";
 import type { Space } from "@intric/intric-js";
 
 export const load: LayoutLoad = async (event) => {
+  // Register dependency for targeted invalidation when space data changes
+  event.depends('spaces:data');
+
   const { intric, user, currentSpace: parentSpace, organizationSpace, loadedAt } = await event.parent();
   const spaceId = event.params.spaceId;
 

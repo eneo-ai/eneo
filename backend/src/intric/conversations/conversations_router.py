@@ -2,10 +2,14 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 from intric.assistants.api.assistant_protocol import to_conversation_response
 from intric.conversations.conversation_models import ConversationRequest
+from intric.mcp_servers.infrastructure.tool_approval import (
+    ToolApprovalDecision,
+    get_approval_manager,
+)
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.container.container import Container
 from intric.main.models import CursorPaginatedResponse
@@ -85,6 +89,7 @@ async def chat(
         tool_assistant_id=tool_assistant_id,
         version=version,
         use_web_search=request.use_web_search,
+        require_tool_approval=request.require_tool_approval,
     )
 
     return await to_conversation_response(
@@ -231,3 +236,32 @@ async def set_title_of_conversation(
     conversation_service = container.conversation_service()
     session = await conversation_service.set_title_of_conversation(session_id)
     return to_session_public(session)
+
+
+@router.post(
+    "/approve-tools/",
+    responses=responses.get_responses([400, 404]),
+)
+async def approve_tools(
+    approval_id: str = Query(..., description="The approval ID from the tool_approval_required event"),
+    decisions: list[ToolApprovalDecision] = [],
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Submit approval decisions for pending tool calls.
+
+    When a chat request is made with require_tool_approval=true, the stream will emit
+    a tool_approval_required event with an approval_id and list of pending tools.
+    Use this endpoint to approve or reject each tool call.
+
+    The decisions list should contain one entry per tool_call_id from the event.
+    If a tool_call_id is omitted, it will be treated as rejected.
+    """
+    approval_manager = get_approval_manager()
+    success = approval_manager.submit_decision(approval_id, decisions)
+
+    if not success:
+        raise HTTPException(
+            status_code=404, detail="Approval request not found or expired"
+        )
+
+    return {"status": "ok"}

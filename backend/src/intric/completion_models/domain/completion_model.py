@@ -43,6 +43,7 @@ class CompletionModel(AIModel):
         is_org_enabled: bool,
         is_org_default: bool,
         reasoning: bool,
+        supports_tool_calling: bool = False,
         base_url: Optional[str] = None,
         litellm_model_name: Optional[str] = None,
         security_classification: Optional[SecurityClassification] = None,
@@ -75,6 +76,7 @@ class CompletionModel(AIModel):
         self.is_org_default = is_org_default
         self.reasoning = reasoning
         self.vision = vision
+        self.supports_tool_calling = supports_tool_calling
         self.token_limit = token_limit
         self.deployment_name = deployment_name
         self.nr_billion_parameters = nr_billion_parameters
@@ -123,6 +125,7 @@ class CompletionModel(AIModel):
             is_org_enabled=completion_model_db.is_enabled,
             is_org_default=completion_model_db.is_default,
             reasoning=completion_model_db.reasoning,
+            supports_tool_calling=completion_model_db.supports_tool_calling,
             base_url=completion_model_db.base_url,
             litellm_model_name=completion_model_db.litellm_model_name,
             security_classification=SecurityClassification.to_domain(

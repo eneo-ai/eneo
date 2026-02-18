@@ -101,7 +101,20 @@ export namespace SSE {
   export type FirstChunk = Omit<components["schemas"]["SSEFirstChunk"], "$defs">;
   export type Files = Omit<components["schemas"]["SSEFiles"], "$defs">;
   export type Intric = Omit<components["schemas"]["SSEIntricEvent"], "$defs">;
-  export type Event = Text | FirstChunk | Files | Intric;
+  export type ToolCall = Omit<components["schemas"]["SSEToolCall"], "$defs">;
+  export type ToolApprovalRequired = {
+    session_id: string;
+    intric_event_type: "tool_approval_required";
+    approval_id: string;
+    tools: Array<{
+      server_name: string;
+      tool_name: string;
+      arguments?: Record<string, unknown>;
+      tool_call_id?: string;
+    }>;
+  };
+  export type Error = Omit<components["schemas"]["SSEError"], "$defs">;
+  export type Event = Text | FirstChunk | Files | Intric | ToolCall | ToolApprovalRequired | Error;
 }
 
 export type UserTokenUsageSummary = components["schemas"]["UserTokenUsageSummary"];

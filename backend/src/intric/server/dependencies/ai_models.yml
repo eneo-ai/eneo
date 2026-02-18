@@ -1,0 +1,469 @@
+# =============================================================================
+# AI MODELS CONFIGURATION
+# =============================================================================
+#
+# CRITICAL WARNING: The 'name' field is used to SYNC models between this file and the database
+#
+# ⚠️  CHANGING OR REMOVING A MODEL'S 'name' WILL ORPHAN EXISTING DATA ⚠️
+#
+# What happens when you change/remove a model's 'name':
+# 1. The old model is DELETED from the database (CASCADE DELETE)
+# 2. All references (assistants, groups, collections, etc.) lose their model connection
+# 3. If you re-add the model with the same name, a NEW database entry is created with a different UUID
+# 4. Previously orphaned data CANNOT automatically reconnect to the new model entry
+# 5. You lose the connection between historical data and the model
+#
+# SAFE PRACTICES:
+# ✅ For completion models: Change 'nickname' for display purposes
+# ✅ Add new models with new 'name' values
+# ✅ Modify other fields (description, token_limit, etc.)
+# ✅ Set is_deprecated: true instead of removing models
+#
+# UNSAFE PRACTICES:
+# ❌ Never change the 'name' of an existing model
+# ❌ Never remove models that are referenced in the system
+# ❌ For embedding models: Extra caution needed (no 'nickname' field exists)
+#
+# EMBEDDING MODELS SPECIAL WARNING:
+# Embedding models only have a 'name' field (no 'nickname'), so ANY change
+# to the 'name' field will orphan all existing embeddings, collections, and
+# groups using that model. Consider marking models as deprecated instead.
+#
+# EXAMPLES OF SAFE CHANGES:
+# ✅ nickname: 'GPT-4' → nickname: 'GPT-4 Turbo' (completion models only)
+# ✅ description: 'Old description' → description: 'New description'
+# ✅ token_limit: 100000 → token_limit: 128000
+# ✅ is_deprecated: false → is_deprecated: true
+# ✅ Adding new models with unique 'name' values
+#
+# EXAMPLES OF UNSAFE CHANGES:
+# ❌ name: 'gpt-4-turbo' → name: 'gpt-4-turbo-preview' (orphans all existing references)
+# ❌ Removing entire model entries (assistants/groups lose their model connection)
+# ❌ name: 'text-embedding-3-small' → name: 'text-embedding-small' (orphans all embeddings)
+#
+# If you accidentally change a model name and need to rollback:
+# 1. Immediately revert the 'name' to its original value
+# 2. Restart the server to reload models from this file
+# 3. Check logs for any reference errors that may need manual fixing
+#
+# =============================================================================
+
+completion_models:
+  # NOTE: Each 'name' field below is used to SYNC with database - DO NOT CHANGE
+  # Changing/removing a name will orphan all existing references (assistants, etc.)
+  # Use 'nickname' field to change display names safely
+
+  - name: 'gpt-4-turbo'  # ⚠️ SYNC KEY - Never change this value
+    nickname: 'GPT-4'
+    family: 'openai'
+    token_limit: 128000
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'usa'
+    description: OpenAI's advanced GPT-4 model with improved performance and a large 128K token context window.
+    org: OpenAI
+    vision: true
+    reasoning: false
+
+  - name: 'gpt-3.5-turbo'
+    nickname: 'ChatGPT'
+    family: 'openai'
+    token_limit: 16385
+    stability: 'stable'
+    is_deprecated: false
+    hosting: 'usa'
+    description: OpenAI's efficient and cost-effective model optimized for chat, with a 16,385-token context window and recent improvements in accuracy and functionality.
+    org: OpenAI
+    vision: false
+    reasoning: false
+
+  - name: 'o3-mini'
+    nickname: 'o3-mini'
+    family: 'openai'
+    token_limit: 200000
+    stability: 'stable'
+    is_deprecated: false
+    hosting: 'usa'
+    description: OpenAI's compact reasoning model designed for efficient processing of complex tasks.
+    org: OpenAI
+    vision: false
+    reasoning: true
+
+  - name: 'mistralai/Mixtral-8x7B-Instruct-v0.1'
+    nickname: 'Mixtral'
+    family: 'mistral'
+    token_limit: 16384
+    is_deprecated: true
+    stability: 'experimental'
+    hosting: 'eu'
+    description: Mistral AI's innovative Mixture of Experts model with 8 experts, each containing 7 billion parameters, offering efficient scaling and processing.
+    vision: false
+    reasoning: false
+
+  - name: 'Qwen/Qwen1.5-14B-Chat'
+    nickname: 'Qwen'
+    family: 'vllm'
+    token_limit: 32000
+    nr_billion_parameters: 14
+    hf_link: 'https://huggingface.co/Qwen/Qwen1.5-14B-Chat'
+    is_deprecated: true
+    stability: 'experimental'
+    hosting: 'eu'
+    description: Alibaba's advanced 14B parameter model, part of the Qwen2.5 series, designed for enhanced performance in natural language processing tasks.
+    vision: false
+    reasoning: false
+
+  - name: 'meta-llama/Meta-Llama-3-8B-Instruct'
+    nickname: 'Llama 3'
+    family: 'vllm'
+    token_limit: 8192
+    is_deprecated: true
+    stability: 'experimental'
+    hosting: 'eu'
+    open_source: true
+    nr_billion_parameters: 8
+    hf_link: 'https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct'
+    description: Meta's compact 8B parameter variant of Llama 3, offering quick processing but with a limited context size of 8,192 tokens.
+    org: Meta
+    vision: false
+    reasoning: false
+
+  - name: 'meta-llama/Meta-Llama-3.1-8B-Instruct'
+    nickname: 'Llama 3.1'
+    family: 'vllm'
+    token_limit: 128000
+    is_deprecated: true
+    stability: 'experimental'
+    hosting: 'eu'
+    open_source: true
+    nr_billion_parameters: 8
+    hf_link: 'https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct'
+    description: An updated version of Meta's Llama 3 with 8B parameters, featuring an impressive 128K token context window while remaining open-source.
+    org: Meta
+    vision: false
+    reasoning: false
+
+  - name: 'gpt-4o'
+    nickname: 'GPT-4o'
+    family: 'openai'
+    token_limit: 128000
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'usa'
+    description: OpenAI's latest multimodal model, GPT-4 Omni, capable of processing text, audio, and images with enhanced interactivity and emotion recognition.
+    org: OpenAI
+    vision: true
+    reasoning: false
+    litellm_model_name: openai/gpt-4o
+
+  - name: 'gpt-4o-mini'
+    nickname: 'GPT-4o mini'
+    family: 'openai'
+    token_limit: 128000
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'usa'
+    description: A more compact version of OpenAI's GPT-4 Omni, offering faster processing while maintaining advanced capabilities.
+    org: OpenAI
+    vision: true
+    reasoning: false
+
+  - name: 'claude-3-opus-latest'
+    nickname: 'Claude 3 Opus'
+    family: 'claude'
+    token_limit: 200000
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'usa'
+    description: Anthropic's most advanced model in the Claude 3 series, featuring high capability and a large 200K token context window.
+    org: Anthropic
+    vision: true
+    reasoning: false
+
+  - name: 'claude-3-sonnet-20240229'
+    nickname: 'Claude 3 Sonnet'
+    family: 'claude'
+    token_limit: 200000
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'usa'
+    description: Anthropic's balanced model in the Claude 3 series, offering a good mix of speed and intelligence with a 200K token context window.
+    org: Anthropic
+    vision: true
+    reasoning: false
+
+  - name: 'claude-3-haiku-20240307'
+    nickname: 'Claude 3 Haiku'
+    family: 'claude'
+    token_limit: 200000
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'usa'
+    description: Anthropic's compact and efficient model in the Claude 3 series, designed for quick responses while maintaining a 200K token context window.
+    org: Anthropic
+    vision: true
+    reasoning: false
+
+  - name: 'claude-3-5-sonnet-latest'
+    nickname: 'Claude 3.5 Sonnet'
+    family: 'claude'
+    token_limit: 200000
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'usa'
+    description: Anthropic's updated Claude 3.5 Sonnet model, offering improved performance while maintaining the speed of its predecessor and a 200K token context window.
+    org: Anthropic
+    vision: true
+    reasoning: false
+
+  - name: 'claude-3-7-sonnet-latest'
+    nickname: 'Claude 3.7 Sonnet'
+    family: 'claude'
+    token_limit: 200000
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'usa'
+    description: Anthropic's most recent Claude model, featuring enhanced reasoning capabilities and performance improvements over previous versions.
+    org: Anthropic
+    vision: true
+    reasoning: false
+
+  - name: 'gpt-4-azure'
+    nickname: 'GPT-4 (Azure)'
+    family: 'azure'
+    token_limit: 128000
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'swe'
+    deployment_name: 'gpt-4'
+    description: Microsoft Azure's hosted version of OpenAI's GPT-4 model, offering the same capabilities with 128K token context window.
+    org: Microsoft
+    vision: true
+    reasoning: false
+
+  - name: 'gpt-4o-azure'
+    nickname: 'GPT-4o (Azure)'
+    family: 'azure'
+    token_limit: 128000
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'swe'
+    deployment_name: 'gpt-4o-2'
+    description: Microsoft Azure's hosted version of OpenAI's latest GPT-4 Omni model, providing multimodal capabilities.
+    org: Microsoft
+    vision: true
+    reasoning: false
+
+  - name: 'gpt-4o-mini-azure'
+    nickname: 'GPT-4o mini (Azure)'
+    family: 'azure'
+    token_limit: 128000
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'swe'
+    deployment_name: 'gpt-4o-mini'
+    description: Microsoft Azure's hosted version of the compact GPT-4 Omni model, offering faster processing with advanced capabilities.
+    org: Microsoft
+    vision: true
+    reasoning: false
+
+  - name: 'o3-mini-azure'
+    nickname: 'o3-mini (Azure)'
+    family: 'azure'
+    token_limit: 200000
+    stability: 'stable'
+    is_deprecated: false
+    hosting: 'swe'
+    deployment_name: 'o3-mini'
+    description: Microsoft Azure's hosted version of OpenAI's compact reasoning model, designed for efficient processing of complex tasks.
+    org: Microsoft
+    vision: false
+    reasoning: true
+
+  - name: 'gpt-5-azure'
+    nickname: 'GPT-5 (Azure)'
+    family: 'azure'
+    token_limit: 400000
+    stability: 'experimental'
+    is_deprecated: false
+    hosting: 'swe'
+    deployment_name: 'gpt-5'
+    litellm_model_name: 'azure/gpt-5'
+    description: Next-generation GPT-5 model with advanced reasoning and multimodal capabilities via LiteLLM.
+    org: Microsoft
+    vision: true
+    reasoning: true
+
+  - name: 'gpt-5-mini-azure'
+    nickname: 'GPT-5 mini (Azure)'
+    family: 'azure'
+    token_limit: 400000
+    stability: 'experimental'
+    is_deprecated: false
+    hosting: 'swe'
+    deployment_name: 'gpt-5-mini'
+    litellm_model_name: 'azure/gpt-5-mini'
+    description: Compact version of GPT-5 model optimized for faster processing while maintaining advanced reasoning capabilities via Azure.
+    org: Microsoft
+    vision: true
+    reasoning: true
+
+  - name: 'gpt-5-nano-azure'
+    nickname: 'GPT-5 nano (Azure)'
+    family: 'azure'
+    token_limit: 400000
+    stability: 'experimental'
+    is_deprecated: false
+    hosting: 'swe'
+    deployment_name: 'gpt-5-nano'
+    litellm_model_name: 'azure/gpt-5-nano'
+    description: Ultra-compact variant of GPT-5 optimized for maximum efficiency while maintaining reasoning capabilities via Azure.
+    org: Microsoft
+    vision: true
+    reasoning: true
+
+  # GDM.se - Swedish AI provider
+  - name: 'gemma3-27b-it'
+    nickname: 'Gemma 3 27B'
+    family: 'openai'
+    token_limit: 128000
+    stability: 'stable'
+    is_deprecated: false
+    hosting: 'swe'
+    litellm_model_name: 'gdm/gemma3-27b-it'
+    description: Google's Gemma 3 27B instruction-tuned model, hosted by GDM in Sweden (ai.gdm.se).
+    org: GDM
+    vision: false
+    reasoning: false
+
+  - name: 'claude-haiku-4-5-20251001'
+    nickname: 'Claude-haiku-4-5'
+    family: 'claude'
+    token_limit: 200000
+    stability: 'experimental'
+    is_deprecated: false
+    hosting: 'usa'
+    deployment_name: 'claude-haiku-4-5'
+    litellm_model_name: 'anthropic/claude-haiku-4-5-20251001'
+    description: Ultra-efficient Claude Haiku 4.5 model designed for fast responses and strong reasoning within long contexts.
+    org: Anthropic
+    vision: true
+    reasoning: true
+
+  - name: 'Meta-Llama-3_3-70B-Instruct'
+    nickname: 'Llama 3.3'
+    family: 'ovhcloud'
+    token_limit: 128000
+    stability: 'stable'
+    is_deprecated: false
+    hosting: 'eu'
+    description: Meta's latest 70B parameter Llama model, featuring improved performance across various benchmarks and a 128K token context window.
+    org: Meta
+    vision: false
+    reasoning: false
+    base_url: https://llama-3-3-70b-instruct.endpoints.kepler.ai.cloud.ovh.net/api/openai_compat/v1
+    open_source: true
+    nr_billion_parameters: 70
+    hf_link: 'https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct'
+
+  - name: 'mistral-large-latest'
+    nickname: 'Mistral Large'
+    family: 'mistral'
+    token_limit: 131000
+    stability: 'stable'
+    is_deprecated: false
+    hosting: 'eu'
+    description: "Mistral's top-tier reasoning model for high-complexity tasks, latest version released November 2024."
+    org: Mistral
+    vision: false
+    reasoning: false
+    open_source: false
+
+  - name: 'google/gemma-3-27b-it'
+    nickname: 'Gemma 3'
+    family: 'vllm'
+    token_limit: 128000
+    stability: 'experimental'
+    is_deprecated: false
+    hosting: 'eu'
+    description: "Google's powerful instruct-tuned 27B parameter model from the Gemma 3 family"
+    open_source: true
+    reasoning: false
+    nr_billion_parameters: 27
+    hf_link: 'https://huggingface.co/google/gemma-3-27b-it'
+    org: Google
+    vision: false
+
+
+embedding_models:
+  # ⚠️ CRITICAL: Embedding models have NO 'nickname' field!
+  # The 'name' field is BOTH the sync key AND display name
+  # Changing/removing will orphan all collections, groups, and embeddings!
+  #
+  # max_batch_size (optional, default 32)
+  #   Controls how many chunks are grouped into a single embedding API request.
+  #   Tune per provider to respect API limits (e.g., Azure often requires <=16).
+
+  - name: 'text-embedding-3-small'  # ⚠️ SYNC KEY + DISPLAY NAME - NEVER CHANGE
+    family: 'openai'
+    open_source: false
+    dimensions: 512
+    max_input: 8191
+    max_batch_size: 32
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'usa'
+    description: OpenAI's latest embedding model, offering improved performance with 512 dimensions and support for up to 8,191 tokens.
+    org: OpenAI
+
+  - name: 'text-embedding-ada-002'
+    family: 'openai'
+    open_source: false
+    max_input: 8191
+    max_batch_size: 32
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'usa'
+    description: OpenAI's previous generation embedding model, still widely used and supported.
+    org: OpenAI
+
+  # Previously hosted via Intric (gpu2.intric.ai), now served for EU compliance via Berget.ai hosting
+  - name: 'multilingual-e5-large'
+    family: 'e5'
+    open_source: true
+    max_input: 1400  # Model has 512 token limit; ~1400 chars = ~400 tokens (conservative for multilingual)
+    max_batch_size: 32
+    is_deprecated: false
+    stability: 'experimental'
+    hosting: 'swe'
+    hf_link: 'https://huggingface.co/intfloat/multilingual-e5-large'
+    description: Microsoft's E5 multilingual embedding model hosted by Berget.ai in Sweden for EU compliance.
+    org: Berget
+    litellm_model_name: 'berget/intfloat/multilingual-e5-large'
+
+  # GDM.se - Swedish AI provider
+  - name: 'multilingual-e5-large-instruct'
+    family: 'e5'
+    open_source: true
+    max_input: 1400  # Per-item character limit (~512 tokens with margin for multilingual text)
+                     # Note: Batching uses count-based strategy (default 32 items/batch)
+    max_batch_size: 32
+    is_deprecated: false
+    stability: 'experimental'
+    hosting: 'swe'
+    description: GDM's E5 multilingual embedding model with instruction tuning, hosted in Sweden (ai.gdm.se).
+    org: GDM
+    litellm_model_name: 'gdm/multilingual-e5-large-instruct'
+
+  - name: 'text-embedding-3-large-azure'
+    family: 'openai'
+    litellm_model_name: 'azure/text-embedding-3-large'
+    open_source: false
+    dimensions: 3072
+    max_input: 8191
+    max_batch_size: 16
+    is_deprecated: false
+    stability: 'stable'
+    hosting: 'swe'
+    description: Microsoft Azure's hosted version of OpenAI's text-embedding-3-large model, offering high-dimensional embeddings via Azure.
+    org: Microsoft

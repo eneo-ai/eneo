@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel
 
@@ -9,7 +9,7 @@ def streaming_response(
     model: Optional[BaseModel] = None,
     response_codes: list[int] = None,
     models: list[BaseModel] = None,
-):
+) -> dict[int | str, Any]:
     """Define a streaming response with Server-Sent Events.
 
     Args:
@@ -18,7 +18,7 @@ def streaming_response(
         models: List of models that can be returned in the stream
     """
     # Initialize schema
-    schema = {}
+    schema: dict[str, Any] = {}
 
     # Handle different input formats for backward compatibility
     if models:
@@ -31,7 +31,7 @@ def streaming_response(
         # If only model is provided (backwards compatibility)
         schema = model.model_json_schema(ref_template="#/components/schemas/{model}")
 
-    streaming = {200: {"content": {"text/event-stream": {"schema": schema}}}}
+    streaming: dict[int | str, Any] = {200: {"content": {"text/event-stream": {"schema": schema}}}}
 
     if response_codes is not None:
         codes = get_responses(response_codes)
@@ -40,5 +40,5 @@ def streaming_response(
     return streaming
 
 
-def get_responses(response_codes: list[int]):
+def get_responses(response_codes: list[int]) -> dict[int | str, dict[str, Any]]:
     return {code: {"model": GeneralError} for code in response_codes}
