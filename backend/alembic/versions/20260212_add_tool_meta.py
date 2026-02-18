@@ -1,7 +1,7 @@
 """add_meta_to_mcp_server_tools
 
 Revision ID: 20260212_add_tool_meta
-Revises: cca4dea4841f
+Revises: rename_integration_perm
 Create Date: 2026-02-12 10:00:00.000000
 """
 
@@ -12,7 +12,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "20260212_add_tool_meta"
-down_revision = "cca4dea4841f"
+down_revision = "rename_integration_perm"
 branch_labels = None
 depends_on = None
 
