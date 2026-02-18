@@ -31,9 +31,13 @@
     selectedMCPServers: Array<any>;
     /** Optional: MCP tool settings to track tool-level overrides */
     selectedMCPTools?: Array<{ tool_id: string; is_enabled: boolean }>;
+    /** Optional: Currently selected completion model to check tool calling support */
+    selectedModel?: { supports_tool_calling?: boolean } | null;
   };
 
-  let { selectedMCPServers = $bindable([]), selectedMCPTools = $bindable([]) }: Props = $props();
+  let { selectedMCPServers = $bindable([]), selectedMCPTools = $bindable([]), selectedModel = null }: Props = $props();
+
+  let modelSupportsTools = $derived(selectedModel?.supports_tool_calling !== false);
 
   const {
     state: { currentSpace }
@@ -194,6 +198,13 @@
 </script>
 
 <div class="space-y-1" role="group" aria-label="MCP-servrar">
+  {#if !modelSupportsTools}
+    <p
+      class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
+    >
+      <span class="font-bold">{m.warning()}:&nbsp;</span>{m.model_does_not_support_tools()}
+    </p>
+  {/if}
   {#if loading}
     <div class="flex items-center gap-3 rounded-lg border border-dashed border-dimmer bg-secondary/30 px-4 py-6">
       <svg class="h-5 w-5 animate-spin text-muted" fill="none" viewBox="0 0 24 24" aria-hidden="true">

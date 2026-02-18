@@ -415,7 +415,7 @@
             discardChanges("mcp_tools");
           }}
         >
-          <SelectMCPServers bind:selectedMCPServers={$update.mcp_servers} bind:selectedMCPTools={$update.mcp_tools} />
+          <SelectMCPServers bind:selectedMCPServers={$update.mcp_servers} bind:selectedMCPTools={$update.mcp_tools} selectedModel={$update.completion_model} />
        </Settings.Row>
       </Settings.Group>
 

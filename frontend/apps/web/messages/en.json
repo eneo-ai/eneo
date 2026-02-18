@@ -1006,6 +1006,7 @@
   "model_label_vision": "Vision",
   "model_label_tool_calling": "Tools",
   "model_tooltip_tool_calling": "This model supports function/tool calling",
+  "model_does_not_support_tools": "The selected model does not support tool calling. MCP tools will not be available during conversations.",
   "model_label_open_source": "Open Source",
   "manage_classifications_description": "Manage your organisation's security classifications and their descriptions.",
   "no_security_classifications": "Your organisation does currently not have any security classifications configured.",
