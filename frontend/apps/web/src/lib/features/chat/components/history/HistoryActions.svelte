@@ -1,7 +1,7 @@
 <script lang="ts">
   import { IconTrash } from "@intric/icons/trash";
   import { IconEdit } from "@intric/icons/edit";
-  import { Button, Dialog } from "@intric/ui";
+  import { Button, Dialog, Input } from "@intric/ui";
   import { getChatService } from "../../ChatService.svelte";
   import type { ConversationSparse } from "@intric/intric-js";
   import * as m from "$lib/paraglide/messages";
@@ -31,20 +31,22 @@
 
     <Dialog.Content width="small">
       <Dialog.Title>{m.chat_history_rename()}</Dialog.Title>
-<Dialog.Description>{m.chat_history_rename_description()}</Dialog.Description>
+      <Dialog.Description>{m.chat_history_rename_description()}</Dialog.Description>
 
+      <Dialog.Section class="p-6">
+        <div class="flex flex-col gap-3">
+          <label for="rename-name" class="text-sm font-medium text-default">
+            {m.chat_history_name_label()}
+          </label>
 
-      <div class="mt-4">
-        <label for="rename-name" class="mb-2 block text-sm font-medium">{m.chat_history_name_label()}</label>
-
-        <input
-          id="rename-name"
-          class="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-white/20"
-          bind:value={newName}
-          placeholder={conversation?.name ?? untitled}
-        />
-      </div>
-
+          <Input.Text
+            id="rename-name"
+            bind:value={newName}
+            placeholder={conversation?.name ?? untitled}
+          />
+        </div>
+      </Dialog.Section>
+      
       <Dialog.Controls let:close>
         <Button is={close}>{m.cancel()}</Button>
 
@@ -58,7 +60,7 @@
             await chat.renameConversation(conversation, trimmed);
           }}
         >
-          Spara
+          {m.save()}
         </Button>
       </Dialog.Controls>
     </Dialog.Content>
