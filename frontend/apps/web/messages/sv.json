@@ -989,6 +989,7 @@
   "model_label_vision": "Vision",
   "model_label_tool_calling": "Verktyg",
   "model_tooltip_tool_calling": "Denna modell stödjer funktions-/verktygsanrop",
+  "model_does_not_support_tools": "Den valda modellen stödjer inte verktygsanrop. MCP-verktyg kommer inte vara tillgängliga under konversationer.",
   "model_label_open_source": "Öppen källkod",
   "manage_classifications_description": "Hantera din organisations säkerhetsklassificeringar och deras beskrivningar.",
   "no_security_classifications": "Din organisation har för närvarande inga säkerhetsklassificeringar konfigurerade.",
