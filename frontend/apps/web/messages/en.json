@@ -2155,5 +2155,9 @@
   "could_not_remove_user_from_group": "Could not remove user from group.",
   "no_users_in_group": "No users in this group",
   "no_users_found": "No users found",
-  "test_model": "Test model"
+  "test_model": "Test model",
+  "chat_history_untitled": "Untitled",
+  "chat_history_rename": "Rename",
+  "chat_history_rename_description": "Enter a new name for the conversation.",
+  "chat_history_name_label": "Name"
 }

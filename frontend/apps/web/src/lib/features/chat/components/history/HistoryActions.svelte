@@ -4,7 +4,7 @@
   import { Button, Dialog } from "@intric/ui";
   import { getChatService } from "../../ChatService.svelte";
   import type { ConversationSparse } from "@intric/intric-js";
-  import { m } from "$lib/paraglide/messages";
+  import * as m from "$lib/paraglide/messages";
 
   export let conversation: ConversationSparse;
   export let onConversationDeleted: ((conversation: ConversationSparse) => void) | undefined =
@@ -15,7 +15,7 @@
   let newName = "";
   $: newName = conversation?.name ?? "";
 
-  const untitled = "Namnlös";
+  const untitled = m.chat_history_untitled();
 </script>
 
 <div class="flex items-center justify-end gap-2">
@@ -23,18 +23,19 @@
   <Dialog.Root>
     <Dialog.Trigger asFragment let:trigger>
       <span on:click|stopPropagation>
-        <Button is={trigger} label="Byt namn" padding="icon">
+        <Button is={trigger} label={m.chat_history_rename()} padding="icon">
           <IconEdit />
         </Button>
       </span>
     </Dialog.Trigger>
 
     <Dialog.Content width="small">
-      <Dialog.Title>Byt namn</Dialog.Title>
-      <Dialog.Description>Skriv ett nytt namn för konversationen.</Dialog.Description>
+      <Dialog.Title>{m.chat_history_rename()}</Dialog.Title>
+<Dialog.Description>{m.chat_history_rename_description()}</Dialog.Description>
+
 
       <div class="mt-4">
-        <label for="rename-name" class="mb-2 block text-sm font-medium">Namn</label>
+        <label for="rename-name" class="mb-2 block text-sm font-medium">{m.chat_history_name_label()}</label>
 
         <input
           id="rename-name"
