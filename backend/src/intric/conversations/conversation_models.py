@@ -49,4 +49,12 @@ class ConversationRequest(BaseModel):
 
 
 class ConversationRenameRequest(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=80)
+
+    @model_validator(mode="after")
+    def validate_name(self) -> "ConversationRenameRequest":
+        self.name = self.name.strip()
+        if not self.name:
+            raise ValueError("name cannot be empty")
+        return self
+

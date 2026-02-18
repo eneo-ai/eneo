@@ -72,7 +72,6 @@ export function initConversations(client) {
     rename: async (conversation, body) => {
       const { id: session_id } = conversation;
 
-      // @ts-expect-error Backend supports this endpoint; schema types may be out of date.
       const res = await client.fetch("/api/v1/conversations/{session_id}/name/", {
         method: "patch",
         params: { path: { session_id } },

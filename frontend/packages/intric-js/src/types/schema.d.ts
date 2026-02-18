@@ -417,6 +417,12 @@ export interface paths {
      */
     post: operations["set_title_of_conversation_api_v1_conversations__session_id__title__post"];
   };
+  "/api/v1/conversations/{session_id}/name/": {
+    /**
+     * Rename Conversation
+     */
+    patch: operations["rename_conversation_api_v1_conversations__session_id__name__patch"];
+  };
   "/api/v1/services/": {
     /** Get Services */
     get: operations["get_services_api_v1_services__get"];
