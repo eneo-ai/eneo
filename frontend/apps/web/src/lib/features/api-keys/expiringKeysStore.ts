@@ -17,6 +17,7 @@ interface ExpiringKeysSummaryResponse {
   items: Array<{
     id: string;
     name: string;
+    key_suffix: string | null;
     scope_type: string;
     scope_id: string | null;
     expires_at: string;
@@ -55,6 +56,12 @@ function createExpiringKeysStore(data: {
     if (!$summary) return false;
     const counts = $summary.counts_by_severity;
     return (counts.urgent ?? 0) > 0 || (counts.expired ?? 0) > 0;
+  });
+
+  const hasWarning = derived(summary, ($summary) => {
+    if (!$summary) return false;
+    const counts = $summary.counts_by_severity;
+    return (counts.warning ?? 0) > 0;
   });
 
   let lastFetchTime = 0;
@@ -129,7 +136,8 @@ function createExpiringKeysStore(data: {
     state: {
       summary: { subscribe: summary.subscribe },
       displayItems: { subscribe: displayItems.subscribe },
-      hasUrgent
+      hasUrgent,
+      hasWarning
     },
     refresh,
     forceRefresh

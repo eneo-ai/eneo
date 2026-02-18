@@ -14,6 +14,7 @@
   import ExpiringKeysBanner from "$lib/features/api-keys/ExpiringKeysBanner.svelte";
   import NotificationPreferences from "$lib/features/api-keys/NotificationPreferences.svelte";
   import type { ExpiringKeyDisplayItem } from "$lib/features/api-keys/expirationUtils";
+  import { getExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
 
   const {
     user,
@@ -21,6 +22,7 @@
     state: { userInfo }
   } = getAppContext();
   const intric = getIntric();
+  const { forceRefresh: forceRefreshExpiringStore } = getExpiringKeysStore();
 
   let keys = $state<ApiKeyV2[]>([]);
   let loading = $state(true);
@@ -87,6 +89,7 @@
 
   async function handleFollowChanged() {
     await notificationPrefsRef?.refreshSubscriptions();
+    await forceRefreshExpiringStore();
   }
 
   async function revokeLegacyKey() {

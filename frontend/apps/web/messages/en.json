@@ -2463,6 +2463,7 @@
   "api_keys_notifications_auto_follow_apps_policy_error": "Auto-follow for published apps is disabled by tenant policy.",
   "api_keys_notifications_follow_action": "Follow expiry reminders",
   "api_keys_notifications_unfollow_action": "Unfollow expiry reminders",
+  "api_keys_notifications_followed_via_scope": "Followed via scope",
   "api_keys_notifications_follow_scope_action": "Follow scope reminders",
   "api_keys_notifications_unfollow_scope_action": "Unfollow scope reminders",
   "api_keys_notifications_publish_assistant_hint": "If enabled in your API key notification settings, publishing this assistant auto-follows expiry reminders.",
@@ -2520,6 +2521,10 @@
   "api_keys_expiring_item_days": "Expires in {days} days",
   "api_keys_expiring_bell_title": "Expiring API Keys",
   "api_keys_expiring_bell_manage": "Manage API keys",
+  "api_keys_expiring_bell_more": "... and {count} more",
+  "api_keys_expiring_bell_summary_expired": "{count} expired",
+  "api_keys_expiring_bell_summary_urgent": "{count} expiring within 3 days",
+  "api_keys_expiring_bell_summary_warning": "{count} expiring soon",
 
   "api_keys_reason_security_concern": "Security concern",
   "api_keys_reason_abuse_detected": "Abuse detected",

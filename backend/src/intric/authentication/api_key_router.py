@@ -667,6 +667,7 @@ def _build_expiring_summary(
             ExpiringKeySummaryItem(
                 id=key.id,
                 name=key.name,
+                key_suffix=key.key_suffix,
                 scope_type=key.scope_type,
                 scope_id=key.scope_id,
                 expires_at=key.expires_at,

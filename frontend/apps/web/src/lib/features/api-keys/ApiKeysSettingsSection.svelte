@@ -61,6 +61,11 @@
   const activeCount = $derived(keys.filter((k) => k.state === "active").length);
   const suspendedCount = $derived(keys.filter((k) => k.state === "suspended").length);
   const expiringDisplayItems = $derived(toDisplayItems(getExpiringKeys(keys)));
+  const effectiveFollowedKeyIds = $derived(
+    isScopeFollowed
+      ? new Set([...followedKeyIds, ...keys.filter((k) => k.state !== "revoked").map((k) => k.id)])
+      : followedKeyIds
+  );
   const canFollowScope = $derived(
     scopeType === "assistant" || scopeType === "app" || scopeType === "space"
   );
@@ -237,8 +242,9 @@
               {loading}
               onChanged={loadKeys}
               onSecret={handleSecret}
-              {followedKeyIds}
-              onFollowChanged={loadScopeFollowState}
+              followedKeyIds={effectiveFollowedKeyIds}
+              scopeFollowed={isScopeFollowed}
+              onFollowChanged={async () => { await loadScopeFollowState(); await forceRefreshExpiringStore(); }}
             />
           </div>
         </div>

@@ -2498,6 +2498,7 @@
   "api_keys_notifications_auto_follow_apps_policy_error": "Automatisk följning av publicerade appar är inaktiverad av organisationens policy.",
   "api_keys_notifications_follow_action": "Följ utgångspåminnelser",
   "api_keys_notifications_unfollow_action": "Avfölj utgångspåminnelser",
+  "api_keys_notifications_followed_via_scope": "Följs via scope",
   "api_keys_notifications_follow_scope_action": "Följ scopepåminnelser",
   "api_keys_notifications_unfollow_scope_action": "Avfölj scopepåminnelser",
   "api_keys_notifications_publish_assistant_hint": "Om aktiverat i dina API-nyckelnotiser följer publicering av denna assistent automatiskt utgångspåminnelser.",
@@ -2555,6 +2556,10 @@
   "api_keys_expiring_item_days": "Går ut om {days} dagar",
   "api_keys_expiring_bell_title": "API-nycklar som går ut",
   "api_keys_expiring_bell_manage": "Hantera API-nycklar",
+  "api_keys_expiring_bell_more": "... och {count} till",
+  "api_keys_expiring_bell_summary_expired": "{count} utgångna",
+  "api_keys_expiring_bell_summary_urgent": "{count} går ut inom 3 dagar",
+  "api_keys_expiring_bell_summary_warning": "{count} går ut snart",
 
   "api_keys_reason_security_concern": "Säkerhetsproblem",
   "api_keys_reason_abuse_detected": "Missbruk upptäckt",

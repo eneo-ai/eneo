@@ -441,6 +441,7 @@ class ExpiringKeySummaryItem(BaseModel):
 
     id: UUID
     name: str
+    key_suffix: Optional[str] = None
     scope_type: ApiKeyScopeType
     scope_id: Optional[UUID] = None
     expires_at: datetime

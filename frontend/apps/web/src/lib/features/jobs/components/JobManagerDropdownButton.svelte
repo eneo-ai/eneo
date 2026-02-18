@@ -12,7 +12,7 @@
   const {
     state: { currentlyRunningJobs, showJobManagerPanel }
   } = getJobManager();
-  const { state: { hasUrgent: hasUrgentKeys } } = getExpiringKeysStore();
+  const { state: { hasUrgent: hasUrgentKeys, hasWarning: hasWarningKeys } } = getExpiringKeysStore();
 
   const {
     elements: { menu, trigger, overlay, arrow },
@@ -38,8 +38,12 @@
   label={m.notifications()}
   class="text-secondary hover:bg-accent-dimmer hover:text-brand-intric flex h-[3.25rem] !min-w-[3.5rem] items-center justify-center pt-[0.1rem]"
 >
-  {#if $currentlyRunningJobs === 0 && !$hasUrgentKeys}
+  {#if $currentlyRunningJobs === 0 && !$hasUrgentKeys && !$hasWarningKeys}
     <IconNotification />
+  {:else if $hasUrgentKeys}
+    <IconNotificationDot class="min-w-6" style="--dot-color: var(--color-negative-default)" />
+  {:else if $hasWarningKeys}
+    <IconNotificationDot class="min-w-6" style="--dot-color: var(--color-warning-default)" />
   {:else}
     <IconNotificationDot class="min-w-6" />
   {/if}

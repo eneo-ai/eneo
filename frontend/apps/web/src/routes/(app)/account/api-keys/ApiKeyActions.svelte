@@ -12,11 +12,12 @@
 
   const intric = getIntric();
 
-  let { apiKey, onChanged, onSecret, isFollowed = false, onFollowChanged } = $props<{
+  let { apiKey, onChanged, onSecret, isFollowed = false, isFollowedViaScope = false, onFollowChanged } = $props<{
     apiKey: ApiKeyV2;
     onChanged: () => void;
     onSecret: (response: ApiKeyCreatedResponse) => void;
     isFollowed?: boolean;
+    isFollowedViaScope?: boolean;
     onFollowChanged?: () => void | Promise<void>;
   }>();
 
@@ -128,7 +129,12 @@
       </Button>
     {/if}
 
-    {#if apiKey.state !== "revoked" && apiKey.state !== "expired"}
+    {#if isFollowedViaScope}
+      <Button is={item} padding="icon-leading" disabled>
+        <Bell size={16} />
+        {m.api_keys_notifications_followed_via_scope()}
+      </Button>
+    {:else if apiKey.state !== "revoked" && apiKey.state !== "expired"}
       <Button is={item} padding="icon-leading" on:click={toggleFollow} disabled={followLoading}>
         {#if isFollowed}
           <BellOff size={16} />

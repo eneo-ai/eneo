@@ -12,6 +12,7 @@ export interface ExpiringKeyInfo {
 export interface ExpiringKeyDisplayItem {
   id: string;
   name: string;
+  keySuffix: string | null;
   daysRemaining: number;
   level: ExpiryLevel;
   suspended: boolean;
@@ -82,6 +83,7 @@ export function toDisplayItems(expiringKeys: ExpiringKeyInfo[]): ExpiringKeyDisp
   return expiringKeys.map((ek) => ({
     id: ek.key.id,
     name: ek.key.name,
+    keySuffix: ek.key.key_suffix ?? null,
     daysRemaining: ek.daysRemaining,
     level: ek.level,
     suspended: ek.key.suspended_at != null
@@ -105,6 +107,7 @@ export function summaryToDisplayItems(
   items: Array<{
     id: string;
     name: string;
+    key_suffix: string | null;
     expires_at: string;
     suspended_at: string | null;
     severity: string;
@@ -113,6 +116,7 @@ export function summaryToDisplayItems(
   return items.map((item) => ({
     id: item.id,
     name: item.name,
+    keySuffix: item.key_suffix,
     daysRemaining: getDaysUntilExpiration(item.expires_at) ?? 0,
     level: item.severity as ExpiryLevel,
     suspended: item.suspended_at != null

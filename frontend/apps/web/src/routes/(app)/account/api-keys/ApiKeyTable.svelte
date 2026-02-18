@@ -62,6 +62,7 @@
     onChanged,
     onSecret,
     followedKeyIds = new Set<string>(),
+    scopeFollowed = false,
     onFollowChanged
   } = $props<{
     keys: ApiKeyV2[];
@@ -69,6 +70,7 @@
     onChanged: () => void;
     onSecret: (response: ApiKeyCreatedResponse) => void;
     followedKeyIds?: Set<string>;
+    scopeFollowed?: boolean;
     onFollowChanged?: () => void | Promise<void>;
   }>();
 
@@ -445,6 +447,7 @@
                   {onChanged}
                   {onSecret}
                   isFollowed={followedKeyIds?.has(key.id) ?? false}
+                  isFollowedViaScope={scopeFollowed && !(followedKeyIds?.has(key.id) ?? false)}
                   {onFollowChanged}
                 />
               </div>
