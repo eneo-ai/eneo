@@ -2190,5 +2190,9 @@
   "could_not_remove_user_from_group": "Kunde inte ta bort användare från gruppen.",
   "no_users_in_group": "Inga användare i denna grupp",
   "no_users_found": "Inga användare hittades",
-  "test_model": "Testa modell"
+  "test_model": "Testa modell",
+  "chat_history_untitled": "Namnlös",
+  "chat_history_rename": "Byt namn",
+  "chat_history_rename_description": "Skriv ett nytt namn för konversationen.",
+  "chat_history_name_label": "Namn"
 }

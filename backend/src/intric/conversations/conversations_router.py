@@ -5,7 +5,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Query
 
 from intric.assistants.api.assistant_protocol import to_conversation_response
-from intric.conversations.conversation_models import ConversationRequest
+from intric.conversations.conversation_models import (
+    ConversationRenameRequest,
+    ConversationRequest,
+)
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.container.container import Container
 from intric.main.models import CursorPaginatedResponse
@@ -15,6 +18,7 @@ from intric.sessions.session import (
     SessionFeedback,
     SessionMetadataPublic,
     SessionPublic,
+    SessionUpdate,
     SSEError,
     SSEFiles,
     SSEFirstChunk,
@@ -230,4 +234,22 @@ async def set_title_of_conversation(
     """Set the title of a conversation"""
     conversation_service = container.conversation_service()
     session = await conversation_service.set_title_of_conversation(session_id)
+    return to_session_public(session)
+
+
+@router.patch(
+    "/{session_id}/name/",
+    response_model=SessionPublic,
+    responses=responses.get_responses([400, 404]),
+)
+async def rename_conversation(
+    payload: ConversationRenameRequest,
+    session_id: UUID = Path(..., description="The UUID of the conversation/session"),
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Rename a conversation (session)"""
+    session_service = container.session_service()
+    session = await session_service.update_session(
+        SessionUpdate(id=session_id, name=payload.name)
+    )
     return to_session_public(session)

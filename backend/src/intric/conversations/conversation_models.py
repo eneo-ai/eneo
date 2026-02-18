@@ -46,3 +46,7 @@ class ConversationRequest(BaseModel):
                 "Either session_id, assistant_id, or group_chat_id must be provided"
             )
         return self
+
+
+class ConversationRenameRequest(BaseModel):
+    name: str
