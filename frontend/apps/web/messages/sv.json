@@ -2263,10 +2263,5 @@
   "could_not_remove_user_from_group": "Kunde inte ta bort användare från gruppen.",
   "no_users_in_group": "Inga användare i denna grupp",
   "no_users_found": "Inga användare hittades",
-  "voice_input_start": "Spela in röstmeddelande",
-  "voice_input_stop": "Stoppa inspelning",
-  "voice_input_error_no_mic": "Mikrofonåtkomst nekad",
-  "voice_input_error_transcription": "Transkribering misslyckades",
-  "voice_input_unsupported_browser": "Röstinmatning stöds inte i denna webbläsare",
   "test_model": "Testa modell"
 }
