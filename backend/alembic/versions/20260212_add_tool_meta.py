@@ -12,7 +12,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "20260212_add_tool_meta"
-down_revision = "rename_integration_perm"
+down_revision = "cca4dea4841f"
 branch_labels = None
 depends_on = None
 
