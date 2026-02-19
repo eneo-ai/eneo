@@ -322,8 +322,7 @@ def extract_text_from_xlsx(binary_data: bytes) -> str:
 
 def extract_text_from_pdf(binary_data: bytes) -> str:
     """
-    Attempt to extract text from a PDF file.
-    Falls back to basic text extraction if PDF-specific extraction fails.
+    Extract text from a PDF file using pdfplumber.
 
     Args:
         binary_data: The binary data of the PDF file
@@ -331,43 +330,25 @@ def extract_text_from_pdf(binary_data: bytes) -> str:
     Returns:
         Extracted text from the PDF
     """
-    # Check if the file looks like a PDF (starts with %PDF)
-    if binary_data.startswith(b"%PDF"):
-        try:
-            # Try to extract text using a simple method that doesn't require additional libraries
-            # This extracts all strings from the PDF that are likely to be text content
-            result = []
+    import pdfplumber
 
-            # Look for text objects in the PDF
-            # PDF text is often in the format: BT ... (text) ... ET
-            text_chunks = re.findall(rb"BT.*?ET", binary_data, re.DOTALL)
+    try:
+        with pdfplumber.open(io.BytesIO(binary_data)) as pdf:
+            extracted_text = " ".join(
+                page.extract_text() or "" for page in pdf.pages
+            )
 
-            for chunk in text_chunks:
-                # Extract text strings in parentheses - these are usually content
-                strings = re.findall(rb"\((.*?)\)", chunk, re.DOTALL)
-                for s in strings:
-                    try:
-                        # Decode PDF-encoded strings
-                        decoded = (
-                            s.replace(b"\\(", b"(")
-                            .replace(b"\\)", b")")
-                            .decode("latin-1", errors="replace")
-                        )
-                        # Only keep strings that seem like real text (not just single characters)
-                        if len(decoded.strip()) > 3 and not decoded.strip().isdigit():
-                            result.append(decoded.strip())
-                    except Exception:
-                        pass
+        # Remove null bytes (cause PostgreSQL UTF-8 encoding errors)
+        sanitized = extracted_text.replace("\x00", "")
 
-            # If we found text in the PDF, return it
-            if result:
-                return "\n".join(result)
+        if not sanitized.strip():
+            logger.warning("No text extracted from PDF - file may be image-only or scanned")
 
-        except Exception as e:
-            logger.warning(f"Error extracting text from PDF using direct method: {e}")
+        return sanitized
 
-    # Fall back to regular text extraction if PDF-specific extraction fails
-    return binary_to_text(binary_data)
+    except Exception as e:
+        logger.warning(f"Error extracting text from PDF: {e}")
+        return binary_to_text(binary_data)
 
 
 def file_extension_to_type(filename: str) -> str:

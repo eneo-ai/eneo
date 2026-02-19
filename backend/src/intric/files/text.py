@@ -6,8 +6,8 @@ from pathlib import Path
 import magic
 import pptx
 from docx2python import docx2python
-from pypdf import PdfReader
-from pypdf.errors import PdfReadError
+import pdfplumber
+from pdfminer.pdfparser import PDFSyntaxError
 
 logger = logging.getLogger(__name__)
 
@@ -131,17 +131,10 @@ class TextExtractor:
     def extract_from_pdf(filepath: Path, filename: str | None = None) -> str:
         display_name = filename or filepath.name
         try:
-            reader = PdfReader(filepath)
-
-            # Check for encryption (pypdf 6.x feature)
-            if reader.is_encrypted:
-                raise EncryptedFileError(display_name)
-
-            # Use default extraction mode (better for NLP/embeddings than "layout")
-            # Layout mode preserves visual whitespace which bloats token count
-            extracted_text = " ".join(
-                page.extract_text() or "" for page in reader.pages
-            )
+            with pdfplumber.open(filepath) as pdf:
+                extracted_text = " ".join(
+                    page.extract_text() or "" for page in pdf.pages
+                )
 
             # Warn if no text extracted (likely image-only/scanned PDF)
             sanitized = TextSanitizer.sanitize(extracted_text)
@@ -153,9 +146,7 @@ class TextExtractor:
 
             return sanitized
 
-        except EncryptedFileError:
-            raise
-        except PdfReadError as e:
+        except PDFSyntaxError as e:
             logger.warning(f"PDF read error for {display_name}: {e}")
             raise CorruptFileError(display_name, str(e))
         except Exception as e:

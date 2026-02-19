@@ -455,8 +455,9 @@ class SharePointContentService:
                 if not actual_drive_id and site_id:
                     actual_drive_id = await content_client.get_default_drive_id(site_id)
                 if not actual_drive_id:
-                    logger.error(f"Could not get drive ID for site {site_id}")
-                    return "Error: Could not find drive"
+                    raise ValueError(
+                        f"Could not resolve drive ID for site {site_id}"
+                    )
 
                 logger.info(
                     f"Starting delta sync with token: {integration_knowledge.delta_token[:20]}..."
@@ -877,10 +878,18 @@ class SharePointContentService:
                             )
                             return stats
 
-                        content, _ = await content_client.get_file_content_by_id(
-                            drive_id=actual_drive_id,
-                            item_id=integration_knowledge.folder_id,
-                        )
+                        try:
+                            content, _ = await content_client.get_file_content_by_id(
+                                drive_id=actual_drive_id,
+                                item_id=integration_knowledge.folder_id,
+                            )
+                        except Exception as e:
+                            logger.error(f"Error getting file content for {item_name}: {e}")
+                            stats["skipped_items"] += 1
+                            stats["skipped_details"].append(
+                                {"file": item_name, "reason": f"Error: {e}"}
+                            )
+                            return stats
 
                         if content:
                             await self._process_info_blob(
@@ -975,9 +984,18 @@ class SharePointContentService:
                         {"file": doc_name, "reason": unsupported_reason}
                     )
                     continue
-                content, _ = await client.get_file_content_by_id(
-                    drive_id=drive_id, item_id=item_id
-                )
+                try:
+                    content, _ = await client.get_file_content_by_id(
+                        drive_id=drive_id, item_id=item_id
+                    )
+                except Exception as e:
+                    logger.error(f"Error getting file content for {doc_name}: {e}")
+                    stats["skipped_items"] += 1
+                    stats["skipped_details"].append(
+                        {"file": doc_name, "reason": f"Error: {e}"}
+                    )
+                    continue
+
                 if content:
                     await self._process_info_blob(
                         title=doc_name,
