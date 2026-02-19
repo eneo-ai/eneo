@@ -442,7 +442,9 @@ class SharePointContentClient(BaseClient):
 
             download_url = file_info.get("@microsoft.graph.downloadUrl")
             if not download_url:
-                return "[Error: No download URL available]", "text/plain"
+                raise ValueError(
+                    f"No download URL available for file '{file_name}' (item_id={item_id})"
+                )
 
             return await self._download_file_content(
                 download_url=download_url,
@@ -460,9 +462,8 @@ class SharePointContentClient(BaseClient):
 
                 download_url = file_info.get("@microsoft.graph.downloadUrl")
                 if not download_url:
-                    return (
-                        "[Error: No download URL available after token refresh]",
-                        "text/plain",
+                    raise ValueError(
+                        f"No download URL available for file '{file_name}' (item_id={item_id}) after token refresh"
                     )
 
                 return await self._download_file_content(
