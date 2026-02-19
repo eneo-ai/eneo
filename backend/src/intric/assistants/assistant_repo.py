@@ -10,6 +10,7 @@ from intric.assistants.assistant_factory import AssistantFactory
 from intric.database.database import AsyncSession
 from intric.database.tables.assistant_table import (
     AssistantIntegrationKnowledge,
+    AssistantMCPServers,
     Assistants,
     AssistantsFiles,
     AssistantsGroups,
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
     from intric.completion_models.domain.completion_model_repo import (
         CompletionModelRepository,
     )
+    from intric.users.user import UserInDB
     from intric.websites.domain.website import Website
 
 
@@ -45,10 +47,12 @@ class AssistantRepository:
         session: AsyncSession,
         factory: AssistantFactory,
         completion_model_repo: "CompletionModelRepository",
+        user: "UserInDB",
     ):
         self.session = session
         self.factory = factory
         self.completion_model_repo = completion_model_repo
+        self.user = user
 
     @staticmethod
     def _options():
@@ -69,6 +73,8 @@ class AssistantRepository:
             .selectinload(IntegrationKnowledge.user_integration)
             .selectinload(UserIntegrationDBModel.tenant_integration)
             .selectinload(TenantIntegrationDBModel.integration),
+            selectinload(Assistants.mcp_servers),
+            selectinload(Assistants.assistant_mcp_server_tools),
         ]
 
     async def _set_is_selected_to_false(self, assistant_id: UUID):
@@ -206,6 +212,71 @@ class AssistantRepository:
                     for knowledge in integration_knowledge
                 ]
             )
+            await self.session.execute(stmt)
+
+        await self.session.refresh(assistant_in_db)
+
+    async def _set_mcp_servers(
+        self,
+        assistant_in_db: Assistants,
+        mcp_server_ids: list[UUID],
+    ):
+        """Set MCP server associations for an assistant.
+
+        Args:
+            assistant_in_db: The assistant database record
+            mcp_server_ids: List of MCP server IDs to associate
+        """
+        # Delete all existing associations
+        stmt = sa.delete(AssistantMCPServers).where(
+            AssistantMCPServers.assistant_id == assistant_in_db.id
+        )
+        await self.session.execute(stmt)
+
+        if mcp_server_ids:
+            values = [
+                {
+                    "assistant_id": assistant_in_db.id,
+                    "mcp_server_id": server_id,
+                }
+                for server_id in mcp_server_ids
+            ]
+
+            stmt = sa.insert(AssistantMCPServers).values(values)
+            await self.session.execute(stmt)
+
+        await self.session.refresh(assistant_in_db)
+
+    async def _set_mcp_tools(
+        self,
+        assistant_in_db: Assistants,
+        mcp_tool_settings: list[tuple[UUID, bool]],
+    ):
+        """Set MCP tool overrides for an assistant.
+
+        Args:
+            assistant_in_db: The assistant database record
+            mcp_tool_settings: List of (tool_id, is_enabled) tuples
+        """
+        from intric.database.tables.assistant_table import AssistantMCPServerTools
+
+        # Delete all existing tool overrides
+        stmt = sa.delete(AssistantMCPServerTools).where(
+            AssistantMCPServerTools.assistant_id == assistant_in_db.id
+        )
+        await self.session.execute(stmt)
+
+        if mcp_tool_settings:
+            values = [
+                {
+                    "assistant_id": assistant_in_db.id,
+                    "mcp_server_tool_id": tool_id,
+                    "is_enabled": is_enabled,
+                }
+                for tool_id, is_enabled in mcp_tool_settings
+            ]
+
+            stmt = sa.insert(AssistantMCPServerTools).values(values)
             await self.session.execute(stmt)
 
         await self.session.refresh(assistant_in_db)
@@ -354,6 +425,14 @@ class AssistantRepository:
         await self._set_websites(entry_in_db, assistant.websites)
         await self._set_integration_knowledge(entry_in_db, assistant.integration_knowledge_list)
         await self._set_attachments(entry_in_db, assistant.attachments)
+
+        # Set MCP servers if provided
+        if hasattr(assistant, '_mcp_server_ids') and assistant._mcp_server_ids is not None:
+            await self._set_mcp_servers(entry_in_db, assistant._mcp_server_ids)
+
+        # Set MCP tool overrides if provided
+        if hasattr(assistant, '_mcp_tool_settings') and assistant._mcp_tool_settings is not None:
+            await self._set_mcp_tools(entry_in_db, assistant._mcp_tool_settings)
 
         if assistant.prompt:
             await self._add_prompt(assistant_id=entry_in_db.id, prompt=assistant.prompt)

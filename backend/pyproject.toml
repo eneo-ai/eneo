@@ -6,9 +6,9 @@ authors = [{ name = "Sundsvalls Kommun" }]
 requires-python = ">=3.11,<4"
 dependencies = [
     "fastapi>=0,<1",
-    "uvicorn[standard]>=0.22.0,<0.23",
+    "uvicorn[standard]>=0.30.0,<1",
     "openai~=1.4",
-    "python-dotenv>=0.21.1,<0.22",
+    "python-dotenv>=1.1.0",
     "pydantic[email]>=2,<3",
     "tenacity>=8.2.1,<9",
     "tiktoken>=0,<1",
@@ -27,7 +27,7 @@ dependencies = [
     "gunicorn>=23.0.0,<24",
     "psutil>=5.9.5,<6",
     "pdfplumber>=0.11,<1",
-    "langchain>=0.0.329,<0.0.330",
+    "langchain>=0.3.0,<0.4",
     "jsonschema>=4.19.2,<5",
     "pydantic-settings>=2.1.0,<3",
     "wrapt>=1.16.0,<2",
@@ -55,12 +55,14 @@ dependencies = [
     "tavily-python>=0.5.1,<0.6",
     "greenlet>=3.2.2,<4",
     "litellm>=1.76.1,<2",
+    "mcp>=1.2.0,<2", # Model Context Protocol SDK for MCP server integration
     "cryptography>=43.0.0,<44", # For Fernet encryption of HTTP auth passwords
-    "httpx~=0.27.0",  # Pin to 0.27.x for compatibility with anthropic 0.28.1
+    "httpx~=0.28.0",
     "pandas>=2.2.3,<3",
     "orjson>=3.9,<4",
     "aiofiles>=23.0,<24",
     "python-calamine>=0.3.1,<1",  # Fast Excel reader engine for pandas
+    "rich>=14.2.0"
 ]
 
 [project.scripts]

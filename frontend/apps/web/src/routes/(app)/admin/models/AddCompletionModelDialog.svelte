@@ -26,6 +26,7 @@
   let tokenLimit = 128000;
   let vision = false;
   let reasoning = false;
+  let supportsToolCalling = false;
   let isActive = true;
   let isDefault = false;
   let isSubmitting = false;
@@ -143,6 +144,7 @@
         token_limit: tokenLimit,
         vision: vision,
         reasoning: reasoning,
+        supports_tool_calling: supportsToolCalling,
         is_active: isActive,
         is_default: isDefault,
       });
@@ -168,6 +170,7 @@
     tokenLimit = 128000;
     vision = false;
     reasoning = false;
+    supportsToolCalling = false;
     isActive = true;
     isDefault = false;
     providerName = "";
@@ -340,6 +343,11 @@
               <label class="flex items-center gap-2 text-sm">
                 <input type="checkbox" bind:checked={reasoning} />
                 <span>{m.reasoning_support()}</span>
+              </label>
+
+              <label class="flex items-center gap-2 text-sm">
+                <input type="checkbox" bind:checked={supportsToolCalling} />
+                <span>{m.tool_calling_support()}</span>
               </label>
             </div>
 

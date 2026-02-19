@@ -472,6 +472,10 @@ class CompletionModelMigrationService:
         if from_model.reasoning and not to_model.reasoning:
             issues.append("Target model lacks reasoning support")
 
+        # Check tool calling support
+        if from_model.supports_tool_calling and not to_model.supports_tool_calling:
+            issues.append("Target model lacks tool calling support")
+
         # Always warn about kwargs being reset for assistants
         issues.append("Assistant model parameters (kwargs) will be reset to defaults")
 

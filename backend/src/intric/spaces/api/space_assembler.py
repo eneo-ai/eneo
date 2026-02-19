@@ -10,6 +10,9 @@ from intric.integration.presentation.assemblers.integration_knowledge_assembler 
     IntegrationKnowledgeAssembler,
 )
 from intric.integration.presentation.models import IntegrationKnowledgePublic
+from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
+    MCPServerAssembler,
+)
 from intric.main.models import PaginatedPermissions, ResourcePermission
 from intric.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
@@ -392,6 +395,11 @@ class SpaceAssembler:
         if self.user.tenant.security_enabled:
             security_classification = self._get_security_classification_model(space)
 
+        mcp_servers = [
+            MCPServerAssembler.to_dict_with_tools(server)
+            for server in space.mcp_servers
+        ]
+
         return SpacePublic(
             created_at=space.created_at,
             updated_at=space.updated_at,
@@ -401,6 +409,7 @@ class SpaceAssembler:
             embedding_models=embedding_models,
             completion_models=completion_models,
             transcription_models=transcription_models,
+            mcp_servers=mcp_servers,
             default_assistant=default_assistant,
             applications=applications,
             knowledge=knowledge,

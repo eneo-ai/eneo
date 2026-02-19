@@ -30,6 +30,7 @@
   let tokenLimitStr = "128000";
   let vision = false;
   let reasoning = false;
+  let supportsToolCalling = false;
   let family = "";
   let hosting: "swe" | "eu" | "usa" = "swe";
   let openSource = false;
@@ -72,6 +73,9 @@
     if ("reasoning" in model) {
       reasoning = model.reasoning;
     }
+    if ("supports_tool_calling" in model) {
+      supportsToolCalling = model.supports_tool_calling;
+    }
     if ("family" in model) {
       family = model.family || "";
     }
@@ -97,7 +101,8 @@
           open_source: openSource,
           token_limit: parseInt(tokenLimitStr, 10),
           vision,
-          reasoning
+          reasoning,
+          supports_tool_calling: supportsToolCalling
         };
         await intric.tenantModels.updateCompletion({ id: model.id }, update);
       } else if (type === "embeddingModel") {
@@ -232,6 +237,15 @@
                 class="h-4 w-4 rounded border-stronger accent-accent-default cursor-pointer"
               />
               <span class="group-hover:text-primary transition-colors">{m.reasoning_support()}</span>
+            </label>
+
+            <label class="flex items-center gap-2 text-sm cursor-pointer group">
+              <input
+                type="checkbox"
+                bind:checked={supportsToolCalling}
+                class="h-4 w-4 rounded border-stronger accent-accent-default cursor-pointer"
+              />
+              <span class="group-hover:text-primary transition-colors">{m.tool_calling_support()}</span>
             </label>
           </div>
         {/if}

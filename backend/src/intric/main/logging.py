@@ -39,12 +39,21 @@ class ContextJSONFormatter(logging.Formatter):
         "message",
     }
 
-    DEFAULT_KEYS = ("correlation_id", "tenant_slug", "user_email", "error_code", "status_code")
+    DEFAULT_KEYS = (
+        "correlation_id",
+        "tenant_slug",
+        "user_email",
+        "error_code",
+        "status_code",
+    )
 
-    def format(self, record: logging.LogRecord) -> str:  # pragma: no cover - formatting logic
+    def format(
+        self, record: logging.LogRecord
+    ) -> str:  # pragma: no cover - formatting logic
         log: dict[str, Any] = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc)
-            .isoformat(timespec="milliseconds"),
+            "timestamp": datetime.fromtimestamp(
+                record.created, tz=timezone.utc
+            ).isoformat(timespec="milliseconds"),
             "level": record.levelname.lower(),
             "logger": record.name,
             "message": record.getMessage(),
@@ -76,6 +85,7 @@ class ContextJSONFormatter(logging.Formatter):
 
         return json.dumps(log, default=str)
 
+
 # Disable loggers from other packages if loglevel is INFO or above
 for _logger in logging.root.manager.loggerDict:
     if get_loglevel() <= logging.DEBUG:
@@ -100,7 +110,7 @@ for logger_name in sqlalchemy_loggers:
 
 # noqa Copied from https://dev.to/taikedz/simple-python-logging-and-a-digression-on-dependencies-trust-and-copypasting-code-229o
 class SimpleLogger(logging.Logger):
-    FORMAT_STRING = '%(asctime)s | %(levelname)s | %(name)s : %(message)s'
+    FORMAT_STRING = "%(asctime)s | %(levelname)s | %(name)s : %(message)s"
     ERROR = logging.ERROR
     WARN = logging.WARN
     INFO = logging.INFO

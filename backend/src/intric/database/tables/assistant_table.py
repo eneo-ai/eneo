@@ -12,6 +12,7 @@ from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.files_table import Files
 from intric.database.tables.icons_table import Icons
 from intric.database.tables.integration_table import IntegrationKnowledge
+from intric.database.tables.mcp_server_table import MCPServers
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.users_table import Users
 from intric.database.tables.websites_table import Websites
@@ -62,6 +63,9 @@ class Assistants(BasePublic):
         secondary="assistant_integration_knowledge",
         order_by=IntegrationKnowledge.created_at,
     )
+    mcp_servers: Mapped[list[MCPServers]] = relationship(
+        secondary="assistant_mcp_servers", order_by=MCPServers.created_at
+    )
     user: Mapped[Users] = relationship()
     completion_model: Mapped[Optional[CompletionModels]] = relationship()
     attachments: Mapped[list["AssistantsFiles"]] = relationship(
@@ -74,6 +78,8 @@ class Assistants(BasePublic):
         viewonly=True
     )
     assistant_websites: Mapped[list["AssistantsWebsites"]] = relationship(viewonly=True)
+    assistant_mcp_servers: Mapped[list["AssistantMCPServers"]] = relationship(viewonly=True)
+    assistant_mcp_server_tools: Mapped[list["AssistantMCPServerTools"]] = relationship(viewonly=True)
 
     __table_args__ = {"extend_existing": True}  # Temporary
 
@@ -115,3 +121,33 @@ class AssistantIntegrationKnowledge(BasePublic):
     integration_knowledge_id: Mapped[UUID] = mapped_column(
         ForeignKey(IntegrationKnowledge.id, ondelete="CASCADE")
     )
+
+
+class AssistantMCPServers(BaseCrossReference):
+    """Assistant-level MCP server selection.
+
+    Note: MCP servers are accessed via `Assistants.mcp_servers` (direct many-to-many).
+    This association table follows the same pattern as AssistantsGroups/AssistantsWebsites.
+    """
+    __tablename__ = "assistant_mcp_servers"  # type: ignore[assignment]
+
+    assistant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Assistants.id, ondelete="CASCADE"), primary_key=True
+    )
+    mcp_server_id: Mapped[UUID] = mapped_column(
+        ForeignKey(MCPServers.id, ondelete="CASCADE"), primary_key=True
+    )
+
+
+class AssistantMCPServerTools(BaseCrossReference):
+    """Assistant-level tool permissions."""
+    __tablename__ = "assistant_mcp_server_tools"  # type: ignore[assignment]
+
+    assistant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Assistants.id, ondelete="CASCADE"), primary_key=True
+    )
+    mcp_server_tool_id: Mapped[UUID] = mapped_column(
+        ForeignKey("mcp_server_tools.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    is_enabled: Mapped[bool] = mapped_column(server_default="True", nullable=False)

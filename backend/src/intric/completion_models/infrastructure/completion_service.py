@@ -16,6 +16,8 @@ from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.config import SETTINGS, Settings, get_settings
 from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
 from intric.main.logging import get_logger
+from intric.mcp_servers.infrastructure.proxy import MCPProxySession, MCPProxySessionFactory
+from intric.mcp_servers.infrastructure.tool_approval import get_approval_manager
 from intric.sessions.session import SessionInDB
 from intric.vision_models.infrastructure.flux_ai import FluxAdapter
 
@@ -26,6 +28,7 @@ if TYPE_CHECKING:
     from intric.completion_models.infrastructure.web_search import WebSearchResult
     from intric.database.database import AsyncSession
     from intric.main.container.container import Container
+    from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.settings.encryption_service import EncryptionService
     from intric.tenants.tenant import TenantInDB
 
@@ -52,6 +55,7 @@ class CompletionService:
         self.config = config or SETTINGS
         self.encryption_service = encryption_service
         self.session = session
+        self._mcp_proxy_factory = MCPProxySessionFactory()
 
     async def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
         """
@@ -152,8 +156,16 @@ class CompletionService:
         function_called = False
 
         async for chunk in completion:
-            # Removed per-token logging to reduce log volume in production
-            # logger.debug(chunk)  # This would log 100+ times per response
+            # Pass through MCP tool call events directly
+            if chunk.response_type == ResponseType.TOOL_CALL:
+                yield chunk
+                continue
+
+            # Pass through tool approval required events directly
+            if chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
+                yield chunk
+                continue
+
 
             if chunk.tool_call:
                 if chunk.tool_call.name:
@@ -199,6 +211,8 @@ class CompletionService:
         extended_logging: bool = False,
         version: int = 1,
         use_image_generation: bool = False,
+        mcp_servers: list["MCPServer"] = [],
+        require_tool_approval: bool = False,
     ):
         model_adapter = await self._get_adapter(model)
 
@@ -230,11 +244,23 @@ class CompletionService:
         else:
             logging_details = None
 
+        # Create MCP proxy session if servers provided
+        mcp_proxy: MCPProxySession | None = None
+        if mcp_servers:
+            mcp_proxy = self._mcp_proxy_factory.create(mcp_servers)
+            logger.debug(f"[MCP] Proxy created with {mcp_proxy.get_tool_count()} tools from {len(mcp_servers)} server(s)")
+
         if not stream:
-            completion = await model_adapter.get_response(
-                context=context,
-                model_kwargs=model_kwargs,
-            )
+            try:
+                completion = await model_adapter.get_response(
+                    context=context,
+                    model_kwargs=model_kwargs,
+                    mcp_proxy=mcp_proxy,
+                )
+            finally:
+                # Ensure cleanup for non-streaming
+                if mcp_proxy:
+                    await mcp_proxy.close()
         else:
             # Two-phase streaming pattern:
             # Phase 1: Create stream connection BEFORE returning (can raise exceptions)
@@ -242,6 +268,7 @@ class CompletionService:
             stream_obj = await model_adapter.prepare_streaming(
                 context=context,
                 model_kwargs=model_kwargs,
+                mcp_proxy=mcp_proxy,
             )
 
             # Phase 2: Create generator that iterates the pre-created stream
@@ -251,13 +278,24 @@ class CompletionService:
                 Generator that iterates pre-created stream.
                 The stream was already created and validated, so we're past
                 the pre-flight checks. Any errors here are mid-stream failures.
+                Proxy cleanup happens after iteration completes.
                 """
-                async for chunk in model_adapter.iterate_stream(
-                    stream=stream_obj,
-                    context=context,
-                    model_kwargs=model_kwargs,
-                ):
-                    yield chunk
+                try:
+                    # Get approval manager if tool approval is required
+                    approval_manager = get_approval_manager() if require_tool_approval else None
+
+                    async for chunk in model_adapter.iterate_stream(
+                        stream=stream_obj,
+                        context=context,
+                        model_kwargs=model_kwargs,
+                        require_tool_approval=require_tool_approval,
+                        approval_manager=approval_manager,
+                    ):
+                        yield chunk
+                finally:
+                    # Cleanup proxy after streaming completes
+                    if mcp_proxy:
+                        await mcp_proxy.close()
 
             completion = self._handle_tool_call(streaming_wrapper())
 
