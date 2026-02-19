@@ -235,7 +235,11 @@ class SpaceAssembler:
         if not space.members:
             return []
 
-        return [space.members[self.user.id]] + [
+        current_user = space.members.get(self.user.id)
+        if current_user is None:
+            return list(space.members.values())
+
+        return [current_user] + [
             member for member in space.members.values() if member.id != self.user.id
         ]
 
