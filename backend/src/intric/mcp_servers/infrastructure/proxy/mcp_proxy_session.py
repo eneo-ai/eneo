@@ -12,7 +12,7 @@ import asyncio
 import re
 import time
 from types import TracebackType
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from intric.main.logging import get_logger
@@ -66,9 +66,6 @@ class MCPProxySession:
 
         OpenAI requires 'items' on every array type. Some MCP servers omit it.
         """
-        if not isinstance(schema, dict):
-            return schema
-
         schema = dict(schema)
 
         if schema.get("type") == "array" and "items" not in schema:
@@ -181,10 +178,12 @@ class MCPProxySession:
     def get_tool_ui_resource_uri(self, prefixed_tool_name: str) -> str | None:
         """Get the UI resource URI for a tool, if declared in its meta."""
         meta = self._tool_meta.get(prefixed_tool_name)
-        if meta and isinstance(meta, dict):
+        if meta:
             ui = meta.get("ui")
             if isinstance(ui, dict):
-                return ui.get("resourceUri")
+                ui_dict = cast(dict[str, Any], ui)
+                resource_uri = ui_dict.get("resourceUri")
+                return str(resource_uri) if resource_uri else None
         return None
 
     def get_tool_mcp_server_id(self, prefixed_tool_name: str) -> str | None:

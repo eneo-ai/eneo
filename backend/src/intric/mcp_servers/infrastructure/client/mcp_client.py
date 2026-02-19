@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 import httpx
 from mcp import ClientSession
+from pydantic import AnyUrl
 from mcp.client.streamable_http import streamablehttp_client
 
 from intric.main.logging import get_logger
@@ -371,7 +372,7 @@ class MCPClient:
             raise MCPClientError("Not connected to MCP server")
 
         try:
-            response = await self.session.read_resource(uri)
+            response = await self.session.read_resource(AnyUrl(uri))
 
             # Return first content item
             for content_item in response.contents:
