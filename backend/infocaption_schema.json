@@ -1,0 +1,2808 @@
+{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "result": {
+        "tools": [
+            {
+                "name": "echo",
+                "description": "Echoes back the input message",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "message": {
+                            "type": "string",
+                            "description": "The message to echo"
+                        }
+                    },
+                    "required": [
+                        "message"
+                    ]
+                }
+            },
+            {
+                "name": "search-guides",
+                "description": "Searches for guides using a search query, optionally filtered by topics",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query to find guides"
+                        },
+                        "topicIds": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Optional list of topic IDs to filter guides by"
+                        }
+                    },
+                    "required": [
+                        "query"
+                    ]
+                }
+            },
+            {
+                "name": "add-guide",
+                "description": "Creates a new guide from structured text input",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "The title of the guide"
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "A brief summary of the guide"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "The structured content of the guide in format: [SECTION]Section Title\n[CELL]Cell content\n[/CELL]\n[/SECTION]\nThe CELL can contain valid HTML with UTF-8 encoding."
+                        },
+                        "primaryColor": {
+                            "type": "string",
+                            "description": "Primary color for the guide (hex format, e.g. #FF5733)",
+                            "default": "#3978D5"
+                        },
+                        "secondaryColor": {
+                            "type": "string",
+                            "description": "Secondary color for the guide (hex format)",
+                            "default": "#F5F5F5"
+                        },
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Topic IDs to categorize the guide. Use the get-topics tool to see available categories with their IDs"
+                        },
+                        "languageID": {
+                            "type": "integer",
+                            "description": "Language ID for the guide content. Use the get-languages tool to see all available languages. Common values: 25 (English), 112 (Swedish), 21 (Danish), 83 (Norwegian), 31 (Finnish)",
+                            "default": 25
+                        }
+                    },
+                    "required": [
+                        "title",
+                        "summary",
+                        "content"
+                    ]
+                }
+            },
+            {
+                "name": "add-text-guide",
+                "description": "Creates a versatile text guide with support for multiple widget types (text, images, dividers, FAQ/accordions, callouts, guide references, iframes, videos), theme support, and flexible layouts. Supports image uploading via base64-encoded data in the 'images' array parameter.\n\nDESIGN GUIDELINES (follow these for well-structured, pedagogically sound guides):\n- Layout: Max 4 cells per row. Place images in the same section as their explanatory text (text 60% width, image 40%).\n- Structure: One concept per section. Use 5-9 sections for optimal learning. Enable showTOC for guides with 5+ sections.\n- Opening: Start with a callout (style: 'info') listing learning objectives or what the reader will gain.\n- Closing: End with a callout (style: 'success') summarizing key takeaways.\n- Signaling: Use callout cells (tip/warning/info) to highlight key points. Bold important terms in text cells.\n- Self-assessment: Add FAQ cells at section ends with comprehension questions so readers can test their understanding.\n- Visual rhythm: Alternate section backgrounds between #FFFFFF and @secondaryColor for readability.\n- Tone: Use second person ('you') for a conversational, learner-friendly tone.\n- Coherence: Every cell should serve a learning goal. Minimize decorative dividers. If a video explains a concept, keep adjacent text brief.\n- Segmenting: Break complex content into learner-paced chunks with clear section titles.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "The title of the guide"
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "A brief summary of the guide"
+                        },
+                        "themeId": {
+                            "type": "integer",
+                            "description": "ID of an existing theme to apply to the guide. If specified, overrides individual color settings."
+                        },
+                        "primaryColor": {
+                            "type": "string",
+                            "description": "Primary color for the guide (hex format, e.g. #3978D5). Used when themeId is not specified.",
+                            "default": "#3978D5"
+                        },
+                        "secondaryColor": {
+                            "type": "string",
+                            "description": "Secondary color for the guide (hex format). Used when themeId is not specified.",
+                            "default": "#F5F5F5"
+                        },
+                        "accentColor": {
+                            "type": "string",
+                            "description": "Accent color for dividers and highlights (hex format). Used when themeId is not specified.",
+                            "default": "#FF6B35"
+                        },
+                        "headerImage": {
+                            "type": "string",
+                            "description": "Optional header image filename or URL"
+                        },
+                        "sections": {
+                            "type": "array",
+                            "description": "Array of sections, each containing cells with content",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "backgroundColor": {
+                                        "type": "string",
+                                        "description": "Background color (hex or color variable like @primaryColor, @secondaryColor, @accentColor)"
+                                    },
+                                    "title": {
+                                        "type": "string",
+                                        "description": "Optional section title"
+                                    },
+                                    "templateId": {
+                                        "type": "integer",
+                                        "description": "Global template ID for this section. When set, content comes from the template. Do not provide cells when using a template."
+                                    },
+                                    "cells": {
+                                        "type": "array",
+                                        "description": "Array of cells in this section",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "type": {
+                                                    "type": "string",
+                                                    "description": "Cell type: 'text', 'image', 'divider', 'faq', 'callout', 'guide', 'iframe', or 'video'",
+                                                    "enum": [
+                                                        "text",
+                                                        "image",
+                                                        "divider",
+                                                        "faq",
+                                                        "callout",
+                                                        "guide",
+                                                        "iframe",
+                                                        "video"
+                                                    ]
+                                                },
+                                                "templateId": {
+                                                    "type": "integer",
+                                                    "description": "Global template ID for this cell. When set, content comes from the template. Do not provide type/content when using a template."
+                                                },
+                                                "content": {
+                                                    "type": "string",
+                                                    "description": "Content for the cell. For text/callout: HTML content. For image: filename/URL. For divider: divider type (solid, dashed, dotted). For video: video URL. For iframe: embed URL."
+                                                },
+                                                "width": {
+                                                    "type": "string",
+                                                    "description": "Optional cell width (0 for auto, or specific width)"
+                                                },
+                                                "align": {
+                                                    "type": "string",
+                                                    "description": "Optional alignment: 'left', 'center', 'right'"
+                                                },
+                                                "padding": {
+                                                    "type": "string",
+                                                    "description": "Optional padding (e.g. '20px 20px')"
+                                                },
+                                                "textColor": {
+                                                    "type": "string",
+                                                    "description": "Optional text color for text cells"
+                                                },
+                                                "items": {
+                                                    "type": "array",
+                                                    "description": "Array of FAQ items for FAQ cells",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "question": {
+                                                                "type": "string",
+                                                                "description": "The question text"
+                                                            },
+                                                            "answer": {
+                                                                "type": "string",
+                                                                "description": "The answer text (supports HTML)"
+                                                            }
+                                                        },
+                                                        "required": [
+                                                            "question",
+                                                            "answer"
+                                                        ]
+                                                    }
+                                                },
+                                                "questionBgColor": {
+                                                    "type": "string",
+                                                    "description": "FAQ question background color (hex or @primaryColor, @secondaryColor, @textPrimaryColor, @textSecondaryColor)"
+                                                },
+                                                "questionTextColor": {
+                                                    "type": "string",
+                                                    "description": "FAQ question text color"
+                                                },
+                                                "answerBgColor": {
+                                                    "type": "string",
+                                                    "description": "FAQ answer background color"
+                                                },
+                                                "answerTextColor": {
+                                                    "type": "string",
+                                                    "description": "FAQ answer text color"
+                                                },
+                                                "style": {
+                                                    "type": "string",
+                                                    "description": "Callout style: 'info' (blue), 'warning' (yellow), 'success' (green), 'danger' (red), 'tip' (purple)"
+                                                },
+                                                "bubbleColor": {
+                                                    "type": "string",
+                                                    "description": "Callout bubble background color (overrides style)"
+                                                },
+                                                "pointerPosition": {
+                                                    "type": "string",
+                                                    "description": "Callout pointer position: 0-100 percentage (0=left, 50=center, 100=right). Default: 50 (centered)"
+                                                },
+                                                "pointerSide": {
+                                                    "type": "string",
+                                                    "description": "Callout pointer side: 'top', 'right', 'bottom', 'left' (default: 'bottom')"
+                                                },
+                                                "guideId": {
+                                                    "type": "integer",
+                                                    "description": "Guide ID for guide reference cells"
+                                                },
+                                                "showAsLink": {
+                                                    "type": "boolean",
+                                                    "description": "Show guide as link (true) or embedded (false)"
+                                                },
+                                                "showStepList": {
+                                                    "type": "boolean",
+                                                    "description": "Show step list for referenced guide"
+                                                },
+                                                "url": {
+                                                    "type": "string",
+                                                    "description": "URL for iframe or video (supports YouTube, Vimeo URLs)"
+                                                },
+                                                "height": {
+                                                    "type": "integer",
+                                                    "description": "Height in pixels for iframe/video (default: 400)"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "fullWidth": {
+                            "type": "boolean",
+                            "description": "Whether the guide should be full width",
+                            "default": true
+                        },
+                        "showTOC": {
+                            "type": "boolean",
+                            "description": "Whether to show table of contents",
+                            "default": false
+                        },
+                        "hideHeader": {
+                            "type": "boolean",
+                            "description": "Whether to hide the header",
+                            "default": true
+                        },
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Topic IDs to categorize the guide. Use the get-topics tool to see available categories with their IDs"
+                        },
+                        "languageID": {
+                            "type": "integer",
+                            "description": "Language ID for the guide content. Use the get-languages tool to see all available languages. Common values: 25 (English), 112 (Swedish), 21 (Danish), 83 (Norwegian), 31 (Finnish)",
+                            "default": 25
+                        },
+                        "images": {
+                            "type": "array",
+                            "description": "Array of images to upload. Each image can be referenced in image cells using 'image:id' format in the content field. Example: for an image with id 'logo', use content: 'image:logo' in an image cell.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {
+                                        "type": "string",
+                                        "description": "Unique identifier for the image, used to reference it in cells (e.g., 'logo', 'header-image')"
+                                    },
+                                    "data": {
+                                        "type": "string",
+                                        "description": "Base64-encoded image data (without data URL prefix)"
+                                    },
+                                    "filename": {
+                                        "type": "string",
+                                        "description": "Filename for the image including extension (e.g., 'logo.png', 'header.jpg')"
+                                    }
+                                },
+                                "required": [
+                                    "id",
+                                    "data",
+                                    "filename"
+                                ]
+                            }
+                        }
+                    },
+                    "required": [
+                        "title",
+                        "sections"
+                    ]
+                }
+            },
+            {
+                "name": "add-knowledge-test",
+                "description": "Creates a knowledge test (quiz) with multiple question types including multiple choice and free text questions. Configure passing scores, question randomization, and result display options.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "The title of the knowledge test"
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "A brief description of the knowledge test"
+                        },
+                        "keyphrases": {
+                            "type": "string",
+                            "description": "Comma-separated keyphrases for search"
+                        },
+                        "languageID": {
+                            "type": "integer",
+                            "description": "Language ID for the test content. Use the get-languages tool to see all available languages. Common values: 25 (English), 112 (Swedish), 21 (Danish), 83 (Norwegian), 31 (Finnish)",
+                            "default": 25
+                        },
+                        "searchable": {
+                            "type": "boolean",
+                            "description": "Whether the test is searchable",
+                            "default": true
+                        },
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Topic IDs to categorize the test. Use the get-topics tool to see available categories with their IDs"
+                        },
+                        "scoreToPass": {
+                            "type": "integer",
+                            "description": "Percentage score required to pass (0-100). Default: 70",
+                            "default": 70,
+                            "minimum": 0,
+                            "maximum": 100
+                        },
+                        "randomizeQuestions": {
+                            "type": "boolean",
+                            "description": "Randomize question order when test is taken",
+                            "default": false
+                        },
+                        "showCorrectAnswers": {
+                            "type": "boolean",
+                            "description": "Show correct answers after test completion",
+                            "default": true
+                        },
+                        "showResults": {
+                            "type": "boolean",
+                            "description": "Show results summary after test completion",
+                            "default": true
+                        },
+                        "showRecommendedGuides": {
+                            "type": "boolean",
+                            "description": "Show recommended guides for missed questions",
+                            "default": true
+                        },
+                        "questions": {
+                            "type": "array",
+                            "description": "Array of questions for the knowledge test",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "questionType": {
+                                        "type": "string",
+                                        "description": "Type of question: 'multiple_choice' or 'free_text'",
+                                        "enum": [
+                                            "multiple_choice",
+                                            "free_text"
+                                        ]
+                                    },
+                                    "title": {
+                                        "type": "string",
+                                        "description": "The question text (can include HTML)"
+                                    },
+                                    "score": {
+                                        "type": "integer",
+                                        "description": "Score weight for this question (0-100). Default: 100",
+                                        "default": 100
+                                    },
+                                    "options": {
+                                        "type": "array",
+                                        "description": "Array of answer options for multiple choice questions",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "text": {
+                                                    "type": "string",
+                                                    "description": "The option text"
+                                                },
+                                                "isCorrect": {
+                                                    "type": "boolean",
+                                                    "description": "Whether this option is correct",
+                                                    "default": false
+                                                }
+                                            },
+                                            "required": [
+                                                "text"
+                                            ]
+                                        }
+                                    },
+                                    "randomizeOptions": {
+                                        "type": "boolean",
+                                        "description": "Randomize option order for multiple choice",
+                                        "default": false
+                                    },
+                                    "acceptedAnswers": {
+                                        "type": "array",
+                                        "description": "Array of accepted answers for free text questions",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "text": {
+                                                    "type": "string",
+                                                    "description": "The expected answer text"
+                                                },
+                                                "caseSensitive": {
+                                                    "type": "boolean",
+                                                    "description": "Whether matching is case sensitive",
+                                                    "default": false
+                                                },
+                                                "matchMethod": {
+                                                    "type": "string",
+                                                    "description": "How to match the answer: 'exact' or 'partial'",
+                                                    "enum": [
+                                                        "exact",
+                                                        "partial"
+                                                    ],
+                                                    "default": "exact"
+                                                }
+                                            },
+                                            "required": [
+                                                "text"
+                                            ]
+                                        }
+                                    },
+                                    "matchAllAnswers": {
+                                        "type": "boolean",
+                                        "description": "Require all accepted answers to match (AND logic). Default is OR logic.",
+                                        "default": false
+                                    }
+                                },
+                                "required": [
+                                    "questionType",
+                                    "title"
+                                ]
+                            }
+                        }
+                    },
+                    "required": [
+                        "title",
+                        "questions"
+                    ]
+                }
+            },
+            {
+                "name": "create-workflow-from-mermaid",
+                "description": "Creates and publishes a Workflow guide from a Mermaid flowchart diagram",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "The title of the workflow guide"
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "A brief summary of the workflow"
+                        },
+                        "mermaidDiagram": {
+                            "type": "string",
+                            "description": "The Mermaid flowchart diagram. Supports graph TD/LR syntax with nodes like A[Node Label] and arrows like A-->B or A-->|Label|B"
+                        },
+                        "roleLabel": {
+                            "type": "string",
+                            "description": "Optional role/swimlane label for all activities (default: 'Process')",
+                            "default": "Process"
+                        },
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Topic IDs to categorize the workflow. Use the get-topics tool to see available categories with their IDs"
+                        },
+                        "languageID": {
+                            "type": "integer",
+                            "description": "Language ID for the workflow content. Use the get-languages tool to see all available languages. Common values: 25 (English), 112 (Swedish), 21 (Danish), 83 (Norwegian), 31 (Finnish)",
+                            "default": 25
+                        },
+                        "themeId": {
+                            "type": "integer",
+                            "description": "Optional theme ID to apply to the workflow"
+                        }
+                    },
+                    "required": [
+                        "title",
+                        "summary",
+                        "mermaidDiagram"
+                    ]
+                }
+            },
+            {
+                "name": "get-guide-structure",
+                "description": "Retrieves the full editable structure of a guide in simplified JSON format. Use this to get the complete content structure before making updates with update-text-guide, update-knowledge-test, or update-workflow tools.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of the guide to retrieve the structure for"
+                        }
+                    },
+                    "required": [
+                        "guideId"
+                    ]
+                }
+            },
+            {
+                "name": "update-text-guide",
+                "description": "Updates an existing text guide with new content. Use get-guide-structure first to retrieve the current structure, modify it, then use this tool to save the changes. Supports image uploading via base64-encoded data in the 'images' array parameter.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of the text guide to update"
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "New title for the guide (optional)"
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "New summary for the guide (optional)"
+                        },
+                        "themeId": {
+                            "type": "integer",
+                            "description": "Optional theme ID to apply to the guide"
+                        },
+                        "fullWidth": {
+                            "type": "boolean",
+                            "description": "Whether the guide uses full width layout",
+                            "default": true
+                        },
+                        "showTOC": {
+                            "type": "boolean",
+                            "description": "Show table of contents",
+                            "default": false
+                        },
+                        "hideHeader": {
+                            "type": "boolean",
+                            "description": "Hide the guide header",
+                            "default": false
+                        },
+                        "sections": {
+                            "type": "array",
+                            "description": "Array of sections. Each section contains cells.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "backgroundColor": {
+                                        "type": "string",
+                                        "description": "Background color for the section (hex color)"
+                                    },
+                                    "templateId": {
+                                        "type": "integer",
+                                        "description": "Global template ID for this section. When set, content comes from the template. Do not provide cells when using a template."
+                                    },
+                                    "cells": {
+                                        "type": "array",
+                                        "description": "Array of cells within the section",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "type": {
+                                                    "type": "string",
+                                                    "description": "Cell type: text, faq, callout, divider, image, guide, iframe",
+                                                    "enum": [
+                                                        "text",
+                                                        "faq",
+                                                        "callout",
+                                                        "divider",
+                                                        "image",
+                                                        "guide",
+                                                        "iframe"
+                                                    ]
+                                                },
+                                                "templateId": {
+                                                    "type": "integer",
+                                                    "description": "Global template ID for this cell. When set, content comes from the template. Do not provide type/content when using a template."
+                                                },
+                                                "content": {
+                                                    "type": "string",
+                                                    "description": "HTML content for text cells"
+                                                },
+                                                "textColor": {
+                                                    "type": "string",
+                                                    "description": "Text color (hex)"
+                                                },
+                                                "padding": {
+                                                    "type": "string",
+                                                    "description": "Cell padding"
+                                                },
+                                                "width": {
+                                                    "type": "integer",
+                                                    "description": "Cell width percentage (1-100)"
+                                                },
+                                                "items": {
+                                                    "type": "array",
+                                                    "description": "FAQ items (for FAQ cells)"
+                                                },
+                                                "bubbleColor": {
+                                                    "type": "string",
+                                                    "description": "Callout bubble background color"
+                                                },
+                                                "pointerPosition": {
+                                                    "type": "string",
+                                                    "description": "Callout pointer position"
+                                                },
+                                                "pointerSide": {
+                                                    "type": "string",
+                                                    "description": "Callout pointer side"
+                                                },
+                                                "guideId": {
+                                                    "type": "integer",
+                                                    "description": "Referenced guide ID (for guide cells)"
+                                                },
+                                                "dividerType": {
+                                                    "type": "string",
+                                                    "description": "Divider type"
+                                                },
+                                                "dividerColor": {
+                                                    "type": "string",
+                                                    "description": "Divider color"
+                                                },
+                                                "dividerHeight": {
+                                                    "type": "integer",
+                                                    "description": "Divider height"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "images": {
+                            "type": "array",
+                            "description": "Array of images to upload. Each image can be referenced in image cells using 'image:id' format in the content field. Example: for an image with id 'logo', use content: 'image:logo' in an image cell.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {
+                                        "type": "string",
+                                        "description": "Unique identifier for the image, used to reference it in cells (e.g., 'logo', 'header-image')"
+                                    },
+                                    "data": {
+                                        "type": "string",
+                                        "description": "Base64-encoded image data (without data URL prefix)"
+                                    },
+                                    "filename": {
+                                        "type": "string",
+                                        "description": "Filename for the image including extension (e.g., 'logo.png', 'header.jpg')"
+                                    }
+                                },
+                                "required": [
+                                    "id",
+                                    "data",
+                                    "filename"
+                                ]
+                            }
+                        }
+                    },
+                    "required": [
+                        "guideId"
+                    ]
+                }
+            },
+            {
+                "name": "update-knowledge-test",
+                "description": "Updates an existing knowledge test (quiz) with new questions and settings. Use get-guide-structure first to retrieve the current structure, modify it, then use this tool to save the changes.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of the knowledge test to update"
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "New title for the test (optional)"
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "New summary for the test (optional)"
+                        },
+                        "scoreToPass": {
+                            "type": "integer",
+                            "description": "Percentage score required to pass (0-100)",
+                            "minimum": 0,
+                            "maximum": 100
+                        },
+                        "randomizeQuestions": {
+                            "type": "boolean",
+                            "description": "Randomize question order when test is taken",
+                            "default": false
+                        },
+                        "showCorrectAnswers": {
+                            "type": "boolean",
+                            "description": "Show correct answers after test completion",
+                            "default": true
+                        },
+                        "showResults": {
+                            "type": "boolean",
+                            "description": "Show results summary after test completion",
+                            "default": true
+                        },
+                        "showRecommendedGuides": {
+                            "type": "boolean",
+                            "description": "Show recommended guides for missed questions",
+                            "default": true
+                        },
+                        "questions": {
+                            "type": "array",
+                            "description": "Array of questions for the knowledge test",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "questionType": {
+                                        "type": "string",
+                                        "description": "Type of question: 'multiple_choice' or 'free_text'",
+                                        "enum": [
+                                            "multiple_choice",
+                                            "free_text"
+                                        ]
+                                    },
+                                    "title": {
+                                        "type": "string",
+                                        "description": "The question text (can include HTML)"
+                                    },
+                                    "score": {
+                                        "type": "integer",
+                                        "description": "Score weight for this question (0-100). Default: 100",
+                                        "default": 100
+                                    },
+                                    "options": {
+                                        "type": "array",
+                                        "description": "Array of answer options for multiple choice questions"
+                                    },
+                                    "randomizeOptions": {
+                                        "type": "boolean",
+                                        "description": "Randomize option order for multiple choice",
+                                        "default": false
+                                    },
+                                    "acceptedAnswers": {
+                                        "type": "array",
+                                        "description": "Array of accepted answers for free text questions"
+                                    },
+                                    "matchAllAnswers": {
+                                        "type": "boolean",
+                                        "description": "Require all accepted answers to match (AND logic)",
+                                        "default": false
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "required": [
+                        "guideId"
+                    ]
+                }
+            },
+            {
+                "name": "update-workflow",
+                "description": "Updates an existing workflow guide. Can update metadata (title, summary) and activity properties (linkedGuideId, description, backgroundColor). Use get-guide-structure first to retrieve the current structure.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of the workflow to update"
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "New title for the workflow (optional)"
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "New summary/description for the workflow (optional)"
+                        },
+                        "activities": {
+                            "type": "array",
+                            "description": "Array of activities to update. Activities are identified by name.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "Name of the activity to update (required - identifies the activity)"
+                                    },
+                                    "linkedGuideId": {
+                                        "type": "integer",
+                                        "description": "ID of guide to link, or null to clear existing link"
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "description": "New description for the activity"
+                                    },
+                                    "backgroundColor": {
+                                        "type": "string",
+                                        "description": "New background color (e.g., '#FF5733')"
+                                    }
+                                },
+                                "required": [
+                                    "name"
+                                ]
+                            }
+                        }
+                    },
+                    "required": [
+                        "guideId"
+                    ]
+                }
+            },
+            {
+                "name": "add-workflow",
+                "description": "Creates a Workflow guide from structured JSON with roles, activities, and connections. Activities can be linked to existing guides via linkedGuideId.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "The title of the workflow guide (required)"
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "A brief summary/description of the workflow"
+                        },
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Topic IDs to categorize the workflow. Use get-topics to see available categories"
+                        },
+                        "languageID": {
+                            "type": "integer",
+                            "description": "Language ID for the workflow. Common: 25 (English), 112 (Swedish), 21 (Danish), 83 (Norwegian)",
+                            "default": 25
+                        },
+                        "themeId": {
+                            "type": "integer",
+                            "description": "Optional theme ID to apply to the workflow"
+                        },
+                        "roles": {
+                            "type": "array",
+                            "description": "Array of roles (swimlanes) containing activities. Each role groups related activities.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "roleName": {
+                                        "type": "string",
+                                        "description": "Name of the role/swimlane (required)"
+                                    },
+                                    "activities": {
+                                        "type": "array",
+                                        "description": "Array of activities within this role",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "name": {
+                                                    "type": "string",
+                                                    "description": "Name of the activity (required)"
+                                                },
+                                                "description": {
+                                                    "type": "string",
+                                                    "description": "Description of the activity"
+                                                },
+                                                "type": {
+                                                    "type": "string",
+                                                    "description": "Activity type",
+                                                    "enum": [
+                                                        "task",
+                                                        "gateway",
+                                                        "decision",
+                                                        "start",
+                                                        "end"
+                                                    ],
+                                                    "default": "task"
+                                                },
+                                                "x": {
+                                                    "type": "integer",
+                                                    "description": "X position (auto-layout if omitted)"
+                                                },
+                                                "y": {
+                                                    "type": "integer",
+                                                    "description": "Y position (auto-layout if omitted)"
+                                                },
+                                                "linkedGuideId": {
+                                                    "type": "integer",
+                                                    "description": "ID of a guide to link to this activity. The linked guide will open when the activity is clicked."
+                                                },
+                                                "backgroundColor": {
+                                                    "type": "string",
+                                                    "description": "Background color (e.g., '#FF5733')"
+                                                },
+                                                "connections": {
+                                                    "type": "array",
+                                                    "description": "Connections from this activity to other activities",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "toActivity": {
+                                                                "type": "string",
+                                                                "description": "Name of the destination activity"
+                                                            },
+                                                            "label": {
+                                                                "type": "string",
+                                                                "description": "Label for the connection arrow"
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "required": [
+                        "title"
+                    ]
+                }
+            },
+            {
+                "name": "add-collection",
+                "description": "Creates a new collection with hierarchical nodes (guides, titles, URLs, documents), settings for navigation and tracking, and optional group connections for course functionality. The collection is automatically published after creation.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "The title of the collection (required)"
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "A brief summary of the collection"
+                        },
+                        "themeId": {
+                            "type": "integer",
+                            "description": "ID of an existing theme to apply"
+                        },
+                        "languageID": {
+                            "type": "integer",
+                            "description": "Language ID for the collection content. Use the get-languages tool to see all available languages. Common values: 25 (English), 112 (Swedish), 21 (Danish), 83 (Norwegian), 31 (Finnish)",
+                            "default": 25
+                        },
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Topic IDs to categorize the collection. Use the get-topics tool to see available categories with their IDs"
+                        },
+                        "settings": {
+                            "type": "object",
+                            "description": "Collection display and tracking settings",
+                            "properties": {
+                                "showSideNavigation": {
+                                    "type": "boolean",
+                                    "description": "Show table of contents in left sidebar",
+                                    "default": true
+                                },
+                                "showProgressBar": {
+                                    "type": "boolean",
+                                    "description": "Show progress bar at top",
+                                    "default": true
+                                },
+                                "showBottomNavigation": {
+                                    "type": "boolean",
+                                    "description": "Show bottom navigation bar",
+                                    "default": false
+                                },
+                                "expandLevel": {
+                                    "type": "integer",
+                                    "description": "Initial expansion depth in sidebar (default: 2)",
+                                    "default": 2
+                                },
+                                "tracking": {
+                                    "type": "boolean",
+                                    "description": "Enable course progress tracking",
+                                    "default": false
+                                },
+                                "showDiploma": {
+                                    "type": "boolean",
+                                    "description": "Show diploma on completion",
+                                    "default": false
+                                },
+                                "diplomaTemplateID": {
+                                    "type": "integer",
+                                    "description": "Diploma template ID"
+                                },
+                                "enableNodeNumbering": {
+                                    "type": "boolean",
+                                    "description": "Number top-level nodes",
+                                    "default": false
+                                },
+                                "enableGlobalValidation": {
+                                    "type": "boolean",
+                                    "description": "Require end-of-collection validation",
+                                    "default": false
+                                },
+                                "applyCollectionThemeOnGuides": {
+                                    "type": "boolean",
+                                    "description": "Apply collection theme to contained guides",
+                                    "default": false
+                                },
+                                "enablePartialApproval": {
+                                    "type": "boolean",
+                                    "description": "Require section approvals",
+                                    "default": false
+                                },
+                                "allowNonParticipants": {
+                                    "type": "boolean",
+                                    "description": "Allow non-group members to view",
+                                    "default": false
+                                },
+                                "showAsDigitalCoach": {
+                                    "type": "boolean",
+                                    "description": "Show collection as Digital Coach interface",
+                                    "default": false
+                                }
+                            }
+                        },
+                        "nodes": {
+                            "type": "array",
+                            "description": "Array of collection nodes (supports nesting via children)",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "description": "Node type: 'title' (section header), 'guide' (reference to guide), 'url' (external link), 'document' (media file)",
+                                        "enum": [
+                                            "title",
+                                            "guide",
+                                            "url",
+                                            "document"
+                                        ]
+                                    },
+                                    "title": {
+                                        "type": "string",
+                                        "description": "Node title (required for title/url types, optional for guide type to override guide title)"
+                                    },
+                                    "referencedGuideID": {
+                                        "type": "integer",
+                                        "description": "Guide ID to reference (required for 'guide' type)"
+                                    },
+                                    "url": {
+                                        "type": "string",
+                                        "description": "URL for external link (required for 'url' type)"
+                                    },
+                                    "openInNewTab": {
+                                        "type": "boolean",
+                                        "description": "Open URL in new tab",
+                                        "default": false
+                                    },
+                                    "mediaFileID": {
+                                        "type": "integer",
+                                        "description": "Media file ID (required for 'document' type)"
+                                    },
+                                    "masteryScore": {
+                                        "type": "integer",
+                                        "description": "Required mastery score 0-100 (for tracking)"
+                                    },
+                                    "selfValidation": {
+                                        "type": "boolean",
+                                        "description": "Require self-validation for this node",
+                                        "default": false
+                                    },
+                                    "children": {
+                                        "type": "array",
+                                        "description": "Nested child nodes"
+                                    }
+                                },
+                                "required": [
+                                    "type"
+                                ]
+                            }
+                        },
+                        "groupConnections": {
+                            "type": "array",
+                            "description": "Group connections for course participant management",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "groupID": {
+                                        "type": "integer",
+                                        "description": "Group ID to connect"
+                                    },
+                                    "connectionLevel": {
+                                        "type": "integer",
+                                        "description": "Connection level (default: 1)",
+                                        "default": 1
+                                    }
+                                },
+                                "required": [
+                                    "groupID"
+                                ]
+                            }
+                        }
+                    },
+                    "required": [
+                        "title"
+                    ]
+                }
+            },
+            {
+                "name": "get-collection-structure",
+                "description": "Retrieves the structure of an existing collection including nodes, settings, and metadata. Use this to get the current structure before making updates with update-collection.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of the collection guide to retrieve"
+                        }
+                    },
+                    "required": [
+                        "guideId"
+                    ]
+                }
+            },
+            {
+                "name": "update-collection",
+                "description": "Updates an existing collection with new nodes, settings, and metadata. Use get-collection-structure first to retrieve the current structure, modify it, then use this tool to save the changes. Node updates use full tree replacement mode. The collection is automatically published after update.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of the collection to update (required)"
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "New title for the collection (optional)"
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "New summary for the collection (optional)"
+                        },
+                        "themeId": {
+                            "type": "integer",
+                            "description": "Theme ID to apply (optional)"
+                        },
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Topic IDs to categorize the collection (replaces existing). Use the get-topics tool to see available categories"
+                        },
+                        "settings": {
+                            "type": "object",
+                            "description": "Collection display and tracking settings (optional)",
+                            "properties": {
+                                "showSideNavigation": {
+                                    "type": "boolean",
+                                    "description": "Show table of contents in left sidebar",
+                                    "default": true
+                                },
+                                "showProgressBar": {
+                                    "type": "boolean",
+                                    "description": "Show progress bar at top",
+                                    "default": true
+                                },
+                                "showBottomNavigation": {
+                                    "type": "boolean",
+                                    "description": "Show bottom navigation bar",
+                                    "default": false
+                                },
+                                "expandLevel": {
+                                    "type": "integer",
+                                    "description": "Initial expansion depth in sidebar"
+                                },
+                                "tracking": {
+                                    "type": "boolean",
+                                    "description": "Enable course progress tracking",
+                                    "default": false
+                                },
+                                "showDiploma": {
+                                    "type": "boolean",
+                                    "description": "Show diploma on completion",
+                                    "default": false
+                                },
+                                "diplomaTemplateID": {
+                                    "type": "integer",
+                                    "description": "Diploma template ID"
+                                },
+                                "enableNodeNumbering": {
+                                    "type": "boolean",
+                                    "description": "Number top-level nodes",
+                                    "default": false
+                                },
+                                "enableGlobalValidation": {
+                                    "type": "boolean",
+                                    "description": "Require end-of-collection validation",
+                                    "default": false
+                                },
+                                "applyCollectionThemeOnGuides": {
+                                    "type": "boolean",
+                                    "description": "Apply collection theme to contained guides",
+                                    "default": false
+                                },
+                                "enablePartialApproval": {
+                                    "type": "boolean",
+                                    "description": "Require section approvals",
+                                    "default": false
+                                },
+                                "allowNonParticipants": {
+                                    "type": "boolean",
+                                    "description": "Allow non-group members to view",
+                                    "default": false
+                                },
+                                "showAsDigitalCoach": {
+                                    "type": "boolean",
+                                    "description": "Show collection as Digital Coach interface",
+                                    "default": false
+                                }
+                            }
+                        },
+                        "nodes": {
+                            "type": "array",
+                            "description": "Full node tree to replace existing nodes (optional, uses tree replacement mode)",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "description": "Node type: 'title', 'guide', 'url', 'document'",
+                                        "enum": [
+                                            "title",
+                                            "guide",
+                                            "url",
+                                            "document"
+                                        ]
+                                    },
+                                    "title": {
+                                        "type": "string",
+                                        "description": "Node title"
+                                    },
+                                    "referencedGuideID": {
+                                        "type": "integer",
+                                        "description": "Guide ID (for 'guide' type)"
+                                    },
+                                    "url": {
+                                        "type": "string",
+                                        "description": "URL (for 'url' type)"
+                                    },
+                                    "openInNewTab": {
+                                        "type": "boolean",
+                                        "description": "Open URL in new tab",
+                                        "default": false
+                                    },
+                                    "mediaFileID": {
+                                        "type": "integer",
+                                        "description": "Media file ID (for 'document' type)"
+                                    },
+                                    "masteryScore": {
+                                        "type": "integer",
+                                        "description": "Required mastery score 0-100"
+                                    },
+                                    "selfValidation": {
+                                        "type": "boolean",
+                                        "description": "Require self-validation",
+                                        "default": false
+                                    },
+                                    "children": {
+                                        "type": "array",
+                                        "description": "Nested child nodes"
+                                    }
+                                },
+                                "required": [
+                                    "type"
+                                ]
+                            }
+                        },
+                        "groupConnections": {
+                            "type": "array",
+                            "description": "Group connections (optional, replaces existing)",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "groupID": {
+                                        "type": "integer",
+                                        "description": "Group ID to connect"
+                                    },
+                                    "connectionLevel": {
+                                        "type": "integer",
+                                        "description": "Connection level (default: 1)"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "required": [
+                        "guideId"
+                    ]
+                }
+            },
+            {
+                "name": "list-themes",
+                "description": "Lists available themes with optional filtering by active status, shared status, and IC theme inclusion",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "activeOnly": {
+                            "type": "boolean",
+                            "description": "If true, only return active themes. Default: true",
+                            "default": true
+                        },
+                        "sharedOnly": {
+                            "type": "boolean",
+                            "description": "If true, only return shared themes. Default: false",
+                            "default": false
+                        },
+                        "includeIcThemes": {
+                            "type": "boolean",
+                            "description": "If true, include InfoCaption-provided themes. Default: true",
+                            "default": true
+                        },
+                        "includeDetails": {
+                            "type": "boolean",
+                            "description": "If true, include theme color variables in the output. Default: false",
+                            "default": false
+                        }
+                    }
+                }
+            },
+            {
+                "name": "set-guide-theme",
+                "description": "Sets or updates the theme for a guide or workflow. Use list-themes to see available themes.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of the guide or workflow to update"
+                        },
+                        "themeId": {
+                            "type": "integer",
+                            "description": "The theme ID to apply. Use null or omit to remove the current theme."
+                        }
+                    },
+                    "required": [
+                        "guideId"
+                    ]
+                }
+            },
+            {
+                "name": "list-templates",
+                "description": "Lists available section and cell templates that can be reused when creating or updating text guides. Includes both global templates (organization-wide defaults) and shared templates (shared by other users). Use the returned template IDs with the templateId property in add-text-guide or update-text-guide sections/cells.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "templateType": {
+                            "type": "string",
+                            "description": "Filter by template type: 'section', 'cell', or 'all'. Default: 'all'",
+                            "enum": [
+                                "section",
+                                "cell",
+                                "all"
+                            ]
+                        },
+                        "scope": {
+                            "type": "string",
+                            "description": "Filter by scope: 'global' (organization-wide defaults), 'shared' (shared by other users), or 'all'. Default: 'all'",
+                            "enum": [
+                                "global",
+                                "shared",
+                                "all"
+                            ]
+                        },
+                        "activeOnly": {
+                            "type": "boolean",
+                            "description": "If true, only return active templates. Default: true",
+                            "default": true
+                        }
+                    }
+                }
+            },
+            {
+                "name": "get-guide-content",
+                "description": "Retrieves the text content of a specific guide by ID",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of the guide to retrieve"
+                        },
+                        "includeExternal": {
+                            "type": "boolean",
+                            "description": "Whether to include external content for URL guides",
+                            "default": false
+                        },
+                        "uiMode": {
+                            "type": "string",
+                            "description": "How to render the UI: 'external' shows a preview card with Open Full Guide button (default), 'embedded' generates inline HTML with full content",
+                            "enum": [
+                                "external",
+                                "embedded"
+                            ],
+                            "default": "external"
+                        }
+                    },
+                    "required": [
+                        "guideId"
+                    ]
+                },
+                "_meta": {
+                    "ui": {
+                        "resourceUri": "ui://infocaption/guide-viewer",
+                        "visibility": [
+                            "model",
+                            "app"
+                        ]
+                    }
+                }
+            },
+            {
+                "name": "search-learning-content",
+                "description": "Searches for learning content (guides, courses, processes) available to the end user",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query to find learning content"
+                        },
+                        "topicIds": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Optional list of topic IDs to filter by"
+                        },
+                        "guideTypes": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Optional list of guide type IDs to filter by (1=Text, 2=StepByStep, 3=Video, 5=Course, 6=Workflow, etc.)"
+                        },
+                        "includeProcesses": {
+                            "type": "boolean",
+                            "description": "Whether to include workflow processes in search results (default: true)",
+                            "default": true
+                        },
+                        "maxResults": {
+                            "type": "integer",
+                            "description": "Maximum number of results to return (default: 10, max: 50)",
+                            "default": 10
+                        }
+                    },
+                    "required": [
+                        "query"
+                    ]
+                }
+            },
+            {
+                "name": "get-content-statistics",
+                "description": "Retrieves comprehensive content statistics for administrators including total guides, views, top performers, and activity metrics",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "days": {
+                            "type": "integer",
+                            "description": "Number of days to look back for statistics (default: 30)",
+                            "default": 30
+                        }
+                    }
+                }
+            },
+            {
+                "name": "get-topics",
+                "description": "Gets all topics (categories) in the system with hierarchical structure. Returns topic IDs that can be used with content creation tools (add-guide, add-text-guide, add-collection, etc.) to organize content into categories",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "languageId": {
+                            "type": "integer",
+                            "description": "Optional language ID to translate topic names (default: system default language)"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "add-topic",
+                "description": "Creates a new topic (category) for organizing content. Topics can be nested hierarchically by specifying a parentID. Use get-topics to see existing categories and their IDs.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "The name of the topic (required). Cannot contain: / & < >"
+                        },
+                        "parentID": {
+                            "type": "integer",
+                            "description": "Parent topic ID to create a subtopic. Use get-topics to find parent IDs. Leave empty or set to 0 for a root-level topic."
+                        }
+                    },
+                    "required": [
+                        "name"
+                    ]
+                }
+            },
+            {
+                "name": "get-languages",
+                "description": "Gets all available languages in the system for content creation. Returns language IDs that can be used with guide creation tools (add-guide, add-text-guide, create-guide-from-document)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            },
+            {
+                "name": "bulk-update-guides",
+                "description": "Performs bulk operations on multiple guides at once. Can update topics, valid dates, access restrictions, keyphrases, and more. Supports preview mode to review changes before applying.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideIds": {
+                            "type": "array",
+                            "description": "Array of guide IDs to update",
+                            "items": {
+                                "type": "integer"
+                            }
+                        },
+                        "topicId": {
+                            "type": "integer",
+                            "description": "Update all guides in this topic (alternative to guideIds)"
+                        },
+                        "operation": {
+                            "type": "string",
+                            "description": "Operation to perform: 'add-topics', 'remove-topics', 'set-valid-from', 'set-valid-to', 'add-keyphrases', 'remove-keyphrases', 'set-searchable', 'set-restricted', 'archive', 'unarchive'"
+                        },
+                        "topicIds": {
+                            "type": "array",
+                            "description": "Topic IDs to add or remove (for topic operations)",
+                            "items": {
+                                "type": "integer"
+                            }
+                        },
+                        "dateValue": {
+                            "type": "string",
+                            "description": "Date value for valid-from/valid-to operations (ISO format: YYYY-MM-DD)"
+                        },
+                        "keyphrases": {
+                            "type": "string",
+                            "description": "Comma-separated keyphrases to add or remove"
+                        },
+                        "booleanValue": {
+                            "type": "boolean",
+                            "description": "Boolean value for searchable/restricted operations",
+                            "default": false
+                        },
+                        "previewOnly": {
+                            "type": "boolean",
+                            "description": "Only preview changes without applying them",
+                            "default": true
+                        }
+                    },
+                    "required": [
+                        "operation"
+                    ]
+                }
+            },
+            {
+                "name": "get-system-health",
+                "description": "Get platform usage statistics and performance metrics including total guides, views, activity trends, and system health indicators",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "days": {
+                            "type": "integer",
+                            "description": "Number of days to analyze (default: 30)"
+                        },
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Filter by topic IDs. Use get-topics tool to see available categories"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "get-audit-log",
+                "description": "Get audit trail for content changes and user actions including guide creations, updates, and contributor activity",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "days": {
+                            "type": "integer",
+                            "description": "Number of days to look back (default: 7)"
+                        },
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Filter by topic IDs. Use get-topics tool to see available categories"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "get-content-gaps",
+                "description": "Identify topics with low content or high search activity but low results, helping to prioritize content creation",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "days": {
+                            "type": "integer",
+                            "description": "Number of days to analyze search data (default: 30)"
+                        },
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Filter by topic IDs. Use get-topics tool to see available categories"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "executive-dashboard",
+                "description": "Generate an executive summary dashboard with key metrics about content health, usage trends, training completion, and quality indicators. Perfect for management reporting and strategic decision-making.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "period": {
+                            "type": "string",
+                            "description": "Reporting period: 'week', 'month', 'quarter', or 'year' (default: month)"
+                        },
+                        "compareWithPrevious": {
+                            "type": "boolean",
+                            "description": "Include comparison with previous period",
+                            "default": true
+                        },
+                        "includeContentHealth": {
+                            "type": "boolean",
+                            "description": "Include content health metrics",
+                            "default": true
+                        },
+                        "includeTrainingMetrics": {
+                            "type": "boolean",
+                            "description": "Include training completion metrics",
+                            "default": true
+                        },
+                        "includeUsageStats": {
+                            "type": "boolean",
+                            "description": "Include usage statistics",
+                            "default": true
+                        },
+                        "includeQualityIndicators": {
+                            "type": "boolean",
+                            "description": "Include content quality indicators",
+                            "default": true
+                        },
+                        "topicId": {
+                            "type": "integer",
+                            "description": "Filter to specific topic (0 for all topics)"
+                        },
+                        "format": {
+                            "type": "string",
+                            "description": "Output format: 'summary' (key metrics only), 'detailed' (full breakdown), or 'presentation' (formatted for sharing)"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "get-outdated-content",
+                "description": "List guides that have not been updated in a specified number of days, helping identify content that may need review or updating",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "days": {
+                            "type": "integer",
+                            "description": "Number of days since last update (default: 180, i.e., 6 months)",
+                            "default": 180
+                        },
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Filter by topic IDs. Use get-topics tool to see available categories"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of guides to return (default: 10)",
+                            "default": 10
+                        }
+                    }
+                }
+            },
+            {
+                "name": "get-low-rated-content",
+                "description": "List guides with poor user ratings that may need review, improvement, or removal",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Filter by topic IDs. Use get-topics tool to see available categories"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of guides to return (default: 10)",
+                            "default": 10
+                        }
+                    }
+                }
+            },
+            {
+                "name": "get-guides-needing-review",
+                "description": "List guides that should be reviewed based on multiple quality indicators including low views, negative ratings, and age",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Filter by topic IDs. Use get-topics tool to see available categories"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of guides to return (default: 10)",
+                            "default": 10
+                        }
+                    }
+                }
+            },
+            {
+                "name": "find-broken-links",
+                "description": "Scans guide content for broken links including external URLs, internal guide references, and image sources. Reports broken links with details and suggests fixes.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of a specific guide to scan (optional - scans recent guides if not provided)"
+                        },
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Filter by topic IDs. Use get-topics tool to see available categories"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of guides to scan (default: 10, max: 50)",
+                            "default": 10
+                        },
+                        "checkExternal": {
+                            "type": "boolean",
+                            "description": "Whether to check external URLs (slower but more thorough)",
+                            "default": true
+                        },
+                        "checkImages": {
+                            "type": "boolean",
+                            "description": "Whether to check image URLs",
+                            "default": true
+                        }
+                    }
+                }
+            },
+            {
+                "name": "translation-quality-check",
+                "description": "Checks translation quality and completeness by comparing translated versions of guides. Identifies missing translations, outdated translations, and provides coverage statistics for multi-language content.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of a specific guide to check translations for (optional)"
+                        },
+                        "sourceLanguage": {
+                            "type": "string",
+                            "description": "Source language code to compare against (default: 'en')",
+                            "default": "en"
+                        },
+                        "targetLanguage": {
+                            "type": "string",
+                            "description": "Target language to check (optional - checks all languages if not specified)"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of guides to check (default: 20, max: 50)",
+                            "default": 20
+                        },
+                        "includeContentComparison": {
+                            "type": "boolean",
+                            "description": "Include detailed content comparison between versions",
+                            "default": false
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "update-from-feedback",
+                "description": "Analyzes user ratings and comments to identify improvement opportunities. Summarizes feedback themes, identifies common issues, and suggests specific content updates based on user feedback patterns.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of a specific guide to analyze feedback for (optional)"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of guides to analyze (default: 10, max: 25)",
+                            "default": 10
+                        },
+                        "minRatings": {
+                            "type": "integer",
+                            "description": "Minimum number of ratings required for analysis (default: 3)",
+                            "default": 3
+                        },
+                        "includePositive": {
+                            "type": "boolean",
+                            "description": "Include analysis of positive feedback (not just issues)",
+                            "default": true
+                        },
+                        "generateSuggestions": {
+                            "type": "boolean",
+                            "description": "Use AI to generate specific improvement suggestions",
+                            "default": true
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "archive-stale-content",
+                "description": "Identify and manage stale content - guides that haven't been updated or viewed in a specified period. Can analyze, flag for review, or archive outdated content to keep your knowledge base fresh.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "staleDays": {
+                            "type": "integer",
+                            "description": "Number of days without updates to consider content stale (default: 365)"
+                        },
+                        "includeViewActivity": {
+                            "type": "boolean",
+                            "description": "Also check view activity (stale if not viewed in period)",
+                            "default": true
+                        },
+                        "viewStaleDays": {
+                            "type": "integer",
+                            "description": "Days without views to consider content stale (default: 180)"
+                        },
+                        "topicId": {
+                            "type": "integer",
+                            "description": "Limit analysis to a specific topic (optional)"
+                        },
+                        "action": {
+                            "type": "string",
+                            "description": "Action to perform on stale content",
+                            "enum": [
+                                "analyze",
+                                "flag-for-review",
+                                "archive",
+                                "preview-archive"
+                            ],
+                            "default": "analyze"
+                        },
+                        "preserveMinRating": {
+                            "type": "integer",
+                            "description": "Preserve content with average rating above this value (1-5, 0 to ignore)"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of guides to analyze/process (default: 100)"
+                        },
+                        "excludeTypes": {
+                            "type": "string",
+                            "description": "Comma-separated list of guide types to exclude (e.g., 'workflow,lmsoutline')"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "create-guide-from-document",
+                "description": "Creates a pedagogical text guide from an uploaded document. Supports PDF, Word (DOCX), HTML, Markdown (.md), and plain text files. Can accept either a fileId (uploaded file UUID) or direct documentContent. Uses AI to analyze the document, create a learning-optimized structure, enhance content for clarity, and add learning objectives and key takeaways.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "fileId": {
+                            "type": "string",
+                            "description": "UUID of an uploaded file (PDF, DOCX, HTML, TXT). Text will be automatically extracted. Either fileId or documentContent must be provided."
+                        },
+                        "documentContent": {
+                            "type": "string",
+                            "description": "Direct document content - HTML string, plain text, or extracted document text. Used if fileId is not provided."
+                        },
+                        "documentType": {
+                            "type": "string",
+                            "description": "Document type: 'pdf', 'docx', 'html', 'md', 'text', or 'auto' (auto-detect). When fileId is provided, type is auto-detected from file extension.",
+                            "default": "auto"
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Guide title (optional - will be extracted/generated if not provided)"
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "Guide summary (optional - will be generated from content)"
+                        },
+                        "primaryColor": {
+                            "type": "string",
+                            "description": "Primary color (hex format)",
+                            "default": "#3978D5"
+                        },
+                        "secondaryColor": {
+                            "type": "string",
+                            "description": "Secondary color (hex format)",
+                            "default": "#F5F5F5"
+                        },
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Topic IDs to categorize the guide. Use the get-topics tool to see available categories with their IDs"
+                        },
+                        "languageID": {
+                            "type": "integer",
+                            "description": "Language ID for the guide content. Use the get-languages tool to see all available languages. Common values: 25 (English), 112 (Swedish), 21 (Danish), 83 (Norwegian), 31 (Finnish)",
+                            "default": 25
+                        },
+                        "pedagogicalMode": {
+                            "type": "boolean",
+                            "description": "Enable multi-pass AI processing for pedagogical content enhancement",
+                            "default": true
+                        },
+                        "addLearningObjectives": {
+                            "type": "boolean",
+                            "description": "Add learning objectives section at the beginning",
+                            "default": true
+                        },
+                        "addSectionSummaries": {
+                            "type": "boolean",
+                            "description": "Add summary at the end of each section",
+                            "default": true
+                        },
+                        "addKeyTakeaways": {
+                            "type": "boolean",
+                            "description": "Add key takeaways at the end of the guide",
+                            "default": true
+                        },
+                        "addReviewQuestions": {
+                            "type": "boolean",
+                            "description": "Add review questions at the end",
+                            "default": false
+                        },
+                        "preserveFormatting": {
+                            "type": "boolean",
+                            "description": "Whether to preserve original text formatting where possible",
+                            "default": true
+                        },
+                        "customInstructions": {
+                            "type": "string",
+                            "description": "Optional instructions for how the guide should be created. Can include target audience, tone, focus areas, or structure preferences."
+                        },
+                        "skillId": {
+                            "type": "string",
+                            "description": "Optional ID of a Content Copilot skill to load as design methodology context. The skill's full content (main file + supporting files) is injected into all AI processing passes. Example: 'guide-design-skill' loads evidence-based design principles and layout patterns."
+                        },
+                        "referenceGuideIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Optional list of existing guide IDs to use as reference material. The content and terminology of these guides will inform the AI when creating the new guide."
+                        },
+                        "searchable": {
+                            "type": "boolean",
+                            "description": "Whether the created guide should be searchable (visible in search results). Defaults to true. Set to false to create a draft that must be manually published.",
+                            "default": true
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "content-health-check",
+                "description": "Performs a comprehensive content health analysis including: outdated content, low-rated guides, low-visibility content, and quality indicators. Returns prioritized recommendations.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Filter by topic IDs. Use get-topics tool to see available categories"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum items per category (default: 5)",
+                            "default": 5
+                        },
+                        "includeRecommendations": {
+                            "type": "boolean",
+                            "description": "Whether to include AI-generated recommendations",
+                            "default": true
+                        }
+                    }
+                }
+            },
+            {
+                "name": "generate-guide-summary",
+                "description": "Generates an AI-powered summary for a guide. Supports different summary types: executive (brief), detailed (comprehensive), key-points (bullets), or learning-objectives (what users will learn). Can optionally update the guide's summary field.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of the guide to summarize"
+                        },
+                        "summaryType": {
+                            "type": "string",
+                            "description": "Type of summary: 'executive' (1-2 sentences), 'detailed' (paragraph), 'key-points' (bullet list), 'learning-objectives' (what users will learn)",
+                            "default": "executive"
+                        },
+                        "maxLength": {
+                            "type": "integer",
+                            "description": "Maximum length of the summary in words (default: 50 for executive, 150 for detailed)"
+                        },
+                        "updateGuide": {
+                            "type": "boolean",
+                            "description": "Whether to update the guide's summary field with the generated summary",
+                            "default": false
+                        },
+                        "language": {
+                            "type": "string",
+                            "description": "Language for the summary (e.g., 'en', 'sv'). Defaults to guide's language."
+                        }
+                    },
+                    "required": [
+                        "guideId"
+                    ]
+                }
+            },
+            {
+                "name": "generate-quiz-from-guide",
+                "description": "Generates quiz questions from an existing guide's content. Creates multiple choice, true/false, and fill-in-blank questions based on the guide material. Can preview questions or create a complete Knowledge Test.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of the guide to generate quiz questions from"
+                        },
+                        "questionCount": {
+                            "type": "integer",
+                            "description": "Number of questions to generate (default: 5, max: 15)",
+                            "default": 5
+                        },
+                        "questionTypes": {
+                            "type": "string",
+                            "description": "Types of questions: 'mixed' (all types), 'multiple-choice', 'true-false', or 'fill-blank'",
+                            "default": "mixed"
+                        },
+                        "difficulty": {
+                            "type": "string",
+                            "description": "Difficulty level: 'easy', 'medium', or 'hard'",
+                            "default": "medium"
+                        },
+                        "createKnowledgeTest": {
+                            "type": "boolean",
+                            "description": "Whether to create a Knowledge Test guide from the generated questions",
+                            "default": false
+                        },
+                        "previewOnly": {
+                            "type": "boolean",
+                            "description": "Only preview the questions without creating a test",
+                            "default": true
+                        }
+                    },
+                    "required": [
+                        "guideId"
+                    ]
+                }
+            },
+            {
+                "name": "improve-guide-clarity",
+                "description": "Analyzes guide content for clarity issues and provides improvement suggestions. Identifies complex sentences, jargon, passive voice, and unclear passages. Provides rewrite suggestions for better readability.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of the guide to analyze"
+                        },
+                        "analysisType": {
+                            "type": "string",
+                            "description": "Type of analysis: 'full' (comprehensive), 'readability' (reading level), 'structure' (organization), or 'suggestions' (AI rewrites only)",
+                            "default": "full"
+                        },
+                        "includeRewrites": {
+                            "type": "boolean",
+                            "description": "Whether to include AI-generated rewrite suggestions for unclear passages",
+                            "default": true
+                        },
+                        "maxSuggestions": {
+                            "type": "integer",
+                            "description": "Maximum number of improvement suggestions to provide (default: 10)",
+                            "default": 10
+                        }
+                    },
+                    "required": [
+                        "guideId"
+                    ]
+                }
+            },
+            {
+                "name": "create-glossary-terms",
+                "description": "Extracts technical terms and key concepts from guide content and generates glossary definitions. Can identify acronyms, domain-specific vocabulary, and important terms that should be explained for users.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of the guide to extract terms from"
+                        },
+                        "maxTerms": {
+                            "type": "integer",
+                            "description": "Maximum number of terms to extract (default: 10, max: 25)",
+                            "default": 10
+                        },
+                        "includeAcronyms": {
+                            "type": "boolean",
+                            "description": "Include acronyms and abbreviations in the results",
+                            "default": true
+                        },
+                        "generateDefinitions": {
+                            "type": "boolean",
+                            "description": "Generate AI-powered definitions for each term",
+                            "default": true
+                        },
+                        "createWordExplanations": {
+                            "type": "boolean",
+                            "description": "Create Word Explanation entries for the terms (saves to database)",
+                            "default": false
+                        }
+                    },
+                    "required": [
+                        "guideId"
+                    ]
+                }
+            },
+            {
+                "name": "suggest-related-guides",
+                "description": "Analyze a guide and suggest related content based on topics, keyphrases, and content similarity. When vector search is enabled, uses semantic similarity for more accurate recommendations. Useful for building 'Related Content' sections, learning paths, or identifying content for cross-linking.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "ID of the guide to find related content for"
+                        },
+                        "maxSuggestions": {
+                            "type": "integer",
+                            "description": "Maximum number of suggestions to return (default: 10)"
+                        },
+                        "relationshipTypes": {
+                            "type": "string",
+                            "description": "Types of relationships to consider",
+                            "enum": [
+                                "all",
+                                "same-topic",
+                                "similar-keyphrases",
+                                "prerequisite",
+                                "follow-up",
+                                "vector-similarity"
+                            ],
+                            "default": "all"
+                        },
+                        "analyzeContent": {
+                            "type": "boolean",
+                            "description": "Whether to analyze guide content for deeper similarity matching",
+                            "default": true
+                        },
+                        "useVectorSearch": {
+                            "type": "boolean",
+                            "description": "Use vector search for semantic similarity matching (requires vector search to be enabled)",
+                            "default": true
+                        },
+                        "minSimilarity": {
+                            "type": "number",
+                            "description": "Minimum similarity score for vector search (0.0 to 1.0, default: 0.6)",
+                            "default": 0.6,
+                            "minimum": 0.0,
+                            "maximum": 1.0
+                        },
+                        "excludeLinked": {
+                            "type": "boolean",
+                            "description": "Exclude guides that are already linked to this guide",
+                            "default": true
+                        }
+                    },
+                    "required": [
+                        "guideId"
+                    ]
+                }
+            },
+            {
+                "name": "build-learning-paths",
+                "description": "Analyze guides and suggest learning paths - structured sequences of content for progressive learning. Identifies prerequisites, groups related content, and creates logical progressions from beginner to advanced.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "topicId": {
+                            "type": "integer",
+                            "description": "Topic ID to build a learning path from (analyzes all guides in this topic)"
+                        },
+                        "guideIds": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Specific guide IDs to sequence into a learning path"
+                        },
+                        "pathName": {
+                            "type": "string",
+                            "description": "Name or theme for the learning path (helps with sequencing)"
+                        },
+                        "targetLevel": {
+                            "type": "string",
+                            "description": "Target learner level",
+                            "enum": [
+                                "beginner",
+                                "intermediate",
+                                "advanced",
+                                "all-levels"
+                            ],
+                            "default": "all-levels"
+                        },
+                        "maxGuides": {
+                            "type": "integer",
+                            "description": "Maximum number of guides in the learning path (default: 10)"
+                        },
+                        "includeTimeEstimates": {
+                            "type": "boolean",
+                            "description": "Include estimated completion times for each guide and total path",
+                            "default": true
+                        }
+                    }
+                }
+            },
+            {
+                "name": "generate-step-by-step",
+                "description": "Generates a structured step-by-step guide from a natural language process description. Provide a description of the process and get back numbered steps with clear actions. Can also generate tips, warnings, and placeholder notes for screenshots.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "Title for the step-by-step guide"
+                        },
+                        "processDescription": {
+                            "type": "string",
+                            "description": "Natural language description of the process to document (e.g., 'How to reset a password in our CRM system')"
+                        },
+                        "targetAudience": {
+                            "type": "string",
+                            "description": "Target audience level: 'beginner', 'intermediate', or 'advanced' (default: beginner)"
+                        },
+                        "includeScreenshotPlaceholders": {
+                            "type": "boolean",
+                            "description": "Include placeholder notes for where screenshots should be added",
+                            "default": true
+                        },
+                        "includeTipsAndWarnings": {
+                            "type": "boolean",
+                            "description": "Include helpful tips and warning callouts where appropriate",
+                            "default": true
+                        },
+                        "maxSteps": {
+                            "type": "integer",
+                            "description": "Maximum number of steps to generate (default: 10)"
+                        },
+                        "language": {
+                            "type": "string",
+                            "description": "Language for the guide (e.g., 'en', 'sv'). Defaults to English."
+                        },
+                        "applicationContext": {
+                            "type": "string",
+                            "description": "Optional context about the application or system being documented"
+                        }
+                    },
+                    "required": [
+                        "processDescription"
+                    ]
+                }
+            },
+            {
+                "name": "create-microlearning-chunks",
+                "description": "Break a guide into smaller, focused microlearning chunks. Each chunk is designed to be completed in 2-5 minutes, making content more digestible for mobile learning and modern attention spans.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "ID of the guide to break into microlearning chunks"
+                        },
+                        "targetChunkMinutes": {
+                            "type": "integer",
+                            "description": "Target duration for each chunk in minutes (default: 5, range: 2-15)"
+                        },
+                        "preserveContext": {
+                            "type": "boolean",
+                            "description": "Include brief context/prerequisites at the start of each chunk",
+                            "default": true
+                        },
+                        "addSummaries": {
+                            "type": "boolean",
+                            "description": "Add a summary at the end of each chunk",
+                            "default": true
+                        },
+                        "createQuizChunks": {
+                            "type": "boolean",
+                            "description": "Create separate quiz chunks for knowledge checks",
+                            "default": false
+                        },
+                        "outputFormat": {
+                            "type": "string",
+                            "description": "Output format: 'outline' (summary only), 'full' (complete chunk content), or 'guides' (create as separate guides)"
+                        }
+                    },
+                    "required": [
+                        "guideId"
+                    ]
+                }
+            },
+            {
+                "name": "create-collections",
+                "description": "Analyze guides and create thematic collections. Can automatically group related guides based on topics, keyphrases, or content similarity. Useful for curating learning experiences and organizing content libraries.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "mode": {
+                            "type": "string",
+                            "description": "Mode: 'analyze' to suggest collections, 'create' to create a new collection, 'auto-organize' to automatically group guides"
+                        },
+                        "guideIds": {
+                            "type": "string",
+                            "description": "Comma-separated list of guide IDs to include in collection (for 'create' mode)"
+                        },
+                        "topicId": {
+                            "type": "integer",
+                            "description": "Topic ID to analyze for collection suggestions (for 'analyze' or 'auto-organize' mode)"
+                        },
+                        "collectionName": {
+                            "type": "string",
+                            "description": "Name for the new collection (for 'create' mode)"
+                        },
+                        "collectionDescription": {
+                            "type": "string",
+                            "description": "Description for the new collection (for 'create' mode)"
+                        },
+                        "groupBy": {
+                            "type": "string",
+                            "description": "How to group guides: 'topic', 'keyphrase', 'type', or 'similarity' (for 'auto-organize' mode)"
+                        },
+                        "minGuidesPerCollection": {
+                            "type": "integer",
+                            "description": "Minimum guides required to form a collection (default: 3)"
+                        },
+                        "maxCollections": {
+                            "type": "integer",
+                            "description": "Maximum number of collections to suggest (default: 10)"
+                        }
+                    },
+                    "required": [
+                        "mode"
+                    ]
+                }
+            },
+            {
+                "name": "smart-topic-assignment",
+                "description": "Analyzes guide content and suggests optimal topic assignments. Uses AI to match content with existing topics based on subject matter, keywords, and topic hierarchy. Can optionally apply suggested assignments.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of the guide to analyze for topic suggestions"
+                        },
+                        "maxSuggestions": {
+                            "type": "integer",
+                            "description": "Maximum number of topic suggestions to return (default: 5)",
+                            "default": 5
+                        },
+                        "applyTopics": {
+                            "type": "boolean",
+                            "description": "Whether to automatically apply the top suggested topics to the guide",
+                            "default": false
+                        },
+                        "maxToApply": {
+                            "type": "integer",
+                            "description": "Maximum number of topics to apply if applyTopics is true (default: 3)",
+                            "default": 3
+                        },
+                        "includeSubtopics": {
+                            "type": "boolean",
+                            "description": "Whether to include subtopics in suggestions",
+                            "default": true
+                        },
+                        "excludeCurrentTopics": {
+                            "type": "boolean",
+                            "description": "Whether to exclude topics the guide is already assigned to",
+                            "default": true
+                        }
+                    },
+                    "required": [
+                        "guideId"
+                    ]
+                }
+            },
+            {
+                "name": "content-gap-report",
+                "description": "Generates a comprehensive content gap analysis report identifying topics with high demand but insufficient content. Provides prioritized recommendations for content creation based on search patterns, user needs, and topic coverage.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "days": {
+                            "type": "integer",
+                            "description": "Number of days to analyze search data (default: 30)",
+                            "default": 30
+                        },
+                        "topicIDs": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Filter by topic IDs. Use get-topics tool to see available categories"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of gap items to report (default: 15)",
+                            "default": 15
+                        },
+                        "includeRecommendations": {
+                            "type": "boolean",
+                            "description": "Whether to include AI-powered content creation recommendations",
+                            "default": true
+                        }
+                    }
+                }
+            },
+            {
+                "name": "optimize-keyphrases",
+                "description": "Analyzes guide content and suggests optimized keyphrases to improve search discoverability. Can analyze current keyphrases, suggest additions, and identify irrelevant phrases to remove.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "guideId": {
+                            "type": "integer",
+                            "description": "The ID of the guide to optimize keyphrases for"
+                        },
+                        "maxSuggestions": {
+                            "type": "integer",
+                            "description": "Maximum number of keyphrase suggestions (default: 10, max: 20)",
+                            "default": 10
+                        },
+                        "analyzeSearchPatterns": {
+                            "type": "boolean",
+                            "description": "Include analysis of search patterns for this guide's topics",
+                            "default": true
+                        },
+                        "updateGuide": {
+                            "type": "boolean",
+                            "description": "Update the guide's keyphrases with the suggestions",
+                            "default": false
+                        },
+                        "language": {
+                            "type": "string",
+                            "description": "Language for keyphrase analysis (e.g., 'en', 'sv'). Defaults to guide's language."
+                        }
+                    },
+                    "required": [
+                        "guideId"
+                    ]
+                }
+            },
+            {
+                "name": "generate-training-report",
+                "description": "Generates a comprehensive training status report for management. Includes course completion rates, user progress, group performance, and compliance status. Supports filtering by date range, groups, and courses.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "days": {
+                            "type": "integer",
+                            "description": "Number of days to include in the report (default: 30)",
+                            "default": 30
+                        },
+                        "reportType": {
+                            "type": "string",
+                            "description": "Report type: 'summary' (overview), 'detailed' (full breakdown), 'compliance' (focus on mandatory training), 'performance' (group comparison)",
+                            "default": "summary"
+                        },
+                        "groupIds": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Optional list of group IDs to filter by"
+                        },
+                        "courseIds": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Optional list of course IDs to filter by"
+                        },
+                        "outputFormat": {
+                            "type": "string",
+                            "description": "Output format: 'text' (readable), 'markdown' (formatted), 'json' (structured data)",
+                            "default": "markdown"
+                        },
+                        "includeRecommendations": {
+                            "type": "boolean",
+                            "description": "Whether to include AI-generated recommendations",
+                            "default": true
+                        }
+                    }
+                }
+            },
+            {
+                "name": "training-needs-analysis",
+                "description": "Analyzes user performance and training history to identify skills gaps and recommend training assignments. Can analyze individuals, groups, or organization-wide training needs.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "userId": {
+                            "type": "integer",
+                            "description": "Analyze training needs for a specific user (optional)"
+                        },
+                        "groupId": {
+                            "type": "integer",
+                            "description": "Analyze training needs for a specific group (optional)"
+                        },
+                        "analysisScope": {
+                            "type": "string",
+                            "description": "Scope of analysis: 'individual', 'group', or 'organization' (default: organization)",
+                            "default": "organization"
+                        },
+                        "includeRecommendations": {
+                            "type": "boolean",
+                            "description": "Generate personalized training recommendations",
+                            "default": true
+                        },
+                        "includeSkillsGaps": {
+                            "type": "boolean",
+                            "description": "Analyze assessment results for skills gaps",
+                            "default": true
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of users to analyze (default: 50, max: 100)",
+                            "default": 50
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "design-push-training",
+                "description": "Design a Push Training campaign with AI assistance. Analyzes content and suggests optimal guide selection, target audience, and scheduling based on campaign objectives. Provide a campaign name, learning objectives, and optionally specify target groups or topics.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "campaignName": {
+                            "type": "string",
+                            "description": "Name for the Push Training campaign"
+                        },
+                        "objectives": {
+                            "type": "string",
+                            "description": "Learning objectives or goals for this campaign (describe what learners should achieve)"
+                        },
+                        "targetGroupIds": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Target group IDs for the campaign audience (optional)"
+                        },
+                        "topicIds": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Topic IDs to source guides from (optional)"
+                        },
+                        "guideIds": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            },
+                            "description": "Specific guide IDs to include (optional)"
+                        },
+                        "durationWeeks": {
+                            "type": "integer",
+                            "description": "Preferred campaign duration in weeks (default: 4)"
+                        },
+                        "frequency": {
+                            "type": "string",
+                            "description": "How often to send guides",
+                            "enum": [
+                                "daily",
+                                "twice-weekly",
+                                "weekly",
+                                "biweekly"
+                            ],
+                            "default": "weekly"
+                        },
+                        "includeSuggestions": {
+                            "type": "boolean",
+                            "description": "Whether to include AI-generated content and audience suggestions",
+                            "default": true
+                        }
+                    },
+                    "required": [
+                        "campaignName",
+                        "objectives"
+                    ]
+                }
+            },
+            {
+                "name": "analyze-training-completion",
+                "description": "Analyze training completion rates across users and groups. Identifies users with incomplete training, calculates completion percentages, and suggests interventions for compliance improvement.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "courseId": {
+                            "type": "integer",
+                            "description": "LMS Course ID to analyze (leave empty for all courses)"
+                        },
+                        "groupId": {
+                            "type": "integer",
+                            "description": "Group ID to filter analysis (leave empty for all groups)"
+                        },
+                        "completionThreshold": {
+                            "type": "integer",
+                            "description": "Minimum completion percentage to consider 'complete' (default: 100)"
+                        },
+                        "daysSinceEnrollment": {
+                            "type": "integer",
+                            "description": "Only include users enrolled at least this many days ago (default: 7)"
+                        },
+                        "includeUserDetails": {
+                            "type": "boolean",
+                            "description": "Include individual user completion details (may be slow for large groups)",
+                            "default": true
+                        },
+                        "identifyAtRisk": {
+                            "type": "boolean",
+                            "description": "Identify users at risk of non-compliance (not started or low progress)",
+                            "default": true
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of incomplete users to return (default: 50)"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "list-skills",
+                "description": "Lists all available agent skills that can be activated for AI-assisted workflows. Skills are markdown-based AI capability packages.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "category": {
+                            "type": "string",
+                            "description": "Optional category filter: CREATE, ANALYZE, REPORT, MANAGE, SKILLS"
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Optional search query to filter skills by name, description, or tags"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "get-skill-details",
+                "description": "Gets detailed information about a specific agent skill including its files, metadata, and usage instructions.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "skillId": {
+                            "type": "string",
+                            "description": "The skill ID to get details for (e.g., 'rwa-agent-skill')"
+                        }
+                    },
+                    "required": [
+                        "skillId"
+                    ]
+                }
+            },
+            {
+                "name": "activate-skill",
+                "description": "Activates an agent skill by loading its methodology and templates into the conversation context for interactive use. Use this when the user wants to work with a skill interactively.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "skillId": {
+                            "type": "string",
+                            "description": "The skill ID to activate (e.g., 'rwa-agent-skill')"
+                        },
+                        "includeSupporting": {
+                            "type": "boolean",
+                            "description": "Whether to include supporting files (templates, guides) in the activation",
+                            "default": false
+                        }
+                    },
+                    "required": [
+                        "skillId"
+                    ]
+                }
+            },
+            {
+                "name": "use-skill",
+                "description": "Executes an agent skill with specific input content for automated workflow execution. The skill's methodology is applied to analyze or process the provided input.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "skillId": {
+                            "type": "string",
+                            "description": "The skill ID to execute (e.g., 'rwa-agent-skill')"
+                        },
+                        "inputContent": {
+                            "type": "string",
+                            "description": "The content to analyze or process using the skill methodology"
+                        },
+                        "instructions": {
+                            "type": "string",
+                            "description": "Additional instructions or context for the skill execution (optional)"
+                        }
+                    },
+                    "required": [
+                        "skillId"
+                    ]
+                }
+            }
+        ]
+    }
+}

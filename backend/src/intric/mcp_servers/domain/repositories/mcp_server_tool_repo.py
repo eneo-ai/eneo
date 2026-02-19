@@ -30,7 +30,9 @@ class MCPServerToolRepository(ABC):
         ...
 
     @abstractmethod
-    async def find_by_name(self, mcp_server_id: UUID, name: str) -> "MCPServerTool | None":
+    async def find_by_name(
+        self, mcp_server_id: UUID, name: str
+    ) -> "MCPServerTool | None":
         """Find a tool by server ID and name."""
         ...
 

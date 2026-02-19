@@ -147,6 +147,10 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
                     arguments=tc.arguments,
                     tool_call_id=tc.tool_call_id,
                     approved=tc.approved,
+                    ui_resource_uri=tc.ui_resource_uri,
+                    mcp_server_id=tc.mcp_server_id,
+                    result=tc.result,
+                    result_meta=tc.result_meta,
                 )
                 for tc in (chunk.tool_calls_metadata or [])
             ],
@@ -163,6 +167,10 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
                     arguments=tc.arguments,
                     tool_call_id=tc.tool_call_id,
                     approved=tc.approved,
+                    ui_resource_uri=tc.ui_resource_uri,
+                    mcp_server_id=tc.mcp_server_id,
+                    result=tc.result,
+                    result_meta=tc.result_meta,
                 )
                 for tc in (chunk.tool_calls_metadata or [])
             ],
@@ -188,7 +196,6 @@ async def to_response(
         @gen_transaction(db_session)
         async def event_stream():
             async for chunk in response.answer:
-
                 if chunk.response_type == ResponseType.TEXT:
                     yield to_ask_response(
                         question=response.question,
