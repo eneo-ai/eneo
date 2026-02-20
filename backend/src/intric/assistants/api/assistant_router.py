@@ -215,6 +215,16 @@ async def update_assistant(
     if "icon_id" in request_dict:
         icon_id = assistant.icon_id
 
+    # Handle rag_context_type: check if it was provided in the request
+    rag_context_type = NOT_PROVIDED
+    if "rag_context_type" in request_dict:
+        rag_context_type = assistant.rag_context_type
+
+    # Handle rag_context_value: check if it was provided in the request
+    rag_context_value = NOT_PROVIDED
+    if "rag_context_value" in request_dict:
+        rag_context_value = assistant.rag_context_value
+    
     updated_assistant, permissions = await service.update_assistant(
         assistant_id=id,
         name=assistant.name,
@@ -233,6 +243,8 @@ async def update_assistant(
         data_retention_days=assistant.data_retention_days,
         metadata_json=metadata_json,
         icon_id=icon_id,
+        rag_context_type=rag_context_type,
+        rag_context_value=rag_context_value,
     )
 
     # Track ALL changes comprehensively

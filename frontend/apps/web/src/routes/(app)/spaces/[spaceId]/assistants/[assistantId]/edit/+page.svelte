@@ -22,6 +22,7 @@
   import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
   import { m } from "$lib/paraglide/messages";
   import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
+  import RagContextSettings from "$lib/components/settings/RagContextSettings.svelte";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
 
   let { data } = $props();
@@ -350,6 +351,25 @@
             bind:selectedWebsites={$update.websites}
             bind:selectedCollections={$update.groups}
             bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
+          />
+        </Settings.Row>
+
+        <Settings.Row
+          title={m.rag_context_settings?.() ?? "Knowledge retrieval"}
+          description={m.rag_context_settings_description?.() ?? "Configure how much knowledge is retrieved when answering questions"}
+          hasChanges={$currentChanges.diff.rag_context_type !== undefined ||
+            $currentChanges.diff.rag_context_value !== undefined}
+          revertFn={() => {
+            discardChanges("rag_context_type");
+            discardChanges("rag_context_value");
+          }}
+        >
+          <RagContextSettings
+            bind:ragContextType={$update.rag_context_type}
+            bind:ragContextValue={$update.rag_context_value}
+            modelTokenLimit={$update.completion_model?.token_limit}
+            hasChanges={$currentChanges.diff.rag_context_type !== undefined ||
+              $currentChanges.diff.rag_context_value !== undefined}
           />
         </Settings.Row>
       </Settings.Group>

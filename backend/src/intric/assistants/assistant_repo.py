@@ -332,6 +332,8 @@ class AssistantRepository:
                 template_id=template_id,
                 type=assistant.type,
                 description=assistant.description,
+                rag_context_type=assistant.rag_context_type.value if assistant.rag_context_type else None,
+                rag_context_value=assistant.rag_context_value,
             )
             .returning(Assistants)
         )
@@ -414,6 +416,8 @@ class AssistantRepository:
                 data_retention_days=assistant.data_retention_days,
                 metadata_json=assistant.metadata_json,
                 icon_id=assistant.icon_id,
+                rag_context_type=assistant.rag_context_type.value if assistant.rag_context_type else None,
+                rag_context_value=assistant.rag_context_value,
             )
             .where(Assistants.id == assistant.id)
             .returning(Assistants)
