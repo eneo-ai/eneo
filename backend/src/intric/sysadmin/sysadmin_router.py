@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Security
+from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from pydantic import BaseModel, Field
 
 from intric.ai_models.completion_models.completion_model import (
@@ -30,6 +30,7 @@ from intric.allowed_origins.allowed_origin_models import (
     AllowedOriginInDB,
 )
 from intric.main.container.container import Container
+from intric.main.exceptions import ValidationException
 from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse, PaginatedResponse
 from intric.observability.debug_toggle import DebugFlag, get_debug_flag, set_debug_flag
@@ -865,6 +866,10 @@ async def migrate_completion_model_for_tenant(
 
         return result
 
+    except HTTPException:
+        raise
+    except ValidationException as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error migrating completion model for tenant {tenant_id}",
@@ -877,8 +882,6 @@ async def migrate_completion_model_for_tenant(
             },
             exc_info=True,
         )
-        from fastapi import HTTPException
-
         raise HTTPException(
             status_code=500,
             detail=f"Error migrating completion model for tenant {tenant_id}: {str(e)}",
@@ -921,8 +924,47 @@ async def migrate_completion_model_for_all_tenants(
         # Get required services
         tenant_repo = container.tenant_repo()
         user_repo = container.user_repo()
+        session = container.session()
 
-        # Get all active tenants (using a separate session scope)
+        # Resolve canonical (name, family) for source and target models
+        # so we can find the equivalent model per tenant
+        from intric.database.tables.ai_models_table import CompletionModels as CM
+        from sqlalchemy import select, and_
+
+        source_model_row = (
+            await session.execute(
+                select(CM.name, CM.family).where(CM.id == model_id)
+            )
+        ).one_or_none()
+
+        if not source_model_row:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Source model {model_id} not found",
+            )
+
+        target_model_row = (
+            await session.execute(
+                select(CM.name, CM.family).where(
+                    CM.id == migration_request.to_model_id
+                )
+            )
+        ).one_or_none()
+
+        if not target_model_row:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Target model {migration_request.to_model_id} not found",
+            )
+
+        source_name, source_family = source_model_row
+        target_name, target_family = target_model_row
+
+        logger.info(
+            f"Resolved canonical models: source=({source_name}, {source_family}), target=({target_name}, {target_family})",
+        )
+
+        # Get all active tenants
         tenants = await tenant_repo.get_all_tenants()
 
         from intric.tenants.tenant import TenantState
@@ -958,52 +1000,105 @@ async def migrate_completion_model_for_all_tenants(
                     f"Processing migration for tenant {tenant.id} ({tenant.name})"
                 )
 
-                # Process each tenant in its own transaction
-                async with container.session().begin():
-                    # Get a user from this tenant to set the context
-                    from intric.database.tables.users_table import Users
-                    from sqlalchemy import select
+                from intric.database.tables.users_table import Users
 
-                    stmt = select(Users).where(Users.tenant_id == tenant.id).limit(1)
-                    result = await container.session().execute(stmt)
-                    user_row = result.scalar_one_or_none()
+                # Resolve per-tenant model IDs by (name, family) match
+                # Order by enabled first, then newest, for deterministic selection
+                tenant_source_row = (
+                    await session.execute(
+                        select(CM.id).where(
+                            and_(
+                                CM.name == source_name,
+                                CM.family == source_family,
+                                CM.tenant_id == tenant.id,
+                            )
+                        ).order_by(CM.is_enabled.desc(), CM.updated_at.desc()).limit(1)
+                    )
+                ).scalar_one_or_none()
 
-                    if not user_row:
-                        logger.warning(
-                            f"No users found for tenant {tenant.id}, skipping migration",
-                            extra={
-                                "tenant_id": str(tenant.id),
-                                "tenant_name": tenant.name,
-                            },
-                        )
-                        migration_results.append(
-                            {
-                                "tenant_id": str(tenant.id),
-                                "tenant_name": tenant.name,
-                                "success": False,
-                                "error": "No users found for tenant",
-                                "migrated_count": 0,
-                            }
-                        )
-                        failed_migrations += 1
-                        continue
+                tenant_target_row = (
+                    await session.execute(
+                        select(CM.id).where(
+                            and_(
+                                CM.name == target_name,
+                                CM.family == target_family,
+                                CM.tenant_id == tenant.id,
+                            )
+                        ).order_by(CM.is_enabled.desc(), CM.updated_at.desc()).limit(1)
+                    )
+                ).scalar_one_or_none()
 
-                    # Get the user object
-                    user = await user_repo.get_user_by_id(user_row.id)
+                if not tenant_source_row or not tenant_target_row:
+                    missing = []
+                    if not tenant_source_row:
+                        missing.append(f"source ({source_name}/{source_family})")
+                    if not tenant_target_row:
+                        missing.append(f"target ({target_name}/{target_family})")
+                    error_msg = f"Model mapping not found for tenant: {', '.join(missing)}"
+                    logger.warning(
+                        error_msg,
+                        extra={
+                            "tenant_id": str(tenant.id),
+                            "tenant_name": tenant.name,
+                        },
+                    )
+                    migration_results.append(
+                        {
+                            "tenant_id": str(tenant.id),
+                            "tenant_name": tenant.name,
+                            "success": False,
+                            "error": error_msg,
+                            "migrated_count": 0,
+                        }
+                    )
+                    failed_migrations += 1
+                    continue
 
-                    # Override container context with this user and tenant
-                    from dependency_injector import providers
+                tenant_from_model_id = tenant_source_row
+                tenant_to_model_id = tenant_target_row
 
-                    container.user.override(providers.Object(user))
-                    container.tenant.override(providers.Object(tenant))
+                # Get a user from this tenant to set the context
+                stmt = select(Users).where(Users.tenant_id == tenant.id).limit(1)
+                result = await session.execute(stmt)
+                user_row = result.scalar_one_or_none()
 
+                if not user_row:
+                    logger.warning(
+                        f"No users found for tenant {tenant.id}, skipping migration",
+                        extra={
+                            "tenant_id": str(tenant.id),
+                            "tenant_name": tenant.name,
+                        },
+                    )
+                    migration_results.append(
+                        {
+                            "tenant_id": str(tenant.id),
+                            "tenant_name": tenant.name,
+                            "success": False,
+                            "error": "No users found for tenant",
+                            "migrated_count": 0,
+                        }
+                    )
+                    failed_migrations += 1
+                    continue
+
+                # Get the user object
+                user = await user_repo.get_user_by_id(user_row.id)
+
+                # Override container context with this user and tenant
+                from dependency_injector import providers
+
+                container.user.override(providers.Object(user))
+                container.tenant.override(providers.Object(tenant))
+
+                try:
                     # Get the migration service with proper context
                     migration_service = container.completion_model_migration_service()
 
-                    # Execute the migration
+                    # Execute the migration with tenant-resolved model IDs
                     result = await migration_service.migrate_model_usage(
-                        from_model_id=model_id,
-                        to_model_id=migration_request.to_model_id,
+                        from_model_id=tenant_from_model_id,
+                        to_model_id=tenant_to_model_id,
                         entity_types=migration_request.entity_types,
                         user=user,
                         confirm_migration=migration_request.confirm_migration,
@@ -1019,6 +1114,8 @@ async def migrate_completion_model_for_all_tenants(
                             "migrated_count": result.migrated_count,
                             "duration": result.duration,
                             "warnings": result.warnings,
+                            "resolved_from_model_id": str(tenant_from_model_id),
+                            "resolved_to_model_id": str(tenant_to_model_id),
                         }
                     )
 
@@ -1031,6 +1128,9 @@ async def migrate_completion_model_for_all_tenants(
                             "migrated_count": result.migrated_count,
                         },
                     )
+                finally:
+                    container.user.reset_override()
+                    container.tenant.reset_override()
 
             except Exception as e:
                 logger.error(
@@ -1074,6 +1174,8 @@ async def migrate_completion_model_for_all_tenants(
             "results": migration_results,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(
             "Error in migrate_completion_model_for_all_tenants endpoint",
@@ -1085,8 +1187,6 @@ async def migrate_completion_model_for_all_tenants(
             },
             exc_info=True,
         )
-        from fastapi import HTTPException
-
         raise HTTPException(
             status_code=500,
             detail=f"Error migrating completion model for all tenants: {str(e)}",
