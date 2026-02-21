@@ -20,8 +20,14 @@ def service(actor: MagicMock):
     actor_manager = MagicMock()
     actor_manager.get_space_actor_from_space.return_value = actor
 
+    # Mock the repo with proper session.execute chain for MCP servers query
+    repo = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = []
+    repo.session.execute.return_value = mock_result
+
     service = SpaceService(
-        repo=AsyncMock(),
+        repo=repo,
         completion_model_crud_service=AsyncMock(),
         transcription_model_crud_service=AsyncMock(),
         embedding_model_crud_service=AsyncMock(),
@@ -139,3 +145,27 @@ async def test_get_spaces_and_personal_space_returns_personal_space_first(
     spaces = await service.get_spaces(include_personal=True)
 
     assert spaces == [personal_space] + other_spaces
+
+
+async def test_get_spaces_passes_include_applications_to_repo(
+    service: SpaceService,
+):
+    service.repo.get_spaces_for_member.return_value = []
+
+    await service.get_spaces(include_applications=True)
+
+    service.repo.get_spaces_for_member.assert_called_once_with(
+        include_applications=True
+    )
+
+
+async def test_get_spaces_defaults_include_applications_to_false(
+    service: SpaceService,
+):
+    service.repo.get_spaces_for_member.return_value = []
+
+    await service.get_spaces()
+
+    service.repo.get_spaces_for_member.assert_called_once_with(
+        include_applications=False
+    )

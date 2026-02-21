@@ -1,4 +1,5 @@
 from collections import defaultdict
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
@@ -45,8 +46,10 @@ def count_tokens(text: str):
 
 def _build_files_string(files: list[File]):
     if files:
+        # Use json.dumps() to properly escape special characters in filenames and text
+        # This prevents broken JSON if the content contains quotes or other special chars
         files_string = "\n".join(
-            f'{{"filename": "{file.name}", "text": "{file.text}"}}' for file in files
+            json.dumps({"filename": file.name, "text": file.text}) for file in files
         )
 
         return (
@@ -398,6 +401,7 @@ class ContextBuilder:
         version: int = 1,
         use_image_generation: bool = False,
         web_search_results: list["WebSearchResult"] = [],
+        mcp_tools: list[FunctionDefinition] = [],
     ):
         tokens_used = 0
         max_tokens_usable = max_tokens - CONTEXT_SIZE_BUFFER  # Leave some room.
@@ -449,7 +453,11 @@ class ContextBuilder:
         prompt_text = str(_prompt)
         tokens_used += _prompt.get_tokens_of_knowledge()
 
-        functions = self._functions() if use_image_generation else []
+        # Combine image generation tools with MCP tools
+        functions = []
+        if use_image_generation:
+            functions.extend(self._functions())
+        functions.extend(mcp_tools)
 
         return Context(
             input=_input_string,

@@ -47,6 +47,9 @@ from intric.integration.presentation.integration_auth_router import (
 from intric.integration.presentation.integration_router import (
     router as integration_router,
 )
+from intric.mcp_servers.presentation.mcp_server_router import (
+    router as mcp_server_router,
+)
 from intric.integration.presentation.sharepoint_webhook_router import (
     router as sharepoint_webhook_router,
 )
@@ -127,7 +130,6 @@ TENANT_ADMIN_API_KEY_GUARDS = (
     *TENANT_ADMIN_SCOPE_GUARDS,
     Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 )
-
 router.include_router(
     crawl_run_router,
     prefix="/crawl-runs",
@@ -397,6 +399,12 @@ router.include_router(
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(integration_router, prefix="/integrations", tags=["integrations"])
+router.include_router(
+    mcp_server_router,
+    prefix="/mcp-servers",
+    tags=["mcp-servers"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
 router.include_router(
     sharepoint_webhook_router, prefix="/integrations", tags=["integrations"]
 )

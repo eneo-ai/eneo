@@ -13,7 +13,7 @@ from intric.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
-from intric.questions.question import QuestionAdd
+from intric.questions.question import QuestionAdd, ToolCallInfo
 from intric.questions.questions_repo import QuestionRepository
 from intric.sessions.session import SessionAdd, SessionFeedback, SessionInDB
 from intric.sessions.sessions_repo import SessionRepository
@@ -130,6 +130,7 @@ class SessionService:
         logging_details: LoggingDetails = None,
         assistant_id: Optional[UUID] = None,
         web_search_results: list["WebSearchResult"] = [],
+        tool_calls: Optional[list[ToolCallInfo]] = None,
     ):
         completion_model_id = completion_model.id if completion_model else None
         question_add = QuestionAdd(
@@ -142,6 +143,7 @@ class SessionService:
             session_id=session.id,
             logging_details=logging_details,
             assistant_id=assistant_id,
+            tool_calls=tool_calls,
         )
 
         return await self.question_repo.add(

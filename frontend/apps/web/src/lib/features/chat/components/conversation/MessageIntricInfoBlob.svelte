@@ -91,6 +91,6 @@
   }
 
   .reference {
-    @apply border-default bg-secondary hover:bg-hover-stronger inline-block min-h-7 min-w-7 rounded-lg border border-b-2 px-2 text-center font-mono text-base font-normal no-underline shadow hover:cursor-pointer;
+    @apply border-default bg-secondary hover:bg-hover-stronger ml-1.5 inline-block min-h-7 min-w-7 rounded-lg border border-b-2 px-2 text-center font-mono text-base font-normal no-underline shadow hover:cursor-pointer;
   }
 </style>

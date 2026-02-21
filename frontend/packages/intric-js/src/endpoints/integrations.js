@@ -234,15 +234,12 @@ export function initIntegrations(client) {
        */
       deleteWrapper: async ({ space, wrapper_id }) => {
         const { id } = space;
-        await client.fetch(
-          "/api/v1/spaces/{id}/knowledge/integrations/wrappers/{wrapper_id}/",
-          {
-            method: "delete",
-            params: {
-              path: { id, wrapper_id }
-            }
+        await client.fetch("/api/v1/spaces/{id}/knowledge/integrations/wrappers/{wrapper_id}/", {
+          method: "delete",
+          params: {
+            path: { id, wrapper_id }
           }
-        );
+        });
       },
 
       /**

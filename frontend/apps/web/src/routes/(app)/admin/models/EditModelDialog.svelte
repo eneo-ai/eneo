@@ -30,6 +30,7 @@
   let tokenLimitStr = "128000";
   let vision = false;
   let reasoning = false;
+  let supportsToolCalling = false;
   let family = "";
   let hosting: "swe" | "eu" | "usa" = "swe";
   let openSource = false;
@@ -40,7 +41,15 @@
   const hostingOptions = [
     { value: "swe", label: m.hosting_swe() },
     { value: "eu", label: m.hosting_eu() },
-    { value: "usa", label: m.hosting_usa() }
+    { value: "usa", label: m.hosting_usa() },
+    { value: "chn", label: m.hosting_chn() },
+    { value: "can", label: m.hosting_can() },
+    { value: "gbr", label: m.hosting_gbr() },
+    { value: "isr", label: m.hosting_isr() },
+    { value: "kor", label: m.hosting_kor() },
+    { value: "deu", label: m.hosting_deu() },
+    { value: "fra", label: m.hosting_fra() },
+    { value: "jpn", label: m.hosting_jpn() }
   ];
 
   // Initialize form values when dialog opens or model changes
@@ -63,6 +72,9 @@
     }
     if ("reasoning" in model) {
       reasoning = model.reasoning;
+    }
+    if ("supports_tool_calling" in model) {
+      supportsToolCalling = model.supports_tool_calling;
     }
     if ("family" in model) {
       family = model.family || "";
@@ -89,7 +101,8 @@
           open_source: openSource,
           token_limit: parseInt(tokenLimitStr, 10),
           vision,
-          reasoning
+          reasoning,
+          supports_tool_calling: supportsToolCalling
         };
         await intric.tenantModels.updateCompletion({ id: model.id }, update);
       } else if (type === "embeddingModel") {
@@ -224,6 +237,15 @@
                 class="h-4 w-4 rounded border-stronger accent-accent-default cursor-pointer"
               />
               <span class="group-hover:text-primary transition-colors">{m.reasoning_support()}</span>
+            </label>
+
+            <label class="flex items-center gap-2 text-sm cursor-pointer group">
+              <input
+                type="checkbox"
+                bind:checked={supportsToolCalling}
+                class="h-4 w-4 rounded border-stronger accent-accent-default cursor-pointer"
+              />
+              <span class="group-hover:text-primary transition-colors">{m.tool_calling_support()}</span>
             </label>
           </div>
         {/if}

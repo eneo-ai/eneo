@@ -133,11 +133,12 @@
     };
   }
 
-  function listGroups(providerList: ModelProviderPublic[]): Array<{ key: string; name: string }> {
+  function listGroups(providerList: ModelProviderPublic[]): Array<{ key: string; name: string; modelCount: number }> {
     // Show all providers, including those without models
     return providerList.map(provider => ({
       key: provider.id,
-      name: provider.name
+      name: provider.name,
+      modelCount: filteredModels.filter(model => model.provider_id === provider.id).length
     }));
   }
 
@@ -174,6 +175,16 @@
 
   $: groups = listGroups(providers);
   $: table.update(filteredModels);
+
+  // Track open/collapsed state per provider group, defaulting to collapsed for empty providers
+  let groupOpenState: Record<string, boolean> = {};
+  $: {
+    for (const group of groups) {
+      if (!(group.key in groupOpenState)) {
+        groupOpenState[group.key] = group.modelCount > 0;
+      }
+    }
+  }
 </script>
 
 {#if providers.length === 0}
@@ -183,7 +194,7 @@
   <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list" showEmptyGroups>
     {#each groups as group (group.key)}
       {@const provider = getProviderForGroup(group.key)}
-      <Table.Group filterFn={createGroupFilter(group.key)} title=" ">
+      <Table.Group filterFn={createGroupFilter(group.key)} title=" " open={groupOpenState[group.key] ?? true} on:openChange={(e) => { groupOpenState[group.key] = e.detail.open; }}>
         <svelte:fragment slot="title-prefix">
           {#if provider}
             <!-- Glyph + Name as unified clickable button to edit provider -->
@@ -220,6 +231,14 @@
               <!-- Visual separator between info and actions -->
               <span class="w-px h-4 bg-border-dimmer"></span>
               <ProviderStatusBadge {provider} />
+              <button
+                class="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors duration-150 hover:bg-hover-dimmer hover:text-primary focus:outline-none focus:ring-1 focus:ring-accent-default"
+                on:click|stopPropagation={() => handleAddModelToProvider(provider.id)}
+                title={m.add_model()}
+              >
+                <Plus class="h-3.5 w-3.5" />
+                {m.add_model()}
+              </button>
               <ProviderActions
                 {provider}
                 onAddModel={handleAddModelToProvider}

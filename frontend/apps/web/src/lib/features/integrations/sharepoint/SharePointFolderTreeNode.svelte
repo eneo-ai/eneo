@@ -24,12 +24,7 @@
     onNavigate?: (node: TreeNode) => void;
   }
 
-  let {
-    node,
-    isSelected = false,
-    onToggleSelect,
-    onNavigate
-  }: Props = $props();
+  let { node, isSelected = false, onToggleSelect, onNavigate }: Props = $props();
 
   const handleToggleSelect = () => {
     onToggleSelect?.(node);
@@ -60,8 +55,21 @@
   const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "svg", "bmp", "webp", "ico", "tiff"];
   const AUDIO_EXTENSIONS = ["mp3", "wav", "ogg", "flac", "aac", "wma", "m4a"];
   const TEXT_EXTENSIONS = [
-    "doc", "docx", "pdf", "txt", "rtf", "odt", "xls", "xlsx", "csv",
-    "ppt", "pptx", "md", "html", "xml", "json"
+    "doc",
+    "docx",
+    "pdf",
+    "txt",
+    "rtf",
+    "odt",
+    "xls",
+    "xlsx",
+    "csv",
+    "ppt",
+    "pptx",
+    "md",
+    "html",
+    "xml",
+    "json"
   ];
 
   function getFileExtension(name: string): string {
@@ -71,57 +79,57 @@
 </script>
 
 <div
-  class="flex items-center gap-2 px-3 py-1.5 text-left w-full border-b border-dimmer last:border-b-0 transition-colors
+  class="border-dimmer flex w-full min-w-0 items-center gap-2 border-b px-3 py-1.5 text-left transition-colors last:border-b-0
     {isSelected ? 'bg-accent-dimmer border-accent' : 'hover:bg-hover-default'}"
 >
   <!-- Chevron for folders -->
   {#if node.type === "folder"}
     <button
       type="button"
-      class="w-3.5 h-3.5 flex-shrink-0 text-secondary hover:text-primary"
+      class="text-secondary hover:text-primary h-3.5 w-3.5 flex-shrink-0"
       onclick={handleNavigate}
       title={m.open_folder()}
       aria-label={m.open_folder()}
     >
-      <IconChevronRight class="w-3.5 h-3.5" />
+      <IconChevronRight class="h-3.5 w-3.5" />
     </button>
   {:else}
-    <div class="w-3.5 h-3.5"></div>
+    <div class="h-3.5 w-3.5"></div>
   {/if}
 
   <input
     type="checkbox"
-    class="h-4 w-4 accent-accent-default flex-shrink-0"
+    class="accent-accent-default h-4 w-4 flex-shrink-0"
     checked={isSelected}
     onclick={handleCheckboxClick}
   />
 
   <button
     type="button"
-    class="flex items-center gap-2 text-left w-full min-w-0"
+    class="flex w-full min-w-0 items-center gap-2 text-left"
     onclick={handleToggleSelect}
   >
     <!-- Icon -->
     {#if node.type === "folder"}
-      <IconFolder class="w-4 h-4 flex-shrink-0 text-secondary" />
+      <IconFolder class="text-secondary h-4 w-4 flex-shrink-0" />
     {:else}
       {@const ext = getFileExtension(node.name)}
       {#if IMAGE_EXTENSIONS.includes(ext)}
-        <IconFileImage class="w-4 h-4 flex-shrink-0 text-secondary" />
+        <IconFileImage class="text-secondary h-4 w-4 flex-shrink-0" />
       {:else if AUDIO_EXTENSIONS.includes(ext)}
-        <IconFileAudio class="w-4 h-4 flex-shrink-0 text-secondary" />
+        <IconFileAudio class="text-secondary h-4 w-4 flex-shrink-0" />
       {:else if TEXT_EXTENSIONS.includes(ext)}
-        <IconFileText class="w-4 h-4 flex-shrink-0 text-secondary" />
+        <IconFileText class="text-secondary h-4 w-4 flex-shrink-0" />
       {:else}
-        <IconFile class="w-4 h-4 flex-shrink-0 text-secondary" />
+        <IconFile class="text-secondary h-4 w-4 flex-shrink-0" />
       {/if}
     {/if}
 
     <!-- Name -->
-    <span class="truncate text-sm flex-1">{node.name}</span>
+    <span class="flex-1 truncate text-sm" title={node.name}>{node.name}</span>
 
     <!-- Metadata -->
-    <span class="text-xs text-secondary flex-shrink-0 tabular-nums">
+    <span class="text-secondary hidden flex-shrink-0 text-xs tabular-nums md:inline">
       {#if node.type === "folder" && node.has_children}
         <!-- could show child count if available -->
       {:else if node.size != null}
@@ -129,7 +137,7 @@
       {/if}
     </span>
     {#if node.modified}
-      <span class="text-xs text-secondary flex-shrink-0 tabular-nums">
+      <span class="text-secondary hidden flex-shrink-0 text-xs tabular-nums lg:inline">
         {formatDate(node.modified)}
       </span>
     {/if}

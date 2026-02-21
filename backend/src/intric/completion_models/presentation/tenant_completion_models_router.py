@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from intric.ai_models.model_enums import ModelFamily, ModelStability
+from intric.ai_models.model_enums import ModelStability
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.roles.permissions import Permission, validate_permission
 from intric.completion_models.presentation import CompletionModelPublic
@@ -28,7 +28,9 @@ class TenantCompletionModelCreate(BaseModel):
     token_limit: int = Field(default=128000, description="Maximum context tokens")
     vision: bool = Field(default=False, description="Supports vision/image inputs")
     reasoning: bool = Field(default=False, description="Supports extended reasoning")
+    supports_tool_calling: bool = Field(default=False, description="Supports function/tool calling")
     hosting: str = Field(default="swe", description="Hosting location (swe, eu, usa)")
+    family: str = Field(default="openai", description="Model family (e.g., 'openai', 'anthropic', 'deepseek')")
     is_active: bool = Field(default=True, description="Enable in organization")
     is_default: bool = Field(default=False, description="Set as default model")
 
@@ -40,6 +42,7 @@ class TenantCompletionModelUpdate(BaseModel):
     token_limit: int | None = Field(None, description="Maximum context tokens")
     vision: bool | None = Field(None, description="Supports vision/image inputs")
     reasoning: bool | None = Field(None, description="Supports extended reasoning")
+    supports_tool_calling: bool | None = Field(None, description="Supports function/tool calling")
     hosting: str | None = Field(None, description="Hosting location (swe, eu, usa)")
     open_source: bool | None = Field(None, description="Is the model open source")
     stability: str | None = Field(None, description="Model stability (stable, experimental)")
@@ -100,8 +103,9 @@ async def create_tenant_completion_model(
         token_limit=model_create.token_limit,
         vision=model_create.vision,
         reasoning=model_create.reasoning,
+        supports_tool_calling=model_create.supports_tool_calling,  # type: ignore[call-arg]
         # Simplified defaults - these fields don't matter for tenant models (grouped by provider in UI)
-        family=ModelFamily.OPEN_AI.value,
+        family=model_create.family,
         hosting=model_create.hosting,
         org=None,
         stability=ModelStability.STABLE.value,
@@ -180,6 +184,8 @@ async def update_tenant_completion_model(
         model.vision = model_update.vision
     if model_update.reasoning is not None:
         model.reasoning = model_update.reasoning
+    if model_update.supports_tool_calling is not None:
+        model.supports_tool_calling = model_update.supports_tool_calling
     if model_update.hosting is not None:
         model.hosting = model_update.hosting
     if model_update.open_source is not None:
@@ -212,7 +218,7 @@ async def delete_tenant_completion_model(
     validate_permission(user, Permission.ADMIN)
     from intric.database.tables.ai_models_table import CompletionModels
     import sqlalchemy as sa
-    from intric.main.exceptions import UnauthorizedException, NotFoundException
+    from intric.main.exceptions import UnauthorizedException, NotFoundException, BadRequestException
 
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(CompletionModels).where(
@@ -230,7 +236,11 @@ async def delete_tenant_completion_model(
         raise UnauthorizedException("Cannot delete global models")
 
     # Delete the model (settings are now on the model itself)
-    await session.delete(model)
-    await session.commit()
+    try:
+        await session.delete(model)
+        await session.commit()
+    except sa.exc.IntegrityError:
+        await session.rollback()
+        raise BadRequestException("MODEL_IN_USE")
 
     return {"success": True}

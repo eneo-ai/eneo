@@ -12,6 +12,7 @@
   import SelectEmbeddingModels from "./SelectEmbeddingModels.svelte";
   import EditNameAndDescription from "./EditNameAndDescription.svelte";
   import SelectCompletionModels from "./SelectCompletionModels.svelte";
+  import SelectMCPServers from "./SelectMCPServers.svelte";
   import { Page, Settings } from "$lib/components/layout";
   import SpaceStorageOverview from "./SpaceStorageOverview.svelte";
   import SelectTranscriptionModels from "./SelectTranscriptionModels.svelte";
@@ -37,6 +38,8 @@
   const spaces = getSpacesManager();
   const currentSpace = spaces.state.currentSpace;
 
+  // Get tenant-enabled MCP servers from space data
+  let mcpServers = $derived($currentSpace.mcp_servers ?? []);
   // Initialize the Space Settings Editor for page-level save
   const {
     state: { update, currentChanges, isSaving },
@@ -222,6 +225,8 @@
 
         <SelectTranscriptionModels selectableModels={transcriptionModels}
         ></SelectTranscriptionModels>
+
+        <SelectMCPServers selectableServers={data.mcpServers}></SelectMCPServers>
       </Settings.Group>
 
       {#if !isOrgSpace && $currentSpace.permissions?.includes("edit")}

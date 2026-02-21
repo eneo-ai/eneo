@@ -110,6 +110,7 @@ INTENTIONALLY_UNGUARDED = {
     "/api-keys":                "Self-management with ensure_manage_authorized() + scope guard",
     "/ws":                      "WebSocket endpoint — separate auth",
     "/audit":                   "Admin audit endpoints with admin scope + admin key guards",
+    "/mcp-servers":             "MCP server management is tenant-admin infrastructure with admin scope + admin key guards",
     "/auth":                    "Public federation/auth endpoints — no user auth required",
     "/api-docs":                "Public API documentation endpoint",
 }

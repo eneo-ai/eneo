@@ -475,6 +475,7 @@ async def update_notification_preferences(
         ...,
         examples=[{"enabled": True, "days_before_expiry": [30, 14, 7, 3, 1]}],
     ),
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
     container: Container = Depends(get_container(with_user=True)),
 ):
     user: UserInDB = container.user()
@@ -550,6 +551,7 @@ async def list_notification_subscriptions(
 async def upsert_notification_subscription(
     target_type: ApiKeyNotificationTargetType,
     target_id: UUID,
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
     container: Container = Depends(get_container(with_user=True)),
 ):
     user: UserInDB = container.user()
@@ -610,6 +612,7 @@ async def upsert_notification_subscription(
 async def delete_notification_subscription(
     target_type: ApiKeyNotificationTargetType,
     target_id: UUID,
+    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
     container: Container = Depends(get_container(with_user=True)),
 ):
     user: UserInDB = container.user()

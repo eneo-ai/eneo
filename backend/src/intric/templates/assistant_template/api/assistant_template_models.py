@@ -91,7 +91,7 @@ class AssistantTemplateAdminPublic(BaseModel):
     description: str
     category: str
     prompt_text: Optional[str] = None
-    completion_model_kwargs: Optional[dict] = Field(default_factory=dict)
+    completion_model_kwargs: dict = Field(default_factory=dict)
     completion_model_id: Optional[UUID] = None
     completion_model_name: Optional[str] = None
     wizard: Optional[AssistantTemplateWizard] = None
@@ -125,7 +125,7 @@ class AssistantTemplateAdminCreate(BaseModel):
     description: Optional[str] = Field(None, max_length=2000)
     category: str = Field(..., min_length=1, max_length=100)
     prompt: Optional[str] = None
-    completion_model_kwargs: Optional[dict] = Field(default_factory=dict)
+    completion_model_kwargs: dict = Field(default_factory=dict)
     wizard: Optional[AssistantTemplateWizard] = None
     icon_name: Optional[str] = Field(None, max_length=100)
 

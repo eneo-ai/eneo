@@ -116,16 +116,6 @@
     </Button>
   </Dropdown.Trigger>
   <Dropdown.Menu let:item>
-    {#if onAddModel}
-      <Button
-        is={item}
-        padding="icon-leading"
-        on:click={() => onAddModel?.(provider.id)}
-      >
-        <Plus class="h-4 w-4" />
-        {m.add_model()}
-      </Button>
-    {/if}
     <Button
       is={item}
       padding="icon-leading"

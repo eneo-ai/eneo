@@ -5,7 +5,8 @@
     "**/__pycache__",
     "**/node_modules",
     "tests",
-    "alembic/**"
+    "alembic/**",
+    "src/intric/server/test_mcp_server.py"
   ],
   "pythonVersion": "3.11",
   "typeCheckingMode": "strict",

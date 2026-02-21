@@ -141,3 +141,224 @@ class ModelProviderService:
         """Get decrypted credentials for a provider (for internal use only)."""
         provider = await self.repository.get_by_id(provider_id)
         return self._decrypt_credentials(provider.credentials)
+
+    async def validate_model(
+        self, provider_id: UUID, model_name: str, model_type: str
+    ) -> dict[str, Any]:
+        """Validate a model by making a minimal LiteLLM call.
+
+        For completion models: sends a single-token completion request.
+        For embedding models: sends a minimal embedding request.
+        For transcription models: skips validation (requires audio file).
+        """
+        if model_type == "transcription":
+            return {"success": True, "message": "Validation skipped for transcription models"}
+
+        import litellm
+
+        provider = await self.repository.get_by_id(provider_id)
+        decrypted_creds = self._decrypt_credentials(provider.credentials)
+        api_key = decrypted_creds.get("api_key", "")
+        provider_type = provider.provider_type.lower()
+
+        # Build the litellm model identifier
+        # For vLLM, use hosted_vllm prefix for litellm compliance
+        if provider_type == "vllm":
+            litellm_model = f"hosted_vllm/{model_name}"
+        elif provider_type == "azure":
+            litellm_model = f"azure/{model_name}"
+        else:
+            litellm_model = f"{provider_type}/{model_name}"
+
+        kwargs: dict[str, Any] = {"model": litellm_model, "api_key": api_key}
+
+        # Add provider-specific config
+        if provider_type == "azure":
+            kwargs["api_base"] = provider.config.get("endpoint", "")
+            kwargs["api_version"] = provider.config.get(
+                "api_version", "2024-02-15-preview"
+            )
+        elif provider_type in ("vllm",) or provider.config.get("endpoint"):
+            kwargs["api_base"] = provider.config.get("endpoint", "")
+
+        try:
+            if model_type == "embedding":
+                await litellm.aembedding(input=["test"], **kwargs)
+            else:
+                await litellm.acompletion(
+                    messages=[{"role": "user", "content": "hi"}],
+                    max_completion_tokens=1,
+                    drop_params=True,
+                    **kwargs,
+                )
+            return {"success": True, "message": "Model validated successfully"}
+        except Exception as e:
+            error_name = e.__class__.__name__
+            if error_name == "AuthenticationError":
+                return {"success": False, "error": "Invalid API key"}
+            if error_name == "NotFoundError":
+                return {"success": False, "error": f"Model not found: {model_name}"}
+            if error_name == "APIConnectionError":
+                return {"success": False, "error": "Could not connect to API"}
+            return {"success": False, "error": f"Validation failed: {str(e)}"}
+
+    async def list_available_models(self, provider_id: UUID) -> list[dict[str, Any]]:
+        """List models/deployments available on a provider using its credentials."""
+        import httpx
+
+        provider = await self.repository.get_by_id(provider_id)
+        decrypted_creds = self._decrypt_credentials(provider.credentials)
+        api_key = decrypted_creds.get("api_key", "")
+        provider_type = provider.provider_type.lower()
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                if provider_type == "azure":
+                    # Azure /openai/models returns all available models in the
+                    # region, not just deployed ones. Skip live listing — users
+                    # should enter their deployment name manually.
+                    return []
+
+                elif provider_type == "openai":
+                    resp = await client.get(
+                        "https://api.openai.com/v1/models",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    return [
+                        {"name": m["id"], "owned_by": m.get("owned_by", "")}
+                        for m in sorted(data.get("data", []), key=lambda m: m["id"])
+                    ]
+
+                elif provider_type == "anthropic":
+                    resp = await client.get(
+                        "https://api.anthropic.com/v1/models",
+                        headers={
+                            "x-api-key": api_key,
+                            "anthropic-version": "2023-06-01",
+                        },
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    return [
+                        {"name": m["id"], "display_name": m.get("display_name", "")}
+                        for m in sorted(data.get("data", []), key=lambda m: m["id"])
+                    ]
+
+                else:
+                    # For other providers, try OpenAI-compatible /v1/models
+                    endpoint = provider.config.get("endpoint", "").rstrip("/")
+                    if endpoint:
+                        resp = await client.get(
+                            f"{endpoint}/v1/models",
+                            headers={"Authorization": f"Bearer {api_key}"},
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+                        return [
+                            {"name": m["id"]}
+                            for m in sorted(
+                                data.get("data", []), key=lambda m: m["id"]
+                            )
+                        ]
+                    return []
+
+        except Exception as e:
+            return [{"error": f"Failed to list models: {str(e)}"}]
+
+    async def test_connection(self, provider_id: UUID) -> dict[str, Any]:
+        """Test connectivity to a model provider by making a minimal LiteLLM call.
+
+        Tries multiple test models per provider as fallback in case older models
+        have been deprecated.
+        """
+        import litellm
+
+        provider = await self.repository.get_by_id(provider_id)
+        decrypted_creds = self._decrypt_credentials(provider.credentials)
+        api_key = decrypted_creds.get("api_key", "")
+
+        provider_type = provider.provider_type.lower()
+        base_kwargs: dict[str, Any] = {
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 1,
+            "api_key": api_key,
+        }
+
+        # Multiple candidates per provider, ordered from cheapest/newest to oldest.
+        # If a model is retired, the next one in the list is tried.
+        test_model_candidates: dict[str, list[str]] = {
+            "openai": [
+                "openai/gpt-4o-mini",
+                "openai/gpt-4.1-nano",
+                "openai/gpt-3.5-turbo",
+            ],
+            "anthropic": [
+                "anthropic/claude-3-5-haiku-20241022",
+                "anthropic/claude-3-haiku-20240307",
+                "anthropic/claude-3-5-sonnet-20241022",
+            ],
+            "gemini": [
+                "gemini/gemini-2.0-flash",
+                "gemini/gemini-1.5-flash",
+                "gemini/gemini-pro",
+            ],
+            "cohere": [
+                "cohere/command-r",
+                "cohere/command-r-plus",
+                "cohere/command",
+            ],
+            "mistral": [
+                "mistral/mistral-small-latest",
+                "mistral/mistral-tiny",
+                "mistral/open-mistral-7b",
+            ],
+        }
+
+        # Azure and vLLM use provider config, not a candidate list
+        if provider_type == "azure":
+            deployment = provider.config.get("deployment_name", "gpt-4o-mini")
+            base_kwargs["model"] = f"azure/{deployment}"
+            base_kwargs["api_base"] = provider.config.get("endpoint", "")
+            base_kwargs["api_version"] = provider.config.get(
+                "api_version", "2024-02-15-preview"
+            )
+            candidates = [base_kwargs["model"]]
+        elif provider_type == "vllm":
+            base_kwargs["api_base"] = provider.config.get("endpoint", "")
+            candidates = ["openai/test"]
+        elif provider_type in test_model_candidates:
+            candidates = test_model_candidates[provider_type]
+        else:
+            model_name = provider.config.get("model_name", "test")
+            if provider.config.get("endpoint"):
+                base_kwargs["api_base"] = provider.config["endpoint"]
+            candidates = [f"openai/{model_name}"]
+
+        for model in candidates:
+            kwargs = {**base_kwargs, "model": model}
+            try:
+                await litellm.acompletion(**kwargs)
+                return {"success": True, "message": "Connection successful"}
+            except Exception as e:
+                error_name = e.__class__.__name__
+                if error_name == "AuthenticationError":
+                    return {"success": False, "error": "Invalid API key"}
+                if error_name == "APIConnectionError":
+                    return {"success": False, "error": "Could not connect to the API"}
+                if error_name == "NotFoundError":
+                    # Model not found — try next candidate
+                    continue
+                # For non-model errors, no point retrying with a different model
+                return {"success": False, "error": f"Connection test failed: {str(e)}"}
+
+        # All candidates returned NotFound
+        return {
+            "success": False,
+            "error": (
+                "None of the test models could be found. "
+                "The provider may not support completion models, "
+                "or the API endpoint may be misconfigured."
+            ),
+        }
