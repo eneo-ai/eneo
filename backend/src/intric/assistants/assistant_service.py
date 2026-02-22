@@ -360,7 +360,50 @@ class AssistantService:
                 for integration_knowledge_id in integration_knowledge_ids
             ]
 
-        # Store MCP server IDs and tool settings for repository to handle
+        # Validate MCP server assignments against tenant + space boundaries.
+        if mcp_server_ids is not None:
+            import sqlalchemy as sa
+            from intric.database.tables.mcp_server_table import (
+                MCPServers as MCPServersTable,
+                SpacesMCPServers as SpacesMCPServersTable,
+            )
+
+            mcp_servers_query = (
+                sa.select(MCPServersTable.id)
+                .where(MCPServersTable.tenant_id == self.user.tenant_id)
+                .where(MCPServersTable.is_enabled == True)  # noqa: E712
+                .where(MCPServersTable.id.in_(mcp_server_ids))
+            )
+            mcp_servers_result = await self.repo.session.execute(mcp_servers_query)
+            enabled_server_ids = {row[0] for row in mcp_servers_result.fetchall()}
+
+            missing_tenant_enabled_ids = [
+                str(server_id)
+                for server_id in mcp_server_ids
+                if server_id not in enabled_server_ids
+            ]
+            if missing_tenant_enabled_ids:
+                raise BadRequestException(
+                    "MCP server(s) are not enabled for this tenant: "
+                    + ", ".join(missing_tenant_enabled_ids)
+                )
+
+            space_servers_query = sa.select(SpacesMCPServersTable.mcp_server_id).where(
+                SpacesMCPServersTable.space_id == space.id,
+                SpacesMCPServersTable.mcp_server_id.in_(mcp_server_ids),
+            )
+            space_servers_result = await self.repo.session.execute(space_servers_query)
+            space_server_ids = {row[0] for row in space_servers_result.fetchall()}
+            missing_space_ids = [
+                str(server_id) for server_id in mcp_server_ids if server_id not in space_server_ids
+            ]
+            if missing_space_ids:
+                raise BadRequestException(
+                    "MCP server(s) are not assigned to this assistant's space: "
+                    + ", ".join(missing_space_ids)
+                )
+
+        # Store MCP server IDs and tool settings for repository to handle.
         assistant._mcp_server_ids = mcp_server_ids
         assistant._mcp_tool_settings = mcp_tools
 
@@ -537,6 +580,7 @@ class AssistantService:
                                 if existing:
                                     # Update existing entry with approval status
                                     existing.approved = tc.approved
+                                    existing.result_status = tc.result_status
                                 else:
                                     # Add new tool call
                                     tool_calls.append(
@@ -546,6 +590,7 @@ class AssistantService:
                                             arguments=tc.arguments,
                                             tool_call_id=tc.tool_call_id,
                                             approved=tc.approved,
+                                            result_status=tc.result_status,
                                         )
                                     )
                         yield chunk
@@ -554,15 +599,43 @@ class AssistantService:
                         # Collect tool calls for approval flow (approval status will be updated later)
                         if chunk.tool_calls_metadata:
                             for tc in chunk.tool_calls_metadata:
-                                tool_calls.append(
-                                    ToolCallInfo(
-                                        server_name=tc.server_name,
-                                        tool_name=tc.tool_name,
-                                        arguments=tc.arguments,
-                                        tool_call_id=tc.tool_call_id,
-                                        approved=None,  # Will be updated when TOOL_CALL with approval status arrives
+                                    tool_calls.append(
+                                        ToolCallInfo(
+                                            server_name=tc.server_name,
+                                            tool_name=tc.tool_name,
+                                            arguments=tc.arguments,
+                                            tool_call_id=tc.tool_call_id,
+                                            approved=None,  # Will be updated when TOOL_CALL with approval status arrives
+                                            result_status=tc.result_status,
+                                        )
                                     )
+                        yield chunk
+
+                    if chunk.response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
+                        if chunk.tool_calls_metadata:
+                            for tc in chunk.tool_calls_metadata:
+                                existing = next(
+                                    (
+                                        t
+                                        for t in tool_calls
+                                        if t.tool_call_id and t.tool_call_id == tc.tool_call_id
+                                    ),
+                                    None,
                                 )
+                                if existing:
+                                    existing.approved = False
+                                    existing.result_status = tc.result_status or "timeout_denied"
+                                else:
+                                    tool_calls.append(
+                                        ToolCallInfo(
+                                            server_name=tc.server_name,
+                                            tool_name=tc.tool_name,
+                                            arguments=tc.arguments,
+                                            tool_call_id=tc.tool_call_id,
+                                            approved=False,
+                                            result_status=tc.result_status or "timeout_denied",
+                                        )
+                                    )
                         yield chunk
 
                 # Get the references for the whole response
@@ -814,9 +887,6 @@ class AssistantService:
         self,
         assistant_id: UUID,
         mcp_server_id: UUID,
-        enabled: bool = True,
-        config: dict | None = None,
-        priority: int = 0,
     ):
         """Add an MCP server to an assistant."""
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
@@ -826,11 +896,34 @@ class AssistantService:
         if not actor.can_edit_assistants():
             raise UnauthorizedException()
 
-        # TODO: Validate that the MCP server is enabled for the tenant
-
         # Get existing associations from the database
         from intric.database.tables.assistant_table import AssistantMCPServers
+        from intric.database.tables.mcp_server_table import (
+            MCPServers as MCPServersTable,
+            SpacesMCPServers as SpacesMCPServersTable,
+        )
         import sqlalchemy as sa
+
+        # Validate tenant ownership + enablement
+        mcp_server_query = sa.select(MCPServersTable).where(
+            MCPServersTable.id == mcp_server_id,
+            MCPServersTable.tenant_id == self.user.tenant_id,
+            MCPServersTable.is_enabled == True,  # noqa: E712
+        )
+        mcp_server_db = await self.repo.session.scalar(mcp_server_query)
+        if mcp_server_db is None:
+            raise BadRequestException("MCP server is not enabled for this tenant")
+
+        # Validate server is assigned to assistant's space
+        space_mapping_query = sa.select(SpacesMCPServersTable).where(
+            SpacesMCPServersTable.space_id == space.id,
+            SpacesMCPServersTable.mcp_server_id == mcp_server_id,
+        )
+        space_mapping = await self.repo.session.scalar(space_mapping_query)
+        if space_mapping is None:
+            raise BadRequestException(
+                "MCP server is not assigned to this assistant's space"
+            )
 
         stmt = sa.select(AssistantMCPServers).where(
             AssistantMCPServers.assistant_id == assistant_id

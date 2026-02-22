@@ -1,4 +1,6 @@
 import hashlib
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -17,18 +19,30 @@ class FileService:
         self.repo = repo
         self.protocol = protocol
 
+    @asynccontextmanager
+    async def _write_transaction(self) -> AsyncIterator[None]:
+        """Open a short write transaction only when one is not already active."""
+        session = self.repo.session
+        if session.in_transaction():
+            yield
+            return
+
+        async with session.begin():
+            yield
+
     async def save_file(self, upload_file: UploadFile):
         file = await self.protocol.to_domain(
             upload_file, max_size=get_settings().upload_max_file_size
         )
 
-        saved_file = await self.repo.add(
-            FileCreate(
-                **file.model_dump(),
-                user_id=self.user.id,
-                tenant_id=self.user.tenant_id,
+        async with self._write_transaction():
+            saved_file = await self.repo.add(
+                FileCreate(
+                    **file.model_dump(),
+                    user_id=self.user.id,
+                    tenant_id=self.user.tenant_id,
+                )
             )
-        )
 
         # Don't calculate token count here - we don't know which model will be used
         # Token counting will happen when the file is used in an assistant context
@@ -53,13 +67,14 @@ class FileService:
             blob=image_data,
         )
 
-        return await self.repo.add(
-            FileCreate(
-                **file_base.model_dump(),
-                user_id=self.user.id,
-                tenant_id=self.user.tenant_id,
+        async with self._write_transaction():
+            return await self.repo.add(
+                FileCreate(
+                    **file_base.model_dump(),
+                    user_id=self.user.id,
+                    tenant_id=self.user.tenant_id,
+                )
             )
-        )
 
     async def get_file_by_id(self, file_id: UUID):
         file = await self.repo.get_by_id(file_id=file_id)

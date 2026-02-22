@@ -20,7 +20,7 @@ from intric.authentication.api_key_notification_auto_follow import auto_follow_o
 from intric.authentication.api_key_router_helpers import (
     error_responses as api_key_error_responses,
 )
-from intric.database.database import AsyncSession, get_session_with_transaction
+from intric.database.database import AsyncSession
 from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.models import NOT_PROVIDED, CursorPaginatedResponse, PaginatedResponse
@@ -629,9 +629,8 @@ async def ask_assistant(
     ask: AskAssistant,
     version: int = Query(default=1, ge=1, le=2),
     container: Container = Depends(
-        get_container(with_user_from_assistant_api_key=True)
+        get_container(with_user_from_assistant_api_key=True, with_transaction=False)
     ),
-    db_session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Streams the response as Server-Sent Events if stream == true"""
     service = container.assistant_service()
@@ -688,9 +687,7 @@ async def ask_assistant(
         ),
     )
 
-    return await assistant_protocol.to_response(
-        response=response, db_session=db_session, stream=ask.stream
-    )
+    return await assistant_protocol.to_response(response=response, stream=ask.stream)
 
 
 @router.get(
@@ -805,9 +802,8 @@ async def ask_followup(
     ask: AskAssistant,
     version: int = Query(default=1, ge=1, le=2),
     container: Container = Depends(
-        get_container(with_user_from_assistant_api_key=True)
+        get_container(with_user_from_assistant_api_key=True, with_transaction=False)
     ),
-    db_session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Streams the response as Server-Sent Events if stream == true"""
     service = container.assistant_service()
@@ -826,9 +822,7 @@ async def ask_followup(
         version=version,
     )
 
-    return await assistant_protocol.to_response(
-        response=response, db_session=db_session, stream=ask.stream
-    )
+    return await assistant_protocol.to_response(response=response, stream=ask.stream)
 
 
 @router.post(

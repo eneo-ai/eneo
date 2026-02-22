@@ -27,3 +27,4 @@ class EntityType(str, Enum):
     EMBEDDING_MODEL = "embedding_model"
     TRANSCRIPTION_MODEL = "transcription_model"
     AUDIT_LOG = "audit_log"
+    SESSION = "session"

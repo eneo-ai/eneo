@@ -41,6 +41,7 @@ def _raise_api_key_http_error(exc: ApiKeyValidationError) -> NoReturn:
 def get_container(
     with_user: bool = False,
     with_user_from_assistant_api_key: bool = False,
+    with_transaction: bool = True,
 ):
     if sum([with_user, with_user_from_assistant_api_key]) > 1:
         raise ValueError(
@@ -48,7 +49,9 @@ def get_container(
         )
 
     async def _get_container(
-        session: AsyncSession = Depends(get_session_with_transaction),
+        session: AsyncSession = Depends(
+            get_session_with_transaction if with_transaction else get_session
+        ),
     ):
         return Container(
             session=providers.Object(session),
@@ -63,9 +66,16 @@ def get_container(
         if request.method == "OPTIONS":
             return container
         try:
-            user = await container.user_service().authenticate(
-                token=token, api_key=api_key, request=request
-            )
+            session = container.session()
+            if session.in_transaction():
+                user = await container.user_service().authenticate(
+                    token=token, api_key=api_key, request=request
+                )
+            else:
+                async with session.begin():
+                    user = await container.user_service().authenticate(
+                        token=token, api_key=api_key, request=request
+                    )
         except ApiKeyValidationError as exc:
             _raise_api_key_http_error(exc)
 
@@ -86,9 +96,18 @@ def get_container(
         if request.method == "OPTIONS":
             return container
         try:
-            user = await container.user_service().authenticate_with_assistant_api_key(
-                token=token, api_key=api_key, assistant_id=id, request=request
-            )
+            session = container.session()
+            if session.in_transaction():
+                user = await container.user_service().authenticate_with_assistant_api_key(
+                    token=token, api_key=api_key, assistant_id=id, request=request
+                )
+            else:
+                async with session.begin():
+                    user = (
+                        await container.user_service().authenticate_with_assistant_api_key(
+                            token=token, api_key=api_key, assistant_id=id, request=request
+                        )
+                    )
         except ApiKeyValidationError as exc:
             _raise_api_key_http_error(exc)
         override_user(container=container, user=user)

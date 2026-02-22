@@ -30,6 +30,7 @@ from intric.database.tables.prompts_table import Prompts, PromptsAssistants
 from intric.database.tables.users_table import Users
 from intric.database.tables.websites_table import CrawlRuns, Websites
 from intric.files.file_models import FileInfo
+from intric.main.exceptions import BadRequestException
 from intric.prompts.prompt import Prompt
 
 if TYPE_CHECKING:
@@ -267,6 +268,34 @@ class AssistantRepository:
         await self.session.execute(stmt)
 
         if mcp_tool_settings:
+            from intric.database.tables.mcp_server_table import MCPServerTools as MCPServerToolsTable
+
+            server_ids_stmt = sa.select(AssistantMCPServers.mcp_server_id).where(
+                AssistantMCPServers.assistant_id == assistant_in_db.id
+            )
+            server_ids_result = await self.session.execute(server_ids_stmt)
+            valid_server_ids = [row[0] for row in server_ids_result.fetchall()]
+
+            tool_ids = [tool_id for tool_id, _ in mcp_tool_settings]
+            if tool_ids and valid_server_ids:
+                valid_tool_ids_stmt = sa.select(MCPServerToolsTable.id).where(
+                    MCPServerToolsTable.id.in_(tool_ids),
+                    MCPServerToolsTable.mcp_server_id.in_(valid_server_ids),
+                )
+                valid_tool_ids_result = await self.session.execute(valid_tool_ids_stmt)
+                valid_tool_ids = {row[0] for row in valid_tool_ids_result.fetchall()}
+            else:
+                valid_tool_ids = set()
+
+            invalid_tool_ids = [
+                str(tool_id) for tool_id in tool_ids if tool_id not in valid_tool_ids
+            ]
+            if invalid_tool_ids:
+                raise BadRequestException(
+                    "MCP tool override references tool(s) outside assistant MCP servers: "
+                    + ", ".join(invalid_tool_ids)
+                )
+
             values = [
                 {
                     "assistant_id": assistant_in_db.id,
@@ -395,7 +424,12 @@ class AssistantRepository:
             for record in records
         ]
 
-    async def update(self, assistant: Assistant):
+    async def update(
+        self,
+        assistant: Assistant,
+        mcp_server_ids: list[UUID] | None = None,
+        mcp_tool_settings: list[tuple[UUID, bool]] | None = None,
+    ):
         completion_model_id = (
             assistant.completion_model.id if assistant.completion_model is not None else None
         )
@@ -426,13 +460,28 @@ class AssistantRepository:
         await self._set_integration_knowledge(entry_in_db, assistant.integration_knowledge_list)
         await self._set_attachments(entry_in_db, assistant.attachments)
 
-        # Set MCP servers if provided
-        if hasattr(assistant, '_mcp_server_ids') and assistant._mcp_server_ids is not None:
-            await self._set_mcp_servers(entry_in_db, assistant._mcp_server_ids)
+        # Set MCP servers/tool overrides explicitly when provided by caller.
+        # Backward-compatible fallback to legacy side-channel attributes.
+        effective_mcp_server_ids = mcp_server_ids
+        if (
+            effective_mcp_server_ids is None
+            and hasattr(assistant, "_mcp_server_ids")
+            and assistant._mcp_server_ids is not None
+        ):
+            effective_mcp_server_ids = assistant._mcp_server_ids
 
-        # Set MCP tool overrides if provided
-        if hasattr(assistant, '_mcp_tool_settings') and assistant._mcp_tool_settings is not None:
-            await self._set_mcp_tools(entry_in_db, assistant._mcp_tool_settings)
+        effective_mcp_tool_settings = mcp_tool_settings
+        if (
+            effective_mcp_tool_settings is None
+            and hasattr(assistant, "_mcp_tool_settings")
+            and assistant._mcp_tool_settings is not None
+        ):
+            effective_mcp_tool_settings = assistant._mcp_tool_settings
+
+        if effective_mcp_server_ids is not None:
+            await self._set_mcp_servers(entry_in_db, effective_mcp_server_ids)
+        if effective_mcp_tool_settings is not None:
+            await self._set_mcp_tools(entry_in_db, effective_mcp_tool_settings)
 
         if assistant.prompt:
             await self._add_prompt(assistant_id=entry_in_db.id, prompt=assistant.prompt)

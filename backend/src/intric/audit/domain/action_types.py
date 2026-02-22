@@ -48,6 +48,7 @@ class ActionType(str, Enum):
     APP_RUN_DELETED = "app_run_deleted"
     SESSION_STARTED = "session_started"
     SESSION_ENDED = "session_ended"
+    TOOL_APPROVAL_SUBMITTED = "tool_approval_submitted"
     FILE_UPLOADED = "file_uploaded"
     FILE_DELETED = "file_deleted"
     WEBSITE_CREATED = "website_created"

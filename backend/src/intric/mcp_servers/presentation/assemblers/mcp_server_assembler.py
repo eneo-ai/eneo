@@ -82,6 +82,14 @@ class MCPServerSettingsAssembler:
             for tool in sorted_tools
         ]
 
+        credential_status = getattr(mcp_server, "credential_status", None)
+        if credential_status is None:
+            credential_status = (
+                "ok"
+                if mcp_server.env_vars is not None and len(mcp_server.env_vars) > 0
+                else "missing"
+            )
+
         return MCPServerSettingsPublic(
             id=mcp_server.id,
             mcp_server_id=mcp_server.id,
@@ -94,7 +102,8 @@ class MCPServerSettingsAssembler:
             icon_url=mcp_server.icon_url,
             documentation_url=mcp_server.documentation_url,
             is_org_enabled=mcp_server.is_enabled,
-            has_credentials=mcp_server.env_vars is not None and len(mcp_server.env_vars) > 0,
+            has_credentials=credential_status == "ok",
+            credential_status=credential_status,
             tools=tools,
         )
 

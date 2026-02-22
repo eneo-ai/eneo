@@ -41,7 +41,7 @@ CATEGORY_MAPPINGS = {
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
     ActionType.MODULE_ADDED.value: "admin_actions",
     ActionType.MODULE_ADDED_TO_TENANT.value: "admin_actions",
-    # User Actions (28 actions)
+    # User Actions (29 actions)
     ActionType.ASSISTANT_CREATED.value: "user_actions",
     ActionType.ASSISTANT_UPDATED.value: "user_actions",
     ActionType.ASSISTANT_DELETED.value: "user_actions",
@@ -67,6 +67,7 @@ CATEGORY_MAPPINGS = {
     ActionType.GROUP_CHAT_CREATED.value: "user_actions",
     ActionType.SESSION_STARTED.value: "user_actions",
     ActionType.SESSION_ENDED.value: "user_actions",
+    ActionType.TOOL_APPROVAL_SUBMITTED.value: "user_actions",
     ActionType.COMPLETION_MODEL_UPDATED.value: "user_actions",
     ActionType.EMBEDDING_MODEL_UPDATED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_UPDATED.value: "user_actions",

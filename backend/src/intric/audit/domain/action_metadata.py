@@ -1,4 +1,4 @@
-"""Action metadata registry - Swedish names and descriptions for all 65 actions.
+"""Action metadata registry - Swedish names and descriptions for all actions.
 
 Used by the audit configuration UI to display human-readable action names.
 """
@@ -172,6 +172,10 @@ ACTION_METADATA = {
     ActionType.SESSION_ENDED.value: {
         "name_sv": "Session avslutad",
         "description_sv": "Loggar när en användarsession avslutas",
+    },
+    ActionType.TOOL_APPROVAL_SUBMITTED.value: {
+        "name_sv": "Verktygsgodkännande inskickat",
+        "description_sv": "Loggar när användaren godkänner eller nekar MCP-verktyg",
     },
     ActionType.FILE_UPLOADED.value: {
         "name_sv": "Fil uppladdad",

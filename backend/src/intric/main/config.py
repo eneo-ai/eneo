@@ -152,6 +152,16 @@ class Settings(BaseSettings):
     redis_socket_keepalive: bool = True
     redis_health_check_interval: int = 30
     redis_max_connections: int | None = None
+    # MCP tool approval configuration
+    mcp_tool_approval_timeout_seconds: int = 300
+    mcp_tool_approval_ttl_seconds: int = 305
+    mcp_tool_approval_denial_reason_max_length: int = 200
+    mcp_client_connect_timeout_seconds: int = 30
+    mcp_client_list_tools_timeout_seconds: int = 30
+    mcp_client_call_timeout_seconds: int = 60
+    mcp_tool_output_max_chars: int = 10000
+    mcp_circuit_breaker_failure_threshold: int = 5
+    mcp_circuit_breaker_cooldown_seconds: int = 60
 
     # Database connection pool configuration
     # Why: Controls PostgreSQL connection pooling behavior for SQLAlchemy async engine
@@ -567,6 +577,77 @@ class Settings(BaseSettings):
             logging.error(
                 "REDIS_MAX_CONNECTIONS must be positive when set. Current value: %s",
                 self.redis_max_connections,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_approval_timeout_seconds <= 0:
+            logging.error(
+                "MCP_TOOL_APPROVAL_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_tool_approval_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_approval_ttl_seconds <= 0:
+            logging.error(
+                "MCP_TOOL_APPROVAL_TTL_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_tool_approval_ttl_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_approval_ttl_seconds < self.mcp_tool_approval_timeout_seconds:
+            logging.error(
+                "MCP_TOOL_APPROVAL_TTL_SECONDS (%s) must be >= MCP_TOOL_APPROVAL_TIMEOUT_SECONDS (%s).",
+                self.mcp_tool_approval_ttl_seconds,
+                self.mcp_tool_approval_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_approval_denial_reason_max_length <= 0:
+            logging.error(
+                "MCP_TOOL_APPROVAL_DENIAL_REASON_MAX_LENGTH must be greater than zero. Current value: %s",
+                self.mcp_tool_approval_denial_reason_max_length,
+            )
+            sys.exit(1)
+
+        if self.mcp_client_connect_timeout_seconds <= 0:
+            logging.error(
+                "MCP_CLIENT_CONNECT_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_client_connect_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_client_list_tools_timeout_seconds <= 0:
+            logging.error(
+                "MCP_CLIENT_LIST_TOOLS_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_client_list_tools_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_client_call_timeout_seconds <= 0:
+            logging.error(
+                "MCP_CLIENT_CALL_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_client_call_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_output_max_chars <= 0:
+            logging.error(
+                "MCP_TOOL_OUTPUT_MAX_CHARS must be greater than zero. Current value: %s",
+                self.mcp_tool_output_max_chars,
+            )
+            sys.exit(1)
+
+        if self.mcp_circuit_breaker_failure_threshold <= 0:
+            logging.error(
+                "MCP_CIRCUIT_BREAKER_FAILURE_THRESHOLD must be greater than zero. Current value: %s",
+                self.mcp_circuit_breaker_failure_threshold,
+            )
+            sys.exit(1)
+
+        if self.mcp_circuit_breaker_cooldown_seconds <= 0:
+            logging.error(
+                "MCP_CIRCUIT_BREAKER_COOLDOWN_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_circuit_breaker_cooldown_seconds,
             )
             sys.exit(1)
 

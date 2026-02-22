@@ -66,6 +66,7 @@ class MCPServerSettingsPublic(MCPServerPublic):
     mcp_server_id: UUID  # ID in global catalog
     is_org_enabled: bool
     has_credentials: bool  # Whether env_vars are configured
+    credential_status: Literal["ok", "missing", "decryption_failed"] = "missing"
     tools: list["MCPServerToolPublic"] = []
 
     @computed_field

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, AsyncGenerator, Optional
 
+import redis.asyncio as aioredis
+
 from intric.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModel,
@@ -49,12 +51,14 @@ class CompletionService:
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
+        redis_client: Optional[aioredis.Redis] = None,
     ):
         self.context_builder = context_builder
         self.tenant = tenant
         self.config = config or SETTINGS
         self.encryption_service = encryption_service
         self.session = session
+        self.redis_client = redis_client
         self._mcp_proxy_factory = MCPProxySessionFactory()
 
     async def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
@@ -282,7 +286,28 @@ class CompletionService:
                 """
                 try:
                     # Get approval manager if tool approval is required
-                    approval_manager = get_approval_manager() if require_tool_approval else None
+                    approval_manager = (
+                        get_approval_manager(redis_client=self.redis_client)
+                        if require_tool_approval
+                        else None
+                    )
+                    pending_approval_ids: set[str] = set()
+                    approval_context = None
+                    if require_tool_approval:
+                        if session is None:
+                            raise ValueError(
+                                "Tool approval requires an active conversation session"
+                            )
+                        if self.tenant is None:
+                            raise ValueError("Tool approval requires tenant context")
+                        approval_context = {
+                            "tenant_id": self.tenant.id,
+                            "user_id": session.user_id,
+                            "session_id": session.id,
+                            "assistant_id": session.assistant.id
+                            if session.assistant is not None
+                            else None,
+                        }
 
                     async for chunk in model_adapter.iterate_stream(
                         stream=stream_obj,
@@ -290,9 +315,22 @@ class CompletionService:
                         model_kwargs=model_kwargs,
                         require_tool_approval=require_tool_approval,
                         approval_manager=approval_manager,
+                        approval_context=approval_context,
+                        pending_approval_ids=pending_approval_ids,
                     ):
                         yield chunk
                 finally:
+                    if approval_manager:
+                        for approval_id in list(pending_approval_ids):
+                            try:
+                                await approval_manager.cancel_approval(approval_id)
+                            except Exception:
+                                logger.warning(
+                                    "Failed to cancel pending tool approval",
+                                    extra={"approval_id": approval_id},
+                                    exc_info=True,
+                                )
+
                     # Cleanup proxy after streaming completes
                     if mcp_proxy:
                         await mcp_proxy.close()

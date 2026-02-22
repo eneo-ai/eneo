@@ -44,6 +44,8 @@ class ErrorCodes(int, Enum):
     # Provider errors
     PROVIDER_INACTIVE = 9031
     PROVIDER_NOT_FOUND = 9032
+    MCP_UPSTREAM_ERROR = 9033
+    MCP_UPSTREAM_AUTH_ERROR = 9034
 
 
 class NotFoundException(Exception):
@@ -203,6 +205,18 @@ class ProviderNotFoundException(Exception):
     pass
 
 
+class MCPClientError(Exception):
+    """Raised when an upstream MCP service fails."""
+
+    pass
+
+
+class MCPAuthenticationError(MCPClientError):
+    """Raised when upstream MCP authentication fails."""
+
+    pass
+
+
 # Map exceptions to response codes
 # Set message to None to use the internal message
 # Set error codes in the range 9000 - 9999
@@ -258,4 +272,14 @@ EXCEPTION_MAP = {
     # Provider errors - use None to pass through the exception's own message
     ProviderInactiveException: (503, None, ErrorCodes.PROVIDER_INACTIVE),
     ProviderNotFoundException: (404, None, ErrorCodes.PROVIDER_NOT_FOUND),
+    MCPClientError: (
+        502,
+        "MCP upstream service unavailable.",
+        ErrorCodes.MCP_UPSTREAM_ERROR,
+    ),
+    MCPAuthenticationError: (
+        502,
+        "MCP upstream authentication failed.",
+        ErrorCodes.MCP_UPSTREAM_AUTH_ERROR,
+    ),
 }

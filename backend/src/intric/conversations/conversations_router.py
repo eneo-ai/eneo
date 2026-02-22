@@ -1,16 +1,26 @@
 from datetime import datetime
-from typing import Optional
+from types import SimpleNamespace
+from typing import Optional, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
 
 from intric.assistants.api.assistant_protocol import to_conversation_response
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
+from intric.audit.infrastructure.rate_limiting import (
+    RateLimitConfig,
+    RateLimitExceededError,
+    RateLimitServiceUnavailableError,
+    enforce_rate_limit,
+)
 from intric.conversations.conversation_models import ConversationRequest
 from intric.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     get_approval_manager,
 )
-from intric.database.database import AsyncSession, get_session_with_transaction
+from intric.database.database import AsyncSession
 from intric.main.container.container import Container
 from intric.main.config import get_settings
 from intric.main.exceptions import NotFoundException
@@ -27,6 +37,10 @@ from intric.sessions.session import (
     SSEFirstChunk,
     SSEIntricEvent,
     SSEText,
+    SSEToolApprovalRequired,
+    SSEToolCall,
+    SSEToolApprovalTimeout,
+    ToolApprovalResponse,
 )
 from intric.sessions.session_protocol import (
     to_session_public,
@@ -70,9 +84,12 @@ async def _validate_conversation_scope(
             user = container.user()
             if not flag.is_enabled(tenant_id=user.tenant_id):
                 return
-    except Exception:
+    except Exception as exc:
         # Fail-closed: if we can't check the flag, enforce scope
-        logger.warning("Could not check scope enforcement feature flag, defaulting to enforced")
+        logger.warning(
+            "Could not check scope enforcement feature flag, defaulting to enforced",
+            extra={"error_type": type(exc).__name__},
+        )
 
     scope_id = UUID(str(scope_id)) if scope_id is not None else None
 
@@ -106,11 +123,11 @@ async def _validate_conversation_scope(
                     "message": "Unable to verify API key scope for this session.",
                 },
             )
-        except Exception:
+        except Exception as e:
             # DB error or unexpected failure — fail-closed: deny access
             logger.error(
                 "Failed to resolve session for scope validation",
-                extra={"session_id": str(session_id)},
+                extra={"session_id": str(session_id), "error_type": type(e).__name__},
                 exc_info=True,
             )
             raise HTTPException(
@@ -248,15 +265,23 @@ async def _validate_conversation_scope(
     "/",
     responses=responses.streaming_response(
         response_codes=[400, 404],
-        models=[SSEText, SSEIntricEvent, SSEFiles, SSEFirstChunk, SSEError],
+        models=[
+            SSEText,
+            SSEIntricEvent,
+            SSEToolCall,
+            SSEToolApprovalRequired,
+            SSEToolApprovalTimeout,
+            SSEFiles,
+            SSEFirstChunk,
+            SSEError,
+        ],
     ),
 )
 async def chat(
     request: ConversationRequest,
     http_request: Request,
     version: int = Query(default=1, ge=1, le=2),
-    container: Container = Depends(get_container(with_user=True)),
-    db_session: AsyncSession = Depends(get_session_with_transaction),
+    container: Container = Depends(get_container(with_user=True, with_transaction=False)),
 ):
     """Unified endpoint for communicating with an assistant or a group chat.
 
@@ -284,6 +309,24 @@ async def chat(
     - SSEFirstChunk: Initial response with metadata
     - SSEError: Error events (API errors, authentication failures, rate limits, etc.)
     """
+    if request.require_tool_approval and not request.stream:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_request",
+                "message": "Tool approval requires streaming mode. Set stream=true or remove require_tool_approval.",
+            },
+        )
+
+    if request.require_tool_approval and request.group_chat_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "not_supported",
+                "message": "Tool approval is not supported for group chats.",
+            },
+        )
+
     # Body-driven scope validation (before service call)
     await _validate_conversation_scope(
         http_request=http_request,
@@ -300,22 +343,22 @@ async def chat(
 
     # Use the dedicated ConversationService to handle routing logic
     conversation_service = container.conversation_service()
-    response = await conversation_service.ask_conversation(
-        question=request.question,
-        session_id=request.session_id,
-        assistant_id=request.assistant_id,
-        group_chat_id=request.group_chat_id,
-        file_ids=file_ids,
-        stream=request.stream,
-        tool_assistant_id=tool_assistant_id,
-        version=version,
-        use_web_search=request.use_web_search,
-        require_tool_approval=request.require_tool_approval,
-    )
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        response = await conversation_service.ask_conversation(
+            question=request.question,
+            session_id=request.session_id,
+            assistant_id=request.assistant_id,
+            group_chat_id=request.group_chat_id,
+            file_ids=file_ids,
+            stream=request.stream,
+            tool_assistant_id=tool_assistant_id,
+            version=version,
+            use_web_search=request.use_web_search,
+            require_tool_approval=request.require_tool_approval,
+        )
 
-    return await to_conversation_response(
-        response=response, db_session=db_session, stream=request.stream
-    )
+    return await to_conversation_response(response=response, stream=request.stream)
 
 
 @router.get(
@@ -477,11 +520,13 @@ async def set_title_of_conversation(
 
 @router.post(
     "/approve-tools/",
-    responses=responses.get_responses([400, 404]),
+    response_model=ToolApprovalResponse,
+    responses=responses.get_responses([400, 403, 404, 409, 429]),
 )
 async def approve_tools(
-    approval_id: str = Query(..., description="The approval ID from the tool_approval_required event"),
-    decisions: list[ToolApprovalDecision] = [],
+    http_request: Request,
+    approval_id: UUID = Query(..., description="The approval ID from the tool_approval_required event"),
+    decisions: list[ToolApprovalDecision] = Body(default_factory=list),
     container: Container = Depends(get_container(with_user=True)),
 ):
     """Submit approval decisions for pending tool calls.
@@ -493,12 +538,132 @@ async def approve_tools(
     The decisions list should contain one entry per tool_call_id from the event.
     If a tool_call_id is omitted, it will be treated as rejected.
     """
-    approval_manager = get_approval_manager()
-    success = approval_manager.submit_decision(approval_id, decisions)
-
-    if not success:
+    current_user = container.user()
+    redis_client = container.redis_client()
+    try:
+        await enforce_rate_limit(
+            redis_client=redis_client,
+            user_id=current_user.id,
+            tenant_id=current_user.tenant_id,
+            config=RateLimitConfig(
+                max_requests=20,
+                window_seconds=60,
+                key_prefix="rate_limit:tool_approval",
+            ),
+        )
+    except RateLimitExceededError as exc:
+        retry_after = exc.result.window_seconds
         raise HTTPException(
-            status_code=404, detail="Approval request not found or expired"
+            status_code=429,
+            detail={
+                "code": "rate_limit_exceeded",
+                "message": "Too many tool approval submissions. Please retry shortly.",
+                "retry_after_seconds": retry_after,
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
+    except RateLimitServiceUnavailableError:
+        # Fail-open on limiter outages to avoid breaking approval flows.
+        logger.warning("Tool approval rate limiter unavailable", exc_info=True)
+
+    approval_manager = get_approval_manager(redis_client=redis_client)
+    context_result = await approval_manager.get_approval_context(
+        approval_id=str(approval_id),
+        actor_tenant_id=current_user.tenant_id,
+        actor_user_id=current_user.id,
+    )
+    if context_result.status == "not_found":
+        raise HTTPException(status_code=404, detail="Approval request not found or expired")
+    if context_result.status == "forbidden":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "forbidden",
+                "message": "Approval request does not belong to this actor.",
+            },
+        )
+    if context_result.context is None:
+        raise HTTPException(status_code=404, detail="Approval request not found or expired")
+
+    await _validate_conversation_scope(
+        http_request=http_request,
+        container=container,
+        assistant_id=context_result.context.assistant_id,
+        group_chat_id=None,
+        session_id=context_result.context.session_id,
+    )
+
+    submit_result = await approval_manager.submit_decision(
+        approval_id=str(approval_id),
+        decisions=decisions,
+        actor_tenant_id=current_user.tenant_id,
+        actor_user_id=current_user.id,
+    )
+
+    if submit_result.status == "not_found":
+        raise HTTPException(status_code=404, detail="Approval request not found or expired")
+    if submit_result.status == "forbidden":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "forbidden",
+                "message": "Approval request does not belong to this actor.",
+            },
+        )
+    if submit_result.status == "conflict":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "approval_conflict",
+                "message": "This approval request was already processed with a different decision set.",
+                "existing_status": submit_result.existing_status,
+            },
         )
 
-    return {"status": "ok"}
+    if submit_result.response_status != "already_processed":
+        approved_count = sum(1 for decision in decisions if decision.approved)
+        denied_count = sum(1 for decision in decisions if not decision.approved)
+        entity_id = context_result.context.assistant_id or context_result.context.session_id
+        entity_type = (
+            EntityType.ASSISTANT
+            if context_result.context.assistant_id
+            else EntityType.SESSION
+        )
+        audit_service = container.audit_service()
+        await audit_service.log_async(
+            tenant_id=current_user.tenant_id,
+            actor_id=current_user.id,
+            action=ActionType.TOOL_APPROVAL_SUBMITTED,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            description="Submitted MCP tool approval decisions",
+            metadata=AuditMetadata.standard(
+                actor=current_user,
+                target=SimpleNamespace(
+                    id=context_result.context.session_id,
+                    name="conversation",
+                ),
+                extra={
+                    "approval_id": str(approval_id),
+                    "session_id": str(context_result.context.session_id),
+                    "assistant_id": (
+                        str(context_result.context.assistant_id)
+                        if context_result.context.assistant_id
+                        else None
+                    ),
+                    "submitted_decisions": len(decisions),
+                    "approved_count": approved_count,
+                    "denied_count": denied_count,
+                    "unrecognized_tool_call_ids": submit_result.unrecognized_tool_call_ids,
+                    "status": submit_result.response_status,
+                },
+            ),
+        )
+
+    return ToolApprovalResponse(
+        status=submit_result.response_status,
+        approval_id=str(approval_id),
+        decisions_received=submit_result.decisions_received,
+        decisions_remaining=submit_result.decisions_remaining,
+        unrecognized_tool_call_ids=submit_result.unrecognized_tool_call_ids,
+    )

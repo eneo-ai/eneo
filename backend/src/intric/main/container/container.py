@@ -727,6 +727,7 @@ class Container(containers.DeclarativeContainer):
         config=config,
         encryption_service=encryption_service,
         session=session,
+        redis_client=redis_client,
     )
 
     # Datastore
@@ -1138,6 +1139,7 @@ class Container(containers.DeclarativeContainer):
         MCPServerSettingsService,
         mcp_server_repo=mcp_server_repo,
         user=user,
+        encryption_service=encryption_service,
     )
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,
