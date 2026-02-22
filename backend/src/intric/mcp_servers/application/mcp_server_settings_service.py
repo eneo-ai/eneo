@@ -47,8 +47,6 @@ class MCPServerSettingsService:
             return None
         validated: dict[str, str] = {}
         for key, value in env_vars.items():
-            if not isinstance(key, str):
-                raise BadRequestException("env_vars keys must be strings")
             if not isinstance(value, str):
                 raise BadRequestException("env_vars values must be strings")
             validated[key] = value

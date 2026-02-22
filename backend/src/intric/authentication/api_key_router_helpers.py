@@ -193,23 +193,24 @@ async def build_api_key_usage_page(
 
     usage_events: list[ApiKeyUsageEvent] = []
     for record in page:
-        metadata = record.log_metadata if isinstance(record.log_metadata, dict) else {}
-        extra = metadata.get("extra") if isinstance(metadata, dict) else {}
-        extra = extra if isinstance(extra, dict) else {}
+        raw_metadata = cast(dict[str, Any] | None, record.log_metadata)
+        metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
+        raw_extra = metadata.get("extra")
+        extra: dict[str, Any] = raw_extra if isinstance(raw_extra, dict) else {}
         usage_events.append(
             ApiKeyUsageEvent(
-                id=record.id,
-                timestamp=record.timestamp,
-                action=record.action,
-                outcome=record.outcome,
+                id=cast(UUID, record.id),
+                timestamp=cast(datetime, record.timestamp),
+                action=cast(str, record.action),
+                outcome=cast(str, record.outcome),
                 ip_address=str(record.ip_address) if record.ip_address else None,
-                user_agent=record.user_agent,
-                request_id=record.request_id,
+                user_agent=cast(str | None, record.user_agent),
+                request_id=cast(UUID | None, record.request_id),
                 request_path=cast(str | None, extra.get("request_path")),
                 method=cast(str | None, extra.get("method")),
                 origin=cast(str | None, extra.get("origin")),
-                error_message=record.error_message,
+                error_message=cast(str | None, record.error_message),
             )
         )
 
-    return usage_events, next_cursor
+    return usage_events, cast(datetime | None, next_cursor)

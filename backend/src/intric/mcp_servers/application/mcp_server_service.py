@@ -54,10 +54,9 @@ class MCPServerService:
 
     async def get_mcp_servers(self, tags: list[str] | None = None) -> list[MCPServer]:
         """Get all MCP servers from global catalog with optional tag filtering."""
-        filters = {"tenant_id": self.user.tenant_id}
         if tags:
-            return await self.repo.query(tags=tags, **filters)
-        return await self.repo.query(**filters)
+            return await self.repo.query(tags=tags, tenant_id=self.user.tenant_id)
+        return await self.repo.query(tenant_id=self.user.tenant_id)
 
     async def get_mcp_server(self, mcp_server_id: UUID) -> MCPServer:
         """Get a single MCP server by ID."""

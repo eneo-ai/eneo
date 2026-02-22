@@ -118,6 +118,11 @@ class ToolApprovalManager:
         self._cancelled_results: dict[str, ToolApprovalWaitResult] = {}
         self._namespace = f"intric:{get_settings().environment}:mcp:approval"
 
+    def set_redis_client(self, redis_client: aioredis.Redis) -> None:
+        """Set the Redis client if not already configured."""
+        if self._redis is None:
+            self._redis = redis_client
+
     def _key(self, approval_id: str) -> str:
         return f"{self._namespace}:{approval_id}"
 
@@ -455,6 +460,6 @@ def get_approval_manager(
     global _approval_manager
     if _approval_manager is None:
         _approval_manager = ToolApprovalManager(redis_client=redis_client)
-    elif redis_client is not None and _approval_manager._redis is None:
-        _approval_manager._redis = redis_client
+    elif redis_client is not None:
+        _approval_manager.set_redis_client(redis_client)
     return _approval_manager
