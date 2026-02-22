@@ -57,6 +57,7 @@ class MCPServerTools(BasePublic):
     description: Mapped[Optional[str]] = mapped_column(Text)
     input_schema: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
     is_enabled_by_default: Mapped[bool] = mapped_column(Boolean, server_default="True", nullable=False)
+    meta: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
 
     # Relationships
     mcp_server: Mapped[MCPServers] = relationship(back_populates="tools")

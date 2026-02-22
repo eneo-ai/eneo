@@ -12,7 +12,7 @@ import asyncio
 import re
 import time
 from types import TracebackType
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from intric.main.logging import get_logger
@@ -56,8 +56,36 @@ class MCPProxySession:
 
         # Build tool registry from DB (no connections needed)
         self._tool_registry: dict[str, tuple[MCPServer, str]] = {}
+        self._tool_meta: dict[str, dict[str, Any] | None] = {}  # prefixed_name -> meta
         self._tools_for_llm: list[dict[str, Any]] = []
         self._build_tool_registry()
+
+    @staticmethod
+    def _fix_schema(schema: dict[str, Any]) -> dict[str, Any]:
+        """Fix JSON Schema issues that cause OpenAI function calling to reject tools.
+
+        OpenAI requires 'items' on every array type. Some MCP servers omit it.
+        """
+        schema = dict(schema)
+
+        if schema.get("type") == "array" and "items" not in schema:
+            schema["items"] = {}
+
+        for key in ("properties", "definitions", "$defs"):
+            if key in schema and isinstance(schema[key], dict):
+                schema[key] = {
+                    k: MCPProxySession._fix_schema(v) for k, v in schema[key].items()
+                }
+
+        for key in ("items", "additionalProperties"):
+            if key in schema and isinstance(schema[key], dict):
+                schema[key] = MCPProxySession._fix_schema(schema[key])
+
+        for key in ("allOf", "anyOf", "oneOf"):
+            if key in schema and isinstance(schema[key], list):
+                schema[key] = [MCPProxySession._fix_schema(s) for s in schema[key]]
+
+        return schema
 
     def _sanitize_name(self, name: str) -> str:
         """
@@ -103,16 +131,22 @@ class MCPProxySession:
 
                 # Register tool -> (server, original_name) mapping
                 self._tool_registry[prefixed_name] = (server, tool.name)
+                self._tool_meta[prefixed_name] = tool.meta
 
                 # Build OpenAI-format tool definition
-                self._tools_for_llm.append({
-                    "type": "function",
-                    "function": {
-                        "name": prefixed_name,
-                        "description": tool.description or f"Tool from {server.name}",
-                        "parameters": tool.input_schema or {"type": "object", "properties": {}},
-                    },
-                })
+                self._tools_for_llm.append(
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": prefixed_name,
+                            "description": tool.description
+                            or f"Tool from {server.name}",
+                            "parameters": self._fix_schema(tool.input_schema)
+                            if tool.input_schema
+                            else {"type": "object", "properties": {}},
+                        },
+                    }
+                )
 
         logger.debug(
             f"[MCPProxy] Built registry with {len(self._tool_registry)} tools "
@@ -140,6 +174,24 @@ class MCPProxySession:
     def get_tool_count(self) -> int:
         """Get total number of available tools."""
         return len(self._tool_registry)
+
+    def get_tool_ui_resource_uri(self, prefixed_tool_name: str) -> str | None:
+        """Get the UI resource URI for a tool, if declared in its meta."""
+        meta = self._tool_meta.get(prefixed_tool_name)
+        if meta:
+            ui = meta.get("ui")
+            if isinstance(ui, dict):
+                ui_dict = cast(dict[str, Any], ui)
+                resource_uri = ui_dict.get("resourceUri")
+                return str(resource_uri) if resource_uri else None
+        return None
+
+    def get_tool_mcp_server_id(self, prefixed_tool_name: str) -> str | None:
+        """Get the MCP server ID for a tool."""
+        if prefixed_tool_name not in self._tool_registry:
+            return None
+        server, _ = self._tool_registry[prefixed_tool_name]
+        return str(server.id)
 
     def get_tool_info(self, prefixed_tool_name: str) -> tuple[str, str] | None:
         """
@@ -230,9 +282,7 @@ class MCPProxySession:
 
         server, original_tool_name = self._tool_registry[tool_name]
 
-        logger.debug(
-            f"[MCPProxy] Calling {original_tool_name} on '{server.name}'"
-        )
+        logger.debug(f"[MCPProxy] Calling {original_tool_name} on '{server.name}'")
 
         # Get or create connection (lazy)
         client = await self._get_or_create_client(server)
@@ -270,9 +320,7 @@ class MCPProxySession:
 
         # Log all tools being called
         tool_names = [name for name, _ in tool_calls]
-        logger.debug(
-            f"[MCPProxy] Executing {len(tool_calls)} tool(s): {tool_names}"
-        )
+        logger.debug(f"[MCPProxy] Executing {len(tool_calls)} tool(s): {tool_names}")
         total_start = time.perf_counter()
 
         # First, identify all servers we need to connect to (by ID to avoid hashability issues)
@@ -285,25 +333,28 @@ class MCPProxySession:
         # Connect to all needed servers in parallel (lazy - only if not already connected)
         if servers_needed:
             connect_tasks = [
-                self._get_or_create_client(server)
-                for server in servers_needed.values()
+                self._get_or_create_client(server) for server in servers_needed.values()
             ]
             await asyncio.gather(*connect_tasks, return_exceptions=True)
 
         # Execute all tool calls in parallel
-        async def execute_single(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        async def execute_single(
+            tool_name: str, arguments: dict[str, Any]
+        ) -> dict[str, Any]:
             try:
                 return await self.call_tool(tool_name, arguments)
             except Exception as e:
                 logger.error(f"[MCPProxy] Tool {tool_name} failed: {e}")
                 return {
-                    "content": [{"type": "text", "text": f"Error executing tool: {str(e)}"}],
+                    "content": [
+                        {"type": "text", "text": f"Error executing tool: {str(e)}"}
+                    ],
                     "is_error": True,
                 }
 
-        results = await asyncio.gather(*[
-            execute_single(name, args) for name, args in tool_calls
-        ])
+        results = await asyncio.gather(
+            *[execute_single(name, args) for name, args in tool_calls]
+        )
 
         total_elapsed_ms = (time.perf_counter() - total_start) * 1000
         error_count = sum(1 for r in results if r.get("is_error"))
@@ -327,7 +378,9 @@ class MCPProxySession:
 
         connection_count = len(self._clients)
         self._clients.clear()
-        logger.debug(f"[MCPProxy] Session closed, {connection_count} connection(s) cleaned up")
+        logger.debug(
+            f"[MCPProxy] Session closed, {connection_count} connection(s) cleaned up"
+        )
 
     async def __aenter__(self):
         """Async context manager entry - no connections yet (lazy)."""

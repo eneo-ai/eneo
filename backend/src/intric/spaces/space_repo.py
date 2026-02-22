@@ -783,6 +783,7 @@ class SpaceRepository:
                 description=tool_db.description,
                 input_schema=tool_db.input_schema,
                 is_enabled_by_default=is_enabled,  # Effective status after all overrides
+                meta=tool_db.meta,
                 created_at=tool_db.created_at,
                 updated_at=tool_db.updated_at,
             )
@@ -1041,6 +1042,7 @@ class SpaceRepository:
                 description=tool_db.description,
                 input_schema=tool_db.input_schema,
                 is_enabled_by_default=is_enabled,  # Effective status after overrides
+                meta=tool_db.meta,
                 created_at=tool_db.created_at,
                 updated_at=tool_db.updated_at,
             )

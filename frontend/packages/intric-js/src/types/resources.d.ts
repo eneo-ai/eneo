@@ -111,6 +111,9 @@ export namespace SSE {
       tool_name: string;
       arguments?: Record<string, unknown>;
       tool_call_id?: string;
+      ui_resource_uri?: string;
+      mcp_server_id?: string;
+      result?: string;
     }>;
   };
   export type Error = Omit<components["schemas"]["SSEError"], "$defs">;

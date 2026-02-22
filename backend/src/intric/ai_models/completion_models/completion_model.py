@@ -50,11 +50,16 @@ class FunctionCall:
 @dataclass
 class ToolCallMetadata:
     """Metadata for MCP tool calls to be rendered by frontend."""
+
     server_name: str
     tool_name: str
     arguments: Optional[dict] = None  # The input values provided to the tool
     tool_call_id: Optional[str] = None  # The tool call ID for approval flow
     approved: Optional[bool] = None  # True=approved, False=denied, None=pending/auto
+    ui_resource_uri: Optional[str] = None  # MCP Apps UI resource URI
+    mcp_server_id: Optional[str] = None  # MCP server UUID for resource fetch
+    result: Optional[str] = None  # Tool execution result text
+    result_meta: Optional[dict] = None  # _meta from MCP tool result (for MCP Apps)
 
 
 @dataclass

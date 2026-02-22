@@ -15,6 +15,7 @@ class MCPServerTool(Entity):
         description: Optional[str] = None,
         input_schema: Optional[dict[str, Any]] = None,
         is_enabled_by_default: bool = True,
+        meta: Optional[dict[str, Any]] = None,
         id: Optional[UUID] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
@@ -25,6 +26,7 @@ class MCPServerTool(Entity):
         self.description = description
         self.input_schema = input_schema
         self.is_enabled_by_default = is_enabled_by_default
+        self.meta = meta
 
 
 class MCPServer(Entity):

@@ -39,8 +39,11 @@ class MCPProxySessionFactory:
         auth_map: dict[UUID, dict[str, str]] = {}
 
         for server in mcp_servers:
-            if server.env_vars:
-                auth_map[server.id] = server.env_vars
+            # env_vars (from tenant settings) takes priority,
+            # fall back to http_auth_config_schema (from server creation)
+            creds = server.env_vars or server.http_auth_config_schema
+            if creds:
+                auth_map[server.id] = creds
                 logger.debug(
                     f"[MCPProxyFactory] Loaded credentials for server {server.name}"
                 )

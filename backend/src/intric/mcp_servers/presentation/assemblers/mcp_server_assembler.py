@@ -94,7 +94,8 @@ class MCPServerSettingsAssembler:
             icon_url=mcp_server.icon_url,
             documentation_url=mcp_server.documentation_url,
             is_org_enabled=mcp_server.is_enabled,
-            has_credentials=mcp_server.env_vars is not None and len(mcp_server.env_vars) > 0,
+            has_credentials=mcp_server.env_vars is not None
+            and len(mcp_server.env_vars) > 0,
             tools=tools,
         )
 

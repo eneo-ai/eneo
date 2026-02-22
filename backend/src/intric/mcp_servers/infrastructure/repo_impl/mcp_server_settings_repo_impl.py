@@ -65,9 +65,7 @@ class MCPServerSettingsRepoImpl(MCPServerSettingsRepository):
     async def add(self, obj: MCPServerSettings) -> MCPServerSettings:
         db_dict = self.mapper.to_db_dict(obj)
 
-        query = (
-            sa.insert(self._db_model).values(**db_dict).returning(self._db_model)
-        )
+        query = sa.insert(self._db_model).values(**db_dict).returning(self._db_model)
         result = await self.session.execute(query)
         _record = result.scalar_one()
 

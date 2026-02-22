@@ -121,6 +121,7 @@ class MCPServerService:
                 description=tool_def.get("description"),
                 input_schema=tool_def.get("input_schema"),
                 is_enabled_by_default=True,
+                meta=tool_def.get("meta"),
             )
             await self.tool_repo.upsert_by_server_and_name(tool)
 
@@ -252,6 +253,7 @@ class MCPServerService:
                     description=tool_def.get("description"),
                     input_schema=tool_def.get("input_schema"),
                     is_enabled_by_default=True,
+                    meta=tool_def.get("meta"),
                 )
 
                 # Upsert tool (update if exists, insert if new)
@@ -357,6 +359,36 @@ class MCPServerService:
         # Return tool with tenant setting applied
         tool.is_enabled_by_default = is_enabled
         return tool
+
+    async def read_resource(
+        self,
+        mcp_server_id: UUID,
+        uri: str,
+    ) -> dict[str, Any]:
+        """
+        Read a resource from an MCP server.
+
+        Args:
+            mcp_server_id: ID of the MCP server
+            uri: Resource URI to read
+
+        Returns:
+            Dict with "content" (string) and "mime_type"
+        """
+        mcp_server = await self.repo.one(id=mcp_server_id)
+
+        # Resolve auth credentials the same way the proxy factory does
+        auth_credentials = mcp_server.env_vars or mcp_server.http_auth_config_schema
+
+        try:
+            async with MCPClient(mcp_server, auth_credentials) as client:
+                return await client.read_resource(uri)
+        except MCPClientError as e:
+            logger.warning(f"Failed to read resource {uri} from {mcp_server.name}: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to read resource {uri} from {mcp_server.name}: {e}")
+            raise MCPClientError(f"Resource read failed: {e}")
 
     async def get_tools_with_tenant_settings(
         self, mcp_server_id: UUID
