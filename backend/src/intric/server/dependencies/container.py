@@ -1,8 +1,7 @@
-from typing import Annotated
+from typing import Annotated, NoReturn, cast
 from uuid import UUID
 
 from dependency_injector import providers
-from typing import NoReturn
 
 from fastapi import Depends, HTTPException, Request, Security, WebSocketException
 
@@ -66,7 +65,7 @@ def get_container(
         if request.method == "OPTIONS":
             return container
         try:
-            session = container.session()
+            session = cast(AsyncSession, container.session())
             if session.in_transaction():
                 user = await container.user_service().authenticate(
                     token=token, api_key=api_key, request=request
@@ -96,7 +95,7 @@ def get_container(
         if request.method == "OPTIONS":
             return container
         try:
-            session = container.session()
+            session = cast(AsyncSession, container.session())
             if session.in_transaction():
                 user = await container.user_service().authenticate_with_assistant_api_key(
                     token=token, api_key=api_key, assistant_id=id, request=request
