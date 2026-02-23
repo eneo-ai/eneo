@@ -108,12 +108,6 @@ def mock_container(mock_user, mock_assistant, mock_response, mock_space):
 
 
 @pytest.fixture
-def mock_db_session():
-    """Create a mock database session."""
-    return AsyncMock()
-
-
-@pytest.fixture
 def mock_assistant_protocol(mock_response):
     """Create a mock for assistant_protocol.to_response."""
     return AsyncMock()
@@ -123,7 +117,7 @@ class TestAskAssistant:
     """Tests for the POST /{id}/sessions/ endpoint."""
 
     async def test_extracts_session_id_from_session_object(
-        self, mock_container, mock_db_session, monkeypatch
+        self, mock_container, monkeypatch
     ):
         """Verify that response.session.id is used, not response.session_id.
 
@@ -149,7 +143,6 @@ class TestAskAssistant:
             ask=ask,
             version=1,
             container=mock_container,
-            db_session=mock_db_session,
         )
 
         # Verify audit_service.log_async was called
@@ -169,7 +162,7 @@ class TestAskAssistant:
         assert str(expected_session_id) in str(metadata)
 
     async def test_audit_logs_session_started_action(
-        self, mock_container, mock_db_session, monkeypatch
+        self, mock_container, monkeypatch
     ):
         """Verify SESSION_STARTED is logged with correct action type and entity type."""
         mock_to_response = AsyncMock(return_value=MagicMock())
@@ -186,7 +179,6 @@ class TestAskAssistant:
             ask=ask,
             version=1,
             container=mock_container,
-            db_session=mock_db_session,
         )
 
         audit_service = mock_container.audit_service.return_value
@@ -197,7 +189,7 @@ class TestAskAssistant:
         assert call_kwargs["entity_id"] == assistant_id
 
     async def test_audit_logs_with_correct_user_context(
-        self, mock_container, mock_user, mock_db_session, monkeypatch
+        self, mock_container, mock_user, monkeypatch
     ):
         """Verify audit logging includes correct tenant_id and actor_id from user."""
         mock_to_response = AsyncMock(return_value=MagicMock())
@@ -214,7 +206,6 @@ class TestAskAssistant:
             ask=ask,
             version=1,
             container=mock_container,
-            db_session=mock_db_session,
         )
 
         audit_service = mock_container.audit_service.return_value
@@ -224,7 +215,7 @@ class TestAskAssistant:
         assert call_kwargs["actor_id"] == mock_user.id
 
     async def test_audit_logs_file_metadata(
-        self, mock_container, mock_db_session, monkeypatch
+        self, mock_container, monkeypatch
     ):
         """Verify file count is captured in audit metadata when files are provided."""
         mock_to_response = AsyncMock(return_value=MagicMock())
@@ -249,7 +240,6 @@ class TestAskAssistant:
             ask=ask,
             version=1,
             container=mock_container,
-            db_session=mock_db_session,
         )
 
         audit_service = mock_container.audit_service.return_value
@@ -261,7 +251,7 @@ class TestAskAssistant:
         assert "file_count" in str(metadata) or hasattr(metadata, "extra")
 
     async def test_space_service_called_for_context(
-        self, mock_container, mock_assistant, mock_db_session, monkeypatch
+        self, mock_container, mock_assistant, monkeypatch
     ):
         """Verify space_service is called to get space context when assistant has space_id."""
         mock_to_response = AsyncMock(return_value=MagicMock())
@@ -278,14 +268,13 @@ class TestAskAssistant:
             ask=ask,
             version=1,
             container=mock_container,
-            db_session=mock_db_session,
         )
 
         space_service = mock_container.space_service.return_value
         space_service.get_space.assert_called_once_with(mock_assistant.space_id)
 
     async def test_space_service_exception_handled_gracefully(
-        self, mock_container, mock_db_session, monkeypatch
+        self, mock_container, monkeypatch
     ):
         """Verify space_service exceptions don't break the endpoint."""
         mock_to_response = AsyncMock(return_value=MagicMock())
@@ -307,7 +296,6 @@ class TestAskAssistant:
             ask=ask,
             version=1,
             container=mock_container,
-            db_session=mock_db_session,
         )
 
         # Audit logging should still happen
