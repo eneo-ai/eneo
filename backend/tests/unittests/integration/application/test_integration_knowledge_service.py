@@ -907,6 +907,107 @@ class TestCreateSpaceIntegrationKnowledge:
 
         assert "Admin permission is required" in str(exc_info.value)
 
+    async def test_create_knowledge_blocked_when_no_space_permission(
+        self,
+        space_with_embedding_model,
+        embedding_model,
+        user_integration_tenant_app,
+    ):
+        """Test that a viewer (no create permission) is blocked at the SpaceActor level,
+        before reaching the tenant_app admin check."""
+        actor = MagicMock()
+        actor.can_create_integrations.return_value = False
+
+        actor_manager = MagicMock()
+        actor_manager.get_space_actor_from_space.return_value = actor
+
+        space_repo = AsyncMock()
+        space_repo.one.return_value = space_with_embedding_model
+
+        service = IntegrationKnowledgeService(
+            job_service=AsyncMock(),
+            user=TEST_USER,
+            oauth_token_repo=AsyncMock(),
+            space_repo=space_repo,
+            integration_knowledge_repo=AsyncMock(),
+            embedding_model_repo=AsyncMock(),
+            user_integration_repo=AsyncMock(),
+            actor_manager=actor_manager,
+            sharepoint_subscription_service=AsyncMock(),
+            tenant_sharepoint_app_repo=AsyncMock(),
+            tenant_app_auth_service=AsyncMock(),
+        )
+
+        with pytest.raises(UnauthorizedException):
+            await service.create_space_integration_knowledge(
+                user_integration_id=user_integration_tenant_app.id,
+                name="SharePoint Site",
+                embedding_model_id=embedding_model.id,
+                space_id=space_with_embedding_model.id,
+                key="site-123",
+                url="https://sharepoint.example.com",
+            )
+
+        # The user_integration_repo should NOT have been called — blocked before reaching it
+        service.user_integration_repo.one.assert_not_called()
+
+    async def test_create_knowledge_editor_without_admin_blocked_for_tenant_app(
+        self,
+        space_with_embedding_model,
+        embedding_model,
+        user_integration_tenant_app,
+    ):
+        """Test that an editor with space-level create permission but without system
+        ADMIN permission is blocked when trying to create tenant_app integrations.
+        This is the key security check for shared spaces."""
+        from intric.users.user import UserInDB
+
+        editor_user = MagicMock(spec=UserInDB)
+        editor_user.id = uuid4()
+        editor_user.tenant_id = TEST_USER.tenant_id
+        editor_user.permissions = [Permission.INTEGRATIONS]  # Has integrations but NOT ADMIN
+
+        actor = MagicMock()
+        actor.can_create_integrations.return_value = True  # Editor has space permission
+
+        actor_manager = MagicMock()
+        actor_manager.get_space_actor_from_space.return_value = actor
+
+        space_repo = AsyncMock()
+        space_repo.one.return_value = space_with_embedding_model
+
+        user_integration_repo = AsyncMock()
+        user_integration_repo.one.return_value = user_integration_tenant_app
+
+        embedding_model_repo = AsyncMock()
+        embedding_model_repo.one.return_value = embedding_model
+
+        service = IntegrationKnowledgeService(
+            job_service=AsyncMock(),
+            user=editor_user,
+            oauth_token_repo=AsyncMock(),
+            space_repo=space_repo,
+            integration_knowledge_repo=AsyncMock(),
+            embedding_model_repo=embedding_model_repo,
+            user_integration_repo=user_integration_repo,
+            actor_manager=actor_manager,
+            sharepoint_subscription_service=AsyncMock(),
+            tenant_sharepoint_app_repo=AsyncMock(),
+            tenant_app_auth_service=AsyncMock(),
+        )
+
+        with pytest.raises(UnauthorizedException) as exc_info:
+            await service.create_space_integration_knowledge(
+                user_integration_id=user_integration_tenant_app.id,
+                name="SharePoint Site",
+                embedding_model_id=embedding_model.id,
+                space_id=space_with_embedding_model.id,
+                key="site-123",
+                url="https://sharepoint.example.com",
+            )
+
+        assert "Admin permission is required" in str(exc_info.value)
+
     async def test_create_knowledge_sets_original_name(
         self,
         space_with_embedding_model,
