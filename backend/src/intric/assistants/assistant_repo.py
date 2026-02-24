@@ -374,12 +374,23 @@ class AssistantRepository:
         if assistant.prompt:
             await self._add_prompt(assistant_id=entry_in_db.id, prompt=assistant.prompt)
 
-    async def get_for_user(self, user_id: UUID, search_query: str = None):
+    async def get_for_user(
+        self,
+        user_id: UUID,
+        search_query: str = None,
+        space_id: UUID | None = None,
+        assistant_id: UUID | None = None,
+    ):
         query = (
             sa.select(Assistants)
             .where(Assistants.user_id == user_id)
             .order_by(Assistants.created_at)
         )
+
+        if assistant_id is not None:
+            query = query.where(Assistants.id == assistant_id)
+        elif space_id is not None:
+            query = query.where(Assistants.space_id == space_id)
 
         if search_query is not None:
             query = query.filter(Assistants.name.like(f"%{search_query}%"))

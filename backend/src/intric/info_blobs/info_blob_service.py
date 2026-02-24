@@ -241,8 +241,17 @@ class InfoBlobService:
 
         return blob
 
-    async def get_by_user(self, metadata_filter: InfoBlobMetadataFilter | None = None):
-        info_blobs = await self.repo.get_by_user(user_id=self.user.id)
+    async def get_by_user(
+        self,
+        metadata_filter: InfoBlobMetadataFilter | None = None,
+        space_id_filter: UUID | None = None,
+    ):
+        if space_id_filter is not None:
+            info_blobs = await self.repo.get_by_user_and_space(
+                user_id=self.user.id, space_ids=[space_id_filter]
+            )
+        else:
+            info_blobs = await self.repo.get_by_user(user_id=self.user.id)
 
         if metadata_filter:
 

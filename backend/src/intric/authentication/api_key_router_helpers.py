@@ -22,9 +22,12 @@ class ApiKeyErrorResponse(BaseModel):
 
 
 def raise_api_key_http_error(exc: ApiKeyValidationError) -> NoReturn:
+    detail: dict[str, object] = {"code": exc.code, "message": exc.message}
+    if exc.context is not None:
+        detail["context"] = dict(exc.context)
     raise HTTPException(
         status_code=exc.status_code,
-        detail={"code": exc.code, "message": exc.message},
+        detail=detail,
         headers=exc.headers,
     ) from exc
 

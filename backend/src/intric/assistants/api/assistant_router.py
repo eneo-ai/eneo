@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from intric.assistants.api import assistant_protocol
 from intric.assistants.api.assistant_models import (
@@ -26,6 +26,7 @@ from intric.main.container.container import Container
 from intric.main.models import NOT_PROVIDED, CursorPaginatedResponse, PaginatedResponse
 from intric.prompts.api.prompt_models import PromptSparse
 from intric.server import protocol
+from intric.authentication.auth_dependencies import get_scope_filter
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.sessions.session import (
@@ -65,9 +66,25 @@ MAX_ABSOLUTE_TEXT_LENGTH = 2_000_000  # 2 MB safeguard in case of misconfigured 
     responses=responses.get_responses([404]),
 )
 async def create_assistant(
+    request: Request,
     assistant: AssistantCreatePublic,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    # Scope validation: scoped keys cannot create assistants outside their scope
+    scope_filter = get_scope_filter(request)
+    if scope_filter.space_id is not None and assistant.space_id is not None:
+        if scope_filter.space_id != assistant.space_id:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "insufficient_scope",
+                    "message": (
+                        f"API key is scoped to space '{scope_filter.space_id}'. "
+                        f"Cannot create assistant in space '{assistant.space_id}'."
+                    ),
+                },
+            )
+
     assistant_service = container.assistant_service()
     assembler = container.assistant_assembler()
     current_user = container.user()
@@ -128,15 +145,36 @@ async def create_assistant(
 
 @router.get("/", response_model=PaginatedResponse[AssistantPublic])
 async def get_assistants(
+    request: Request,
     name: str = None,
     for_tenant: bool = False,
     container: Container = Depends(get_container(with_user=True)),
 ):
     """Requires Admin permission if `for_tenant` is `true`."""
+    scope_filter = get_scope_filter(request)
+
+    # Assistant-scoped keys must not bypass scope via for_tenant
+    if for_tenant and scope_filter.scope_type is not None and scope_filter.scope_type != "tenant":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "insufficient_scope",
+                "message": (
+                    "Scoped API keys cannot use for_tenant=true. "
+                    "This parameter requires a tenant-scoped key or bearer auth."
+                ),
+            },
+        )
+
     service = container.assistant_service()
     assembler = container.assistant_assembler()
 
-    assistants = await service.get_assistants(name, for_tenant)
+    assistants = await service.get_assistants(
+        name,
+        for_tenant,
+        space_id_filter=scope_filter.space_id,
+        assistant_id_filter=scope_filter.assistant_id,
+    )
 
     assistants = [
         assembler.from_assistant_to_model(assistant)

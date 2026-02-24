@@ -49,6 +49,27 @@ def _route_has_scope_check_dep(route) -> bool:
     )
 
 
+def _route_has_dep_name(route, dep_name: str) -> bool:
+    deps = getattr(route, "dependencies", [])
+    return any(
+        hasattr(dep, "dependency")
+        and getattr(dep.dependency, "__name__", "") == dep_name
+        for dep in deps
+    )
+
+
+def _find_route_by_method_and_paths(method: str, *paths: str):
+    router = _get_router()
+    for route in router.routes:
+        route_path = getattr(route, "path", "")
+        route_methods = getattr(route, "methods", set()) or set()
+        if route_path in paths and method in route_methods:
+            return route
+    pytest.fail(
+        f"No route found for method={method} paths={paths}"
+    )
+
+
 def _get_all_endpoint_names():
     """Collect all registered endpoint function names from the router."""
     router = _get_router()
@@ -86,11 +107,11 @@ INTENTIONALLY_UNGUARDED = {
     "/settings":                "Admin settings endpoints are mounted on a dedicated router with admin scope + admin key guards",
     "/users":                   "Admin user endpoints are mounted on users_admin_router with admin scope + admin key guards; /me/ and /tenant/ safe for any scoped key",
     "/admin":                   "Admin endpoints are mounted with admin scope + admin key guards",
-    "/dashboard":               "Read-only aggregation endpoint",
+    "/dashboard":               "Read-only aggregation endpoint with scope guard",
     "/icons":                   "Public static assets",
     "/limits":                  "Authenticated limit info (with_user=True)",
-    "/prompts":                 "Authenticated via get_container(with_user=True)",
-    "/integrations":            "Authenticated via get_container(with_user=True)",
+    "/prompts":                 "Scope-guarded per prompt ID; no resource permission needed (regular user feature)",
+    "/integrations":            "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/jobs":                    "Authenticated via get_container(with_user=True)",
     "/analysis":                "Authenticated via get_container(with_user=True), service-layer role checks",
     "/logging":                 "Router-level Depends(get_current_active_user) auth",
@@ -98,10 +119,10 @@ INTENTIONALLY_UNGUARDED = {
     "/embedding-models":        "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/transcription-models":    "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/ai-models":               "Model listing aggregation",
-    "/user-groups":             "Internal admin role checks",
+    "/user-groups":             "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/allowed-origins":         "Internal admin role checks",
     "/security-classifications": "Internal admin role checks",
-    "/storage":                 "Internal admin role checks",
+    "/storage":                 "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/token-usage":             "Admin scope + admin key permission guards (not resource guard)",
     "/templates":               "Read-only discovery endpoints",
     "/sysadmin":                "Separate intric_super_api_key auth, out of scope",
@@ -123,18 +144,14 @@ INTENTIONALLY_SCOPE_FREE = {
     "/logging": "Logging route has its own auth dependency",
     "/analysis": "Analysis endpoints rely on service-level actor checks",
     "/jobs": "Job endpoints rely on service-level authorization",
-    "/user-groups": "User-group authorization handled in service/actor layer",
     "/allowed-origins": "Tenant allowed-origin endpoints enforce admin in service layer",
     "/icons": "Static icon catalog",
     "/limits": "Tenant/user limits endpoint",
-    "/dashboard": "Dashboard aggregate endpoint",
     "/ws": "WebSocket auth path",
-    "/prompts": "Prompt endpoints handle authorization internally",
     "/templates": "Template listing/discovery endpoints",
-    "/storage": "Storage usage endpoints",
     "/security-classifications": "Security classification endpoints enforce admin permissions",
-    "/integrations": "Integration endpoints enforce authorization in service layer",
     "/ai-models": "Model listing endpoint",
+    "/integrations": "SharePoint webhook routes share /integrations prefix but lack scope guards (external callbacks); main integration_router has TENANT_ADMIN guards",
     "/sysadmin": "Protected by super API key dependency",
     "/modules": "Protected by super-duper API key dependency",
     "/auth": "Public federation auth endpoints",
@@ -398,6 +415,10 @@ class TestTenantAdminApiKeyGuards:
             if getattr(route, "path", "").startswith(prefix)
         ]
 
+    # Routes under /integrations that are external callbacks/auth flows
+    # (sharepoint webhooks, OAuth flows) — intentionally unguarded
+    INTEGRATION_CALLBACK_PREFIXES = ("/integrations/sharepoint/", "/integrations/auth/")
+
     def test_admin_surfaces_have_scope_and_admin_key_guards(self):
         prefixes = [
             "/admin",
@@ -405,16 +426,22 @@ class TestTenantAdminApiKeyGuards:
             "/embedding-models",
             "/transcription-models",
             "/audit",
+            "/integrations",
+            "/storage",
+            "/user-groups",
         ]
         for prefix in prefixes:
             routes = self._routes_for_prefix(prefix)
             assert routes, f"No routes found for prefix {prefix}"
             for route in routes:
+                path = getattr(route, "path", "")
+                if any(path.startswith(p) for p in self.INTEGRATION_CALLBACK_PREFIXES):
+                    continue  # External callback/auth, intentionally unguarded
                 assert self._has_dependency(route, "_scope_check_dep"), (
-                    f"{route.path} missing _scope_check_dep"
+                    f"{path} missing _scope_check_dep"
                 )
                 assert self._has_dependency(route, "_api_key_permission_dep"), (
-                    f"{route.path} missing _api_key_permission_dep"
+                    f"{path} missing _api_key_permission_dep"
                 )
 
     def test_api_keys_list_remains_self_service(self):
@@ -433,6 +460,60 @@ class TestTenantAdminApiKeyGuards:
         )
         assert not self._has_dependency(list_route, "_api_key_permission_dep"), (
             "GET /api-keys should remain self-service and must not require admin key permission"
+        )
+
+
+# ---------------------------------------------------------------------------
+# High-risk route exact-guard checks
+# ---------------------------------------------------------------------------
+
+
+class TestHighRiskExactRouteGuards:
+    """Exact method+path assertions for high-risk surfaces.
+
+    Prefix allowlists are useful for breadth, but these checks prevent false safety
+    from broad prefix exemptions on privileged routes.
+    """
+
+    def test_integrations_admin_route_has_scope_and_admin_key_guards(self):
+        route = _find_route_by_method_and_paths("GET", "/integrations/", "/integrations")
+        assert _route_has_dep_name(route, "_scope_check_dep"), "GET /integrations/ missing _scope_check_dep"
+        assert _route_has_dep_name(route, "_api_key_permission_dep"), "GET /integrations/ missing _api_key_permission_dep"
+
+    def test_storage_admin_route_has_scope_and_admin_key_guards(self):
+        route = _find_route_by_method_and_paths("GET", "/storage/", "/storage")
+        assert _route_has_dep_name(route, "_scope_check_dep"), "GET /storage/ missing _scope_check_dep"
+        assert _route_has_dep_name(route, "_api_key_permission_dep"), "GET /storage/ missing _api_key_permission_dep"
+
+    def test_user_groups_admin_route_has_scope_and_admin_key_guards(self):
+        route = _find_route_by_method_and_paths("GET", "/user-groups/", "/user-groups")
+        assert _route_has_dep_name(route, "_scope_check_dep"), "GET /user-groups/ missing _scope_check_dep"
+        assert _route_has_dep_name(route, "_api_key_permission_dep"), "GET /user-groups/ missing _api_key_permission_dep"
+
+    def test_files_routes_have_scope_resource_and_delete_stash_guards(self):
+        list_route = _find_route_by_method_and_paths("GET", "/files/", "/files")
+        post_route = _find_route_by_method_and_paths("POST", "/files/", "/files")
+        detail_get_route = _find_route_by_method_and_paths("GET", "/files/{id}/", "/files/{id}")
+        detail_delete_route = _find_route_by_method_and_paths("DELETE", "/files/{id}/", "/files/{id}")
+
+        for route, label in (
+            (list_route, "GET /files/"),
+            (post_route, "POST /files/"),
+            (detail_get_route, "GET /files/{id}/"),
+            (detail_delete_route, "DELETE /files/{id}/"),
+        ):
+            assert _route_has_dep_name(route, "_scope_check_dep"), f"{label} missing _scope_check_dep"
+            assert _route_has_dep_name(route, "_resource_permission_dep"), f"{label} missing _resource_permission_dep"
+
+        assert _route_has_dep_name(detail_delete_route, "_stash"), (
+            "DELETE /files/{id}/ missing deferred tenant-scope delete guard (_stash)"
+        )
+
+    def test_prompts_route_has_scope_guard_without_resource_permission_guard(self):
+        route = _find_route_by_method_and_paths("GET", "/prompts/{id}/", "/prompts/{id}")
+        assert _route_has_dep_name(route, "_scope_check_dep"), "GET /prompts/{id}/ missing _scope_check_dep"
+        assert not _route_has_dep_name(route, "_resource_permission_dep"), (
+            "GET /prompts/{id}/ should not require resource-permission guard"
         )
 
 

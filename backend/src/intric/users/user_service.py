@@ -68,6 +68,7 @@ from intric.database.tables.service_table import Services
 from intric.database.tables.users_table import Users
 from intric.database.tables.app_table import AppRuns, Apps
 from intric.database.tables.websites_table import CrawlRuns, Websites
+from intric.database.tables.prompts_table import PromptsAssistants
 from intric.database.tables.sessions_table import Sessions
 from intric.database.tables.spaces_table import Spaces
 
@@ -137,7 +138,12 @@ def _check_method_resource_permission(
     key: ApiKeyV2InDB,
     config: dict,
 ) -> None:
-    """Check fine-grained resource permission based on HTTP method.
+    """Check method→permission and fine-grained resource permission.
+
+    The method→permission check (with read-overrides) is ALWAYS enforced,
+    even when ``api_key_enforce_resource_permissions`` is disabled.
+    The fine-grained resource-type check is delegated to
+    ``check_resource_permission`` which self-gates via the flag.
 
     Called after authentication has set ``request.state.api_key``.
     *config* is written by the router-level
@@ -154,6 +160,20 @@ def _check_method_resource_permission(
             if route.endpoint.__name__ in read_override_endpoints:
                 required = "read"
 
+    # Method→permission: always enforced (respects read-overrides above)
+    required_level = PERMISSION_LEVEL_ORDER.get(required, 3)
+    granted_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
+    if granted_level < required_level:
+        raise ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_permission",
+            message=(
+                f"API key cannot perform {request.method} requests "
+                f"on this endpoint (requires '{required}' permission)."
+            ),
+        )
+
+    # Fine-grained resource permission (self-gated by flag)
     check_resource_permission(key, resource_type, required)
 
 
@@ -708,45 +728,74 @@ class UserService:
         request.state.api_key_scope_id = resolved.key.scope_id
         request.state.api_key_resource_permissions = resolved.key.resource_permissions
 
-        # Method-level permission enforcement (gated by feature flag)
-        if not get_settings().api_key_enforce_resource_permissions:
-            logger.critical(
-                "API key permission enforcement disabled for request",
-                extra={
-                    "key_id": str(resolved.key.id),
-                    "key_prefix": resolved.key.key_prefix,
-                    "method": request.method,
-                    "path": request.url.path,
-                },
+        # Evaluate scope enforcement once and stash result for downstream router-level
+        # filters (list/create validation) and deferred delete guard enforcement.
+        scope_enforcement_enabled = False
+        if settings.api_key_enforce_scope:
+            scope_enforcement_enabled = await self._is_scope_enforcement_enabled(
+                user.tenant_id
             )
+        request.state.scope_enforcement_enabled = scope_enforcement_enabled
+
+        # Deferred tenant-scope-for-delete check (stashed by router-level dep)
+        if scope_enforcement_enabled and getattr(
+            request.state, "_require_tenant_scope_for_delete", False
+        ):
+            scope_type_str = (
+                resolved.key.scope_type.value
+                if hasattr(resolved.key.scope_type, "value")
+                else str(resolved.key.scope_type)
+            )
+            if scope_type_str != "tenant":
+                exc = ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_scope",
+                    message=(
+                        "File deletion requires a tenant-scoped API key. "
+                        "Files are user-scoped and may be attached to conversations "
+                        "across multiple spaces."
+                    ),
+                )
+                await self._log_api_key_auth_failed(
+                    user, resolved.key, exc,
+                    ip_address=ip_address,
+                    request_id=request_id,
+                    user_agent=user_agent,
+                    request=request,
+                )
+                raise exc
+
+        # Method-level permission: ALWAYS enforced (not gated by flag).
+        # Routes with resource guards use read-overrides; others use basic check.
+        # Fine-grained resource permission check inside _check_method_resource_permission
+        # is self-gated by the flag via check_resource_permission().
+        perm_config = getattr(request.state, "_resource_perm_config", None)
+        if perm_config is not None:
+            # Route has resource guard — method check with read-overrides + resource check
+            try:
+                _check_method_resource_permission(request, resolved.key, perm_config)
+            except ApiKeyValidationError as exc:
+                await self._log_api_key_auth_failed(
+                    user, resolved.key, exc,
+                    ip_address=ip_address,
+                    request_id=request_id,
+                    user_agent=user_agent,
+                    request=request,
+                )
+                raise
         else:
-            perm_config = getattr(request.state, "_resource_perm_config", None)
-            if perm_config is not None:
-                # Route has resource guard — use fine-grained check (with read-overrides)
-                try:
-                    _check_method_resource_permission(request, resolved.key, perm_config)
-                except ApiKeyValidationError as exc:
-                    await self._log_api_key_auth_failed(
-                        user, resolved.key, exc,
-                        ip_address=ip_address,
-                        request_id=request_id,
-                        user_agent=user_agent,
-                        request=request,
-                    )
-                    raise
-            else:
-                # No resource guard — fall back to basic method->permission check
-                try:
-                    _check_basic_method_permission(request, resolved.key)
-                except ApiKeyValidationError as exc:
-                    await self._log_api_key_auth_failed(
-                        user, resolved.key, exc,
-                        ip_address=ip_address,
-                        request_id=request_id,
-                        user_agent=user_agent,
-                        request=request,
-                    )
-                    raise
+            # No resource guard — basic method→permission check
+            try:
+                _check_basic_method_permission(request, resolved.key)
+            except ApiKeyValidationError as exc:
+                await self._log_api_key_auth_failed(
+                    user, resolved.key, exc,
+                    ip_address=ip_address,
+                    request_id=request_id,
+                    user_agent=user_agent,
+                    request=request,
+                )
+                raise
 
         # Management endpoint guard (NOT gated by feature flag)
         required_perm = getattr(
@@ -766,30 +815,26 @@ class UserService:
                 raise
 
         # Scope enforcement (gated by env flag AND tenant feature flag)
-        if get_settings().api_key_enforce_scope:
-            scope_enforcement_enabled = await self._is_scope_enforcement_enabled(
-                user.tenant_id
-            )
-            if scope_enforcement_enabled:
-                strict_mode_enabled = await self._is_strict_mode_enabled(user.tenant_id)
-                scope_config = getattr(request.state, "_scope_check_config", None)
-                if (
-                    scope_config is not None
-                    and resolved.key.scope_type != ApiKeyScopeType.TENANT.value
-                ):
-                    try:
-                        await self._enforce_api_key_scope(
-                            request, resolved.key, scope_config, strict_mode=strict_mode_enabled
-                        )
-                    except ApiKeyValidationError as exc:
-                        await self._log_api_key_auth_failed(
-                            user, resolved.key, exc,
-                            ip_address=ip_address,
-                            request_id=request_id,
-                            user_agent=user_agent,
-                            request=request,
-                        )
-                        raise
+        if scope_enforcement_enabled:
+            strict_mode_enabled = await self._is_strict_mode_enabled(user.tenant_id)
+            scope_config = getattr(request.state, "_scope_check_config", None)
+            if (
+                scope_config is not None
+                and resolved.key.scope_type != ApiKeyScopeType.TENANT.value
+            ):
+                try:
+                    await self._enforce_api_key_scope(
+                        request, resolved.key, scope_config, strict_mode=strict_mode_enabled
+                    )
+                except ApiKeyValidationError as exc:
+                    await self._log_api_key_auth_failed(
+                        user, resolved.key, exc,
+                        ip_address=ip_address,
+                        request_id=request_id,
+                        user_agent=user_agent,
+                        request=request,
+                    )
+                    raise
 
         await self._maybe_log_api_key_used(
             user, resolved.key,
@@ -981,6 +1026,14 @@ class UserService:
             return await self._resolve_app_run_space_id(resource_id)
         elif resource_type == "crawl_run":
             return await self._resolve_crawl_run_space_id(resource_id)
+        elif resource_type == "prompt":
+            # Prompt may be mapped to assistants in multiple spaces. Use a stable
+            # deterministic fallback for scalar callers; authorization uses
+            # _resolve_prompt_space_ids for full membership checks.
+            space_ids = await self._resolve_prompt_space_ids(resource_id)
+            if not space_ids:
+                return None
+            return sorted(space_ids, key=str)[0]
         elif resource_type == "info_blob":
             stmt = (
                 sa.select(
@@ -1031,6 +1084,17 @@ class UserService:
         )
         result = await self.repo.session.scalar(stmt)
         return result
+
+    async def _resolve_prompt_space_ids(self, prompt_id: UUID) -> set[UUID]:
+        """Resolve all spaces a prompt belongs to via Prompt<->Assistant mappings."""
+        stmt = (
+            sa.select(Assistants.space_id)
+            .select_from(PromptsAssistants)
+            .join(Assistants, Assistants.id == PromptsAssistants.assistant_id)
+            .where(PromptsAssistants.prompt_id == prompt_id)
+        )
+        rows = (await self.repo.session.scalars(stmt)).all()
+        return {space_id for space_id in rows if space_id is not None}
 
     async def _resolve_app_run_app_id(self, app_run_id: UUID) -> UUID | None:
         """Resolve app_run → app_id for app-scoped key enforcement."""
@@ -1095,6 +1159,7 @@ class UserService:
         """
         resource_type: str = scope_config["resource_type"]
         path_param: str | None = scope_config["path_param"]
+        self_filtering: bool = scope_config.get("self_filtering", False)
         scope_type = ApiKeyScopeType(key.scope_type)
 
         # 1. Tenant-scoped keys always pass (fast path)
@@ -1121,7 +1186,10 @@ class UserService:
 
         # 4. LIST-ENDPOINT RULES (no resource_id in path)
         if resource_id is None:
-            if strict_mode:
+            # Files are intentionally user-scoped (not space-scoped). They are allowed for
+            # scoped keys on GET/POST and restricted on DELETE by a separate tenant-only guard.
+            # Keep strict-mode protections for all other ambiguous list endpoints.
+            if strict_mode and not self_filtering and resource_type != "file":
                 raise ApiKeyValidationError(
                     status_code=403,
                     code="insufficient_scope",
@@ -1136,7 +1204,7 @@ class UserService:
                 # Space-scoped: pass — service layer filters by space membership
                 return
             elif scope_type == ApiKeyScopeType.ASSISTANT:
-                if resource_type in ("assistant", "conversation"):
+                if resource_type in ("assistant", "conversation", "file"):
                     return
                 raise ApiKeyValidationError(
                     status_code=403,
@@ -1147,7 +1215,7 @@ class UserService:
                     ),
                 )
             elif scope_type == ApiKeyScopeType.APP:
-                if resource_type in ("app", "app_run"):
+                if resource_type in ("app", "app_run", "file"):
                     return
                 raise ApiKeyValidationError(
                     status_code=403,
@@ -1162,6 +1230,24 @@ class UserService:
         # 5. SINGLE-RESOURCE RULES (resource_id found in path)
 
         if scope_type == ApiKeyScopeType.SPACE:
+            if resource_type == "file":
+                # Defense-in-depth: if file routes ever become ID-scoped in this layer,
+                # keep them allowed and rely on FileService ownership + DELETE guard.
+                return
+            if resource_type == "prompt":
+                target_space_ids = await self._resolve_prompt_space_ids(resource_id)
+                if not target_space_ids or key.scope_id not in target_space_ids:
+                    # Fail-closed: can't prove scope or no membership in prompt spaces
+                    raise ApiKeyValidationError(
+                        status_code=403,
+                        code="insufficient_scope",
+                        message=(
+                            f"API key is scoped to space '{key.scope_id}'. "
+                            f"The requested resource belongs to a different scope."
+                        ),
+                    )
+                return
+
             if resource_type == "info_blob" and resolved_param == "space_id":
                 target_space_id = resource_id
             else:
@@ -1190,6 +1276,9 @@ class UserService:
             return
 
         if scope_type == ApiKeyScopeType.ASSISTANT:
+            if resource_type == "file":
+                # Files are user-scoped; assistant keys can use non-destructive file routes.
+                return
             if resource_type == "assistant":
                 if key.scope_id == resource_id:
                     return
@@ -1224,6 +1313,9 @@ class UserService:
                 )
 
         if scope_type == ApiKeyScopeType.APP:
+            if resource_type == "file":
+                # Files are user-scoped; app keys can use non-destructive file routes.
+                return
             if resource_type == "app":
                 if key.scope_id == resource_id:
                     return

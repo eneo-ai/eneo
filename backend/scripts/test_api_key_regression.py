@@ -21,6 +21,9 @@ Usage:
 
 from __future__ import annotations
 
+# Manual live-environment regression script. Do not auto-collect via pytest.
+__test__ = False
+
 import argparse
 import sys
 import time

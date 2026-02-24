@@ -450,12 +450,21 @@ class AssistantService:
         return assistant, permissions
 
     async def get_assistants(
-        self, name: str = None, for_tenant: bool = False
+        self,
+        name: str = None,
+        for_tenant: bool = False,
+        space_id_filter: UUID | None = None,
+        assistant_id_filter: UUID | None = None,
     ) -> list[Assistant]:
         if for_tenant:
             return await self.get_tenant_assistants(name)
 
-        return await self.repo.get_for_user(self.user.id, search_query=name)
+        return await self.repo.get_for_user(
+            self.user.id,
+            search_query=name,
+            space_id=space_id_filter,
+            assistant_id=assistant_id_filter,
+        )
 
     @validate_permissions(Permission.ADMIN)
     async def get_tenant_assistants(

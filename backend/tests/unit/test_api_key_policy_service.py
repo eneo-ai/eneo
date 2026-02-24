@@ -543,3 +543,179 @@ async def test_rate_limit_at_cap_boundary_valid():
     service = _service_with_user([])
     service.user.tenant.api_key_policy = {"max_rate_limit_override": 100}
     await service._validate_rate_limit(100)
+
+
+# ---------------------------------------------------------------------------
+# Localhost origin configurable bypass (Plan 1F)
+# ---------------------------------------------------------------------------
+
+
+def _make_pk_key(*, tenant_id=None, allowed_origins=None):
+    """Build a minimal pk_ key-like object for _validate_origin tests."""
+    return SimpleNamespace(
+        key_type=ApiKeyType.PK.value,
+        allowed_origins=allowed_origins or ["http://localhost:3000"],
+        allowed_ips=None,
+        revoked_at=None,
+        suspended_at=None,
+        expires_at=None,
+        tenant_id=tenant_id or uuid4(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_pk_localhost_origin_denied_when_allow_localhost_origin_false(
+    monkeypatch,
+):
+    """When api_key_allow_localhost_origin=False, localhost origin falls through
+    to normal tenant pattern matching. If no patterns match, it's rejected.
+
+    This is the core security fix: localhost no longer gets a free pass.
+    """
+
+    tenant_id = uuid4()
+    # Tenant has only https://example.com — no localhost pattern
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=DummyOriginRepo(["https://example.com"]),
+        space_service=DummySpaceService(),
+        user=None,
+    )
+    # Override the setting to False
+    service.settings = SimpleNamespace(
+        **{
+            **vars(service.settings),
+            "api_key_allow_localhost_origin": False,
+            "api_key_origin_cache_ttl_seconds": 0,
+        }
+    )
+    key = _make_pk_key(tenant_id=tenant_id)
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service._validate_origin(key=key, origin="http://localhost:3000")
+
+    assert exc.value.status_code == 403
+    assert exc.value.code == "origin_not_allowed"
+
+
+@pytest.mark.asyncio
+async def test_pk_localhost_origin_allowed_when_allow_localhost_origin_true(
+    monkeypatch,
+):
+    """When api_key_allow_localhost_origin=True, localhost origin bypasses all
+    origin checks and returns immediately.
+    """
+    tenant_id = uuid4()
+    # Tenant has NO matching patterns — but bypass should kick in
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=DummyOriginRepo([]),
+        space_service=DummySpaceService(),
+        user=None,
+    )
+    service.settings = SimpleNamespace(
+        **{
+            **vars(service.settings),
+            "api_key_allow_localhost_origin": True,
+            "api_key_origin_cache_ttl_seconds": 0,
+        }
+    )
+    key = _make_pk_key(tenant_id=tenant_id)
+
+    # Should NOT raise — localhost bypass active
+    await service._validate_origin(key=key, origin="http://localhost:3000")
+
+
+@pytest.mark.asyncio
+async def test_pk_localhost_127_0_0_1_respects_setting(monkeypatch):
+    """127.0.0.1 is recognized as localhost and respects the config setting."""
+    tenant_id = uuid4()
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=DummyOriginRepo(["https://example.com"]),
+        space_service=DummySpaceService(),
+        user=None,
+    )
+    # Setting OFF → 127.0.0.1 must be denied (no matching tenant pattern)
+    service.settings = SimpleNamespace(
+        **{
+            **vars(service.settings),
+            "api_key_allow_localhost_origin": False,
+            "api_key_origin_cache_ttl_seconds": 0,
+        }
+    )
+    key = _make_pk_key(tenant_id=tenant_id)
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service._validate_origin(key=key, origin="http://127.0.0.1:8080")
+    assert exc.value.code == "origin_not_allowed"
+
+
+@pytest.mark.asyncio
+async def test_pk_localhost_ipv6_respects_setting(monkeypatch):
+    """IPv6 loopback [::1] is recognized as localhost and respects the config setting."""
+    tenant_id = uuid4()
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=DummyOriginRepo(["https://example.com"]),
+        space_service=DummySpaceService(),
+        user=None,
+    )
+    service.settings = SimpleNamespace(
+        **{
+            **vars(service.settings),
+            "api_key_allow_localhost_origin": False,
+            "api_key_origin_cache_ttl_seconds": 0,
+        }
+    )
+    key = _make_pk_key(tenant_id=tenant_id)
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service._validate_origin(key=key, origin="http://[::1]:5173")
+    assert exc.value.code == "origin_not_allowed"
+
+
+@pytest.mark.asyncio
+async def test_pk_non_localhost_not_affected_by_setting(monkeypatch):
+    """Non-localhost origins are unaffected by api_key_allow_localhost_origin setting.
+
+    Ensures the setting only controls localhost behavior, not general origin matching.
+    """
+    tenant_id = uuid4()
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=DummyOriginRepo(["https://app.example.com"]),
+        space_service=DummySpaceService(),
+        user=None,
+    )
+    service.settings = SimpleNamespace(
+        **{
+            **vars(service.settings),
+            "api_key_allow_localhost_origin": True,  # Even with bypass ON
+            "api_key_origin_cache_ttl_seconds": 0,
+        }
+    )
+    key = _make_pk_key(
+        tenant_id=tenant_id,
+        allowed_origins=["https://app.example.com"],
+    )
+
+    # Non-localhost with matching pattern → should pass
+    await service._validate_origin(key=key, origin="https://app.example.com")
+
+    # Non-localhost with non-matching pattern → should fail
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service._validate_origin(key=key, origin="https://evil.com")
+    assert exc.value.code == "origin_not_allowed"
+
+
+@pytest.mark.asyncio
+async def test_localhost_subdomain_trick_not_bypassed():
+    """Subdomain tricks like 'localhost.evil.com' must NOT be treated as localhost.
+
+    Security test: only exact localhost/127.0.0.1/::1 hostnames should match.
+    """
+    service = ApiKeyPolicyService(
+        allowed_origin_repo=DummyOriginRepo([]),
+        space_service=DummySpaceService(),
+        user=None,
+    )
+
+    assert not service._is_localhost_origin("https://localhost.evil.com")
+    assert not service._is_localhost_origin("https://foo.localhost")
+    assert not service._is_localhost_origin("https://127.0.0.1.evil.com")

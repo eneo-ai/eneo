@@ -392,12 +392,18 @@ async def list_conversations(
     if assistant_id is None and group_chat_id is None:
         raise HTTPException(
             status_code=400,
-            detail="Either assistant_id or group_chat_id must be provided",
+            detail={
+                "code": "invalid_request",
+                "message": "Either assistant_id or group_chat_id must be provided.",
+            },
         )
     if assistant_id is not None and group_chat_id is not None:
         raise HTTPException(
             status_code=400,
-            detail="Provide either assistant_id or group_chat_id, not both",
+            detail={
+                "code": "invalid_request",
+                "message": "Provide either assistant_id or group_chat_id, not both.",
+            },
         )
 
     session_service = container.session_service()
@@ -573,7 +579,13 @@ async def approve_tools(
         actor_user_id=current_user.id,
     )
     if context_result.status == "not_found":
-        raise HTTPException(status_code=404, detail="Approval request not found or expired")
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": "Approval request not found or expired.",
+            },
+        )
     if context_result.status == "forbidden":
         raise HTTPException(
             status_code=403,
@@ -583,7 +595,13 @@ async def approve_tools(
             },
         )
     if context_result.context is None:
-        raise HTTPException(status_code=404, detail="Approval request not found or expired")
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": "Approval request not found or expired.",
+            },
+        )
 
     await _validate_conversation_scope(
         http_request=http_request,
@@ -601,7 +619,13 @@ async def approve_tools(
     )
 
     if submit_result.status == "not_found":
-        raise HTTPException(status_code=404, detail="Approval request not found or expired")
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": "Approval request not found or expired.",
+            },
+        )
     if submit_result.status == "forbidden":
         raise HTTPException(
             status_code=403,

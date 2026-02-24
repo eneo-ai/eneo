@@ -1,12 +1,12 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, UploadFile
+from fastapi import APIRouter, Depends, Request, UploadFile
 
 from intric.ai_models.embedding_models.datastore.datastore_models import (
     SemanticSearchRequest,
     SemanticSearchResponse,
 )
-from intric.authentication.auth_dependencies import get_current_active_user
+from intric.authentication.auth_dependencies import get_current_active_user, get_scope_filter
 from intric.collections.presentation.collection_models import (
     CollectionPublic,
     CollectionUpdate,
@@ -45,9 +45,13 @@ router = APIRouter()
         "Legacy groups endpoint. Use collections/spaces instead for new integrations."
     ),
 )
-async def get_groups(container: Container = Depends(get_container(with_user=True))):
+async def get_groups(
+    request: Request,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    scope_filter = get_scope_filter(request)
     service = container.group_service()
-    groups = await service.get_groups_for_user()
+    groups = await service.get_groups_for_user(space_id_filter=scope_filter.space_id)
     counts = await service.get_counts_for_groups(groups)
     groups_public = group_protocol.to_groups_public_with_metadata(groups, counts)
 

@@ -9,6 +9,7 @@ from intric.authentication.auth_dependencies import (
     require_api_key_permission,
     require_api_key_scope_check,
     require_resource_permission_for_method,
+    require_tenant_scope_for_delete,
 )
 from intric.authentication.auth_models import ApiKeyPermission
 
@@ -245,7 +246,7 @@ router.include_router(
                 "assistants", read_override_endpoints=CONVERSATIONS_READ_OVERRIDES
             )
         ),
-        Depends(require_api_key_scope_check(resource_type="conversation", path_param="session_id")),
+        Depends(require_api_key_scope_check(resource_type="conversation", path_param="session_id", self_filtering=True)),
     ],
 )
 router.include_router(
@@ -288,7 +289,12 @@ router.include_router(
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
-router.include_router(user_groups_router, prefix="/user-groups", tags=["user-groups"])
+router.include_router(
+    user_groups_router,
+    prefix="/user-groups",
+    tags=["user-groups"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
 router.include_router(
     allowed_origins_router, prefix="/allowed-origins", tags=["allowed-origins"]
 )
@@ -340,7 +346,8 @@ router.include_router(
     tags=["files"],
     dependencies=[
         Depends(require_resource_permission_for_method("knowledge", read_override_endpoints=FILES_READ_OVERRIDES)),
-        Depends(require_api_key_scope_check(resource_type="space", path_param=None)),
+        Depends(require_api_key_scope_check(resource_type="file", path_param=None)),
+        Depends(require_tenant_scope_for_delete()),
     ],
 )
 router.include_router(icons_router, prefix="/icons", tags=["icons"])
@@ -354,7 +361,14 @@ router.include_router(
         Depends(require_api_key_scope_check(resource_type="space", path_param="id")),
     ],
 )
-router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
+router.include_router(
+    dashboard_router,
+    prefix="/dashboard",
+    tags=["dashboard"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="space", path_param=None)),
+    ],
+)
 router.include_router(
     website_router,
     prefix="/websites",
@@ -365,7 +379,14 @@ router.include_router(
     ],
 )
 router.include_router(websocket_router, prefix="", tags=["websockets"])
-router.include_router(prompt_router, prefix="/prompts", tags=["prompts"])
+router.include_router(
+    prompt_router,
+    prefix="/prompts",
+    tags=["prompts"],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="prompt", path_param="id")),
+    ],
+)
 router.include_router(
     app_template_router,
     prefix="/templates/apps",
@@ -377,7 +398,12 @@ router.include_router(
     tags=["assistants-templates"],
 )
 router.include_router(template_router, prefix="/templates", tags=["templates"])
-router.include_router(storage_router, prefix="/storage", tags=["storage"])
+router.include_router(
+    storage_router,
+    prefix="/storage",
+    tags=["storage"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
 router.include_router(
     token_usage_router,
     prefix="/token-usage",
@@ -398,7 +424,12 @@ router.include_router(
     tags=["audit"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
-router.include_router(integration_router, prefix="/integrations", tags=["integrations"])
+router.include_router(
+    integration_router,
+    prefix="/integrations",
+    tags=["integrations"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
 router.include_router(
     mcp_server_router,
     prefix="/mcp-servers",

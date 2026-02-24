@@ -340,7 +340,8 @@ class TestContractMatrixBoundaries:
         request = _fake_request("POST")
         with pytest.raises(ApiKeyValidationError) as exc_info:
             _check_method_resource_permission(request, key, _config("assistants"))
-        assert exc_info.value.code == "insufficient_resource_permission"
+        # Method-level permission is always enforced before fine-grained resource checks.
+        assert exc_info.value.code == "insufficient_permission"
 
     def test_read_key_post_override_endpoint_passes(self, monkeypatch):
         """3. read key + POST on override endpoint → 200 (read-override)."""

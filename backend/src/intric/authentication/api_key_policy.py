@@ -542,8 +542,10 @@ class ApiKeyPolicyService:
                 message="Origin header required for pk_ keys.",
             )
 
-        if self._is_localhost_origin(origin):
+        if self._is_localhost_origin(origin) and self.settings.api_key_allow_localhost_origin:
             return
+        # When allow_localhost_origin is off, localhost falls through to
+        # normal tenant/key pattern matching — no free pass.
 
         tenant_patterns = await self._get_tenant_origin_patterns(key.tenant_id)
 

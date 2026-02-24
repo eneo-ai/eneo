@@ -112,7 +112,11 @@ class GroupService:
 
         return group
 
-    async def get_groups_for_user(self) -> list[Group]:
+    async def get_groups_for_user(
+        self, space_id_filter: UUID | None = None
+    ) -> list[Group]:
+        if space_id_filter is not None:
+            return await self.repo.get_groups_by_space(space_id_filter)
         return await self.repo.get_groups_by_user(self.user.id)
 
     async def get_group(self, group_id: UUID) -> Group:

@@ -176,12 +176,13 @@ class TestMethodAwarePermissionCheck:
         assert exc_info.value.status_code == 403
 
     def test_admin_key_delete_passes(self, monkeypatch):
-        """6. Admin key + DELETE → pass."""
+        """6. Admin key + DELETE → pass (both method and resource checks)."""
         monkeypatch.setattr(
             "intric.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
+            permission=ApiKeyPermission.ADMIN,
             resource_permissions=ResourcePermissions(apps=ResourcePermissionLevel.ADMIN),
         )
         request = _fake_request("DELETE")
@@ -984,7 +985,11 @@ class TestPrimaryBugScenario:
     """The exact bug being fixed: resource_permissions=None + read key + DELETE → 403."""
 
     def test_read_key_null_resource_permissions_delete_blocked(self, monkeypatch):
-        """Read key (resource_permissions=None) + DELETE on guarded route → 403."""
+        """Read key (resource_permissions=None) + DELETE on guarded route → 403.
+
+        The method→permission check fires first (READ < ADMIN for DELETE),
+        producing 'insufficient_permission' before the resource check runs.
+        """
         monkeypatch.setattr(
             "intric.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
@@ -997,7 +1002,7 @@ class TestPrimaryBugScenario:
         with pytest.raises(ApiKeyValidationError) as exc_info:
             _check_method_resource_permission(request, key, _config("apps"))
         assert exc_info.value.status_code == 403
-        assert exc_info.value.code == "insufficient_resource_permission"
+        assert exc_info.value.code == "insufficient_permission"
 
     def test_read_key_null_resource_permissions_post_blocked(self, monkeypatch):
         """Read key (resource_permissions=None) + POST on guarded route → 403."""
@@ -1134,6 +1139,7 @@ class TestGuardrailInteraction:
 
         Origin guardrails are enforced earlier in the pipeline (enforce_guardrails).
         Permission checks happen later in _resolve_api_key. These are independent layers.
+        The method→permission check fires first (READ < ADMIN for DELETE).
         """
         monkeypatch.setattr(
             "intric.authentication.api_key_resolver.get_settings",
@@ -1150,7 +1156,7 @@ class TestGuardrailInteraction:
                 _fake_request("DELETE"), key, _config("apps"),
             )
         assert exc_info.value.status_code == 403
-        assert exc_info.value.code == "insufficient_resource_permission"
+        assert exc_info.value.code == "insufficient_permission"
 
     def test_permission_check_passes_when_sufficient(self, monkeypatch):
         """Admin key passes permission check regardless of guardrail status."""
@@ -1181,14 +1187,19 @@ class TestGuardrailInteraction:
 
     def test_layer2_error_code_differs_from_layer1(self, monkeypatch):
         """Layer 1 (resource) uses 'insufficient_resource_permission',
-        Layer 2 (basic) uses 'insufficient_permission'."""
+        Layer 2 (basic) uses 'insufficient_permission'.
+
+        For Layer 1 to produce the resource-level error, the key's basic
+        permission must pass the method check (ADMIN >= ADMIN for DELETE)
+        so the resource check fires (apps=READ < ADMIN).
+        """
         monkeypatch.setattr(
             "intric.authentication.api_key_resolver.get_settings",
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
-        # Layer 1
+        # Layer 1: method check passes (ADMIN), resource check fails (apps=READ)
         key_l1 = _make_key(
-            permission=ApiKeyPermission.READ,
+            permission=ApiKeyPermission.ADMIN,
             resource_permissions=ResourcePermissions(apps=ResourcePermissionLevel.READ),
         )
         with pytest.raises(ApiKeyValidationError) as exc_info:
@@ -1247,7 +1258,7 @@ ERROR_CONTRACTS = [
     {
         "id": "layer1_resource_read_write",
         "desc": "Layer 1: read resource + write required → insufficient_resource_permission",
-        "perm": ApiKeyPermission.READ,
+        "perm": ApiKeyPermission.WRITE,
         "method": "POST",
         "layer": "resource",
         "resource_type": "apps",
@@ -1259,14 +1270,14 @@ ERROR_CONTRACTS = [
     },
     {
         "id": "layer1_null_fallback_read_delete",
-        "desc": "Layer 1: null resource_permissions + read key + DELETE",
+        "desc": "Layer 1: null resource_permissions + read key + DELETE → method check",
         "perm": ApiKeyPermission.READ,
         "method": "DELETE",
         "layer": "resource_null",
         "resource_type": "apps",
         "status": 403,
-        "code": "insufficient_resource_permission",
-        "must_contain": ["apps", "requires 'admin'"],
+        "code": "insufficient_permission",
+        "must_contain": ["requires 'admin'"],
         "must_not_contain": [],
     },
 ]

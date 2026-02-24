@@ -24,3 +24,6 @@ class TenantIntegrationRepository(ABC):
 
     @abstractmethod
     async def delete(self, id: "UUID") -> None: ...
+
+    @abstractmethod
+    async def delete_by_tenant(self, id: "UUID", tenant_id: "UUID") -> None: ...

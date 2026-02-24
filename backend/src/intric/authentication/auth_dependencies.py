@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from uuid import UUID
 
 from typing import NoReturn
@@ -25,9 +26,12 @@ def _raise_api_key_http_error(exc: ApiKeyValidationError) -> NoReturn:
         "API key authentication failed",
         extra={"code": exc.code, "error_message": exc.message},
     )
+    detail: dict[str, object] = {"code": exc.code, "message": exc.message}
+    if exc.context is not None:
+        detail["context"] = dict(exc.context)
     raise HTTPException(
         status_code=exc.status_code,
-        detail={"code": exc.code, "message": exc.message},
+        detail=detail,
         headers=exc.headers,
     ) from exc
 
@@ -194,6 +198,7 @@ def require_resource_permission_for_method(
 def require_api_key_scope_check(
     resource_type: str,
     path_param: str | None = "id",
+    self_filtering: bool = False,
 ):
     """Router-level dependency: stores scope check config for post-auth enforcement.
 
@@ -206,12 +211,16 @@ def require_api_key_scope_check(
         path_param: URL path parameter holding the resource ID (e.g. "id",
             "session_id"). None means no path-level check (list endpoints or
             resources without extractable IDs).
+        self_filtering: When True, the endpoint performs deterministic scope
+            filtering (e.g. requires assistant_id param). Exempts from
+            strict-mode blanket denial of list endpoints.
     """
 
     async def _scope_check_dep(request: Request) -> None:
         request.state._scope_check_config = {
             "resource_type": resource_type,
             "path_param": path_param,
+            "self_filtering": self_filtering,
         }
 
     return _scope_check_dep
@@ -250,3 +259,65 @@ def require_resource_permission(resource_type: str, required: str):
             _raise_api_key_http_error(exc)
 
     return _resource_check_dep
+
+
+def require_tenant_scope_for_delete():
+    """Block DELETE requests for non-tenant-scoped API keys.
+
+    Files are user-scoped (no space_id column). GET/POST are safe for scoped keys,
+    but DELETE could affect files attached to conversations in other spaces.
+
+    Uses the deferred-enforcement pattern: stashes a marker on ``request.state``
+    so the actual check runs inside ``_resolve_api_key`` (after auth has populated
+    ``api_key_scope_type``).  Router-level dependencies execute *before* endpoint
+    dependencies, so we cannot inspect auth state here.
+    """
+
+    async def _stash(request: Request) -> None:
+        if request.method == "DELETE":
+            request.state._require_tenant_scope_for_delete = True
+
+    return _stash
+
+
+@dataclass(frozen=True, slots=True)
+class ScopeFilter:
+    """Immutable scope filter extracted from API key state at the router boundary.
+
+    Passed to service/repo layers as an optional parameter for query-time filtering.
+    None fields mean "no constraint from this scope dimension".
+    """
+
+    scope_type: str | None = None
+    space_id: UUID | None = None
+    assistant_id: UUID | None = None
+
+
+def get_scope_filter(request: Request) -> ScopeFilter:
+    """Extract scope filter from request state for scoped API keys.
+
+    Returns an empty ScopeFilter for tenant-scoped keys, bearer auth, or when
+    scope enforcement is disabled via env/tenant kill-switch.
+    Called at the router boundary; the result is passed to service methods.
+    """
+    if getattr(request.state, "scope_enforcement_enabled", True) is False:
+        return ScopeFilter()
+
+    scope_type = getattr(request.state, "api_key_scope_type", None)
+    scope_id = getattr(request.state, "api_key_scope_id", None)
+
+    if scope_type is None or scope_id is None:
+        return ScopeFilter()
+
+    scope_type_str = scope_type.value if hasattr(scope_type, "value") else str(scope_type)
+
+    if scope_type_str == "tenant":
+        return ScopeFilter(scope_type=scope_type_str)
+    elif scope_type_str == "space":
+        return ScopeFilter(scope_type=scope_type_str, space_id=scope_id)
+    elif scope_type_str == "assistant":
+        return ScopeFilter(
+            scope_type=scope_type_str, assistant_id=scope_id
+        )
+    else:
+        return ScopeFilter(scope_type=scope_type_str)

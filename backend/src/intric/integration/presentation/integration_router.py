@@ -109,8 +109,11 @@ async def remove_tenant_integration(
     user = container.user()
 
     # Get tenant integration info BEFORE deletion (snapshot pattern)
+    # Use tenant_id filter to prevent cross-tenant deletion
     tenant_integration_repo = container.tenant_integration_repo()
-    tenant_integration = await tenant_integration_repo.one(id=tenant_integration_id)
+    tenant_integration = await tenant_integration_repo.one(
+        id=tenant_integration_id, tenant_id=user.tenant_id
+    )
 
     # Delete tenant integration
     await service.remove_tenant_integration(tenant_integration_id=tenant_integration_id)

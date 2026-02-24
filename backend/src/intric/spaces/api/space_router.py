@@ -2,7 +2,7 @@ from uuid import UUID
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
@@ -11,7 +11,7 @@ from intric.audit.domain.entity_types import EntityType
 
 from intric.apps.apps.api.app_models import AppPublic
 from intric.assistants.api.assistant_models import AssistantPublic
-from intric.authentication.auth_dependencies import require_permission
+from intric.authentication.auth_dependencies import get_scope_filter, require_permission
 from intric.collections.presentation.collection_models import CollectionPublic
 from intric.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
 from intric.jobs.job_models import JobPublic
@@ -302,6 +302,7 @@ async def delete_space(
     status_code=200,
 )
 async def get_spaces(
+    request: Request,
     include_applications: bool = Query(default=False, description="Includes published applications on each space"),
     include_personal: bool = Query(default=False,  description="Includes your personal space"),
     container: Container = Depends(get_container(with_user=True)),
@@ -313,6 +314,12 @@ async def get_spaces(
         include_personal=include_personal,
         include_applications=include_applications,
     )
+
+    # Scope filtering: space-scoped key sees only its scoped space
+    scope_filter = get_scope_filter(request)
+    if scope_filter.space_id is not None:
+        spaces = [s for s in spaces if s.id == scope_filter.space_id]
+
     spaces = [assembler.from_space_to_sparse_model(space, include_applications=include_applications) for space in spaces]
 
     return protocol.to_paginated_response(spaces)

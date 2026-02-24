@@ -115,10 +115,10 @@ class FileService:
         return files
 
     async def delete_file(self, id: UUID):
-        file_deleted = await self.repo.delete(id)
+        file_deleted = await self.repo.delete_by_owner(id=id, user_id=self.user.id)
 
-        if file_deleted.user_id != self.user.id:
-            raise UnauthorizedException()
+        if file_deleted is None:
+            raise NotFoundException()
 
         return file_deleted
 

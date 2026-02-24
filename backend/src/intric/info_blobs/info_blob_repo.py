@@ -214,6 +214,62 @@ class InfoBlobRepository:
         items = await self.delegate.get_records_from_query(query)
         return [InfoBlobInDBNoText.model_validate(record) for record in items]
 
+    async def get_by_user_and_space(
+        self, user_id: UUID, space_ids: list[UUID]
+    ) -> list[InfoBlobInDBNoText]:
+        """User-scoped info blobs filtered to specific spaces (SQL-level).
+
+        Resolves space membership via group/website/integration_knowledge joins.
+        """
+        if not space_ids:
+            return []
+
+        # Collect parent IDs that belong to the given spaces
+        group_ids = list(
+            await self.session.scalars(
+                sa.select(CollectionsTable.id).where(
+                    CollectionsTable.space_id.in_(space_ids)
+                )
+            )
+        )
+        website_ids = list(
+            await self.session.scalars(
+                sa.select(Websites.id).where(Websites.space_id.in_(space_ids))
+            )
+        )
+        integration_ids = list(
+            await self.session.scalars(
+                sa.select(IntegrationKnowledge.id).where(
+                    IntegrationKnowledge.space_id.in_(space_ids)
+                )
+            )
+        )
+
+        space_conditions = []
+        if group_ids:
+            space_conditions.append(InfoBlobs.group_id.in_(group_ids))
+        if website_ids:
+            space_conditions.append(InfoBlobs.website_id.in_(website_ids))
+        if integration_ids:
+            space_conditions.append(
+                InfoBlobs.integration_knowledge_id.in_(integration_ids)
+            )
+
+        if not space_conditions:
+            return []
+
+        query = (
+            sa.select(InfoBlobs)
+            .where(InfoBlobs.user_id == user_id)
+            .where(sa.or_(*space_conditions))
+            .order_by(InfoBlobs.created_at)
+            .options(selectinload(InfoBlobs.group))
+            .options(selectinload(InfoBlobs.embedding_model))
+            .options(defer(InfoBlobs.text))
+        )
+        items = await self.delegate.get_records_from_query(query)
+        return [InfoBlobInDBNoText.model_validate(record) for record in items]
+
     async def get(self, id: UUID) -> InfoBlobInDB:
         record = await self.delegate.get(id)
         return InfoBlobInDB.model_validate(record)
