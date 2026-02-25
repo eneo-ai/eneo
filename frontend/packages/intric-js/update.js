@@ -6,7 +6,7 @@ import fs from "fs";
 import { exec, spawn } from "node:child_process";
 
 const localUrl = "http://localhost:8123";
-const remoteUrl = process.env.INTRIC_BACKEND_URL || "http://localhost:8123";
+const remoteUrl = process.env.ENEO_BACKEND_URL || process.env.INTRIC_BACKEND_URL || "http://localhost:8123";
 
 /** @param {string} baseUrl */
 async function updateClient(baseUrl) {

@@ -52,10 +52,10 @@ async function getScopeByOrigin(origin?: string) {
 
   // try {
   //   // Lookup org id via origin
-  //   if (origin && env.INTRIC_SYS_API_KEY) {
+  //   if (origin && env.ENEO_SYS_API_KEY) {
   //     const client = createClient({
-  //       baseUrl: env.INTRIC_BACKEND_URL!,
-  //       apiKey: env.INTRIC_SYS_API_KEY,
+  //       baseUrl: env.ENEO_BACKEND_URL!,
+  //       apiKey: env.ENEO_SYS_API_KEY,
   //       fetch
   //     });
   //     const tenant = await client.fetch("/api/v1/sysadmin/tenants/", {

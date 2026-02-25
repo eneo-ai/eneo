@@ -10,6 +10,7 @@
 
 import { dev } from "$app/environment";
 import { env } from "$env/dynamic/private";
+import { getBackendUrl } from "$lib/core/environment.server";
 import type { Cookies } from "@sveltejs/kit";
 import { createCodePair, encodeState, setFrontendAuthCookie } from "./auth.server";
 import { getRequestEvent } from "$app/server";
@@ -115,7 +116,7 @@ export async function loginWithMobilityguard(code: string): Promise<boolean> {
     hasCode: !!code,
     hasCodeVerifier: !!code_verifier,
     redirectUri: `${getPublicOrigin()}/login/callback`,
-    backendUrl: env.INTRIC_BACKEND_URL
+    backendUrl: getBackendUrl()
   });
 
   const body = JSON.stringify({
@@ -126,7 +127,7 @@ export async function loginWithMobilityguard(code: string): Promise<boolean> {
     client_id: env.MOBILITYGUARD_CLIENT_ID
   });
 
-  const backendUrl = `${env.INTRIC_BACKEND_URL}/api/v1/users/login/openid-connect/mobilityguard/`;
+  const backendUrl = `${getBackendUrl()}/api/v1/users/login/openid-connect/mobilityguard/`;
   console.debug("[OIDC] Calling backend (MobilityGuard)", {
     url: backendUrl,
     redirectUri: `${getPublicOrigin()}/login/callback`
