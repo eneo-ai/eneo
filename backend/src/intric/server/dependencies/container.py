@@ -3,8 +3,9 @@ from uuid import UUID
 
 from dependency_injector import providers
 
-from fastapi import Depends, HTTPException, Request, Security, WebSocketException
+from fastapi import Depends, Request, Security, WebSocketException
 
+from intric.authentication.api_key_router_helpers import raise_api_key_http_error
 from intric.database.database import (
     AsyncSession,
     get_session,
@@ -13,7 +14,6 @@ from intric.database.database import (
 )
 from intric.main.container.container import Container
 from intric.main.container.container_overrides import override_user
-from intric.main.logging import get_logger
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.server.dependencies.auth_definitions import (
     API_KEY_HEADER,
@@ -22,19 +22,12 @@ from intric.server.dependencies.auth_definitions import (
 )
 from intric.users.setup import setup_user
 
-logger = get_logger(__name__)
-
-
-def _raise_api_key_http_error(exc: ApiKeyValidationError) -> NoReturn:
-    logger.warning(
-        "API key authentication failed",
-        extra={"code": exc.code, "error_message": exc.message},
-    )
-    raise HTTPException(
-        status_code=exc.status_code,
-        detail={"code": exc.code, "message": exc.message},
-        headers=exc.headers,
-    ) from exc
+def _raise_api_key_http_error(
+    exc: ApiKeyValidationError,
+    *,
+    request: Request | None = None,
+) -> NoReturn:
+    raise_api_key_http_error(exc, request=request)
 
 
 def get_container(
@@ -76,7 +69,7 @@ def get_container(
                         token=token, api_key=api_key, request=request
                     )
         except ApiKeyValidationError as exc:
-            _raise_api_key_http_error(exc)
+            _raise_api_key_http_error(exc, request=request)
 
         if not user.is_active:
             await setup_user(container=container, user=user)
@@ -108,7 +101,7 @@ def get_container(
                         )
                     )
         except ApiKeyValidationError as exc:
-            _raise_api_key_http_error(exc)
+            _raise_api_key_http_error(exc, request=request)
         override_user(container=container, user=user)
 
         return container

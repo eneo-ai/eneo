@@ -189,7 +189,15 @@ class SpaceService:
 
         actor = self._get_actor(space)
         if not actor.can_read_space():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "space",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return space
 
@@ -740,7 +748,15 @@ class SpaceService:
         actor = self._get_actor(space)
 
         if not actor.can_read_space():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "space",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return space
 

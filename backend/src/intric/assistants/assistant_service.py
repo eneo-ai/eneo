@@ -320,7 +320,15 @@ class AssistantService:
         assistant = space.get_assistant(assistant_id=assistant_id)
 
         if not actor.can_edit_assistants():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to edit assistants in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "update",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         prompt_obj: Prompt | None = None
         if prompt is not None:
@@ -442,7 +450,15 @@ class AssistantService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_read_assistants():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read assistants in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_assistant_permissions(assistant=assistant)
@@ -486,7 +502,15 @@ class AssistantService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_delete_assistants():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to delete assistants in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "delete",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         assistant = space.get_assistant(assistant_id=assistant_id)
         icon_id = assistant.icon_id
@@ -517,7 +541,15 @@ class AssistantService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_edit_assistants():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to manage assistant API keys.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "manage_api_keys",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return await self.auth_service.create_assistant_api_key(
             "ina", assistant_id=assistant_id
@@ -528,7 +560,15 @@ class AssistantService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_read_prompts_of_assistants():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read prompts for this assistant.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "prompt",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return await self.prompt_service.get_prompts_by_assistant(assistant_id)
 
@@ -750,7 +790,15 @@ class AssistantService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_read_assistant(assistant=active_assistant):
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to use this assistant.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "ask",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         if not space.can_ask_assistant(assistant=active_assistant):
             raise UnauthorizedException(
@@ -871,7 +919,15 @@ class AssistantService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_publish_assistants():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "Publishing assistants is not allowed for your current space role.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "publish",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         assistant.update(published=publish)
 
@@ -888,7 +944,15 @@ class AssistantService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_read_assistants():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read assistants in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return assistant.mcp_servers
 
@@ -903,7 +967,15 @@ class AssistantService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_edit_assistants():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to edit assistants in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "edit_mcp",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         # Get existing associations from the database
         from intric.database.tables.assistant_table import AssistantMCPServers
@@ -975,7 +1047,15 @@ class AssistantService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_edit_assistants():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to edit assistants in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "edit_mcp",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         # Get existing associations from the database
         from intric.database.tables.assistant_table import AssistantMCPServers, Assistants
@@ -1022,7 +1102,15 @@ class AssistantService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_edit_assistants():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to edit assistants in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "edit_mcp",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         # Get existing associations from the database
         from intric.database.tables.assistant_table import AssistantMCPServers, Assistants

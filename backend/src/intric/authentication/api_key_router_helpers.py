@@ -14,6 +14,10 @@ from intric.authentication.api_key_request_context import resolve_client_ip
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.auth_models import ApiKeyUsageEvent, ApiKeyUsageSummary, ApiKeyV2, ApiKeyV2InDB
 from intric.main.config import get_settings
+from intric.main.logging import get_logger
+from intric.main.request_context import get_request_context
+
+logger = get_logger(__name__)
 
 
 class ApiKeyErrorResponse(BaseModel):
@@ -21,10 +25,109 @@ class ApiKeyErrorResponse(BaseModel):
     message: str
 
 
-def raise_api_key_http_error(exc: ApiKeyValidationError) -> NoReturn:
+_SAFE_CONTEXT_KEYS: frozenset[str] = frozenset(
+    {
+        "resource_type",
+        "required_level",
+        "scope_type",
+        "action",
+        "auth_layer",
+        "required_capability",
+    }
+)
+_GUARDRAIL_CODES: frozenset[str] = frozenset(
+    {
+        "origin_not_allowed",
+        "ip_not_allowed",
+        "rate_limited",
+        "rate_limit_exceeded",
+        "api_key_expired",
+        "api_key_revoked",
+        "api_key_inactive",
+    }
+)
+
+
+def _resolve_request_id(request: Request | None = None) -> str | None:
+    if request is not None:
+        request_id = request.headers.get("x-correlation-id") or request.headers.get(
+            "x-request-id"
+        )
+        if request_id:
+            return request_id
+    context = get_request_context()
+    return cast(str | None, context.get("correlation_id"))
+
+
+def _infer_auth_layer(exc: ApiKeyValidationError) -> str | None:
+    if exc.status_code == 401:
+        return "identity"
+    if exc.status_code != 403:
+        return None
+
+    if exc.code in {"insufficient_scope"}:
+        return "api_key_scope"
+    if exc.code in {"insufficient_resource_permission"}:
+        return "api_key_resource"
+    if exc.code in {"insufficient_permission"}:
+        return "api_key_method"
+    if exc.code in _GUARDRAIL_CODES:
+        return "guardrail"
+
+    return None
+
+
+def _sanitize_context(
+    context: dict[str, object] | None,
+    *,
+    auth_layer: str | None,
+) -> dict[str, object] | None:
+    if context is None:
+        sanitized: dict[str, object] = {}
+    else:
+        sanitized = {
+            key: value
+            for key, value in context.items()
+            if key in _SAFE_CONTEXT_KEYS and key != "granted_level"
+        }
+
+    if auth_layer is not None:
+        sanitized["auth_layer"] = auth_layer
+    elif "auth_layer" in sanitized:
+        # 400/500 style errors should not carry auth-layer tags.
+        sanitized.pop("auth_layer", None)
+
+    return sanitized or None
+
+
+def raise_api_key_http_error(
+    exc: ApiKeyValidationError,
+    *,
+    request: Request | None = None,
+) -> NoReturn:
+    auth_layer = _infer_auth_layer(exc)
+    context = _sanitize_context(
+        dict(exc.context) if exc.context is not None else None,
+        auth_layer=auth_layer,
+    )
+    request_id = _resolve_request_id(request)
+
+    logger.warning(
+        "API key authentication failed",
+        extra={
+            "code": exc.code,
+            "error_message": exc.message,
+            "status_code": exc.status_code,
+            "auth_layer": auth_layer,
+        },
+    )
+
     detail: dict[str, object] = {"code": exc.code, "message": exc.message}
-    if exc.context is not None:
-        detail["context"] = dict(exc.context)
+    if context is not None:
+        detail["context"] = context
+    if request_id:
+        detail["request_id"] = request_id
+
     raise HTTPException(
         status_code=exc.status_code,
         detail=detail,

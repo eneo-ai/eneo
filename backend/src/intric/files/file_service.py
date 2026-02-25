@@ -80,7 +80,15 @@ class FileService:
         file = await self.repo.get_by_id(file_id=file_id)
 
         if file.user_id != self.user.id:
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You can only access files you own.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "file",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return file
 
@@ -110,7 +118,15 @@ class FileService:
 
         for file in files:
             if file.user_id != self.user.id:
-                raise UnauthorizedException()
+                raise UnauthorizedException(
+                    "You can only access files you own.",
+                    code="forbidden_action",
+                    context={
+                        "resource_type": "file",
+                        "action": "read",
+                        "auth_layer": "domain_policy",
+                    },
+                )
 
         return files
 
@@ -124,7 +140,15 @@ class FileService:
 
     async def update_file(self, file: File) -> File:
         if file.user_id != self.user.id:
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You can only update files you own.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "file",
+                    "action": "update",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return await self.repo.update(file)
 
@@ -132,7 +156,15 @@ class FileService:
         file = await self.repo.get_by_id(file_id=file_id)
 
         if file.user_id != self.user.id:
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You can only access files you own.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "file",
+                    "action": "read_content",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         if file.text is None and file.blob is None:
             raise NotFoundException("File content not found")

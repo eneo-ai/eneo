@@ -1183,13 +1183,25 @@ class TestScopeBodyDriven:
     """Body-driven scope validation for POST /conversations/."""
 
     def _make_http_request(
-        self, scope_type: str | None = None, scope_id: UUID | None = None
+        self,
+        scope_type: str | None = None,
+        scope_id: UUID | None = None,
+        *,
+        request_id: str | None = None,
     ) -> SimpleNamespace:
         state = State()
         if scope_type is not None:
             state.api_key_scope_type = scope_type
             state.api_key_scope_id = scope_id
-        return SimpleNamespace(state=state)
+        headers: dict[str, str] = {}
+        if request_id is not None:
+            headers["x-correlation-id"] = request_id
+        return SimpleNamespace(
+            state=state,
+            headers=headers,
+            url=SimpleNamespace(path="/api/v1/conversations/"),
+            method="POST",
+        )
 
     def _make_container(
         self,
@@ -1279,7 +1291,11 @@ class TestScopeBodyDriven:
     async def test_app_scope_denied(self):
         """App-scoped key → DENY (can't create conversations)."""
         app_id = uuid4()
-        request = self._make_http_request(scope_type="app", scope_id=app_id)
+        request = self._make_http_request(
+            scope_type="app",
+            scope_id=app_id,
+            request_id="req-scope-1",
+        )
         container = self._make_container()
 
         with pytest.raises(HTTPException) as exc_info:
@@ -1293,6 +1309,8 @@ class TestScopeBodyDriven:
         assert exc_info.value.status_code == 403
         assert exc_info.value.detail["code"] == "insufficient_scope"
         assert "app" in exc_info.value.detail["message"].lower()
+        assert exc_info.value.detail["request_id"] == "req-scope-1"
+        assert exc_info.value.detail["context"]["auth_layer"] == "api_key_scope"
 
     @pytest.mark.asyncio
     async def test_assistant_scope_matching_assistant_passes(self):

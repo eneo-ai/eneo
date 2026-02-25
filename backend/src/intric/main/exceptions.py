@@ -53,7 +53,16 @@ class NotFoundException(Exception):
 
 
 class UnauthorizedException(Exception):
-    pass
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str = "forbidden",
+        context: dict[str, object] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.context = context
 
 
 class UnsupportedModelException(Exception):

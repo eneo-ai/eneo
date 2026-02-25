@@ -107,6 +107,11 @@ def _check_basic_method_permission(
                 f"API key cannot perform {request.method} requests "
                 f"on this endpoint (requires '{required}' permission)."
             ),
+            context={
+                "auth_layer": "api_key_method",
+                "action": request.method.lower(),
+                "required_level": required,
+            },
         )
 
 
@@ -130,6 +135,11 @@ def _check_management_permission(
                 "Use a key with 'admin' permission, or authenticate "
                 "with a bearer token."
             ),
+            context={
+                "auth_layer": "api_key_method",
+                "action": "management",
+                "required_level": required,
+            },
         )
 
 
@@ -171,6 +181,12 @@ def _check_method_resource_permission(
                 f"API key cannot perform {request.method} requests "
                 f"on this endpoint (requires '{required}' permission)."
             ),
+            context={
+                "auth_layer": "api_key_method",
+                "action": request.method.lower(),
+                "required_level": required,
+                "resource_type": resource_type,
+            },
         )
 
     # Fine-grained resource permission (self-gated by flag)

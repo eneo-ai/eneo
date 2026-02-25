@@ -74,7 +74,15 @@ class AppRunService:
             raise NotFoundException()
 
         if app_run.user_id != self.user.id:
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read this app run.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app_run",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return app_run
 

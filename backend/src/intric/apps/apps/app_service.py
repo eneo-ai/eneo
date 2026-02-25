@@ -78,7 +78,15 @@ class AppService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_create_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to create apps in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "create",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         completion_model = await self.get_completion_model(space=space)
         transcription_model = await self.get_transcription_model(space=space)
@@ -182,7 +190,15 @@ class AppService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_read_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read apps in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_app_permissions()
@@ -209,7 +225,15 @@ class AppService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_edit_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to edit apps in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "update",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         completion_model = None
         if completion_model_id is not None:
@@ -279,7 +303,15 @@ class AppService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_delete_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to delete apps in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "delete",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         app = space.get_app(app_id=app_id)
         icon_id = app.icon_id
@@ -309,10 +341,26 @@ class AppService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_read_app(app=app):
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to run this app.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "run",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         if not space.can_run_app(app=app):
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "This app cannot be run in the current space configuration.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "run",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         files = await self.file_service.get_files_by_ids(
             file_ids=file_ids, include_transcription=True
@@ -330,7 +378,15 @@ class AppService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_read_prompts_of_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read prompts for this app.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "prompt",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return await self.prompt_service.get_prompts_by_app(app_id=app_id)
 
@@ -340,7 +396,15 @@ class AppService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_publish_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "Publishing apps is not allowed for your current space role.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "publish",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         app.update(published=publish)
 

@@ -34,10 +34,14 @@ if TYPE_CHECKING:
     from intric.audit.application.audit_service import AuditService
 
 
-class ResourceDenialContext(TypedDict):
+class ResourceDenialContext(TypedDict, total=False):
     resource_type: str
     required_level: str
     granted_level: str
+    scope_type: str
+    action: str
+    auth_layer: str
+    required_capability: str
 
 
 class ApiKeyValidationError(Exception):
@@ -87,6 +91,8 @@ def check_resource_permission(
                     resource_type=resource_type,
                     required_level=required,
                     granted_level=key.permission,
+                    auth_layer="api_key_resource",
+                    action="resource_permission_check",
                 ),
             )
         return
@@ -124,6 +130,8 @@ def check_resource_permission(
                 resource_type=resource_type,
                 required_level=required,
                 granted_level=granted_str,
+                auth_layer="api_key_resource",
+                action="resource_permission_check",
             ),
         )
 

@@ -3,15 +3,6 @@
  * Do not make direct changes to the file.
  */
 
-/** OneOf type helpers */
-type Without<T, U> = { [P in Exclude<keyof T, keyof U>]?: never };
-type XOR<T, U> = T | U extends object ? (Without<T, U> & U) | (Without<U, T> & T) : T | U;
-type OneOf<T extends any[]> = T extends [infer Only]
-  ? Only
-  : T extends [infer A, infer B, ...infer Rest]
-    ? OneOf<[XOR<A, B>, ...Rest]>
-    : never;
-
 export interface paths {
   "/api/v1/crawl-runs/{id}/": {
     /** Get Crawl Run */
@@ -3088,6 +3079,7 @@ export interface components {
       | "app_run_deleted"
       | "session_started"
       | "session_ended"
+      | "tool_approval_submitted"
       | "file_uploaded"
       | "file_deleted"
       | "website_created"
@@ -6216,7 +6208,8 @@ export interface components {
       | "completion_model"
       | "embedding_model"
       | "transcription_model"
-      | "audit_log";
+      | "audit_log"
+      | "session";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -6254,7 +6247,9 @@ export interface components {
       | 9029
       | 9030
       | 9031
-      | 9032;
+      | 9032
+      | 9033
+      | 9034;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -6538,6 +6533,14 @@ export interface components {
       /** Message */
       message: string;
       intric_error_code: components["schemas"]["ErrorCodes"];
+      /** Code */
+      code?: string | null;
+      /** Context */
+      context?: {
+        [key: string]: unknown;
+      } | null;
+      /** Request Id */
+      request_id?: string | null;
     };
     /** GetModelsResponse */
     GetModelsResponse: {
@@ -7287,6 +7290,12 @@ export interface components {
       is_org_enabled: boolean;
       /** Has Credentials */
       has_credentials: boolean;
+      /**
+       * Credential Status
+       * @default missing
+       * @enum {string}
+       */
+      credential_status?: "ok" | "missing" | "decryption_failed";
       /**
        * Tools
        * @default []
@@ -11002,6 +11011,24 @@ export interface components {
       tool_call_id: string;
       /** Approved */
       approved: boolean;
+      /** Reason */
+      reason?: string | null;
+    };
+    /** ToolApprovalResponse */
+    ToolApprovalResponse: {
+      /** Status */
+      status: string;
+      /** Approval Id */
+      approval_id: string;
+      /** Decisions Received */
+      decisions_received: number;
+      /** Decisions Remaining */
+      decisions_remaining: number;
+      /**
+       * Unrecognized Tool Call Ids
+       * @default []
+       */
+      unrecognized_tool_call_ids?: string[];
     };
     /** ToolAssistant */
     ToolAssistant: {
@@ -11030,6 +11057,8 @@ export interface components {
       tool_call_id?: string | null;
       /** Approved */
       approved?: boolean | null;
+      /** Result Status */
+      result_status?: string | null;
     };
     /** TranscriptionModelPublic */
     TranscriptionModelPublic: {
@@ -12477,7 +12506,11 @@ export interface components {
       finished_at: string | null;
     };
     /** @enum {string} */
-    IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
+    IntricEventType:
+      | "generating_image"
+      | "tool_call"
+      | "tool_approval_required"
+      | "tool_approval_timeout";
     /** SSEText */
     SSEText: {
       /**
@@ -12556,7 +12589,11 @@ export interface components {
          * IntricEventType
          * @enum {string}
          */
-        IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
+        IntricEventType:
+          | "generating_image"
+          | "tool_call"
+          | "tool_approval_required"
+          | "tool_approval_timeout";
       };
     };
     /**
@@ -12578,7 +12615,11 @@ export interface components {
          * IntricEventType
          * @enum {string}
          */
-        IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
+        IntricEventType:
+          | "generating_image"
+          | "tool_call"
+          | "tool_approval_required"
+          | "tool_approval_timeout";
         /**
          * ToolCallInfo
          * @description Info about a single tool being called.
@@ -12605,6 +12646,11 @@ export interface components {
            * @default null
            */
           approved?: boolean | null;
+          /**
+           * Result Status
+           * @default null
+           */
+          result_status?: string | null;
         };
       };
     };
@@ -12629,7 +12675,11 @@ export interface components {
          * IntricEventType
          * @enum {string}
          */
-        IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
+        IntricEventType:
+          | "generating_image"
+          | "tool_call"
+          | "tool_approval_required"
+          | "tool_approval_timeout";
         /**
          * ToolCallInfo
          * @description Info about a single tool being called.
@@ -12656,6 +12706,71 @@ export interface components {
            * @default null
            */
           approved?: boolean | null;
+          /**
+           * Result Status
+           * @default null
+           */
+          result_status?: string | null;
+        };
+      };
+    };
+    /**
+     * SSEToolApprovalTimeout
+     * @description Event emitted when tool approval timed out.
+     */
+    SSEToolApprovalTimeout: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** @default tool_approval_timeout */
+      intric_event_type?: $defs["IntricEventType"];
+      /** Approval Id */
+      approval_id: string;
+      /** Tools */
+      tools: $defs["ToolCallInfo"][];
+      $defs: {
+        /**
+         * IntricEventType
+         * @enum {string}
+         */
+        IntricEventType:
+          | "generating_image"
+          | "tool_call"
+          | "tool_approval_required"
+          | "tool_approval_timeout";
+        /**
+         * ToolCallInfo
+         * @description Info about a single tool being called.
+         */
+        ToolCallInfo: {
+          /** Server Name */
+          server_name: string;
+          /** Tool Name */
+          tool_name: string;
+          /**
+           * Arguments
+           * @default null
+           */
+          arguments?: {
+            [key: string]: unknown;
+          } | null;
+          /**
+           * Tool Call Id
+           * @default null
+           */
+          tool_call_id?: string | null;
+          /**
+           * Approved
+           * @default null
+           */
+          approved?: boolean | null;
+          /**
+           * Result Status
+           * @default null
+           */
+          result_status?: string | null;
         };
       };
     };
@@ -16436,9 +16551,8 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
-          "text/event-stream": OneOf<
-            [
-              {
+          "text/event-stream":
+            | {
                 /**
                  * Session Id
                  * Format: uuid
@@ -16483,8 +16597,8 @@ export interface operations {
                     size: number;
                   };
                 };
-              },
-              {
+              }
+            | {
                 /**
                  * Session Id
                  * Format: uuid
@@ -16496,10 +16610,144 @@ export interface operations {
                    * IntricEventType
                    * @enum {string}
                    */
-                  IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
+                  IntricEventType:
+                    | "generating_image"
+                    | "tool_call"
+                    | "tool_approval_required"
+                    | "tool_approval_timeout";
                 };
-              },
-              {
+              }
+            | {
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** @default tool_call */
+                intric_event_type?: components["schemas"]["IntricEventType"];
+                /** Tools */
+                tools: components["schemas"]["ToolCallInfo"][];
+                $defs: {
+                  /**
+                   * IntricEventType
+                   * @enum {string}
+                   */
+                  IntricEventType:
+                    | "generating_image"
+                    | "tool_call"
+                    | "tool_approval_required"
+                    | "tool_approval_timeout";
+                  /**
+                   * ToolCallInfo
+                   * @description Info about a single tool being called.
+                   */
+                  ToolCallInfo: {
+                    /** Server Name */
+                    server_name: string;
+                    /** Tool Name */
+                    tool_name: string;
+                    /** Arguments */
+                    arguments?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** Tool Call Id */
+                    tool_call_id?: string | null;
+                    /** Approved */
+                    approved?: boolean | null;
+                    /** Result Status */
+                    result_status?: string | null;
+                  };
+                };
+              }
+            | {
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** @default tool_approval_required */
+                intric_event_type?: components["schemas"]["IntricEventType"];
+                /** Approval Id */
+                approval_id: string;
+                /** Tools */
+                tools: components["schemas"]["ToolCallInfo"][];
+                $defs: {
+                  /**
+                   * IntricEventType
+                   * @enum {string}
+                   */
+                  IntricEventType:
+                    | "generating_image"
+                    | "tool_call"
+                    | "tool_approval_required"
+                    | "tool_approval_timeout";
+                  /**
+                   * ToolCallInfo
+                   * @description Info about a single tool being called.
+                   */
+                  ToolCallInfo: {
+                    /** Server Name */
+                    server_name: string;
+                    /** Tool Name */
+                    tool_name: string;
+                    /** Arguments */
+                    arguments?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** Tool Call Id */
+                    tool_call_id?: string | null;
+                    /** Approved */
+                    approved?: boolean | null;
+                    /** Result Status */
+                    result_status?: string | null;
+                  };
+                };
+              }
+            | {
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** @default tool_approval_timeout */
+                intric_event_type?: components["schemas"]["IntricEventType"];
+                /** Approval Id */
+                approval_id: string;
+                /** Tools */
+                tools: components["schemas"]["ToolCallInfo"][];
+                $defs: {
+                  /**
+                   * IntricEventType
+                   * @enum {string}
+                   */
+                  IntricEventType:
+                    | "generating_image"
+                    | "tool_call"
+                    | "tool_approval_required"
+                    | "tool_approval_timeout";
+                  /**
+                   * ToolCallInfo
+                   * @description Info about a single tool being called.
+                   */
+                  ToolCallInfo: {
+                    /** Server Name */
+                    server_name: string;
+                    /** Tool Name */
+                    tool_name: string;
+                    /** Arguments */
+                    arguments?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** Tool Call Id */
+                    tool_call_id?: string | null;
+                    /** Approved */
+                    approved?: boolean | null;
+                    /** Result Status */
+                    result_status?: string | null;
+                  };
+                };
+              }
+            | {
                 /**
                  * Session Id
                  * Format: uuid
@@ -16531,8 +16779,8 @@ export interface operations {
                     token_count?: number | null;
                   };
                 };
-              },
-              {
+              }
+            | {
                 /**
                  * Session Id
                  * Format: uuid
@@ -16635,8 +16883,8 @@ export interface operations {
                     url: string;
                   };
                 };
-              },
-              {
+              }
+            | {
                 /**
                  * Session Id
                  * Format: uuid
@@ -16646,9 +16894,7 @@ export interface operations {
                 error: string;
                 /** Error Code */
                 error_code?: number | null;
-              }
-            ]
-          >;
+              };
         };
       };
       /** @description Bad Request */
@@ -16852,11 +17098,17 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["ToolApprovalResponse"];
         };
       };
       /** @description Bad Request */
       400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };
@@ -16867,10 +17119,22 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

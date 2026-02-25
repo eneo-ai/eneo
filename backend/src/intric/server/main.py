@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from intric.allowed_origins.get_origin_callback import get_origin
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
+from intric.main.request_context import get_request_context
 from intric.server import api_documentation
 from intric.server.dependencies.lifespan import lifespan as app_lifespan
 from intric.server.exception_handlers import add_exception_handlers
@@ -189,10 +190,20 @@ def get_application():
     async def http_exception_handler(request, exc: HTTPException):
         detail = exc.detail
         headers = exc.headers or None
+        request_id = request.headers.get("x-correlation-id") or request.headers.get(
+            "x-request-id"
+        )
+        if not request_id:
+            request_id = get_request_context().get("correlation_id")
+
         if isinstance(detail, dict) and "code" in detail and "message" in detail:
+            normalized_detail = dict(detail)
+            if request_id and "request_id" not in normalized_detail:
+                normalized_detail["request_id"] = request_id
             return JSONResponse(
-                status_code=exc.status_code, content=detail, headers=headers
+                status_code=exc.status_code, content=normalized_detail, headers=headers
             )
+
         return JSONResponse(
             status_code=exc.status_code, content={"detail": detail}, headers=headers
         )

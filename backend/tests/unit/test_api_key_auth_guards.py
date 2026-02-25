@@ -362,6 +362,27 @@ class TestErrorContracts:
         assert http_exc.detail == {"code": "rate_limited", "message": "Too many requests."}
         assert http_exc.headers["Retry-After"] == "60"
 
+    def test_auth_dependencies_raise_includes_request_id_when_available(self):
+        exc = ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_scope",
+            message="Denied.",
+        )
+        request = Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/",
+                "headers": [(b"x-correlation-id", b"req-123")],
+            }
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            _raise_api_key_http_error(exc, request=request)
+
+        detail = exc_info.value.detail
+        assert detail["request_id"] == "req-123"
+
     def test_router_helpers_raise_preserves_contract(self):
         """15. raise_api_key_http_error in api_key_router_helpers.py."""
         from intric.authentication.api_key_router_helpers import raise_api_key_http_error
@@ -376,7 +397,9 @@ class TestErrorContracts:
             raise_api_key_http_error(exc)
         http_exc = exc_info.value
         assert http_exc.status_code == 403
-        assert http_exc.detail == {"code": "insufficient_permission", "message": "Denied."}
+        assert http_exc.detail["code"] == "insufficient_permission"
+        assert http_exc.detail["message"] == "Denied."
+        assert http_exc.detail["context"]["auth_layer"] == "api_key_method"
         assert http_exc.headers["X-Custom"] == "val"
 
     def test_container_raise_preserves_contract(self):
@@ -393,8 +416,61 @@ class TestErrorContracts:
             container_raise(exc)
         http_exc = exc_info.value
         assert http_exc.status_code == 401
-        assert http_exc.detail == {"code": "invalid_api_key", "message": "Invalid."}
+        assert http_exc.detail["code"] == "invalid_api_key"
+        assert http_exc.detail["message"] == "Invalid."
+        assert http_exc.detail["context"]["auth_layer"] == "identity"
         assert http_exc.headers["WWW-Authenticate"] == "Bearer"
+
+    def test_converter_strips_granted_level_from_response_context(self):
+        from intric.authentication.api_key_router_helpers import raise_api_key_http_error
+
+        exc = ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_resource_permission",
+            message="Denied.",
+            context={
+                "resource_type": "apps",
+                "required_level": "write",
+                "granted_level": "read",
+            },
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            raise_api_key_http_error(exc)
+
+        detail = exc_info.value.detail
+        assert detail["context"]["resource_type"] == "apps"
+        assert detail["context"]["required_level"] == "write"
+        assert detail["context"]["auth_layer"] == "api_key_resource"
+        assert "granted_level" not in detail["context"]
+
+    def test_converter_does_not_add_auth_layer_for_400(self):
+        from intric.authentication.api_key_router_helpers import raise_api_key_http_error
+
+        exc = ApiKeyValidationError(
+            status_code=400,
+            code="invalid_request",
+            message="Invalid input.",
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            raise_api_key_http_error(exc)
+
+        assert "context" not in exc_info.value.detail
+
+    def test_converter_maps_guardrail_layer(self):
+        from intric.authentication.api_key_router_helpers import raise_api_key_http_error
+
+        exc = ApiKeyValidationError(
+            status_code=403,
+            code="origin_not_allowed",
+            message="Origin is not allowed.",
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            raise_api_key_http_error(exc)
+
+        assert exc_info.value.detail["context"]["auth_layer"] == "guardrail"
 
 
 # ---------------------------------------------------------------------------

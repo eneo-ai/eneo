@@ -1,6 +1,6 @@
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Optional, cast
+from typing import NoReturn, Optional, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
@@ -52,6 +52,29 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
+def _raise_conversation_scope_denied(http_request: Request, message: str) -> NoReturn:
+    request_id = http_request.headers.get("x-correlation-id") or http_request.headers.get(
+        "x-request-id"
+    )
+    detail: dict[str, object] = {
+        "code": "insufficient_scope",
+        "message": message,
+        "context": {"auth_layer": "api_key_scope"},
+    }
+    if request_id:
+        detail["request_id"] = request_id
+
+    logger.warning(
+        "Conversation scope denied",
+        extra={
+            "code": "insufficient_scope",
+            "request_path": http_request.url.path,
+            "method": http_request.method,
+        },
+    )
+    raise HTTPException(status_code=403, detail=detail)
+
+
 async def _validate_conversation_scope(
     http_request: Request,
     container: Container,
@@ -95,15 +118,12 @@ async def _validate_conversation_scope(
 
     # App-scoped keys cannot create conversations at all
     if scope_type == "app":
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "insufficient_scope",
-                "message": (
-                    f"API key is scoped to app '{scope_id}'. "
-                    f"It can only access that app and its runs."
-                ),
-            },
+        _raise_conversation_scope_denied(
+            http_request,
+            (
+                f"API key is scoped to app '{scope_id}'. "
+                f"It can only access that app and its runs."
+            ),
         )
 
     space_repo = container.space_repo()
@@ -116,12 +136,8 @@ async def _validate_conversation_scope(
         except NotFoundException:
             # Session doesn't exist — return 403 (not 404) to prevent
             # scoped keys from enumerating session existence.
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "code": "insufficient_scope",
-                    "message": "Unable to verify API key scope for this session.",
-                },
+            _raise_conversation_scope_denied(
+                http_request, "Unable to verify API key scope for this session."
             )
         except Exception as e:
             # DB error or unexpected failure — fail-closed: deny access
@@ -130,52 +146,39 @@ async def _validate_conversation_scope(
                 extra={"session_id": str(session_id), "error_type": type(e).__name__},
                 exc_info=True,
             )
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "code": "insufficient_scope",
-                    "message": "Unable to verify API key scope for this session.",
-                },
+            _raise_conversation_scope_denied(
+                http_request, "Unable to verify API key scope for this session."
             )
 
         if scope_type == "assistant":
             session_assistant_id = session.assistant.id if session.assistant else None
             if session_assistant_id != scope_id:
-                raise HTTPException(
-                    status_code=403,
-                    detail={
-                        "code": "insufficient_scope",
-                        "message": (
-                            f"API key is scoped to assistant '{scope_id}'. "
-                            f"It can only access that assistant and its conversations."
-                        ),
-                    },
+                _raise_conversation_scope_denied(
+                    http_request,
+                    (
+                        f"API key is scoped to assistant '{scope_id}'. "
+                        f"It can only access that assistant and its conversations."
+                    ),
                 )
         elif scope_type == "space":
             # Resolve session to space via assistant or group_chat
             try:
                 space = await space_repo.get_space_by_session(session_id)
                 if space.id != scope_id:
-                    raise HTTPException(
-                        status_code=403,
-                        detail={
-                            "code": "insufficient_scope",
-                            "message": (
-                                f"API key is scoped to space '{scope_id}'. "
-                                f"The requested resource belongs to a different scope."
-                            ),
-                        },
-                    )
-            except NotFoundException:
-                raise HTTPException(
-                    status_code=403,
-                    detail={
-                        "code": "insufficient_scope",
-                        "message": (
+                    _raise_conversation_scope_denied(
+                        http_request,
+                        (
                             f"API key is scoped to space '{scope_id}'. "
                             f"The requested resource belongs to a different scope."
                         ),
-                    },
+                    )
+            except NotFoundException:
+                _raise_conversation_scope_denied(
+                    http_request,
+                    (
+                        f"API key is scoped to space '{scope_id}'. "
+                        f"The requested resource belongs to a different scope."
+                    ),
                 )
         return
 
@@ -183,40 +186,31 @@ async def _validate_conversation_scope(
     if assistant_id is not None:
         if scope_type == "assistant":
             if assistant_id != scope_id:
-                raise HTTPException(
-                    status_code=403,
-                    detail={
-                        "code": "insufficient_scope",
-                        "message": (
-                            f"API key is scoped to assistant '{scope_id}'. "
-                            f"It can only access that assistant and its conversations."
-                        ),
-                    },
+                _raise_conversation_scope_denied(
+                    http_request,
+                    (
+                        f"API key is scoped to assistant '{scope_id}'. "
+                        f"It can only access that assistant and its conversations."
+                    ),
                 )
         elif scope_type == "space":
             try:
                 space = await space_repo.get_space_by_assistant(assistant_id)
                 if space.id != scope_id:
-                    raise HTTPException(
-                        status_code=403,
-                        detail={
-                            "code": "insufficient_scope",
-                            "message": (
-                                f"API key is scoped to space '{scope_id}'. "
-                                f"The requested resource belongs to a different scope."
-                            ),
-                        },
-                    )
-            except NotFoundException:
-                raise HTTPException(
-                    status_code=403,
-                    detail={
-                        "code": "insufficient_scope",
-                        "message": (
+                    _raise_conversation_scope_denied(
+                        http_request,
+                        (
                             f"API key is scoped to space '{scope_id}'. "
                             f"The requested resource belongs to a different scope."
                         ),
-                    },
+                    )
+            except NotFoundException:
+                _raise_conversation_scope_denied(
+                    http_request,
+                    (
+                        f"API key is scoped to space '{scope_id}'. "
+                        f"The requested resource belongs to a different scope."
+                    ),
                 )
         return
 
@@ -224,40 +218,31 @@ async def _validate_conversation_scope(
     if group_chat_id is not None:
         if scope_type == "assistant":
             # Assistant-scoped keys cannot access group chats
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "code": "insufficient_scope",
-                    "message": (
-                        f"API key is scoped to assistant '{scope_id}'. "
-                        f"It can only access that assistant and its conversations."
-                    ),
-                },
+            _raise_conversation_scope_denied(
+                http_request,
+                (
+                    f"API key is scoped to assistant '{scope_id}'. "
+                    f"It can only access that assistant and its conversations."
+                ),
             )
         elif scope_type == "space":
             try:
                 space = await space_repo.get_space_by_group_chat(group_chat_id)
                 if space.id != scope_id:
-                    raise HTTPException(
-                        status_code=403,
-                        detail={
-                            "code": "insufficient_scope",
-                            "message": (
-                                f"API key is scoped to space '{scope_id}'. "
-                                f"The requested resource belongs to a different scope."
-                            ),
-                        },
-                    )
-            except NotFoundException:
-                raise HTTPException(
-                    status_code=403,
-                    detail={
-                        "code": "insufficient_scope",
-                        "message": (
+                    _raise_conversation_scope_denied(
+                        http_request,
+                        (
                             f"API key is scoped to space '{scope_id}'. "
                             f"The requested resource belongs to a different scope."
                         ),
-                    },
+                    )
+            except NotFoundException:
+                _raise_conversation_scope_denied(
+                    http_request,
+                    (
+                        f"API key is scoped to space '{scope_id}'. "
+                        f"The requested resource belongs to a different scope."
+                    ),
                 )
 
 

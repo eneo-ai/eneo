@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, Request, Security, status
 from intric.authentication.auth_factory import get_auth_service
 from intric.authentication.auth_service import AuthService
 from intric.authentication.api_key_resolver import ApiKeyValidationError, check_resource_permission
+from intric.authentication.api_key_router_helpers import raise_api_key_http_error
 from intric.authentication.auth_models import ApiKeyPermission
 from intric.main.config import get_settings
 from intric.main.container.container import Container
@@ -21,19 +22,12 @@ from intric.main.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _raise_api_key_http_error(exc: ApiKeyValidationError) -> NoReturn:
-    logger.warning(
-        "API key authentication failed",
-        extra={"code": exc.code, "error_message": exc.message},
-    )
-    detail: dict[str, object] = {"code": exc.code, "message": exc.message}
-    if exc.context is not None:
-        detail["context"] = dict(exc.context)
-    raise HTTPException(
-        status_code=exc.status_code,
-        detail=detail,
-        headers=exc.headers,
-    ) from exc
+def _raise_api_key_http_error(
+    exc: ApiKeyValidationError,
+    *,
+    request: Request | None = None,
+) -> NoReturn:
+    raise_api_key_http_error(exc, request=request)
 
 
 async def _get_api_key_from_header(
@@ -60,7 +54,7 @@ async def get_current_active_user(
     try:
         return await user_service.authenticate(token, api_key, request=request)
     except ApiKeyValidationError as exc:
-        _raise_api_key_http_error(exc)
+        _raise_api_key_http_error(exc, request=request)
 
 
 async def get_current_active_user_with_quota(
@@ -75,7 +69,7 @@ async def get_current_active_user_with_quota(
             token, api_key, with_quota_used=True, request=request
         )
     except ApiKeyValidationError as exc:
-        _raise_api_key_http_error(exc)
+        _raise_api_key_http_error(exc, request=request)
 
 
 async def get_user_from_token_or_assistant_api_key(
@@ -91,7 +85,7 @@ async def get_user_from_token_or_assistant_api_key(
             api_key, token, assistant_id=id, request=request
         )
     except ApiKeyValidationError as exc:
-        _raise_api_key_http_error(exc)
+        _raise_api_key_http_error(exc, request=request)
 
 
 async def get_user_from_token_or_assistant_api_key_without_assistant_id(
@@ -106,7 +100,7 @@ async def get_user_from_token_or_assistant_api_key_without_assistant_id(
             api_key, token, request=request
         )
     except ApiKeyValidationError as exc:
-        _raise_api_key_http_error(exc)
+        _raise_api_key_http_error(exc, request=request)
 
 
 def get_api_key(hashed: bool = True):
@@ -256,7 +250,7 @@ def require_resource_permission(resource_type: str, required: str):
         try:
             check_resource_permission(key, resource_type, required)
         except ApiKeyValidationError as exc:
-            _raise_api_key_http_error(exc)
+            _raise_api_key_http_error(exc, request=request)
 
     return _resource_check_dep
 

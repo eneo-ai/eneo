@@ -8,6 +8,7 @@ import pytest
 import sqlalchemy as sa
 
 from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
+from intric.spaces.api.space_models import SpaceRoleValue
 from intric.main.config import get_settings, set_settings
 from intric.users.user import UserAdd, UserState
 
@@ -33,10 +34,9 @@ async def default_user_token(db_container, patch_auth_service_jwt, default_user)
 
 
 @pytest.fixture
-async def regular_user_token(db_container, patch_auth_service_jwt, default_user):
+async def regular_user(db_container, default_user):
     async with db_container() as container:
         user_repo = container.user_repo()
-        auth_service = container.auth_service()
         user = await user_repo.add(
             UserAdd(
                 email=f"regular-api-key-{uuid4().hex[:8]}@example.com",
@@ -45,7 +45,14 @@ async def regular_user_token(db_container, patch_auth_service_jwt, default_user)
                 tenant_id=default_user.tenant_id,
             )
         )
-        token = auth_service.create_access_token_for_user(user)
+    return user
+
+
+@pytest.fixture
+async def regular_user_token(db_container, patch_auth_service_jwt, regular_user):
+    async with db_container() as container:
+        auth_service = container.auth_service()
+        token = auth_service.create_access_token_for_user(regular_user)
     return token
 
 
@@ -79,6 +86,32 @@ async def _create_space_and_assistant(
     assert assistant_response.status_code == 200, assistant_response.text
     assistant_id = assistant_response.json()["id"]
     return space_id, assistant_id
+
+
+async def _add_space_member_role(
+    db_container,
+    *,
+    space_id: str,
+    user_id: UUID,
+    role: str = SpaceRoleValue.VIEWER.value,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.text(
+                """
+                INSERT INTO spaces_users (space_id, user_id, role)
+                VALUES (:space_id, :user_id, :role)
+                ON CONFLICT DO NOTHING
+                """
+            ),
+            {
+                "space_id": space_id,
+                "user_id": str(user_id),
+                "role": role,
+            },
+        )
+        await session.commit()
 
 
 @pytest.mark.integration
@@ -204,10 +237,14 @@ async def test_pk_origin_guardrail(
         headers={
             "X-API-Key": secret,
             "Origin": "https://evil.example.com",
+            "X-Correlation-ID": "guardrail-origin-1",
         },
     )
     assert deny_response.status_code == 403
-    assert deny_response.json()["code"] == "origin_not_allowed"
+    payload = deny_response.json()
+    assert payload["code"] == "origin_not_allowed"
+    assert payload["request_id"] == "guardrail-origin-1"
+    assert payload["context"]["auth_layer"] == "guardrail"
 
 
 @pytest.mark.integration
@@ -510,11 +547,13 @@ async def test_api_key_expired_denied(client, default_user_token):
 
     response = await client.get(
         _AUTH_ENDPOINT,
-        headers={"X-API-Key": secret},
+        headers={"X-API-Key": secret, "X-Correlation-ID": "identity-expired-1"},
     )
     assert response.status_code == 401
     payload = response.json()
     assert payload["code"] == "invalid_api_key"
+    assert payload["request_id"] == "identity-expired-1"
+    assert payload["context"]["auth_layer"] == "identity"
     assert "expired" in payload["message"].lower()
 
 
@@ -545,11 +584,13 @@ async def test_api_key_suspended_denied(client, default_user_token):
 
     response = await client.get(
         _AUTH_ENDPOINT,
-        headers={"X-API-Key": secret},
+        headers={"X-API-Key": secret, "X-Correlation-ID": "identity-suspended-1"},
     )
     assert response.status_code == 401
     payload = response.json()
     assert payload["code"] == "invalid_api_key"
+    assert payload["request_id"] == "identity-suspended-1"
+    assert payload["context"]["auth_layer"] == "identity"
     assert "suspended" in payload["message"].lower()
 
 
@@ -558,11 +599,16 @@ async def test_api_key_suspended_denied(client, default_user_token):
 async def test_invalid_api_key_denied(client):
     response = await client.get(
         _AUTH_ENDPOINT,
-        headers={"X-API-Key": "sk_invalid_123456"},
+        headers={
+            "X-API-Key": "sk_invalid_123456",
+            "X-Correlation-ID": "identity-invalid-1",
+        },
     )
     assert response.status_code == 401
     payload = response.json()
     assert payload["code"] == "invalid_api_key"
+    assert payload["request_id"] == "identity-invalid-1"
+    assert payload["context"]["auth_layer"] == "identity"
 
 
 @pytest.mark.integration
@@ -1326,10 +1372,13 @@ async def test_method_aware_guard_blocks_write_key_on_app_run_delete(
 
     response = await client.delete(
         f"/api/v1/app-runs/{uuid4()}/",
-        headers={"X-API-Key": secret},
+        headers={"X-API-Key": secret, "X-Correlation-ID": "method-layer-1"},
     )
     assert response.status_code == 403, response.text
-    assert response.json()["code"] == "insufficient_permission"
+    detail = response.json()
+    assert detail["code"] == "insufficient_permission"
+    assert detail["request_id"] == "method-layer-1"
+    assert detail["context"]["auth_layer"] == "api_key_method"
 
 
 @pytest.mark.integration
@@ -1405,9 +1454,11 @@ async def test_method_aware_guard_blocks_read_key_on_assistant_session_create(
         headers={"X-API-Key": secret},
     )
     assert create_session_response.status_code == 403, create_session_response.text
-    assert (
-        create_session_response.json()["code"] == "insufficient_resource_permission"
-    )
+    detail = create_session_response.json()
+    assert detail["code"] == "insufficient_resource_permission"
+    assert detail["context"]["auth_layer"] == "api_key_resource"
+    assert detail["context"]["required_level"] == "read"
+    assert "granted_level" not in detail["context"]
 
 
 @pytest.mark.integration
@@ -1451,6 +1502,119 @@ async def test_assistant_scoped_write_key_can_create_assistant_session(
     # Non-member tool assistant should produce a domain-level error after DB lookups.
     # If transaction wiring is broken, this path fails earlier with 500/autobegin.
     assert create_session_response.status_code == 404, create_session_response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_domain_policy_publish_assistant_denial_returns_actionable_error(
+    client,
+    db_container,
+    default_user_token,
+    regular_user,
+    regular_user_token,
+):
+    """403 domain policy denials must provide actionable API-consumer details."""
+    space_id, assistant_id = await _create_space_and_assistant(
+        client,
+        bearer_token=default_user_token,
+    )
+    await _add_space_member_role(
+        db_container,
+        space_id=space_id,
+        user_id=regular_user.id,
+        role=SpaceRoleValue.VIEWER.value,
+    )
+
+    response = await client.post(
+        f"/api/v1/assistants/{assistant_id}/publish/?published=true",
+        headers={
+            "Authorization": f"Bearer {regular_user_token}",
+            "X-Correlation-ID": "domain-policy-assistant-1",
+        },
+    )
+    assert response.status_code == 403, response.text
+    body = response.json()
+    assert body["code"] == "forbidden_action"
+    assert "publish" in body["message"].lower()
+    assert body["request_id"] == "domain-policy-assistant-1"
+    assert body["context"]["auth_layer"] == "domain_policy"
+    assert body["context"]["resource_type"] == "assistant"
+    assert body["context"]["action"] == "publish"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_domain_policy_app_create_denial_returns_actionable_error(
+    client,
+    db_container,
+    default_user_token,
+    regular_user,
+    regular_user_token,
+):
+    """Domain RBAC denial on non-publish endpoint should keep same error contract."""
+    space_response = await client.post(
+        "/api/v1/spaces/",
+        json={"name": f"domain-policy-space-{uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert space_response.status_code == 201, space_response.text
+    space_id = space_response.json()["id"]
+
+    await _add_space_member_role(
+        db_container,
+        space_id=space_id,
+        user_id=regular_user.id,
+        role=SpaceRoleValue.VIEWER.value,
+    )
+
+    response = await client.post(
+        f"/api/v1/spaces/{space_id}/applications/apps/",
+        json={"name": f"domain-policy-app-{uuid4().hex[:8]}"},
+        headers={
+            "Authorization": f"Bearer {regular_user_token}",
+            "X-Correlation-ID": "domain-policy-app-1",
+        },
+    )
+    assert response.status_code == 403, response.text
+    body = response.json()
+    assert body["code"] == "forbidden_action"
+    assert body["request_id"] == "domain-policy-app-1"
+    assert body["context"]["auth_layer"] == "domain_policy"
+    assert body["context"]["resource_type"] == "app"
+    assert body["context"]["action"] == "create"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_invalid_request_payload_does_not_include_auth_layer_context(
+    client,
+    default_user_token,
+):
+    """400 validation-style errors must remain actionable without auth-layer pollution."""
+    _, assistant_id = await _create_space_and_assistant(
+        client,
+        bearer_token=default_user_token,
+    )
+
+    response = await client.post(
+        "/api/v1/conversations/",
+        json={
+            "question": "hello",
+            "assistant_id": assistant_id,
+            "stream": False,
+            "require_tool_approval": True,
+        },
+        headers={
+            "Authorization": f"Bearer {default_user_token}",
+            "X-Correlation-ID": "invalid-request-1",
+        },
+    )
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["code"] == "invalid_request"
+    assert body["message"]
+    assert body["request_id"] == "invalid-request-1"
+    assert "context" not in body
 
 
 @pytest.mark.integration
@@ -1573,11 +1737,14 @@ async def test_space_scoped_key_conversations_session_scope_check_no_autobegin_e
             "stream": False,
             "files": [],
         },
-        headers={"X-API-Key": secret},
+        headers={"X-API-Key": secret, "X-Correlation-ID": "scope-denial-int-1"},
     )
     # Scope/session lookup should fail-closed without leaking existence, but never 500.
     assert response.status_code == 403, response.text
-    assert response.json().get("code") == "insufficient_scope"
+    body = response.json()
+    assert body.get("code") == "insufficient_scope"
+    assert body.get("request_id") == "scope-denial-int-1"
+    assert body.get("context", {}).get("auth_layer") == "api_key_scope"
 
 
 @pytest.mark.integration

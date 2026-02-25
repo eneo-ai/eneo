@@ -138,12 +138,17 @@ async def test_assistant_scoped_key_cannot_approve_other_assistant_context(
         response = await client.post(
             f"/api/v1/conversations/approve-tools/?approval_id={approval_id}",
             json=[{"tool_call_id": "call_1", "approved": True}],
-            headers={"X-API-Key": scoped_key},
+            headers={
+                "X-API-Key": scoped_key,
+                "X-Correlation-ID": "approval-scope-1",
+            },
         )
         assert response.status_code == 403, response.text
         body = response.json()
         code = body.get("code") or body.get("detail", {}).get("code")
         assert code == "insufficient_scope"
+        assert body.get("request_id") == "approval-scope-1"
+        assert body.get("context", {}).get("auth_layer") == "api_key_scope"
     finally:
         await manager.cancel_approval(approval_id)
 
@@ -187,6 +192,7 @@ async def test_space_scoped_key_cannot_approve_tools_outside_space(
         body = response.json()
         code = body.get("code") or body.get("detail", {}).get("code")
         assert code == "insufficient_scope"
+        assert body.get("context", {}).get("auth_layer") == "api_key_scope"
     finally:
         await manager.cancel_approval(approval_id)
 
