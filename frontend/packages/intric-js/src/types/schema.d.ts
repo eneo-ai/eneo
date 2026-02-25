@@ -2642,7 +2642,7 @@ export interface paths {
      * Create Completion Model
      * @description Create a new completion model (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * This creates the model metadata only. To enable it for a tenant,
      * use POST /api/v1/completion-models/{id}/ with tenant credentials.
@@ -2654,7 +2654,7 @@ export interface paths {
      * Update Completion Model Metadata
      * @description Update completion model metadata (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * Updates global model metadata. Does not affect tenant-specific settings.
      */
@@ -2665,7 +2665,7 @@ export interface paths {
      * Delete Completion Model
      * @description Delete a completion model (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * WARNING: Deletion affects all tenants. Use with caution.
      * Set force=true to delete even if model is in use (may break references).
@@ -2677,7 +2677,7 @@ export interface paths {
      * Create Embedding Model
      * @description Create a new embedding model (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * This creates the model metadata only. To enable it for a tenant,
      * use POST /api/v1/embedding-models/{id}/ with tenant credentials.
@@ -2689,7 +2689,7 @@ export interface paths {
      * Update Embedding Model Metadata
      * @description Update embedding model metadata (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * Updates global model metadata. Does not affect tenant-specific settings.
      */
@@ -2700,7 +2700,7 @@ export interface paths {
      * Delete Embedding Model
      * @description Delete an embedding model (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * WARNING: Deletion affects all tenants. Use with caution.
      */
@@ -10107,6 +10107,16 @@ export interface components {
       super_api_key_configured: boolean;
       /** Super Duper Api Key Configured */
       super_duper_api_key_configured: boolean;
+      /**
+       * Super Api Key Using Legacy
+       * @default false
+       */
+      super_api_key_using_legacy?: boolean;
+      /**
+       * Super Duper Api Key Using Legacy
+       * @default false
+       */
+      super_duper_api_key_using_legacy?: boolean;
     };
     /**
      * SyncLog
@@ -25921,7 +25931,7 @@ export interface operations {
    * Create Completion Model
    * @description Create a new completion model (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * This creates the model metadata only. To enable it for a tenant,
    * use POST /api/v1/completion-models/{id}/ with tenant credentials.
@@ -25963,7 +25973,7 @@ export interface operations {
    * Update Completion Model Metadata
    * @description Update completion model metadata (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * Updates global model metadata. Does not affect tenant-specific settings.
    */
@@ -26009,7 +26019,7 @@ export interface operations {
    * Delete Completion Model
    * @description Delete a completion model (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * WARNING: Deletion affects all tenants. Use with caution.
    * Set force=true to delete even if model is in use (may break references).
@@ -26061,7 +26071,7 @@ export interface operations {
    * Create Embedding Model
    * @description Create a new embedding model (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * This creates the model metadata only. To enable it for a tenant,
    * use POST /api/v1/embedding-models/{id}/ with tenant credentials.
@@ -26103,7 +26113,7 @@ export interface operations {
    * Update Embedding Model Metadata
    * @description Update embedding model metadata (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * Updates global model metadata. Does not affect tenant-specific settings.
    */
@@ -26149,7 +26159,7 @@ export interface operations {
    * Delete Embedding Model
    * @description Delete an embedding model (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * WARNING: Deletion affects all tenants. Use with caution.
    */

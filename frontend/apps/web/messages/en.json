@@ -2385,6 +2385,7 @@
   "api_keys_admin_tracking_open_audit_config": "Open full audit configuration",
   "api_keys_admin_status_configured": "Configured",
   "api_keys_admin_status_not_configured": "Not configured",
+  "api_keys_admin_status_using_legacy": "Configured via legacy INTRIC_ env variable. Migrate to {newVar} for continued support.",
   "api_keys_admin_super_keys_info": "Super keys are configured via environment variables only. Rotate by updating the environment value and restarting the backend.",
   "api_keys_admin_policy_require_expiration": "Require expiration",
   "api_keys_admin_policy_require_expiration_desc": "Force all new API keys to include an expiration date for improved security",

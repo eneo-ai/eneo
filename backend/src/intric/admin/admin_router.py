@@ -1405,10 +1405,28 @@ async def get_super_api_key_status(
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
 
+    import os
+
     settings = get_settings()
+
+    # Legacy detection: INTRIC_* is set in the environment but ENEO_* is not.
+    # If the user has added ENEO_* (even if INTRIC_* is still present), it's not legacy.
+    super_legacy = (
+        bool(settings.eneo_super_api_key)
+        and "INTRIC_SUPER_API_KEY" in os.environ
+        and "ENEO_SUPER_API_KEY" not in os.environ
+    )
+    super_duper_legacy = (
+        bool(settings.eneo_super_duper_api_key)
+        and "INTRIC_SUPER_DUPER_API_KEY" in os.environ
+        and "ENEO_SUPER_DUPER_API_KEY" not in os.environ
+    )
+
     return SuperApiKeyStatus(
-        super_api_key_configured=bool(settings.intric_super_api_key),
-        super_duper_api_key_configured=bool(settings.intric_super_duper_api_key),
+        super_api_key_configured=bool(settings.eneo_super_api_key),
+        super_duper_api_key_configured=bool(settings.eneo_super_duper_api_key),
+        super_api_key_using_legacy=super_legacy,
+        super_duper_api_key_using_legacy=super_duper_legacy,
     )
 
 

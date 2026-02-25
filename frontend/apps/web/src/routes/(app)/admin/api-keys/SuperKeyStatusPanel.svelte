@@ -44,13 +44,27 @@
 
   {#if status}
     <div class="flex flex-col gap-3">
-      <div class="flex items-center justify-between">
-        <div class="text-sm font-medium">INTRIC_SUPER_API_KEY</div>
-        <Label.Single item={statusLabel(status.super_api_key_configured)} />
+      <div class="flex flex-col gap-1">
+        <div class="flex items-center justify-between">
+          <div class="text-sm font-medium">ENEO_SUPER_API_KEY</div>
+          <Label.Single item={statusLabel(status.super_api_key_configured)} />
+        </div>
+        {#if status.super_api_key_using_legacy}
+          <p class="text-muted text-xs italic">
+            {m.api_keys_admin_status_using_legacy({ newVar: "ENEO_SUPER_API_KEY" })}
+          </p>
+        {/if}
       </div>
-      <div class="flex items-center justify-between">
-        <div class="text-sm font-medium">INTRIC_SUPER_DUPER_API_KEY</div>
-        <Label.Single item={statusLabel(status.super_duper_api_key_configured)} />
+      <div class="flex flex-col gap-1">
+        <div class="flex items-center justify-between">
+          <div class="text-sm font-medium">ENEO_SUPER_DUPER_API_KEY</div>
+          <Label.Single item={statusLabel(status.super_duper_api_key_configured)} />
+        </div>
+        {#if status.super_duper_api_key_using_legacy}
+          <p class="text-muted text-xs italic">
+            {m.api_keys_admin_status_using_legacy({ newVar: "ENEO_SUPER_DUPER_API_KEY" })}
+          </p>
+        {/if}
       </div>
     </div>
     <p class="text-muted text-sm">

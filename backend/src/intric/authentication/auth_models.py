@@ -409,6 +409,8 @@ class ApiKeyNotificationPolicyUpdate(BaseModel):
 class SuperApiKeyStatus(BaseModel):
     super_api_key_configured: bool
     super_duper_api_key_configured: bool
+    super_api_key_using_legacy: bool = False
+    super_duper_api_key_using_legacy: bool = False
 
     model_config = ConfigDict(extra="forbid")
 

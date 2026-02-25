@@ -2420,6 +2420,7 @@
   "api_keys_admin_tracking_open_audit_config": "Öppna full granskningskonfiguration",
   "api_keys_admin_status_configured": "Konfigurerad",
   "api_keys_admin_status_not_configured": "Inte konfigurerad",
+  "api_keys_admin_status_using_legacy": "Konfigurerad via föråldrad INTRIC_-miljövariabel. Migrera till {newVar} för fortsatt stöd.",
   "api_keys_admin_super_keys_info": "Supernycklar konfigureras endast via miljövariabler. Rotera genom att uppdatera miljövärdet och starta om backend.",
   "api_keys_admin_policy_require_expiration": "Kräv utgångsdatum",
   "api_keys_admin_policy_require_expiration_desc": "Tvinga alla nya API-nycklar att inkludera ett utgångsdatum för förbättrad säkerhet",
