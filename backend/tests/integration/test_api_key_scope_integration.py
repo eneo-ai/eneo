@@ -211,6 +211,7 @@ async def _create_file_scoped_key(
 ) -> str:
     """Create scope resource(s) as needed and return an API key for file-route tests."""
     if scope_type == "app":
+        scope_id: str | None = None
         existing_apps_resp = await client.get(
             "/api/v1/apps/",
             headers={"Authorization": f"Bearer {token}"},
@@ -220,14 +221,17 @@ async def _create_file_scoped_key(
                 "/api/v1/apps",
                 headers={"Authorization": f"Bearer {token}"},
             )
-        if existing_apps_resp.status_code != 200:
+
+        if existing_apps_resp.status_code == 200:
+            existing_apps = existing_apps_resp.json().get("items", [])
+            if existing_apps:
+                scope_id = existing_apps[0]["id"]
+        elif existing_apps_resp.status_code not in {404}:
             pytest.skip(
                 f"Cannot query apps endpoint for app-scoped key fixture (status={existing_apps_resp.status_code})"
             )
-        existing_apps = existing_apps_resp.json().get("items", [])
-        if existing_apps:
-            scope_id = existing_apps[0]["id"]
-        else:
+
+        if scope_id is None:
             # App creation requires transcription model setup in the target space.
             # Fall back to creating one; skip if fixture tenant lacks prerequisites.
             space_id = await _create_space(

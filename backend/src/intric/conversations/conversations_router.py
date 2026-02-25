@@ -327,24 +327,24 @@ async def chat(
             },
         )
 
-    # Body-driven scope validation (before service call)
-    await _validate_conversation_scope(
-        http_request=http_request,
-        container=container,
-        assistant_id=request.assistant_id,
-        group_chat_id=request.group_chat_id,
-        session_id=request.session_id,
-    )
-
-    file_ids = [file.id for file in request.files]
-    tool_assistant_id = None
-    if request.tools is not None and request.tools.assistants:
-        tool_assistant_id = request.tools.assistants[0].id
-
-    # Use the dedicated ConversationService to handle routing logic
-    conversation_service = container.conversation_service()
     session = cast(AsyncSession, container.session())
     async with session.begin():
+        # Body-driven scope validation (before service call)
+        await _validate_conversation_scope(
+            http_request=http_request,
+            container=container,
+            assistant_id=request.assistant_id,
+            group_chat_id=request.group_chat_id,
+            session_id=request.session_id,
+        )
+
+        file_ids = [file.id for file in request.files]
+        tool_assistant_id = None
+        if request.tools is not None and request.tools.assistants:
+            tool_assistant_id = request.tools.assistants[0].id
+
+        # Use the dedicated ConversationService to handle routing logic
+        conversation_service = container.conversation_service()
         response = await conversation_service.ask_conversation(
             question=request.question,
             session_id=request.session_id,

@@ -1412,6 +1412,211 @@ async def test_method_aware_guard_blocks_read_key_on_assistant_session_create(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_assistant_scoped_write_key_can_create_assistant_session(
+    client, default_user_token
+):
+    """Regression: assistant session POST must not fail with session autobegin errors."""
+    _, assistant_id = await _create_space_and_assistant(
+        client,
+        bearer_token=default_user_token,
+    )
+
+    key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Assistant Scoped Write Key",
+            "key_type": "sk_",
+            "permission": "write",
+            "scope_type": "assistant",
+            "scope_id": assistant_id,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert key_response.status_code == 201, key_response.text
+    secret = key_response.json()["secret"]
+
+    create_session_response = await client.post(
+        f"/api/v1/assistants/{assistant_id}/sessions/",
+        json={
+            "question": "hello",
+            "stream": False,
+            "tools": {
+                "assistants": [
+                    {"id": str(uuid4()), "handle": "non-member"},
+                ]
+            },
+        },
+        headers={"X-API-Key": secret},
+    )
+    # Non-member tool assistant should produce a domain-level error after DB lookups.
+    # If transaction wiring is broken, this path fails earlier with 500/autobegin.
+    assert create_session_response.status_code == 404, create_session_response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_space_scoped_key_can_hit_conversations_without_autobegin_error(
+    client, default_user_token
+):
+    """Regression: /conversations should not hit autobegin errors for scoped keys."""
+    space_id, assistant_id = await _create_space_and_assistant(
+        client,
+        bearer_token=default_user_token,
+    )
+
+    key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Space Scoped Write Key",
+            "key_type": "sk_",
+            "permission": "write",
+            "scope_type": "space",
+            "scope_id": space_id,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert key_response.status_code == 201, key_response.text
+    secret = key_response.json()["secret"]
+
+    response = await client.post(
+        "/api/v1/conversations/",
+        json={
+            "question": "hello",
+            "assistant_id": assistant_id,
+            "stream": False,
+            "files": [],
+            "tools": {
+                "assistants": [
+                    {"id": str(uuid4()), "handle": "non-member"},
+                ]
+            },
+        },
+        headers={"X-API-Key": secret},
+    )
+    # Non-member tool assistant should fail at domain level after scoped auth/scope validation.
+    # If transaction wiring is broken, this path fails earlier with 500/autobegin.
+    assert response.status_code in {400, 404}, response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_assistant_scoped_write_key_can_hit_followup_without_autobegin_error(
+    client, default_user_token
+):
+    """Regression: assistant follow-up POST must not fail with session autobegin errors."""
+    _, assistant_id = await _create_space_and_assistant(
+        client,
+        bearer_token=default_user_token,
+    )
+
+    key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Assistant Scoped Write Key Followup",
+            "key_type": "sk_",
+            "permission": "write",
+            "scope_type": "assistant",
+            "scope_id": assistant_id,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert key_response.status_code == 201, key_response.text
+    secret = key_response.json()["secret"]
+
+    response = await client.post(
+        f"/api/v1/assistants/{assistant_id}/sessions/{uuid4()}/",
+        json={
+            "question": "hello followup",
+            "stream": False,
+            "tools": {
+                "assistants": [
+                    {"id": str(uuid4()), "handle": "non-member"},
+                ]
+            },
+        },
+        headers={"X-API-Key": secret},
+    )
+    # Missing session or tool mismatch should fail at domain level, not with autobegin 500.
+    assert response.status_code in {400, 404}, response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_space_scoped_key_conversations_session_scope_check_no_autobegin_error(
+    client, default_user_token
+):
+    """Regression: /conversations session_id scope validation must not fail with autobegin."""
+    space_id, _ = await _create_space_and_assistant(
+        client,
+        bearer_token=default_user_token,
+    )
+
+    key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Space Scoped Session Scope Validation Key",
+            "key_type": "sk_",
+            "permission": "write",
+            "scope_type": "space",
+            "scope_id": space_id,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert key_response.status_code == 201, key_response.text
+    secret = key_response.json()["secret"]
+
+    response = await client.post(
+        "/api/v1/conversations/",
+        json={
+            "question": "hello",
+            "session_id": str(uuid4()),
+            "stream": False,
+            "files": [],
+        },
+        headers={"X-API-Key": secret},
+    )
+    # Scope/session lookup should fail-closed without leaking existence, but never 500.
+    assert response.status_code == 403, response.text
+    assert response.json().get("code") == "insufficient_scope"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_space_scoped_key_can_list_conversations_for_scoped_assistant(
+    client, default_user_token
+):
+    """Regression: scoped conversation list path should not error and should honor scope."""
+    space_id, assistant_id = await _create_space_and_assistant(
+        client,
+        bearer_token=default_user_token,
+    )
+
+    key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Space Scoped Conversations List Key",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "space",
+            "scope_id": space_id,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert key_response.status_code == 201, key_response.text
+    secret = key_response.json()["secret"]
+
+    response = await client.get(
+        f"/api/v1/conversations/?assistant_id={assistant_id}",
+        headers={"X-API-Key": secret},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert "items" in payload
+    assert "total_count" in payload
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_method_aware_guard_blocks_write_key_on_assistant_delete(
     client, default_user_token
 ):

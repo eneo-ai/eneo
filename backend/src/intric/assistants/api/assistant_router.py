@@ -667,7 +667,7 @@ async def ask_assistant(
     ask: AskAssistant,
     version: int = Query(default=1, ge=1, le=2),
     container: Container = Depends(
-        get_container(with_user_from_assistant_api_key=True, with_transaction=False)
+        get_container(with_user_from_assistant_api_key=True)
     ),
 ):
     """Streams the response as Server-Sent Events if stream == true"""
@@ -840,7 +840,7 @@ async def ask_followup(
     ask: AskAssistant,
     version: int = Query(default=1, ge=1, le=2),
     container: Container = Depends(
-        get_container(with_user_from_assistant_api_key=True, with_transaction=False)
+        get_container(with_user_from_assistant_api_key=True)
     ),
 ):
     """Streams the response as Server-Sent Events if stream == true"""
