@@ -97,7 +97,7 @@ TAGS_METADATA = [
     {
         "name": "sysadmin",
         "description": (
-            "System Administration operations. Manage the entire Eneo installation across all tenants using the INTRIC_SUPER_API_KEY environment variable. Create/manage tenants, system-wide settings, and cross-tenant operations. For single tenant management (users, settings within your organization), see Tenant Admin endpoints."
+            "System Administration operations. Manage the entire Eneo installation across all tenants using the ENEO_SUPER_API_KEY environment variable. Create/manage tenants, system-wide settings, and cross-tenant operations. For single tenant management (users, settings within your organization), see Tenant Admin endpoints."
         ),
     },
     {

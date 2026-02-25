@@ -5,7 +5,7 @@
 
 import { setFrontendAuthCookie } from "./auth.server";
 import { getRequestEvent } from "$app/server";
-import { env } from "$env/dynamic/private";
+import { getBackendUrl } from "$lib/core/environment.server";
 
 /**
  * Try to login a user. If successful, the `auth` cookie will be set.
@@ -24,7 +24,7 @@ export async function loginWithIntric(
 
   const { fetch } = getRequestEvent();
 
-  const response = await fetch(`${env.INTRIC_BACKEND_URL}/api/v1/users/login/token/`, {
+  const response = await fetch(`${getBackendUrl()}/api/v1/users/login/token/`, {
     body: body,
     method: "POST",
     headers: {
