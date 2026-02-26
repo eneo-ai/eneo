@@ -1104,8 +1104,8 @@ class TestSuperKeyIsolationContract:
         from intric.main.exceptions import AuthenticationException
 
         settings = SimpleNamespace(
-            intric_super_api_key="super-key",
-            intric_super_duper_api_key="super-duper-key",
+            eneo_super_api_key="super-key",
+            eneo_super_duper_api_key="super-duper-key",
             api_key_header_name="X-API-Key",
         )
         monkeypatch.setattr("intric.authentication.auth.get_settings", lambda: settings)
