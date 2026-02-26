@@ -9,7 +9,7 @@ CATEGORY_DESCRIPTIONS = {
     "user_actions": "Assistant, space, app operations, templates, model configs",
     "security_events": "Security classification lifecycle events",
     "file_operations": "File uploads and deletions",
-    "integration_events": "Integration connections, knowledge sources, website crawling",
+    "integration_events": "Integration connections, knowledge sources, website crawling, MCP servers",
     "system_actions": "Retention policies, encryption, maintenance",
     "audit_access": "Viewing and exporting audit logs",
 }
@@ -83,6 +83,13 @@ CATEGORY_MAPPINGS = {
     ActionType.WEBSITE_DELETED.value: "integration_events",
     ActionType.WEBSITE_CRAWLED.value: "integration_events",
     ActionType.WEBSITE_TRANSFERRED.value: "integration_events",
+    ActionType.MCP_SERVER_CREATED.value: "integration_events",
+    ActionType.MCP_SERVER_UPDATED.value: "integration_events",
+    ActionType.MCP_SERVER_DELETED.value: "integration_events",
+    ActionType.MCP_SERVER_ENABLED.value: "integration_events",
+    ActionType.MCP_SERVER_DISABLED.value: "integration_events",
+    ActionType.MCP_SERVER_TOOL_ENABLED.value: "integration_events",
+    ActionType.MCP_SERVER_TOOL_DISABLED.value: "integration_events",
     # System Actions (3 actions)
     ActionType.RETENTION_POLICY_APPLIED.value: "system_actions",
     ActionType.ENCRYPTION_KEY_ROTATED.value: "system_actions",

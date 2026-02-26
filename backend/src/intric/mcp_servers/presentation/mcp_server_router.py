@@ -2,6 +2,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.main.container.container import Container
 from intric.main.exceptions import BadRequestException
 from intric.main.models import PaginatedResponse
@@ -87,6 +90,20 @@ async def enable_mcp_for_tenant(
         is_org_enabled=True,
         env_vars=data.env_vars,
     )
+
+    # Audit logging
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.MCP_SERVER_ENABLED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=settings.id,
+        description=f"Enabled MCP server '{settings.name}'",
+        metadata=AuditMetadata.standard(actor=user, target=settings),
+    )
+
     return assembler.from_domain_to_model(settings)
 
 
@@ -123,9 +140,27 @@ async def disable_mcp_for_tenant(
 ):
     """Disable an MCP server for the current tenant."""
     service = container.mcp_server_settings_service()
+
+    # Get server info before disabling for audit context
+    mcp_server_service = container.mcp_server_service()
+    mcp_server = await mcp_server_service.get_mcp_server(mcp_server_id)
+
     await service.update_mcp_settings(
         mcp_server_id=mcp_server_id,
         is_org_enabled=False,
+    )
+
+    # Audit logging
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.MCP_SERVER_DISABLED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=mcp_server_id,
+        description=f"Disabled MCP server '{mcp_server.name}'",
+        metadata=AuditMetadata.standard(actor=user, target=mcp_server),
     )
 
 
@@ -143,8 +178,31 @@ async def update_tenant_tool_enabled(
     service = container.mcp_server_service()
     assembler = container.mcp_server_tool_assembler()
 
+    # Fetch tool and server info before update (update does manual session.commit())
+    tool_before = await service.tool_repo.one(id=tool_id)
+    mcp_server = await service.get_mcp_server(tool_before.mcp_server_id)
+
     # Update tool's tenant-level enabled status
     tool = await service.update_tenant_tool_enabled(tool_id, data.is_enabled)
+
+    # Audit logging
+    user = container.user()
+    audit_service = container.audit_service()
+    action = ActionType.MCP_SERVER_TOOL_ENABLED if data.is_enabled else ActionType.MCP_SERVER_TOOL_DISABLED
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=action,
+        entity_type=EntityType.MCP_SERVER_TOOL,
+        entity_id=tool.id,
+        description=f"{'Enabled' if data.is_enabled else 'Disabled'} tool '{tool.name}' on MCP server '{mcp_server.name}' (tenant)",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=tool,
+            extra={"mcp_server_id": str(mcp_server.id), "mcp_server_name": mcp_server.name},
+        ),
+    )
+
     return assembler.from_domain_to_model(tool)
 
 
@@ -203,6 +261,19 @@ async def create_mcp_server(
             result.connection.error_message or "Failed to connect to MCP server"
         )
 
+    # Audit logging
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.MCP_SERVER_CREATED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=result.server.id,
+        description=f"Created MCP server '{result.server.name}'",
+        metadata=AuditMetadata.standard(actor=user, target=result.server),
+    )
+
     return MCPServerCreateResponse(
         server=assembler.from_domain_to_model(result.server),
         connection=MCPConnectionStatus(
@@ -227,6 +298,9 @@ async def update_mcp_server(
     service = container.mcp_server_service()
     assembler = container.mcp_server_assembler()
 
+    # Get old state for change tracking
+    old_server = await service.get_mcp_server(id)
+
     mcp_server = await service.update_mcp_server(
         mcp_server_id=id,
         name=data.name,
@@ -238,6 +312,33 @@ async def update_mcp_server(
         icon_url=str(data.icon_url) if data.icon_url else None,
         documentation_url=str(data.documentation_url) if data.documentation_url else None,
     )
+
+    # Build changes dict
+    changes = {}
+    if data.name is not None and data.name != old_server.name:
+        changes["name"] = {"old": old_server.name, "new": data.name}
+    if data.http_url is not None and str(data.http_url) != old_server.http_url:
+        changes["http_url"] = {"old": old_server.http_url, "new": str(data.http_url)}
+    if data.description is not None and data.description != old_server.description:
+        changes["description"] = {"old": old_server.description, "new": data.description}
+    if data.http_auth_type is not None and data.http_auth_type != old_server.http_auth_type:
+        changes["http_auth_type"] = {"old": old_server.http_auth_type, "new": data.http_auth_type}
+    if data.tags is not None and data.tags != old_server.tags:
+        changes["tags"] = {"old": old_server.tags, "new": data.tags}
+
+    # Audit logging
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.MCP_SERVER_UPDATED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=mcp_server.id,
+        description=f"Updated MCP server '{mcp_server.name}'",
+        metadata=AuditMetadata.standard(actor=user, target=mcp_server, changes=changes),
+    )
+
     return assembler.from_domain_to_model(mcp_server)
 
 
@@ -252,7 +353,24 @@ async def delete_mcp_server(
 ):
     """Delete an MCP server from global catalog (admin only)."""
     service = container.mcp_server_service()
+
+    # Get server info before deletion for audit context
+    mcp_server = await service.get_mcp_server(id)
+
     await service.delete_mcp_server(id)
+
+    # Audit logging
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.MCP_SERVER_DELETED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=id,
+        description=f"Deleted MCP server '{mcp_server.name}'",
+        metadata=AuditMetadata.standard(actor=user, target=mcp_server),
+    )
 
 
 # ============================================================================
@@ -328,6 +446,28 @@ async def update_tool_default_enabled(
     service = container.mcp_server_service()
     assembler = container.mcp_server_tool_assembler()
 
+    # Fetch server info before update for audit context
+    mcp_server = await service.get_mcp_server(id)
+
     # Update tool's default enabled status
     tool = await service.update_tool_default_enabled(tool_id, data.is_enabled)
+
+    # Audit logging
+    user = container.user()
+    audit_service = container.audit_service()
+    action = ActionType.MCP_SERVER_TOOL_ENABLED if data.is_enabled else ActionType.MCP_SERVER_TOOL_DISABLED
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=action,
+        entity_type=EntityType.MCP_SERVER_TOOL,
+        entity_id=tool.id,
+        description=f"{'Enabled' if data.is_enabled else 'Disabled'} tool '{tool.name}' on MCP server '{mcp_server.name}' (default)",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=tool,
+            extra={"mcp_server_id": str(mcp_server.id), "mcp_server_name": mcp_server.name},
+        ),
+    )
+
     return assembler.from_domain_to_model(tool)
