@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { pushState } from "$app/navigation";
+  import { goto } from "$app/navigation";
   import { Page } from "$lib/components/layout/index.js";
   import { getAppContext } from "$lib/core/AppContext.js";
   import { initChatService } from "$lib/features/chat/ChatService.svelte";
@@ -100,11 +100,16 @@
         on:click={() => {
           chat.newConversation();
           const tab = "chat";
-          pushState(
+          goto(
             `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, tab })}`,
             {
-              conversation: undefined,
-              tab
+              replaceState: true,
+              noScroll: true,
+              keepFocus: true,
+              state: {
+                conversation: undefined,
+                tab
+              }
             }
           );
         }}
@@ -122,6 +127,7 @@
           : undefined}
       ></ConversationView>
     </Page.Tab>
+
     <Page.Tab id="history">
       {#await data.initialHistory}
         <!-- TODO: This has some delay on it as the underlying table is delayed in updating its rows, so we cover it up during that time. -->
@@ -132,26 +138,37 @@
           <IconLoadingSpinner class="animate-spin"></IconLoadingSpinner>
         </div>
       {/await}
+
       <HistoryTable
         onConversationLoaded={(conversation) => {
-          const tab = "chat";
-          pushState(
-            `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, conversation, tab })}`,
-            {
-              conversation,
-              tab
-            }
+          const params = new URLSearchParams(
+            getChatQueryParams({ chatPartner: chat.partner, conversation })
           );
+          params.set("tab", "chat");
+
+          goto(`/spaces/${$currentSpace.routeId}/chat/?${params.toString()}`, {
+            replaceState: true,
+            noScroll: true,
+            keepFocus: true,
+            state: {
+              conversation,
+              tab: "chat"
+            }
+          });
         }}
         onConversationDeleted={() => {
-          const tab = "history";
-          pushState(
-            `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, tab })}`,
-            {
+          const params = new URLSearchParams(getChatQueryParams({ chatPartner: chat.partner }));
+          params.set("tab", "history");
+
+          goto(`/spaces/${$currentSpace.routeId}/chat/?${params.toString()}`, {
+            replaceState: true,
+            noScroll: true,
+            keepFocus: true,
+            state: {
               conversation: undefined,
-              tab
+              tab: "history"
             }
-          );
+          });
         }}
       />
 
