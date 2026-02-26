@@ -2229,5 +2229,16 @@
   "could_not_remove_user_from_group": "Could not remove user from group.",
   "no_users_in_group": "No users in this group",
   "no_users_found": "No users found",
-  "test_model": "Test model"
+  "test_model": "Test model",
+  "import_knowledge_from_org_integrations": "Import knowledge from organization-wide integrations. Configure them in",
+  "admin_settings": "admin settings",
+  "loading_integrations": "Loading integrations...",
+  "no_integrations_available": "No integrations available.",
+  "connect_personal_integration": "Connect a personal integration",
+  "to_get_started": "to get started.",
+  "configure_a": "Configure a",
+  "tenant_app_integration": "tenant app integration",
+  "in_admin_settings": "in admin settings.",
+  "org_integrations_require_admin": "Organization-wide integrations require admin permissions",
+  "shared_integrations_require_admin": "Contact an administrator to configure integrations"
 }

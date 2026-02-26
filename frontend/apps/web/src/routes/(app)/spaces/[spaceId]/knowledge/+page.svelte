@@ -89,10 +89,8 @@
 
   let userCanSeeCollections = $derived($currentSpace.hasPermission("read", "collection"));
   let userCanSeeWebsites = $derived($currentSpace.hasPermission("read", "website"));
-  // Only show integrations in personal and organization spaces, not in shared spaces
   let userCanSeeIntegrations = $derived(
-    $currentSpace.hasPermission("read", "integrationKnowledge") &&
-    (isPersonalSpace || isOrgSpace)
+    $currentSpace.hasPermission("read", "integrationKnowledge")
   );
 
   // Reset selected integration when dialog closes
@@ -154,20 +152,18 @@
         {#if data.availableIntegrations.length > 0}
           <ImportKnowledgeDialog></ImportKnowledgeDialog>
         {:else}
-          {#if isOrgSpace}
-            {#if isAdmin}
-              <Button variant="primary" onclick={() => window.location.href = '/admin/integrations?tab=providers'}>
-                {m.configure_integrations()}
-              </Button>
-            {:else}
-              <div class="text-secondary text-sm italic">
-                Organization-wide integrations require admin permissions
-              </div>
-            {/if}
-          {:else}
+          {#if isPersonalSpace}
             <Button variant="primary" onclick={() => window.location.href = '/account/integrations?tab=providers'}>
               {m.configure_integrations()}
             </Button>
+          {:else if isAdmin}
+            <Button variant="primary" onclick={() => window.location.href = '/admin/integrations?tab=providers'}>
+              {m.configure_integrations()}
+            </Button>
+          {:else}
+            <p class="text-secondary max-w-72 text-right text-xs">
+              {isOrgSpace ? m.org_integrations_require_admin() : m.shared_integrations_require_admin()}
+            </p>
           {/if}
         {/if}
       {:else if $selectedTab === "integrations" && !$currentSpace.hasPermission("create", "integrationKnowledge")}

@@ -480,3 +480,203 @@ def test_group_editor_cannot_manage_group_members(
         )
         is False
     )
+
+
+# Integration Knowledge Permission Tests - Shared Spaces
+
+
+def test_viewer_cannot_create_integration_knowledge_in_shared_space(
+    viewer_user: MockUser, shared_space: MockSpace
+):
+    """Viewers should only be able to read integration knowledge, not create."""
+    actor = SpaceActor(viewer_user, shared_space)
+    assert (
+        actor.can_perform_action(
+            action=SpaceAction.CREATE,
+            resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+        )
+        is False
+    )
+
+
+def test_viewer_cannot_edit_integration_knowledge_in_shared_space(
+    viewer_user: MockUser, shared_space: MockSpace
+):
+    actor = SpaceActor(viewer_user, shared_space)
+    assert (
+        actor.can_perform_action(
+            action=SpaceAction.EDIT,
+            resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+        )
+        is False
+    )
+
+
+def test_viewer_cannot_delete_integration_knowledge_in_shared_space(
+    viewer_user: MockUser, shared_space: MockSpace
+):
+    actor = SpaceActor(viewer_user, shared_space)
+    assert (
+        actor.can_perform_action(
+            action=SpaceAction.DELETE,
+            resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+        )
+        is False
+    )
+
+
+def test_viewer_can_read_integration_knowledge_in_shared_space(
+    viewer_user: MockUser, shared_space: MockSpace
+):
+    actor = SpaceActor(viewer_user, shared_space)
+    assert actor.can_perform_action(
+        action=SpaceAction.READ,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
+
+
+def test_editor_can_create_integration_knowledge_in_shared_space(
+    editor_user: MockUser, shared_space: MockSpace
+):
+    actor = SpaceActor(editor_user, shared_space)
+    assert actor.can_perform_action(
+        action=SpaceAction.CREATE,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
+
+
+def test_editor_can_delete_integration_knowledge_in_shared_space(
+    editor_user: MockUser, shared_space: MockSpace
+):
+    actor = SpaceActor(editor_user, shared_space)
+    assert actor.can_perform_action(
+        action=SpaceAction.DELETE,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
+
+
+def test_admin_can_create_integration_knowledge_in_shared_space(
+    admin_user: MockUser, shared_space: MockSpace
+):
+    actor = SpaceActor(admin_user, shared_space)
+    assert actor.can_perform_action(
+        action=SpaceAction.CREATE,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
+
+
+def test_admin_can_delete_integration_knowledge_in_shared_space(
+    admin_user: MockUser, shared_space: MockSpace
+):
+    actor = SpaceActor(admin_user, shared_space)
+    assert actor.can_perform_action(
+        action=SpaceAction.DELETE,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
+
+
+# Integration Knowledge Permission Tests - Organization Spaces
+
+
+def test_viewer_cannot_create_integration_knowledge_in_org_space(
+    viewer_user: MockUser, organization_space: MockSpace
+):
+    organization_space.members = {viewer_user.id: viewer_user}
+    actor = SpaceActor(viewer_user, organization_space)
+    assert (
+        actor.can_perform_action(
+            action=SpaceAction.CREATE,
+            resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+        )
+        is False
+    )
+
+
+def test_viewer_cannot_delete_integration_knowledge_in_org_space(
+    viewer_user: MockUser, organization_space: MockSpace
+):
+    organization_space.members = {viewer_user.id: viewer_user}
+    actor = SpaceActor(viewer_user, organization_space)
+    assert (
+        actor.can_perform_action(
+            action=SpaceAction.DELETE,
+            resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+        )
+        is False
+    )
+
+
+def test_viewer_cannot_read_integration_knowledge_in_org_space(
+    viewer_user: MockUser, organization_space: MockSpace
+):
+    """Org spaces only grant permissions to admins, not viewers."""
+    organization_space.members = {viewer_user.id: viewer_user}
+    actor = SpaceActor(viewer_user, organization_space)
+    assert (
+        actor.can_perform_action(
+            action=SpaceAction.READ,
+            resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+        )
+        is False
+    )
+
+
+def test_admin_can_read_integration_knowledge_in_org_space(
+    admin_user: MockUser, organization_space: MockSpace
+):
+    organization_space.members = {admin_user.id: admin_user}
+    actor = SpaceActor(admin_user, organization_space)
+    assert actor.can_perform_action(
+        action=SpaceAction.READ,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
+
+
+def test_admin_can_create_integration_knowledge_in_org_space(
+    admin_user: MockUser, organization_space: MockSpace
+):
+    organization_space.members = {admin_user.id: admin_user}
+    actor = SpaceActor(admin_user, organization_space)
+    assert actor.can_perform_action(
+        action=SpaceAction.CREATE,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
+
+
+# Integration Knowledge Permission Tests - Group Membership
+
+
+def test_group_viewer_cannot_create_integration_knowledge(
+    group_member_user: MockUser, space_with_group_viewer: MockSpace
+):
+    """Viewer via group membership should not be able to create integration knowledge."""
+    actor = SpaceActor(group_member_user, space_with_group_viewer)
+    assert (
+        actor.can_perform_action(
+            action=SpaceAction.CREATE,
+            resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+        )
+        is False
+    )
+
+
+def test_group_editor_can_create_integration_knowledge(
+    group_member_user: MockUser, space_with_group_editor: MockSpace
+):
+    """Editor via group membership should be able to create integration knowledge."""
+    actor = SpaceActor(group_member_user, space_with_group_editor)
+    assert actor.can_perform_action(
+        action=SpaceAction.CREATE,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )
+
+
+def test_group_admin_can_create_integration_knowledge(
+    group_member_user: MockUser, space_with_group_admin: MockSpace
+):
+    """Admin via group membership should be able to create integration knowledge."""
+    actor = SpaceActor(group_member_user, space_with_group_admin)
+    assert actor.can_perform_action(
+        action=SpaceAction.CREATE,
+        resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    )

@@ -2264,5 +2264,16 @@
   "could_not_remove_user_from_group": "Kunde inte ta bort användare från gruppen.",
   "no_users_in_group": "Inga användare i denna grupp",
   "no_users_found": "Inga användare hittades",
-  "test_model": "Testa modell"
+  "test_model": "Testa modell",
+  "import_knowledge_from_org_integrations": "Importera kunskap från organisationsövergripande integrationer. Konfigurera dem i",
+  "admin_settings": "admininställningar",
+  "loading_integrations": "Laddar integrationer...",
+  "no_integrations_available": "Inga integrationer tillgängliga.",
+  "connect_personal_integration": "Anslut en personlig integration",
+  "to_get_started": "för att komma igång.",
+  "configure_a": "Konfigurera en",
+  "tenant_app_integration": "klientappintegration",
+  "in_admin_settings": "i admininställningar.",
+  "org_integrations_require_admin": "Organisationsövergripande integrationer kräver administratörsbehörigheter",
+  "shared_integrations_require_admin": "Kontakta en administratör för att konfigurera integrationer"
 }

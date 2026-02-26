@@ -95,7 +95,7 @@
   let filteredResources = $derived.by(() => {
     const search = $inputValue.toLowerCase();
     return (availableResources ?? [])
-      .filter((resource) => resource.value.name.toLowerCase().startsWith(search))
+      .filter((resource) => resource.value.name.toLowerCase().includes(search))
       .filter((resource) => {
         if (showPublicTeamsNotMember) return true;
         return getPreviewCategory(resource.value) !== "public_teams_not_member";
