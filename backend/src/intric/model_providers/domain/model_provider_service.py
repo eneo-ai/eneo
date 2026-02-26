@@ -187,7 +187,7 @@ class ModelProviderService:
             else:
                 await litellm.acompletion(
                     messages=[{"role": "user", "content": "hi"}],
-                    max_completion_tokens=1,
+                    max_completion_tokens=10,
                     drop_params=True,
                     **kwargs,
                 )
