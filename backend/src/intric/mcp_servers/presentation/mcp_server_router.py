@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -314,7 +315,7 @@ async def update_mcp_server(
     )
 
     # Build changes dict
-    changes = {}
+    changes: dict[str, Any] = {}
     if data.name is not None and data.name != old_server.name:
         changes["name"] = {"old": old_server.name, "new": data.name}
     if data.http_url is not None and str(data.http_url) != old_server.http_url:
