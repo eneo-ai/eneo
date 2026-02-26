@@ -235,6 +235,7 @@ class TestScopeEnforcementUnit:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
         assert "assistant" in exc_info.value.message.lower()
+        assert "conversations, and files" in exc_info.value.message
 
     @pytest.mark.asyncio
     async def test_assistant_key_own_conversation_passes(self):
@@ -310,6 +311,7 @@ class TestScopeEnforcementUnit:
         with pytest.raises(ApiKeyValidationError) as exc_info:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
+        assert "runs, and files" in exc_info.value.message
 
     @pytest.mark.asyncio
     async def test_app_key_own_app_run_passes(self):
@@ -585,6 +587,7 @@ class TestScopeListEndpoints:
         with pytest.raises(ApiKeyValidationError) as exc_info:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
+        assert "conversations, and files" in exc_info.value.message
 
     @pytest.mark.asyncio
     async def test_assistant_key_list_services_denied(self):
@@ -647,6 +650,7 @@ class TestScopeListEndpoints:
         with pytest.raises(ApiKeyValidationError) as exc_info:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
+        assert "runs, and files" in exc_info.value.message
 
     @pytest.mark.asyncio
     async def test_app_key_list_services_denied(self):

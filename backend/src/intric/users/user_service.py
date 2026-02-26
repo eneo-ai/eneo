@@ -1227,7 +1227,7 @@ class UserService:
                     code="insufficient_scope",
                     message=(
                         f"API key is scoped to assistant '{key.scope_id}'. "
-                        f"It can only access that assistant and its conversations."
+                        f"It can only access that assistant, its conversations, and files."
                     ),
                 )
             elif scope_type == ApiKeyScopeType.APP:
@@ -1238,7 +1238,7 @@ class UserService:
                     code="insufficient_scope",
                     message=(
                         f"API key is scoped to app '{key.scope_id}'. "
-                        f"It can only access that app and its runs."
+                        f"It can only access that app, its runs, and files."
                     ),
                 )
             return
@@ -1303,7 +1303,7 @@ class UserService:
                     code="insufficient_scope",
                     message=(
                         f"API key is scoped to assistant '{key.scope_id}'. "
-                        f"It can only access that assistant and its conversations."
+                        f"It can only access that assistant, its conversations, and files."
                     ),
                 )
             elif resource_type == "conversation":
@@ -1315,7 +1315,7 @@ class UserService:
                     code="insufficient_scope",
                     message=(
                         f"API key is scoped to assistant '{key.scope_id}'. "
-                        f"It can only access that assistant and its conversations."
+                        f"It can only access that assistant, its conversations, and files."
                     ),
                 )
             else:
@@ -1324,7 +1324,7 @@ class UserService:
                     code="insufficient_scope",
                     message=(
                         f"API key is scoped to assistant '{key.scope_id}'. "
-                        f"It can only access that assistant and its conversations."
+                        f"It can only access that assistant, its conversations, and files."
                     ),
                 )
 
@@ -1340,7 +1340,7 @@ class UserService:
                     code="insufficient_scope",
                     message=(
                         f"API key is scoped to app '{key.scope_id}'. "
-                        f"It can only access that app and its runs."
+                        f"It can only access that app, its runs, and files."
                     ),
                 )
             elif resource_type == "app_run":
@@ -1352,7 +1352,7 @@ class UserService:
                     code="insufficient_scope",
                     message=(
                         f"API key is scoped to app '{key.scope_id}'. "
-                        f"It can only access that app and its runs."
+                        f"It can only access that app, its runs, and files."
                     ),
                 )
             else:
@@ -1361,7 +1361,7 @@ class UserService:
                     code="insufficient_scope",
                     message=(
                         f"API key is scoped to app '{key.scope_id}'. "
-                        f"It can only access that app and its runs."
+                        f"It can only access that app, its runs, and files."
                     ),
                 )
 

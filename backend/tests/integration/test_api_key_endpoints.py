@@ -1854,3 +1854,194 @@ async def test_method_aware_guard_allows_read_override_for_assistant_token_estim
         headers={"X-API-Key": secret},
     )
     assert estimate_response.status_code == 200, estimate_response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_owner_scoped_governance_denials_follow_permission_then_scope_order(
+    client, default_user_token
+):
+    """Owner role must not bypass API-key guard order on governance endpoints."""
+    _, assistant_id = await _create_space_and_assistant(
+        client,
+        bearer_token=default_user_token,
+    )
+
+    read_key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Owner Assistant Governance Read Key",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "assistant",
+            "scope_id": assistant_id,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert read_key_response.status_code == 201, read_key_response.text
+    read_key = read_key_response.json()["secret"]
+
+    admin_key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Owner Assistant Governance Admin Key",
+            "key_type": "sk_",
+            "permission": "admin",
+            "scope_type": "assistant",
+            "scope_id": assistant_id,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert admin_key_response.status_code == 201, admin_key_response.text
+    admin_key = admin_key_response.json()["secret"]
+
+    read_response = await client.get(
+        "/api/v1/allowed-origins/",
+        headers={
+            "X-API-Key": read_key,
+            "X-Correlation-ID": "owner-gov-read-1",
+        },
+    )
+    assert read_response.status_code == 403, read_response.text
+    read_body = read_response.json()
+    assert read_body["code"] == "insufficient_permission"
+    assert read_body["request_id"] == "owner-gov-read-1"
+    assert read_body["context"]["auth_layer"] == "api_key_method"
+    assert read_body["context"]["action"] == "management"
+    assert read_body["context"]["required_level"] == "admin"
+
+    admin_response = await client.get(
+        "/api/v1/allowed-origins/",
+        headers={
+            "X-API-Key": admin_key,
+            "X-Correlation-ID": "owner-gov-admin-1",
+        },
+    )
+    assert admin_response.status_code == 403, admin_response.text
+    admin_body = admin_response.json()
+    assert admin_body["code"] == "insufficient_scope"
+    assert admin_body["request_id"] == "owner-gov-admin-1"
+    assert admin_body["context"]["auth_layer"] == "api_key_scope"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_owner_scoped_governance_denials_cover_all_locked_governance_routes(
+    client, default_user_token
+):
+    _, assistant_id = await _create_space_and_assistant(
+        client,
+        bearer_token=default_user_token,
+    )
+
+    read_key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Owner Assistant Governance Read Matrix Key",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "assistant",
+            "scope_id": assistant_id,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert read_key_response.status_code == 201, read_key_response.text
+    read_key = read_key_response.json()["secret"]
+
+    admin_key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Owner Assistant Governance Admin Matrix Key",
+            "key_type": "sk_",
+            "permission": "admin",
+            "scope_type": "assistant",
+            "scope_id": assistant_id,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert admin_key_response.status_code == 201, admin_key_response.text
+    admin_key = admin_key_response.json()["secret"]
+
+    governance_paths = [
+        "/api/v1/allowed-origins/",
+        "/api/v1/security-classifications/",
+    ]
+    if get_settings().using_access_management:
+        governance_paths.append("/api/v1/roles/")
+
+    for path in governance_paths:
+        read_request_id = f"owner-gov-matrix-read-{uuid4().hex[:8]}"
+        read_response = await client.get(
+            path,
+            headers={
+                "X-API-Key": read_key,
+                "X-Correlation-ID": read_request_id,
+            },
+        )
+        assert read_response.status_code == 403, read_response.text
+        read_body = read_response.json()
+        assert read_body["code"] == "insufficient_permission"
+        assert read_body["request_id"] == read_request_id
+        assert read_body["context"]["auth_layer"] == "api_key_method"
+        assert read_body["context"]["action"] == "management"
+        assert read_body["context"]["required_level"] == "admin"
+
+        admin_request_id = f"owner-gov-matrix-admin-{uuid4().hex[:8]}"
+        admin_response = await client.get(
+            path,
+            headers={
+                "X-API-Key": admin_key,
+                "X-Correlation-ID": admin_request_id,
+            },
+        )
+        assert admin_response.status_code == 403, admin_response.text
+        admin_body = admin_response.json()
+        assert admin_body["code"] == "insufficient_scope"
+        assert admin_body["request_id"] == admin_request_id
+        assert admin_body["context"]["auth_layer"] == "api_key_scope"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_owner_scoped_keys_cannot_access_diagnostics_regardless_of_permission(
+    client, default_user_token
+):
+    """Diagnostics endpoints are tenant-scope-only for all non-tenant key scopes."""
+    _, assistant_id = await _create_space_and_assistant(
+        client,
+        bearer_token=default_user_token,
+    )
+
+    for permission in ("read", "write", "admin"):
+        key_response = await client.post(
+            "/api/v1/api-keys",
+            json={
+                "name": f"Owner Assistant Diagnostics {permission}",
+                "key_type": "sk_",
+                "permission": permission,
+                "scope_type": "assistant",
+                "scope_id": assistant_id,
+            },
+            headers={"Authorization": f"Bearer {default_user_token}"},
+        )
+        assert key_response.status_code == 201, key_response.text
+        secret = key_response.json()["secret"]
+
+        for path in (
+            "/api/v1/analysis/counts/",
+            "/api/v1/jobs/",
+            f"/api/v1/logging/{uuid4()}/",
+        ):
+            request_id = f"owner-diag-{permission}-{uuid4().hex[:8]}"
+            response = await client.get(
+                path,
+                headers={
+                    "X-API-Key": secret,
+                    "X-Correlation-ID": request_id,
+                },
+            )
+            assert response.status_code == 403, response.text
+            body = response.json()
+            assert body["code"] == "insufficient_scope"
+            assert body["request_id"] == request_id
+            assert body["context"]["auth_layer"] == "api_key_scope"

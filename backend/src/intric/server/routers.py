@@ -262,8 +262,18 @@ router.include_router(
         Depends(require_api_key_scope_check(resource_type="service", path_param="id")),
     ],
 )
-router.include_router(logging_router, prefix="/logging", tags=["logging"])
-router.include_router(analysis_router, prefix="/analysis", tags=["analysis"])
+router.include_router(
+    logging_router,
+    prefix="/logging",
+    tags=["logging"],
+    dependencies=TENANT_ADMIN_SCOPE_GUARDS,
+)
+router.include_router(
+    analysis_router,
+    prefix="/analysis",
+    tags=["analysis"],
+    dependencies=TENANT_ADMIN_SCOPE_GUARDS,
+)
 router.include_router(
     admin_router,
     prefix="/admin",
@@ -288,7 +298,12 @@ router.include_router(
     tags=["admin-templates"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
-router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
+router.include_router(
+    jobs_router,
+    prefix="/jobs",
+    tags=["jobs"],
+    dependencies=TENANT_ADMIN_SCOPE_GUARDS,
+)
 router.include_router(
     user_groups_router,
     prefix="/user-groups",
@@ -296,7 +311,10 @@ router.include_router(
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
-    allowed_origins_router, prefix="/allowed-origins", tags=["allowed-origins"]
+    allowed_origins_router,
+    prefix="/allowed-origins",
+    tags=["allowed-origins"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
     completion_models_router,
@@ -417,6 +435,7 @@ router.include_router(
     security_classifications_router,
     prefix="/security-classifications",
     tags=["security-classifications"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
     audit_router,
@@ -466,4 +485,9 @@ router.include_router(documentation_router, prefix="")
 if get_settings().using_access_management:
     from intric.roles.roles_router import router as roles_router
 
-    router.include_router(roles_router, prefix="/roles", tags=["roles"])
+    router.include_router(
+        roles_router,
+        prefix="/roles",
+        tags=["roles"],
+        dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+    )

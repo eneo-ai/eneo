@@ -11,6 +11,7 @@ import importlib
 import pathlib
 
 import pytest
+from intric.main.config import get_settings
 
 from intric.authentication.auth_dependencies import (
     APPS_READ_OVERRIDES,
@@ -112,22 +113,22 @@ INTENTIONALLY_UNGUARDED = {
     "/limits":                  "Authenticated limit info (with_user=True)",
     "/prompts":                 "Scope-guarded per prompt ID; no resource permission needed (regular user feature)",
     "/integrations":            "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
-    "/jobs":                    "Authenticated via get_container(with_user=True)",
-    "/analysis":                "Authenticated via get_container(with_user=True), service-layer role checks",
-    "/logging":                 "Router-level Depends(get_current_active_user) auth",
+    "/jobs":                    "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); service-layer authorization",
+    "/analysis":                "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); service-layer role checks",
+    "/logging":                 "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); router-level auth",
     "/completion-models":       "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/embedding-models":        "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/transcription-models":    "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/ai-models":               "Model listing aggregation",
     "/user-groups":             "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
-    "/allowed-origins":         "Internal admin role checks",
-    "/security-classifications": "Internal admin role checks",
+    "/allowed-origins":         "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
+    "/security-classifications": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/storage":                 "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/token-usage":             "Admin scope + admin key permission guards (not resource guard)",
     "/templates":               "Read-only discovery endpoints",
     "/sysadmin":                "Separate intric_super_api_key auth, out of scope",
     "/modules":                 "Separate auth, out of scope",
-    "/roles":                   "Internal role-based access management",
+    "/roles":                   "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/api-keys":                "Self-management with ensure_manage_authorized() + scope guard",
     "/ws":                      "WebSocket endpoint — separate auth",
     "/audit":                   "Admin audit endpoints with admin scope + admin key guards",
@@ -141,22 +142,16 @@ INTENTIONALLY_UNGUARDED = {
 INTENTIONALLY_SCOPE_FREE = {
     "/users": "User profile/login/provisioning endpoints and legacy compatibility flows",
     "/settings": "Tenant settings read/models endpoints",
-    "/logging": "Logging route has its own auth dependency",
-    "/analysis": "Analysis endpoints rely on service-level actor checks",
-    "/jobs": "Job endpoints rely on service-level authorization",
-    "/allowed-origins": "Tenant allowed-origin endpoints enforce admin in service layer",
     "/icons": "Static icon catalog",
     "/limits": "Tenant/user limits endpoint",
     "/ws": "WebSocket auth path",
     "/templates": "Template listing/discovery endpoints",
-    "/security-classifications": "Security classification endpoints enforce admin permissions",
     "/ai-models": "Model listing endpoint",
     "/integrations": "SharePoint webhook routes share /integrations prefix but lack scope guards (external callbacks); main integration_router has TENANT_ADMIN guards",
     "/sysadmin": "Protected by super API key dependency",
     "/modules": "Protected by super-duper API key dependency",
     "/auth": "Public federation auth endpoints",
     "/api-docs": "Public API documentation endpoint",
-    "/roles": "Access-management endpoints use role authorization",
 }
 
 
@@ -429,9 +424,14 @@ class TestTenantAdminApiKeyGuards:
             "/integrations",
             "/storage",
             "/user-groups",
+            "/allowed-origins",
+            "/security-classifications",
+            "/roles",
         ]
         for prefix in prefixes:
             routes = self._routes_for_prefix(prefix)
+            if prefix == "/roles" and not routes and not get_settings().using_access_management:
+                continue
             assert routes, f"No routes found for prefix {prefix}"
             for route in routes:
                 path = getattr(route, "path", "")
@@ -489,6 +489,44 @@ class TestHighRiskExactRouteGuards:
         route = _find_route_by_method_and_paths("GET", "/user-groups/", "/user-groups")
         assert _route_has_dep_name(route, "_scope_check_dep"), "GET /user-groups/ missing _scope_check_dep"
         assert _route_has_dep_name(route, "_api_key_permission_dep"), "GET /user-groups/ missing _api_key_permission_dep"
+
+    def test_allowed_origins_admin_route_has_scope_and_admin_key_guards(self):
+        route = _find_route_by_method_and_paths("GET", "/allowed-origins/", "/allowed-origins")
+        assert _route_has_dep_name(route, "_scope_check_dep"), "GET /allowed-origins/ missing _scope_check_dep"
+        assert _route_has_dep_name(route, "_api_key_permission_dep"), "GET /allowed-origins/ missing _api_key_permission_dep"
+
+    def test_security_classifications_admin_route_has_scope_and_admin_key_guards(self):
+        route = _find_route_by_method_and_paths(
+            "GET", "/security-classifications/", "/security-classifications"
+        )
+        assert _route_has_dep_name(route, "_scope_check_dep"), "GET /security-classifications/ missing _scope_check_dep"
+        assert _route_has_dep_name(route, "_api_key_permission_dep"), (
+            "GET /security-classifications/ missing _api_key_permission_dep"
+        )
+
+    def test_roles_admin_route_has_scope_and_admin_key_guards_when_enabled(self):
+        if not get_settings().using_access_management:
+            pytest.skip("roles router is disabled when using_access_management=false")
+        route = _find_route_by_method_and_paths("GET", "/roles/", "/roles")
+        assert _route_has_dep_name(route, "_scope_check_dep"), "GET /roles/ missing _scope_check_dep"
+        assert _route_has_dep_name(route, "_api_key_permission_dep"), "GET /roles/ missing _api_key_permission_dep"
+
+    @pytest.mark.parametrize(
+        "method,paths,label",
+        [
+            ("GET", ("/analysis/counts/", "/analysis/counts"), "GET /analysis/counts/"),
+            ("GET", ("/jobs/", "/jobs"), "GET /jobs/"),
+            ("GET", ("/logging/{message_id}/", "/logging/{message_id}"), "GET /logging/{message_id}/"),
+        ],
+    )
+    def test_diagnostics_routes_have_scope_guard_without_admin_key_guard(
+        self, method: str, paths: tuple[str, ...], label: str
+    ):
+        route = _find_route_by_method_and_paths(method, *paths)
+        assert _route_has_dep_name(route, "_scope_check_dep"), f"{label} missing _scope_check_dep"
+        assert not _route_has_dep_name(route, "_api_key_permission_dep"), (
+            f"{label} should not require _api_key_permission_dep"
+        )
 
     def test_files_routes_have_scope_resource_and_delete_stash_guards(self):
         list_route = _find_route_by_method_and_paths("GET", "/files/", "/files")
