@@ -7,7 +7,7 @@ Adds composite indexes to optimize date-range analytics queries on:
 - Sessions (group_chat_id, created_at)
 
 Revision ID: add_analytics_indexes
-Revises: c3670d9f940c
+Revises: cca4dea4841f
 Create Date: 2026-01-30
 
 """
@@ -16,7 +16,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "add_analytics_indexes"
-down_revision = "c3670d9f940c"
+down_revision = "cca4dea4841f"
 branch_labels = None
 depends_on = None
 

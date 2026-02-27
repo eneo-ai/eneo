@@ -1,7 +1,7 @@
 """add admin insights history indexes
 
 Revision ID: 9d2a6c01f3e7
-Revises: 526af5beea6e
+Revises: add_activity_indexes
 Create Date: 2026-02-11
 """
 
@@ -9,7 +9,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "9d2a6c01f3e7"
-down_revision = "526af5beea6e"
+down_revision = "add_activity_indexes"
 branch_labels = None
 depends_on = None
 
