@@ -4187,6 +4187,11 @@ export interface components {
       vision: boolean;
       /** Reasoning */
       reasoning: boolean;
+      /**
+       * Supports Tool Calling
+       * @default false
+       */
+      supports_tool_calling?: boolean;
       /** Base Url */
       base_url?: string | null;
       /** Litellm Model Name */
@@ -9091,6 +9096,12 @@ export interface components {
        */
       hosting?: string;
       /**
+       * Supports Tool Calling
+       * @description Supports function/tool calling
+       * @default false
+       */
+      supports_tool_calling?: boolean;
+      /**
        * Is Active
        * @description Enable in organization
        * @default true
@@ -9135,6 +9146,11 @@ export interface components {
        * @description Supports extended reasoning
        */
       reasoning?: boolean | null;
+      /**
+       * Supports Tool Calling
+       * @description Supports function/tool calling
+       */
+      supports_tool_calling?: boolean | null;
       /**
        * Hosting
        * @description Hosting location (swe, eu, usa)
@@ -12654,6 +12670,11 @@ export interface operations {
                 vision: boolean;
                 /** Reasoning */
                 reasoning: boolean;
+                /**
+                 * Supports Tool Calling
+                 * @default false
+                 */
+                supports_tool_calling?: boolean;
                 /** Base Url */
                 base_url?: string | null;
                 /** Litellm Model Name */
@@ -12967,6 +12988,11 @@ export interface operations {
                 vision: boolean;
                 /** Reasoning */
                 reasoning: boolean;
+                /**
+                 * Supports Tool Calling
+                 * @default false
+                 */
+                supports_tool_calling?: boolean;
                 /** Base Url */
                 base_url?: string | null;
                 /** Litellm Model Name */

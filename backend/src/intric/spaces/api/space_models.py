@@ -24,6 +24,7 @@ from intric.jobs.job_models import JobPublic
 from intric.main.models import (
     NOT_PROVIDED,
     InDB,
+    MCPToolSetting,
     ModelId,
     NotProvided,
     PaginatedPermissions,
@@ -105,6 +106,8 @@ class UpdateSpaceRequest(BaseModel):
     embedding_models: list[ModelId]
     completion_models: list[ModelId]
     transcription_models: list[ModelId]
+    mcp_servers: list[ModelId]
+    mcp_tools: list[MCPToolSetting]
 
     security_classification: Union[ModelId, NotProvided, None] = Field(
         default=NOT_PROVIDED,
@@ -188,6 +191,7 @@ class SpacePublic(SpaceDashboard):
     embedding_models: list[EmbeddingModelPublic]
     completion_models: list[CompletionModelPublic]
     transcription_models: list[TranscriptionModelPublic]
+    mcp_servers: list[dict]  # Will be populated by assembler
     knowledge: Knowledge
     members: PaginatedPermissions[SpaceMember]
     group_members: PaginatedPermissions[SpaceGroupMember]

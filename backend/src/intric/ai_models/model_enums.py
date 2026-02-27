@@ -20,6 +20,14 @@ class ModelHostingLocation(str, Enum):
     USA = "usa"
     EU = "eu"
     SWE = "swe"
+    CHN = "chn"
+    CAN = "can"
+    GBR = "gbr"
+    ISR = "isr"
+    KOR = "kor"
+    DEU = "deu"
+    FRA = "fra"
+    JPN = "jpn"
 
 
 class ModelOrg(str, Enum):

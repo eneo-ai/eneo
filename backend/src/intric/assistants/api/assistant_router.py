@@ -181,6 +181,14 @@ async def update_assistant(
     if assistant.integration_knowledge_list is not None:
         integration_knowledge_ids = [i.id for i in assistant.integration_knowledge_list]
 
+    mcp_server_ids = None
+    if assistant.mcp_servers is not None:
+        mcp_server_ids = [mcp.id for mcp in assistant.mcp_servers]
+
+    mcp_tool_settings = None
+    if assistant.mcp_tools is not None:
+        mcp_tool_settings = [(tool.tool_id, tool.is_enabled) for tool in assistant.mcp_tools]
+
     completion_model_id = None
     if assistant.completion_model is not None:
         completion_model_id = assistant.completion_model.id
@@ -218,6 +226,8 @@ async def update_assistant(
         groups=groups,
         websites=websites,
         integration_knowledge_ids=integration_knowledge_ids,
+        mcp_server_ids=mcp_server_ids,
+        mcp_tools=mcp_tool_settings,
         description=description,
         insight_enabled=assistant.insight_enabled,
         data_retention_days=assistant.data_retention_days,
@@ -1034,4 +1044,69 @@ async def estimate_tokens(
             files=file_tokens,
             file_details=file_token_details,
         ),
+    )
+
+
+@router.get(
+    "/{id}/mcp-servers/",
+    responses=responses.get_responses([404]),
+)
+async def get_assistant_mcp_servers(
+    id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Get all MCP servers associated with an assistant."""
+    service = container.assistant_service()
+    mcp_servers = await service.get_assistant_mcp_servers(id)
+
+
+    # Return as list of AssistantMCPServerPublic
+    return {
+        "items": [
+            {
+                "mcp_server_id": mcp.id,
+                "mcp_server_name": mcp.name,
+                "enabled": True,  # If it's in the list, it's enabled
+                "config": None,  # TODO: Get from association table
+                "priority": 0,  # TODO: Get from association table
+            }
+            for mcp in mcp_servers
+        ]
+    }
+
+
+@router.post(
+    "/{id}/mcp-servers/{mcp_server_id}/",
+    responses=responses.get_responses([400, 404]),
+)
+async def add_mcp_to_assistant(
+    id: UUID,
+    mcp_server_id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Add an MCP server to an assistant."""
+    service = container.assistant_service()
+    assistant, _permissions = await service.add_mcp_to_assistant(
+        assistant_id=id,
+        mcp_server_id=mcp_server_id,
+    )
+
+    return {"success": True}
+
+
+@router.delete(
+    "/{id}/mcp-servers/{mcp_server_id}/",
+    status_code=204,
+    responses=responses.get_responses([404]),
+)
+async def remove_mcp_from_assistant(
+    id: UUID,
+    mcp_server_id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Remove an MCP server from an assistant."""
+    service = container.assistant_service()
+    await service.remove_mcp_from_assistant(
+        assistant_id=id,
+        mcp_server_id=mcp_server_id,
     )

@@ -91,7 +91,7 @@ update_intric_js() {
     fi
 
     echo "Generating types from backend..."
-    if ! INTRIC_BACKEND_URL="http://localhost:$backend_port" bun run update; then
+    if ! ENEO_BACKEND_URL="http://localhost:$backend_port" bun run update; then
         echo "ERROR: Failed to generate types from backend"
         echo "Checking if container is still healthy..."
         # Use global container name that should be available

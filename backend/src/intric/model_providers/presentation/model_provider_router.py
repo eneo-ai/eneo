@@ -13,6 +13,7 @@ from intric.model_providers.presentation.model_provider_models import (
     ModelProviderCreate,
     ModelProviderPublic,
     ModelProviderUpdate,
+    ValidateModelRequest,
 )
 from intric.server.protocol import responses
 from intric.settings.encryption_service import EncryptionService
@@ -42,6 +43,76 @@ async def list_providers(
     """List all model providers for the tenant."""
     providers = await service.get_all()
     return [ModelProviderPublic(**provider.to_dict()) for provider in providers]
+
+
+@router.get(
+    "/capabilities/",
+)
+async def get_provider_capabilities(
+    _user: UserInDB = Depends(get_current_active_user),
+):
+    """Get supported model types and top models per provider type from LiteLLM."""
+    import litellm
+    from collections import defaultdict
+
+    # Mode mapping: LiteLLM mode -> our model type
+    mode_map = {
+        "chat": "completion",
+        "completion": "completion",
+        "embedding": "embedding",
+        "audio_transcription": "transcription",
+    }
+
+    # Collect all models per provider per mode with metadata
+    raw: dict[str, dict[str, dict[str, dict]]] = defaultdict(
+        lambda: defaultdict(dict)
+    )
+    from datetime import date
+
+    today = date.today().isoformat()
+
+    for model_key, info in litellm.model_cost.items():
+        provider = info.get("litellm_provider", "")
+        litellm_mode = info.get("mode", "")
+        mode = mode_map.get(litellm_mode)
+
+        # Skip fine-tuned model templates
+        if model_key.startswith("ft:"):
+            continue
+
+        # Skip deprecated models
+        dep = info.get("deprecation_date")
+        if dep and dep <= today:
+            continue
+
+        if provider and mode and model_key not in raw[provider][mode]:
+            model_info: dict = {"name": model_key}
+            if mode == "completion":
+                model_info["max_input_tokens"] = info.get("max_input_tokens")
+                model_info["max_output_tokens"] = info.get("max_output_tokens")
+                model_info["supports_vision"] = info.get("supports_vision", False)
+                model_info["supports_function_calling"] = info.get(
+                    "supports_function_calling", False
+                )
+                model_info["supports_reasoning"] = info.get(
+                    "supports_reasoning", False
+                )
+            elif mode == "embedding":
+                model_info["max_input_tokens"] = info.get("max_input_tokens")
+                model_info["output_vector_size"] = info.get("output_vector_size")
+            raw[provider][mode][model_key] = model_info
+
+    # Build response sorted alphabetically
+    result = {}
+    for provider, modes in raw.items():
+        provider_data: dict = {"modes": sorted(modes.keys()), "models": {}}
+        for mode, models_dict in modes.items():
+            provider_data["models"][mode] = sorted(
+                models_dict.values(), key=lambda m: m["name"]
+            )
+        result[provider] = provider_data
+
+    return result
 
 
 @router.get(
@@ -100,6 +171,43 @@ async def update_provider(
         is_active=data.is_active,
     )
     return ModelProviderPublic(**provider.to_dict())
+
+
+@router.get(
+    "/{provider_id}/models/",
+    responses=responses.get_responses([404]),
+)
+async def list_provider_models(
+    provider_id: UUID,
+    service: ModelProviderService = Depends(get_model_provider_service),
+):
+    """List available models/deployments from the provider's API using its credentials."""
+    return await service.list_available_models(provider_id)
+
+
+@router.post(
+    "/{provider_id}/test/",
+    responses=responses.get_responses([404]),
+)
+async def test_provider(
+    provider_id: UUID,
+    service: ModelProviderService = Depends(get_model_provider_service),
+):
+    """Test connectivity to a model provider."""
+    return await service.test_connection(provider_id)
+
+
+@router.post(
+    "/{provider_id}/validate-model/",
+    responses=responses.get_responses([404]),
+)
+async def validate_model(
+    provider_id: UUID,
+    body: ValidateModelRequest,
+    service: ModelProviderService = Depends(get_model_provider_service),
+):
+    """Validate that a model works with this provider by making a minimal API call."""
+    return await service.validate_model(provider_id, body.model_name, body.model_type)
 
 
 @router.delete(

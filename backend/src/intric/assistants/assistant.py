@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from intric.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
+    from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.templates.assistant_template.assistant_template import AssistantTemplate
     from intric.websites.domain.website import Website
 
@@ -56,6 +57,7 @@ class Assistant(Entity):
         attachments: list[FileInfo],
         published: bool,
         integration_knowledge_list: list["IntegrationKnowledge"] = [],
+        mcp_servers: list["MCPServer"] = [],
         created_at: datetime = None,
         updated_at: datetime = None,
         source_template: Optional["AssistantTemplate"] = None,
@@ -79,6 +81,7 @@ class Assistant(Entity):
         self._websites = websites
         self._collections = collections
         self._integration_knowledge_list = integration_knowledge_list
+        self.mcp_servers = mcp_servers
         self.created_at = created_at
         self.updated_at = updated_at
         self._attachments = attachments
@@ -92,6 +95,10 @@ class Assistant(Entity):
         self.type = AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
         self._metadata_json = metadata_json
         self.icon_id = icon_id
+
+        # Temporary attributes for update flow - not persisted directly
+        self._mcp_server_ids: list[UUID] | None = None
+        self._mcp_tool_settings: list | None = None
 
     def _validate_embedding_model(self, items: _KnowledgeItemList):
         embedding_model_id_set = set([item.embedding_model.id for item in items])
@@ -219,6 +226,7 @@ class Assistant(Entity):
         collections: list["Collection"] | None = None,
         websites: list["Website"] | None = None,
         integration_knowledge_list: list["IntegrationKnowledge"] | None = None,
+        mcp_servers: list["MCPServer"] | None = None,
         published: bool | None = None,
         description: Union[str, None, NotProvided] = NOT_PROVIDED,
         insight_enabled: bool | None = None,
@@ -251,6 +259,9 @@ class Assistant(Entity):
 
         if integration_knowledge_list is not None:
             self.integration_knowledge_list = integration_knowledge_list
+
+        if mcp_servers is not None:
+            self.mcp_servers = mcp_servers
 
         if description is not NOT_PROVIDED:
             self.description = description
@@ -311,6 +322,7 @@ class Assistant(Entity):
         stream: bool = False,
         version: int = 1,
         web_search_results: list["WebSearchResult"] = [],
+        require_tool_approval: bool = False,
     ):
         if any([file.file_type == FileType.IMAGE for file in files]):
             if not self.completion_model.vision:
@@ -345,6 +357,8 @@ class Assistant(Entity):
             version=version,
             use_image_generation=self.is_default,
             web_search_results=web_search_results,
+            mcp_servers=self.mcp_servers,
+            require_tool_approval=require_tool_approval,
         )
 
         return response, datastore_result

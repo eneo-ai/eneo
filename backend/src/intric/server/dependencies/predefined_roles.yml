@@ -5,7 +5,6 @@ roles:
       - group_chats
       - apps
       - collections
-      - integration_knowledge_list
 
   - name: 'AI Configurator'
     permissions:
@@ -16,8 +15,8 @@ roles:
       - collections
       - AI
       - websites
-      - integration_knowledge_list
-  
+      - integrations
+
   - name: 'Owner'
     permissions:
       - admin
@@ -29,4 +28,4 @@ roles:
       - insights
       - AI
       - websites
-      - integration_knowledge_list
+      - integrations

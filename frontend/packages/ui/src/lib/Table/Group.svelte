@@ -23,15 +23,13 @@
   export let showEmptyRow: boolean = true;
 
   const internalOpen = writable(true);
-  const isOpen = derived(internalOpen, ($internalOpen) =>
-    open === undefined ? $internalOpen : open
-  );
+  $: isOpen = open !== undefined ? open : $internalOpen;
   const dispatch = createEventDispatcher<{
     openChange: { open: boolean };
   }>();
 
   function toggleOpen() {
-    const nextOpen = !$isOpen;
+    const nextOpen = !isOpen;
     if (open === undefined) {
       internalOpen.set(nextOpen);
       return;
@@ -109,7 +107,7 @@
                 padding="icon-leading"
                 class="font-mono font-medium"
               >
-                <IconChevronDown class="{$isOpen ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
+                <IconChevronDown class="{isOpen ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
               </Button>
               <slot name="title-prefix" />
               <Button
@@ -125,7 +123,7 @@
         </td>
       </tr>
     {/if}
-    {#if $isOpen}
+    {#if isOpen}
       {#if $filteredRows.length > 0}
         {#each $filteredRows as row (row.id)}
           <Subscribe rowAttrs={row.attrs()} let:rowAttrs>
@@ -174,7 +172,7 @@
         class="font-mono font-medium"
       >
         <div class="flex items-center gap-2">
-          <IconChevronDown class="{$isOpen ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
+          <IconChevronDown class="{isOpen ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
           <slot name="title-prefix" />
           <span>{title}</span>
         </div>
@@ -182,7 +180,7 @@
       <slot name="title-suffix" />
     </div>
   {/if}
-  {#if $isOpen}
+  {#if isOpen}
     {#if $filteredRows.length > 0}
       <div style="column-gap: {gapX}rem; row-gap: {gapY}rem;" class={cardLayout({ layout })}>
         {#each $filteredRows as row (row.id)}

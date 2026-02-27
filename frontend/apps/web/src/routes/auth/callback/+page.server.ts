@@ -1,4 +1,4 @@
-import { env } from "$env/dynamic/private";
+import { getBackendUrl } from "$lib/core/environment.server";
 import { DEFAULT_LANDING_PAGE } from "$lib/core/constants";
 import { setFrontendAuthCookie } from "$lib/features/auth/auth.server";
 import { redirect } from "@sveltejs/kit";
@@ -24,7 +24,7 @@ export const load: PageServerLoad = async ({ url, fetch }) => {
 
   try {
     // Call backend to exchange code for token
-    const backendUrl = env.INTRIC_BACKEND_URL || "http://localhost:8123";
+    const backendUrl = getBackendUrl() || "http://localhost:8123";
     const response = await fetch(`${backendUrl}/api/v1/auth/callback`, {
       method: "POST",
       headers: {

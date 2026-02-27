@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from intric.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
+    from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.services.service import Service
     from intric.websites.domain.website import Website
 
@@ -53,6 +54,7 @@ class Space:
         embedding_models: list["EmbeddingModel"],
         completion_models: list["CompletionModel"],
         transcription_models: list[TranscriptionModel],
+        mcp_servers: list["MCPServer"],
         default_assistant: "Assistant",
         assistants: list["Assistant"],
         apps: list["App"],
@@ -78,6 +80,7 @@ class Space:
         self._embedding_models = embedding_models
         self._completion_models = completion_models
         self._transcription_models = transcription_models
+        self._mcp_servers = mcp_servers
         self.default_assistant = default_assistant
         self.assistants = assistants
         self.group_chats = group_chats
@@ -102,7 +105,7 @@ class Space:
 
     def is_organization(self):
         return (self.user_id is None) and (self.tenant_space_id is None)
-    
+
     def is_embedding_model_in_space(self, embedding_model_id: UUID | None) -> bool:
         return embedding_model_id in [model.id for model in self.embedding_models]
 
@@ -111,8 +114,15 @@ class Space:
             return False
         return any(m.id == completion_model_id for m in self.completion_models)
 
-    def is_transcription_model_in_space(self, transcription_model_id: UUID | None) -> bool:
-        return transcription_model_id in [model.id for model in self.transcription_models]
+    def is_transcription_model_in_space(
+        self, transcription_model_id: UUID | None
+    ) -> bool:
+        return transcription_model_id in [
+            model.id for model in self.transcription_models
+        ]
+
+    def is_mcp_server_in_space(self, mcp_server_id: UUID | None) -> bool:
+        return mcp_server_id in [server.id for server in self.mcp_servers]
 
     def is_completion_model_available(self, completion_model_id: UUID) -> bool:
         return (
@@ -139,7 +149,9 @@ class Space:
         return website_id in [website.id for website in self.websites]
 
     def is_integration_knowledge_in_space(self, integration_knowledge_id: UUID) -> bool:
-        return integration_knowledge_id in [i.id for i in self.integration_knowledge_list]
+        return integration_knowledge_id in [
+            i.id for i in self.integration_knowledge_list
+        ]
 
     def get_member(self, member_id: UUID) -> SpaceMember:
         return self.members[member_id]
@@ -211,7 +223,9 @@ class Space:
         if not self.completion_models:
             return None
 
-        model = filter(lambda m: m.is_org_default and m.can_access, self.completion_models)
+        model = filter(
+            lambda m: m.is_org_default and m.can_access, self.completion_models
+        )
         default_model = next(model, None)
 
         if default_model is None:
@@ -229,7 +243,9 @@ class Space:
             return None
 
         # First try to get the org default model
-        model = filter(lambda m: m.is_org_default and m.can_access, self.transcription_models)
+        model = filter(
+            lambda m: m.is_org_default and m.can_access, self.transcription_models
+        )
         default_model = next(model, None)
 
         if default_model is not None:
@@ -276,6 +292,16 @@ class Space:
 
         self._transcription_models = transcription_models
 
+    @property
+    def mcp_servers(self) -> list["MCPServer"]:
+        return self._mcp_servers
+
+    @mcp_servers.setter
+    def mcp_servers(self, mcp_servers: list["MCPServer"]):
+        # For MCP servers, we may want to add similar validation
+        # For now, just set them directly
+        self._mcp_servers = mcp_servers
+
     def update(
         self,
         name: str = None,
@@ -283,7 +309,10 @@ class Space:
         embedding_models: list["EmbeddingModel"] = None,
         completion_models: list["CompletionModel"] = None,
         transcription_models: list[TranscriptionModel] = None,
-        security_classification: Union[SecurityClassification, NotProvided, None] = NOT_PROVIDED,
+        mcp_servers: list["MCPServer"] = None,
+        security_classification: Union[
+            SecurityClassification, NotProvided, None
+        ] = NOT_PROVIDED,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ):
@@ -295,7 +324,9 @@ class Space:
 
         if description is not None:
             if self.is_personal():
-                raise BadRequestException("Can not change description of personal space")
+                raise BadRequestException(
+                    "Can not change description of personal space"
+                )
 
             self.description = description
         # Only if security_classification_enabled on tenant (checked in service layer)
@@ -330,21 +361,33 @@ class Space:
 
         if completion_models is not None:
             if self.is_personal():
-                raise BadRequestException("Can not add completion models to personal space")
+                raise BadRequestException(
+                    "Can not add completion models to personal space"
+                )
 
             self.completion_models = completion_models
 
         if embedding_models is not None:
             if self.is_personal():
-                raise BadRequestException("Can not add embedding models to personal space")
+                raise BadRequestException(
+                    "Can not add embedding models to personal space"
+                )
 
             self.embedding_models = embedding_models
 
         if transcription_models is not None:
             if self.is_personal():
-                raise BadRequestException("Can not add transcription models to personal space")
+                raise BadRequestException(
+                    "Can not add transcription models to personal space"
+                )
 
             self.transcription_models = transcription_models
+
+        if mcp_servers is not None:
+            if self.is_personal():
+                raise BadRequestException("Can not add MCP servers to personal space")
+
+            self.mcp_servers = mcp_servers
 
         if data_retention_days is not NOT_PROVIDED:
             self.data_retention_days = data_retention_days
@@ -447,9 +490,8 @@ class Space:
 
         self.assistants.remove(assistant)
 
-
     def add_collection_owner_move(self, collection: "Collection"):
-        """Byter ägare på en collection till detta space (uppdaterar FK i DB). 
+        """Byter ägare på en collection till detta space (uppdaterar FK i DB).
         Använd INTE för import/delning."""
 
         if collection.id in [_c.id for _c in self.collections]:
@@ -457,7 +499,7 @@ class Space:
         if not self.is_embedding_model_in_space(collection.embedding_model.id):
             raise BadRequestException("Embedding model is not in the space")
         self.collections.append(collection)
-        
+
     def remove_collection(self, collection: "Collection"):
         for assistant in self.assistants:
             assistant.collections = [
@@ -484,7 +526,9 @@ class Space:
         if not self.is_completion_model_available(assistant.completion_model.id):
             return False
         if not self.can_use_knowledge(
-            assistant.collections + assistant.websites + assistant.integration_knowledge_list
+            assistant.collections
+            + assistant.websites
+            + assistant.integration_knowledge_list
         ):
             return False
         if self.security_classification is not None:
@@ -549,10 +593,16 @@ class Space:
     def get_collection(self, collection_id: UUID) -> "Collection":
         return self._get_entity(collection_id, self.collections)
 
-    def get_integration_knowledge(self, integration_knowledge_id: UUID) -> "IntegrationKnowledge":
-        return self._get_entity(integration_knowledge_id, self.integration_knowledge_list)
+    def get_integration_knowledge(
+        self, integration_knowledge_id: UUID
+    ) -> "IntegrationKnowledge":
+        return self._get_entity(
+            integration_knowledge_id, self.integration_knowledge_list
+        )
 
-    def get_transcription_model(self, transcription_model_id: UUID) -> "TranscriptionModel":
+    def get_transcription_model(
+        self, transcription_model_id: UUID
+    ) -> "TranscriptionModel":
         return self._get_entity(transcription_model_id, self.transcription_models)
 
     def get_completion_model(self, completion_model_id: UUID) -> "CompletionModel":
@@ -560,6 +610,9 @@ class Space:
 
     def get_embedding_model(self, embedding_model_id: UUID) -> "EmbeddingModel":
         return self._get_entity(embedding_model_id, self.embedding_models)
+
+    def get_mcp_server(self, mcp_server_id: UUID) -> "MCPServer":
+        return self._get_entity(mcp_server_id, self.mcp_servers)
 
     def get_website(self, website_id: UUID) -> "Website":
         return self._get_entity(website_id, self.websites)

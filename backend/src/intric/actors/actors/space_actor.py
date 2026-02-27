@@ -371,7 +371,7 @@ class SpaceActor:
             SpaceResourceType.SERVICE: Permission.SERVICES,
             SpaceResourceType.COLLECTION: Permission.COLLECTIONS,
             SpaceResourceType.WEBSITE: Permission.WEBSITES,
-            SpaceResourceType.INTEGRATION_KNOWLEDGE: Permission.INTEGRATION_KNOWLEDGE_LIST,
+            SpaceResourceType.INTEGRATION_KNOWLEDGE: Permission.INTEGRATIONS,
         }
 
         return permission_map.get(resource_type)
@@ -455,7 +455,8 @@ class SpaceActor:
             permission = self._to_permisson(resource_type=resource_type)
             has_permission = permission in self.user.permissions if permission else False
             if not has_permission and not (
-                resource_type == SpaceResourceType.WEBSITE and action == SpaceAction.READ
+                resource_type in {SpaceResourceType.WEBSITE, SpaceResourceType.INTEGRATION_KNOWLEDGE}
+                and action == SpaceAction.READ
             ):
                 return False
 
@@ -736,25 +737,25 @@ class SpaceActor:
             resource_type=SpaceResourceType.WEBSITE,
         )
 
-    def can_read_integration_knowledge_list(self):
+    def can_read_integrations(self):
         return self.can_perform_action(
             action=SpaceAction.READ,
             resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
         )
 
-    def can_create_integration_knowledge_list(self):
+    def can_create_integrations(self):
         return self.can_perform_action(
             action=SpaceAction.CREATE,
             resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
         )
 
-    def can_delete_integration_knowledge_list(self):
+    def can_delete_integrations(self):
         return self.can_perform_action(
             action=SpaceAction.DELETE,
             resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
         )
 
-    def can_edit_integration_knowledge_list(self):
+    def can_edit_integrations(self):
         return self.can_perform_action(
             action=SpaceAction.EDIT,
             resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
@@ -890,10 +891,10 @@ class SpaceActor:
             can_toggle_insight=False,
         )
 
-    def get_integration_knowledge_list_permissions(self):
+    def get_integrations_permissions(self):
         return self._get_resource_permissions(
-            can_edit=self.can_edit_integration_knowledge_list(),
-            can_delete=self.can_delete_integration_knowledge_list(),
+            can_edit=self.can_edit_integrations(),
+            can_delete=self.can_delete_integrations(),
             can_publish=False,
             can_access_insight=False,
             can_toggle_insight=False,

@@ -14,14 +14,22 @@
   import type { IntegrationImportDialogProps } from "../IntegrationData";
   import { m } from "$lib/paraglide/messages";
   import SharePointFolderTree from "./SharePointFolderTree.svelte";
-  import {
-    buildSharePointSelectionKey,
-    normalizeSharePointPath
-  } from "./selectionKey";
+  import { buildSharePointSelectionKey, normalizeSharePointPath } from "./selectionKey";
+
+  type PreviewCategory =
+    | "my_teams"
+    | "public_teams_not_member"
+    | "other_sites"
+    | "onedrive"
+    | "unknown";
+
+  type CategorizedIntegrationKnowledgePreview = IntegrationKnowledgePreview & {
+    category?: PreviewCategory;
+  };
 
   type PreviewOption = {
     label: string;
-    value: IntegrationKnowledgePreview;
+    value: CategorizedIntegrationKnowledgePreview;
   };
 
   type SelectedTreeItem = {
@@ -47,15 +55,78 @@
     refreshCurrentSpace
   } = getSpacesManager();
   const { addJob, startFastUpdatePolling } = getJobManager();
+  const CATEGORY_ORDER: PreviewCategory[] = [
+    "my_teams",
+    "public_teams_not_member",
+    "other_sites",
+    "onedrive",
+    "unknown"
+  ];
 
   let availableResources = $state<PreviewOption[] | null>(null);
+  let showPublicTeamsNotMember = $state(true);
+
+  function getPreviewCategory(site: CategorizedIntegrationKnowledgePreview): PreviewCategory {
+    if (site.type === "onedrive") return "onedrive";
+    return site.category ?? "other_sites";
+  }
+
+  function getCategoryRank(category: PreviewCategory): number {
+    const idx = CATEGORY_ORDER.indexOf(category);
+    return idx === -1 ? CATEGORY_ORDER.length : idx;
+  }
+
+  function getCategoryLabel(category: PreviewCategory): string {
+    switch (category) {
+      case "my_teams":
+        return m.sharepoint_category_my_teams();
+      case "public_teams_not_member":
+        return m.sharepoint_category_public_teams_not_member();
+      case "other_sites":
+        return m.sharepoint_category_other_sites();
+      case "onedrive":
+        return "OneDrive";
+      case "unknown":
+        return m.sharepoint_category_unknown();
+    }
+  }
+
+
   let filteredResources = $derived.by(() => {
-    return (availableResources ?? []).filter((resource) =>
-      resource.value.name.toLowerCase().startsWith($inputValue.toLowerCase())
+    const search = $inputValue.toLowerCase();
+    return (availableResources ?? [])
+      .filter((resource) => resource.value.name.toLowerCase().startsWith(search))
+      .filter((resource) => {
+        if (showPublicTeamsNotMember) return true;
+        return getPreviewCategory(resource.value) !== "public_teams_not_member";
+      });
+  });
+
+  let hasPublicTeamsNotMember = $derived.by(() => {
+    return (availableResources ?? []).some(
+      (resource) => getPreviewCategory(resource.value) === "public_teams_not_member"
     );
   });
 
-  let selectedSite = $state<IntegrationKnowledgePreview | null>(null);
+  let groupedFilteredResources = $derived.by(() => {
+    const grouped = new Map<PreviewCategory, PreviewOption[]>();
+    for (const resource of filteredResources) {
+      const category = getPreviewCategory(resource.value);
+      const existing = grouped.get(category);
+      if (existing) {
+        existing.push(resource);
+      } else {
+        grouped.set(category, [resource]);
+      }
+    }
+
+    return CATEGORY_ORDER.map((category) => ({
+      category,
+      items: grouped.get(category) ?? []
+    })).filter((group) => group.items.length > 0);
+  });
+
+  let selectedSite = $state<CategorizedIntegrationKnowledgePreview | null>(null);
   let selectedEmbeddingModel = $state<{ id: string } | null>(null);
   let selectedItems = $state<SelectedImportItem[]>([]);
   let wrapperName = $state("");
@@ -69,19 +140,28 @@
       return;
     }
 
-    const preview = await intric.integrations.knowledge.preview({ id });
-    availableResources = preview.map((site) => {
-      return {
+    const preview = (await intric.integrations.knowledge.preview({
+      id
+    })) as CategorizedIntegrationKnowledgePreview[];
+
+    availableResources = preview
+      .map((site) => ({
         label: site.name,
         value: site
-      };
-    });
+      }))
+      .sort((a, b) => {
+        const categoryDiff =
+          getCategoryRank(getPreviewCategory(a.value)) -
+          getCategoryRank(getPreviewCategory(b.value));
+        if (categoryDiff !== 0) return categoryDiff;
+        return a.label.localeCompare(b.label);
+      });
   });
 
   const {
     elements: { menu, input, option },
     states: { open, inputValue }
-  } = createCombobox<IntegrationKnowledgePreview>({
+  } = createCombobox<CategorizedIntegrationKnowledgePreview>({
     portal: null,
     positioning: {
       sameWidth: true,
@@ -183,6 +263,11 @@
     };
   });
 
+  let requiresWrapperName = $derived.by(() => dedupedSelection.effectiveEntries.length > 1);
+  let wrapperNameMissing = $derived.by(
+    () => requiresWrapperName && wrapperName.trim().length === 0
+  );
+
   const importKnowledge = createAsyncState(async () => {
     if (!selectedSite) return;
     if (!selectedEmbeddingModel) return;
@@ -221,7 +306,7 @@
       const response = await intric.integrations.knowledge.importBatch({
         integration: { id },
         items: batchItems,
-        wrapper_name: dedupedSelection.effectiveEntries.length > 1 ? wrapperName.trim() : undefined,
+        wrapper_name: requiresWrapperName ? wrapperName.trim() : undefined,
         embedding_model: selectedEmbeddingModel,
         space: $currentSpace
       });
@@ -263,7 +348,7 @@
     }
   });
 
-  const handleSiteSelect = (site: IntegrationKnowledgePreview) => {
+  const handleSiteSelect = (site: CategorizedIntegrationKnowledgePreview) => {
     selectedSite = site;
     selectedItems = [];
     wrapperName = "";
@@ -327,6 +412,20 @@
               <IconSearch class="absolute top-2 right-4" />
             </button>
           </div>
+          {#if hasPublicTeamsNotMember}
+            <label class="text-secondary flex items-center gap-2 px-2 py-1 text-sm">
+              <input
+                type="checkbox"
+                class="accent-accent-default h-4 w-4"
+                checked={showPublicTeamsNotMember}
+                onchange={(event) => {
+                  const target = event.currentTarget as HTMLInputElement;
+                  showPublicTeamsNotMember = target.checked;
+                }}
+              />
+              <span>{m.sharepoint_toggle_public_non_member_teams()}</span>
+            </label>
+          {/if}
           <ul
             class="shadow-bg-secondary border-stronger bg-primary relative z-10 flex flex-col gap-1 overflow-y-auto rounded-lg border p-1 shadow-md focus:!ring-0"
             {...$menu}
@@ -339,24 +438,31 @@
                   <IconLoadingSpinner class="animate-spin"></IconLoadingSpinner>
                   {m.loading_available_sites()}
                 </div>
-              {:else if filteredResources.length > 0}
-                {#each filteredResources as previewItem (previewItem.value.key)}
-                  {@const item = $state.snapshot(previewItem)}
-                  {@const previewIsOneDrive = item.value.type === "onedrive"}
-                  <li
-                    {...$option(item)}
-                    use:option
-                    class="hover:bg-hover-default flex items-center gap-2 rounded-md px-2 py-1 hover:cursor-pointer"
+              {:else if groupedFilteredResources.length > 0}
+                {#each groupedFilteredResources as group (group.category)}
+                  <div
+                    class="text-secondary px-2 pt-2 pb-1 text-xs font-medium tracking-wide uppercase"
                   >
-                    {#if previewIsOneDrive}
-                      <IconUploadCloud class="w-4 h-4 text-secondary flex-shrink-0" />
-                    {:else}
-                      <IconWeb class="w-4 h-4 text-secondary flex-shrink-0" />
-                    {/if}
-                    <span class="text-primary truncate py-1">
-                      {item.value.name}
-                    </span>
-                  </li>
+                    {getCategoryLabel(group.category)}
+                  </div>
+                  {#each group.items as previewItem (previewItem.value.key)}
+                    {@const item = $state.snapshot(previewItem)}
+                    {@const previewIsOneDrive = item.value.type === "onedrive"}
+                    <li
+                      {...$option(item)}
+                      use:option
+                      class="hover:bg-hover-default flex items-center gap-2 rounded-md px-2 py-1 hover:cursor-pointer"
+                    >
+                      {#if previewIsOneDrive}
+                        <IconUploadCloud class="text-secondary h-4 w-4 flex-shrink-0" />
+                      {:else}
+                        <IconWeb class="text-secondary h-4 w-4 flex-shrink-0" />
+                      {/if}
+                      <span class="text-primary truncate py-1">
+                        {item.value.name}
+                      </span>
+                    </li>
+                  {/each}
                 {/each}
               {:else}
                 <span class="text-secondary px-2 py-1">{m.no_matching_sites_found()}</span>
@@ -365,7 +471,9 @@
           </ul>
         </div>
       {:else}
-        <div class="flex flex-col gap-3">
+        <div
+          class="flex max-h-[56vh] min-h-0 flex-col gap-3 overflow-x-hidden overflow-y-auto pr-1"
+        >
           <SharePointFolderTree
             userIntegrationId={integration.id || ""}
             spaceId={$currentSpace.id}
@@ -373,29 +481,31 @@
             driveId={selectedSite.type === "onedrive" ? selectedSite.key : undefined}
             siteName={selectedSite.name}
             isOneDrive={isOneDrive ?? false}
-            selectedItemKeys={selectedItemKeys}
+            {selectedItemKeys}
             onToggleSelect={toggleSelectedItem}
           />
 
           {#if selectedItems.length > 0}
-            <div class="mx-4 mb-1 px-3 py-2 bg-accent-dimmer border border-accent rounded-md">
+            <div class="bg-accent-dimmer border-accent mx-4 mb-1 rounded-md border px-3 py-2">
               <div class="text-sm font-medium">
                 {m.sharepoint_selected_items_count({ count: selectedItems.length })}
               </div>
               {#if dedupedSelection.skippedCount > 0}
-                <div class="text-xs text-secondary mt-1">
+                <div class="text-secondary mt-1 text-xs">
                   {m.sharepoint_nested_selection_notice({ count: dedupedSelection.skippedCount })}
                 </div>
               {/if}
             </div>
 
-            {#if dedupedSelection.effectiveEntries.length > 1}
+            {#if requiresWrapperName}
               <div class="mx-4 mb-1">
-                <label class="text-xs text-secondary block mb-1">
-                  {m.sharepoint_wrapper_name_label()}
+                <label class="text-secondary mb-1 block text-xs">
+                  {m.sharepoint_wrapper_name_label()} <span class="text-label-stronger">*</span>
                 </label>
+                <p class="text-secondary mb-1 text-xs">{m.sharepoint_wrapper_name_required_hint()}</p>
                 <input
-                  class="border border-default bg-primary rounded px-2 py-1 text-sm w-full"
+                  class="border-default bg-primary w-full rounded border px-2 py-1 text-sm"
+                  class:border-label-default={wrapperNameMissing}
                   value={wrapperName}
                   placeholder={m.sharepoint_wrapper_name_placeholder()}
                   oninput={(event) => {
@@ -403,33 +513,38 @@
                     wrapperName = target.value;
                   }}
                 />
+                {#if wrapperNameMissing}
+                  <p class="text-label-stronger mt-1 text-xs">{m.sharepoint_wrapper_name_missing_hint()}</p>
+                {/if}
               </div>
             {/if}
 
-            <div class="mx-4 mb-2 border border-default rounded-md max-h-48 overflow-y-auto">
+            <div
+              class="border-default mx-4 mb-2 max-h-48 overflow-x-hidden overflow-y-auto rounded-md border"
+            >
               {#each selectedItems as selection (selection.selectionKey)}
-                <div class="px-3 py-2 border-b border-dimmer last:border-b-0">
+                <div class="border-dimmer border-b px-3 py-2 last:border-b-0">
                   <div class="flex items-center gap-2">
                     <input
-                      class="border border-default bg-primary rounded px-2 py-1 text-sm flex-1 min-w-0"
+                      class="border-default bg-primary min-w-0 flex-1 rounded border px-2 py-1 text-sm"
                       value={selection.importName}
                       oninput={(event) => handleSelectionNameInput(selection.selectionKey, event)}
                     />
                     <button
                       type="button"
-                      class="text-xs text-secondary hover:text-primary underline"
+                      class="text-secondary hover:text-primary text-xs underline"
                       onclick={() => removeSelectedItem(selection.selectionKey)}
                     >
                       {m.remove()}
                     </button>
                   </div>
-                  <div class="mt-1 flex items-center gap-2 text-xs text-secondary">
-                    <span class="truncate">{selection.item.path}</span>
+                  <div class="text-secondary mt-1 flex min-w-0 items-center gap-2 text-xs">
+                    <span class="min-w-0 flex-1 truncate">{selection.item.path}</span>
                     {#if selection.item.size != null}
                       <span class="flex-shrink-0">({formatSize(selection.item.size)})</span>
                     {/if}
                     {#if dedupedSelection.excludedKeys.has(selection.selectionKey)}
-                      <span class="flex-shrink-0 text-secondary">
+                      <span class="text-secondary flex-shrink-0">
                         {m.sharepoint_nested_selection_skipped()}
                       </span>
                     {/if}
@@ -453,18 +568,27 @@
     </Dialog.Section>
 
     <Dialog.Controls>
-      <Button onclick={() => {
-        if (selectedSite) {
-          selectedSite = null;
-          selectedItems = [];
-          wrapperName = "";
-        } else {
-          goBack();
-        }
-      }}>{m.back()}</Button>
+      {#if wrapperNameMissing}
+        <span class="text-secondary mr-auto text-xs">{m.sharepoint_wrapper_name_missing_hint()}</span>
+      {/if}
+      <Button
+        onclick={() => {
+          if (selectedSite) {
+            selectedSite = null;
+            selectedItems = [];
+            wrapperName = "";
+          } else {
+            goBack();
+          }
+        }}>{m.back()}</Button
+      >
       <Button
         variant="primary"
-        disabled={importKnowledge.isLoading || $currentSpace.embedding_models.length === 0 || !selectedSite || dedupedSelection.effectiveEntries.length === 0 || (dedupedSelection.effectiveEntries.length > 1 && wrapperName.trim().length === 0)}
+        disabled={importKnowledge.isLoading ||
+          $currentSpace.embedding_models.length === 0 ||
+          !selectedSite ||
+          dedupedSelection.effectiveEntries.length === 0 ||
+          wrapperNameMissing}
         onclick={importKnowledge}
       >
         {importKnowledge.isLoading ? m.importing() : m.import()}

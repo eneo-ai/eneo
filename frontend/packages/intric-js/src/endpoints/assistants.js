@@ -285,6 +285,60 @@ export function initAssistants(client) {
       });
 
       return res;
+    },
+
+    /**
+     * Get all MCP servers associated with an assistant
+     * @param {{id: string}} params
+     * @returns {Promise<{items: Array}>}
+     * */
+    listMCPServers: async ({ id }) => {
+      const res = await client.fetch("/api/v1/assistants/{id}/mcp-servers/", {
+        method: "get",
+        params: {
+          path: { id }
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Add an MCP server to an assistant
+     * @param {{id: string}} assistant
+     * @param {{id: string}} mcpServer
+     * @returns {Promise<{success: boolean}>}
+     * */
+    addMCPServer: async ({ assistant, mcpServer }) => {
+      const res = await client.fetch("/api/v1/assistants/{id}/mcp-servers/{mcp_server_id}/", {
+        method: "post",
+        params: {
+          path: {
+            id: assistant.id,
+            mcp_server_id: mcpServer.id
+          }
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Remove an MCP server from an assistant
+     * @param {{id: string}} assistant
+     * @param {{id: string}} mcpServer
+     * @returns {Promise<void>}
+     * */
+    removeMCPServer: async ({ assistant, mcpServer }) => {
+      await client.fetch("/api/v1/assistants/{id}/mcp-servers/{mcp_server_id}/", {
+        method: "delete",
+        params: {
+          path: {
+            id: assistant.id,
+            mcp_server_id: mcpServer.id
+          }
+        }
+      });
     }
   };
 }
