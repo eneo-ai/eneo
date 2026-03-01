@@ -41,6 +41,7 @@
     { value: "cohere", label: "Cohere" },
     { value: "mistral", label: "Mistral AI" },
     { value: "hosted_vllm", label: "vLLM" },
+    { value: "berget", label: "Berget AI" },
   ];
 
   const providerTypeStore = writable(providerTypes[0]);
@@ -217,8 +218,8 @@
     error = null;
   }
 
-  // Endpoint is required for Azure and vLLM
-  $: requiresEndpoint = providerType === "azure" || providerType === "hosted_vllm";
+  // Endpoint is required for Azure, vLLM, and Berget
+  $: requiresEndpoint = providerType === "azure" || providerType === "hosted_vllm" || providerType === "berget";
 </script>
 
 <Dialog.Root {openController}>
@@ -332,6 +333,8 @@
             bind:value={endpoint}
             placeholder={providerType === "azure"
               ? "https://your-resource.openai.azure.com"
+              : providerType === "berget"
+              ? "api.berget.ai/v1"
               : "https://api.openai.com/v1 (default) or custom endpoint"}
             required={requiresEndpoint}
           />
@@ -342,6 +345,10 @@
           {:else if providerType === "azure"}
             <p class="text-muted-foreground text-xs mt-1">
               {m.endpoint_required_azure()}
+            </p>
+          {:else if providerType === "berget"}
+            <p class="text-muted-foreground text-xs mt-1">
+              https://api.berget.ai/v1
             </p>
           {:else}
             <p class="text-muted-foreground text-xs mt-1">

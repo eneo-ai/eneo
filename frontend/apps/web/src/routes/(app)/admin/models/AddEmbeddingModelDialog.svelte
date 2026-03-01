@@ -45,6 +45,7 @@
     { value: "anthropic", label: "Anthropic (Claude)" },
     { value: "gemini", label: "Google Gemini" },
     { value: "cohere", label: "Cohere" },
+    { value: "berget", label: "Berget AI" },
   ];
 
   const modelFamilies = [

@@ -6,7 +6,7 @@
    * Uses subtle tinted backgrounds to avoid harsh color blocks
    */
 
-  export let providerType: "openai" | "azure" | "anthropic" | "gemini" | "cohere" | string;
+  export let providerType: "openai" | "azure" | "anthropic" | "gemini" | "cohere" | "berget" | string;
   export let size: "sm" | "md" | "lg" = "md";
 
   // Size mappings
@@ -51,6 +51,11 @@
       bg: "bg-[oklch(94%_0.04_55)] dark:bg-[oklch(22%_0.06_55)]",
       fg: "text-[oklch(40%_0.15_55)] dark:text-[oklch(81%_0.14_55)]",
       border: "border-[oklch(84%_0.05_55)] dark:border-[oklch(35%_0.07_55)]"
+    },
+    berget: {
+      bg: "bg-[oklch(94%_0.05_180)] dark:bg-[oklch(23%_0.07_180)]",
+      fg: "text-[oklch(38%_0.18_180)] dark:text-[oklch(82%_0.16_180)]",
+      border: "border-[oklch(83%_0.06_180)] dark:border-[oklch(35%_0.09_180)]"
     },
     hosted_vllm: {
       bg: "bg-[oklch(93%_0.035_140)] dark:bg-[oklch(21%_0.06_140)]",

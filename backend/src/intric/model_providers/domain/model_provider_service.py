@@ -250,8 +250,10 @@ class ModelProviderService:
                     # For other providers, try OpenAI-compatible /v1/models
                     endpoint = provider.config.get("endpoint", "").rstrip("/")
                     if endpoint:
+                        # Check if endpoint already ends with /v1, if so add /models, otherwise add /v1/models
+                        models_endpoint = f"{endpoint}/models" if endpoint.endswith("/v1") else f"{endpoint}/v1/models"
                         resp = await client.get(
-                            f"{endpoint}/v1/models",
+                            models_endpoint,
                             headers={"Authorization": f"Bearer {api_key}"},
                         )
                         resp.raise_for_status()

@@ -43,11 +43,19 @@ class LiteLLMTranscriptionAdapter:
         self.credential_resolver = credential_resolver
         self.provider_type = provider_type
 
+        # Map provider types to LiteLLM provider names
+        # Berget is OpenAI-compatible, so use "openai" provider type
+        provider_mapping = {
+            "berget": "openai",
+            "gdm": "openai",
+        }
+        litellm_provider_type = provider_mapping.get(provider_type, provider_type)
+
         # Construct LiteLLM model name with provider prefix
         # LiteLLM requires the provider prefix to know which client to use
         # Users should set provider_type to a LiteLLM-compatible value
         # (e.g., "openai", "hosted_vllm" for OpenAI-compatible APIs)
-        self.litellm_model = f"{provider_type}/{model.model_name}"
+        self.litellm_model = f"{litellm_provider_type}/{model.model_name}"
 
         logger.debug(
             f"[LiteLLM] Initializing transcription adapter for model: {model.name} -> {self.litellm_model}"
