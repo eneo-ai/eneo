@@ -82,6 +82,15 @@ class ActionType(str, Enum):
     SECURITY_CLASSIFICATION_ENABLED = "security_classification_enabled"
     SECURITY_CLASSIFICATION_DISABLED = "security_classification_disabled"
 
+    # MCP Server Actions
+    MCP_SERVER_CREATED = "mcp_server_created"
+    MCP_SERVER_UPDATED = "mcp_server_updated"
+    MCP_SERVER_DELETED = "mcp_server_deleted"
+    MCP_SERVER_ENABLED = "mcp_server_enabled"
+    MCP_SERVER_DISABLED = "mcp_server_disabled"
+    MCP_SERVER_TOOL_ENABLED = "mcp_server_tool_enabled"
+    MCP_SERVER_TOOL_DISABLED = "mcp_server_tool_disabled"
+
     # System Actions
     RETENTION_POLICY_APPLIED = "retention_policy_applied"
     ENCRYPTION_KEY_ROTATED = "encryption_key_rotated"

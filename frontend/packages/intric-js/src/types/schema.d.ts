@@ -691,6 +691,30 @@ export interface paths {
      */
     get: operations["get_metadata_api_v1_analysis_metadata_statistics__get"];
   };
+  "/api/v1/analysis/assistant-activity/": {
+    /**
+     * Get Assistant Activity
+     * @description Get assistant activity statistics for the tenant.
+     *
+     * Returns:
+     * - active_assistant_count: Number of assistants with sessions in the period
+     * - total_trackable_assistants: Number of published assistants with insights enabled
+     * - active_assistant_pct: Percentage of trackable assistants that are active
+     * - active_user_count: Number of unique users with sessions (excluding service sessions
+     *   and deleted users)
+     *
+     * Note on datetime parameters:
+     * - If no time is provided in the datetime, time components default to 00:00:00
+     */
+    get: operations["get_assistant_activity_api_v1_analysis_assistant_activity__get"];
+  };
+  "/api/v1/analysis/metadata-statistics/aggregated/": {
+    /**
+     * Get Metadata Aggregated
+     * @description Aggregated data for analytics (hourly buckets).
+     */
+    get: operations["get_metadata_aggregated_api_v1_analysis_metadata_statistics_aggregated__get"];
+  };
   "/api/v1/analysis/assistants/{assistant_id}/": {
     /**
      * Get Most Recent Questions
@@ -760,6 +784,10 @@ export interface paths {
      *     AnalysisAnswer containing the AI response
      */
     post: operations["ask_unified_questions_about_questions_api_v1_analysis_conversation_insights__post"];
+  };
+  "/api/v1/analysis/conversation-insights/jobs/{job_id}/": {
+    /** Get Conversation Insight Job */
+    get: operations["get_conversation_insight_job_api_v1_analysis_conversation_insights_jobs__job_id___get"];
   };
   "/api/v1/analysis/conversation-insights/sessions/": {
     /**
@@ -3211,6 +3239,39 @@ export interface components {
       /** Url */
       url: string;
     };
+    /**
+     * AnalysisJobStatus
+     * @enum {string}
+     */
+    AnalysisJobStatus: "queued" | "processing" | "completed" | "failed";
+    /** AnalysisJobStatusResponse */
+    AnalysisJobStatusResponse: {
+      /**
+       * Job Id
+       * Format: uuid
+       */
+      job_id: string;
+      status: components["schemas"]["AnalysisJobStatus"];
+      /** Answer */
+      answer?: string | null;
+      /** Error */
+      error?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * AnalysisProcessingMode
+     * @enum {string}
+     */
+    AnalysisProcessingMode: "sync" | "auto";
     /** ApiKey */
     ApiKey: {
       /** Truncated Key */
@@ -4045,6 +4106,20 @@ export interface components {
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
       model?: components["schemas"]["CompletionModelPublic"] | null;
+    };
+    /**
+     * AssistantActivityStats
+     * @description Statistics about assistant activity within a period.
+     */
+    AssistantActivityStats: {
+      /** Active Assistant Count */
+      active_assistant_count: number;
+      /** Total Trackable Assistants */
+      total_trackable_assistants: number;
+      /** Active Assistant Pct */
+      active_assistant_pct: number;
+      /** Active User Count */
+      active_user_count: number;
     };
     /** AssistantCreatePublic */
     AssistantCreatePublic: {
@@ -7470,6 +7545,16 @@ export interface components {
       tool_calls?: components["schemas"]["ToolCallInfo"][];
       logging_details: components["schemas"]["LoggingDetailsPublic"];
     };
+    /** MetadataCount */
+    MetadataCount: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Count */
+      count: number;
+    };
     /** MetadataStatistics */
     MetadataStatistics: {
       /** Assistants */
@@ -7478,6 +7563,15 @@ export interface components {
       sessions: components["schemas"]["SessionMetadata"][];
       /** Questions */
       questions: components["schemas"]["QuestionMetadata"][];
+    };
+    /** MetadataStatisticsAggregated */
+    MetadataStatisticsAggregated: {
+      /** Assistants */
+      assistants: components["schemas"]["MetadataCount"][];
+      /** Sessions */
+      sessions: components["schemas"]["MetadataCount"][];
+      /** Questions */
+      questions: components["schemas"]["MetadataCount"][];
     };
     /**
      * MigrationResult
@@ -10212,7 +10306,8 @@ export interface components {
       | "pull_confluence_content"
       | "pull_sharepoint_content"
       | "sync_sharepoint_delta"
-      | "update_model_usage_stats";
+      | "update_model_usage_stats"
+      | "analyze_conversation_insights";
     /** TemplateCreate */
     TemplateCreate: {
       /**
@@ -10326,6 +10421,12 @@ export interface components {
        * @default false
        */
       reasoning?: boolean;
+      /**
+       * Hosting
+       * @description Hosting location (swe, eu, usa)
+       * @default swe
+       */
+      hosting?: string;
       /**
        * Supports Tool Calling
        * @description Supports function/tool calling
@@ -15164,6 +15265,56 @@ export interface operations {
     };
   };
   /**
+   * Toggle JIT user provisioning
+   * @description Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Behavior:**
+   * - When enabled: Users are automatically created on first SSO login
+   * - When disabled: Only pre-existing users can log in via SSO
+   * - New users get the "User" role by default
+   * - Change takes effect immediately for all SSO logins
+   *
+   * **Example Request:**
+   * ```json
+   * {
+   *   "enabled": true
+   * }
+   * ```
+   *
+   * **Example Response:**
+   * ```json
+   * {
+   *   "chatbot_widget": {},
+   *   "using_templates": true,
+   *   "audit_logging_enabled": true,
+   *   "provisioning": true
+   * }
+   * ```
+   */
+  update_provisioning_setting_api_v1_settings_provisioning_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TemplateSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Get Assistants
    * @description Requires Admin permission if `for_tenant` is `true`.
    */
@@ -17451,8 +17602,8 @@ export interface operations {
   get_metadata_api_v1_analysis_metadata_statistics__get: {
     parameters: {
       query?: {
-        start_date?: string;
-        end_date?: string;
+        start_date?: string | null;
+        end_date?: string | null;
       };
     };
     responses: {
@@ -17460,6 +17611,68 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["MetadataStatistics"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Assistant Activity
+   * @description Get assistant activity statistics for the tenant.
+   *
+   * Returns:
+   * - active_assistant_count: Number of assistants with sessions in the period
+   * - total_trackable_assistants: Number of published assistants with insights enabled
+   * - active_assistant_pct: Percentage of trackable assistants that are active
+   * - active_user_count: Number of unique users with sessions (excluding service sessions
+   *   and deleted users)
+   *
+   * Note on datetime parameters:
+   * - If no time is provided in the datetime, time components default to 00:00:00
+   */
+  get_assistant_activity_api_v1_analysis_assistant_activity__get: {
+    parameters: {
+      query?: {
+        start_date?: string | null;
+        end_date?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AssistantActivityStats"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Metadata Aggregated
+   * @description Aggregated data for analytics (hourly buckets).
+   */
+  get_metadata_aggregated_api_v1_analysis_metadata_statistics_aggregated__get: {
+    parameters: {
+      query?: {
+        start_date?: string | null;
+        end_date?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MetadataStatisticsAggregated"];
         };
       };
       /** @description Validation Error */
@@ -17628,6 +17841,7 @@ export interface operations {
         include_followups?: boolean;
         assistant_id?: string | null;
         group_chat_id?: string | null;
+        processing_mode?: components["schemas"]["AnalysisProcessingMode"];
       };
     };
     requestBody: {
@@ -17640,6 +17854,28 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Conversation Insight Job */
+  get_conversation_insight_job_api_v1_analysis_conversation_insights_jobs__job_id___get: {
+    parameters: {
+      path: {
+        job_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AnalysisJobStatusResponse"];
         };
       };
       /** @description Validation Error */

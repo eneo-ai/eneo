@@ -38,6 +38,15 @@ export type JobStatus = components["schemas"]["Status"];
 export type Tenant = components["schemas"]["TenantPublic"];
 export type ModelProviderPublic = components["schemas"]["ModelProviderPublic"];
 export type AnalyticsData = components["schemas"]["MetadataStatistics"];
+export type AnalyticsAggregateRow = {
+  created_at: string;
+  count: number;
+};
+export type AnalyticsAggregatedData = {
+  assistants: AnalyticsAggregateRow[];
+  sessions: AnalyticsAggregateRow[];
+  questions: AnalyticsAggregateRow[];
+};
 export type UserGroup = components["schemas"]["UserGroupPublic"];
 export type User = components["schemas"]["UserAdminView"];
 export type UserSparse = components["schemas"]["UserSparse"];

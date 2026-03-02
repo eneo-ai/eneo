@@ -246,8 +246,8 @@ class AuditMetadata:
         method: str,
         success: bool,
         failure_reason: Optional[str] = None,
-        extra: Optional[dict] = None,
-    ) -> dict:
+        extra: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         """
         Create metadata for authentication events.
 
