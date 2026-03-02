@@ -26,6 +26,7 @@ from intric.authentication.auth_models import (
     ApiKeyScopeType,
 )
 from intric.authentication.api_key_resolver import ApiKeyValidationError
+from intric.roles.permissions import Permission
 from intric.conversations.conversations_router import _validate_conversation_scope
 from tests.unit.api_key_test_utils import make_api_key
 
@@ -838,6 +839,7 @@ class TestResolveApiKeyStrictModeWiring:
                 return_value=SimpleNamespace(
                     id=key.owner_user_id,
                     tenant_id=key.tenant_id,
+                    permissions={Permission.ADMIN},
                 )
             )
         )
@@ -1909,6 +1911,7 @@ class TestTenantScopeForDeleteEnforcement:
                 return_value=SimpleNamespace(
                     id=key.owner_user_id,
                     tenant_id=key.tenant_id,
+                    permissions={Permission.ADMIN},
                 )
             )
         )

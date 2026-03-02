@@ -506,6 +506,26 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
             true, now(), now())
         ON CONFLICT (name) DO NOTHING
     """)
+    # Add API key scope enforcement feature flags.
+    # These rows are NOT needed for normal scope enforcement (which fail-closed defaults
+    # to True when the row is missing). They ARE needed because the settings API
+    # (PATCH /settings/scope-enforcement, /settings/strict-mode) calls
+    # _require_feature_flag() which raises ValueError if the global row doesn't exist.
+    # The access matrix tests toggle these flags via the settings API.
+    cursor.execute("""
+        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'api_key_scope_enforcement',
+            'Enforce API key scope restrictions',
+            true, now(), now())
+        ON CONFLICT (name) DO NOTHING
+    """)
+    cursor.execute("""
+        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'api_key_strict_mode',
+            'Enable strict scope mode for API keys',
+            false, now(), now())
+        ON CONFLICT (name) DO NOTHING
+    """)
     conn.commit()
     cursor.close()
     conn.close()
