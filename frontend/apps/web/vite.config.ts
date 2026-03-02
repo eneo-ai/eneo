@@ -32,6 +32,9 @@ export default defineConfig({
   test: {
     include: ["src/**/*.{test,spec}.{js,ts}"]
   },
+  ssr: {
+    noExternal: ["@xyflow/svelte", "@xyflow/system"]
+  },
   server: {
     host: "0.0.0.0", // Change to host 0.0.0.0 if you cant login on localhost (e.g. WSL)
     port: 3000,

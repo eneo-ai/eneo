@@ -33,6 +33,7 @@ import { initIcons } from "./endpoints/icons";
 import { initModelProviders } from "./endpoints/model-providers";
 import { initTenantModels } from "./endpoints/tenant-models";
 import { initApiKeys } from "./endpoints/api-keys";
+import { initFlows } from "./endpoints/flows";
 
 /**
  * Create an Intric.js object to interact with the intric backend.
@@ -80,6 +81,7 @@ export function createIntric(args) {
     modelProviders: initModelProviders(client),
     tenantModels: initTenantModels(client),
     apiKeys: initApiKeys(client),
+    flows: initFlows(client),
     client
   };
 }

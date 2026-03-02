@@ -33,6 +33,7 @@ dependencies = [
     "wrapt>=1.16.0,<2",
     "python-multipart>=0.0.18,<0.0.19",
     "arq>=0.26,<1",  # v0.26+ required for allow_abort_jobs, lifecycle hooks
+    "celery[redis]>=5.4,<6",
     "soundfile>=0.12.1,<0.13",
     "audioread>=3.0.1,<4",
     "pydantic-extra-types>=2.6.0,<3",

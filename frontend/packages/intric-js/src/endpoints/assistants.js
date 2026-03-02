@@ -33,7 +33,7 @@ export function initAssistants(client) {
      * */
     create: async (assistant) => {
       if ("spaceId" in assistant) {
-        const { spaceId: id, name, from_template } = assistant;
+        const { spaceId: id, name, from_template, hidden } = assistant;
         const res = await client.fetch("/api/v1/spaces/{id}/applications/assistants/", {
           method: "post",
           params: {
@@ -42,7 +42,7 @@ export function initAssistants(client) {
             }
           },
           requestBody: {
-            "application/json": { name, from_template }
+            "application/json": { name, from_template, hidden }
           }
         });
         return res;

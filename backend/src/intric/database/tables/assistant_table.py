@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import CheckConstraint, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,6 +20,12 @@ from intric.database.tables.websites_table import Websites
 
 class Assistants(BasePublic):
     name: Mapped[str] = mapped_column()
+    hidden: Mapped[bool] = mapped_column(default=False, server_default="false")
+    origin: Mapped[str] = mapped_column(default="user", server_default="user", nullable=False)
+    managing_flow_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("flows.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     completion_model_kwargs: Mapped[Optional[dict]] = mapped_column(JSONB)
     guardrail_active: Mapped[Optional[bool]] = mapped_column()
     logging_enabled: Mapped[bool] = mapped_column()
@@ -81,7 +87,23 @@ class Assistants(BasePublic):
     assistant_mcp_servers: Mapped[list["AssistantMCPServers"]] = relationship(viewonly=True)
     assistant_mcp_server_tools: Mapped[list["AssistantMCPServerTools"]] = relationship(viewonly=True)
 
-    __table_args__ = {"extend_existing": True}  # Temporary
+    __table_args__ = (
+        CheckConstraint(
+            "origin IN ('user','flow_managed')",
+            name="ck_assistants_origin",
+        ),
+        CheckConstraint(
+            "(origin = 'user' AND managing_flow_id IS NULL) OR "
+            "(origin = 'flow_managed' AND managing_flow_id IS NOT NULL)",
+            name="ck_assistants_origin_flow_owner",
+        ),
+        CheckConstraint(
+            "origin <> 'flow_managed' OR hidden = true",
+            name="ck_assistants_flow_managed_hidden",
+        ),
+        Index("ix_assistants_origin_managing_flow", "origin", "managing_flow_id"),
+        {"extend_existing": True},
+    )
 
 
 class AssistantsGroups(BaseCrossReference):

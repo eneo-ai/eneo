@@ -358,7 +358,8 @@ async def create_space_assistant(
 
     # Create assistant
     assistant, permissions = await service.create_assistant(
-        name=assistant_in.name, space_id=id, template_data=assistant_in.from_template
+        name=assistant_in.name, space_id=id, template_data=assistant_in.from_template,
+        hidden=assistant_in.hidden,
     )
 
     # Get space for context (graceful degradation if space fetch fails)

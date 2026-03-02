@@ -38,6 +38,8 @@ from intric.embedding_models.presentation.tenant_embedding_models_router import 
     router as tenant_embedding_models_router,
 )
 from intric.files.file_router import router as files_router
+from intric.flows.api.flow_router import router as flow_router
+from intric.flows.api.flow_run_router import router as flow_run_router
 from intric.group_chat.presentation.group_chat_router import router as group_chat_router
 from intric.groups_legacy.api.group_router import router as groups_router
 from intric.icons.api.icon_router import router as icons_router
@@ -394,6 +396,36 @@ router.include_router(
     dependencies=[
         Depends(require_resource_permission_for_method("knowledge")),
         Depends(require_api_key_scope_check(resource_type="website", path_param="id")),
+    ],
+)
+router.include_router(
+    flow_router,
+    prefix="/flows",
+    tags=["flows"],
+    dependencies=[
+        Depends(require_resource_permission_for_method("apps")),
+        Depends(
+            require_api_key_scope_check(
+                resource_type="flow",
+                path_param="id",
+                self_filtering=True,
+            )
+        ),
+    ],
+)
+router.include_router(
+    flow_run_router,
+    prefix="/flow-runs",
+    tags=["flow-runs"],
+    dependencies=[
+        Depends(require_resource_permission_for_method("apps")),
+        Depends(
+            require_api_key_scope_check(
+                resource_type="flow_run",
+                path_param="id",
+                self_filtering=True,
+            )
+        ),
     ],
 )
 router.include_router(websocket_router, prefix="", tags=["websockets"])

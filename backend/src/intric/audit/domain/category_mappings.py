@@ -41,7 +41,7 @@ CATEGORY_MAPPINGS = {
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
     ActionType.MODULE_ADDED.value: "admin_actions",
     ActionType.MODULE_ADDED_TO_TENANT.value: "admin_actions",
-    # User Actions (29 actions)
+    # User Actions (36 actions)
     ActionType.ASSISTANT_CREATED.value: "user_actions",
     ActionType.ASSISTANT_UPDATED.value: "user_actions",
     ActionType.ASSISTANT_DELETED.value: "user_actions",
@@ -71,6 +71,16 @@ CATEGORY_MAPPINGS = {
     ActionType.COMPLETION_MODEL_UPDATED.value: "user_actions",
     ActionType.EMBEDDING_MODEL_UPDATED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_UPDATED.value: "user_actions",
+    ActionType.FLOW_CREATED.value: "user_actions",
+    ActionType.FLOW_UPDATED.value: "user_actions",
+    ActionType.FLOW_DELETED.value: "user_actions",
+    ActionType.FLOW_PUBLISHED.value: "user_actions",
+    ActionType.FLOW_UNPUBLISHED.value: "user_actions",
+    ActionType.FLOW_RUN_CREATED.value: "user_actions",
+    ActionType.FLOW_RUN_CANCELLED.value: "user_actions",
+    ActionType.FLOW_CLASSIFICATION_OVERRIDE.value: "user_actions",
+    ActionType.FLOW_RUN_DOCUMENT_GENERATED.value: "user_actions",
+    ActionType.FLOW_RUN_CONTRACT_REJECTED.value: "user_actions",
     # Security Events (6 actions)
     ActionType.SECURITY_CLASSIFICATION_CREATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_UPDATED.value: "security_events",

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import ModelKwargs
-from intric.assistants.assistant import Assistant
+from intric.assistants.assistant import Assistant, AssistantOrigin
 from intric.completion_models.domain.completion_model import CompletionModel
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.prompts_table import Prompts
@@ -56,6 +56,9 @@ class AssistantFactory:
         data_retention_days: int | None = None,
         metadata_json: dict | None = None,
         description: str | None = None,
+        hidden: bool = False,
+        origin: AssistantOrigin = AssistantOrigin.USER,
+        managing_flow_id: UUID | None = None,
     ) -> Assistant:
         # Avoid mutable default anti-pattern
         if completion_model_kwargs is None:
@@ -81,6 +84,9 @@ class AssistantFactory:
             data_retention_days=data_retention_days,
             metadata_json=metadata_json,
             description=description,
+            hidden=hidden,
+            origin=origin,
+            managing_flow_id=managing_flow_id,
         )
 
     def create_assistant_from_db(
@@ -142,6 +148,9 @@ class AssistantFactory:
             description=assistant_in_db.description,
             insight_enabled=assistant_in_db.insight_enabled,
             icon_id=assistant_in_db.icon_id,
+            hidden=assistant_in_db.hidden,
+            origin=AssistantOrigin(assistant_in_db.origin or AssistantOrigin.USER.value),
+            managing_flow_id=assistant_in_db.managing_flow_id,
         )
 
     def create_space_assistant_from_db(
@@ -231,4 +240,7 @@ class AssistantFactory:
             data_retention_days=assistant_in_db.data_retention_days,
             metadata_json=assistant_in_db.metadata_json,
             icon_id=assistant_in_db.icon_id,
+            hidden=assistant_in_db.hidden,
+            origin=AssistantOrigin(assistant_in_db.origin or AssistantOrigin.USER.value),
+            managing_flow_id=assistant_in_db.managing_flow_id,
         )

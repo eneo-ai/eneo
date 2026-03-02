@@ -183,6 +183,9 @@ declare module "@intric/icons/drop-file" {
 declare module "@intric/icons/feedback" {
   export { Icon as IconFeedback } from "@intric/icons/*";
 }
+declare module "@intric/icons/workflow" {
+  export { Icon as IconWorkflow } from "@intric/icons/*";
+}
 declare module "@intric/icons/notification-dot" {
   export { Icon as IconNotificationDot } from "@intric/icons/*";
 }

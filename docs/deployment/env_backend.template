@@ -18,6 +18,11 @@ POSTGRES_DB=eneo
 # Redis cache
 REDIS_HOST=redis              # Docker service name
 REDIS_PORT=6379
+# Redis database slots (must be unique)
+REDIS_DB=0
+REDIS_DB_CELERY_BROKER=2
+REDIS_DB_CELERY_RESULT=3
+REDIS_DB_AUTH_BROKER=4
 
 # ----------------------------------------------------------------------------
 # Security (REQUIRED)
@@ -261,6 +266,14 @@ WORKER_MAX_JOBS=15
 # In multi-tenant deployments, prevents one tenant from monopolizing all worker slots
 # Set to 0 to disable (not recommended for multi-tenant production)
 TENANT_WORKER_CONCURRENCY_LIMIT=4
+
+# Max concurrent Flow runs per tenant
+FLOW_MAX_CONCURRENT_RUNS_PER_TENANT=4
+
+# Celery Flow worker queue/runtime settings
+FLOW_CELERY_QUEUE=flows.execute
+CELERY_VISIBILITY_TIMEOUT_SECONDS=3600
+FLOW_TASK_TIMEOUT_SECONDS=3600
 
 # Semaphore TTL - auto-cleanup for crashed workers
 # CRITICAL: Must be > CRAWL_MAX_LENGTH to prevent premature lock release

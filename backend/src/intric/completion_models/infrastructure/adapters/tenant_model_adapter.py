@@ -416,6 +416,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             if response.choices and len(response.choices) > 0:
                 choice = response.choices[0]
                 msg = choice.message
+                execution_metadata: list[ToolCallMetadata] = []
 
                 # DEBUG: Log message details
                 logger.debug(f"[DEBUG] Message: {msg}")
@@ -467,15 +468,45 @@ class TenantModelAdapter(CompletionModelAdapter):
                             for ci in result["content"]:
                                 if ci.get("type") == "text":
                                     result_text += ci.get("text", "")
+                        result_status = "succeeded"
                         if result.get("is_error"):
                             result_text = json.dumps(
                                 {"error": result_text or "Tool execution failed"}
                             )
+                            result_status = "failed"
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
                             "content": result_text,
                         })
+
+                        # Keep parity with streaming path: persist MCP tool call metadata
+                        # so non-streaming runs retain complete audit evidence.
+                        tool_info = mcp_proxy.get_tool_info(tc.function.name)
+                        if tool_info:
+                            server_name, tool_name = tool_info
+                        elif "__" in tc.function.name:
+                            server_name, tool_name = tc.function.name.split("__", 1)
+                        else:
+                            server_name, tool_name = "", tc.function.name
+                        try:
+                            args = (
+                                json.loads(tc.function.arguments)
+                                if tc.function.arguments
+                                else None
+                            )
+                        except json.JSONDecodeError:
+                            args = None
+                        execution_metadata.append(
+                            ToolCallMetadata(
+                                server_name=server_name,
+                                tool_name=tool_name,
+                                arguments=args,
+                                tool_call_id=tc.id,
+                                approved=True,
+                                result_status=result_status,
+                            )
+                        )
 
                     # Follow-up completion without tools
                     follow_up_kwargs = {
@@ -492,6 +523,8 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                 if hasattr(msg, "content") and msg.content:
                     completion.text = self._strip_thinking_content(msg.content)
+                if execution_metadata:
+                    completion.tool_calls_metadata = execution_metadata
                 completion.stop = choice.finish_reason == "stop"
 
             logger.info(f"[TenantModelAdapter] {self.litellm_model}: Completion successful")

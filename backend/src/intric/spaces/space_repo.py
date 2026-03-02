@@ -413,6 +413,7 @@ class SpaceRepository:
             .where(Assistants.space_id == space_in_db.id)
             .where(Assistants.id.notin_([assistant.id for assistant in assistants]))
             .where(Assistants.is_default == False)  # noqa
+            .where(Assistants.origin != "flow_managed")
         )
         await self.session.execute(stmt)
 
@@ -794,7 +795,7 @@ class SpaceRepository:
 
         return mcp_servers
 
-    async def _get_assistants(self, space_id: UUID):
+    async def _get_assistants(self, space_id: UUID, include_hidden: bool = False):
         stmt = (
             sa.select(Assistants)
             .where(Assistants.space_id == space_id)
@@ -808,6 +809,8 @@ class SpaceRepository:
             )
             .order_by(Assistants.created_at)
         )
+        if not include_hidden:
+            stmt = stmt.where(Assistants.hidden.is_(False))
         assistant_records = await self.session.execute(stmt)
         assistants = assistant_records.scalars().all()
 
@@ -1087,7 +1090,7 @@ class SpaceRepository:
 
         return apps_db
 
-    async def _get_from_query(self, query: sa.Select):
+    async def _get_from_query(self, query: sa.Select, *, include_hidden_assistants: bool = False):
         entry_in_db = await self._get_record_with_options(query)
         if not entry_in_db:
             return
@@ -1139,7 +1142,10 @@ class SpaceRepository:
                 entry_in_db.id, mcp_servers
             )
 
-        assistants = await self._get_assistants(space_id=entry_in_db.id)
+        assistants = await self._get_assistants(
+            space_id=entry_in_db.id,
+            include_hidden=include_hidden_assistants,
+        )
         apps = await self._get_apps(space_id=entry_in_db.id)
         group_chats = await self._get_group_chats(space_id=entry_in_db.id)
         services = await self._get_services(space_id=entry_in_db.id)
@@ -1203,13 +1209,21 @@ class SpaceRepository:
         await self._set_group_chats(entry_in_db, space.group_chats)
         return await self.one(id=entry_in_db.id)
 
-    async def one_or_none(self, id: UUID) -> Optional[Space]:
+    async def one_or_none(
+        self, id: UUID, *, include_hidden_assistants: bool = False
+    ) -> Optional[Space]:
         query = sa.select(Spaces).where(Spaces.id == id)
 
-        return await self._get_from_query(query)
+        return await self._get_from_query(
+            query, include_hidden_assistants=include_hidden_assistants
+        )
 
-    async def one(self, id: UUID) -> Space:
-        space = await self.one_or_none(id=id)
+    async def one(
+        self, id: UUID, *, include_hidden_assistants: bool = False
+    ) -> Space:
+        space = await self.one_or_none(
+            id=id, include_hidden_assistants=include_hidden_assistants
+        )
 
         if space is None:
             raise NotFoundException()
@@ -1219,7 +1233,9 @@ class SpaceRepository:
     async def update(
         self,
         space: Space,
-        mcp_tool_settings: list[tuple[UUID, bool]] = None
+        mcp_tool_settings: list[tuple[UUID, bool]] = None,
+        *,
+        include_hidden_assistants: bool = False,
     ) -> Space:
         query = (
             sa.update(Spaces)
@@ -1260,7 +1276,10 @@ class SpaceRepository:
         )
         await self._set_group_chats(entry_in_db, space.group_chats)
 
-        return await self.one(id=entry_in_db.id)
+        return await self.one(
+            id=entry_in_db.id,
+            include_hidden_assistants=include_hidden_assistants,
+        )
 
     async def delete(self, id: UUID):
         query = sa.delete(Spaces).where(Spaces.id == id)
@@ -1327,9 +1346,14 @@ class SpaceRepository:
         return await self._get_from_query(query)
 
     async def get_space_by_assistant(self, assistant_id: UUID) -> Space:
-        query = sa.select(Spaces).join(Assistants).where(Assistants.id == assistant_id)
+        query = (
+            sa.select(Spaces)
+            .join(Assistants)
+            .where(Assistants.id == assistant_id)
+            .where(Spaces.tenant_id == self.user.tenant_id)
+        )
 
-        space = await self._get_from_query(query)
+        space = await self._get_from_query(query, include_hidden_assistants=True)
 
         if space is None:
             raise NotFoundException()

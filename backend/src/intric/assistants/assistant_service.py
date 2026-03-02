@@ -8,7 +8,7 @@ from intric.ai_models.completion_models.completion_model import (
     ResponseType,
 )
 from intric.assistants.api.assistant_models import AssistantResponse
-from intric.assistants.assistant import Assistant
+from intric.assistants.assistant import Assistant, AssistantOrigin
 from intric.assistants.assistant_factory import AssistantFactory
 from intric.assistants.assistant_repo import AssistantRepository
 from intric.authentication.auth_service import AuthService
@@ -16,7 +16,7 @@ from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.completion_models.infrastructure.web_search import WebSearch
 from intric.files.file_service import FileService
 from intric.icons.icon_repo import IconRepository
-from intric.main.exceptions import BadRequestException, UnauthorizedException
+from intric.main.exceptions import BadRequestException, NotFoundException, UnauthorizedException
 from intric.main.logging import get_logger
 from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 from intric.prompts.api.prompt_models import PromptCreate
@@ -171,6 +171,9 @@ class AssistantService:
         name: str,
         space_id: UUID,
         template_data: Optional["TemplateCreate"] = None,
+        hidden: bool = False,
+        origin: AssistantOrigin = AssistantOrigin.USER,
+        managing_flow_id: UUID | None = None,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         space = await self.space_service.get_space(space_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
@@ -188,11 +191,26 @@ class AssistantService:
                 user=self.user,
                 space_id=space_id,
                 completion_model=completion_model,
+                hidden=hidden,
+                origin=origin,
+                managing_flow_id=managing_flow_id,
             )
 
             space.add_assistant(assistant)
             refreshed_space = await self.space_repo.update(space)
-            assistant = refreshed_space.get_assistant(assistant.id)
+            try:
+                assistant = refreshed_space.get_assistant(assistant.id)
+            except NotFoundException:
+                # Hidden assistants are intentionally excluded from default space reads.
+                # Flow-managed assistants are hidden by default, so resolve from a
+                # hidden-inclusive lookup to return the created assistant.
+                if hidden:
+                    hidden_space = await self.space_repo.get_space_by_assistant(
+                        assistant.id
+                    )
+                    assistant = hidden_space.get_assistant(assistant.id)
+                else:
+                    raise
 
         else:
             assistant = await self._create_from_template(
@@ -305,6 +323,7 @@ class AssistantService:
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        include_hidden: bool = False,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
@@ -434,7 +453,9 @@ class AssistantService:
 
         self.validate_space_assistant(space=space, assistant=assistant)
 
-        refreshed_space = await self.space_repo.update(space)
+        refreshed_space = await self.space_repo.update(
+            space, include_hidden_assistants=include_hidden
+        )
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
 
         # TODO: Review how we get the permissions to the presentation layer

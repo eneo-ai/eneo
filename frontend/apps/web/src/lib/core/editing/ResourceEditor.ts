@@ -1,4 +1,5 @@
 import { IntricError, type Intric, type UploadedFile } from "@intric/intric-js";
+import { toast } from "$lib/components/toast";
 import { derived, get, readonly, writable } from "svelte/store";
 import { getAddedItems, getRemovedItems } from "./getChangedItems";
 import { getDiff, type CompareOptions, type Diff } from "./getDiff";
@@ -86,10 +87,9 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
         });
       }
     } catch (e) {
-      alert("Error while trying to update!");
-      if (e instanceof IntricError) {
-        console.error(e.getReadableMessage());
-      }
+      const message = e instanceof IntricError ? e.getReadableMessage() : "Error while trying to update";
+      toast.error(message);
+      console.error(message);
     }
     isSaving.set(false);
   }
@@ -122,6 +122,13 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
     });
   }
 
+  /** Replace both persisted and editable state (e.g. after publish/unpublish) */
+  function setResource(value: T) {
+    const applied = applyDefaults(value, data.defaults);
+    resource.set(applied);
+    update.set(JSON.parse(JSON.stringify(applied)));
+  }
+
   return Object.freeze({
     state: {
       /** Read-only, current persisted state of the resource */
@@ -134,7 +141,8 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
       isSaving: readonly(isSaving)
     },
     saveChanges,
-    discardChanges
+    discardChanges,
+    setResource
   });
 }
 

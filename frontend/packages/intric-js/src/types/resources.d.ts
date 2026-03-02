@@ -107,6 +107,140 @@ export type ConversationSparse = components["schemas"]["SessionMetadataPublic"];
 export type ConversationMessage = components["schemas"]["Message"];
 export type ConversationTools = components["schemas"]["UseTools"];
 export type GroupChat = components["schemas"]["GroupChatPublic"];
+
+// Flow types — manually defined until OpenAPI schema is generated
+export type FlowStep = {
+  id?: string | null;
+  assistant_id: string;
+  step_order: number;
+  user_description?: string | null;
+  input_source: "flow_input" | "previous_step" | "all_previous_steps" | "http_get" | "http_post";
+  input_type: "text" | "json" | "image" | "audio" | "document" | "file" | "any";
+  input_contract?: Record<string, unknown> | null;
+  output_mode: "pass_through" | "http_post";
+  output_type: "text" | "json" | "pdf" | "docx";
+  output_contract?: Record<string, unknown> | null;
+  input_bindings?: Record<string, unknown> | null;
+  output_classification_override?: number | null;
+  mcp_policy: "inherit" | "restricted";
+  input_config?: Record<string, unknown> | null;
+  output_config?: Record<string, unknown> | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type FlowSparse = {
+  id: string;
+  tenant_id: string;
+  space_id: string;
+  name: string;
+  description?: string | null;
+  created_by_user_id?: string | null;
+  owner_user_id?: string | null;
+  published_version?: number | null;
+  metadata_json?: Record<string, unknown> | null;
+  data_retention_days?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type Flow = FlowSparse & {
+  steps: FlowStep[];
+};
+
+export type FlowRunArtifact = {
+  file_id: string;
+  name: string;
+  mimetype: string;
+  size: number;
+};
+
+export type FlowRunOutputPayload = {
+  text?: string;
+  structured?: Record<string, unknown>;
+  artifacts?: FlowRunArtifact[];
+  generated_file_ids?: string[];
+  file_ids?: string[];
+  webhook_delivered?: boolean;
+};
+
+export type FlowRun = {
+  id: string;
+  flow_id: string;
+  flow_version: number;
+  user_id?: string | null;
+  tenant_id: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  cancelled_at?: string | null;
+  input_payload_json?: Record<string, unknown> | null;
+  output_payload_json?: FlowRunOutputPayload | null;
+  error_message?: string | null;
+  job_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FlowStepResult = {
+  id?: string | null;
+  flow_run_id: string;
+  flow_id: string;
+  tenant_id: string;
+  step_id?: string | null;
+  step_order: number;
+  assistant_id?: string | null;
+  input_payload_json?: Record<string, unknown> | null;
+  effective_prompt?: string | null;
+  output_payload_json?: FlowRunOutputPayload | null;
+  model_parameters_json?: Record<string, unknown> | null;
+  num_tokens_input?: number | null;
+  num_tokens_output?: number | null;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  error_message?: string | null;
+  tool_calls_metadata?: unknown[] | Record<string, unknown> | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type FlowGraphNode = {
+  id: string;
+  label: string;
+  type: "input" | "llm" | "output";
+  step_order?: number;
+  input_source?: string;
+  input_type?: string;
+  output_type?: string;
+  output_mode?: string;
+  mcp_policy?: string;
+  run_status?: string;
+  num_tokens_input?: number;
+  num_tokens_output?: number;
+  error_message?: string;
+};
+
+export type FlowGraphEdge = {
+  source: string;
+  target: string;
+};
+
+export type FlowGraph = {
+  nodes: FlowGraphNode[];
+  edges: FlowGraphEdge[];
+};
+
+export type FlowRunEvidence = {
+  run: Record<string, unknown>;
+  definition_snapshot: Record<string, unknown>;
+  step_results: FlowStepResult[];
+  step_attempts: Record<string, unknown>[];
+};
+
+export type DryRunResult = {
+  step_order: number;
+  step_id: string;
+  valid: boolean;
+  resolved_bindings?: Record<string, string>;
+  errors?: string[];
+};
 export type GroupChatSparse = Omit<components["schemas"]["GroupChatSparse"], "user_id">;
 export type ChatPartner =
   | { id: string; type: "assistant" }

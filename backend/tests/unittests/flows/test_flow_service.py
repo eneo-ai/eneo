@@ -1,0 +1,577 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
+
+import pytest
+
+from intric.ai_models.completion_models.completion_model import ModelKwargs
+from intric.assistants.assistant import Assistant, AssistantOrigin
+from intric.flows.flow import Flow, FlowStep, FlowVersion
+from intric.flows.flow_service import FlowService
+from intric.main.models import NOT_PROVIDED
+from intric.main.exceptions import BadRequestException, NotFoundException
+
+
+class _FakeEncryptionService:
+    def is_active(self) -> bool:
+        return True
+
+    def is_encrypted(self, value: str) -> bool:
+        return value.startswith("enc:")
+
+    def encrypt(self, plaintext: str) -> str:
+        return f"enc:{plaintext}"
+
+    def decrypt(self, ciphertext: str) -> str:
+        return ciphertext.removeprefix("enc:")
+
+
+def _step(step_order: int = 1) -> FlowStep:
+    return FlowStep(
+        id=uuid4(),
+        assistant_id=uuid4(),
+        step_order=step_order,
+        user_description="Step",
+        input_source="flow_input",
+        input_type="text",
+        output_mode="pass_through",
+        output_type="json",
+        mcp_policy="inherit",
+    )
+
+
+def _build_assistant(*, flow_id, space_id, user) -> Assistant:
+    return Assistant(
+        id=uuid4(),
+        user=user,
+        space_id=space_id,
+        completion_model=None,
+        name="Flow managed",
+        prompt=None,
+        completion_model_kwargs=ModelKwargs(),
+        logging_enabled=False,
+        websites=[],
+        collections=[],
+        attachments=[],
+        published=False,
+        hidden=True,
+        origin=AssistantOrigin.FLOW_MANAGED,
+        managing_flow_id=flow_id,
+    )
+
+
+def _service(*, user, flow_repo, version_repo, encryption_service=None) -> FlowService:
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=AsyncMock(),
+        encryption_service=encryption_service,
+    )
+    service._validate_assistant_scope_for_steps = AsyncMock()  # type: ignore[method-assign]
+    return service
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_invalid_form_schema(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    with pytest.raises(BadRequestException):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[_step()],
+            metadata_json={"form_schema": {"fields": "not-a-list"}},
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_duplicate_step_order(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    step_one = _step(step_order=1)
+    step_duplicate = _step(step_order=1)
+
+    with pytest.raises(BadRequestException, match="Duplicate step_order"):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[step_one, step_duplicate],
+            metadata_json=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_non_contiguous_step_order(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    with pytest.raises(BadRequestException, match="contiguous and start at 1"):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[_step(step_order=1), _step(step_order=3)],
+            metadata_json=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_publish_flow_creates_version_and_updates_published_version(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    space_id = uuid4()
+    source_flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=space_id,
+        name="Publishable Flow",
+        description="Test flow",
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1), _step(step_order=2)],
+    )
+    latest_version = None
+    created_version = FlowVersion(
+        flow_id=flow_id,
+        version=1,
+        tenant_id=user.tenant_id,
+        definition_checksum="checksum",
+        definition_json={"dummy": True},
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    updated_flow = source_flow.model_copy(update={"published_version": 1})
+
+    flow_repo.get.return_value = source_flow
+    version_repo.get_latest.return_value = latest_version
+    version_repo.create.return_value = created_version
+    flow_repo.update.return_value = updated_flow
+
+    result = await service.publish_flow(flow_id=flow_id)
+
+    assert result.published_version == 1
+    version_repo.create.assert_awaited_once()
+    flow_repo.update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_forward_step_reference(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    step = _step(step_order=1).model_copy(
+        update={"input_bindings": {"value": "{{step_1.output.summary}}"}}
+    )
+
+    with pytest.raises(BadRequestException):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[step],
+            metadata_json=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_flow_allows_explicit_description_clear(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    source_flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Update Flow",
+        description="to be cleared",
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1)],
+    )
+    expected = source_flow.model_copy(update={"description": None})
+    flow_repo.get.return_value = source_flow
+    flow_repo.update.return_value = expected
+
+    result = await service.update_flow(
+        flow_id=flow_id,
+        description=None,
+        name=NOT_PROVIDED,
+    )
+
+    assert result.description is None
+    flow_repo.update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_flow_encrypts_step_header_values(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_repo.create.side_effect = lambda flow, tenant_id: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=version_repo,
+        encryption_service=_FakeEncryptionService(),
+    )
+    step = _step(step_order=1).model_copy(
+        update={
+            "input_config": {"url": "https://example.org/input", "headers": {"Authorization": "Bearer topsecret"}},
+            "output_config": {"url": "https://example.org/output", "headers": {"X-Api-Key": "abc123"}},
+        }
+    )
+
+    created = await service.create_flow(
+        space_id=uuid4(),
+        name="Flow",
+        steps=[step],
+        metadata_json=None,
+    )
+
+    assert created.steps[0].input_config["headers"]["Authorization"] == "enc:Bearer topsecret"
+    assert created.steps[0].output_config["headers"]["X-Api-Key"] == "enc:abc123"
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_header_secrets_without_encryption_key(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=version_repo,
+        encryption_service=None,
+    )
+    step = _step(step_order=1).model_copy(
+        update={
+            "input_config": {
+                "url": "https://example.org/input",
+                "headers": {"Authorization": "Bearer topsecret"},
+            }
+        }
+    )
+
+    with pytest.raises(BadRequestException, match="ENCRYPTION_KEY"):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[step],
+            metadata_json=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_previous_step_input_for_first_step(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    step = _step(step_order=1).model_copy(update={"input_source": "previous_step"})
+
+    with pytest.raises(BadRequestException):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[step],
+            metadata_json=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_http_input_sources_until_implemented(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    step = _step(step_order=1).model_copy(update={"input_source": "http_get"})
+
+    with pytest.raises(BadRequestException, match="not supported yet"):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[step],
+            metadata_json=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_assistants_outside_space_or_tenant(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_repo.create.return_value = AsyncMock()
+
+    allowed_result = MagicMock()
+    allowed_result.all.return_value = []
+    flow_repo.session = AsyncMock()
+    flow_repo.session.execute.return_value = allowed_result
+
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=AsyncMock(),
+    )
+
+    with pytest.raises(BadRequestException, match="outside the selected space or tenant"):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[_step(step_order=1)],
+            metadata_json=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_flow_rejects_when_flow_is_published(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    source_flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Published Flow",
+        description="locked",
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=1,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1)],
+    )
+    flow_repo.get.return_value = source_flow
+
+    with pytest.raises(BadRequestException, match="Cannot mutate a published flow"):
+        await service.update_flow(flow_id=flow_id, name="new")
+
+
+@pytest.mark.asyncio
+async def test_update_flow_assistant_rejects_when_flow_published(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    assistant_service = AsyncMock()
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=assistant_service,
+    )
+
+    flow_id = uuid4()
+    published_flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=2,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[],
+    )
+    flow_repo.get.return_value = published_flow
+
+    with pytest.raises(BadRequestException, match="Cannot mutate assistant of a published flow"):
+        await service.update_flow_assistant(
+            flow_id=flow_id,
+            assistant_id=uuid4(),
+            name="Updated",
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_flow_assistant_sets_flow_managed_origin(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    assistant_service = AsyncMock()
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=assistant_service,
+    )
+
+    flow_id = uuid4()
+    flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[],
+    )
+    flow_repo.get.return_value = flow
+    expected = _build_assistant(flow_id=flow_id, space_id=flow.space_id, user=user)
+    assistant_service.create_assistant.return_value = (expected, [])
+
+    assistant, _ = await service.create_flow_assistant(flow_id=flow_id, name="step")
+
+    assert assistant.origin == AssistantOrigin.FLOW_MANAGED
+    assistant_service.create_assistant.assert_awaited_once_with(
+        name="step",
+        space_id=flow.space_id,
+        hidden=True,
+        origin=AssistantOrigin.FLOW_MANAGED,
+        managing_flow_id=flow_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_flow_assistant_rejects_wrong_owner(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    assistant_service = AsyncMock()
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=assistant_service,
+    )
+
+    flow_id = uuid4()
+    flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[],
+    )
+    flow_repo.get.return_value = flow
+    wrong_owner_assistant = _build_assistant(
+        flow_id=uuid4(),
+        space_id=flow.space_id,
+        user=user,
+    )
+    assistant_service.get_assistant.return_value = (wrong_owner_assistant, [])
+
+    with pytest.raises(NotFoundException, match="belongs to a different flow"):
+        await service.get_flow_assistant(flow_id=flow_id, assistant_id=wrong_owner_assistant.id)
+
+
+@pytest.mark.asyncio
+async def test_get_flow_assistant_rejects_non_flow_managed(user):
+    """Assistant exists but is not flow-managed → clear error, not generic 404."""
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    assistant_service = AsyncMock()
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=assistant_service,
+    )
+
+    flow_id = uuid4()
+    flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[],
+    )
+    flow_repo.get.return_value = flow
+
+    # Assistant with origin != FLOW_MANAGED
+    regular_assistant = _build_assistant(flow_id=flow_id, space_id=flow.space_id, user=user)
+    regular_assistant.origin = AssistantOrigin.USER
+    assistant_service.get_assistant.return_value = (regular_assistant, [])
+
+    with pytest.raises(NotFoundException, match="not flow-managed"):
+        await service.get_flow_assistant(flow_id=flow_id, assistant_id=regular_assistant.id)
+
+
+@pytest.mark.asyncio
+async def test_update_flow_assistant_passes_include_hidden(user):
+    """update_flow_assistant must pass include_hidden=True to assistant_service."""
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    assistant_service = AsyncMock()
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=assistant_service,
+    )
+
+    flow_id = uuid4()
+    space_id = uuid4()
+    flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=space_id,
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[],
+    )
+    flow_repo.get.return_value = flow
+
+    owned_assistant = _build_assistant(flow_id=flow_id, space_id=space_id, user=user)
+    assistant_service.get_assistant.return_value = (owned_assistant, [])
+    assistant_service.update_assistant.return_value = (owned_assistant, [])
+
+    await service.update_flow_assistant(
+        flow_id=flow_id,
+        assistant_id=owned_assistant.id,
+        name="Updated",
+    )
+
+    assistant_service.update_assistant.assert_awaited_once_with(
+        assistant_id=owned_assistant.id,
+        include_hidden=True,
+        name="Updated",
+    )

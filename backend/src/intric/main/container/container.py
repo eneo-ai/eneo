@@ -90,6 +90,16 @@ from intric.files.file_size_service import FileSizeService
 from intric.files.image import ImageExtractor
 from intric.files.text import TextExtractor
 from intric.files.transcriber import Transcriber
+from intric.flows import (
+    FlowFactory,
+    FlowRepository,
+    FlowRunRepository,
+    FlowRunService,
+    FlowService,
+    FlowVersionRepository,
+)
+from intric.flows.runtime.celery_app import celery_app as flow_celery_app
+from intric.flows.runtime.celery_execution_backend import CeleryFlowExecutionBackend
 from intric.group_chat.application.group_chat_service import GroupChatService
 from intric.group_chat.presentation.assemblers.group_chat_assembler import (
     GroupChatAssembler,
@@ -362,6 +372,14 @@ def _build_tenant_limiter(redis_client: aioredis.Redis) -> TenantConcurrencyLimi
     )
 
 
+def _flow_celery_queue_name() -> str:
+    return get_settings().flow_celery_queue
+
+
+def _flow_max_concurrent_runs_per_tenant() -> int:
+    return get_settings().flow_max_concurrent_runs_per_tenant
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SESSION PROXY PATTERN FOR SESSIONLESS CONTAINERS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -489,6 +507,7 @@ class Container(containers.DeclarativeContainer):
 
     storage_info_factory = providers.Factory(StorageInfoFactory)
     app_run_factory = providers.Factory(AppRunFactory)
+    flow_factory = providers.Factory(FlowFactory)
     actor_factory = providers.Factory(ActorFactory)
 
     # Managers
@@ -654,6 +673,27 @@ class Container(containers.DeclarativeContainer):
     question_repo = providers.Factory(QuestionRepository, session=session)
     file_repo = providers.Factory(FileRepository, session=session)
     crawl_run_repo = providers.Factory(CrawlRunRepository, session=session)
+    flow_repo = providers.Factory(
+        FlowRepository,
+        session=session,
+        factory=flow_factory,
+    )
+    flow_version_repo = providers.Factory(
+        FlowVersionRepository,
+        session=session,
+        factory=flow_factory,
+    )
+    flow_run_repo = providers.Factory(
+        FlowRunRepository,
+        session=session,
+        factory=flow_factory,
+    )
+    flow_celery_app = providers.Object(flow_celery_app)
+    flow_execution_backend = providers.Factory(
+        CeleryFlowExecutionBackend,
+        celery_app=flow_celery_app,
+        queue_name=providers.Callable(_flow_celery_queue_name),
+    )
 
     storage_repo = providers.Factory(
         StorageInfoRepository, user=user, session=session, factory=storage_info_factory
@@ -895,6 +935,16 @@ class Container(containers.DeclarativeContainer):
         audit_service=audit_service,
     )
     storage_service = providers.Factory(StorageInfoService, repo=storage_repo)
+    flow_run_service = providers.Factory(
+        FlowRunService,
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=providers.Callable(
+            _flow_max_concurrent_runs_per_tenant
+        ),
+    )
     job_service = providers.Factory(
         JobService,
         user=user,
@@ -1054,6 +1104,14 @@ class Container(containers.DeclarativeContainer):
         references_service=references_service,
         icon_repo=icon_repo,
         api_key_scope_revoker=api_key_scope_revoker,
+    )
+    flow_service = providers.Factory(
+        FlowService,
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=flow_version_repo,
+        assistant_service=assistant_service,
+        encryption_service=encryption_service,
     )
     group_chat_service = providers.Factory(
         GroupChatService,

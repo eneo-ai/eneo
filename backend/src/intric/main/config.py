@@ -141,6 +141,10 @@ class Settings(BaseSettings):
     postgres_db: str
     redis_host: str
     redis_port: int
+    redis_db: int = 0
+    redis_db_celery_broker: int = 2
+    redis_db_celery_result: int = 3
+    redis_db_auth_broker: int = 4
     # Redis connection resilience defaults
     # Safe defaults avoid aggressive timeouts during transient network blips
     redis_conn_timeout: int = 5
@@ -198,6 +202,11 @@ class Settings(BaseSettings):
     crawl_feeder_enabled: bool = True  # Enabled by default - meters job enqueue rate
     crawl_feeder_interval_seconds: int = 10  # How often feeder checks for work
     crawl_feeder_batch_size: int = 10  # Max jobs to enqueue per cycle per tenant
+    flow_max_concurrent_runs_per_tenant: int = 4
+    flow_celery_queue: str = "flows.execute"
+    celery_visibility_timeout_seconds: int = 3600
+    flow_task_timeout_seconds: int = 3600
+    flow_max_inline_text_bytes: int = 1_048_576
 
     # Orphaned crawl run cleanup (prevents "Crawl already in progress" blocking)
     orphan_crawl_run_timeout_hours: int = (
@@ -485,6 +494,13 @@ class Settings(BaseSettings):
             )
             sys.exit(1)
 
+        if self.flow_max_inline_text_bytes <= 0:
+            logging.error(
+                "FLOW_MAX_INLINE_TEXT_BYTES must be greater than zero. Current value: %s",
+                self.flow_max_inline_text_bytes,
+            )
+            sys.exit(1)
+
         if self.tenant_worker_semaphore_ttl_seconds <= 0:
             logging.error(
                 "TENANT_WORKER_SEMAPHORE_TTL_SECONDS must be greater than zero. Current value: %s",
@@ -589,6 +605,24 @@ class Settings(BaseSettings):
             )
             sys.exit(1)
 
+        redis_db_values = (
+            self.redis_db,
+            self.redis_db_celery_broker,
+            self.redis_db_celery_result,
+            self.redis_db_auth_broker,
+        )
+        if len(set(redis_db_values)) != len(redis_db_values):
+            logging.error(
+                "Redis DB indexes for ARQ/Celery/Auth must be unique. "
+                "Configured values: redis_db=%s, redis_db_celery_broker=%s, "
+                "redis_db_celery_result=%s, redis_db_auth_broker=%s",
+                self.redis_db,
+                self.redis_db_celery_broker,
+                self.redis_db_celery_result,
+                self.redis_db_auth_broker,
+            )
+            sys.exit(1)
+
         if self.mcp_tool_approval_timeout_seconds <= 0:
             logging.error(
                 "MCP_TOOL_APPROVAL_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
@@ -657,6 +691,27 @@ class Settings(BaseSettings):
             logging.error(
                 "MCP_CIRCUIT_BREAKER_COOLDOWN_SECONDS must be greater than zero. Current value: %s",
                 self.mcp_circuit_breaker_cooldown_seconds,
+            )
+            sys.exit(1)
+
+        if self.flow_max_concurrent_runs_per_tenant <= 0:
+            logging.error(
+                "FLOW_MAX_CONCURRENT_RUNS_PER_TENANT must be greater than zero. Current value: %s",
+                self.flow_max_concurrent_runs_per_tenant,
+            )
+            sys.exit(1)
+
+        if self.flow_task_timeout_seconds <= 0:
+            logging.error(
+                "FLOW_TASK_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.flow_task_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.flow_max_inline_text_bytes <= 0:
+            logging.error(
+                "FLOW_MAX_INLINE_TEXT_BYTES must be greater than zero. Current value: %s",
+                self.flow_max_inline_text_bytes,
             )
             sys.exit(1)
 

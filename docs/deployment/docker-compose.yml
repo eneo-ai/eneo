@@ -131,6 +131,23 @@ services:
     depends_on:
       - backend
 
+  celery-worker-flows:
+    # Flow execution worker (Celery). Runs alongside ARQ worker during migration.
+    image: ghcr.io/eneo-ai/eneo-backend:latest
+    container_name: eneo_celery_worker_flows
+    restart: unless-stopped
+    environment:
+      - RUN_AS_CELERY_WORKER=true
+    env_file:
+      - env_backend.env
+    volumes:
+      - eneo_backend_data:/app/data
+      - eneo_temp_files:/tmp
+    networks:
+      - proxy_tier
+    depends_on:
+      - backend
+
   db:
     image: pgvector/pgvector:pg16
     container_name: eneo_db

@@ -16,6 +16,7 @@ import intric.database.tables.collections_table
 import intric.database.tables.completion_model_migration_history_table
 import intric.database.tables.feature_flag_table
 import intric.database.tables.files_table
+import intric.database.tables.flow_tables
 import intric.database.tables.group_chats_table
 import intric.database.tables.info_blob_chunk_table
 import intric.database.tables.info_blobs_table

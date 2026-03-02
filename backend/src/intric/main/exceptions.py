@@ -46,6 +46,11 @@ class ErrorCodes(int, Enum):
     PROVIDER_NOT_FOUND = 9032
     MCP_UPSTREAM_ERROR = 9033
     MCP_UPSTREAM_AUTH_ERROR = 9034
+    # Typed I/O errors
+    TYPED_IO_CONTRACT_VIOLATION = 9035
+    TYPED_IO_RENDER_FAILED = 9036
+    TYPED_IO_PARSE_FAILED = 9037
+    TYPED_IO_INCOMPATIBLE_CHAIN = 9038
 
 
 class NotFoundException(Exception):
@@ -226,6 +231,14 @@ class MCPAuthenticationError(MCPClientError):
     pass
 
 
+class TypedIOValidationException(Exception):
+    """Raised when typed I/O contract validation, parsing, or rendering fails."""
+
+    def __init__(self, message: str = "", *, code: str = "typed_io_error"):
+        super().__init__(message)
+        self.code = code
+
+
 # Map exceptions to response codes
 # Set message to None to use the internal message
 # Set error codes in the range 9000 - 9999
@@ -291,4 +304,5 @@ EXCEPTION_MAP = {
         "MCP upstream authentication failed.",
         ErrorCodes.MCP_UPSTREAM_AUTH_ERROR,
     ),
+    TypedIOValidationException: (422, None, ErrorCodes.TYPED_IO_CONTRACT_VIOLATION),
 }

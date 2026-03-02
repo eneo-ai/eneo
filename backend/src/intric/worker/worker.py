@@ -361,59 +361,10 @@ class Worker:
                     f"Executing long-running {func.__name__} with context {ctx}"
                 )
 
-                # PHASE 1: Bootstrap - short-lived session for user lookup only
-                # Pattern: Query ORM → Convert to Pydantic INSIDE session → Return pure Python data
-                # Why: Pydantic model is session-independent, safe to use after session closes
-                user = None
-                if with_user and hasattr(params, "user_id") and params.user_id:
-                    async with sessionmanager.session() as session:
-                        async with session.begin():
-                            # Import here to avoid circular imports at module level
-                            from sqlalchemy.orm import selectinload
-                            from intric.database.tables.users_table import Users
-                            from intric.database.tables.tenant_table import Tenants
-                            from intric.users.user import UserInDB
-
-                            # Query with ALL selectinload options (exact match with UsersRepository._get_options())
-                            # CRITICAL: Every relationship field in UserInDB must be loaded here.
-                            # Missing any relationship causes MissingGreenlet/DetachedInstanceError
-                            # when Pydantic tries to validate (triggers lazy load in async context).
-                            stmt = (
-                                sa.select(Users)
-                                .where(Users.id == params.user_id)
-                                .where(Users.deleted_at.is_(None))  # Soft-delete safety
-                                .options(
-                                    selectinload(Users.roles),
-                                    selectinload(Users.predefined_roles),
-                                    selectinload(Users.tenant).selectinload(
-                                        Tenants.modules
-                                    ),
-                                    selectinload(Users.api_key),
-                                    selectinload(Users.user_groups),
-                                )
-                            )
-                            result = await session.execute(stmt)
-                            user_row = result.scalar_one_or_none()
-                            if user_row:
-                                # Convert ORM → Pydantic INSIDE session (while relationships accessible)
-                                # This creates a pure Python object with no ORM bindings.
-                                # No expunge() needed - we're not using the ORM object after this.
-                                user = UserInDB.model_validate(user_row)
-                    # Session returned to pool HERE (~50ms total)
-                    # `user` is now a Pydantic model - pure Python data, session-independent
-
-                # PHASE 2: Create sessionless container with SessionProxy
-                # Inject SessionProxy() instead of None. This allows dependencies (like JobRepo)
-                # to be instantiated without failing type validation. The proxy delegates to
-                # the ContextVar set by session_scope(), raising a clear error if accessed
-                # outside a scope instead of cryptic "None is not AsyncSession" during DI.
-                container = Container(session=providers.Object(SessionProxy()))
-
-                # Override user if found during bootstrap
-                if user is not None:
-                    from intric.main.container.container_overrides import override_user
-
-                    override_user(container=container, user=user)
+                container = await self._build_sessionless_container(
+                    params=params,
+                    with_user=with_user,
+                )
 
                 # PHASE 3: Execute task - NO session held
                 # Task uses Container.session_scope() for DB operations
@@ -422,6 +373,121 @@ class Worker:
                     extra={"job_id": ctx.get("job_id")},
                 )
                 return await func(ctx["job_id"], params, container=container)
+
+            self.functions.append(wrapper)
+            return wrapper
+
+        return decorator
+
+    async def _build_sessionless_container(
+        self,
+        params: ResourceTaskParams,
+        with_user: bool,
+    ) -> Container:
+        """Create a container backed by SessionProxy for long-running execution.
+
+        Why:
+        - Avoids holding a DB session during long LLM/network calls.
+        - Keeps user context by eagerly materializing UserInDB in a short-lived session.
+        """
+        user = None
+        if with_user and hasattr(params, "user_id") and params.user_id:
+            async with sessionmanager.session() as session:
+                async with session.begin():
+                    from sqlalchemy.orm import selectinload
+
+                    from intric.database.tables.tenant_table import Tenants
+                    from intric.database.tables.users_table import Users
+                    from intric.users.user import UserInDB
+
+                    stmt = (
+                        sa.select(Users)
+                        .where(Users.id == params.user_id)
+                        .where(Users.deleted_at.is_(None))
+                        .options(
+                            selectinload(Users.roles),
+                            selectinload(Users.predefined_roles),
+                            selectinload(Users.tenant).selectinload(Tenants.modules),
+                            selectinload(Users.api_key),
+                            selectinload(Users.user_groups),
+                        )
+                    )
+                    result = await session.execute(stmt)
+                    user_row = result.scalar_one_or_none()
+                    if user_row:
+                        user = UserInDB.model_validate(user_row)
+
+        container = Container(session=providers.Object(SessionProxy()))
+        if user is not None:
+            override_user(container=container, user=user)
+
+        return container
+
+    def long_running_task(
+        self,
+        with_user: bool = True,
+        channel_type: ChannelType | None = None,
+    ):
+        """Task decorator for long-running operations without long-lived DB sessions.
+
+        Contract:
+        - Build a sessionless container (SessionProxy + ContextVar session_scope()).
+        - Only open DB sessions for status transitions and explicit repository operations.
+        - Never keep one transaction open across provider/network calls.
+        """
+
+        def decorator(func):
+            @wraps(func)
+            async def wrapper(*args):
+                ctx: dict = args[0]
+                params: ResourceTaskParams = args[1]
+                logger.debug(
+                    f"Executing long-running task {func.__name__} with context {ctx} and params {params}"
+                )
+
+                container = await self._build_sessionless_container(
+                    params=params,
+                    with_user=with_user,
+                )
+                task_manager = container.task_manager(
+                    job_id=ctx["job_id"],
+                    resource_id=params.id,
+                    channel_type=channel_type,
+                )
+                optional_kwargs = self._get_kwargs(func, task_manager=task_manager)
+
+                async def _tm_call(callable_, *call_args):
+                    # Job status persistence needs a DB session because job_service uses repositories.
+                    async with container.session_scope():
+                        return await callable_(*call_args)
+
+                await _tm_call(task_manager.set_status, Status.IN_PROGRESS)
+                try:
+                    task_manager.result_location = await func(
+                        params,
+                        container=container,
+                        **optional_kwargs,
+                    )
+                except asyncio.CancelledError:
+                    await _tm_call(task_manager.fail_job, "Job cancelled")
+                    task_manager.success = False
+                    raise
+                except Exception as exc:
+                    logger.exception("Error on long-running worker:")
+                    message = str(exc).strip()
+                    await _tm_call(
+                        task_manager.fail_job,
+                        message[:512] if message else None,
+                    )
+                    task_manager.success = False
+                else:
+                    await _tm_call(task_manager.complete_job)
+                    task_manager.success = True
+                finally:
+                    if task_manager.cleanup_func is not None:
+                        task_manager.cleanup_func()
+
+                return task_manager.successful()
 
             self.functions.append(wrapper)
             return wrapper

@@ -1,4 +1,5 @@
 from datetime import datetime
+from enum import Enum
 from typing import TYPE_CHECKING, List, Optional, Union
 from uuid import UUID
 
@@ -41,6 +42,11 @@ UNAUTHORIZED_EXCEPTION_MESSAGE = "Unauthorized. User has no permissions to acces
 _KnowledgeItemList = List[Union["Collection", "Website", "IntegrationKnowledge"]]
 
 
+class AssistantOrigin(str, Enum):
+    USER = "user"
+    FLOW_MANAGED = "flow_managed"
+
+
 class Assistant(Entity):
     def __init__(
         self,
@@ -68,6 +74,9 @@ class Assistant(Entity):
         data_retention_days: Optional[int] = None,
         metadata_json: Optional[dict] = {},
         icon_id: Optional[UUID] = None,
+        hidden: bool = False,
+        origin: AssistantOrigin = AssistantOrigin.USER,
+        managing_flow_id: UUID | None = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
 
@@ -95,6 +104,9 @@ class Assistant(Entity):
         self.type = AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
         self._metadata_json = metadata_json
         self.icon_id = icon_id
+        self.hidden = hidden
+        self.origin = origin
+        self.managing_flow_id = managing_flow_id
 
         # Temporary attributes for update flow - not persisted directly
         self._mcp_server_ids: list[UUID] | None = None
@@ -294,16 +306,23 @@ class Assistant(Entity):
         session: SessionInDB | None = None,
         stream: bool = False,
         extended_logging: bool = False,
+        prompt_override: str | None = None,
         prompt: str | None = None,
     ):
         if self.completion_model is None:
             raise NoModelSelectedException()
 
+        resolved_prompt = (
+            prompt_override
+            if prompt_override is not None
+            else prompt
+        )
+
         return await completion_service.get_response(
             model=self.completion_model,
             text_input=question,
             files=files,
-            prompt=prompt or self.get_prompt_text(),
+            prompt=resolved_prompt or self.get_prompt_text(),
             prompt_files=self.attachments,
             info_blob_chunks=info_blob_chunks,
             session=session,

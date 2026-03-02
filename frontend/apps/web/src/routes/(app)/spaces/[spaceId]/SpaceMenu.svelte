@@ -12,6 +12,7 @@
   import { IconOverview } from "@intric/icons/overview";
   import { IconServices } from "@intric/icons/services";
   import { IconSpeechBubble } from "@intric/icons/speech-bubble";
+  import { IconWorkflow } from "@intric/icons/workflow";
   import { page } from "$app/stores";
   import { Navigation } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -61,6 +62,14 @@
       isActive={section === "apps"}
       icon={IconApp}
       label={m.apps()}
+    />
+  {/if}
+  {#if !isOrgSpace && $currentSpace.hasPermission("read", "app")}
+    <Navigation.Link
+      href={localizeHref(`/spaces/${$currentSpace.routeId}/flows`)}
+      isActive={section === "flows"}
+      icon={IconWorkflow}
+      label={m.flows()}
     />
   {/if}
   {#if $currentSpace.hasPermission("read", "website") || $currentSpace.hasPermission("read", "collection")}

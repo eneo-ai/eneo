@@ -28,3 +28,5 @@ class EntityType(str, Enum):
     TRANSCRIPTION_MODEL = "transcription_model"
     AUDIT_LOG = "audit_log"
     SESSION = "session"
+    FLOW = "flow"
+    FLOW_RUN = "flow_run"

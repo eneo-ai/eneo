@@ -1069,6 +1069,7 @@ class TestScopeRouteGuardCoverage:
             "/spaces", "/assistants", "/apps", "/app-runs",
             "/conversations", "/services", "/group-chats",
             "/groups", "/websites", "/crawl-runs",
+            "/flows", "/flow-runs",
         }
         found_prefixes = set()
         routes_missing_scope_dep = []
@@ -2031,3 +2032,55 @@ class TestTenantScopeForDeleteEnforcement:
 
         _, returned_key = await svc._resolve_api_key("sk_test", request=request)
         assert returned_key is key
+
+
+class TestFlowScopeResolution:
+    """Scope enforcement coverage for flow and flow_run resources."""
+
+    @pytest.mark.asyncio
+    async def test_space_key_matching_flow_scope_passes(self):
+        space_id = uuid4()
+        flow_id = uuid4()
+        svc = _make_user_service(session_scalar_return=space_id)
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=space_id)
+        request = _scope_request(path_params={"id": str(flow_id)})
+        scope_config = {"resource_type": "flow", "path_param": "id"}
+
+        await svc._enforce_api_key_scope(request, key, scope_config)
+
+    @pytest.mark.asyncio
+    async def test_space_key_other_flow_scope_denied(self):
+        key_space = uuid4()
+        flow_id = uuid4()
+        svc = _make_user_service(session_scalar_return=uuid4())
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=key_space)
+        request = _scope_request(path_params={"id": str(flow_id)})
+        scope_config = {"resource_type": "flow", "path_param": "id"}
+
+        with pytest.raises(ApiKeyValidationError) as exc_info:
+            await svc._enforce_api_key_scope(request, key, scope_config)
+        assert exc_info.value.code == "insufficient_scope"
+
+    @pytest.mark.asyncio
+    async def test_space_key_matching_flow_run_scope_passes(self):
+        space_id = uuid4()
+        run_id = uuid4()
+        svc = _make_user_service(session_scalar_return=space_id)
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=space_id)
+        request = _scope_request(path_params={"id": str(run_id)})
+        scope_config = {"resource_type": "flow_run", "path_param": "id"}
+
+        await svc._enforce_api_key_scope(request, key, scope_config)
+
+    @pytest.mark.asyncio
+    async def test_space_key_other_flow_run_scope_denied(self):
+        key_space = uuid4()
+        run_id = uuid4()
+        svc = _make_user_service(session_scalar_return=uuid4())
+        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=key_space)
+        request = _scope_request(path_params={"id": str(run_id)})
+        scope_config = {"resource_type": "flow_run", "path_param": "id"}
+
+        with pytest.raises(ApiKeyValidationError) as exc_info:
+            await svc._enforce_api_key_scope(request, key, scope_config)
+        assert exc_info.value.code == "insufficient_scope"

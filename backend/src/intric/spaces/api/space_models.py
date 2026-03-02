@@ -233,6 +233,7 @@ class TemplateCreate(BaseModel):
 
 class CreateSpaceAssistantRequest(CreateRequest):
     from_template: Optional[TemplateCreate] = None
+    hidden: bool = False
 
 
 class CreateSpaceAppRequest(CreateRequest):

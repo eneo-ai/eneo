@@ -15,6 +15,7 @@ from intric.assistants.api.assistant_models import (
     TokenEstimateResponse,
     TokenEstimateBreakdown,
 )
+from intric.assistants.assistant import AssistantOrigin
 from intric.authentication.auth_models import ApiKey, ApiKeyNotificationTargetType
 from intric.authentication.api_key_notification_auto_follow import auto_follow_on_publish
 from intric.authentication.api_key_router_helpers import (
@@ -60,6 +61,25 @@ MAX_TOTAL_FILE_SIZE = 50_000_000  # 50 MB
 MAX_ABSOLUTE_TEXT_LENGTH = 2_000_000  # 2 MB safeguard in case of misconfigured models
 
 
+def _flow_managed_mutation_error(*, assistant_id: UUID, flow_id: UUID | None) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={
+            "code": "flow_managed_assistant",
+            "message": (
+                "This assistant is flow-managed and must be modified through "
+                f"/api/v1/flows/{flow_id}/assistants/{assistant_id}/"
+                if flow_id is not None
+                else "This assistant is flow-managed and must be modified through flow endpoints."
+            ),
+            "context": {
+                "assistant_id": str(assistant_id),
+                "flow_id": str(flow_id) if flow_id is not None else None,
+            },
+        },
+    )
+
+
 @router.post(
     "/",
     response_model=AssistantPublic,
@@ -91,7 +111,7 @@ async def create_assistant(
 
     # Create assistant
     created_assistant, permissions = await assistant_service.create_assistant(
-        name=assistant.name, space_id=assistant.space_id
+        name=assistant.name, space_id=assistant.space_id, hidden=assistant.hidden
     )
 
     # Get space for context
@@ -221,6 +241,11 @@ async def update_assistant(
 
     # Get old state for change tracking
     old_assistant, _ = await service.get_assistant(assistant_id=id)
+    if old_assistant.origin == AssistantOrigin.FLOW_MANAGED:
+        raise _flow_managed_mutation_error(
+            assistant_id=id,
+            flow_id=old_assistant.managing_flow_id,
+        )
 
     attachment_ids = None
     if assistant.attachments is not None:
@@ -595,6 +620,11 @@ async def delete_assistant(
 
     # Get assistant details BEFORE deletion (snapshot pattern)
     assistant, _ = await service.get_assistant(id)
+    if assistant.origin == AssistantOrigin.FLOW_MANAGED:
+        raise _flow_managed_mutation_error(
+            assistant_id=id,
+            flow_id=assistant.managing_flow_id,
+        )
 
     # Get space for context before deletion
     space = None

@@ -61,6 +61,7 @@ from intric.users.user import (
 from intric.users.user_repo import UsersRepository
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.collections_table import CollectionsTable
+from intric.database.tables.flow_tables import Flows, FlowRuns
 from intric.database.tables.group_chats_table import GroupChatsTable
 from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.database.tables.integration_table import IntegrationKnowledge
@@ -1042,6 +1043,18 @@ class UserService:
             return await self._resolve_app_run_space_id(resource_id)
         elif resource_type == "crawl_run":
             return await self._resolve_crawl_run_space_id(resource_id)
+        elif resource_type == "flow":
+            stmt = sa.select(Flows.space_id).where(Flows.id == resource_id)
+            return await session.scalar(stmt)
+        elif resource_type == "flow_run":
+            stmt = (
+                sa.select(Flows.space_id)
+                .select_from(FlowRuns)
+                .join(Flows, Flows.id == FlowRuns.flow_id)
+                .where(FlowRuns.id == resource_id)
+                .where(Flows.deleted_at.is_(None))
+            )
+            return await session.scalar(stmt)
         elif resource_type == "prompt":
             # Prompt may be mapped to assistants in multiple spaces. Use a stable
             # deterministic fallback for scalar callers; authorization uses

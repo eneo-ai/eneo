@@ -238,7 +238,10 @@ async def download_file_signed(
     response_mimetype = file.mimetype
     response_filename = file.name
 
-    if file.file_type == FileType.TEXT and file.text:
+    if file.file_type == FileType.DOCUMENT and file.blob:
+        # Generated documents (PDF, DOCX): serve blob with original MIME and filename
+        content_bytes = file.blob
+    elif file.file_type == FileType.TEXT and file.text:
         content_bytes = file.text.encode("utf-8")
         # For text files (PDFs, DOCX, etc.), return as .txt with plain text mimetype
         response_mimetype = "text/plain"

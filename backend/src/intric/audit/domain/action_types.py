@@ -73,6 +73,16 @@ class ActionType(str, Enum):
     TEMPLATE_CREATED = "template_created"
     TEMPLATE_UPDATED = "template_updated"
     TEMPLATE_DELETED = "template_deleted"
+    FLOW_CREATED = "flow_created"
+    FLOW_UPDATED = "flow_updated"
+    FLOW_DELETED = "flow_deleted"
+    FLOW_PUBLISHED = "flow_published"
+    FLOW_UNPUBLISHED = "flow_unpublished"
+    FLOW_RUN_CREATED = "flow_run_created"
+    FLOW_RUN_CANCELLED = "flow_run_cancelled"
+    FLOW_CLASSIFICATION_OVERRIDE = "flow_classification_override"
+    FLOW_RUN_DOCUMENT_GENERATED = "flow_run_document_generated"
+    FLOW_RUN_CONTRACT_REJECTED = "flow_run_contract_rejected"
 
     # Security Classification Actions
     SECURITY_CLASSIFICATION_CREATED = "security_classification_created"

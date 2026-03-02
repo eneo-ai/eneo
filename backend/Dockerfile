@@ -34,7 +34,7 @@ ADD --chmod=644 https://openaipublic.blob.core.windows.net/encodings/cl100k_base
 FROM python:3.11-slim-bookworm
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y ffmpeg libmagic1 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ffmpeg libmagic1 fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
 
 # Copy venv and tiktoken from builder
 COPY --from=builder /app/.venv /app/.venv

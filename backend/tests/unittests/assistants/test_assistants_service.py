@@ -11,10 +11,11 @@ from intric.assistants.api.assistant_models import (
     AssistantCreatePublic,
     AssistantUpdatePublic,
 )
+from intric.assistants.assistant import AssistantOrigin
 from intric.assistants.assistant_service import AssistantService
 from intric.main.config import get_settings
-from intric.main.exceptions import BadRequestException, UnauthorizedException
-from intric.main.models import ModelId
+from intric.main.exceptions import BadRequestException, NotFoundException, UnauthorizedException
+from intric.main.models import ModelId, ResourcePermission
 from intric.prompts.api.prompt_models import PromptCreate
 from pydantic import ValidationError
 from tests.fixtures import (
@@ -190,3 +191,40 @@ async def test_publish_assistant_unauthorized_has_actionable_message(setup: Setu
         await setup.service.publish_assistant(TEST_UUID, True)
 
     assert "Publishing assistants" in str(exc_info.value)
+
+
+async def test_create_hidden_assistant_uses_hidden_lookup_when_space_snapshot_excludes_it(
+    setup: Setup,
+):
+    assistant_id = uuid4()
+    managing_flow_id = uuid4()
+    created_assistant = MagicMock(id=assistant_id)
+
+    actor = MagicMock()
+    actor.can_create_assistants.return_value = True
+    actor.get_assistant_permissions.return_value = [ResourcePermission.READ]
+    setup.service.actor_manager.get_space_actor_from_space.return_value = actor
+    setup.service.get_completion_model = AsyncMock(return_value=None)
+    setup.service.factory.create_assistant.return_value = created_assistant
+
+    space = MagicMock()
+    refreshed_space = MagicMock()
+    refreshed_space.get_assistant.side_effect = NotFoundException()
+    hidden_space = MagicMock()
+    hidden_space.get_assistant.return_value = created_assistant
+
+    setup.service.space_service.get_space.return_value = space
+    setup.service.space_repo.update.return_value = refreshed_space
+    setup.service.space_repo.get_space_by_assistant.return_value = hidden_space
+
+    assistant, permissions = await setup.service.create_assistant(
+        name="Flow Step Assistant",
+        space_id=TEST_UUID,
+        hidden=True,
+        origin=AssistantOrigin.FLOW_MANAGED,
+        managing_flow_id=managing_flow_id,
+    )
+
+    assert assistant == created_assistant
+    assert permissions == [ResourcePermission.READ]
+    setup.service.space_repo.get_space_by_assistant.assert_awaited_once_with(assistant_id)

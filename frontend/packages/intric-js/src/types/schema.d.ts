@@ -1849,6 +1849,64 @@ export interface paths {
     /** Get Info Blobs */
     get: operations["get_info_blobs_api_v1_websites__id__info_blobs__get"];
   };
+  "/api/v1/flows/": {
+    /** List Flows */
+    get: operations["list_flows_api_v1_flows__get"];
+    /** Create Flow */
+    post: operations["create_flow_api_v1_flows__post"];
+  };
+  "/api/v1/flows/{id}/": {
+    /** Get Flow */
+    get: operations["get_flow_api_v1_flows__id___get"];
+    /** Delete Flow */
+    delete: operations["delete_flow_api_v1_flows__id___delete"];
+    /** Update Flow */
+    patch: operations["update_flow_api_v1_flows__id___patch"];
+  };
+  "/api/v1/flows/{id}/publish/": {
+    /** Publish Flow */
+    post: operations["publish_flow_api_v1_flows__id__publish__post"];
+  };
+  "/api/v1/flows/{id}/unpublish/": {
+    /** Unpublish Flow */
+    post: operations["unpublish_flow_api_v1_flows__id__unpublish__post"];
+  };
+  "/api/v1/flows/{id}/assistants/": {
+    /** Create Flow Assistant */
+    post: operations["create_flow_assistant_api_v1_flows__id__assistants__post"];
+  };
+  "/api/v1/flows/{id}/assistants/{assistant_id}/": {
+    /** Get Flow Assistant */
+    get: operations["get_flow_assistant_api_v1_flows__id__assistants__assistant_id___get"];
+    /** Delete Flow Assistant */
+    delete: operations["delete_flow_assistant_api_v1_flows__id__assistants__assistant_id___delete"];
+    /** Update Flow Assistant */
+    patch: operations["update_flow_assistant_api_v1_flows__id__assistants__assistant_id___patch"];
+  };
+  "/api/v1/flows/{id}/runs/": {
+    /** Create Flow Run */
+    post: operations["create_flow_run_api_v1_flows__id__runs__post"];
+  };
+  "/api/v1/flows/{id}/graph/": {
+    /** Get Flow Graph */
+    get: operations["get_flow_graph_api_v1_flows__id__graph__get"];
+  };
+  "/api/v1/flow-runs/": {
+    /** List Flow Runs */
+    get: operations["list_flow_runs_api_v1_flow_runs__get"];
+  };
+  "/api/v1/flow-runs/{id}/": {
+    /** Get Flow Run */
+    get: operations["get_flow_run_api_v1_flow_runs__id___get"];
+  };
+  "/api/v1/flow-runs/{id}/cancel/": {
+    /** Cancel Flow Run */
+    post: operations["cancel_flow_run_api_v1_flow_runs__id__cancel__post"];
+  };
+  "/api/v1/flow-runs/{id}/evidence/": {
+    /** Get Flow Run Evidence */
+    get: operations["get_flow_run_evidence_api_v1_flow_runs__id__evidence__get"];
+  };
   "/api/v1/prompts/{id}/": {
     /** Get Prompt */
     get: operations["get_prompt_api_v1_prompts__id___get"];
@@ -3104,6 +3162,16 @@ export interface components {
       | "template_created"
       | "template_updated"
       | "template_deleted"
+      | "flow_created"
+      | "flow_updated"
+      | "flow_deleted"
+      | "flow_published"
+      | "flow_unpublished"
+      | "flow_run_created"
+      | "flow_run_cancelled"
+      | "flow_classification_override"
+      | "flow_run_document_generated"
+      | "flow_run_contract_rejected"
       | "security_classification_created"
       | "security_classification_updated"
       | "security_classification_deleted"
@@ -4066,6 +4134,11 @@ export interface components {
        * Format: uuid
        */
       space_id: string;
+      /**
+       * Hidden
+       * @default false
+       */
+      hidden?: boolean;
       /**
        * @deprecated
        * @description This field is deprecated and will be ignored
@@ -5521,6 +5594,11 @@ export interface components {
       /** Name */
       name: string;
       from_template?: components["schemas"]["TemplateCreate"] | null;
+      /**
+       * Hidden
+       * @default false
+       */
+      hidden?: boolean;
     };
     /** CreateSpaceGroupsRequest */
     CreateSpaceGroupsRequest: {
@@ -6209,7 +6287,9 @@ export interface components {
       | "embedding_model"
       | "transcription_model"
       | "audit_log"
-      | "session";
+      | "session"
+      | "flow"
+      | "flow_run";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -6249,7 +6329,11 @@ export interface components {
       | 9031
       | 9032
       | 9033
-      | 9034;
+      | 9034
+      | 9035
+      | 9036
+      | 9037
+      | 9038;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -6517,6 +6601,273 @@ export interface components {
       accepted_file_types: components["schemas"]["AcceptedFileType"][];
       limit: components["schemas"]["Limit"];
     };
+    /** FlowAssistantCreateRequest */
+    FlowAssistantCreateRequest: {
+      /** Name */
+      name: string;
+    };
+    /** FlowCreateRequest */
+    FlowCreateRequest: {
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Steps */
+      steps: components["schemas"]["FlowStepCreateRequest"][];
+      /** Metadata Json */
+      metadata_json?: {
+        [key: string]: unknown;
+      } | null;
+      /** Data Retention Days */
+      data_retention_days?: number | null;
+    };
+    /** FlowPublic */
+    FlowPublic: {
+      /** Id */
+      id?: string | null;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Created By User Id */
+      created_by_user_id?: string | null;
+      /** Owner User Id */
+      owner_user_id?: string | null;
+      /** Published Version */
+      published_version?: number | null;
+      /** Metadata Json */
+      metadata_json?: {
+        [key: string]: unknown;
+      } | null;
+      /** Data Retention Days */
+      data_retention_days?: number | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /** Steps */
+      steps: components["schemas"]["FlowStepPublic"][];
+    };
+    /** FlowRunCreateRequest */
+    FlowRunCreateRequest: {
+      /** Input Payload Json */
+      input_payload_json?: {
+        [key: string]: unknown;
+      } | null;
+      /** File Ids */
+      file_ids?: string[] | null;
+    };
+    /** FlowRunEvidenceResponse */
+    FlowRunEvidenceResponse: {
+      /** Run */
+      run: {
+        [key: string]: unknown;
+      };
+      /** Definition Snapshot */
+      definition_snapshot: {
+        [key: string]: unknown;
+      };
+      /** Step Results */
+      step_results: {
+        [key: string]: unknown;
+      }[];
+      /** Step Attempts */
+      step_attempts: {
+        [key: string]: unknown;
+      }[];
+    };
+    /** FlowRunPublic */
+    FlowRunPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /** Flow Version */
+      flow_version: number;
+      /** User Id */
+      user_id?: string | null;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Status */
+      status: string;
+      /** Cancelled At */
+      cancelled_at?: string | null;
+      /** Input Payload Json */
+      input_payload_json?: {
+        [key: string]: unknown;
+      } | null;
+      /** Output Payload Json */
+      output_payload_json?: {
+        [key: string]: unknown;
+      } | null;
+      /** Error Message */
+      error_message?: string | null;
+      /** Job Id */
+      job_id?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /** FlowSparsePublic */
+    FlowSparsePublic: {
+      /** Id */
+      id?: string | null;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Created By User Id */
+      created_by_user_id?: string | null;
+      /** Owner User Id */
+      owner_user_id?: string | null;
+      /** Published Version */
+      published_version?: number | null;
+      /** Metadata Json */
+      metadata_json?: {
+        [key: string]: unknown;
+      } | null;
+      /** Data Retention Days */
+      data_retention_days?: number | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+    };
+    /** FlowStepCreateRequest */
+    FlowStepCreateRequest: {
+      /**
+       * Assistant Id
+       * Format: uuid
+       */
+      assistant_id: string;
+      /** Step Order */
+      step_order: number;
+      /** User Description */
+      user_description?: string | null;
+      /** Input Source */
+      input_source: string;
+      /** Input Type */
+      input_type: string;
+      /** Input Contract */
+      input_contract?: {
+        [key: string]: unknown;
+      } | null;
+      /** Output Mode */
+      output_mode: string;
+      /** Output Type */
+      output_type: string;
+      /** Output Contract */
+      output_contract?: {
+        [key: string]: unknown;
+      } | null;
+      /** Input Bindings */
+      input_bindings?: {
+        [key: string]: unknown;
+      } | null;
+      /** Output Classification Override */
+      output_classification_override?: number | null;
+      /** Mcp Policy */
+      mcp_policy: string;
+      /** Input Config */
+      input_config?: {
+        [key: string]: unknown;
+      } | null;
+      /** Output Config */
+      output_config?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /** FlowStepPublic */
+    FlowStepPublic: {
+      /** Id */
+      id?: string | null;
+      /**
+       * Assistant Id
+       * Format: uuid
+       */
+      assistant_id: string;
+      /** Step Order */
+      step_order: number;
+      /** User Description */
+      user_description?: string | null;
+      /** Input Source */
+      input_source: string;
+      /** Input Type */
+      input_type: string;
+      /** Input Contract */
+      input_contract?: {
+        [key: string]: unknown;
+      } | null;
+      /** Output Mode */
+      output_mode: string;
+      /** Output Type */
+      output_type: string;
+      /** Output Contract */
+      output_contract?: {
+        [key: string]: unknown;
+      } | null;
+      /** Input Bindings */
+      input_bindings?: {
+        [key: string]: unknown;
+      } | null;
+      /** Output Classification Override */
+      output_classification_override?: number | null;
+      /** Mcp Policy */
+      mcp_policy: string;
+      /** Input Config */
+      input_config?: {
+        [key: string]: unknown;
+      } | null;
+      /** Output Config */
+      output_config?: {
+        [key: string]: unknown;
+      } | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+    };
     /** FormatLimit */
     FormatLimit: {
       /** Mimetype */
@@ -6548,6 +6899,17 @@ export interface components {
       completion_models: components["schemas"]["CompletionModelPublic"][];
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublicLegacy"][];
+    };
+    /** GraphResponse */
+    GraphResponse: {
+      /** Nodes */
+      nodes: {
+        [key: string]: unknown;
+      }[];
+      /** Edges */
+      edges: {
+        [key: string]: unknown;
+      }[];
     };
     /** GroupChatAssistantPublic */
     GroupChatAssistantPublic: {
@@ -8297,6 +8659,32 @@ export interface components {
        */
       count: number;
     };
+    /** PaginatedResponse[FlowRunPublic] */
+    PaginatedResponse_FlowRunPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["FlowRunPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
+    /** PaginatedResponse[FlowSparsePublic] */
+    PaginatedResponse_FlowSparsePublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["FlowSparsePublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
     /** PaginatedResponse[GroupPublicWithMetadata] */
     PaginatedResponse_GroupPublicWithMetadata_: {
       /**
@@ -8705,6 +9093,8 @@ export interface components {
       logging_enabled?: boolean | null;
       /** Space Id */
       space_id?: string | null;
+      /** Hidden */
+      hidden?: boolean | null;
       prompt?: components["schemas"]["PromptCreate"] | null;
       /**
        * Groups
@@ -8837,6 +9227,21 @@ export interface components {
       litellm_model_name?: string | null;
       /** Id */
       id?: string | null;
+    };
+    /** PartialFlowUpdateRequest */
+    PartialFlowUpdateRequest: {
+      /** Name */
+      name?: string | null;
+      /** Description */
+      description?: string | null;
+      /** Steps */
+      steps?: components["schemas"]["FlowStepCreateRequest"][] | null;
+      /** Metadata Json */
+      metadata_json?: {
+        [key: string]: unknown;
+      } | null;
+      /** Data Retention Days */
+      data_retention_days?: number | null;
     };
     /** PartialPropUserUpdate */
     PartialPropUserUpdate: {
@@ -22954,6 +23359,406 @@ export interface operations {
       404: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** List Flows */
+  list_flows_api_v1_flows__get: {
+    parameters: {
+      query: {
+        space_id: string;
+        limit?: number;
+        offset?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_FlowSparsePublic_"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Create Flow */
+  create_flow_api_v1_flows__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Flow */
+  get_flow_api_v1_flows__id___get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Delete Flow */
+  delete_flow_api_v1_flows__id___delete: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Update Flow */
+  update_flow_api_v1_flows__id___patch: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PartialFlowUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Publish Flow */
+  publish_flow_api_v1_flows__id__publish__post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Unpublish Flow */
+  unpublish_flow_api_v1_flows__id__unpublish__post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Create Flow Assistant */
+  create_flow_assistant_api_v1_flows__id__assistants__post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowAssistantCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["AssistantPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Flow Assistant */
+  get_flow_assistant_api_v1_flows__id__assistants__assistant_id___get: {
+    parameters: {
+      path: {
+        id: string;
+        assistant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AssistantPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Delete Flow Assistant */
+  delete_flow_assistant_api_v1_flows__id__assistants__assistant_id___delete: {
+    parameters: {
+      path: {
+        id: string;
+        assistant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Update Flow Assistant */
+  update_flow_assistant_api_v1_flows__id__assistants__assistant_id___patch: {
+    parameters: {
+      path: {
+        id: string;
+        assistant_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PartialAssistantUpdatePublic"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AssistantPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Create Flow Run */
+  create_flow_run_api_v1_flows__id__runs__post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["FlowRunPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Flow Graph */
+  get_flow_graph_api_v1_flows__id__graph__get: {
+    parameters: {
+      query?: {
+        run_id?: string | null;
+      };
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["GraphResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** List Flow Runs */
+  list_flow_runs_api_v1_flow_runs__get: {
+    parameters: {
+      query: {
+        flow_id: string;
+        limit?: number;
+        offset?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_FlowRunPublic_"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Flow Run */
+  get_flow_run_api_v1_flow_runs__id___get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowRunPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Cancel Flow Run */
+  cancel_flow_run_api_v1_flow_runs__id__cancel__post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowRunPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Flow Run Evidence */
+  get_flow_run_evidence_api_v1_flow_runs__id__evidence__get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowRunEvidenceResponse"];
         };
       };
       /** @description Validation Error */

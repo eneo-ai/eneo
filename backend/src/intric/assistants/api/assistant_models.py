@@ -112,6 +112,7 @@ class AssistantBase(BaseModel):
 
 class AssistantCreatePublic(AssistantBase):
     space_id: UUID
+    hidden: bool = False
     prompt: Optional[PromptCreate] = Field(
         default=None,
         deprecated=True,
