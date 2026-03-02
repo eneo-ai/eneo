@@ -25,6 +25,11 @@ from intric.ai_models.embedding_models.embedding_model import (
 from intric.ai_models.embedding_models.embedding_models_repo import (
     AdminEmbeddingModelsService,
 )
+import sqlalchemy as sa
+from intric.database.tables.collections_table import CollectionsTable
+from intric.database.tables.integration_table import IntegrationKnowledge
+from intric.database.tables.websites_table import Websites
+from intric.main.exceptions import BadRequestException
 from intric.allowed_origins.allowed_origin_models import (
     AllowedOriginCreate,
     AllowedOriginInDB,
@@ -1275,11 +1280,21 @@ async def delete_embedding_model(
 
     WARNING: Deletion affects all tenants. Use with caution.
     """
-    # TODO: Add cross-tenant usage check before deletion
-    # For now, we allow deletion with force parameter
-
     session = container.session()
+
     async with session.begin():
+        if not force:
+            usage_counts = await session.execute(
+                sa.select(
+                    sa.select(sa.func.count()).where(CollectionsTable.embedding_model_id == id).correlate(None).scalar_subquery().label("collections"),
+                    sa.select(sa.func.count()).where(Websites.embedding_model_id == id).correlate(None).scalar_subquery().label("websites"),
+                    sa.select(sa.func.count()).where(IntegrationKnowledge.embedding_model_id == id).correlate(None).scalar_subquery().label("integrations"),
+                )
+            )
+            row = usage_counts.one()
+            if row.collections > 0 or row.websites > 0 or row.integrations > 0:
+                raise BadRequestException("MODEL_IN_USE")
+
         repo = AdminEmbeddingModelsService(session=session)
         await repo.delete_model(id)
 
