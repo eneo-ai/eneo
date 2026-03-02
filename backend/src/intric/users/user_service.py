@@ -44,6 +44,7 @@ from intric.main.exceptions import (
 from intric.main.logging import get_logger
 from intric.main.models import ModelId
 from intric.predefined_roles.predefined_role import PredefinedRoleName
+from intric.roles.permissions import Permission
 from intric.predefined_roles.predefined_roles_repo import PredefinedRolesRepository
 from intric.settings.settings import SettingsUpsert
 from intric.settings.settings_repo import SettingsRepository
@@ -690,6 +691,18 @@ class UserService:
                 status_code=401,
                 code="invalid_api_key",
                 message="API key tenant mismatch.",
+            )
+
+        # Verify the owner still has the permissions required for this key's scope.
+        # Tenant-scoped keys require the owner to be a tenant admin.
+        if resolved.key.scope_type in (
+            ApiKeyScopeType.TENANT,
+            ApiKeyScopeType.TENANT.value,
+        ) and Permission.ADMIN not in user.permissions:
+            raise ApiKeyValidationError(
+                status_code=403,
+                code="owner_permission_revoked",
+                message="API key owner no longer has admin permissions required for tenant-scoped keys.",
             )
 
         ip_address, request_id, user_agent = extract_audit_context(request)
