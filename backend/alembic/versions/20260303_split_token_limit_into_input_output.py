@@ -1,7 +1,7 @@
 """split token_limit into max_input_tokens and max_output_tokens
 
 Revision ID: 20260303_split_token_limit
-Revises: cca4dea4841f
+Revises: 9d2a6c01f3e7
 Create Date: 2026-03-03
 """
 
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "20260303_split_token_limit"
-down_revision = "cca4dea4841f"
+down_revision = "9d2a6c01f3e7"
 branch_labels = None
 depends_on = None
 
