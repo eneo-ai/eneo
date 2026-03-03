@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Any
 
 from intric.files.text import (
     CorruptFileError,
@@ -59,7 +60,41 @@ class UnsupportedModelException(Exception):
 
 
 class QueryException(Exception):
-    pass
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        tokens_used: int | None = None,
+        token_limit: int | None = None,
+    ):
+        self.tokens_used = tokens_used
+        self.token_limit = token_limit
+
+        if message is None:
+            message = self._build_default_message()
+
+        super().__init__(message)
+
+    def _build_default_message(self) -> str:
+        if self.tokens_used is not None and self.token_limit is not None:
+            return (
+                f"Input is too long for the selected model: "
+                f"{self.tokens_used:,} tokens used, limit is {self.token_limit:,} tokens. "
+                f"Try a shorter input, fewer attachments, or a model with a larger context window."
+            )
+        return "Query too long"
+
+    @property
+    def details(self) -> dict[str, Any]:
+        details: dict[str, Any] = {}
+
+        if self.tokens_used is not None:
+            details["tokens_used"] = self.tokens_used
+
+        if self.token_limit is not None:
+            details["token_limit"] = self.token_limit
+
+        return details
 
 
 class UniqueUserException(Exception):
@@ -107,7 +142,84 @@ class FileNotSupportedException(Exception):
 
 
 class FileTooLargeException(Exception):
-    pass
+    DEFAULT_DOCS_HINT = (
+        "See backend/README.md (Environment variables) and backend/.env.template "
+        "to update upload limits."
+    )
+
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        file_size: int | None = None,
+        max_size: int | None = None,
+        setting_name: str | None = None,
+        docs_hint: str | None = None,
+    ):
+        self.file_size = file_size
+        self.max_size = max_size
+        self.setting_name = setting_name
+        self.docs_hint = docs_hint or self.DEFAULT_DOCS_HINT
+
+        if message is None:
+            message = self._build_default_message()
+
+        super().__init__(message)
+
+    @staticmethod
+    def _format_bytes(value: int) -> str:
+        if value < 1024:
+            return f"{value} bytes"
+
+        size = float(value)
+        units = ("KiB", "MiB", "GiB", "TiB")
+
+        for unit in units:
+            size /= 1024
+            if size < 1024 or unit == units[-1]:
+                return f"{size:.1f} {unit}"
+
+        return f"{value} bytes"
+
+    def _build_default_message(self) -> str:
+        if self.file_size is not None and self.max_size is not None:
+            message = (
+                "File size limit exceeded: "
+                f"got {self.file_size} bytes ({self._format_bytes(self.file_size)}), "
+                f"maximum allowed is {self.max_size} bytes ({self._format_bytes(self.max_size)})."
+            )
+        elif self.max_size is not None:
+            message = (
+                "File size limit exceeded: "
+                f"maximum allowed is {self.max_size} bytes ({self._format_bytes(self.max_size)})."
+            )
+        else:
+            message = "File size limit exceeded."
+
+        if self.setting_name:
+            message += (
+                f" Adjust {self.setting_name} in your backend environment "
+                "if you need a higher limit."
+            )
+
+        if self.docs_hint:
+            message += f" {self.docs_hint}"
+
+        return message
+
+    @property
+    def details(self) -> dict[str, Any]:
+        details: dict[str, Any] = {}
+
+        if self.file_size is not None:
+            details["file_size_bytes"] = self.file_size
+            details["file_size_human"] = self._format_bytes(self.file_size)
+
+        if self.max_size is not None:
+            details["max_size_bytes"] = self.max_size
+            details["max_size_human"] = self._format_bytes(self.max_size)
+
+        return details
 
 
 class ChunkEmbeddingMisMatchException(Exception):
