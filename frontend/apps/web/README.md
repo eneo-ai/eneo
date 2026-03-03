@@ -17,8 +17,8 @@ All deployment specific settings are configured via runtime environment variable
 | Variable              | Description                                                                                                           |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `JWT_SECRET`          | Secret to use when signing JWT tokens on the frontend, used for logging in users.                                     |
-| `INTRIC_BACKEND_URL`  | The base url of your Intric backend instance.                                                                         |
-| `INTRIC_BACKEND_SERVER_URL` | _Optional._ The url of the Intric backend server, for server-side rendering. Useful when running the backend with the frontend. Defaults to `INTRIC_BACKEND_URL` |
+| `ENEO_BACKEND_URL`  | The base url of your Intric backend instance.                                                                         |
+| `ENEO_BACKEND_SERVER_URL` | _Optional._ The url of the Intric backend server, for server-side rendering. Useful when running the backend with the frontend. Defaults to `ENEO_BACKEND_URL` |
 | `MOBILITY_GUARD_AUTH` | _Optional. Required for OIDC/MobilityGuard._ `Authorize` endpoint for the MobilityGuard flow, more info further down. |
 
 ### Example config
@@ -27,7 +27,7 @@ Your environment could look something like this:
 
 ```
 JWT_SECRET="abc123"
-INTRIC_BACKEND_URL="https://backend.intric.ai:1234"
+ENEO_BACKEND_URL="https://backend.intric.ai:1234"
 MOBILITY_GUARD_AUTH="https://example.com/mg-local/intric/oauth2/authorize"
 ```
 

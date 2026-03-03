@@ -405,9 +405,6 @@ class TenantModelAdapter(CompletionModelAdapter):
                 **litellm_kwargs,
             )
 
-            # DEBUG: Log raw response
-            logger.debug(f"[DEBUG] Raw response: {response}")
-
             # Parse response
             completion = Completion()
             if response.choices and len(response.choices) > 0:
@@ -585,10 +582,6 @@ class TenantModelAdapter(CompletionModelAdapter):
             APIKeyNotConfiguredException: If credentials are invalid
             OpenAIException: For API errors, rate limits, network issues
         """
-        # DEBUG: Log incoming parameters
-        logger.debug(f"[DEBUG] model_kwargs received: {model_kwargs}")
-        logger.debug(f"[DEBUG] extra kwargs received: {kwargs}")
-
         # Prepare LiteLLM kwargs with credentials and provider-specific handling
         litellm_kwargs = self._prepare_kwargs(model_kwargs=model_kwargs, **kwargs)
 
@@ -610,11 +603,6 @@ class TenantModelAdapter(CompletionModelAdapter):
         )
 
         try:
-            # DEBUG: Log what we're sending (with masked credentials)
-            logger.debug(f"[DEBUG] litellm_model: {self.litellm_model}")
-            logger.debug(f"[DEBUG] messages: {messages}")
-            logger.debug(f"[DEBUG] litellm_kwargs (effective): {self._get_effective_params(litellm_kwargs, dropped)}")
-
             # Create stream with drop_params=True to handle unsupported params gracefully
             stream = await litellm.acompletion(
                 model=self.litellm_model,

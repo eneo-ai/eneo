@@ -1,4 +1,4 @@
-import { env } from "$env/dynamic/private";
+import { getBackendUrl } from "$lib/core/environment.server";
 import { DEFAULT_LANDING_PAGE } from "$lib/core/constants.js";
 import { redirect } from "@sveltejs/kit";
 
@@ -10,7 +10,7 @@ export const load = async (event) => {
     redirect(302, "/login");
   }
 
-  const response = await event.fetch(env.INTRIC_BACKEND_URL + "/api/v1/users/me", {
+  const response = await event.fetch(getBackendUrl() + "/api/v1/users/me", {
     headers: {
       Authorization: `Bearer ${accessToken}`
     }

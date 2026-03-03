@@ -165,6 +165,19 @@ async def update_assistant(
     # Get old state for change tracking
     old_assistant, _ = await service.get_assistant(assistant_id=id)
 
+    # Snapshot old MCP tool overrides before update (not on domain entity)
+    old_mcp_tool_overrides = None
+    if assistant.mcp_tools is not None:
+        import sqlalchemy as sa
+        from intric.database.tables.assistant_table import AssistantMCPServerTools
+
+        stmt = sa.select(
+            AssistantMCPServerTools.mcp_server_tool_id,
+            AssistantMCPServerTools.is_enabled,
+        ).where(AssistantMCPServerTools.assistant_id == id)
+        result = await service.repo.session.execute(stmt)
+        old_mcp_tool_overrides = {str(row[0]): row[1] for row in result.all()}
+
     attachment_ids = None
     if assistant.attachments is not None:
         attachment_ids = [attachment.id for attachment in assistant.attachments]
@@ -415,6 +428,34 @@ async def update_assistant(
     if knowledge_changes:
         changes["knowledge_sources"] = knowledge_changes
 
+    # MCP Servers
+    mcp_servers_added, mcp_servers_removed = get_changes_for_list(
+        old_assistant.mcp_servers, updated_assistant.mcp_servers,
+        assistant_space_id=updated_assistant.space_id
+    )
+    if mcp_servers_added or mcp_servers_removed:
+        changes["mcp_servers"] = {}
+        if mcp_servers_added:
+            changes["mcp_servers"]["added"] = mcp_servers_added
+        if mcp_servers_removed:
+            changes["mcp_servers"]["removed"] = mcp_servers_removed
+
+    # MCP Tool settings - compare request against the updated assistant's persisted state
+    if assistant.mcp_tools is not None and old_mcp_tool_overrides is not None:
+        new_tool_map = {str(t.tool_id): t.is_enabled for t in assistant.mcp_tools}
+
+        tool_changes = []
+        for tid, is_enabled in new_tool_map.items():
+            old_enabled = old_mcp_tool_overrides.get(tid)
+            if old_enabled != is_enabled:
+                tool_changes.append({
+                    "tool_id": tid,
+                    "old_enabled": old_enabled,
+                    "new_enabled": is_enabled,
+                })
+        if tool_changes:
+            changes["mcp_tools"] = tool_changes
+
     # Create summary of changes
     change_summary = []
     if "name" in changes:
@@ -433,6 +474,10 @@ async def update_assistant(
         change_summary.append("retention")
     if "knowledge_sources" in changes:
         change_summary.append("knowledge sources")
+    if "mcp_servers" in changes:
+        change_summary.append("MCP servers")
+    if "mcp_tools" in changes:
+        change_summary.append("MCP tools")
 
     # Get space for context
     space = None
@@ -1094,6 +1139,25 @@ async def add_mcp_to_assistant(
         mcp_server_id=mcp_server_id,
     )
 
+    # Audit logging
+    user = container.user()
+    audit_service = container.audit_service()
+    mcp_server_service = container.mcp_server_service()
+    mcp_server = await mcp_server_service.get_mcp_server(mcp_server_id)
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.ASSISTANT_UPDATED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=id,
+        description=f"Added MCP server '{mcp_server.name}' to assistant '{assistant.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=assistant,
+            changes={"mcp_servers": {"added": [{"id": str(mcp_server.id), "name": mcp_server.name}]}},
+        ),
+    )
+
     return {"success": True}
 
 
@@ -1109,7 +1173,30 @@ async def remove_mcp_from_assistant(
 ):
     """Remove an MCP server from an assistant."""
     service = container.assistant_service()
+
+    # Get context before removal for audit log
+    assistant, _ = await service.get_assistant(assistant_id=id)
+    mcp_server_service = container.mcp_server_service()
+    mcp_server = await mcp_server_service.get_mcp_server(mcp_server_id)
+
     await service.remove_mcp_from_assistant(
         assistant_id=id,
         mcp_server_id=mcp_server_id,
+    )
+
+    # Audit logging
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.ASSISTANT_UPDATED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=id,
+        description=f"Removed MCP server '{mcp_server.name}' from assistant '{assistant.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=assistant,
+            changes={"mcp_servers": {"removed": [{"id": str(mcp_server.id), "name": mcp_server.name}]}},
+        ),
     )

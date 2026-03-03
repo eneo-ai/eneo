@@ -37,9 +37,9 @@ cp env_db.template env_db.env
 
 # 5. Configure env_frontend.env:
 #    - JWT_SECRET=<same as backend>
-#    - INTRIC_BACKEND_URL=https://your-domain.com
-#    - INTRIC_BACKEND_SERVER_URL=http://backend:8000
-#    - PUBLIC_INTRIC_BACKEND_URL=https://your-domain.com
+#    - ENEO_BACKEND_URL=https://your-domain.com
+#    - ENEO_BACKEND_SERVER_URL=http://backend:8000
+#    - PUBLIC_ENEO_BACKEND_URL=https://your-domain.com
 #    - ORIGIN=https://your-domain.com
 #    - PUBLIC_ORIGIN=https://your-domain.com
 

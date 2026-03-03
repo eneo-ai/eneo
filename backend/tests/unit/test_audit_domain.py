@@ -460,6 +460,14 @@ def test_action_types_enum():
     assert ActionType.TRANSCRIPTION_MODEL_UPDATED == "transcription_model_updated"
     assert ActionType.SECURITY_CLASSIFICATION_CREATED == "security_classification_created"
     assert ActionType.SECURITY_CLASSIFICATION_ENABLED == "security_classification_enabled"
+    # MCP server action types
+    assert ActionType.MCP_SERVER_CREATED == "mcp_server_created"
+    assert ActionType.MCP_SERVER_UPDATED == "mcp_server_updated"
+    assert ActionType.MCP_SERVER_DELETED == "mcp_server_deleted"
+    assert ActionType.MCP_SERVER_ENABLED == "mcp_server_enabled"
+    assert ActionType.MCP_SERVER_DISABLED == "mcp_server_disabled"
+    assert ActionType.MCP_SERVER_TOOL_ENABLED == "mcp_server_tool_enabled"
+    assert ActionType.MCP_SERVER_TOOL_DISABLED == "mcp_server_tool_disabled"
 
 
 def test_entity_types_enum():
@@ -482,6 +490,9 @@ def test_entity_types_enum():
     assert EntityType.COMPLETION_MODEL == "completion_model"
     assert EntityType.EMBEDDING_MODEL == "embedding_model"
     assert EntityType.TRANSCRIPTION_MODEL == "transcription_model"
+    # MCP entity types
+    assert EntityType.MCP_SERVER == "mcp_server"
+    assert EntityType.MCP_SERVER_TOOL == "mcp_server_tool"
 
 
 def test_actor_types_enum():

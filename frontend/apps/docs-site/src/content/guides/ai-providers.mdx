@@ -442,7 +442,7 @@ For multi-tenant deployments, API credentials are managed per-tenant through a s
 
 ### Authentication
 
-All credential endpoints require the `INTRIC_SUPER_API_KEY` header:
+All credential endpoints require the `ENEO_SUPER_API_KEY` header:
 
 ```bash
 -H "X-API-Key: your-super-admin-api-key"
@@ -579,7 +579,7 @@ Check your usage regularly:
 **Solutions**:
 - Verify the API key is copied correctly (no extra spaces)
 - Check if the key has expired
-- For credential API: Verify `INTRIC_SUPER_API_KEY` is correct
+- For credential API: Verify `ENEO_SUPER_API_KEY` is correct
 - For Azure: Ensure endpoint URL ends with `/`
 
 ### Rate Limit Errors (429)
@@ -644,7 +644,7 @@ Check your usage regularly:
    - Implement firewall rules for vLLM endpoints
 
 4. **Access Control**
-   - Limit `INTRIC_SUPER_API_KEY` access to administrators
+   - Limit `ENEO_SUPER_API_KEY` access to administrators
    - Use separate credentials per tenant
    - Monitor credential API usage for anomalies
 
