@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Globe, Key, Shield, Settings2 } from "lucide-svelte";
+  import { Globe, Shield } from "lucide-svelte";
 
   type Props = {
     mcpServer: {
@@ -33,18 +33,6 @@
           label: "Bearer",
           icon: Shield,
           classes: "bg-intric-100 text-intric-700 dark:bg-intric-900/50 dark:text-intric-300"
-        };
-      case "api_key":
-        return {
-          label: "API-nyckel",
-          icon: Key,
-          classes: "bg-ui-orange-100 text-ui-orange-700 dark:bg-ui-orange-900/50 dark:text-ui-orange-300"
-        };
-      case "custom_headers":
-        return {
-          label: "Anpassad",
-          icon: Settings2,
-          classes: "bg-amethyst-100 text-amethyst-700 dark:bg-amethyst-900/50 dark:text-amethyst-300"
         };
       default:
         return {

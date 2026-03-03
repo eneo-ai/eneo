@@ -1,9 +1,10 @@
 """MCP Client for connecting to and executing HTTP-based MCP servers."""
 
-import asyncio
+from datetime import timedelta
 from types import TracebackType
 from typing import Any, Optional
 
+import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
@@ -20,6 +21,70 @@ class MCPClientError(Exception):
     """Base exception for MCP client errors."""
 
     pass
+
+
+def _extract_error_message(exc: BaseException) -> str:
+    """Extract meaningful error message from exception groups.
+
+    The MCP library uses anyio TaskGroups which wrap errors in
+    BaseExceptionGroup. This extracts the actual HTTP/connection
+    error, ignoring noise like GeneratorExit and cancel scope errors.
+    """
+    if isinstance(exc, BaseExceptionGroup):
+        sub_exceptions: tuple[BaseException, ...] = exc.exceptions  # type: ignore
+        for sub_exc in sub_exceptions:
+            msg = _extract_error_message(sub_exc)
+            if msg:
+                return msg
+        return str(exc)  # type: ignore
+
+    # Skip noise exceptions
+    if isinstance(exc, (GeneratorExit, KeyboardInterrupt, SystemExit)):
+        return ""
+    if "cancel scope" in str(exc).lower():
+        return ""
+
+    return str(exc)
+
+
+async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
+    """Quick HTTP request to diagnose the real error when MCP protocol fails.
+
+    The MCP library's anyio TaskGroups can swallow the actual HTTP error
+    (e.g. 401) and replace it with a cancel scope error. This makes a
+    direct HTTP request to surface the real issue.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
+            resp = await client.post(
+                url,
+                headers={**headers, "Content-Type": "application/json"},
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "initialize",
+                    "id": 1,
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "eneo", "version": "0.1"},
+                    },
+                },
+            )
+            if resp.status_code == 401:
+                return "Authentication failed (401 Unauthorized). Check your bearer token."
+            elif resp.status_code == 403:
+                return "Access denied (403 Forbidden). Check your credentials."
+            elif resp.status_code >= 500:
+                return f"Server error (HTTP {resp.status_code})."
+            elif resp.status_code >= 400:
+                return f"Server returned HTTP {resp.status_code}."
+    except httpx.ConnectError:
+        return f"Could not connect to {url}. Verify the URL and that the server is running."
+    except httpx.TimeoutException:
+        return f"Connection to {url} timed out."
+    except Exception:
+        pass
+    return "Connection failed for unknown reasons."
 
 
 class MCPClient:
@@ -55,41 +120,38 @@ class MCPClient:
             if token:
                 headers["Authorization"] = f"Bearer {token}"
 
-        elif self.mcp_server.http_auth_type == "api_key":
-            api_key = self.auth_credentials.get("api_key")
-            key_header = self.auth_credentials.get("header_name", "X-API-Key")
-            if api_key:
-                headers[key_header] = api_key
-
-        elif self.mcp_server.http_auth_type == "custom_headers":
-            # Custom headers are passed directly from credentials
-            headers.update(self.auth_credentials)
-
         return headers
 
     async def connect(self) -> None:
-        """Connect to the HTTP-based MCP server."""
+        """Connect to the HTTP-based MCP server.
+
+        Timeout is delegated to the HTTP transport (not asyncio.wait_for)
+        to avoid conflicts with anyio's cancel scopes in the MCP library.
+        """
         try:
-            await asyncio.wait_for(
-                self._connect_internal(),
-                timeout=self.timeout
-            )
-        except asyncio.TimeoutError:
-            logger.error(f"Connection to MCP server {self.mcp_server.name} timed out after {self.timeout}s")
-            # Clean up any partially initialized contexts
+            await self._connect_internal()
+        except MCPClientError:
+            raise
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException as e:
+            error_msg = _extract_error_message(e)
+            if not error_msg:
+                # Cancel scope or other unhelpful error — do a direct HTTP
+                # request to surface the real issue (e.g. 401).
+                error_msg = await _diagnose_http(
+                    self.mcp_server.http_url, self._build_auth_headers()
+                )
+            logger.error(f"Failed to connect to MCP server {self.mcp_server.name}: {error_msg}")
             await self._cleanup_contexts()
-            raise MCPClientError(f"Connection timed out after {self.timeout}s")
-        except Exception as e:
-            logger.error(f"Failed to connect to MCP server {self.mcp_server.name}: {e}")
-            await self._cleanup_contexts()
-            raise MCPClientError(f"Connection failed: {e}")
+            raise MCPClientError(error_msg) from e
 
     async def _cleanup_contexts(self) -> None:
         """Clean up any partially initialized contexts."""
         try:
             if self._session_context:
                 await self._session_context.__aexit__(None, None, None)
-        except Exception:
+        except BaseException:
             pass
         finally:
             self._session_context = None
@@ -98,44 +160,44 @@ class MCPClient:
         try:
             if self._streams_context:
                 await self._streams_context.__aexit__(None, None, None)
-        except Exception:
+        except BaseException:
             pass
         finally:
             self._streams_context = None
 
     async def _connect_internal(self) -> None:
-        """Internal connection logic."""
+        """Internal connection logic.
+
+        Errors are NOT wrapped here — they propagate to connect() which
+        has the diagnostic fallback for unhelpful cancel scope errors.
+        """
         headers = self._build_auth_headers()
 
-        # Create the streamable HTTP context manager
+        # Create the streamable HTTP context manager with timeout delegated
+        # to the transport layer (avoids asyncio.wait_for vs anyio conflicts)
         streams_context = streamablehttp_client(
             url=self.mcp_server.http_url,
-            headers=headers
+            headers=headers,
+            timeout=timedelta(seconds=self.timeout),
         )
 
-        # Enter the streams context - only save reference after successful entry
-        # This prevents cleanup attempts on partially-initialized contexts (anyio 4.x fix)
-        try:
-            streams = await streams_context.__aenter__()
-        except Exception:
-            # Failed during __aenter__ - don't save context, don't try to cleanup
-            # Let GC handle the partially initialized context
-            raise
+        # Enter the streams context
+        streams = await streams_context.__aenter__()
 
         # Successfully entered - now save the reference
         self._streams_context = streams_context
-        read, write, session_id = streams
-        logger.debug(f"Streamable HTTP session ID: {session_id}")
+        read, write, _ = streams
+        logger.debug(f"Streamable HTTP transport connected to {self.mcp_server.http_url}")
 
         # Create and enter session context
         session_context = ClientSession(read, write)
         try:
             session = await session_context.__aenter__()
-        except Exception:
-            # Session entry failed - cleanup streams context only
+        except BaseException:
+            # Session entry failed - cleanup streams context
             try:
                 await streams_context.__aexit__(None, None, None)
-            except Exception:
+            except BaseException:
                 pass
             self._streams_context = None
             raise
@@ -144,8 +206,13 @@ class MCPClient:
         self._session_context = session_context
         self.session = session
 
-        # Initialize the session
-        await self.session.initialize()
+        # Initialize the MCP protocol session
+        try:
+            await self.session.initialize()
+        except BaseException:
+            await self._cleanup_contexts()
+            raise
+
         logger.info(f"Connected to MCP server: {self.mcp_server.name}")
 
     async def list_tools(self) -> list[dict[str, Any]]:
@@ -172,9 +239,12 @@ class MCPClient:
             logger.debug(f"Listed {len(tools)} tools from {self.mcp_server.name}")
             return tools
 
-        except Exception as e:
-            logger.error(f"Failed to list tools from {self.mcp_server.name}: {e}")
-            raise MCPClientError(f"Failed to list tools: {e}")
+        except MCPClientError:
+            raise
+        except BaseException as e:
+            error_msg = _extract_error_message(e) or str(e)
+            logger.error(f"Failed to list tools from {self.mcp_server.name}: {error_msg}")
+            raise MCPClientError(f"Failed to list tools: {error_msg}") from e
 
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """
@@ -223,9 +293,12 @@ class MCPClient:
             logger.info(f"Called tool {tool_name} on {self.mcp_server.name}")
             return result
 
-        except Exception as e:
-            logger.error(f"Failed to call tool {tool_name} on {self.mcp_server.name}: {e}")
-            raise MCPClientError(f"Tool call failed: {e}")
+        except MCPClientError:
+            raise
+        except BaseException as e:
+            error_msg = _extract_error_message(e) or str(e)
+            logger.error(f"Failed to call tool {tool_name} on {self.mcp_server.name}: {error_msg}")
+            raise MCPClientError(f"Tool call failed: {error_msg}") from e
 
     async def disconnect(self) -> None:
         """Disconnect from the MCP server.
@@ -246,13 +319,13 @@ class MCPClient:
         try:
             if session_ctx:
                 await session_ctx.__aexit__(None, None, None)
-        except (RuntimeError, GeneratorExit, BaseException):
+        except BaseException:
             pass  # Task boundary issue or cleanup error - GC will handle
 
         try:
             if streams_ctx:
                 await streams_ctx.__aexit__(None, None, None)
-        except (RuntimeError, GeneratorExit, BaseException):
+        except BaseException:
             pass  # Task boundary issue or cleanup error - GC will handle
 
         logger.debug(f"Disconnected from MCP server: {self.mcp_server.name}")

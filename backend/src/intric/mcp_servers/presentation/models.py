@@ -21,8 +21,9 @@ class MCPServerPublic(BaseModel):
     name: str
     description: Optional[str]
     http_url: str
-    http_auth_type: str  # "none", "bearer", "api_key", "custom_headers"
-    http_auth_config_schema: Optional[dict[str, Any]]
+    http_auth_type: str  # "none", "bearer"
+    has_credentials: bool
+    credential_preview: Optional[str] = None  # masked token, e.g. "••••••••sk12"
     tags: Optional[list[str]]
     icon_url: Optional[str]
     documentation_url: Optional[str]
@@ -37,7 +38,7 @@ class MCPServerCreate(BaseModel):
 
     name: str
     http_url: AnyHttpUrl
-    http_auth_type: Literal["none", "bearer", "api_key", "custom_headers"] = "none"
+    http_auth_type: Literal["none", "bearer"] = "none"
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
     tags: Optional[list[str]] = None
@@ -50,9 +51,7 @@ class MCPServerUpdate(BaseModel):
 
     name: Optional[str] = None
     http_url: Optional[AnyHttpUrl] = None
-    http_auth_type: Optional[Literal["none", "bearer", "api_key", "custom_headers"]] = (
-        None
-    )
+    http_auth_type: Optional[Literal["none", "bearer"]] = None
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
     tags: Optional[list[str]] = None
@@ -65,7 +64,6 @@ class MCPServerSettingsPublic(MCPServerPublic):
 
     mcp_server_id: UUID  # ID in global catalog
     is_org_enabled: bool
-    has_credentials: bool  # Whether env_vars are configured
     tools: list["MCPServerToolPublic"] = []
 
     @computed_field
