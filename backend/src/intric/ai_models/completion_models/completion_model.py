@@ -5,7 +5,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 from intric.ai_models.model_enums import ModelFamily as CompletionModelFamily
 from intric.ai_models.model_enums import ModelHostingLocation, ModelStability
@@ -78,7 +78,8 @@ class CompletionModelBase(BaseModel):
     nickname: str
     # Allow both enum and string for tenant models with dynamic values
     family: Union[CompletionModelFamily, str]
-    token_limit: int
+    max_input_tokens: int
+    max_output_tokens: int
     is_deprecated: bool
     nr_billion_parameters: Optional[int] = None
     hf_link: Optional[str] = None
@@ -93,6 +94,12 @@ class CompletionModelBase(BaseModel):
     supports_tool_calling: bool = False
     base_url: Optional[str] = None
     litellm_model_name: Optional[str] = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def token_limit(self) -> int:
+        """Backward-compat: exposed in JSON responses for frontend."""
+        return self.max_input_tokens
 
 
 class CompletionModelCreate(CompletionModelBase):
@@ -138,7 +145,8 @@ class CompletionModelPublic(CompletionModel):
             name=completion_model.name,
             nickname=completion_model.nickname,
             family=completion_model.family,
-            token_limit=completion_model.token_limit,
+            max_input_tokens=completion_model.max_input_tokens,
+            max_output_tokens=completion_model.max_output_tokens,
             is_deprecated=completion_model.is_deprecated,
             nr_billion_parameters=completion_model.nr_billion_parameters,
             hf_link=completion_model.hf_link,

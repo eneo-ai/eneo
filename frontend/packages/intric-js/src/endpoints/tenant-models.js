@@ -28,16 +28,7 @@ export function initTenantModels(client) {
 
     /**
      * Create a new Completion Model.
-     * @param {Object} model
-     * @param {string} model.provider_id Provider ID
-     * @param {string} model.name LiteLLM model identifier
-     * @param {string} model.display_name User-friendly name
-     * @param {Object} [model.capabilities] Model capabilities
-     * @param {Object} [model.default_params] Default parameters
-     * @param {Object} [model.param_constraints] Parameter constraints
-     * @param {boolean} [model.is_active] Whether model is active
-     * @param {boolean} [model.is_default] Whether this is the default model
-     * @param {string} [model.security_classification_id] Security classification ID
+     * @param {Object} model Model data (passed through to API)
      * @throws {IntricError}
      * */
     createCompletion: async (model) => {

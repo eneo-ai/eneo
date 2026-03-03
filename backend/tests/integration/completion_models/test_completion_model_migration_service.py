@@ -719,7 +719,7 @@ class TestCompletionModelMigration:
             reasoning_warning = any("reasoning" in w.lower() for w in result.warnings)
             assert reasoning_warning, "Should warn about loss of reasoning capability"
 
-    async def test_warn_about_token_limit_reduction(
+    async def test_warn_about_input_token_limit_reduction(
         self,
         db_container,
         completion_model_factory,
@@ -734,14 +734,14 @@ class TestCompletionModelMigration:
                 session,
                 "gpt-4-turbo",
                 provider="openai",
-                token_limit=128000
+                max_input_tokens=128000
             )
             # Create target model with lower token limit
             target_model = await completion_model_factory(
                 session,
                 "gpt-3.5-turbo",
                 provider="openai",
-                token_limit=4096
+                max_input_tokens=4096
             )
 
             # Act: Migrate with confirmation

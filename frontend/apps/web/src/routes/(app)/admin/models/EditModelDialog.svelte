@@ -27,7 +27,8 @@
   let modelIdentifier = "";
   let displayName = "";
   let description = "";
-  let tokenLimitStr = "128000";
+  let maxInputTokensStr = "128000";
+  let maxOutputTokensStr = "4096";
   let vision = false;
   let reasoning = false;
   let supportsToolCalling = false;
@@ -64,8 +65,15 @@
     hosting = model.hosting as "swe" | "eu" | "usa";
     openSource = model.open_source ?? false;
 
-    if ("token_limit" in model && model.token_limit !== null) {
-      tokenLimitStr = String(model.token_limit);
+    if ("max_input_tokens" in model && model.max_input_tokens != null) {
+      maxInputTokensStr = String(model.max_input_tokens);
+    } else if ("token_limit" in model && model.token_limit != null) {
+      maxInputTokensStr = String(model.token_limit);
+    }
+    if ("max_output_tokens" in model && model.max_output_tokens != null) {
+      maxOutputTokensStr = String(model.max_output_tokens);
+    } else {
+      maxOutputTokensStr = "4096";
     }
     if ("vision" in model) {
       vision = model.vision;
@@ -99,7 +107,8 @@
           description: description.trim(),
           hosting,
           open_source: openSource,
-          token_limit: parseInt(tokenLimitStr, 10),
+          max_input_tokens: parseInt(maxInputTokensStr, 10),
+          max_output_tokens: parseInt(maxOutputTokensStr, 10),
           vision,
           reasoning,
           supports_tool_calling: supportsToolCalling
@@ -138,6 +147,12 @@
     } finally {
       isSubmitting = false;
     }
+  }
+
+  function formatTokenLimit(limit: number): string {
+    if (limit >= 1_000_000) return `${(limit / 1_000_000).toFixed(limit % 1_000_000 === 0 ? 0 : 1)}M`;
+    if (limit >= 1_000) return `${Math.round(limit / 1_000)}K`;
+    return limit.toString();
   }
 
   function handleCancel() {
@@ -205,20 +220,41 @@
 
         <!-- Completion model specific fields -->
         {#if type === "completionModel"}
-          <div class="flex flex-col gap-2">
-            <label for="token-limit" class="text-sm font-medium text-secondary">{m.token_limit()}</label>
-            <Input.Text
-              id="token-limit"
-              type="number"
-              bind:value={tokenLimitStr}
-              min="1024"
-              max="1000000"
-              required
-            />
-            <p class="text-muted-foreground text-xs mt-1">
-              {m.token_limit_hint()}
-            </p>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="flex flex-col gap-2">
+              <label for="max-input-tokens" class="text-sm font-medium text-secondary">{m.max_input_tokens()}</label>
+              <Input.Text
+                id="max-input-tokens"
+                type="number"
+                bind:value={maxInputTokensStr}
+                min="1024"
+                max="10000000"
+                required
+              />
+              <p class="text-muted-foreground text-xs mt-1">
+                {m.max_input_tokens_help()}
+              </p>
+            </div>
+
+            <div class="flex flex-col gap-2">
+              <label for="max-output-tokens" class="text-sm font-medium text-secondary">{m.max_output_tokens()}</label>
+              <Input.Text
+                id="max-output-tokens"
+                type="number"
+                bind:value={maxOutputTokensStr}
+                min="1"
+                max="10000000"
+                required
+              />
+              <p class="text-muted-foreground text-xs mt-1">
+                {m.max_output_tokens_help()}
+              </p>
+            </div>
           </div>
+
+          <p class="text-xs text-muted">
+            {m.effective_context({ tokens: formatTokenLimit(Math.max(0, parseInt(maxInputTokensStr, 10) - parseInt(maxOutputTokensStr, 10))) })}
+          </p>
 
           <div class="flex gap-6">
             <label class="flex items-center gap-2 text-sm cursor-pointer group">

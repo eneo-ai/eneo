@@ -331,7 +331,7 @@ class Assistant(Entity):
                 )
 
         # Fill half the context
-        num_chunks = self.completion_model.token_limit // 200 // 2 if version == 2 else 30
+        num_chunks = self.completion_model.max_input_tokens // 200 // 2 if version == 2 else 30
 
         datastore_result = await references_service.get_references(
             question=question,
