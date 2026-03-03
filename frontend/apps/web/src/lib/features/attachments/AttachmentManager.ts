@@ -1,7 +1,9 @@
 import { derived, get, readable, writable, type Readable } from "svelte/store";
-import type { Intric, UploadedFile } from "@intric/intric-js";
+import { type Intric, type UploadedFile } from "@intric/intric-js";
 import { createContext } from "$lib/core/context";
 import { ATTACHMENTS } from "$lib/core/constants";
+import { formatBytes } from "$lib/core/formatting/formatBytes";
+import { getUploadErrorMessage } from "$lib/features/attachments/getUploadErrorMessage";
 
 export type Attachment = {
   id: string;
@@ -25,6 +27,14 @@ export type AttachmentRules = {
     mimetype: string;
     maxSize: number;
   }[];
+};
+
+export type AttachmentValidationError = {
+  kind: "max_total_count" | "unsupported_type" | "file_size" | "max_total_size";
+  message: string;
+  fileName?: string;
+  fileSizeBytes?: number;
+  maxSizeBytes?: number;
 };
 
 const [getAttachmentManager, setAttachmentManager] =
@@ -158,14 +168,15 @@ function createAttachmentManager(data: AttachmentManagerParams) {
         });
       } catch (error) {
         if (error instanceof Error && error.message.includes("Cancelled")) {
-          console.warn(`Cancelled uppload for ${file.name}`);
+          console.warn(`Cancelled upload for ${file.name}`);
         } else {
-          alert(`We encountered an error uploading the file ${file.name}\n${error}`);
+          const message = getUploadErrorMessage(error, file.name);
+          alert(`We encountered an error uploading the file ${file.name}\n${message}`);
         }
         attachments.update(($attachments) => $attachments.filter((u) => u.id !== currentUpload));
       } finally {
         const idx = runningUploads.findIndex((id) => id === currentUpload);
-        if (idx) runningUploads.splice(idx, 1);
+        if (idx !== -1) runningUploads.splice(idx, 1);
         continueUploadQueue();
       }
     }
@@ -175,17 +186,18 @@ function createAttachmentManager(data: AttachmentManagerParams) {
     attachments.set([]);
   }
 
-  function queueValidUploads(files: File[], rules?: AttachmentRules) {
-    const errors: string[] = [];
+  function queueValidUploadsDetailed(files: File[], rules?: AttachmentRules) {
+    const errors: AttachmentValidationError[] = [];
     const selectedRules = rules ?? get(attachmentRules);
 
     for (const file of files) {
       const $attachments = get(attachments);
 
       if (selectedRules.maxTotalCount && $attachments.length >= selectedRules.maxTotalCount) {
-        errors.push(
-          `You can only attach a maximum number of ${selectedRules.maxTotalCount} files at a time.`
-        );
+        errors.push({
+          kind: "max_total_count",
+          message: `You can only attach a maximum number of ${selectedRules.maxTotalCount} files at a time.`
+        });
         break;
       }
 
@@ -195,14 +207,24 @@ function createAttachmentManager(data: AttachmentManagerParams) {
         const format = selectedRules.acceptedFormats.find((format) => format.mimetype === mimetype);
 
         if (!format) {
-          errors.push(`${file.name}: File type ${mimetype} is not supported for this operation.`);
+          errors.push({
+            kind: "unsupported_type",
+            fileName: file.name,
+            message: `${file.name}: File type ${mimetype} is not supported for this operation.`
+          });
           continue;
         }
 
         if (file.size > format.maxSize) {
-          errors.push(
-            `${file.name}: File is too large. Maximum size is ${format.maxSize} bytes while ${file.name} is ${file.size} bytes.`
-          );
+          errors.push({
+            kind: "file_size",
+            fileName: file.name,
+            fileSizeBytes: file.size,
+            maxSizeBytes: format.maxSize,
+            message:
+              `${file.name}: File is ${formatBytes(file.size)}, ` +
+              `maximum allowed is ${formatBytes(format.maxSize)}.`
+          });
           continue;
         }
       }
@@ -214,9 +236,15 @@ function createAttachmentManager(data: AttachmentManagerParams) {
         selectedRules.maxTotalSize &&
         currentTotalSize + file.size >= selectedRules.maxTotalSize
       ) {
-        errors.push(
-          `${file.name}: Skipping file. Can only upload a total of ${selectedRules.maxTotalSize} bytes at a time.`
-        );
+        errors.push({
+          kind: "max_total_size",
+          fileName: file.name,
+          fileSizeBytes: file.size,
+          maxSizeBytes: selectedRules.maxTotalSize,
+          message:
+            `${file.name}: Skipping file. Can only upload a total of ` +
+            `${formatBytes(selectedRules.maxTotalSize)} at a time.`
+        });
         continue;
       }
 
@@ -224,6 +252,11 @@ function createAttachmentManager(data: AttachmentManagerParams) {
     }
 
     return errors.length > 0 ? errors : null;
+  }
+
+  function queueValidUploads(files: File[], rules?: AttachmentRules) {
+    const errors = queueValidUploadsDetailed(files, rules);
+    return errors ? errors.map((error) => error.message) : null;
   }
 
   // Return -------------------------------------------------------
@@ -241,6 +274,7 @@ function createAttachmentManager(data: AttachmentManagerParams) {
      * Supply your own ruleset if you want to override this behaviour.
      */
     queueValidUploads,
+    queueValidUploadsDetailed,
     /** Will reset the current attachment list */
     clearUploads
   });
