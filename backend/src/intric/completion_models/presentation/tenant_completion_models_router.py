@@ -100,8 +100,8 @@ async def create_tenant_completion_model(
         name=model_create.name,  # Model identifier (may contain slashes)
         nickname=model_create.display_name,
         litellm_model_name=None,  # Constructed at runtime by TenantModelAdapter
-        max_input_tokens=model_create.max_input_tokens,
-        max_output_tokens=model_create.max_output_tokens,
+        max_input_tokens=model_create.max_input_tokens,  # type: ignore[call-arg]
+        max_output_tokens=model_create.max_output_tokens,  # type: ignore[call-arg]
         vision=model_create.vision,
         reasoning=model_create.reasoning,
         supports_tool_calling=model_create.supports_tool_calling,  # type: ignore[call-arg]

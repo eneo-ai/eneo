@@ -324,6 +324,9 @@ class Assistant(Entity):
         web_search_results: list["WebSearchResult"] = [],
         require_tool_approval: bool = False,
     ):
+        if self.completion_model is None:
+            raise NoModelSelectedException()
+
         if any([file.file_type == FileType.IMAGE for file in files]):
             if not self.completion_model.vision:
                 raise BadRequestException(
