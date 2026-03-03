@@ -1,7 +1,10 @@
 from collections import defaultdict
 import json
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
+
+logger = logging.getLogger(__name__)
 
 import tiktoken
 
@@ -188,6 +191,16 @@ class _Prompt:
 
         # Save the used_tokens for later
         self._knowledge_tokens = used_tokens
+        included_count = sum(len(c) for c in chunks_by_info_blob.values())
+        logger.debug(
+            "Knowledge token fitting: included=%d/%d chunks, "
+            "%d tokens used of %d max, from %d sources",
+            included_count,
+            len(chunks),
+            used_tokens,
+            max_tokens,
+            len(chunks_by_info_blob),
+        )
 
         # Process each document
         chunk_groupings = []
@@ -429,29 +442,58 @@ class ContextBuilder:
         _prompt.add_web_search_result(web_search_results=web_search_results)
         tokens_used += _prompt.num_tokens
 
-        # Create the messages, keeping within the 80% mark,
-        # and minimum 3.
-        max_tokens_messages = (
-            int(max_tokens_usable * (1 - MIN_PERCENTAGE_KNOWLEDGE)) - tokens_used
-        )
-        messages, tokens_used_messages = self._build_messages(
-            session=session, max_tokens=max_tokens_messages, min_len=3
-        )
-        tokens_used += tokens_used_messages
+        if version == 1:
+            # v1: Static 80/20 split — messages capped at 20%, knowledge gets the rest
+            max_tokens_messages = (
+                int(max_tokens_usable * (1 - MIN_PERCENTAGE_KNOWLEDGE)) - tokens_used
+            )
+            messages, tokens_used_messages = self._build_messages(
+                session=session, max_tokens=max_tokens_messages, min_len=3
+            )
+            tokens_used += tokens_used_messages
 
-        # Check for worst case.
-        # Up until this point, all text will be
-        # assumed by the user to be there,
-        # and erroring is preferable to not
-        # including something.
-        if tokens_used > max_tokens_usable:
-            raise QueryException("Query too long")
+            if tokens_used > max_tokens_usable:
+                raise QueryException("Query too long")
 
-        # Add the knowledge in all the space that is left.
-        tokens_left = max_tokens_usable - tokens_used
-        _prompt.add_knowledge(chunks=info_blob_chunks, max_tokens=tokens_left)
-        prompt_text = str(_prompt)
-        tokens_used += _prompt.get_tokens_of_knowledge()
+            tokens_left = max_tokens_usable - tokens_used
+            _prompt.add_knowledge(chunks=info_blob_chunks, max_tokens=tokens_left)
+            prompt_text = str(_prompt)
+            tokens_used += _prompt.get_tokens_of_knowledge()
+        else:
+            # v2: Knowledge-first — knowledge gets all remaining space (autocut-limited),
+            # then messages fill whatever is left
+            if tokens_used > max_tokens_usable:
+                raise QueryException("Query too long")
+
+            tokens_left_for_knowledge = max_tokens_usable - tokens_used
+            _prompt.add_knowledge(
+                chunks=info_blob_chunks, max_tokens=tokens_left_for_knowledge
+            )
+            knowledge_tokens = _prompt.get_tokens_of_knowledge()
+            tokens_used += knowledge_tokens
+
+            tokens_left_for_messages = max_tokens_usable - tokens_used
+            messages, tokens_used_messages = self._build_messages(
+                session=session, max_tokens=tokens_left_for_messages, min_len=3
+            )
+            tokens_used += tokens_used_messages
+            prompt_text = str(_prompt)
+
+            logger.debug(
+                "v2 context allocation: max=%d, input=%d, prompt=%d, "
+                "knowledge=%d/%d (chunks=%d), messages=%d/%d (count=%d), "
+                "total=%d",
+                max_tokens_usable,
+                tokens_used_input,
+                _prompt.num_tokens - knowledge_tokens,
+                knowledge_tokens,
+                tokens_left_for_knowledge,
+                len(info_blob_chunks),
+                tokens_used_messages,
+                tokens_left_for_messages,
+                len(messages),
+                tokens_used,
+            )
 
         # Combine image generation tools with MCP tools
         functions = []

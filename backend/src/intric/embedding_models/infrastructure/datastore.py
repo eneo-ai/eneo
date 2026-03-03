@@ -38,8 +38,17 @@ class ChunkSettings(BaseSettings):
 settings = ChunkSettings()
 
 
-def autocut(y_values: list[float], cutoff: int = 2) -> int:
-    # Written by GPT-4, fact-checked by GPT-4
+def autocut(
+    y_values: list[float], cutoff: int = 2, cliff_threshold: float = 0.5
+) -> int:
+    """Cut a sorted list of scores at natural grouping boundaries.
+
+    Finds local maxima in the normalized deviation-from-linear curve.
+    Cuts at the n-th local maximum where n = cutoff.
+
+    If a single cliff is dramatic enough (diff exceeds cliff_threshold),
+    cut there immediately regardless of the cutoff count.
+    """
 
     if len(y_values) <= 1:
         return len(y_values)
@@ -58,14 +67,17 @@ def autocut(y_values: list[float], cutoff: int = 2) -> int:
 
     extrema_count = 0
     for i in range(1, len(diff)):
+        is_local_max = False
         if i == len(diff) - 1:
-            if len(diff) > 2 and diff[i] > diff[i - 1] and diff[i] > diff[i - 2]:
-                extrema_count += 1
-                if extrema_count >= cutoff:
-                    return i
-        elif diff[i] > diff[i - 1] and len(diff) > i + 1 and diff[i] > diff[i + 1]:
+            is_local_max = (
+                len(diff) > 2 and diff[i] > diff[i - 1] and diff[i] > diff[i - 2]
+            )
+        else:
+            is_local_max = diff[i] > diff[i - 1] and diff[i] > diff[i + 1]
+
+        if is_local_max:
             extrema_count += 1
-            if extrema_count >= cutoff:
+            if extrema_count >= cutoff or diff[i] >= cliff_threshold:
                 return i
 
     return len(y_values)
@@ -176,6 +188,19 @@ class Datastore:
 
         if autocut_cutoff is not None:
             cut_point = autocut(scores, autocut_cutoff)
+            logger.debug(
+                "Semantic search: fetched=%d, autocut=%d/%d, "
+                "scores=[%s]",
+                len(semantic_results),
+                cut_point,
+                len(semantic_results),
+                ", ".join(f"{s:.4f}" for s in scores[:10]),
+            )
             return semantic_results[:cut_point]
 
+        logger.debug(
+            "Semantic search: fetched=%d (no autocut), scores=[%s]",
+            len(semantic_results),
+            ", ".join(f"{s:.4f}" for s in scores[:10]),
+        )
         return semantic_results
