@@ -7,6 +7,7 @@
   import { ArrowLeft, Plus, Trash2, Sparkles, Check, ListPlus, TriangleAlert, Search, Loader2, CircleCheck, CircleX, Zap } from "lucide-svelte";
   import HelpTooltip from "../components/HelpTooltip.svelte";
   import { getIntric } from "$lib/core/Intric";
+  import { toast } from "$lib/components/toast";
 
   const intric = getIntric();
 
@@ -265,6 +266,29 @@
     dispatch("back");
   }
 
+  let isLookingUpDefaults = false;
+  async function lookupDefaults() {
+    if (!currentModel.name.trim()) return;
+    isLookingUpDefaults = true;
+    try {
+      const result = await intric.modelProviders.getModelDefaults(currentModel.name.trim());
+      if (result.found) {
+        if (result.max_input_tokens != null) currentModel.maxInputTokens = result.max_input_tokens;
+        if (result.max_output_tokens != null) currentModel.maxOutputTokens = result.max_output_tokens;
+        currentModel.vision = result.supports_vision ?? false;
+        currentModel.reasoning = result.supports_reasoning ?? false;
+        currentModel.supportsToolCalling = result.supports_function_calling ?? false;
+        toast.success(m.reset_to_defaults_success());
+      } else {
+        toast.info(m.reset_to_defaults_not_found({ model: currentModel.name.trim() }));
+      }
+    } catch {
+      toast.info(m.reset_to_defaults_not_found({ model: currentModel.name.trim() }));
+    } finally {
+      isLookingUpDefaults = false;
+    }
+  }
+
   $: canAddModel = currentModel.name.trim() !== "" && currentModel.displayName.trim() !== "";
 
   function formatTokenLimit(limit: number): string {
@@ -413,6 +437,19 @@
               ? m.model_identifier_placeholder_embedding()
               : m.model_identifier_placeholder_transcription()}
         />
+        {#if modelType === "completion" && currentModel.name.trim()}
+          <button
+            type="button"
+            class="text-xs text-accent-default hover:text-accent-stronger transition-colors underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 self-start"
+            disabled={isLookingUpDefaults}
+            on:click={lookupDefaults}
+          >
+            {#if isLookingUpDefaults}
+              <Loader2 class="w-3 h-3 animate-spin" />
+            {/if}
+            {m.lookup_defaults()}
+          </button>
+        {/if}
       </div>
 
       <!-- Display Name -->

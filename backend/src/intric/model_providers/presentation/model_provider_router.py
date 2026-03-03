@@ -116,6 +116,45 @@ async def get_provider_capabilities(
 
 
 @router.get(
+    "/model-defaults/",
+)
+async def get_model_defaults(
+    model_name: str,
+    _user: UserInDB = Depends(get_current_active_user),
+):
+    """Look up recommended default values for a model from LiteLLM's model_cost database."""
+    import litellm
+
+    # Try exact match first
+    info = litellm.model_cost.get(model_name)
+
+    # If no exact match, try common prefixed variants
+    if info is None:
+        prefixes = set()
+        for key in litellm.model_cost:
+            if "/" in key:
+                prefix = key.split("/")[0]
+                prefixes.add(prefix)
+        for prefix in sorted(prefixes):
+            candidate = f"{prefix}/{model_name}"
+            info = litellm.model_cost.get(candidate)
+            if info is not None:
+                break
+
+    if info is None:
+        return {"found": False}
+
+    return {
+        "found": True,
+        "max_input_tokens": info.get("max_input_tokens"),
+        "max_output_tokens": info.get("max_output_tokens"),
+        "supports_vision": info.get("supports_vision", False),
+        "supports_function_calling": info.get("supports_function_calling", False),
+        "supports_reasoning": info.get("supports_reasoning", False),
+    }
+
+
+@router.get(
     "/{provider_id}/",
     response_model=ModelProviderPublic,
     responses=responses.get_responses([404]),

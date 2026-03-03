@@ -144,6 +144,21 @@ export function initModelProviders(client) {
     },
 
     /**
+     * Look up recommended default values for a model from LiteLLM.
+     * @param {string} modelName The model identifier to look up
+     * @returns {Promise<{found: boolean, max_input_tokens?: number, max_output_tokens?: number, supports_vision?: boolean, supports_function_calling?: boolean, supports_reasoning?: boolean}>}
+     * @throws {IntricError}
+     * */
+    getModelDefaults: async (modelName) => {
+      const res = await client.fetch("/api/v1/admin/model-providers/model-defaults/", {
+        method: "get",
+        params: { query: { model_name: modelName } }
+      });
+
+      return res;
+    },
+
+    /**
      * Test provider connection.
      * @param {{id: string}} provider
      * @throws {IntricError}
