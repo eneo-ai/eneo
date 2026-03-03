@@ -31,11 +31,12 @@ def _extract_error_message(exc: BaseException) -> str:
     error, ignoring noise like GeneratorExit and cancel scope errors.
     """
     if isinstance(exc, BaseExceptionGroup):
-        for sub_exc in exc.exceptions:
+        sub_exceptions: tuple[BaseException, ...] = exc.exceptions  # type: ignore
+        for sub_exc in sub_exceptions:
             msg = _extract_error_message(sub_exc)
             if msg:
                 return msg
-        return str(exc)
+        return str(exc)  # type: ignore
 
     # Skip noise exceptions
     if isinstance(exc, (GeneratorExit, KeyboardInterrupt, SystemExit)):
@@ -185,7 +186,7 @@ class MCPClient:
 
         # Successfully entered - now save the reference
         self._streams_context = streams_context
-        read, write, get_session_id = streams
+        read, write, _ = streams
         logger.debug(f"Streamable HTTP transport connected to {self.mcp_server.http_url}")
 
         # Create and enter session context
