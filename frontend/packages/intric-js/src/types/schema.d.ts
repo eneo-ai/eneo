@@ -1903,6 +1903,10 @@ export interface paths {
     /** Cancel Flow Run */
     post: operations["cancel_flow_run_api_v1_flow_runs__id__cancel__post"];
   };
+  "/api/v1/flow-runs/{id}/redispatch/": {
+    /** Redispatch Flow Run */
+    post: operations["redispatch_flow_run_api_v1_flow_runs__id__redispatch__post"];
+  };
   "/api/v1/flow-runs/{id}/evidence/": {
     /** Get Flow Run Evidence */
     get: operations["get_flow_run_evidence_api_v1_flow_runs__id__evidence__get"];
@@ -3168,6 +3172,7 @@ export interface components {
       | "flow_published"
       | "flow_unpublished"
       | "flow_run_created"
+      | "flow_run_redispatched"
       | "flow_run_cancelled"
       | "flow_classification_override"
       | "flow_run_document_generated"
@@ -6672,6 +6677,119 @@ export interface components {
       /** File Ids */
       file_ids?: string[] | null;
     };
+    /** FlowRunDebugDefinition */
+    FlowRunDebugDefinition: {
+      /** Flow Id */
+      flow_id: string;
+      /** Version */
+      version: number;
+      /** Checksum */
+      checksum: string;
+      /** Steps Count */
+      steps_count: number;
+    };
+    /** FlowRunDebugExport */
+    FlowRunDebugExport: {
+      /** Schema Version */
+      schema_version: string;
+      /**
+       * Generated At
+       * Format: date-time
+       */
+      generated_at: string;
+      run: components["schemas"]["FlowRunDebugRun"];
+      definition: components["schemas"]["FlowRunDebugDefinition"];
+      /** Definition Snapshot */
+      definition_snapshot: {
+        [key: string]: unknown;
+      };
+      /** Steps */
+      steps: components["schemas"]["FlowRunDebugStep"][];
+      security: components["schemas"]["FlowRunDebugSecurity"];
+    };
+    /** FlowRunDebugInput */
+    FlowRunDebugInput: {
+      /** Source */
+      source?: string | null;
+      /** Type */
+      type?: string | null;
+      /** Contract */
+      contract?: {
+        [key: string]: unknown;
+      } | null;
+      /** Bindings */
+      bindings?: {
+        [key: string]: unknown;
+      } | null;
+      /** Config */
+      config?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /** FlowRunDebugIoTypes */
+    FlowRunDebugIoTypes: {
+      /** Input */
+      input?: string | null;
+      /** Output */
+      output?: string | null;
+    };
+    /** FlowRunDebugMcp */
+    FlowRunDebugMcp: {
+      /** Policy */
+      policy?: string | null;
+      /** Tool Allowlist */
+      tool_allowlist?: string[];
+    };
+    /** FlowRunDebugOutput */
+    FlowRunDebugOutput: {
+      /** Mode */
+      mode?: string | null;
+      /** Type */
+      type?: string | null;
+      /** Contract */
+      contract?: {
+        [key: string]: unknown;
+      } | null;
+      /** Classification */
+      classification?: number | null;
+      /** Config */
+      config?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /** FlowRunDebugRun */
+    FlowRunDebugRun: {
+      /** Run Id */
+      run_id: string;
+      /** Flow Id */
+      flow_id: string;
+      /** Flow Version */
+      flow_version: number;
+      /** Status */
+      status: string;
+    };
+    /** FlowRunDebugSecurity */
+    FlowRunDebugSecurity: {
+      /** Redaction Applied */
+      redaction_applied: boolean;
+      /** Classification Field */
+      classification_field: string;
+      /** Mcp Policy Field */
+      mcp_policy_field: string;
+    };
+    /** FlowRunDebugStep */
+    FlowRunDebugStep: {
+      /** Step Id */
+      step_id?: string | null;
+      /** Step Order */
+      step_order?: number | null;
+      /** Assistant Id */
+      assistant_id?: string | null;
+      io_types: components["schemas"]["FlowRunDebugIoTypes"];
+      input: components["schemas"]["FlowRunDebugInput"];
+      output: components["schemas"]["FlowRunDebugOutput"];
+      mcp: components["schemas"]["FlowRunDebugMcp"];
+    };
     /** FlowRunEvidenceResponse */
     FlowRunEvidenceResponse: {
       /** Run */
@@ -6690,6 +6808,7 @@ export interface components {
       step_attempts: {
         [key: string]: unknown;
       }[];
+      debug_export: components["schemas"]["FlowRunDebugExport"];
     };
     /** FlowRunPublic */
     FlowRunPublic: {
@@ -6738,6 +6857,12 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /** FlowRunRedispatchResponse */
+    FlowRunRedispatchResponse: {
+      run: components["schemas"]["FlowRunPublic"];
+      /** Redispatched Count */
+      redispatched_count: number;
     };
     /** FlowSparsePublic */
     FlowSparsePublic: {
@@ -23737,6 +23862,28 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["FlowRunPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Redispatch Flow Run */
+  redispatch_flow_run_api_v1_flow_runs__id__redispatch__post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowRunRedispatchResponse"];
         };
       };
       /** @description Validation Error */

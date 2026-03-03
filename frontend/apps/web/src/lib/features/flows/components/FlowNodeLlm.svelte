@@ -50,15 +50,15 @@
       </div>
       <div class="flex items-center gap-1">
         {#if data.assistantClassLevel != null}
-          <span class="rounded bg-blue-100 px-1.5 text-[10px] font-bold text-blue-700">
+          <span class="rounded bg-accent-dimmer px-1.5 text-[10px] font-bold text-accent-stronger">
             Model K{data.assistantClassLevel}
           </span>
         {/if}
         {#if data.classLevel != null && data.classLevel !== data.assistantClassLevel}
           <span class="rounded px-1.5 text-[10px] font-bold
-            {data.classLevel >= 3 ? 'bg-red-100 text-red-700' :
-             data.classLevel >= 2 ? 'bg-amber-100 text-amber-700' :
-             'bg-green-100 text-green-700'}">
+            {data.classLevel >= 3 ? 'bg-negative-dimmer text-negative-stronger' :
+             data.classLevel >= 2 ? 'bg-warning-dimmer text-warning-stronger' :
+             'bg-positive-dimmer text-positive-stronger'}">
             Output K{data.classLevel}
           </span>
         {/if}
@@ -69,9 +69,9 @@
         <div class="text-secondary">{data.modelName}</div>
       {/if}
       <div class="flex items-center gap-1">
-        <span class="bg-blue-100 text-blue-700 rounded px-1.5">{data.step.input_type}</span>
+        <span class="bg-accent-dimmer text-accent-stronger rounded px-1.5">{data.step.input_type}</span>
         <span class="text-secondary">&rarr;</span>
-        <span class="bg-green-100 text-green-700 rounded px-1.5">{data.step.output_type}</span>
+        <span class="bg-positive-dimmer text-positive-stronger rounded px-1.5">{data.step.output_type}</span>
       </div>
       {#if data.step.mcp_policy === "restricted"}
         <div class="flex items-center gap-1 text-amber-600">

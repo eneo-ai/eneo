@@ -9,6 +9,10 @@ import { createResourceEditor } from "$lib/core/editing/ResourceEditor";
 import { IntricError, type Flow, type FlowStep, type Intric } from "@intric/intric-js";
 import { derived, get, writable } from "svelte/store";
 import { uid } from "uid";
+import {
+  remapStepOrderTemplateTokens,
+  replaceExactTemplateToken,
+} from "./flowVariableTokens";
 
 /** Map output types to valid input types (pdf/docx → text) */
 function mapOutputToInputType(
@@ -102,11 +106,25 @@ function initFlowEditor(data: {
   const assistantCache = new Map<string, unknown>();
   const assistantSaveStatus = writable<"idle" | "pending" | "saving" | "error">("idle");
   const assistantErrorPrefix = "assistant:";
+  const flowErrorPrefix = "flow:";
 
   function setAssistantValidationError(assistantId: string, message: string | null) {
     validationErrors.update((current) => {
       const next = new Map(current);
       const key = `${assistantErrorPrefix}${assistantId}`;
+      if (message) {
+        next.set(key, [message]);
+      } else {
+        next.delete(key);
+      }
+      return next;
+    });
+  }
+
+  function setFlowValidationError(code: string, message: string | null) {
+    validationErrors.update((current) => {
+      const next = new Map(current);
+      const key = `${flowErrorPrefix}${code}`;
       if (message) {
         next.set(key, [message]);
       } else {
@@ -132,6 +150,33 @@ function initFlowEditor(data: {
       return assistant;
     } catch {
       return null;
+    }
+  }
+
+  async function updateAssistantImmediately(
+    assistantId: string,
+    changes: Record<string, unknown>,
+  ): Promise<void> {
+    if (!assistantId || assistantId === "") return;
+    assistantSaveStatus.set("saving");
+    setAssistantValidationError(assistantId, null);
+    try {
+      const updated = await data.intric.flows.assistants.update({
+        id: getFlowId(),
+        assistantId,
+        update: changes,
+      });
+      assistantCache.set(assistantId, updated);
+      assistantSaveStatus.set("idle");
+      setAssistantValidationError(assistantId, null);
+    } catch (error) {
+      assistantSaveStatus.set("error");
+      const message =
+        error instanceof IntricError
+          ? error.getReadableMessage()
+          : "Failed to update flow step assistant";
+      setAssistantValidationError(assistantId, message);
+      throw error;
     }
   }
 
@@ -250,7 +295,7 @@ function initFlowEditor(data: {
     const { hasUnsavedChanges } = get(editor.state.currentChanges);
     if (!hasUnsavedChanges) return;
 
-    saveStatus.set("unsaved");
+    if (get(saveStatus) !== "unsaved") saveStatus.set("unsaved");
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(async () => {
       // Double-check published state before saving
@@ -286,11 +331,12 @@ function initFlowEditor(data: {
     const prevStep = stepCount > 0 ? currentSteps[stepCount - 1] : null;
 
     const tempId = `_temp_${uid(12)}`;
+    const defaultStepName = `Nytt steg ${stepCount + 1}`;
     const newStep: Partial<FlowStep> & { id: string } = {
       id: tempId,
       assistant_id: "",
       step_order: stepCount + 1,
-      user_description: "Nytt steg",
+      user_description: defaultStepName,
       input_source: isFirst ? "flow_input" : "previous_step",
       input_type: isFirst ? "text" : mapOutputToInputType((prevStep as FlowStep)?.output_type),
       output_mode: "pass_through",
@@ -309,7 +355,7 @@ function initFlowEditor(data: {
     try {
       const assistant = await data.intric.flows.assistants.create({
         id: getFlowId(),
-        name: "Nytt steg"
+        name: defaultStepName
       });
       // Wire the real assistant_id
       editor.state.update.update((u) => ({
@@ -338,11 +384,12 @@ function initFlowEditor(data: {
     const prevStep = currentSteps.find((s: FlowStep) => s.step_order === afterOrder);
     const isFirstInsert = afterOrder === 0;
 
+    const defaultStepName = `Nytt steg ${afterOrder + 1}`;
     const newStep: Partial<FlowStep> & { id: string } = {
       id: tempId,
       assistant_id: "",
       step_order: afterOrder + 1,
-      user_description: "Nytt steg",
+      user_description: defaultStepName,
       input_source: isFirstInsert ? "flow_input" : "previous_step",
       input_type: isFirstInsert ? "text" : mapOutputToInputType((prevStep as FlowStep)?.output_type),
       output_mode: "pass_through",
@@ -375,7 +422,7 @@ function initFlowEditor(data: {
     try {
       const assistant = await data.intric.flows.assistants.create({
         id: getFlowId(),
-        name: "Nytt steg"
+        name: defaultStepName
       });
       editor.state.update.update((u) => ({
         ...u,
@@ -397,8 +444,199 @@ function initFlowEditor(data: {
     }
   }
 
-  async function listAssistantPrompts(assistantId: string): Promise<unknown[]> {
+  async function listAssistantPrompts(assistantId: string): Promise<any[]> {
     return data.intric.assistants.listPrompts({ id: assistantId });
+  }
+
+  function getStableStepKey(step: FlowStep, index: number): string {
+    if (step.id && !step.id.startsWith("_temp_")) return `id:${step.id}`;
+    if (step.assistant_id) return `assistant:${step.assistant_id}`;
+    return `index:${index}`;
+  }
+
+  async function applyStepsWithSafeOrderRemap(nextSteps: FlowStep[]): Promise<void> {
+    const previousSteps = [...(get(editor.state.update).steps ?? [])];
+    const previousOrderByKey = new Map<string, number>();
+    for (let i = 0; i < previousSteps.length; i += 1) {
+      const step = previousSteps[i];
+      previousOrderByKey.set(getStableStepKey(step, i), step.step_order);
+    }
+
+    const remapByOldOrder = new Map<number, number>();
+    const seenOldOrders = new Set<number>();
+    const rewrittenSteps = nextSteps.map((step, index) => {
+      const key = getStableStepKey(step, index);
+      const oldOrder = previousOrderByKey.get(key);
+      if (oldOrder !== undefined) {
+        remapByOldOrder.set(oldOrder, step.step_order);
+        seenOldOrders.add(oldOrder);
+      }
+      return { ...step };
+    });
+
+    const deletedOrders = new Set<number>();
+    for (const previousStep of previousSteps) {
+      if (!seenOldOrders.has(previousStep.step_order)) {
+        deletedOrders.add(previousStep.step_order);
+      }
+    }
+
+    const impactedDeletedReferences = new Set<number>();
+    for (let i = 0; i < rewrittenSteps.length; i += 1) {
+      const step = rewrittenSteps[i];
+      const bindings = (step.input_bindings as Record<string, unknown> | null | undefined) ?? null;
+      const question = typeof bindings?.question === "string" ? bindings.question : null;
+      if (question) {
+        const remapped = remapStepOrderTemplateTokens(question, remapByOldOrder, deletedOrders);
+        if (remapped.changed) {
+          rewrittenSteps[i] = {
+            ...step,
+            input_bindings: {
+              ...(bindings ?? {}),
+              question: remapped.text,
+            },
+          };
+        }
+        for (const deletedReference of remapped.rewrittenDeletedReferences) {
+          impactedDeletedReferences.add(deletedReference);
+        }
+      }
+    }
+
+    editor.state.update.update((resource) => ({
+      ...resource,
+      steps: rewrittenSteps,
+    }));
+    scheduleAutoSave();
+
+    for (const step of rewrittenSteps) {
+      if (!step.assistant_id) continue;
+      const assistant = await loadAssistant(step.assistant_id);
+      if (!assistant || typeof assistant !== "object") continue;
+
+      const prompt = (assistant as { prompt?: { text?: unknown; description?: unknown } }).prompt;
+      const promptText = typeof prompt?.text === "string" ? prompt.text : "";
+      if (!promptText) continue;
+
+      const remapped = remapStepOrderTemplateTokens(promptText, remapByOldOrder, deletedOrders);
+      if (!remapped.changed) continue;
+
+      const nextPrompt = {
+        text: remapped.text,
+        description: typeof prompt?.description === "string" ? prompt.description : "",
+      };
+      await updateAssistantImmediately(step.assistant_id, { prompt: nextPrompt });
+      for (const deletedReference of remapped.rewrittenDeletedReferences) {
+        impactedDeletedReferences.add(deletedReference);
+      }
+    }
+
+    if (impactedDeletedReferences.size > 0) {
+      const sortedDeleted = [...impactedDeletedReferences].sort((a, b) => a - b).join(", ");
+      setFlowValidationError(
+        "deleted-step-reference",
+        `Step references to removed step order(s) ${sortedDeleted} were marked for manual repair.`,
+      );
+    } else {
+      setFlowValidationError("deleted-step-reference", null);
+    }
+  }
+
+  async function rewriteInputFieldVariableReferences(
+    oldName: string,
+    newName: string,
+  ): Promise<number> {
+    const fromToken = oldName.trim();
+    const toToken = newName.trim();
+    if (!fromToken || !toToken || fromToken === toToken) return 0;
+
+    let rewrittenCount = 0;
+    const steps = get(editor.state.update).steps ?? [];
+    for (const step of steps) {
+      if (!step.assistant_id) continue;
+      const assistant = await loadAssistant(step.assistant_id);
+      if (!assistant || typeof assistant !== "object") continue;
+
+      const prompt = (assistant as { prompt?: { text?: unknown; description?: unknown } }).prompt;
+      const currentText = typeof prompt?.text === "string" ? prompt.text : "";
+      const nextText = replaceExactTemplateToken(currentText, fromToken, toToken);
+      if (nextText !== currentText) {
+        const nextPrompt = {
+          text: nextText,
+          description: typeof prompt?.description === "string" ? prompt.description : "",
+        };
+        await updateAssistantImmediately(step.assistant_id, { prompt: nextPrompt });
+        rewrittenCount += 1;
+      }
+    }
+
+    const nextSteps = steps.map((step) => {
+      const bindings = (step.input_bindings as Record<string, unknown> | null | undefined) ?? null;
+      const question = typeof bindings?.question === "string" ? bindings.question : null;
+      if (!question) return step;
+      const rewritten = replaceExactTemplateToken(question, fromToken, toToken);
+      if (rewritten === question) return step;
+      return {
+        ...step,
+        input_bindings: { ...(bindings ?? {}), question: rewritten },
+      };
+    });
+    editor.state.update.update((resource) => ({ ...resource, steps: nextSteps }));
+    scheduleAutoSave();
+
+    return rewrittenCount;
+  }
+
+  async function rewriteStepNameVariableReferences({
+    renamedStepOrder,
+    oldName,
+    newName,
+  }: {
+    renamedStepOrder: number;
+    oldName: string;
+    newName: string;
+  }): Promise<number> {
+    const fromToken = oldName.trim();
+    const toToken = newName.trim();
+    if (!fromToken || !toToken || fromToken === toToken) return 0;
+
+    let rewrittenCount = 0;
+    const steps = (get(editor.state.update).steps ?? []).filter(
+      (step) => step.step_order > renamedStepOrder,
+    );
+    for (const step of steps) {
+      if (!step.assistant_id) continue;
+      const assistant = await loadAssistant(step.assistant_id);
+      if (!assistant || typeof assistant !== "object") continue;
+      const prompt = (assistant as { prompt?: { text?: unknown; description?: unknown } }).prompt;
+      const currentText = typeof prompt?.text === "string" ? prompt.text : "";
+      const nextText = replaceExactTemplateToken(currentText, fromToken, toToken);
+      if (nextText === currentText) continue;
+      const nextPrompt = {
+        text: nextText,
+        description: typeof prompt?.description === "string" ? prompt.description : "",
+      };
+      await updateAssistantImmediately(step.assistant_id, { prompt: nextPrompt });
+      rewrittenCount += 1;
+    }
+
+    const allSteps = get(editor.state.update).steps ?? [];
+    const nextSteps = allSteps.map((step) => {
+      if (step.step_order <= renamedStepOrder) return step;
+      const bindings = (step.input_bindings as Record<string, unknown> | null | undefined) ?? null;
+      const question = typeof bindings?.question === "string" ? bindings.question : null;
+      if (!question) return step;
+      const rewritten = replaceExactTemplateToken(question, fromToken, toToken);
+      if (rewritten === question) return step;
+      return {
+        ...step,
+        input_bindings: { ...(bindings ?? {}), question: rewritten },
+      };
+    });
+    editor.state.update.update((resource) => ({ ...resource, steps: nextSteps }));
+    scheduleAutoSave();
+
+    return rewrittenCount;
   }
 
   function destroy() {
@@ -421,7 +659,11 @@ function initFlowEditor(data: {
     insertStepAfter,
     loadAssistant,
     saveAssistant,
+    updateAssistantImmediately,
     listAssistantPrompts,
+    applyStepsWithSafeOrderRemap,
+    rewriteInputFieldVariableReferences,
+    rewriteStepNameVariableReferences,
     scheduleAutoSave,
     destroy
   });

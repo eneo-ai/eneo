@@ -354,9 +354,11 @@ class AssistantService:
             # Create the prompt if the prompt contains text
             # Update the description if the prompt contains description
             if prompt.text is not None:
-                prompt_obj = await self.prompt_service.create_prompt(
-                    prompt.text, prompt.description
-                )
+                current_text = assistant.prompt.text if assistant.prompt else ""
+                if prompt.text != current_text:
+                    prompt_obj = await self.prompt_service.create_prompt(
+                        prompt.text, prompt.description
+                    )
 
         completion_model = None
         if completion_model_id is not None:

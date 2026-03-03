@@ -33,6 +33,26 @@ _COMPATIBLE_COERCIONS = {
     ("docx", "text"), ("docx", "document"), ("docx", "any"),
 }
 
+_ALLOWED_FORM_FIELD_TYPES = {"text", "multiselect", "number", "date", "select"}
+_LEGACY_FORM_FIELD_TYPE_NORMALIZATION = {
+    "string": "text",
+    "email": "text",
+    "textarea": "text",
+}
+_RESERVED_VARIABLE_ALIASES = {
+    "flow",
+    "flow_input",
+    "transkribering",
+    "föregående_steg",
+    "indata_text",
+    "indata_json",
+    "indata_filer",
+}
+_RESERVED_VARIABLE_ALIASES_NORMALIZED = {
+    alias.casefold() for alias in _RESERVED_VARIABLE_ALIASES
+}
+_STEP_ALIAS_PATTERN = re.compile(r"^step_\d+($|[._])")
+
 
 class FlowService:
     """Tenant-scoped business service for flow lifecycle operations."""
@@ -62,8 +82,13 @@ class FlowService:
         data_retention_days: int | None = None,
         owner_user_id: UUID | None = None,
     ) -> Flow:
-        self._validate_form_schema(metadata_json)
+        normalized_metadata = self._normalize_legacy_form_schema(metadata_json)
+        self._validate_form_schema(normalized_metadata)
         self._validate_steps(steps)
+        self._validate_variable_alias_collisions(
+            steps=steps,
+            metadata_json=normalized_metadata,
+        )
         await self._validate_assistant_scope_for_steps(
             space_id=space_id,
             steps=steps,
@@ -80,7 +105,7 @@ class FlowService:
             created_by_user_id=self.user.id,
             owner_user_id=owner_user_id or self.user.id,
             published_version=None,
-            metadata_json=metadata_json,
+            metadata_json=normalized_metadata,
             data_retention_days=data_retention_days,
             created_at=None,
             updated_at=None,
@@ -135,10 +160,14 @@ class FlowService:
             owning_flow_id=existing.id,
         )
 
-        next_metadata = existing.metadata_json
+        next_metadata = self._normalize_legacy_form_schema(existing.metadata_json)
         if metadata_json is not NOT_PROVIDED:
-            next_metadata = cast(JsonObject | None, metadata_json)
+            next_metadata = self._normalize_legacy_form_schema(cast(JsonObject | None, metadata_json))
         self._validate_form_schema(next_metadata)
+        self._validate_variable_alias_collisions(
+            steps=next_steps,
+            metadata_json=next_metadata,
+        )
 
         next_retention = existing.data_retention_days
         if data_retention_days is not NOT_PROVIDED:
@@ -230,7 +259,13 @@ class FlowService:
 
     async def publish_flow(self, *, flow_id: UUID) -> Flow:
         flow = await self.get_flow(flow_id)
+        normalized_metadata = self._normalize_legacy_form_schema(flow.metadata_json)
+        self._validate_form_schema(normalized_metadata)
         self._validate_publishable(flow)
+        self._validate_variable_alias_collisions(
+            steps=flow.steps,
+            metadata_json=normalized_metadata,
+        )
         await self._validate_assistant_scope_for_steps(
             space_id=flow.space_id,
             steps=flow.steps,
@@ -253,7 +288,13 @@ class FlowService:
             tenant_id=self.user.tenant_id,
         )
 
-        updated = flow.model_copy(update={"published_version": next_version}, deep=True)
+        updated = flow.model_copy(
+            update={
+                "published_version": next_version,
+                "metadata_json": normalized_metadata,
+            },
+            deep=True,
+        )
         return await self.flow_repo.update(updated, tenant_id=self.user.tenant_id)
 
     def _validate_publishable(self, flow: Flow) -> None:
@@ -275,6 +316,19 @@ class FlowService:
             raise BadRequestException(
                 "Step order must be contiguous and start at 1."
             )
+
+        normalized_names: set[str] = set()
+        for step in sorted_steps:
+            if step.user_description is None:
+                continue
+            normalized_name = step.user_description.strip().casefold()
+            if not normalized_name:
+                continue
+            if normalized_name in normalized_names:
+                raise BadRequestException(
+                    "Step names must be unique (case-insensitive) for publishable flows."
+                )
+            normalized_names.add(normalized_name)
 
         seen: set[int] = set()
         for step in sorted_steps:
@@ -380,6 +434,8 @@ class FlowService:
         if not isinstance(fields, list):
             raise BadRequestException("metadata_json.form_schema.fields must be a list.")
 
+        seen_names: set[str] = set()
+        seen_orders: set[int] = set()
         for index, field in enumerate(cast(list[object], fields)):
             if not isinstance(field, dict):
                 raise BadRequestException(
@@ -391,14 +447,187 @@ class FlowService:
                 raise BadRequestException(
                     f"metadata_json.form_schema.fields[{index}].name must be a non-empty string."
                 )
+            normalized_name = field_name.strip().casefold()
+            if normalized_name in seen_names:
+                raise BadRequestException(
+                    f"metadata_json.form_schema.fields[{index}].name must be unique."
+                )
+            if "." in field_name:
+                raise BadRequestException(
+                    f"metadata_json.form_schema.fields[{index}].name cannot contain '.'."
+                )
+            if "{{" in field_name or "}}" in field_name:
+                raise BadRequestException(
+                    f"metadata_json.form_schema.fields[{index}].name cannot contain template delimiters."
+                )
+            if normalized_name in _RESERVED_VARIABLE_ALIASES_NORMALIZED:
+                raise BadRequestException(
+                    f"metadata_json.form_schema.fields[{index}].name uses a reserved variable alias."
+                )
+            if _STEP_ALIAS_PATTERN.match(normalized_name):
+                raise BadRequestException(
+                    f"metadata_json.form_schema.fields[{index}].name cannot use reserved step alias format."
+                )
+            seen_names.add(normalized_name)
             field_type = field_dict.get("type")
             if not isinstance(field_type, str) or not field_type.strip():
                 raise BadRequestException(
                     f"metadata_json.form_schema.fields[{index}].type must be a non-empty string."
                 )
+            normalized_type = field_type.strip().casefold()
+            if normalized_type not in _ALLOWED_FORM_FIELD_TYPES:
+                raise BadRequestException(
+                    f"metadata_json.form_schema.fields[{index}].type must be one of "
+                    f"{sorted(_ALLOWED_FORM_FIELD_TYPES)}."
+                )
             if "required" in field_dict and not isinstance(field_dict["required"], bool):
                 raise BadRequestException(
                     f"metadata_json.form_schema.fields[{index}].required must be a boolean."
+                )
+            if "order" in field_dict:
+                if not isinstance(field_dict["order"], int):
+                    raise BadRequestException(
+                        f"metadata_json.form_schema.fields[{index}].order must be an integer."
+                    )
+                order_value = field_dict["order"]
+                if order_value < 1:
+                    raise BadRequestException(
+                        f"metadata_json.form_schema.fields[{index}].order must be >= 1."
+                    )
+                if order_value in seen_orders:
+                    raise BadRequestException(
+                        f"metadata_json.form_schema.fields[{index}].order must be unique."
+                    )
+                seen_orders.add(order_value)
+            options = field_dict.get("options")
+            if normalized_type == "multiselect":
+                if options is None or not isinstance(options, list):
+                    raise BadRequestException(
+                        f"metadata_json.form_schema.fields[{index}].options must be a list for multiselect."
+                    )
+                normalized_options: set[str] = set()
+                for option_index, option in enumerate(cast(list[object], options)):
+                    if not isinstance(option, str) or not option.strip():
+                        raise BadRequestException(
+                            f"metadata_json.form_schema.fields[{index}].options[{option_index}] "
+                            "must be a non-empty string."
+                        )
+                    option_key = option.strip().casefold()
+                    if option_key in normalized_options:
+                        raise BadRequestException(
+                            f"metadata_json.form_schema.fields[{index}].options[{option_index}] "
+                            "must be unique."
+                        )
+                    normalized_options.add(option_key)
+            elif normalized_type == "select":
+                if options is not None and not isinstance(options, list):
+                    raise BadRequestException(
+                        f"metadata_json.form_schema.fields[{index}].options must be a list for select."
+                    )
+                if isinstance(options, list):
+                    normalized_options: set[str] = set()
+                    for option_index, option in enumerate(cast(list[object], options)):
+                        if not isinstance(option, str) or not option.strip():
+                            raise BadRequestException(
+                                f"metadata_json.form_schema.fields[{index}].options[{option_index}] "
+                                "must be a non-empty string."
+                            )
+                        option_key = option.strip().casefold()
+                        if option_key in normalized_options:
+                            raise BadRequestException(
+                                f"metadata_json.form_schema.fields[{index}].options[{option_index}] "
+                                "must be unique."
+                            )
+                        normalized_options.add(option_key)
+            elif options is not None:
+                raise BadRequestException(
+                    f"metadata_json.form_schema.fields[{index}].options is only valid for multiselect."
+                )
+
+    def _normalize_legacy_form_schema(self, metadata_json: JsonObject | None) -> JsonObject | None:
+        if metadata_json is None:
+            return None
+        form_schema = metadata_json.get("form_schema")
+        if not isinstance(form_schema, dict):
+            return metadata_json
+        fields = form_schema.get("fields")
+        if not isinstance(fields, list):
+            return metadata_json
+
+        changed = False
+        normalized_fields: list[object] = []
+        for field in fields:
+            if not isinstance(field, dict):
+                normalized_fields.append(field)
+                continue
+            field_dict = cast(dict[str, Any], field)
+            normalized_field = dict(field_dict)
+            raw_type = normalized_field.get("type")
+            if isinstance(raw_type, str):
+                legacy_target = _LEGACY_FORM_FIELD_TYPE_NORMALIZATION.get(raw_type.strip().casefold())
+                if legacy_target is not None and legacy_target != raw_type:
+                    normalized_field["type"] = legacy_target
+                    changed = True
+            normalized_fields.append(normalized_field)
+
+        if not changed:
+            return metadata_json
+
+        normalized_form_schema = dict(form_schema)
+        normalized_form_schema["fields"] = normalized_fields
+        normalized_metadata = dict(metadata_json)
+        normalized_metadata["form_schema"] = normalized_form_schema
+        return cast(JsonObject, normalized_metadata)
+
+    def _validate_variable_alias_collisions(
+        self,
+        *,
+        steps: list[FlowStep],
+        metadata_json: JsonObject | None,
+    ) -> None:
+        normalized_reserved = _RESERVED_VARIABLE_ALIASES_NORMALIZED
+        field_names: dict[str, str] = {}
+
+        form_schema = metadata_json.get("form_schema") if metadata_json else None
+        fields = form_schema.get("fields") if isinstance(form_schema, dict) else None
+        if isinstance(fields, list):
+            for index, field in enumerate(fields):
+                if not isinstance(field, dict):
+                    continue
+                raw_name = field.get("name")
+                if not isinstance(raw_name, str):
+                    continue
+                normalized = raw_name.strip().casefold()
+                if not normalized:
+                    continue
+                if normalized in normalized_reserved:
+                    raise BadRequestException(
+                        f"metadata_json.form_schema.fields[{index}].name is reserved."
+                    )
+                if _STEP_ALIAS_PATTERN.match(normalized):
+                    raise BadRequestException(
+                        f"metadata_json.form_schema.fields[{index}].name conflicts with reserved step alias namespace."
+                    )
+                field_names[normalized] = raw_name.strip()
+
+        for step in steps:
+            raw_name = step.user_description
+            if raw_name is None:
+                continue
+            normalized = raw_name.strip().casefold()
+            if not normalized:
+                continue
+            if normalized in normalized_reserved:
+                raise BadRequestException(
+                    f"Step {step.step_order} name '{raw_name}' uses a reserved variable alias."
+                )
+            if _STEP_ALIAS_PATTERN.match(normalized):
+                raise BadRequestException(
+                    f"Step {step.step_order} name '{raw_name}' conflicts with reserved step alias namespace."
+                )
+            if normalized in field_names:
+                raise BadRequestException(
+                    f"Step {step.step_order} name '{raw_name}' conflicts with form field name '{field_names[normalized]}'."
                 )
 
     async def _validate_assistant_scope_for_steps(

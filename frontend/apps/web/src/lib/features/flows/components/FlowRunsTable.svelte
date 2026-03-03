@@ -1,10 +1,13 @@
 <script lang="ts">
   import type { Flow, FlowRun, Intric } from "@intric/intric-js";
-  import { Button } from "@intric/ui";
+  import { Button, Dialog } from "@intric/ui";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import FlowRunDialog from "./FlowRunDialog.svelte";
   import FlowRunEvidence from "./FlowRunEvidence.svelte";
   import { onDestroy } from "svelte";
+  import { toast } from "$lib/components/toast";
+  import { getFlowRunStatusLabel } from "./flowRunStatusLabel";
+  import { getRedispatchToastKind } from "./flowRunRedispatchFeedback";
   import { m } from "$lib/paraglide/messages";
 
   export let flow: Flow;
@@ -19,6 +22,10 @@
   let selectedRunId: string | null = null;
   let lastLoadedFlowId: string | null = null;
   let isInitialLoad = true;
+  let redispatchingRunId: string | null = null;
+  let cancellingRunId: string | null = null;
+  let showCancelConfirm: Dialog.OpenState;
+  let pendingCancelRunId: string | null = null;
 
   async function loadRuns() {
     if (!flow?.id) {
@@ -66,23 +73,23 @@
 
   function getStatusColor(status: string): string {
     switch (status) {
-      case "completed": return "bg-green-100 text-green-700";
-      case "failed": return "bg-red-100 text-red-700";
-      case "running": return "bg-blue-100 text-blue-700";
-      case "queued": return "bg-gray-100 text-gray-700";
-      case "cancelled": return "bg-amber-100 text-amber-700";
-      default: return "bg-gray-100 text-gray-700";
+      case "completed": return "bg-positive-dimmer text-positive-stronger";
+      case "failed": return "bg-negative-dimmer text-negative-stronger";
+      case "running": return "bg-accent-dimmer text-accent-stronger";
+      case "queued": return "bg-hover-dimmer text-secondary";
+      case "cancelled": return "bg-warning-dimmer text-warning-stronger";
+      default: return "bg-hover-dimmer text-secondary";
     }
   }
 
   function getStatusLabel(status: string): string {
-    const map: Record<string, () => string> = {
+    return getFlowRunStatusLabel(status, {
       completed: m.flow_run_status_completed,
       failed: m.flow_run_status_failed,
       queued: m.flow_run_status_queued,
       running: m.flow_run_status_running,
-    };
-    return (map[status] ?? (() => status))();
+      cancelled: m.flow_run_status_cancelled,
+    });
   }
 
   function formatDuration(start: string, end: string): string {
@@ -101,7 +108,53 @@
       window.open(url, "_blank");
     } catch (e) {
       console.error("Failed to download artifact", e);
+      toast.error(m.flow_run_download_artifact_failed());
     }
+  }
+
+  async function redispatchRun(runId: string) {
+    redispatchingRunId = runId;
+    try {
+      const result = await intric.flows.runs.redispatch({ id: runId });
+      if (getRedispatchToastKind(result?.redispatched_count) === "success") {
+        toast.success(m.flow_run_redispatch_requested());
+      } else {
+        toast.info(m.flow_run_redispatch_noop());
+      }
+      await loadRuns();
+    } catch (error) {
+      console.error("Failed to redispatch run", error);
+      toast.error(m.flow_run_redispatch_failed());
+    } finally {
+      redispatchingRunId = null;
+    }
+  }
+
+  function requestCancelRun(runId: string) {
+    pendingCancelRunId = runId;
+    $showCancelConfirm = true;
+  }
+
+  async function confirmCancelRun() {
+    if (!pendingCancelRunId) return;
+    const runId = pendingCancelRunId;
+    $showCancelConfirm = false;
+    pendingCancelRunId = null;
+    cancellingRunId = runId;
+    try {
+      await intric.flows.runs.cancel({ id: runId });
+      toast.success(m.flow_run_cancel_requested());
+      await loadRuns();
+    } catch (error) {
+      console.error("Failed to cancel run", error);
+      toast.error(m.flow_run_cancel_failed());
+    } finally {
+      cancellingRunId = null;
+    }
+  }
+
+  function getEvidenceRowId(runId: string): string {
+    return `flow-run-evidence-${runId}`;
   }
 </script>
 
@@ -125,7 +178,7 @@
   {:else if loadError}
     <div class="flex items-center gap-3 rounded-lg border border-negative-default/20 bg-negative-dimmer px-5 py-4">
       <p class="flex-1 text-sm text-negative-default">{loadError}</p>
-      <Button variant="ghost" size="sm" on:click={loadRuns} class="gap-1.5 text-xs">
+      <Button variant="outlined" size="sm" on:click={loadRuns} class="gap-1.5 text-xs">
         {m.flow_retry()}
       </Button>
     </div>
@@ -136,7 +189,7 @@
       <div class="overflow-x-auto">
         <table class="w-full min-w-[600px] text-sm" aria-label={m.flow_history()}>
           <thead>
-            <tr class="border-default border-b bg-slate-50/80 text-left dark:bg-slate-800/30">
+            <tr class="border-default border-b bg-secondary/50 text-left">
               <th scope="col" class="px-4 py-2 font-medium">{m.status()}</th>
               <th scope="col" class="px-4 py-2 font-medium">{m.version()}</th>
               <th scope="col" class="px-4 py-2 font-medium">{m.flow_run_started()}</th>
@@ -160,7 +213,7 @@
                   {#if run.status === "completed" || run.status === "failed"}
                     {formatDuration(run.created_at, run.updated_at)}
                   {:else if run.status === "running"}
-                    <span class="text-blue-600">{m.flow_run_running()}</span>
+                    <span class="text-accent-stronger">{m.flow_run_running()}</span>
                   {:else}
                     -
                   {/if}
@@ -170,20 +223,30 @@
                     <Button
                       variant="outlined"
                       size="sm"
+                      aria-expanded={selectedRunId === run.id}
+                      aria-controls={getEvidenceRowId(run.id)}
                       on:click={() => (selectedRunId = selectedRunId === run.id ? null : run.id)}
                     >
                       {m.flow_run_evidence()}
                     </Button>
+                    {#if run.status === "queued"}
+                      <Button
+                        variant="outlined"
+                        size="sm"
+                        disabled={redispatchingRunId === run.id}
+                        on:click={() => void redispatchRun(run.id)}
+                      >
+                        {redispatchingRunId === run.id ? m.flow_run_redispatching() : m.flow_run_redispatch()}
+                      </Button>
+                    {/if}
                     {#if run.status === "queued" || run.status === "running"}
                       <Button
                         variant="destructive"
                         size="sm"
-                        on:click={async () => {
-                          await intric.flows.runs.cancel({ id: run.id });
-                          await loadRuns();
-                        }}
+                        disabled={cancellingRunId === run.id}
+                        on:click={() => requestCancelRun(run.id)}
                       >
-                        {m.cancel()}
+                        {cancellingRunId === run.id ? m.flow_run_cancelling() : m.cancel()}
                       </Button>
                     {/if}
                   </div>
@@ -192,8 +255,8 @@
               {#if run.status === "failed" && run.error_message}
                 <tr>
                   <td colspan="5" class="border-default border-b px-4 py-2">
-                    <div class="flex min-w-0 items-start gap-2 rounded bg-red-50 px-3 py-2 text-xs text-red-700">
-                      <span class="shrink-0 font-medium">{m.flow_run_error()}:</span>
+                    <div class="flex min-w-0 items-start gap-2 rounded-md border border-negative-default/20 bg-negative-dimmer px-3 py-2 text-xs text-negative-stronger">
+                      <span class="shrink-0 font-semibold">{m.flow_run_error()}:</span>
                       <span class="min-w-0 break-words">{run.error_message}</span>
                     </div>
                   </td>
@@ -202,24 +265,39 @@
               {#if run.status === "completed" && run.output_payload_json}
                 <tr>
                   <td colspan="5" class="border-default border-b px-4 py-2">
-                    <div class="flex flex-col gap-1.5 rounded bg-green-50 px-3 py-2 text-xs">
+                    <div class="flex flex-col gap-1.5 rounded-md border border-positive-default/20 bg-positive-dimmer px-3 py-2 text-xs">
                       {#if run.output_payload_json.structured}
-                        {@const entries = Object.entries(run.output_payload_json.structured).slice(0, 4)}
-                        <div class="text-secondary flex flex-wrap gap-x-3 gap-y-1">
-                          <span class="font-medium text-green-700">{m.flow_run_output()}:</span>
-                          {#each entries as [key, val], i}
-                            <span>
-                              <span class="font-medium text-green-700">{key}:</span>
-                              {String(val).slice(0, 80)}{String(val).length > 80 ? "\u2026" : ""}{i < entries.length - 1 ? "" : ""}
-                            </span>
-                          {/each}
-                          {#if Object.keys(run.output_payload_json.structured).length > 4}
-                            <span class="text-muted">+{Object.keys(run.output_payload_json.structured).length - 4} more</span>
-                          {/if}
-                        </div>
+                        {@const structured = run.output_payload_json.structured}
+                        {#if Array.isArray(structured)}
+                          <div class="text-secondary flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                            <span class="font-semibold text-positive-stronger">{m.flow_run_output()}:</span>
+                            {#each structured.slice(0, 3) as item, i}
+                              <span class="font-mono">
+                                #{i + 1}: {JSON.stringify(item).slice(0, 80)}{JSON.stringify(item).length > 80 ? "\u2026" : ""}
+                              </span>
+                            {/each}
+                            {#if structured.length > 3}
+                              <span class="text-muted">+{structured.length - 3} more</span>
+                            {/if}
+                          </div>
+                        {:else}
+                          {@const entries = Object.entries(structured).slice(0, 4)}
+                          <div class="text-secondary flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                            <span class="font-semibold text-positive-stronger">{m.flow_run_output()}:</span>
+                            {#each entries as [key, val], i}
+                              <span>
+                                <span class="font-semibold text-positive-stronger">{key}:</span>
+                                <span class="text-secondary">{String(val).slice(0, 80)}{String(val).length > 80 ? "\u2026" : ""}</span>
+                              </span>
+                            {/each}
+                            {#if Object.keys(structured).length > 4}
+                              <span class="text-muted">+{Object.keys(structured).length - 4} more</span>
+                            {/if}
+                          </div>
+                        {/if}
                       {:else if run.output_payload_json.text}
                         <div class="text-secondary truncate">
-                          <span class="font-medium text-green-700">{m.flow_run_output()}:</span>
+                          <span class="font-semibold text-positive-stronger">{m.flow_run_output()}:</span>
                           {String(run.output_payload_json.text).slice(0, 200)}{String(run.output_payload_json.text).length > 200 ? "\u2026" : ""}
                         </div>
                       {/if}
@@ -227,7 +305,7 @@
                         <div class="flex flex-wrap items-center gap-2">
                           {#each run.output_payload_json.artifacts as artifact}
                             <button
-                              class="inline-flex items-center gap-1 rounded-md border border-green-200 bg-white px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100 transition-colors"
+                              class="inline-flex items-center gap-1 rounded-md border border-positive-default/30 bg-primary px-2 py-1 text-xs font-medium text-positive-stronger hover:bg-positive-dimmer transition-colors"
                               on:click={() => downloadArtifact(artifact.file_id)}
                             >
                               {m.download()} {artifact.name}
@@ -241,7 +319,7 @@
               {/if}
               {#if selectedRunId === run.id}
                 <tr>
-                  <td colspan="5" class="bg-hover-dimmer px-4 py-4">
+                  <td id={getEvidenceRowId(run.id)} colspan="5" class="border-default border-b bg-hover-dimmer/50 px-4 py-4">
                     <FlowRunEvidence runId={run.id} {intric} runStatus={run.status} />
                   </td>
                 </tr>
@@ -261,3 +339,14 @@
   lastInputPayload={runs.length > 0 ? (runs[0].input_payload_json ?? null) : null}
   on:runCreated={loadRuns}
 />
+
+<Dialog.Root alert bind:isOpen={showCancelConfirm}>
+  <Dialog.Content width="small">
+    <Dialog.Title>{m.cancel()}</Dialog.Title>
+    <Dialog.Description>{m.flow_run_cancel_confirm()}</Dialog.Description>
+    <Dialog.Controls let:close>
+      <Button is={close} variant="outlined">{m.cancel()}</Button>
+      <Button variant="destructive" on:click={confirmCancelRun}>{m.cancel()}</Button>
+    </Dialog.Controls>
+  </Dialog.Content>
+</Dialog.Root>

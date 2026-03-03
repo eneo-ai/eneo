@@ -129,6 +129,20 @@ export type FlowStep = {
   updated_at?: string | null;
 };
 
+export type FlowFormFieldType = "text" | "multiselect" | "number" | "date" | "select";
+
+export type FlowFormField = {
+  name: string;
+  type: FlowFormFieldType;
+  required?: boolean;
+  options?: string[];
+  order?: number;
+};
+
+export type FlowFormSchema = {
+  fields: FlowFormField[];
+};
+
 export type FlowSparse = {
   id: string;
   tenant_id: string;
@@ -157,11 +171,12 @@ export type FlowRunArtifact = {
 
 export type FlowRunOutputPayload = {
   text?: string;
-  structured?: Record<string, unknown>;
+  structured?: Record<string, unknown> | unknown[];
   artifacts?: FlowRunArtifact[];
   generated_file_ids?: string[];
   file_ids?: string[];
   webhook_delivered?: boolean;
+  webhook_error?: string;
 };
 
 export type FlowRun = {
@@ -196,6 +211,7 @@ export type FlowStepResult = {
   num_tokens_output?: number | null;
   status: "pending" | "running" | "completed" | "failed" | "cancelled";
   error_message?: string | null;
+  flow_step_execution_hash?: string | null;
   tool_calls_metadata?: unknown[] | Record<string, unknown> | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -227,11 +243,77 @@ export type FlowGraph = {
   edges: FlowGraphEdge[];
 };
 
+export type FlowRunDebugIoTypes = {
+  input?: string | null;
+  output?: string | null;
+};
+
+export type FlowRunDebugInput = {
+  source?: string | null;
+  type?: string | null;
+  contract?: Record<string, unknown> | null;
+  bindings?: Record<string, unknown> | null;
+  config?: Record<string, unknown> | null;
+};
+
+export type FlowRunDebugOutput = {
+  mode?: string | null;
+  type?: string | null;
+  contract?: Record<string, unknown> | null;
+  classification?: number | null;
+  config?: Record<string, unknown> | null;
+};
+
+export type FlowRunDebugMcp = {
+  policy?: string | null;
+  tool_allowlist: string[];
+};
+
+export type FlowRunDebugStep = {
+  step_id?: string | null;
+  step_order?: number | null;
+  assistant_id?: string | null;
+  io_types: FlowRunDebugIoTypes;
+  input: FlowRunDebugInput;
+  output: FlowRunDebugOutput;
+  mcp: FlowRunDebugMcp;
+};
+
+export type FlowRunDebugExport = {
+  schema_version: string;
+  generated_at: string;
+  run: {
+    run_id: string;
+    flow_id: string;
+    flow_version: number;
+    status: string;
+  };
+  definition: {
+    flow_id: string;
+    version: number;
+    checksum: string;
+    steps_count: number;
+  };
+  definition_snapshot: Record<string, unknown>;
+  steps: FlowRunDebugStep[];
+  security: {
+    redaction_applied: boolean;
+    classification_field: string;
+    mcp_policy_field: string;
+  };
+};
+
 export type FlowRunEvidence = {
   run: Record<string, unknown>;
   definition_snapshot: Record<string, unknown>;
   step_results: FlowStepResult[];
   step_attempts: Record<string, unknown>[];
+  debug_export: FlowRunDebugExport;
+};
+
+export type FlowRunRedispatchResult = {
+  run: FlowRun;
+  redispatched_count: number;
 };
 
 export type DryRunResult = {

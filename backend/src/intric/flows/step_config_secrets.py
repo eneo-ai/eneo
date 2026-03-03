@@ -27,6 +27,8 @@ def encrypt_step_headers_for_storage(
         raise BadRequestException(
             "Webhook headers require active encryption. Configure ENCRYPTION_KEY before saving header secrets."
         )
+    if encryption_service is None:
+        return config
 
     encrypted_headers: dict[str, Any] = {}
     for key, value in headers.items():

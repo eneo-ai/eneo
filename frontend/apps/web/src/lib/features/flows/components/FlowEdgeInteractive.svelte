@@ -96,7 +96,7 @@ export let data:
 
 {#if isPowerUser}
   <EdgeLabel x={labelX} y={labelY + labelOffsetY}>
-    <div class="edge-actions group nodrag nopan flex items-center gap-1 rounded-full bg-white/70 px-1.5 py-0.5 text-secondary backdrop-blur-sm dark:bg-gray-900/70">
+    <div class="edge-actions group nodrag nopan flex items-center gap-1 rounded-full bg-primary/70 px-1.5 py-0.5 text-secondary backdrop-blur-sm">
       {#if isEscalation || isViolation}
         <span class="text-[11px]" title={isViolation ? m.flow_graph_classification_violation() : m.flow_graph_classification_escalation()}>
           {#if isViolation}⛔{:else}🔒{/if}

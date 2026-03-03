@@ -1,30 +1,30 @@
 <script lang="ts">
-  import type { FlowStep } from "@intric/intric-js";
+  import { IntricError, type FlowStep } from "@intric/intric-js";
   import { Settings } from "$lib/components/layout";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import VariablePicker from "./VariablePicker.svelte";
-  import FlowVariableChipPreview from "./FlowVariableChipPreview.svelte";
+  import FlowPromptEditor from "./FlowPromptEditor.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectKnowledgeV2 from "$lib/features/knowledge/components/SelectKnowledgeV2.svelte";
   import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
-  import FlowFormSchemaEditor from "./FlowFormSchemaEditor.svelte";
   import { createEventDispatcher } from "svelte";
   import { IconTrash } from "@intric/icons/trash";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconWorkflow } from "@intric/icons/workflow";
   import { IconQuestionMark } from "@intric/icons/question-mark";
   import { Button, Dialog, Tooltip } from "@intric/ui";
+  import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { slide } from "svelte/transition";
 
   export let steps: FlowStep[];
   export let activeStepId: string | null;
   export let isPublished: boolean;
-  export let formSchema: { fields: { name: string; type: string; required?: boolean }[] } | undefined;
+  export let transcriptionEnabled: boolean = true;
+  export let formSchema: { fields: { name: string; type: string; required?: boolean; options?: string[]; order?: number }[] } | undefined;
 
   const dispatch = createEventDispatcher<{
     stepChanged: { index: number; step: FlowStep };
@@ -43,6 +43,8 @@
   let assistantLoading = false;
   let lastLoadedAssistantId: string | null = null;
   const autoClearedLegacyTemplateByStepId = new Set<string>();
+  let stepNameBeforeEdit = "";
+  let assistantLoadRequestToken = 0;
 
   // Load assistant when active step changes
   $: if (activeStep?.assistant_id && activeStep.assistant_id !== lastLoadedAssistantId) {
@@ -55,13 +57,20 @@
 
   async function loadAssistantForStep(assistantId: string) {
     if (!assistantId || assistantId === "") return;
+    const requestToken = ++assistantLoadRequestToken;
     assistantLoading = true;
     lastLoadedAssistantId = assistantId;
     try {
-      assistant = await flowEditor.loadAssistant(assistantId);
-    } catch {
+      const loadedAssistant = await flowEditor.loadAssistant(assistantId);
+      if (requestToken !== assistantLoadRequestToken) return;
+      if (activeStep?.assistant_id !== assistantId) return;
+      assistant = loadedAssistant;
+    } catch (error) {
+      if (requestToken !== assistantLoadRequestToken) return;
+      console.error("Failed to load assistant for flow step:", error);
       assistant = null;
     } finally {
+      if (requestToken !== assistantLoadRequestToken) return;
       assistantLoading = false;
     }
   }
@@ -72,9 +81,32 @@
       assistant && typeof assistant === "object" && assistant.prompt && typeof assistant.prompt === "object"
         ? assistant.prompt
         : { text: "", description: "" };
+    const currentText = typeof currentPrompt.text === "string" ? currentPrompt.text : "";
+    if (value === currentText) return;
     const nextPrompt = { ...currentPrompt, text: value, description: "" };
     assistant = { ...(assistant ?? {}), prompt: nextPrompt };
     flowEditor.saveAssistant(activeStep.assistant_id, { prompt: nextPrompt });
+  }
+
+
+  async function handleCommittedStepRename() {
+    if (!activeStep) return;
+    const oldName = stepNameBeforeEdit.trim();
+    const newName = (activeStep.user_description ?? "").trim();
+    if (!oldName || !newName || oldName === newName) return;
+    try {
+      await flowEditor.rewriteStepNameVariableReferences({
+        renamedStepOrder: activeStep.step_order,
+        oldName,
+        newName,
+      });
+    } catch (error) {
+      const message =
+        error instanceof IntricError
+          ? error.getReadableMessage()
+          : "Failed to rewrite downstream variable references.";
+      toast.error(message);
+    }
   }
 
   function sanitizeBindingsForSource(
@@ -85,7 +117,7 @@
     return Object.keys(nextBindings).length > 0 ? nextBindings : null;
   }
 
-  function handleInputSourceChange(nextSource: string) {
+  function handleInputSourceChange(nextSource: FlowStep["input_source"]) {
     if (activeStep === null || activeIndex < 0) return;
     const updated = {
       ...activeStep,
@@ -129,7 +161,8 @@
     typeof assistant.completion_model.security_classification.security_level === "number"
       ? assistant.completion_model.security_classification.security_level
       : null;
-  $: showInputTemplate = $mode === "power_user";
+  $: showInputTemplate = $mode === "power_user" ||
+    (activeStep !== null && activeStep.input_source !== "flow_input" && hasInputTemplateOverride);
   $: hasInputTemplateOverride = inputTemplateText.trim().length > 0;
 
   $: templateStepRefs = (() => {
@@ -267,18 +300,19 @@
       {/if}
     </div>
   {:else}
-    <!-- Flow settings (form schema editor) -->
-    <div class="p-6" class:pointer-events-none={isPublished} class:opacity-60={isPublished}>
-      <Settings.Page>
-        <FlowFormSchemaEditor {isPublished} />
-      </Settings.Page>
+    <div class="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
+      <h3 class="text-lg font-semibold">{m.flow_step_select_prompt()}</h3>
+      <p class="max-w-md text-sm text-secondary">
+        {m.flow_step_select_prompt_desc()}
+      </p>
     </div>
   {/if}
 {:else}
-  <div class="p-4 lg:p-6" class:pointer-events-none={isPublished} class:opacity-60={isPublished}>
+  <div class="p-4 pb-8 lg:p-6 lg:pb-8" class:pointer-events-none={isPublished} class:opacity-60={isPublished}>
+    <div class="flow-step-editor [&_section>div:last-child]:gap-6 [&_section>div:last-child]:pb-6">
     <Settings.Page>
       <!-- Data Source Section -->
-      <Settings.Group title={m.flow_step_input_source()}>
+      <Settings.Group title={$mode === "power_user" ? m.flow_step_input_source() : ""}>
         <Settings.Row title={m.flow_step_name()} description="" let:aria>
           <input
             {...aria}
@@ -287,10 +321,15 @@
             value={activeStep.user_description ?? ""}
             placeholder={m.flow_step_name_placeholder()}
             disabled={isPublished}
+            on:focus={() => {
+              stepNameBeforeEdit = activeStep.user_description ?? "";
+            }}
             on:input={(e) => updateStep("user_description", e.currentTarget.value || null)}
+            on:change={() => void handleCommittedStepRename()}
           />
         </Settings.Row>
 
+        {#if $mode === "power_user"}
         <Settings.Row title={m.flow_step_input_source_label()} description="" let:aria>
           <div class="flex flex-col gap-1.5">
             <select
@@ -298,7 +337,7 @@
               class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
               value={activeStep.input_source}
               disabled={isPublished}
-              on:change={(e) => handleInputSourceChange(e.currentTarget.value)}
+              on:change={(e) => handleInputSourceChange(e.currentTarget.value as FlowStep["input_source"])}
             >
               {#each INPUT_SOURCES as source}
                 <option value={source.value} disabled={source.disabled ?? false}>
@@ -325,6 +364,7 @@
             {/each}
           </select>
         </Settings.Row>
+        {/if}
       </Settings.Group>
 
       <!-- AI Model Section -->
@@ -352,23 +392,27 @@
             />
           </Settings.Row>
 
-          <Settings.Row title={m.flow_step_security_classification()} description="">
-            <select
-              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-              value={activeStep.output_classification_override ?? ""}
-              disabled={isPublished}
-              on:change={(e) => {
-                const val = e.currentTarget.value === "" ? null : Number(e.currentTarget.value);
-                updateStep("output_classification_override", val);
-              }}
-            >
-              <option value="">{m.flow_step_security_inherit()}</option>
-              <option value="1">K1</option>
-              <option value="2">K2</option>
-              <option value="3">K3</option>
-              <option value="4">K4</option>
-            </select>
-          </Settings.Row>
+          {#if $mode === "power_user"}
+            <div class="border-l border-l-amber-300/50">
+              <Settings.Row title={m.flow_step_security_classification()} description="">
+                <select
+                  class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+                  value={activeStep.output_classification_override ?? ""}
+                  disabled={isPublished}
+                  on:change={(e) => {
+                    const val = e.currentTarget.value === "" ? null : Number(e.currentTarget.value);
+                    updateStep("output_classification_override", val);
+                  }}
+                >
+                  <option value="">{m.flow_step_security_inherit()}</option>
+                  <option value="1">K1</option>
+                  <option value="2">K2</option>
+                  <option value="3">K3</option>
+                  <option value="4">K4</option>
+                </select>
+              </Settings.Row>
+            </div>
+          {/if}
         {/if}
       </Settings.Group>
 
@@ -409,33 +453,46 @@
 
       <!-- Instruction Section -->
       <Settings.Group title={m.instructions()}>
-        <Settings.Row title={m.instructions()} description={m.describe_assistant_behavior()} fullWidth let:aria>
-          <div slot="toolbar" class="text-secondary">
-            {#if assistant?.id && !isPublished}
-              <PromptVersionDialog
-                title={m.prompt_history()}
-                loadPromptVersionHistory={() => {
-                  return flowEditor.listAssistantPrompts(activeStep.assistant_id);
-                }}
-                onPromptSelected={(prompt) => {
-                  updateAssistantField("prompt", { ...assistant.prompt, text: prompt.text });
-                }}
-              />
-            {/if}
-          </div>
-          <textarea
-            {...aria}
-            class="border-default bg-primary ring-default min-h-[120px] w-full rounded-lg border px-4 py-3 font-mono text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+        <Settings.Row title={m.instructions()} description={m.flow_step_instructions_desc()} fullWidth>
+          <svelte:fragment slot="title">
+            <Tooltip text={m.flow_step_instructions_tooltip()}>
+              <IconQuestionMark class="ml-1.5 text-muted hover:text-primary" />
+            </Tooltip>
+          </svelte:fragment>
+          <FlowPromptEditor
             value={instructionText}
             disabled={isPublished || assistantLoading || !assistant}
-            on:input={(e) => updateInstruction(e.currentTarget.value)}
             placeholder={m.flow_step_instructions_placeholder()}
-          ></textarea>
+            {steps}
+            currentStepOrder={activeStep.step_order}
+            {formSchema}
+            {transcriptionEnabled}
+            isAdvancedMode={$mode === "power_user"}
+            on:change={(e) => {
+              const currentPrompt = assistant?.prompt ?? { text: "", description: "" };
+              assistant = { ...(assistant ?? {}), prompt: { ...currentPrompt, text: e.detail } };
+            }}
+            on:commit={(e) => updateInstruction(e.detail)}
+          >
+            <svelte:fragment slot="toolbar">
+              {#if assistant?.id && !isPublished}
+                <PromptVersionDialog
+                  title={m.prompt_history()}
+                  loadPromptVersionHistory={() => {
+                    return flowEditor.listAssistantPrompts(activeStep.assistant_id) as Promise<any[]>;
+                  }}
+                  onPromptSelected={(prompt) => {
+                    updateAssistantField("prompt", { ...assistant.prompt, text: prompt.text });
+                  }}
+                />
+              {/if}
+            </svelte:fragment>
+          </FlowPromptEditor>
         </Settings.Row>
       </Settings.Group>
 
       {#if $mode !== "power_user" && hasInputTemplateOverride}
-        <div class="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
+        <div class="mb-3 flex items-start gap-3 rounded-lg border border-warning-default/40 bg-warning-dimmer px-3 py-2.5 text-xs text-warning-stronger">
           <span class="flex-1">{m.flow_input_template_override_warning()}</span>
           <Button variant="outlined" size="small" on:click={() => updateInputTemplate("")}>
             {m.clear()}
@@ -444,7 +501,7 @@
       {/if}
 
       {#if templateSourceConflict && $mode === "power_user"}
-        <div class="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+        <div class="mb-3 flex items-start gap-3 rounded-lg border border-warning-default/40 bg-warning-dimmer px-3 py-2.5 text-xs text-warning-stronger">
           <span class="flex-1">
             {m.flow_template_source_conflict_warning({
               steps: templateSourceConflict.map((n) => `Step ${n}`).join(", "),
@@ -474,43 +531,24 @@
                 <IconQuestionMark class="ml-1.5 text-muted hover:text-primary" />
               </Tooltip>
             </svelte:fragment>
-            <div class="flex flex-col gap-1.5">
-              <FlowVariableChipPreview
-                text={inputTemplateText}
-                {steps}
-                compact
-              />
-
-              <!-- Toolbar + textarea editor -->
-              <div class="border-default overflow-hidden rounded-lg border shadow">
-                <div class="bg-secondary/50 flex items-center justify-between border-b border-default px-3 py-1.5">
-                  <span class="text-[11px] text-muted">{m.flow_variable_toolbar_hint()}</span>
-                  {#if !isPublished}
-                    <VariablePicker
-                      {steps}
-                      currentStepOrder={activeStep.step_order}
-                      {formSchema}
-                      on:insert={(e) => {
-                        updateInputTemplate(`${inputTemplateText}${e.detail}`);
-                      }}
-                    />
-                  {/if}
-                </div>
-                <textarea
-                  class="bg-primary min-h-[100px] w-full resize-y px-3 py-2 font-mono text-sm focus:outline-none"
-                  value={inputTemplateText}
-                  disabled={isPublished}
-                  on:input={(e) => updateInputTemplate(e.currentTarget.value)}
-                  placeholder={m.flow_step_input_template_placeholder()}
-                ></textarea>
-              </div>
-            </div>
+            <FlowPromptEditor
+              value={inputTemplateText}
+              disabled={isPublished}
+              placeholder={m.flow_step_input_template_placeholder()}
+              {steps}
+              currentStepOrder={activeStep.step_order}
+              {formSchema}
+              {transcriptionEnabled}
+              isAdvancedMode={true}
+              on:change={(e) => updateInputTemplate(e.detail)}
+            />
           </Settings.Row>
         </Settings.Group>
         </div>
       {/if}
 
-      <!-- Output Section -->
+      <!-- Output Section (hidden in user mode when defaults are active) -->
+      {#if $mode === "power_user" || activeStep.output_type !== "text" || activeStep.output_mode !== "pass_through"}
       <Settings.Group title={m.flow_step_output_section()}>
         <Settings.Row title={m.flow_step_output_type()} description="">
           <select
@@ -553,40 +591,41 @@
           </Settings.Row>
         {/if}
       </Settings.Group>
+      {/if}
 
       <!-- Typed I/O info banners -->
       {#if activeStep.output_type === "json" && activeStep.output_contract}
-        <div class="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300">
+        <div class="flex items-start gap-2 mb-3 rounded-lg border border-accent-default/30 bg-accent-dimmer px-3 py-2.5 text-xs text-accent-stronger">
           {m.flow_typed_io_json_contract_info()}
         </div>
       {/if}
 
       {#if (activeStep.output_type === "pdf" || activeStep.output_type === "docx") && activeStep.output_contract}
-        <div class="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300">
+        <div class="flex items-start gap-2 mb-3 rounded-lg border border-accent-default/30 bg-accent-dimmer px-3 py-2.5 text-xs text-accent-stronger">
           {m.flow_typed_io_doc_contract_info()}
         </div>
       {/if}
 
       {#if activeStep.input_type === "document" && activeStep.step_order === 1}
-        <div class="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300">
+        <div class="flex items-start gap-2 mb-3 rounded-lg border border-accent-default/30 bg-accent-dimmer px-3 py-2.5 text-xs text-accent-stronger">
           {m.flow_typed_io_document_input_info()}
         </div>
       {/if}
 
       {#if activeStep.input_type === "audio"}
-        <div class="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+        <div class="flex items-start gap-2 mb-3 rounded-lg border border-warning-default/40 bg-warning-dimmer px-3 py-2.5 text-xs text-warning-stronger">
           {m.flow_typed_io_audio_not_supported()}
         </div>
       {/if}
 
       {#if activeStep.input_type === "image"}
-        <div class="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+        <div class="flex items-start gap-2 mb-3 rounded-lg border border-warning-default/40 bg-warning-dimmer px-3 py-2.5 text-xs text-warning-stronger">
           {m.flow_typed_io_image_not_supported()}
         </div>
       {/if}
 
       {#if typeChainIncompatible && previousStep}
-        <div class="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+        <div class="flex items-start gap-2 mb-3 rounded-lg border border-warning-default/40 bg-warning-dimmer px-3 py-2.5 text-xs text-warning-stronger">
           {m.flow_typed_io_chain_incompatible({
             outputType: previousStep.output_type,
             inputType: activeStep.input_type,
@@ -597,7 +636,7 @@
 
       <!-- Advanced Section (Power User only) -->
       {#if $mode === "power_user"}
-        <div transition:slide={{ duration: 200 }}>
+        <div transition:slide={{ duration: 200 }} class="border-l border-l-amber-300/50">
         <Settings.Group title={m.flow_step_advanced()}>
           <Settings.Row title={m.flow_step_mcp_policy()} description="">
             <svelte:fragment slot="title">
@@ -615,25 +654,6 @@
                 <option value={policy.value}>{policy.label}</option>
               {/each}
             </select>
-          </Settings.Row>
-
-          <Settings.Row title={m.flow_step_classification_override()} description="">
-            <svelte:fragment slot="title">
-              <Tooltip text={m.flow_step_classification_override_tooltip()}>
-                <IconQuestionMark class="ml-1.5 text-muted hover:text-primary" />
-              </Tooltip>
-            </svelte:fragment>
-            <input
-              type="number"
-              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-              value={activeStep.output_classification_override ?? ""}
-              disabled={isPublished}
-              on:input={(e) => {
-                const val = e.currentTarget.value ? Number(e.currentTarget.value) : null;
-                updateStep("output_classification_override", val);
-              }}
-              placeholder={m.flow_step_leave_empty_for_default()}
-            />
           </Settings.Row>
 
           <Settings.Row title={m.flow_step_input_contract()} description={m.flow_step_input_contract_desc()}>
@@ -723,15 +743,24 @@
         </div>
       {/if}
     </Settings.Page>
+    </div>
   </div>
 {/if}
 
 <Dialog.Root alert bind:isOpen={showDeleteConfirm}>
   <Dialog.Content width="small">
+    <div class="mb-3 flex justify-center">
+      <svg class="size-10 text-negative-default/60" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+    </div>
     <Dialog.Title>{m.flow_step_remove()}</Dialog.Title>
     <Dialog.Description>{m.flow_step_remove_confirm()}</Dialog.Description>
     <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
+      <Button variant="simple" is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={() => {
         if (activeIndex >= 0) {
           dispatch("removeStep", activeIndex);

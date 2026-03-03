@@ -11,7 +11,7 @@
 
 {#if hasErrors}
   <div
-    class="bg-red-50 border-red-200 flex items-center gap-2 border-b px-4 py-2 text-sm text-red-700"
+    class="bg-negative-dimmer border-negative-default/40 flex items-center gap-2 border-b px-4 py-2 text-sm text-negative-stronger"
     transition:fade={{ duration: 200 }}
   >
     <IconInfo class="size-4 shrink-0" />

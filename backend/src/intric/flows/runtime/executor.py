@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
@@ -42,6 +42,7 @@ class RuntimeStep:
     step_id: UUID
     step_order: int
     assistant_id: UUID
+    user_description: str | None
     input_source: str
     input_bindings: dict[str, Any] | None
     input_config: dict[str, Any] | None
@@ -68,6 +69,7 @@ class StepExecutionOutput:
     num_tokens_output: int | None
     effective_prompt: str
     model_parameters_json: dict[str, Any]
+    contract_validation: dict[str, Any] | None = None
     structured_output: dict[str, Any] | list[Any] | None = None
     artifacts: list[dict[str, Any]] | None = None
 
@@ -102,6 +104,7 @@ class RunExecutionState:
     assistant_cache: dict[UUID, Any]
     json_mode_supported: dict[str, bool]
     file_cache: dict[frozenset[UUID], list[Any]]
+    step_names_by_order: dict[int, str] = field(default_factory=dict)
 
     @property
     def all_previous_text(self) -> str:
@@ -225,6 +228,11 @@ class FlowRunExecutor:
             assistant_cache={},
             json_mode_supported={},
             file_cache={},
+            step_names_by_order={
+                item.step_order: item.user_description.strip()
+                for item in steps
+                if isinstance(item.user_description, str) and item.user_description.strip()
+            },
         )
 
         logger.info("flow_executor.steps_parsed run_id=%s step_count=%d", run_id, len(steps))
@@ -303,9 +311,34 @@ class FlowRunExecutor:
             try:
                 output = await self._execute_step(step=step, run=latest_run, state=state)
             except TypedIOValidationException as typed_exc:
+                contract_diag = None
+                failed_input_payload = getattr(typed_exc, "input_payload_json", None)
+                resolved_input_source = step.input_source
+                if isinstance(failed_input_payload, dict):
+                    contract_diag = failed_input_payload.get("contract_validation")
+                    payload_source = failed_input_payload.get("input_source")
+                    if isinstance(payload_source, str) and payload_source:
+                        resolved_input_source = payload_source
+                else:
+                    failed_input_payload = {
+                        "text": "",
+                        "source_text": "",
+                        "input_source": step.input_source,
+                        "used_question_binding": False,
+                        "legacy_prompt_binding_used": False,
+                    }
                 logger.error(
-                    "flow_executor.step_typed_io_error run_id=%s step_order=%d code=%s error=%s",
-                    run_id, step.step_order, typed_exc.code, str(typed_exc),
+                    "flow_executor.step_typed_io_error run_id=%s step_order=%d input_type=%s input_source=%s code=%s schema_type_hint=%s parse_attempted=%s parse_succeeded=%s candidate_type=%s error=%s",
+                    run_id,
+                    step.step_order,
+                    step.input_type,
+                    resolved_input_source,
+                    typed_exc.code,
+                    contract_diag.get("schema_type_hint") if isinstance(contract_diag, dict) else None,
+                    contract_diag.get("parse_attempted") if isinstance(contract_diag, dict) else None,
+                    contract_diag.get("parse_succeeded") if isinstance(contract_diag, dict) else None,
+                    contract_diag.get("candidate_type") if isinstance(contract_diag, dict) else None,
+                    str(typed_exc),
                 )
                 await self._rollback()
                 await self.flow_run_repo.finish_attempt(
@@ -318,11 +351,17 @@ class FlowRunExecutor:
                     error_message=str(typed_exc),
                 )
                 exc = typed_exc  # alias for shared failure path below
+                failed_updates: dict[str, Any] = {
+                    "status": FlowStepResultStatus.FAILED,
+                    "error_message": str(exc),
+                }
+                if isinstance(failed_input_payload, dict):
+                    failed_updates["input_payload_json"] = failed_input_payload
+                failed_prompt = getattr(typed_exc, "effective_prompt", None)
+                if isinstance(failed_prompt, str):
+                    failed_updates["effective_prompt"] = failed_prompt
                 failed_result = claimed.model_copy(
-                    update={
-                        "status": FlowStepResultStatus.FAILED,
-                        "error_message": str(exc),
-                    },
+                    update=failed_updates,
                     deep=True,
                 )
                 await self.flow_repo.save_step_result(run_id, failed_result, tenant_id=tenant_id)
@@ -382,6 +421,11 @@ class FlowRunExecutor:
                     "input_source": output.input_source,
                     "used_question_binding": output.used_question_binding,
                     "legacy_prompt_binding_used": output.legacy_prompt_binding_used,
+                    **(
+                        {"contract_validation": output.contract_validation}
+                        if output.contract_validation is not None
+                        else {}
+                    ),
                 },
                 effective_prompt=output.effective_prompt,
                 output_payload_json=self._build_output_payload(output),
@@ -520,17 +564,46 @@ class FlowRunExecutor:
 
         # Use state's prior results instead of per-step DB fetch
         context_results = [item for item in state.prior_results if item.status == FlowStepResultStatus.COMPLETED]
-        context = self.variable_resolver.build_context(run.input_payload_json, context_results)
+        context = self.variable_resolver.build_context(
+            run.input_payload_json,
+            context_results,
+            current_step_order=step.step_order,
+            step_names_by_order=state.step_names_by_order,
+        )
         assistant = await self._load_assistant(step.assistant_id, state)
         prompt_text = assistant.get_prompt_text()
         logger.debug("flow_executor.resolving_input run_id=%s step_order=%d", run.id, step.step_order)
-        step_input = await self._resolve_step_input(
-            step=step,
-            context=context,
-            run=run,
-            prior_results=state.prior_results,
-            assistant_prompt_text=prompt_text,
-            state=state,
+        effective_prompt = ""
+        input_payload_for_result = {
+            "text": "",
+            "source_text": "",
+            "input_source": step.input_source,
+            "used_question_binding": False,
+            "legacy_prompt_binding_used": False,
+        }
+        try:
+            step_input = await self._resolve_step_input(
+                step=step,
+                context=context,
+                run=run,
+                prior_results=state.prior_results,
+                assistant_prompt_text=prompt_text,
+                state=state,
+            )
+        except TypedIOValidationException as exc:
+            raise self._attach_typed_failure_context(
+                exc,
+                input_payload_for_result=input_payload_for_result,
+                effective_prompt=effective_prompt,
+            ) from exc
+        input_payload_for_result.update(
+            {
+                "text": step_input.text,
+                "source_text": step_input.text,
+                "input_source": step_input.input_source,
+                "used_question_binding": step_input.used_question_binding,
+                "legacy_prompt_binding_used": step_input.legacy_prompt_binding_used,
+            }
         )
 
         logger.info(
@@ -538,29 +611,42 @@ class FlowRunExecutor:
             run.id, step.step_order, step_input.files is not None and len(step_input.files) > 0,
             step_input.structured is not None, len(step_input.text),
         )
+        contract_validation: dict[str, Any] | None = None
 
         # Runtime guards for unsupported types (driven by type_policies)
         policy = INPUT_TYPE_POLICIES.get(step.input_type)
         if policy and not policy.supported:
-            raise TypedIOValidationException(
-                f"Input type '{step.input_type}' is not yet supported in runtime execution.",
-                code="typed_io_unsupported_type",
+            raise self._attach_typed_failure_context(
+                TypedIOValidationException(
+                    f"Input type '{step.input_type}' is not yet supported in runtime execution.",
+                    code="typed_io_unsupported_type",
+                ),
+                input_payload_for_result=input_payload_for_result,
+                effective_prompt=effective_prompt,
             )
 
         # Strict extraction validation (uses raw, pre-binding text)
         if policy and policy.requires_extraction and not step_input.raw_extracted_text.strip():
-            raise TypedIOValidationException(
-                f"Step {step.step_order}: {step.input_type} extraction produced empty text.",
-                code="typed_io_empty_extraction",
+            raise self._attach_typed_failure_context(
+                TypedIOValidationException(
+                    f"Step {step.step_order}: {step.input_type} extraction produced empty text.",
+                    code="typed_io_empty_extraction",
+                ),
+                input_payload_for_result=input_payload_for_result,
+                effective_prompt=effective_prompt,
             )
 
         # Image file validation
         if policy and policy.requires_files:
             usable = [f for f in (step_input.files or []) if (getattr(f, "mimetype", None) or "").startswith("image/")]
             if not usable:
-                raise TypedIOValidationException(
-                    f"Step {step.step_order}: image input requires at least one valid image file.",
-                    code="typed_io_missing_required_files",
+                raise self._attach_typed_failure_context(
+                    TypedIOValidationException(
+                        f"Step {step.step_order}: image input requires at least one valid image file.",
+                        code="typed_io_missing_required_files",
+                    ),
+                    input_payload_for_result=input_payload_for_result,
+                    effective_prompt=effective_prompt,
                 )
             non_images = [
                 getattr(f, "name", "unknown")
@@ -568,26 +654,87 @@ class FlowRunExecutor:
                 if not (getattr(f, "mimetype", None) or "").startswith("image/")
             ]
             if non_images:
-                raise TypedIOValidationException(
-                    f"Step {step.step_order}: non-image file(s) for image input: {non_images}",
-                    code="typed_io_invalid_file_type",
-                )
-
-        # Input contract validation
-        if step.input_contract:
-            from intric.flows.output_processing import validate_against_contract
-            if step.input_type == "json" and step_input.structured is not None:
-                validate_against_contract(
-                    step_input.structured, step.input_contract, label=f"Step {step.step_order} input"
-                )
-            elif step.input_type == "text":
-                validate_against_contract(
-                    step_input.text, step.input_contract, label=f"Step {step.step_order} input"
+                raise self._attach_typed_failure_context(
+                    TypedIOValidationException(
+                        f"Step {step.step_order}: non-image file(s) for image input: {non_images}",
+                        code="typed_io_invalid_file_type",
+                    ),
+                    input_payload_for_result=input_payload_for_result,
+                    effective_prompt=effective_prompt,
                 )
 
         effective_prompt = (
             self.variable_resolver.interpolate(prompt_text, context) if prompt_text else ""
         )
+
+        # Input contract validation
+        if step.input_contract:
+            from intric.flows.output_processing import validate_against_contract
+            if step.input_type == "json" and step_input.structured is not None:
+                contract_validation = {
+                    "schema_type_hint": self._schema_type_hint(step.input_contract),
+                    "parse_attempted": False,
+                    "parse_succeeded": True,
+                    "candidate_type": type(step_input.structured).__name__,
+                }
+                try:
+                    validate_against_contract(
+                        step_input.structured, step.input_contract, label=f"Step {step.step_order} input"
+                    )
+                except TypedIOValidationException as exc:
+                    input_payload_for_result["contract_validation"] = contract_validation
+                    raise self._attach_typed_failure_context(
+                        exc,
+                        input_payload_for_result=input_payload_for_result,
+                        effective_prompt=effective_prompt,
+                    ) from exc
+            elif step.input_type == "json":
+                contract_validation = {
+                    "schema_type_hint": self._schema_type_hint(step.input_contract),
+                    "parse_attempted": False,
+                    "parse_succeeded": False,
+                    "candidate_type": "str",
+                }
+                input_payload_for_result["contract_validation"] = contract_validation
+                typed_error = TypedIOValidationException(
+                    f"Step {step.step_order}: input_type 'json' requires valid JSON input before contract validation.",
+                    code="typed_io_invalid_json_input",
+                )
+                raise self._attach_typed_failure_context(
+                    typed_error,
+                    input_payload_for_result=input_payload_for_result,
+                    effective_prompt=effective_prompt,
+                ) from typed_error
+            elif step.input_type == "text":
+                candidate, contract_validation = self._prepare_text_contract_candidate(
+                    text=step_input.text,
+                    schema=step.input_contract,
+                )
+                try:
+                    validate_against_contract(
+                        candidate, step.input_contract, label=f"Step {step.step_order} input"
+                    )
+                except TypedIOValidationException as exc:
+                    input_payload_for_result["contract_validation"] = contract_validation
+                    raise self._attach_typed_failure_context(
+                        exc,
+                        input_payload_for_result=input_payload_for_result,
+                        effective_prompt=effective_prompt,
+                    ) from exc
+
+        if contract_validation is not None:
+            input_payload_for_result["contract_validation"] = contract_validation
+            logger.info(
+                "flow_executor.contract_validation run_id=%s step_order=%d input_type=%s input_source=%s schema_type_hint=%s parse_attempted=%s parse_succeeded=%s candidate_type=%s",
+                run.id,
+                step.step_order,
+                step.input_type,
+                step_input.input_source,
+                contract_validation["schema_type_hint"],
+                contract_validation["parse_attempted"],
+                contract_validation["parse_succeeded"],
+                contract_validation["candidate_type"],
+            )
         await self._commit()
 
         # Channel dispatch — files_only types send files, not text to LLM
@@ -659,9 +806,16 @@ class FlowRunExecutor:
             "flow_executor.typed_output_processing run_id=%s step_order=%d output_type=%s",
             run.id, step.step_order, step.output_type,
         )
-        structured_output, artifacts = await self._process_typed_output(
-            full_text=full_text, step=step, run=run
-        )
+        try:
+            structured_output, artifacts = await self._process_typed_output(
+                full_text=full_text, step=step, run=run
+            )
+        except TypedIOValidationException as exc:
+            raise self._attach_typed_failure_context(
+                exc,
+                input_payload_for_result=input_payload_for_result,
+                effective_prompt=effective_prompt,
+            ) from exc
         logger.info(
             "flow_executor.typed_output_done run_id=%s step_order=%d has_structured=%s has_artifacts=%s",
             run.id, step.step_order, structured_output is not None,
@@ -687,6 +841,7 @@ class FlowRunExecutor:
             num_tokens_output=count_tokens(full_text) + reasoning_tokens,
             effective_prompt=effective_prompt,
             model_parameters_json=self._effective_model_parameters(assistant),
+            contract_validation=contract_validation,
             structured_output=structured_output,
             artifacts=artifacts,
         )
@@ -886,6 +1041,73 @@ class FlowRunExecutor:
         return f"{provider}:{name}:{mid}"
 
     @staticmethod
+    def _schema_type_hint(schema: dict[str, Any]) -> str:
+        raw_type = schema.get("type")
+        if isinstance(raw_type, str):
+            return raw_type
+        if isinstance(raw_type, list):
+            type_entries = sorted(str(item) for item in raw_type if isinstance(item, str))
+            if type_entries:
+                return "|".join(type_entries)
+        if isinstance(schema.get("properties"), dict):
+            return "object"
+        if "items" in schema:
+            return "array"
+        return "unknown"
+
+    @staticmethod
+    def _schema_expects_structured(schema: dict[str, Any]) -> bool:
+        raw_type = schema.get("type")
+        if isinstance(raw_type, str):
+            return raw_type in {"object", "array"}
+        if isinstance(raw_type, list):
+            return any(item in {"object", "array"} for item in raw_type if isinstance(item, str))
+        return isinstance(schema.get("properties"), dict) or "items" in schema
+
+    def _prepare_text_contract_candidate(
+        self,
+        *,
+        text: str,
+        schema: dict[str, Any],
+    ) -> tuple[Any, dict[str, Any]]:
+        parse_attempted = self._schema_expects_structured(schema)
+        parse_succeeded = False
+        candidate: Any = text
+        if parse_attempted:
+            try:
+                candidate = json.loads(text)
+                parse_succeeded = True
+            except (json.JSONDecodeError, ValueError):
+                candidate = text
+        return candidate, {
+            "schema_type_hint": self._schema_type_hint(schema),
+            "parse_attempted": parse_attempted,
+            "parse_succeeded": parse_succeeded,
+            "candidate_type": type(candidate).__name__,
+        }
+
+    @staticmethod
+    def _attach_typed_failure_context(
+        exc: TypedIOValidationException,
+        *,
+        input_payload_for_result: dict[str, Any],
+        effective_prompt: str,
+    ) -> TypedIOValidationException:
+        existing_payload = getattr(exc, "input_payload_json", None)
+        if not isinstance(existing_payload, dict):
+            payload = dict(input_payload_for_result)
+            payload.setdefault("text", "")
+            payload.setdefault("source_text", payload.get("text", ""))
+            payload.setdefault("input_source", "")
+            payload.setdefault("used_question_binding", False)
+            payload.setdefault("legacy_prompt_binding_used", False)
+            setattr(exc, "input_payload_json", payload)
+        existing_prompt = getattr(exc, "effective_prompt", None)
+        if not isinstance(existing_prompt, str):
+            setattr(exc, "effective_prompt", effective_prompt)
+        return exc
+
+    @staticmethod
     def _is_json_mode_rejection(exc: Exception) -> bool:
         """Check if LLM error is due to unsupported response_format."""
         msg = str(exc).lower()
@@ -1041,6 +1263,9 @@ class FlowRunExecutor:
                     step_id=step_id,
                     step_order=step_order,
                     assistant_id=assistant_id,
+                    user_description=str(item.get("user_description")).strip()
+                    if isinstance(item.get("user_description"), str)
+                    else None,
                     input_source=input_source,
                     input_bindings=item.get("input_bindings"),
                     input_config=item.get("input_config"),

@@ -9,6 +9,12 @@
 
   const mode = getFlowUserMode();
 
+  const INPUT_SOURCE_LABELS: Record<string, () => string> = {
+    flow_input: () => m.flow_input_source_flow_input(),
+    previous_step: () => m.flow_input_source_previous_step(),
+    all_previous_steps: () => m.flow_input_source_all_previous_steps()
+  };
+
   type StepValidation = {
     stepOrder: number;
     stepId: string | null;
@@ -72,9 +78,13 @@
   }
 
   $: errorCount = dryRunResults.filter((r) => !r.valid).length;
+
+  function getStepByOrder(order: number) {
+    return flow.steps.find((s) => s.step_order === order);
+  }
 </script>
 
-<div class="flex items-center gap-2">
+<div class="contents">
   <Button
     variant="outlined"
     disabled={isRunning || flow.steps.length === 0}
@@ -85,29 +95,49 @@
   </Button>
 
   {#if hasRun}
-    {#if errorCount === 0}
-      <span class="text-positive text-xs font-medium">{m.flow_dry_run_ready()}</span>
-    {:else}
-      <span class="text-xs font-medium text-red-600">{m.flow_dry_run_issues({ count: String(errorCount) })}</span>
-    {/if}
+    <div class="border-default divide-default order-1 w-full divide-y overflow-hidden rounded-lg border">
+      {#each dryRunResults as result}
+        {@const step = getStepByOrder(result.stepOrder)}
+        <div class="flex items-start justify-between gap-3 px-4 py-3">
+          <div class="flex min-w-0 items-start gap-3">
+            <span class="bg-hover-default mt-0.5 flex size-6 shrink-0 items-center justify-center rounded text-xs font-bold tabular-nums">
+              {result.stepOrder}
+            </span>
+            <div class="flex min-w-0 flex-col gap-0.5">
+              <span class="text-sm font-medium">
+                {step?.user_description || m.flow_step_fallback_label({ order: String(result.stepOrder) })}
+              </span>
+              <span class="truncate text-xs text-secondary">
+                {step?.input_type ?? "text"} &rarr; {step?.output_type ?? "text"}
+                <span class="text-tertiary">&middot;</span>
+                {INPUT_SOURCE_LABELS[step?.input_source ?? ""]?.() ?? step?.input_source ?? ""}
+              </span>
+              {#if !result.valid && $mode === "power_user"}
+                {#each result.errors as error}
+                  <span class="text-xs text-negative-stronger">{error}</span>
+                {/each}
+              {/if}
+            </div>
+          </div>
+          <span class="mt-1 shrink-0 text-sm font-medium" class:text-positive-stronger={result.valid} class:text-negative-stronger={!result.valid}>
+            {#if result.valid}&#10003;{:else}&#10007;{/if}
+          </span>
+        </div>
+      {/each}
+    </div>
+
+    <div
+      class="order-2 w-full rounded-lg px-3 py-2 text-xs font-medium"
+      class:bg-positive-dimmer={errorCount === 0}
+      class:text-positive-stronger={errorCount === 0}
+      class:bg-negative-dimmer={errorCount > 0}
+      class:text-negative-stronger={errorCount > 0}
+    >
+      {#if errorCount === 0}
+        &#10003; {m.flow_dry_run_ready()}
+      {:else}
+        &#10007; {m.flow_dry_run_issues({ count: String(errorCount) })}
+      {/if}
+    </div>
   {/if}
 </div>
-
-{#if hasRun && $mode === "power_user"}
-  <div class="mt-2 flex flex-col gap-1">
-    {#each dryRunResults as result}
-      <div
-        class="flex items-center gap-2 rounded px-2 py-1 text-xs"
-        class:bg-green-50={result.valid}
-        class:bg-red-50={!result.valid}
-      >
-        <span class="font-medium">Step {result.stepOrder}</span>
-        {#if result.valid}
-          <span class="text-green-600">&#10003;</span>
-        {:else}
-          <span class="text-red-600">&#10007; {result.errors.join(", ")}</span>
-        {/if}
-      </div>
-    {/each}
-  </div>
-{/if}

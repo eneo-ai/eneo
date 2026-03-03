@@ -66,6 +66,21 @@ async def test_celery_execution_backend_uses_default_queue_and_none_user(monkeyp
     assert kwargs["kwargs"]["user_id"] is None
 
 
+@pytest.mark.asyncio
+async def test_celery_execution_backend_dispatch_propagates_send_task_failure():
+    celery_app = MagicMock()
+    celery_app.send_task.side_effect = RuntimeError("broker unavailable")
+    backend = CeleryFlowExecutionBackend(celery_app=celery_app, queue_name="flows.execute")
+
+    with pytest.raises(RuntimeError, match="broker unavailable"):
+        await backend.dispatch(
+            run_id=uuid4(),
+            flow_id=uuid4(),
+            tenant_id=uuid4(),
+            user_id=uuid4(),
+        )
+
+
 def test_create_flow_celery_app_applies_redis_and_queue_settings(monkeypatch):
     celery_app_module = importlib.import_module("intric.flows.runtime.celery_app")
     monkeypatch.setattr(

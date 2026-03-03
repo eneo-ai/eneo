@@ -39,7 +39,11 @@ def _step(step_order: int = 1) -> FlowStep:
     )
 
 
-def _flow(user, published_version: int | None = 1) -> Flow:
+def _flow(
+    user,
+    published_version: int | None = 1,
+    metadata_json: dict | None = None,
+) -> Flow:
     return Flow(
         id=uuid4(),
         tenant_id=user.tenant_id,
@@ -49,7 +53,7 @@ def _flow(user, published_version: int | None = 1) -> Flow:
         created_by_user_id=user.id,
         owner_user_id=user.id,
         published_version=published_version,
-        metadata_json=None,
+        metadata_json=metadata_json,
         data_retention_days=None,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -94,6 +98,37 @@ def _version(user, flow: Flow, version: int = 1) -> FlowVersion:
         },
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
+    )
+
+
+def _form_schema_flow(user) -> Flow:
+    return _flow(
+        user=user,
+        published_version=1,
+        metadata_json={
+            "form_schema": {
+                "fields": [
+                    {"name": "Namn på brukare", "type": "text", "required": True, "order": 1},
+                    {"name": "Personnummer", "type": "text", "required": True, "order": 2},
+                    {
+                        "name": "Typ av insats",
+                        "type": "multiselect",
+                        "required": True,
+                        "options": ["Hemtjänst", "Trygghetslarm"],
+                        "order": 3,
+                    },
+                    {
+                        "name": "Prioritet",
+                        "type": "select",
+                        "required": False,
+                        "options": ["Låg", "Medel", "Hög"],
+                        "order": 4,
+                    },
+                    {"name": "Mötesdatum", "type": "date", "required": False, "order": 5},
+                    {"name": "Antal timmar", "type": "number", "required": False, "order": 6},
+                ]
+            }
+        },
     )
 
 
@@ -224,6 +259,127 @@ async def test_create_run_raises_if_dispatch_fails(user):
 
 
 @pytest.mark.asyncio
+async def test_create_run_rejects_missing_required_form_field(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _form_schema_flow(user)
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+    flow_repo.get.return_value = flow
+    flow_run_repo.count_active_runs.return_value = 0
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+
+    with pytest.raises(BadRequestException, match="Missing required input field 'Personnummer'"):
+        await service.create_run(
+            flow_id=flow.id,
+            input_payload_json={
+                "Namn på brukare": "Anna",
+                "Typ av insats": ["Hemtjänst"],
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_invalid_select_option(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _form_schema_flow(user)
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+    flow_repo.get.return_value = flow
+    flow_run_repo.count_active_runs.return_value = 0
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+
+    with pytest.raises(BadRequestException, match="must be one of the configured options"):
+        await service.create_run(
+            flow_id=flow.id,
+            input_payload_json={
+                "Namn på brukare": "Anna",
+                "Personnummer": "19121212-1212",
+                "Typ av insats": ["Hemtjänst"],
+                "Prioritet": "Akut",
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_invalid_multiselect_shape(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _form_schema_flow(user)
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+    flow_repo.get.return_value = flow
+    flow_run_repo.count_active_runs.return_value = 0
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+
+    with pytest.raises(BadRequestException, match="contains invalid option values"):
+        await service.create_run(
+            flow_id=flow.id,
+            input_payload_json={
+                "Namn på brukare": "Anna",
+                "Personnummer": "19121212-1212",
+                "Typ av insats": ["Ogiltig"],
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_run_normalizes_multiselect_number_and_date_fields(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _form_schema_flow(user)
+    created_run = _run(user=user, flow_id=flow.id)
+    flow_run_repo.create.return_value = created_run
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+    flow_repo.get.return_value = flow
+    flow_run_repo.count_active_runs.return_value = 0
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+
+    await service.create_run(
+        flow_id=flow.id,
+        input_payload_json={
+            "Namn på brukare": "Anna",
+            "Personnummer": "19121212-1212",
+            "Typ av insats": "Hemtjänst,Trygghetslarm",
+            "Prioritet": "Hög",
+            "Mötesdatum": "2026-03-03",
+            "Antal timmar": "12",
+        },
+    )
+
+    payload = flow_run_repo.create.await_args.kwargs["input_payload_json"]
+    assert payload["Typ av insats"] == ["Hemtjänst", "Trygghetslarm"]
+    assert payload["Antal timmar"] == 12
+    assert payload["Mötesdatum"] == "2026-03-03"
+
+
+@pytest.mark.asyncio
 async def test_list_runs_delegates_to_repo(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
@@ -248,6 +404,247 @@ async def test_list_runs_delegates_to_repo(user):
         limit=None,
         offset=None,
     )
+
+
+@pytest.mark.asyncio
+async def test_redispatch_stale_queued_runs_dispatches_with_backend(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    execution_backend = AsyncMock()
+    flow_id = uuid4()
+    stale_run = _run(user=user, flow_id=flow_id)
+    flow_run_repo.list_stale_queued_runs.return_value = [stale_run]
+    flow_run_repo.claim_stale_queued_run_for_redispatch.return_value = stale_run
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    count = await service.redispatch_stale_queued_runs(
+        flow_id=flow_id,
+        execution_backend=execution_backend,
+    )
+
+    assert count == 1
+    flow_run_repo.list_stale_queued_runs.assert_awaited_once()
+    kwargs = flow_run_repo.list_stale_queued_runs.await_args.kwargs
+    assert kwargs["tenant_id"] == user.tenant_id
+    assert kwargs["flow_id"] == flow_id
+    assert kwargs["run_id"] is None
+    assert kwargs["limit"] == 25
+    assert isinstance(kwargs["stale_before"], datetime)
+    claim_kwargs = flow_run_repo.claim_stale_queued_run_for_redispatch.await_args.kwargs
+    assert claim_kwargs["run_id"] == stale_run.id
+    assert claim_kwargs["tenant_id"] == user.tenant_id
+    assert claim_kwargs["flow_id"] == flow_id
+    assert isinstance(claim_kwargs["stale_before"], datetime)
+    execution_backend.dispatch.assert_awaited_once_with(
+        run_id=stale_run.id,
+        flow_id=flow_id,
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_redispatch_stale_queued_runs_returns_zero_without_backend(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    count = await service.redispatch_stale_queued_runs(flow_id=uuid4())
+
+    assert count == 0
+    flow_run_repo.list_stale_queued_runs.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_redispatch_stale_queued_runs_skips_runs_without_user_id(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    execution_backend = AsyncMock()
+    flow_id = uuid4()
+    missing_user_run = _run(user=user, flow_id=flow_id).model_copy(update={"user_id": None})
+    dispatchable_run = _run(user=user, flow_id=flow_id)
+    flow_run_repo.list_stale_queued_runs.return_value = [missing_user_run, dispatchable_run]
+    flow_run_repo.claim_stale_queued_run_for_redispatch.side_effect = [missing_user_run, dispatchable_run]
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    count = await service.redispatch_stale_queued_runs(
+        flow_id=flow_id,
+        execution_backend=execution_backend,
+    )
+
+    assert count == 1
+    assert flow_run_repo.claim_stale_queued_run_for_redispatch.await_count == 2
+    execution_backend.dispatch.assert_awaited_once_with(
+        run_id=dispatchable_run.id,
+        flow_id=flow_id,
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_redispatch_stale_queued_runs_skips_when_claim_returns_none(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    execution_backend = AsyncMock()
+    flow_id = uuid4()
+    stale_run = _run(user=user, flow_id=flow_id)
+    flow_run_repo.list_stale_queued_runs.return_value = [stale_run]
+    flow_run_repo.claim_stale_queued_run_for_redispatch.return_value = None
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    count = await service.redispatch_stale_queued_runs(
+        flow_id=flow_id,
+        execution_backend=execution_backend,
+    )
+
+    assert count == 0
+    execution_backend.dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_redispatch_stale_queued_runs_continues_on_dispatch_failure(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    execution_backend = AsyncMock()
+    flow_id = uuid4()
+    failed_run = _run(user=user, flow_id=flow_id)
+    succeeded_run = _run(user=user, flow_id=flow_id)
+    flow_run_repo.list_stale_queued_runs.return_value = [failed_run, succeeded_run]
+    flow_run_repo.claim_stale_queued_run_for_redispatch.side_effect = [failed_run, succeeded_run]
+    execution_backend.dispatch.side_effect = [RuntimeError("broker down"), None]
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    count = await service.redispatch_stale_queued_runs(
+        flow_id=flow_id,
+        execution_backend=execution_backend,
+    )
+
+    assert count == 1
+    assert execution_backend.dispatch.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_redispatch_stale_queued_runs_supports_run_scoped_filter(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    execution_backend = AsyncMock()
+    flow_id = uuid4()
+    stale_run = _run(user=user, flow_id=flow_id)
+    flow_run_repo.list_stale_queued_runs.return_value = [stale_run]
+    flow_run_repo.claim_stale_queued_run_for_redispatch.return_value = stale_run
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    count = await service.redispatch_stale_queued_runs(
+        flow_id=flow_id,
+        run_id=stale_run.id,
+        limit=1,
+        execution_backend=execution_backend,
+    )
+
+    assert count == 1
+    kwargs = flow_run_repo.list_stale_queued_runs.await_args.kwargs
+    assert kwargs["run_id"] == stale_run.id
+    assert kwargs["limit"] == 1
+
+
+@pytest.mark.asyncio
+async def test_redispatch_stale_queued_runs_raises_on_run_scoped_dispatch_failure(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    execution_backend = AsyncMock()
+    flow_id = uuid4()
+    stale_run = _run(user=user, flow_id=flow_id)
+    flow_run_repo.list_stale_queued_runs.return_value = [stale_run]
+    flow_run_repo.claim_stale_queued_run_for_redispatch.return_value = stale_run
+    execution_backend.dispatch.side_effect = RuntimeError("broker down")
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    with pytest.raises(RuntimeError, match="broker down"):
+        await service.redispatch_stale_queued_runs(
+            flow_id=flow_id,
+            run_id=stale_run.id,
+            limit=1,
+            execution_backend=execution_backend,
+        )
+
+    execution_backend.dispatch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_redispatch_stale_queued_runs_skips_unclaimable_runs(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    execution_backend = AsyncMock()
+    flow_id = uuid4()
+    stale_run = _run(user=user, flow_id=flow_id)
+    flow_run_repo.list_stale_queued_runs.return_value = [stale_run]
+    flow_run_repo.claim_stale_queued_run_for_redispatch.return_value = None
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    count = await service.redispatch_stale_queued_runs(
+        flow_id=flow_id,
+        execution_backend=execution_backend,
+    )
+
+    assert count == 0
+    execution_backend.dispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -468,6 +865,8 @@ async def test_get_evidence_redacts_sensitive_values(user):
             "input_payload_json": {
                 "text": "hello",
                 "api_key": "sk-secret",
+                "api-key": "sk-secret-hyphen",
+                "api.token": "sk-secret-dot",
                 "webhook_url": "https://alice:secret@example.org/hook?token=abc",
             }
         }
@@ -483,8 +882,12 @@ async def test_get_evidence_redacts_sensitive_values(user):
                 {
                     "step_order": 1,
                     "output_config": {
-                        "url": "https://service.example.com/notify?api_key=hidden",
-                        "headers": {"Authorization": "Bearer top-secret", "X-Trace": "ok"},
+                        "url": "https://service.example.com/notify?api_key=hidden&x-api-key=hidden2",
+                        "headers": {
+                            "Authorization": "Bearer top-secret",
+                            "X-Api-Key": "top-secret-hyphen",
+                            "X-Trace": "ok",
+                        },
                     },
                 }
             ]
@@ -499,10 +902,18 @@ async def test_get_evidence_redacts_sensitive_values(user):
                 "input_payload_json": {
                     "text": "safe",
                     "token": "abc",
+                    "x-api-key": "abc-2",
+                    "auth.token": "abc-3",
+                    "contract_validation": {
+                        "schema_type_hint": "object",
+                        "parse_attempted": True,
+                        "parse_succeeded": False,
+                        "candidate_type": "str",
+                    },
                 },
                 "effective_prompt": "Authorization: Bearer xyz",
                 "output_payload_json": {
-                    "url": "https://bob:pw@example.org/path?client_secret=x",
+                    "url": "https://bob:pw@example.org/path?client_secret=x&client.secret=z&api-key=y",
                 },
             }
         )
@@ -527,14 +938,37 @@ async def test_get_evidence_redacts_sensitive_values(user):
     evidence = await service.get_evidence(run_id=run.id)
 
     assert evidence["run"]["input_payload_json"]["api_key"] == "[REDACTED]"
+    assert evidence["run"]["input_payload_json"]["api-key"] == "[REDACTED]"
+    assert evidence["run"]["input_payload_json"]["api.token"] == "[REDACTED]"
     assert evidence["run"]["input_payload_json"]["webhook_url"] == "https://example.org/hook?token=%5BREDACTED%5D"
     assert (
         evidence["definition_snapshot"]["steps"][0]["output_config"]["headers"]["Authorization"]
         == "[REDACTED]"
     )
+    assert evidence["definition_snapshot"]["steps"][0]["output_config"]["headers"]["X-Api-Key"] == "[REDACTED]"
+    assert evidence["definition_snapshot"]["steps"][0]["output_config"]["url"] == (
+        "https://service.example.com/notify?api_key=%5BREDACTED%5D&x-api-key=%5BREDACTED%5D"
+    )
     assert evidence["step_results"][0]["input_payload_json"]["token"] == "[REDACTED]"
+    assert evidence["step_results"][0]["input_payload_json"]["x-api-key"] == "[REDACTED]"
+    assert evidence["step_results"][0]["input_payload_json"]["auth.token"] == "[REDACTED]"
+    assert evidence["step_results"][0]["input_payload_json"]["contract_validation"] == {
+        "schema_type_hint": "object",
+        "parse_attempted": True,
+        "parse_succeeded": False,
+        "candidate_type": "str",
+    }
     assert evidence["step_results"][0]["effective_prompt"] == "Authorization: Bearer [REDACTED]"
     assert evidence["step_results"][0]["output_payload_json"]["url"] == (
-        "https://example.org/path?client_secret=%5BREDACTED%5D"
+        "https://example.org/path?client_secret=%5BREDACTED%5D&client.secret=%5BREDACTED%5D&api-key=%5BREDACTED%5D"
     )
     assert evidence["step_attempts"][0]["error_message"] == "Bearer [REDACTED]"
+    assert evidence["debug_export"]["schema_version"] == "eneo.flow.debug-export.v1"
+    assert evidence["debug_export"]["definition"]["checksum"] == "checksum"
+    assert evidence["debug_export"]["run"]["status"] == "queued"
+    assert evidence["debug_export"]["steps"][0]["input"]["source"] is None
+    assert evidence["debug_export"]["steps"][0]["mcp"]["tool_allowlist"] == []
+    assert (
+        evidence["debug_export"]["definition_snapshot"]["steps"][0]["output_config"]["headers"]["Authorization"]
+        == "[REDACTED]"
+    )

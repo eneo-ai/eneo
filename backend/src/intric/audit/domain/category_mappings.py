@@ -41,7 +41,7 @@ CATEGORY_MAPPINGS = {
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
     ActionType.MODULE_ADDED.value: "admin_actions",
     ActionType.MODULE_ADDED_TO_TENANT.value: "admin_actions",
-    # User Actions (36 actions)
+    # User Actions
     ActionType.ASSISTANT_CREATED.value: "user_actions",
     ActionType.ASSISTANT_UPDATED.value: "user_actions",
     ActionType.ASSISTANT_DELETED.value: "user_actions",
@@ -78,6 +78,7 @@ CATEGORY_MAPPINGS = {
     ActionType.FLOW_UNPUBLISHED.value: "user_actions",
     ActionType.FLOW_RUN_CREATED.value: "user_actions",
     ActionType.FLOW_RUN_CANCELLED.value: "user_actions",
+    ActionType.FLOW_RUN_REDISPATCHED.value: "user_actions",
     ActionType.FLOW_CLASSIFICATION_OVERRIDE.value: "user_actions",
     ActionType.FLOW_RUN_DOCUMENT_GENERATED.value: "user_actions",
     ActionType.FLOW_RUN_CONTRACT_REJECTED.value: "user_actions",

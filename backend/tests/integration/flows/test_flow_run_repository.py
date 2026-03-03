@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.flow_tables import FlowStepAttempts, FlowStepResults
+from intric.database.tables.flow_tables import FlowRuns, FlowStepAttempts, FlowStepResults
 from intric.flows import Flow, FlowFactory, FlowRepository, FlowStep, FlowVersionRepository
 from intric.flows.flow import FlowRunStatus, FlowStepAttemptStatus, FlowStepResultStatus
 from intric.flows.flow_run_repo import FlowRunRepository
@@ -942,3 +943,179 @@ async def test_finish_attempt_is_idempotent(
         assert first is not None
         assert first.finished_at is not None
         assert second is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_and_claim_stale_queued_runs_supports_scope_filters_and_cooldown(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flows stale-run scope space", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Flow stale-run assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        first_flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        second_flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ).model_copy(update={"name": "Second stale flow"}),
+            tenant_id=admin_user.tenant_id,
+        )
+
+        await version_repo.create(
+            flow_id=first_flow.id,
+            version=1,
+            definition_checksum="checksum-stale-1",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(first_flow.steps[0].id),
+                        "assistant_id": str(first_flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    }
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+        await version_repo.create(
+            flow_id=second_flow.id,
+            version=1,
+            definition_checksum="checksum-stale-2",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(second_flow.steps[0].id),
+                        "assistant_id": str(second_flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    }
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        stale_first_flow = await run_repo.create(
+            flow_id=first_flow.id,
+            flow_version=1,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "stale-first"},
+            preseed_steps=[
+                {
+                    "step_id": first_flow.steps[0].id,
+                    "assistant_id": first_flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+        fresh_first_flow = await run_repo.create(
+            flow_id=first_flow.id,
+            flow_version=1,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "fresh-first"},
+            preseed_steps=[
+                {
+                    "step_id": first_flow.steps[0].id,
+                    "assistant_id": first_flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+        stale_second_flow = await run_repo.create(
+            flow_id=second_flow.id,
+            flow_version=1,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "stale-second"},
+            preseed_steps=[
+                {
+                    "step_id": second_flow.steps[0].id,
+                    "assistant_id": second_flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+
+        now = datetime.now(timezone.utc)
+        stale_before = now - timedelta(minutes=5)
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == stale_first_flow.id)
+            .values(updated_at=now - timedelta(minutes=10))
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == fresh_first_flow.id)
+            .values(updated_at=now - timedelta(minutes=1))
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == stale_second_flow.id)
+            .values(updated_at=now - timedelta(minutes=15))
+        )
+        await session.flush()
+
+        first_flow_stale = await run_repo.list_stale_queued_runs(
+            tenant_id=admin_user.tenant_id,
+            flow_id=first_flow.id,
+            stale_before=stale_before,
+            limit=10,
+        )
+        oldest_only = await run_repo.list_stale_queued_runs(
+            tenant_id=admin_user.tenant_id,
+            stale_before=stale_before,
+            limit=1,
+        )
+        run_scoped = await run_repo.list_stale_queued_runs(
+            tenant_id=admin_user.tenant_id,
+            flow_id=first_flow.id,
+            run_id=stale_first_flow.id,
+            stale_before=stale_before,
+            limit=10,
+        )
+
+        assert [item.id for item in first_flow_stale] == [stale_first_flow.id]
+        assert [item.id for item in oldest_only] == [stale_second_flow.id]
+        assert [item.id for item in run_scoped] == [stale_first_flow.id]
+
+        claimed = await run_repo.claim_stale_queued_run_for_redispatch(
+            run_id=stale_first_flow.id,
+            tenant_id=admin_user.tenant_id,
+            stale_before=stale_before,
+            flow_id=first_flow.id,
+        )
+        second_claim = await run_repo.claim_stale_queued_run_for_redispatch(
+            run_id=stale_first_flow.id,
+            tenant_id=admin_user.tenant_id,
+            stale_before=stale_before,
+            flow_id=first_flow.id,
+        )
+
+        assert claimed is not None
+        assert claimed.id == stale_first_flow.id
+        assert second_claim is None

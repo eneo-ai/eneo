@@ -3,30 +3,18 @@
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { createEventDispatcher, onMount } from "svelte";
   import { slide } from "svelte/transition";
-  import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { m } from "$lib/paraglide/messages";
-  import { browser } from "$app/environment";
 
   export let flow: Flow;
   export let activeStepId: string | null;
 
   const dispatch = createEventDispatcher<{ nodeClick: string }>();
-  const mode = getFlowUserMode();
 
-  let isOpen = browser ? ($mode === "power_user" && window.innerWidth >= 1440) : false;
-  let prevMode = $mode;
+  let isOpen = false;
   let FlowGraphComponent: any = null;
   let graphMountKey = 0;
   let slideReady = false;
-
-  // Auto-open graph when user switches to "Avancerad" mode
-  $: if ($mode !== prevMode) {
-    prevMode = $mode;
-    if (browser && $mode === "power_user" && !isOpen) {
-      isOpen = true;
-    }
-  }
 
   // Reset slideReady when closing
   $: if (!isOpen) slideReady = false;
@@ -55,6 +43,8 @@
   <button
     class="hover:bg-hover-dimmer flex w-full items-center justify-between px-4 py-2 text-sm font-medium"
     on:click={toggle}
+    aria-expanded={isOpen}
+    aria-controls="flow-graph-panel"
   >
     <span>{m.flow_graph_preview()}</span>
     <span
@@ -66,14 +56,19 @@
   </button>
 
   {#if isOpen}
-    <div class="border-default h-[200px] border-t lg:h-[320px]" transition:slide={{ duration: 250 }} on:introend={handleIntroEnd}>
+    <div
+      id="flow-graph-panel"
+      class="border-default h-[200px] border-t lg:h-[320px]"
+      transition:slide={{ duration: 200 }}
+      on:introend={handleIntroEnd}
+    >
       {#if FlowGraphComponent && slideReady}
         {#key graphMountKey}
           <svelte:component
             this={FlowGraphComponent}
             {flow}
             {activeStepId}
-            onnodeclick={(id) => dispatch("nodeClick", id)}
+            onnodeclick={(id: string) => dispatch("nodeClick", id)}
           />
         {/key}
       {:else}

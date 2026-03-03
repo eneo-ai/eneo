@@ -135,8 +135,12 @@ export function initFlows(client) {
        * @throws {IntricError}
        */
       update: async ({ id, assistantId, update }) => {
-        const body = { ...update };
-        body.description = body.description?.trim?.() === "" ? null : body.description;
+        const body = /** @type {{description?: string | null} & Record<string, any>} */ ({
+          ...update
+        });
+        if (typeof body.description === "string" && body.description.trim() === "") {
+          body.description = null;
+        }
         return _fetch(`/api/v1/flows/${id}/assistants/${assistantId}/`, {
           method: "patch",
           requestBody: { "application/json": body }
@@ -203,6 +207,16 @@ export function initFlows(client) {
        */
       cancel: async (run) => {
         return _fetch(`/api/v1/flow-runs/${run.id}/cancel/`, { method: "post" });
+      },
+
+      /**
+       * Redispatch a stale queued flow run
+       * @param {{id: string}} run
+       * @returns {Promise<import('../types/resources').FlowRunRedispatchResult>}
+       * @throws {IntricError}
+       */
+      redispatch: async (run) => {
+        return _fetch(`/api/v1/flow-runs/${run.id}/redispatch/`, { method: "post" });
       },
 
       /**

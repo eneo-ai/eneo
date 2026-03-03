@@ -3,8 +3,8 @@ from __future__ import annotations
 from functools import partial
 from uuid import UUID
 
-import anyio
 from celery import Celery
+from anyio.to_thread import run_sync
 
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
@@ -33,7 +33,7 @@ class CeleryFlowExecutionBackend:
         tenant_id: UUID,
         user_id: UUID | None,
     ) -> None:
-        await anyio.to_thread.run_sync(
+        await run_sync(
             partial(
                 self.celery_app.send_task,
                 FLOW_EXECUTE_TASK_NAME,

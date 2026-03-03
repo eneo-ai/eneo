@@ -81,6 +81,7 @@ def _runtime_step(
         step_id=uuid4(),
         step_order=step_order,
         assistant_id=uuid4(),
+        user_description=None,
         input_source=input_source,
         input_bindings=input_bindings,
         input_config=None,
@@ -127,6 +128,22 @@ def _completed_step_result(
         created_at=now,
         updated_at=now,
     )
+
+
+def _mock_assistant_for_execute_step(*, response_text: str = "ok") -> MagicMock:
+    assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
+    assistant.completion_model_kwargs = MagicMock()
+    assistant.completion_model_kwargs.model_copy.return_value = assistant.completion_model_kwargs
+    assistant.completion_model_kwargs.model_dump.return_value = {}
+    assistant.completion_model = SimpleNamespace(id=uuid4(), name="test", provider_type="test")
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(
+            completion=response_text,
+            total_token_count=3,
+        )
+    )
+    return assistant
 
 
 # --- RuntimeStep extended fields ---
@@ -364,6 +381,137 @@ async def test_image_requires_valid_files(user):
 
     with pytest.raises(TypedIOValidationException, match="not yet supported|requires"):
         await executor._execute_step(step=step, run=run)
+
+
+@pytest.mark.asyncio
+async def test_json_input_contract_rejects_unparseable_json(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": "not valid json"},
+    )
+    step = _runtime_step(
+        input_type="json",
+        input_contract={"type": "object"},
+    )
+    mock_assistant = MagicMock()
+    mock_assistant.get_prompt_text.return_value = ""
+    executor._load_assistant = AsyncMock(return_value=mock_assistant)
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(step=step, run=run)
+
+    assert exc.value.code == "typed_io_invalid_json_input"
+
+
+@pytest.mark.asyncio
+async def test_text_input_contract_accepts_json_object_string(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": '{"title":"Sakerhetsanalys"}'},
+    )
+    step = _runtime_step(
+        input_type="text",
+        input_contract={
+            "type": "object",
+            "required": ["title"],
+            "properties": {"title": {"type": "string"}},
+        },
+    )
+    executor._load_assistant = AsyncMock(return_value=_mock_assistant_for_execute_step())
+
+    output = await executor._execute_step(step=step, run=run)
+
+    assert output.input_text == '{"title":"Sakerhetsanalys"}'
+    assert output.full_text == "ok"
+    assert output.contract_validation == {
+        "schema_type_hint": "object",
+        "parse_attempted": True,
+        "parse_succeeded": True,
+        "candidate_type": "dict",
+    }
+
+
+@pytest.mark.asyncio
+async def test_text_input_contract_accepts_json_array_string(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": '["a","b"]'},
+    )
+    step = _runtime_step(
+        input_type="text",
+        input_contract={
+            "type": "array",
+            "items": {"type": "string"},
+        },
+    )
+    executor._load_assistant = AsyncMock(return_value=_mock_assistant_for_execute_step())
+
+    output = await executor._execute_step(step=step, run=run)
+
+    assert output.input_text == '["a","b"]'
+    assert output.full_text == "ok"
+    assert output.contract_validation == {
+        "schema_type_hint": "array",
+        "parse_attempted": True,
+        "parse_succeeded": True,
+        "candidate_type": "list",
+    }
+
+
+@pytest.mark.asyncio
+async def test_text_input_contract_rejects_non_json_for_object_schema(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": "not json at all"},
+    )
+    step = _runtime_step(
+        input_type="text",
+        input_contract={
+            "type": "object",
+            "required": ["title"],
+            "properties": {"title": {"type": "string"}},
+        },
+    )
+    executor._load_assistant = AsyncMock(return_value=_mock_assistant_for_execute_step())
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(step=step, run=run)
+
+    assert exc.value.code == "typed_io_contract_violation"
+
+
+@pytest.mark.asyncio
+async def test_text_input_contract_string_schema_keeps_string_behavior(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": '{"title":"still a string"}'},
+    )
+    step = _runtime_step(
+        input_type="text",
+        input_contract={"type": "string"},
+    )
+    executor._load_assistant = AsyncMock(return_value=_mock_assistant_for_execute_step())
+
+    output = await executor._execute_step(step=step, run=run)
+
+    assert output.input_text == '{"title":"still a string"}'
+    assert output.full_text == "ok"
+    assert output.contract_validation == {
+        "schema_type_hint": "string",
+        "parse_attempted": False,
+        "parse_succeeded": False,
+        "candidate_type": "str",
+    }
 
 
 # --- _parse_runtime_steps extended fields ---

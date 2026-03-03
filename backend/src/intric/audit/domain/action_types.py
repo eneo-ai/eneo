@@ -79,6 +79,7 @@ class ActionType(str, Enum):
     FLOW_PUBLISHED = "flow_published"
     FLOW_UNPUBLISHED = "flow_unpublished"
     FLOW_RUN_CREATED = "flow_run_created"
+    FLOW_RUN_REDISPATCHED = "flow_run_redispatched"
     FLOW_RUN_CANCELLED = "flow_run_cancelled"
     FLOW_CLASSIFICATION_OVERRIDE = "flow_classification_override"
     FLOW_RUN_DOCUMENT_GENERATED = "flow_run_document_generated"

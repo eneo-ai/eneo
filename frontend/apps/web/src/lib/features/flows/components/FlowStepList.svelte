@@ -4,7 +4,7 @@
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
   import { IconPlus } from "@intric/icons/plus";
-  import { Button } from "@intric/ui";
+  import { Button, Dialog } from "@intric/ui";
   import { createEventDispatcher } from "svelte";
   import { m } from "$lib/paraglide/messages";
 
@@ -20,16 +20,9 @@
   const mode = getFlowUserMode();
   const flowEditor = getFlowEditor();
 
-  // --- DnD state ---
-  let draggedIndex: number | null = null;
-  let dropTargetIndex: number | null = null;
-
-  function fixFirstStepInputSource(updated: FlowStep[]): FlowStep[] {
-    if (updated[0] && (updated[0].input_source === "previous_step" || updated[0].input_source === "all_previous_steps")) {
-      updated[0] = { ...updated[0], input_source: "flow_input" };
-    }
-    return updated;
-  }
+  let showRemoveConfirm: Dialog.OpenState;
+  let pendingRemoveIndex: number | null = null;
+  let pendingRemoveLabel = "";
 
   function moveStep(index: number, direction: -1 | 1) {
     const newIndex = index + direction;
@@ -43,148 +36,88 @@
       step.step_order = i + 1;
     });
 
-    dispatch("stepsChanged", fixFirstStepInputSource(updated));
+    dispatch("stepsChanged", updated);
   }
 
-  function reorderStep(fromIndex: number, toIndex: number) {
-    if (fromIndex === toIndex) return;
+  function requestRemoveStep(index: number) {
+    const targetStep = steps[index];
+    pendingRemoveIndex = index;
+    pendingRemoveLabel =
+      (targetStep?.user_description ?? "").trim() ||
+      m.flow_step_fallback_label({ order: String(targetStep?.step_order ?? index + 1) });
+    $showRemoveConfirm = true;
+  }
 
-    const updated = [...steps];
-    const [moved] = updated.splice(fromIndex, 1);
-    updated.splice(toIndex, 0, moved);
-
+  function confirmRemove() {
+    if (pendingRemoveIndex === null) return;
+    const updated = steps.filter((_, i) => i !== pendingRemoveIndex);
     updated.forEach((step, i) => {
       step.step_order = i + 1;
     });
-
-    dispatch("stepsChanged", fixFirstStepInputSource(updated));
-  }
-
-  function removeStep(index: number) {
-    const updated = steps.filter((_, i) => i !== index);
-    updated.forEach((step, i) => {
-      step.step_order = i + 1;
-    });
-    dispatch("stepsChanged", fixFirstStepInputSource(updated));
-  }
-
-  // --- DnD handlers ---
-  function handleDragStart(e: CustomEvent<number>) {
-    draggedIndex = e.detail;
-  }
-
-  function handleDragEnd() {
-    draggedIndex = null;
-    dropTargetIndex = null;
-  }
-
-  function handleDragOver(e: DragEvent) {
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    if (draggedIndex === null) return;
-
-    const list = (e.currentTarget as HTMLElement);
-    const cards = Array.from(list.querySelectorAll("[role='option']"));
-    const mouseY = e.clientY;
-
-    let targetIdx = cards.length;
-    for (let i = 0; i < cards.length; i++) {
-      const rect = cards[i].getBoundingClientRect();
-      if (mouseY < rect.top + rect.height / 2) {
-        targetIdx = i;
-        break;
-      }
-    }
-
-    // Adjust for the dragged item's original position
-    dropTargetIndex = targetIdx;
-  }
-
-  function handleDrop(e: DragEvent) {
-    e.preventDefault();
-    if (draggedIndex === null || dropTargetIndex === null) return;
-
-    let toIndex = dropTargetIndex;
-    // If dropping below the original position, adjust for the removed item
-    if (toIndex > draggedIndex) toIndex--;
-    if (toIndex !== draggedIndex) {
-      reorderStep(draggedIndex, toIndex);
-    }
-
-    draggedIndex = null;
-    dropTargetIndex = null;
-  }
-
-  function handleDragLeave(e: DragEvent) {
-    // Only clear when leaving the list itself, not child elements
-    const related = e.relatedTarget as Node | null;
-    if (related && (e.currentTarget as HTMLElement).contains(related)) return;
-    dropTargetIndex = null;
+    dispatch("stepsChanged", updated);
+    $showRemoveConfirm = false;
+    pendingRemoveIndex = null;
   }
 </script>
 
 <div class="flex h-full flex-col">
   <div class="border-default border-b px-3 py-2">
-    <h3 class="text-xs font-semibold uppercase tracking-wider text-secondary">
+    <h3 class="text-sm font-semibold uppercase tracking-wider text-secondary">
       {m.flow_steps()} ({steps.length})
     </h3>
   </div>
 
   <div
     class="flex-1 overflow-y-auto"
-    role="listbox"
+    role="list"
     aria-label={m.flow_steps()}
-    on:dragover={handleDragOver}
-    on:drop={handleDrop}
-    on:dragleave={handleDragLeave}
   >
     {#if steps.length === 0}
       <div class="flex flex-col items-center gap-3 px-4 py-8 text-center">
-        <p class="text-secondary text-sm">{m.flow_steps_empty()}</p>
-        {#if !isPublished}
-          <Button variant="primary" on:click={() => flowEditor.addStep()}>
-            {m.flow_empty_add_step()}
-          </Button>
-        {/if}
+        <p class="text-sm text-secondary">{m.flow_steps_empty()}</p>
+        <p class="max-w-[200px] text-xs text-muted">{m.flow_step_list_empty_hint()}</p>
       </div>
     {:else}
       {#each steps as step, index (step.id ?? index)}
-        <!-- Drop indicator line -->
-        {#if draggedIndex !== null && dropTargetIndex === index && dropTargetIndex !== draggedIndex && dropTargetIndex !== draggedIndex + 1}
-          <div class="h-0.5 bg-blue-400 mx-2 rounded-full transition-all duration-100"></div>
-        {/if}
-
         <FlowStepCard
           {step}
-          {index}
           isActive={activeStepId === step.id}
           {isPublished}
           isPowerUser={$mode === "power_user"}
           canMoveUp={index > 0}
           canMoveDown={index < steps.length - 1}
-          isDragging={draggedIndex === index}
           on:click={() => dispatch("selectStep", step.id ?? null)}
           on:moveUp={() => moveStep(index, -1)}
           on:moveDown={() => moveStep(index, 1)}
-          on:remove={() => removeStep(index)}
-          on:dragstart={handleDragStart}
-          on:dragend={handleDragEnd}
+          on:remove={() => requestRemoveStep(index)}
         />
       {/each}
-
-      <!-- Drop indicator at the end -->
-      {#if draggedIndex !== null && dropTargetIndex === steps.length && dropTargetIndex !== draggedIndex + 1}
-        <div class="h-0.5 bg-blue-400 mx-2 rounded-full transition-all duration-100"></div>
-      {/if}
     {/if}
   </div>
 
   {#if !isPublished}
     <div class="border-default border-t p-3">
-      <Button variant="outlined" class="w-full justify-center hover:border-blue-300 hover:text-blue-600 transition-colors duration-200" on:click={() => flowEditor.addStep()}>
-        <IconPlus size="sm" />
+      <button
+        type="button"
+        class="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-default py-2.5 text-sm text-secondary transition-colors hover:border-accent-default hover:bg-accent-dimmer hover:text-accent-default"
+        on:click={() => flowEditor.addStep()}
+      >
+        <IconPlus class="size-4" />
         {m.flow_step_add()}
-      </Button>
+      </button>
     </div>
   {/if}
 </div>
+
+<Dialog.Root alert bind:isOpen={showRemoveConfirm}>
+  <Dialog.Content width="small">
+    <Dialog.Title>{m.flow_step_remove()}</Dialog.Title>
+    <Dialog.Description>
+      {m.flow_step_remove_confirm_named({ name: pendingRemoveLabel })}
+    </Dialog.Description>
+    <Dialog.Controls let:close>
+      <Button is={close} variant="outlined">{m.cancel()}</Button>
+      <Button variant="destructive" on:click={confirmRemove}>{m.delete()}</Button>
+    </Dialog.Controls>
+  </Dialog.Content>
+</Dialog.Root>

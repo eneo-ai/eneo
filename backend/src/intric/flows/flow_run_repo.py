@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Sequence, TypedDict
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -21,6 +21,12 @@ from intric.flows.flow_factory import FlowFactory
 from intric.main.exceptions import NotFoundException
 
 
+class PreseedStep(TypedDict):
+    step_id: UUID
+    assistant_id: UUID
+    step_order: int
+
+
 class FlowRunRepository:
     """Tenant-scoped repository for flow run lifecycle and run evidence."""
 
@@ -38,7 +44,7 @@ class FlowRunRepository:
         user_id: UUID,
         tenant_id: UUID,
         input_payload_json: dict[str, Any] | None,
-        preseed_steps: list[dict[str, Any]],
+        preseed_steps: Sequence["PreseedStep"],
     ) -> FlowRun:
         run_row = await self.session.scalar(
             sa.insert(FlowRuns)
@@ -123,6 +129,56 @@ class FlowRunRepository:
 
         rows = (await self.session.execute(stmt)).scalars().all()
         return [self.factory.from_flow_run_db(row) for row in rows]
+
+    async def list_stale_queued_runs(
+        self,
+        *,
+        tenant_id: UUID,
+        stale_before: datetime,
+        flow_id: UUID | None = None,
+        run_id: UUID | None = None,
+        limit: int = 25,
+    ) -> list[FlowRun]:
+        stmt = (
+            sa.select(FlowRuns)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(FlowRuns.updated_at <= stale_before)
+            .order_by(FlowRuns.updated_at.asc())
+            .limit(limit)
+        )
+        if flow_id is not None:
+            stmt = stmt.where(FlowRuns.flow_id == flow_id)
+        if run_id is not None:
+            stmt = stmt.where(FlowRuns.id == run_id)
+
+        rows = (await self.session.execute(stmt)).scalars().all()
+        return [self.factory.from_flow_run_db(row) for row in rows]
+
+    async def claim_stale_queued_run_for_redispatch(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        stale_before: datetime,
+        flow_id: UUID | None = None,
+    ) -> FlowRun | None:
+        stmt = (
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(FlowRuns.updated_at <= stale_before)
+        )
+        if flow_id is not None:
+            stmt = stmt.where(FlowRuns.flow_id == flow_id)
+
+        claimed = await self.session.scalar(
+            stmt.values(updated_at=datetime.now(timezone.utc)).returning(FlowRuns)
+        )
+        if claimed is None:
+            return None
+        return self.factory.from_flow_run_db(claimed)
 
     async def update_status(
         self,

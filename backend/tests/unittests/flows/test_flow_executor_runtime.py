@@ -16,7 +16,7 @@ from intric.flows.flow import (
     FlowVersion,
 )
 from intric.flows.runtime.executor import FlowRunExecutor, RunExecutionState, RuntimeStep, StepExecutionOutput
-from intric.main.exceptions import BadRequestException
+from intric.main.exceptions import BadRequestException, TypedIOValidationException
 
 
 def _run(*, status: FlowRunStatus, user) -> FlowRun:
@@ -146,6 +146,12 @@ async def test_webhook_failure_keeps_completed_step_evidence(user):
             num_tokens_output=11,
             effective_prompt="prompt",
             model_parameters_json={"temperature": 0.2},
+            contract_validation={
+                "schema_type_hint": "object",
+                "parse_attempted": True,
+                "parse_succeeded": True,
+                "candidate_type": "dict",
+            },
         )
     )
     executor._deliver_webhook = AsyncMock(side_effect=RuntimeError("webhook unavailable"))
@@ -169,6 +175,12 @@ async def test_webhook_failure_keeps_completed_step_evidence(user):
         "input_source": "flow_input",
         "used_question_binding": False,
         "legacy_prompt_binding_used": False,
+        "contract_validation": {
+            "schema_type_hint": "object",
+            "parse_attempted": True,
+            "parse_succeeded": True,
+            "candidate_type": "dict",
+        },
     }
     assert second_saved.status == FlowStepResultStatus.COMPLETED
     assert second_saved.output_payload_json["webhook_delivered"] is False
@@ -336,6 +348,158 @@ async def test_step_execution_failure_marks_attempt_and_run_failed(user):
     saved_result = flow_repo.save_step_result.await_args.args[1]
     assert saved_result.status == FlowStepResultStatus.FAILED
     assert saved_result.error_message == "llm boom"
+
+
+@pytest.mark.asyncio
+async def test_typed_validation_failure_persists_input_context_for_export(user):
+    executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    step_id = uuid4()
+    assistant_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        step_id=step_id,
+        assistant_id=assistant_id,
+    )
+
+    flow_run_repo.get = AsyncMock(side_effect=[queued_run, running_run])
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
+    flow_run_repo.create_or_get_attempt_started = AsyncMock()
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_run_repo.update_status = AsyncMock()
+    flow_version_repo.get = AsyncMock(
+        return_value=FlowVersion(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum="checksum",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": 1,
+                        "assistant_id": str(assistant_id),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                    }
+                ]
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+    typed_exc = TypedIOValidationException(
+        "Step 1 input: 'not json' is not of type 'object'",
+        code="typed_io_contract_violation",
+    )
+    typed_exc.input_payload_json = {
+        "text": "not json",
+        "source_text": "not json",
+        "input_source": "flow_input",
+        "contract_validation": {
+            "schema_type_hint": "object",
+            "parse_attempted": True,
+            "parse_succeeded": False,
+            "candidate_type": "str",
+        },
+    }
+    typed_exc.effective_prompt = "Categorize this"
+    executor._execute_step = AsyncMock(side_effect=typed_exc)
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        celery_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result["status"] == "failed"
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert finish_kwargs["status"] == FlowStepAttemptStatus.FAILED
+    assert finish_kwargs["error_code"] == "typed_io_contract_violation"
+    saved_result = flow_repo.save_step_result.await_args.args[1]
+    assert saved_result.status == FlowStepResultStatus.FAILED
+    assert saved_result.input_payload_json == typed_exc.input_payload_json
+    assert saved_result.effective_prompt == "Categorize this"
+
+
+@pytest.mark.asyncio
+async def test_typed_validation_failure_without_attached_context_uses_fallback_payload(user):
+    executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    step_id = uuid4()
+    assistant_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        step_id=step_id,
+        assistant_id=assistant_id,
+    )
+
+    flow_run_repo.get = AsyncMock(side_effect=[queued_run, running_run])
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
+    flow_run_repo.create_or_get_attempt_started = AsyncMock()
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_run_repo.update_status = AsyncMock()
+    flow_version_repo.get = AsyncMock(
+        return_value=FlowVersion(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum="checksum",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": 1,
+                        "assistant_id": str(assistant_id),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                    }
+                ]
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+    executor._execute_step = AsyncMock(
+        side_effect=TypedIOValidationException(
+            "Step 1 output: expected object",
+            code="typed_io_contract_violation",
+        )
+    )
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        celery_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result["status"] == "failed"
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert finish_kwargs["status"] == FlowStepAttemptStatus.FAILED
+    assert finish_kwargs["error_code"] == "typed_io_contract_violation"
+    saved_result = flow_repo.save_step_result.await_args.args[1]
+    assert saved_result.status == FlowStepResultStatus.FAILED
+    assert saved_result.input_payload_json == {
+        "text": "",
+        "source_text": "",
+        "input_source": "flow_input",
+        "used_question_binding": False,
+        "legacy_prompt_binding_used": False,
+    }
 
 
 @pytest.mark.asyncio
@@ -582,6 +746,7 @@ def _runtime_step(
         step_id=uuid4(),
         step_order=step_order,
         assistant_id=uuid4(),
+        user_description=None,
         input_source=input_source,
         input_bindings=input_bindings,
         input_config=None,
@@ -1159,6 +1324,7 @@ async def test_file_cache_hit(user):
         step_id=uuid4(),
         step_order=1,
         assistant_id=uuid4(),
+        user_description=None,
         input_source="flow_input",
         input_bindings=None,
         input_config=None,

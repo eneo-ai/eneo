@@ -150,9 +150,80 @@ class FlowRunPublic(BaseModel):
     updated_at: datetime
 
 
+class FlowRunRedispatchResponse(BaseModel):
+    run: FlowRunPublic
+    redispatched_count: int
+
+
 class GraphResponse(BaseModel):
     nodes: list[dict[str, Any]]
     edges: list[dict[str, Any]]
+
+
+class FlowRunDebugIoTypes(BaseModel):
+    input: str | None = None
+    output: str | None = None
+
+
+class FlowRunDebugInput(BaseModel):
+    source: str | None = None
+    type: str | None = None
+    contract: dict[str, Any] | None = None
+    bindings: dict[str, Any] | None = None
+    config: dict[str, Any] | None = None
+
+
+class FlowRunDebugOutput(BaseModel):
+    mode: str | None = None
+    type: str | None = None
+    contract: dict[str, Any] | None = None
+    classification: int | None = None
+    config: dict[str, Any] | None = None
+
+
+class FlowRunDebugMcp(BaseModel):
+    policy: str | None = None
+    tool_allowlist: list[str] = Field(default_factory=list)
+
+
+class FlowRunDebugStep(BaseModel):
+    step_id: str | None = None
+    step_order: int | None = None
+    assistant_id: str | None = None
+    io_types: FlowRunDebugIoTypes
+    input: FlowRunDebugInput
+    output: FlowRunDebugOutput
+    mcp: FlowRunDebugMcp
+
+
+class FlowRunDebugRun(BaseModel):
+    run_id: str
+    flow_id: str
+    flow_version: int
+    status: str
+
+
+class FlowRunDebugDefinition(BaseModel):
+    flow_id: str
+    version: int
+    checksum: str
+    steps_count: int
+
+
+class FlowRunDebugSecurity(BaseModel):
+    redaction_applied: bool
+    classification_field: str
+    mcp_policy_field: str
+
+
+class FlowRunDebugExport(BaseModel):
+    schema_version: str
+    generated_at: datetime
+    run: FlowRunDebugRun
+    definition: FlowRunDebugDefinition
+    definition_snapshot: dict[str, Any]
+    steps: list[FlowRunDebugStep]
+    security: FlowRunDebugSecurity
 
 
 class FlowRunEvidenceResponse(BaseModel):
@@ -160,3 +231,4 @@ class FlowRunEvidenceResponse(BaseModel):
     definition_snapshot: dict[str, Any]
     step_results: list[dict[str, Any]]
     step_attempts: list[dict[str, Any]]
+    debug_export: FlowRunDebugExport

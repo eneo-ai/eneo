@@ -33,7 +33,7 @@ def _step(step_order: int = 1) -> FlowStep:
         id=uuid4(),
         assistant_id=uuid4(),
         step_order=step_order,
-        user_description="Step",
+        user_description=f"Step {step_order}",
         input_source="flow_input",
         input_type="text",
         output_mode="pass_through",
@@ -277,6 +277,36 @@ async def test_create_flow_rejects_header_secrets_without_encryption_key(user):
             steps=[step],
             metadata_json=None,
         )
+
+
+@pytest.mark.asyncio
+async def test_create_flow_allows_empty_headers_without_encryption_key(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_repo.create.side_effect = lambda flow, tenant_id: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=version_repo,
+        encryption_service=None,
+    )
+    step = _step(step_order=1).model_copy(
+        update={
+            "input_config": {
+                "url": "https://example.org/input",
+                "headers": {},
+            }
+        }
+    )
+
+    created = await service.create_flow(
+        space_id=uuid4(),
+        name="Flow",
+        steps=[step],
+        metadata_json=None,
+    )
+
+    assert created.steps[0].input_config["headers"] == {}
 
 
 @pytest.mark.asyncio
@@ -575,3 +605,160 @@ async def test_update_flow_assistant_passes_include_hidden(user):
         include_hidden=True,
         name="Updated",
     )
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_duplicate_step_names_case_insensitive(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    steps = [
+        _step(step_order=1).model_copy(update={"user_description": "Sammanfattning"}),
+        _step(step_order=2).model_copy(update={"user_description": "sammanfattning"}),
+    ]
+
+    with pytest.raises(BadRequestException, match="Step names must be unique"):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=steps,
+            metadata_json=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_invalid_form_field_type(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    with pytest.raises(BadRequestException, match="must be one of"):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[_step()],
+            metadata_json={
+                "form_schema": {
+                    "fields": [
+                        {"name": "Namn på brukare", "type": "unsupported_type", "required": True}
+                    ]
+                }
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_multiselect_without_options(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    with pytest.raises(BadRequestException, match="options must be a list"):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[_step()],
+            metadata_json={
+                "form_schema": {
+                    "fields": [
+                        {"name": "Typ av insats", "type": "multiselect", "required": True}
+                    ]
+                }
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_options_for_non_multiselect(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    with pytest.raises(BadRequestException, match="only valid for multiselect"):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[_step()],
+            metadata_json={
+                "form_schema": {
+                    "fields": [
+                        {
+                            "name": "Personnummer",
+                            "type": "text",
+                            "required": True,
+                            "options": ["x"],
+                        }
+                    ]
+                }
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_flow_normalizes_legacy_form_field_types(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_repo.create.side_effect = lambda flow, tenant_id: flow
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    created = await service.create_flow(
+        space_id=uuid4(),
+        name="Flow",
+        steps=[_step()],
+        metadata_json={
+            "form_schema": {
+                "fields": [
+                    {"name": "Email", "type": "email", "required": True},
+                    {"name": "Anteckning", "type": "textarea", "required": False},
+                ]
+            }
+        },
+    )
+
+    field_types = [field["type"] for field in created.metadata_json["form_schema"]["fields"]]
+    assert field_types == ["text", "text"]
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_reserved_form_field_alias_names(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    with pytest.raises(BadRequestException, match="reserved"):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[_step()],
+            metadata_json={
+                "form_schema": {
+                    "fields": [
+                        {"name": "flow_input", "type": "text", "required": True}
+                    ]
+                }
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_form_field_name_conflicting_with_step_name(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    with pytest.raises(BadRequestException, match="conflicts with form field name"):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[
+                _step(step_order=1).model_copy(update={"user_description": "Sammanfattning"}),
+                _step(step_order=2).model_copy(update={"user_description": "Analys"}),
+            ],
+            metadata_json={
+                "form_schema": {
+                    "fields": [
+                        {"name": "Sammanfattning", "type": "text", "required": True}
+                    ]
+                }
+            },
+        )

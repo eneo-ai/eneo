@@ -22,8 +22,23 @@
   let inputText = "";
   let isSubmitting = false;
 
-  type FormField = { name: string; type: string; required?: boolean };
-  $: formFields = ((flow.metadata_json?.form_schema as { fields: FormField[] })?.fields ?? []) as FormField[];
+  type FormFieldType = "text" | "number" | "date" | "select" | "multiselect" | "email" | "textarea" | "string";
+  type FormField = {
+    name: string;
+    type: FormFieldType;
+    required?: boolean;
+    options?: string[];
+    order?: number;
+  };
+  const LEGACY_TEXT_TYPES = new Set<FormFieldType>(["email", "textarea", "string"]);
+  $: formFields = (((flow.metadata_json?.form_schema as { fields: FormField[] })?.fields ?? []) as FormField[])
+    .map((field, index) => ({
+      ...field,
+      type: normalizeFieldType(field.type),
+      options: Array.isArray(field.options) ? field.options.filter((option) => option.trim().length > 0) : [],
+      order: typeof field.order === "number" ? field.order : index + 1,
+    }))
+    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
   $: hasFormFields = formFields.length > 0;
 
   $: stepCount = flow.steps?.length ?? 0;
@@ -32,7 +47,40 @@
   $: firstStep = flow.steps?.length > 0 ? flow.steps[0] : null;
   $: needsFileUpload = firstStep?.input_type === "document" || firstStep?.input_type === "file";
 
-  let formValues: Record<string, string> = {};
+  let formValues: Record<string, unknown> = {};
+
+  function normalizeFieldType(type: FormFieldType | string | undefined): Exclude<FormFieldType, "email" | "textarea" | "string"> {
+    const normalized = (type ?? "text").toLowerCase() as FormFieldType;
+    if (LEGACY_TEXT_TYPES.has(normalized)) return "text";
+    if (normalized === "number") return "number";
+    if (normalized === "date") return "date";
+    if (normalized === "select") return "select";
+    if (normalized === "multiselect") return "multiselect";
+    return "text";
+  }
+
+  function getFieldValue(field: FormField): string {
+    const value = formValues[field.name];
+    if (Array.isArray(value)) return "";
+    if (value === null || value === undefined) return "";
+    return String(value);
+  }
+
+  function getFieldMultiValue(field: FormField): string[] {
+    const value = formValues[field.name];
+    if (Array.isArray(value)) return value.map((item) => String(item));
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.split(",").map((item) => item.trim()).filter((item) => item.length > 0);
+    }
+    return [];
+  }
+
+  function setFieldValue(field: FormField, value: unknown) {
+    formValues = {
+      ...formValues,
+      [field.name]: value
+    };
+  }
 
   // File upload state
   let uploadedFiles: UploadedFile[] = [];
@@ -44,7 +92,18 @@
     if (lastInputPayload) {
       if (hasFormFields) {
         for (const field of formFields) {
-          formValues[field.name] = String(lastInputPayload[field.name] ?? "");
+          const previous = lastInputPayload[field.name];
+          if (field.type === "multiselect") {
+            formValues[field.name] = Array.isArray(previous)
+              ? previous.map((item) => String(item))
+              : typeof previous === "string"
+                ? previous.split(",").map((item) => item.trim()).filter((item) => item.length > 0)
+                : [];
+          } else if (previous !== undefined) {
+            formValues[field.name] = previous;
+          } else {
+            formValues[field.name] = "";
+          }
         }
         formValues = formValues;
       } else {
@@ -100,7 +159,17 @@
     try {
       let payload: Record<string, unknown>;
       if (hasFormFields) {
-        payload = { ...formValues };
+        payload = {};
+        for (const field of formFields) {
+          if (field.type === "multiselect") {
+            payload[field.name] = getFieldMultiValue(field);
+          } else if (field.type === "number") {
+            const raw = getFieldValue(field).trim();
+            payload[field.name] = raw.length > 0 ? Number(raw) : raw;
+          } else {
+            payload[field.name] = getFieldValue(field);
+          }
+        }
       } else {
         payload = { text: inputText };
       }
@@ -139,28 +208,53 @@
         </p>
 
         {#if hasFormFields}
-          {#each formFields as field}
+          {#each formFields as field, fieldIndex}
             <div class="flex flex-col gap-1">
-              <label class="text-sm font-medium">
+              <label class="text-sm font-medium" for={`flow-input-${fieldIndex}`}>
                 {field.name}
                 {#if field.required}
                   <span class="text-red-500">*</span>
                 {/if}
               </label>
-              {#if field.type === "textarea"}
-                <textarea
-                  class="border-default bg-primary ring-default min-h-[80px] w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
-                  bind:value={formValues[field.name]}
-                  placeholder={field.name}
+              {#if field.type === "multiselect"}
+                <select
+                  id={`flow-input-${fieldIndex}`}
+                  class="border-default bg-primary ring-default min-h-[100px] w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
+                  multiple
                   required={field.required}
-                ></textarea>
+                  on:change={(e) => {
+                    const selected = Array.from(e.currentTarget.selectedOptions).map((option) => option.value);
+                    setFieldValue(field, selected);
+                  }}
+                >
+                  {#each field.options ?? [] as option}
+                    <option value={option} selected={getFieldMultiValue(field).includes(option)}>
+                      {option}
+                    </option>
+                  {/each}
+                </select>
+              {:else if field.type === "select"}
+                <select
+                  id={`flow-input-${fieldIndex}`}
+                  class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
+                  value={getFieldValue(field)}
+                  required={field.required}
+                  on:change={(e) => setFieldValue(field, e.currentTarget.value)}
+                >
+                  <option value="">{m.flow_select_placeholder()}</option>
+                  {#each field.options ?? [] as option}
+                    <option value={option}>{option}</option>
+                  {/each}
+                </select>
               {:else}
                 <input
-                  type={field.type === "number" ? "number" : field.type === "email" ? "email" : "text"}
+                  id={`flow-input-${fieldIndex}`}
+                  type={field.type === "number" ? "number" : field.type === "date" ? "date" : "text"}
                   class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
-                  bind:value={formValues[field.name]}
+                  value={getFieldValue(field)}
                   placeholder={field.name}
                   required={field.required}
+                  on:input={(e) => setFieldValue(field, e.currentTarget.value)}
                 />
               {/if}
             </div>
