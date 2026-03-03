@@ -970,12 +970,15 @@ async def estimate_tokens(
     if not assistant.completion_model:
         raise HTTPException(status_code=400, detail="Assistant has no model configured")
 
-    model_name = assistant.completion_model.name
-    token_limit = assistant.completion_model.token_limit
+    from intric.completion_models.infrastructure.context_builder import CONTEXT_SIZE_BUFFER
+
+    model = assistant.completion_model
+    model_name = model.name
+    effective_limit = max(0, model.max_input_tokens - model.max_output_tokens - CONTEXT_SIZE_BUFFER)
 
     max_chars = min(
         MAX_ABSOLUTE_TEXT_LENGTH,
-        int(token_limit * DEFAULT_CHARS_PER_TOKEN) if token_limit else MAX_ABSOLUTE_TEXT_LENGTH,
+        int(model.max_input_tokens * DEFAULT_CHARS_PER_TOKEN),
     )
 
     text = payload.text or ""
@@ -1032,12 +1035,12 @@ async def estimate_tokens(
             file_token_details[str(file.id)] = tokens
 
     total_tokens = prompt_tokens + text_tokens + file_tokens
-    percentage = (total_tokens / token_limit) * 100 if token_limit > 0 else 0
+    percentage = (total_tokens / effective_limit) * 100 if effective_limit > 0 else 0
 
     return TokenEstimateResponse(
         tokens=total_tokens,
         percentage=round(percentage, 2),
-        limit=token_limit,
+        limit=effective_limit,
         breakdown=TokenEstimateBreakdown(
             prompt=prompt_tokens,
             text=text_tokens,

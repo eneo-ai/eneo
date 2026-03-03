@@ -32,7 +32,6 @@ from intric.model_providers.infrastructure.tenant_model_credential_resolver impo
 
 logger = get_logger(__name__)
 
-TOKENS_RESERVED_FOR_COMPLETION = 1000
 
 # Regex to match Qwen3 thinking blocks: <think>...</think>
 THINKING_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
@@ -339,10 +338,8 @@ class TenantModelAdapter(CompletionModelAdapter):
             # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)
             # require it explicitly or return empty responses
             if "max_tokens" not in model_kwargs_dict and "max_completion_tokens" not in model_kwargs_dict:
-                # Use 1/4 of model's token limit, capped at 4096
-                default_max = min(self.model.token_limit // 4, 4096) if self.model.token_limit else 4096
-                model_kwargs_dict["max_tokens"] = default_max
-                logger.debug(f"Added default max_tokens={default_max} (from token_limit={self.model.token_limit})")
+                model_kwargs_dict["max_tokens"] = self.model.max_output_tokens
+                logger.debug(f"Added default max_tokens={self.model.max_output_tokens}")
 
             kwargs.update(model_kwargs_dict)
 
@@ -1001,7 +998,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         Returns:
             int: Maximum tokens available for input context
         """
-        return self.model.token_limit - TOKENS_RESERVED_FOR_COMPLETION
+        return self.model.max_input_tokens - self.model.max_output_tokens
 
     def get_logging_details(
         self, context: "Context", model_kwargs: dict
