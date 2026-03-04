@@ -6892,6 +6892,29 @@ export interface components {
         [key: string]: unknown;
       } | null;
     };
+    /** FlowRunDebugRag */
+    FlowRunDebugRag: {
+      /** Attempted */
+      attempted?: boolean | null;
+      /** Status */
+      status?: string | null;
+      /** Version */
+      version?: number | null;
+      /** Timeout Seconds */
+      timeout_seconds?: number | null;
+      /** Include Info Blobs */
+      include_info_blobs?: boolean | null;
+      /** Chunks Retrieved */
+      chunks_retrieved?: number | null;
+      /** Unique Sources */
+      unique_sources?: number | null;
+      /** Source Ids */
+      source_ids?: string[] | null;
+      /** Source Ids Short */
+      source_ids_short?: string[] | null;
+      /** Error Code */
+      error_code?: string | null;
+    };
     /** FlowRunDebugRun */
     FlowRunDebugRun: {
       /** Run Id */
@@ -6924,6 +6947,7 @@ export interface components {
       input: components["schemas"]["FlowRunDebugInput"];
       output: components["schemas"]["FlowRunDebugOutput"];
       mcp: components["schemas"]["FlowRunDebugMcp"];
+      rag?: components["schemas"]["FlowRunDebugRag"] | null;
     };
     /** FlowRunEvidenceResponse */
     FlowRunEvidenceResponse: {

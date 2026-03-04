@@ -10,7 +10,15 @@ from uuid import UUID
 import sqlalchemy as sa
 
 from intric.database.tables.tenant_table import Tenants
-from intric.flows.flow import Flow, FlowRun, FlowRunStatus, FlowStep, FlowVersion, JsonObject
+from intric.flows.flow import (
+    Flow,
+    FlowRun,
+    FlowRunStatus,
+    FlowStep,
+    FlowStepResult,
+    FlowVersion,
+    JsonObject,
+)
 from intric.flows.execution_backend import FlowExecutionBackend
 from intric.flows.flow_repo import FlowRepository
 from intric.flows.flow_run_repo import FlowRunRepository, PreseedStep
@@ -542,7 +550,11 @@ class FlowRunService:
             run_id=run.id,
             tenant_id=self.user.tenant_id,
         )
-        debug_export = self._build_debug_export(run=run, version=version)
+        debug_export = self._build_debug_export(
+            run=run,
+            version=version,
+            step_results=step_results,
+        )
         return {
             "run": cast(dict[str, Any], _redact_payload(run.model_dump(mode="json"))),
             "definition_snapshot": cast(dict[str, Any], _redact_payload(version.definition_json)),
@@ -557,18 +569,55 @@ class FlowRunService:
             "debug_export": cast(dict[str, Any], _redact_payload(debug_export)),
         }
 
-    def _build_debug_export(self, *, run: FlowRun, version: FlowVersion) -> dict[str, Any]:
+    def _build_debug_export(
+        self,
+        *,
+        run: FlowRun,
+        version: FlowVersion,
+        step_results: list[FlowStepResult] | None = None,
+    ) -> dict[str, Any]:
         definition_snapshot = (
             version.definition_json
             if isinstance(version.definition_json, dict)
             else {}
         )
+        rag_by_step_order: dict[int, dict[str, Any]] = {}
+        for result in step_results or []:
+            input_payload = getattr(result, "input_payload_json", None)
+            step_order = getattr(result, "step_order", None)
+            if not isinstance(input_payload, dict):
+                model_dump = getattr(result, "model_dump", None)
+                if callable(model_dump):
+                    dumped = model_dump(mode="json")
+                    if isinstance(dumped, dict):
+                        if step_order is None:
+                            step_order = dumped.get("step_order")
+                        input_payload = dumped.get("input_payload_json")
+            if not isinstance(input_payload, dict):
+                continue
+            rag_metadata = input_payload.get("rag")
+            if not isinstance(rag_metadata, dict):
+                continue
+            try:
+                rag_by_step_order[int(step_order)] = rag_metadata
+            except (TypeError, ValueError):
+                continue
+
         raw_steps = definition_snapshot.get("steps")
         normalized_steps = []
         if isinstance(raw_steps, list):
             for raw_step in raw_steps:
                 if isinstance(raw_step, dict):
-                    normalized_steps.append(self._normalize_debug_step(raw_step))
+                    try:
+                        step_order = int(raw_step.get("step_order", 0))
+                    except (TypeError, ValueError):
+                        step_order = 0
+                    normalized_steps.append(
+                        self._normalize_debug_step(
+                            raw_step,
+                            rag_metadata=rag_by_step_order.get(step_order),
+                        )
+                    )
 
         return {
             "schema_version": _DEBUG_EXPORT_SCHEMA_VERSION,
@@ -595,7 +644,11 @@ class FlowRunService:
         }
 
     @staticmethod
-    def _normalize_debug_step(step: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_debug_step(
+        step: dict[str, Any],
+        *,
+        rag_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         raw_allowlist = step.get("mcp_tool_allowlist")
         tool_allowlist = raw_allowlist if isinstance(raw_allowlist, list) else []
         input_type = step.get("input_type")
@@ -626,6 +679,7 @@ class FlowRunService:
                 "policy": step.get("mcp_policy"),
                 "tool_allowlist": tool_allowlist,
             },
+            "rag": rag_metadata if isinstance(rag_metadata, dict) else None,
         }
 
     def _build_preseed_steps(

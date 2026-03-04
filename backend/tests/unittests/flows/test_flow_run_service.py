@@ -972,3 +972,88 @@ async def test_get_evidence_redacts_sensitive_values(user):
         evidence["debug_export"]["definition_snapshot"]["steps"][0]["output_config"]["headers"]["Authorization"]
         == "[REDACTED]"
     )
+
+
+@pytest.mark.asyncio
+async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    run = _run(user=user, flow_id=flow.id)
+    flow_run_repo.get.return_value = run
+    flow_version_repo.get.return_value = FlowVersion(
+        flow_id=flow.id,
+        version=1,
+        tenant_id=user.tenant_id,
+        definition_checksum="checksum",
+        definition_json={
+            "steps": [
+                {
+                    "step_order": 1,
+                    "step_id": str(uuid4()),
+                    "assistant_id": str(uuid4()),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "text",
+                    "mcp_policy": "inherit",
+                }
+            ]
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    flow_run_repo.list_step_results.return_value = [
+        SimpleNamespace(
+            step_order=1,
+            input_payload_json={
+                "text": "hello",
+                "rag": {
+                    "attempted": True,
+                    "status": "success",
+                    "version": 1,
+                    "timeout_seconds": 30,
+                    "include_info_blobs": False,
+                    "chunks_retrieved": 5,
+                    "unique_sources": 2,
+                    "source_ids": ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
+                    "source_ids_short": ["aaaaaaaa"],
+                    "error_code": None,
+                },
+            },
+            model_dump=lambda mode="json": {
+                "step_order": 1,
+                "input_payload_json": {
+                    "text": "hello",
+                    "rag": {
+                        "attempted": True,
+                        "status": "success",
+                        "version": 1,
+                        "timeout_seconds": 30,
+                        "include_info_blobs": False,
+                        "chunks_retrieved": 5,
+                        "unique_sources": 2,
+                        "source_ids": ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
+                        "source_ids_short": ["aaaaaaaa"],
+                        "error_code": None,
+                    },
+                },
+            },
+        )
+    ]
+    flow_run_repo.list_step_attempts.return_value = []
+
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    evidence = await service.get_evidence(run_id=run.id)
+
+    assert evidence["debug_export"]["steps"][0]["rag"]["status"] == "success"
+    assert evidence["debug_export"]["steps"][0]["rag"]["chunks_retrieved"] == 5
+    assert evidence["debug_export"]["steps"][0]["rag"]["source_ids_short"] == ["aaaaaaaa"]

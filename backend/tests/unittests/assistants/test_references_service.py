@@ -94,3 +94,65 @@ def test_concatenate_session_is_null():
     service = ReferencesService(AsyncMock(), AsyncMock())
     concatenated_session = service._concatenate_conversation("next question", None)
     assert concatenated_session == "next question"
+
+
+@pytest.mark.asyncio
+async def test_get_references_skips_info_blob_hydration_when_disabled():
+    info_blobs_repo = AsyncMock()
+    datastore = AsyncMock()
+    service = ReferencesService(info_blobs_repo=info_blobs_repo, datastore=datastore)
+    chunks = [
+        _create_chunk_with_score(0.9, uuid4()),
+        _create_chunk_with_score(0.7, uuid4()),
+    ]
+    datastore.semantic_search.return_value = chunks
+    collection = MagicMock()
+    collection.embedding_model = MagicMock()
+
+    result = await service.get_references(
+        question="hello",
+        collections=[collection],
+        include_info_blobs=False,
+    )
+
+    assert result.chunks == chunks
+    assert result.no_duplicate_chunks == chunks
+    assert result.info_blobs == []
+    info_blobs_repo.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_references_hydrates_info_blobs_by_default():
+    info_blobs_repo = AsyncMock()
+    datastore = AsyncMock()
+    service = ReferencesService(info_blobs_repo=info_blobs_repo, datastore=datastore)
+    chunk = _create_chunk_with_score(0.9, uuid4())
+    datastore.semantic_search.return_value = [chunk]
+    collection = MagicMock()
+    collection.embedding_model = MagicMock()
+    info_blob = MagicMock()
+    info_blob.model_dump.return_value = {
+        "id": chunk.info_blob_id,
+        "tenant_id": chunk.tenant_id,
+        "created_at": None,
+        "updated_at": None,
+        "title": "title",
+        "size": 1,
+        "user_id": uuid4(),
+        "group_id": uuid4(),
+        "website_id": None,
+        "integration_knowledge_id": None,
+        "url": None,
+        "embedding_model_id": uuid4(),
+        "text": "body",
+        "sharepoint_item_id": None,
+    }
+    info_blobs_repo.get.return_value = info_blob
+
+    result = await service.get_references(
+        question="hello",
+        collections=[collection],
+    )
+
+    assert len(result.info_blobs) == 1
+    info_blobs_repo.get.assert_awaited_once_with(chunk.info_blob_id)

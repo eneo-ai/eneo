@@ -186,6 +186,19 @@ class FlowRunDebugMcp(BaseModel):
     tool_allowlist: list[str] = Field(default_factory=list)
 
 
+class FlowRunDebugRag(BaseModel):
+    attempted: bool | None = None
+    status: str | None = None
+    version: int | None = None
+    timeout_seconds: int | None = None
+    include_info_blobs: bool | None = None
+    chunks_retrieved: int | None = None
+    unique_sources: int | None = None
+    source_ids: list[str] | None = None
+    source_ids_short: list[str] | None = None
+    error_code: str | None = None
+
+
 class FlowRunDebugStep(BaseModel):
     step_id: str | None = None
     step_order: int | None = None
@@ -194,6 +207,7 @@ class FlowRunDebugStep(BaseModel):
     input: FlowRunDebugInput
     output: FlowRunDebugOutput
     mcp: FlowRunDebugMcp
+    rag: FlowRunDebugRag | None = None
 
 
 class FlowRunDebugRun(BaseModel):

@@ -337,6 +337,10 @@ async def test_update_flow_assistant_forwards_payload():
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
     flow_id = uuid4()
     assistant_id = uuid4()
+    attachment_id = uuid4()
+    website_id = uuid4()
+    group_id = uuid4()
+    integration_knowledge_id = uuid4()
     updated_assistant = SimpleNamespace(
         id=assistant_id,
         name="Updated assistant",
@@ -356,7 +360,13 @@ async def test_update_flow_assistant_forwards_payload():
     response = await update_flow_assistant(
         id=flow_id,
         assistant_id=assistant_id,
-        assistant_in=AssistantUpdatePublic(name="Updated assistant"),
+        assistant_in=AssistantUpdatePublic(
+            name="Updated assistant",
+            attachments=[{"id": attachment_id}],
+            websites=[{"id": website_id}],
+            groups=[{"id": group_id}],
+            integration_knowledge_list=[{"id": integration_knowledge_id}],
+        ),
         container=container,
     )
 
@@ -366,4 +376,8 @@ async def test_update_flow_assistant_forwards_payload():
     assert kwargs["flow_id"] == flow_id
     assert kwargs["assistant_id"] == assistant_id
     assert kwargs["name"] == "Updated assistant"
+    assert kwargs["attachment_ids"] == [attachment_id]
+    assert kwargs["websites"] == [website_id]
+    assert kwargs["groups"] == [group_id]
+    assert kwargs["integration_knowledge_ids"] == [integration_knowledge_id]
     audit_service.log_async.assert_awaited_once()

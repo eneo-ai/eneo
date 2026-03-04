@@ -133,6 +133,7 @@ class ReferencesService:
         embed_method: EmbedMethod = EmbedMethod.CONCATENATE,
         num_chunks: Optional[int] = None,
         version: int = 1,
+        include_info_blobs: bool = True,
     ) -> "DatastoreResult":
         if embed_method == EmbedMethod.CONCATENATE:
             input_string = self._concatenate_conversation(
@@ -150,7 +151,11 @@ class ReferencesService:
             version=version,
         )
         no_duplicate_chunks = self._get_info_blob_chunks_without_duplicates(chunks)
-        info_blobs = await self._get_info_blobs_from_chunks(no_duplicate_chunks)
+        info_blobs = (
+            await self._get_info_blobs_from_chunks(no_duplicate_chunks)
+            if include_info_blobs
+            else []
+        )
 
         return DatastoreResult(
             chunks=chunks,

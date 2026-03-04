@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { IntricError, type FlowStep } from "@intric/intric-js";
+  import { IntricError, type FlowStep, type UploadedFile } from "@intric/intric-js";
   import { Settings } from "$lib/components/layout";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
@@ -8,9 +8,19 @@
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectKnowledgeV2 from "$lib/features/knowledge/components/SelectKnowledgeV2.svelte";
+  import { getIntric } from "$lib/core/Intric";
+  import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
+  import { getExplicitAttachmentRules } from "$lib/features/attachments/getAttachmentRules";
+  import AttachmentUploadTextButton from "$lib/features/attachments/components/AttachmentUploadTextButton.svelte";
+  import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
+  import AttachmentPreview from "$lib/features/attachments/components/AttachmentPreview.svelte";
+  import { formatBytes } from "$lib/core/formatting/formatBytes";
+  import { formatFileType } from "$lib/core/formatting/formatFileType";
   import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
-  import { createEventDispatcher } from "svelte";
+  import { createEventDispatcher, onDestroy } from "svelte";
+  import { writable } from "svelte/store";
+  import { IconCancel } from "@intric/icons/cancel";
   import { IconTrash } from "@intric/icons/trash";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconWorkflow } from "@intric/icons/workflow";
@@ -35,6 +45,18 @@
   const mode = getFlowUserMode();
   const flowEditor = getFlowEditor();
   const { state: { currentSpace } } = getSpacesManager();
+  const intric = getIntric();
+  const attachmentRules = writable({});
+  const {
+    state: { attachments: newAttachments },
+    clearUploads
+  } = initAttachmentManager({
+    intric,
+    options: {
+      rules: attachmentRules,
+      onFileUploaded,
+    },
+  });
 
   $: activeIndex = steps.findIndex((s) => s.id === activeStepId);
   $: activeStep = activeIndex >= 0 ? steps[activeIndex] : null;
@@ -149,14 +171,41 @@
   const autoClearedLegacyTemplateByStepId = new Set<string>();
   let stepNameBeforeEdit = "";
   let assistantLoadRequestToken = 0;
+  let runningUploads: { id: string; file: File; status: string; progress: number; remove: () => void }[] = [];
+
+  function cancelUploadsAndClearQueue() {
+    $newAttachments.forEach((upload) => {
+      if (upload.status !== "completed") {
+        upload.remove();
+      }
+    });
+    clearUploads();
+  }
 
   // Load assistant when active step changes
   $: if (activeStep?.assistant_id && activeStep.assistant_id !== lastLoadedAssistantId) {
+    cancelUploadsAndClearQueue();
     void loadAssistantForStep(activeStep.assistant_id);
   } else if (!activeStep || !activeStep.assistant_id) {
     assistant = null;
     lastLoadedAssistantId = null;
     assistantLoading = false;
+    cancelUploadsAndClearQueue();
+  }
+
+  onDestroy(() => {
+    cancelUploadsAndClearQueue();
+  });
+
+  $: runningUploads = $newAttachments.filter((attachment) => attachment.status !== "completed");
+
+  $: {
+    const allowed = assistant?.allowed_attachments;
+    if (allowed) {
+      attachmentRules.set(getExplicitAttachmentRules(allowed));
+    } else {
+      attachmentRules.set({});
+    }
   }
 
   async function loadAssistantForStep(assistantId: string) {
@@ -411,6 +460,33 @@
     flowEditor.saveAssistant(activeStep.assistant_id, { [field]: value });
   }
 
+  function onFileUploaded(newFile: UploadedFile) {
+    if (!assistant) return;
+    const currentAttachments = Array.isArray(assistant.attachments) ? assistant.attachments : [];
+    if (currentAttachments.some((file: UploadedFile) => file.id === newFile.id)) return;
+    updateAssistantField("attachments", [...currentAttachments, newFile]);
+  }
+
+  async function removeAttachment(file: { id: string }) {
+    if (!assistant) return;
+    const uploadStillQueued = $newAttachments.find(
+      (attachment) => attachment.fileRef && attachment.fileRef.id === file.id
+    );
+    if (uploadStillQueued) {
+      try {
+        await intric.files.delete({ fileId: file.id });
+      } catch (error) {
+        console.error("Failed to delete newly uploaded attachment file", error);
+      }
+    }
+
+    const currentAttachments = Array.isArray(assistant.attachments) ? assistant.attachments : [];
+    updateAssistantField(
+      "attachments",
+      currentAttachments.filter((attachment: UploadedFile) => attachment.id !== file.id),
+    );
+  }
+
   // Type chain compatibility (matching backend _COMPATIBLE_COERCIONS)
   const COMPATIBLE_COERCIONS = new Set([
     "text:text", "text:json", "text:any",
@@ -635,6 +711,71 @@
                 updateAssistantField("integration_knowledge_list", assistant.integration_knowledge_list);
               }}
             />
+          </Settings.Row>
+        {/if}
+      </Settings.Group>
+
+      <!-- Attachments Section -->
+      <Settings.Group title={m.attachments()}>
+        {#if assistantLoading}
+          <div class="flex items-center gap-2 px-4 py-3 text-sm text-secondary">
+            <IconLoadingSpinner class="size-4 animate-spin" />
+            {m.flow_step_assistant_loading()}
+          </div>
+        {:else if assistant}
+          <Settings.Row title="" description="">
+            <div class="w-full">
+              {#each (Array.isArray(assistant.attachments) ? assistant.attachments : []) as file (file.id)}
+                <div class="border-default bg-primary hover:bg-hover-dimmer flex h-16 items-center gap-3 border-b px-4">
+                  <UploadedFileIcon {file}></UploadedFileIcon>
+                  <div class="flex flex-grow items-center justify-between gap-1">
+                    <AttachmentPreview {file} isTableView={true}>
+                      {#snippet children({ showFile }: { showFile: () => void })}
+                        <button
+                          on:click={showFile}
+                          class="line-clamp-1 cursor-pointer text-left hover:underline"
+                        >
+                          {file.name}
+                        </button>
+                      {/snippet}
+                    </AttachmentPreview>
+                    <span class="text-secondary line-clamp-1 text-right text-sm">
+                      {formatFileType(file.mimetype)} · {formatBytes(file.size)}
+                    </span>
+                  </div>
+                  <div class="min-w-8">
+                    <Button variant="destructive" padding="icon" on:click={() => void removeAttachment(file)}>
+                      <IconTrash></IconTrash>
+                    </Button>
+                  </div>
+                </div>
+              {/each}
+
+              {#each runningUploads as upload (upload.id)}
+                <div class="border-default bg-primary hover:bg-hover-dimmer flex h-16 w-full items-center gap-4 border-b px-4">
+                  <UploadedFileIcon file={{ mimetype: upload.file.type }}></UploadedFileIcon>
+                  <div class="flex flex-grow flex-col gap-1">
+                    <div class="flex max-w-full items-center gap-4">
+                      <span class="line-clamp-1 flex-grow font-medium">{upload.file.name}</span>
+                      <span class="text-secondary line-clamp-1 text-right text-sm">
+                        {formatFileType(upload.file.type)} · {formatBytes(upload.file.size)}
+                      </span>
+                    </div>
+                    <div class="h-1.5 w-full overflow-hidden rounded-full bg-hover-dimmer">
+                      <div class="h-full bg-accent-default transition-all" style={`width: ${upload.progress}%`}></div>
+                    </div>
+                  </div>
+                  <div class="min-w-8">
+                    <Button variant="destructive" padding="icon" on:click={() => upload.remove()}>
+                      <IconCancel />
+                    </Button>
+                  </div>
+                </div>
+              {/each}
+              <div class="mt-2">
+                <AttachmentUploadTextButton multiple></AttachmentUploadTextButton>
+              </div>
+            </div>
           </Settings.Row>
         {/if}
       </Settings.Group>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -18,7 +19,13 @@ from intric.flows.flow import (
 )
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.outcome import Outcome
-from intric.flows.runtime.executor import FlowRunExecutor, RunExecutionState, RuntimeStep, StepExecutionOutput
+from intric.flows.runtime.executor import (
+    FlowRunExecutor,
+    RunExecutionState,
+    RuntimeStep,
+    StepExecutionOutput,
+    StepInputValue,
+)
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
 
 
@@ -89,6 +96,26 @@ def _build_executor(user):
         max_inline_text_bytes=1024 * 1024,
     )
     return executor, flow_repo, flow_run_repo, flow_version_repo
+
+
+def _assistant_for_execute_step(*, has_knowledge: bool):
+    model_kwargs = MagicMock()
+    model_kwargs.model_dump.return_value = {}
+    assistant = MagicMock()
+    assistant.has_knowledge.return_value = has_knowledge
+    assistant.collections = [MagicMock()] if has_knowledge else []
+    assistant.websites = []
+    assistant.integration_knowledge_list = []
+    assistant.get_prompt_text.return_value = ""
+    assistant.completion_model_kwargs = model_kwargs
+    assistant.completion_model = SimpleNamespace(id=uuid4(), name="gpt-4o-mini", provider_type="openai")
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(
+            completion="answer",
+            total_token_count=42,
+        )
+    )
+    return assistant
 
 
 @pytest.mark.asyncio
@@ -1419,6 +1446,161 @@ async def test_assistant_cache_hit(user):
 
     assert result1 is result2
     assert executor.space_repo.get_space_by_assistant.call_count == 1
+
+
+def _step_for_execute_step(*, step_order: int = 1) -> RuntimeStep:
+    return RuntimeStep(
+        step_id=uuid4(),
+        step_order=step_order,
+        assistant_id=uuid4(),
+        user_description=None,
+        input_source="flow_input",
+        input_bindings=None,
+        input_config=None,
+        output_mode="pass_through",
+        output_config=None,
+        output_type="text",
+        input_type="text",
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_step_uses_rag_chunks_when_knowledge_present(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step()
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        all_previous_segments=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    assistant = _assistant_for_execute_step(has_knowledge=True)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(text="hello", source_text="hello", input_source="flow_input")
+    )
+    executor._process_typed_output = AsyncMock(return_value=(None, None))
+    executor._apply_output_cap = AsyncMock(return_value=("answer", []))
+    executor._commit = AsyncMock()
+    chunks = [SimpleNamespace(info_blob_id=uuid4()), SimpleNamespace(info_blob_id=uuid4())]
+    executor.references_service = AsyncMock()
+    executor.references_service.get_references = AsyncMock(
+        return_value=SimpleNamespace(chunks=chunks)
+    )
+
+    output = await executor._execute_step(step=step, run=run, state=state)
+
+    executor.references_service.get_references.assert_awaited_once()
+    rag_kwargs = executor.references_service.get_references.await_args.kwargs
+    assert rag_kwargs["version"] == 1
+    assert rag_kwargs["include_info_blobs"] is False
+    assert assistant.get_response.await_args.kwargs["info_blob_chunks"] == chunks
+    assert output.rag_metadata is not None
+    assert output.rag_metadata["status"] == "success"
+    assert output.rag_metadata["chunks_retrieved"] == 2
+    assert output.rag_metadata["attempted"] is True
+
+
+@pytest.mark.asyncio
+async def test_execute_step_skips_rag_when_assistant_has_no_knowledge(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step()
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        all_previous_segments=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    assistant = _assistant_for_execute_step(has_knowledge=False)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(text="hello", source_text="hello", input_source="flow_input")
+    )
+    executor._process_typed_output = AsyncMock(return_value=(None, None))
+    executor._apply_output_cap = AsyncMock(return_value=("answer", []))
+    executor._commit = AsyncMock()
+    executor.references_service = AsyncMock()
+    executor.references_service.get_references = AsyncMock()
+
+    output = await executor._execute_step(step=step, run=run, state=state)
+
+    executor.references_service.get_references.assert_not_awaited()
+    assert assistant.get_response.await_args.kwargs["info_blob_chunks"] == []
+    assert output.rag_metadata is not None
+    assert output.rag_metadata["status"] == "skipped_no_knowledge"
+    assert output.rag_metadata["attempted"] is False
+
+
+@pytest.mark.asyncio
+async def test_execute_step_rag_timeout_appends_diagnostic_and_continues(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step()
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        all_previous_segments=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    assistant = _assistant_for_execute_step(has_knowledge=True)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(text="hello", source_text="hello", input_source="flow_input")
+    )
+    executor._process_typed_output = AsyncMock(return_value=(None, None))
+    executor._apply_output_cap = AsyncMock(return_value=("answer", []))
+    executor._commit = AsyncMock()
+    executor.references_service = AsyncMock()
+    executor.references_service.get_references = AsyncMock(side_effect=asyncio.TimeoutError())
+
+    output = await executor._execute_step(step=step, run=run, state=state)
+
+    assert assistant.get_response.await_args.kwargs["info_blob_chunks"] == []
+    assert output.rag_metadata is not None
+    assert output.rag_metadata["status"] == "timeout"
+    assert output.rag_metadata["error_code"] == "rag_retrieval_timeout"
+    assert any(d.code == "rag_retrieval_timeout" for d in output.diagnostics)
+
+
+@pytest.mark.asyncio
+async def test_execute_step_rag_failure_appends_diagnostic_and_continues(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step()
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        all_previous_segments=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    assistant = _assistant_for_execute_step(has_knowledge=True)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(text="hello", source_text="hello", input_source="flow_input")
+    )
+    executor._process_typed_output = AsyncMock(return_value=(None, None))
+    executor._apply_output_cap = AsyncMock(return_value=("answer", []))
+    executor._commit = AsyncMock()
+    executor.references_service = AsyncMock()
+    executor.references_service.get_references = AsyncMock(side_effect=RuntimeError("boom"))
+
+    output = await executor._execute_step(step=step, run=run, state=state)
+
+    assert assistant.get_response.await_args.kwargs["info_blob_chunks"] == []
+    assert output.rag_metadata is not None
+    assert output.rag_metadata["status"] == "error"
+    assert output.rag_metadata["error_code"] == "rag_retrieval_failed"
+    assert any(d.code == "rag_retrieval_failed" for d in output.diagnostics)
 
 
 # --- Prior results bootstrap ---

@@ -50,6 +50,7 @@ from intric.users.user import UserInDB
 
 if TYPE_CHECKING:
     from intric.audit.application.audit_service import AuditService
+    from intric.assistants.references import ReferencesService
 
 _TEMPLATE_ONLY_PATTERN = re.compile(r"^\s*\{\{\s*([^{}]+)\s*\}\}\s*$")
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
@@ -99,6 +100,7 @@ class StepExecutionOutput:
     structured_output: dict[str, Any] | list[Any] | None = None
     diagnostics: list[StepDiagnostic] = field(default_factory=list)
     artifacts: list[dict[str, Any]] | None = None
+    rag_metadata: dict[str, Any] | None = None
 
 
 @dataclass
@@ -172,6 +174,7 @@ class FlowRunExecutor:
         encryption_service: EncryptionService,
         max_inline_text_bytes: int,
         audit_service: AuditService | None = None,
+        references_service: ReferencesService | None = None,
     ):
         self.user = user
         self.flow_repo = flow_repo
@@ -183,11 +186,13 @@ class FlowRunExecutor:
         self.encryption_service = encryption_service
         self.max_inline_text_bytes = max_inline_text_bytes
         self.audit_service = audit_service
+        self.references_service = references_service
         self.variable_resolver = FlowVariableResolver()
         settings = get_settings()
         self.http_request_timeout_seconds = float(settings.flow_http_request_timeout_seconds)
         self.http_max_timeout_seconds = float(settings.flow_http_max_timeout_seconds)
         self.http_allow_private_networks = bool(settings.flow_http_allow_private_networks)
+        self.rag_retrieval_timeout_seconds = 30
 
     async def execute(
         self,
@@ -456,6 +461,11 @@ class FlowRunExecutor:
                     "input_source": output.input_source,
                     "used_question_binding": output.used_question_binding,
                     "legacy_prompt_binding_used": output.legacy_prompt_binding_used,
+                    **(
+                        {"rag": output.rag_metadata}
+                        if output.rag_metadata is not None
+                        else {}
+                    ),
                     **(
                         {"contract_validation": output.contract_validation}
                         if output.contract_validation is not None
@@ -799,6 +809,15 @@ class FlowRunExecutor:
             )
         await self._commit()
 
+        diagnostics = list(step_input.diagnostics)
+        info_blob_chunks, rag_metadata, rag_diagnostics = await self._retrieve_rag_chunks(
+            assistant=assistant,
+            question=step_input.text,
+            run_id=run.id,
+            step_order=step.step_order,
+        )
+        diagnostics.extend(rag_diagnostics)
+
         # Channel dispatch — files_only types send files, not text to LLM
         llm_files: list[Any] = []
         if policy and policy.channel == "files_only":
@@ -825,6 +844,7 @@ class FlowRunExecutor:
                 completion_service=self.completion_service,
                 model_kwargs=model_kwargs,
                 files=llm_files,
+                info_blob_chunks=info_blob_chunks,
                 stream=False,
                 prompt_override=effective_prompt,
             )
@@ -836,6 +856,7 @@ class FlowRunExecutor:
                     completion_service=self.completion_service,
                     model_kwargs=original_kwargs,
                     files=llm_files,
+                    info_blob_chunks=info_blob_chunks,
                     stream=False,
                     prompt_override=effective_prompt,
                 )
@@ -906,8 +927,100 @@ class FlowRunExecutor:
             contract_validation=contract_validation,
             structured_output=structured_output,
             artifacts=artifacts,
-            diagnostics=step_input.diagnostics,
+            diagnostics=diagnostics,
+            rag_metadata=rag_metadata,
         )
+
+    async def _retrieve_rag_chunks(
+        self,
+        *,
+        assistant: Any,
+        question: str,
+        run_id: UUID,
+        step_order: int,
+    ) -> tuple[list[Any], dict[str, Any], list[StepDiagnostic]]:
+        info_blob_chunks: list[Any] = []
+        rag_diagnostics: list[StepDiagnostic] = []
+        rag_metadata: dict[str, Any] = {
+            "attempted": False,
+            "status": "skipped_no_service",
+            "version": 1,
+            "timeout_seconds": self.rag_retrieval_timeout_seconds,
+            "include_info_blobs": False,
+            "chunks_retrieved": 0,
+            "unique_sources": 0,
+            "source_ids": [],
+            "source_ids_short": [],
+            "error_code": None,
+        }
+        if self.references_service is None:
+            rag_metadata["status"] = "skipped_no_service"
+            return info_blob_chunks, rag_metadata, rag_diagnostics
+        if not assistant.has_knowledge():
+            rag_metadata["status"] = "skipped_no_knowledge"
+            return info_blob_chunks, rag_metadata, rag_diagnostics
+        if not question.strip():
+            rag_metadata["status"] = "skipped_no_input"
+            return info_blob_chunks, rag_metadata, rag_diagnostics
+
+        rag_metadata["attempted"] = True
+        try:
+            # Flow runtime intentionally uses v1 retrieval (autocut + bounded chunks)
+            datastore_result = await asyncio.wait_for(
+                self.references_service.get_references(
+                    question=question,
+                    collections=assistant.collections,
+                    websites=assistant.websites,
+                    integration_knowledge_list=assistant.integration_knowledge_list,
+                    version=1,
+                    include_info_blobs=False,
+                ),
+                timeout=self.rag_retrieval_timeout_seconds,
+            )
+            info_blob_chunks = datastore_result.chunks
+            source_ids = list(
+                dict.fromkeys(
+                    str(getattr(chunk, "info_blob_id", ""))
+                    for chunk in info_blob_chunks
+                    if getattr(chunk, "info_blob_id", None) is not None
+                )
+            )
+            rag_metadata["status"] = "success"
+            rag_metadata["chunks_retrieved"] = len(info_blob_chunks)
+            rag_metadata["unique_sources"] = len(source_ids)
+            rag_metadata["source_ids"] = source_ids
+            rag_metadata["source_ids_short"] = [source_id[:8] for source_id in source_ids]
+        except asyncio.TimeoutError:
+            rag_metadata["status"] = "timeout"
+            rag_metadata["error_code"] = "rag_retrieval_timeout"
+            rag_diagnostics.append(
+                StepDiagnostic(
+                    code="rag_retrieval_timeout",
+                    message=f"RAG retrieval exceeded {self.rag_retrieval_timeout_seconds}s timeout.",
+                )
+            )
+            logger.warning(
+                "flow_executor.rag_timeout run_id=%s step_order=%d timeout=%s",
+                run_id,
+                step_order,
+                self.rag_retrieval_timeout_seconds,
+            )
+        except Exception:
+            rag_metadata["status"] = "error"
+            rag_metadata["error_code"] = "rag_retrieval_failed"
+            rag_diagnostics.append(
+                StepDiagnostic(
+                    code="rag_retrieval_failed",
+                    message="RAG retrieval failed; continuing without knowledge chunks.",
+                )
+            )
+            logger.warning(
+                "flow_executor.rag_failed run_id=%s step_order=%d",
+                run_id,
+                step_order,
+                exc_info=True,
+            )
+        return info_blob_chunks, rag_metadata, rag_diagnostics
 
     async def _flow_is_active(self, *, flow_id: UUID, tenant_id: UUID) -> bool:
         flow_id_in_db = await self.flow_repo.session.scalar(

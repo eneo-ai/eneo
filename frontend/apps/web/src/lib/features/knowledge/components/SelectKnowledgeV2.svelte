@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createCombobox } from "@melt-ui/svelte";
+  import { createEventDispatcher } from "svelte";
   import { IconCancel } from "@intric/icons/cancel";
   import { IconCollections } from "@intric/icons/collections";
   import { IconPlus } from "@intric/icons/plus";
@@ -67,6 +68,11 @@
    */
   export let inDialog = false;
   export let originMode: "personal" | "organization" | "both" = "both";
+  const dispatch = createEventDispatcher<{ change: void }>();
+
+  function emitChange() {
+    dispatch("change");
+  }
 
   const {
     elements: {
@@ -502,6 +508,7 @@
     selectedIntegrationKnowledge = selectedIntegrationKnowledge?.filter(
       (item) => !ids.includes(item.id)
     );
+    emitChange();
   }
 
   function focusOpenInput() {
@@ -516,19 +523,23 @@
       | { integrationKnowledge: IntegrationKnowledge }
       | { integrationWrapper: IntegrationWrapperOption }
   ) {
+    let didChange = false;
     if ("collection" in item && selectedCollections) {
       if (!selectedCollections.some(c => c.id === item.collection.id)) {
         selectedCollections = [...selectedCollections, item.collection];
+        didChange = true;
       }
     }
     if ("website" in item && selectedWebsites) {
       if (!selectedWebsites.some(w => w.id === item.website.id)) {
         selectedWebsites = [...selectedWebsites, item.website];
+        didChange = true;
       }
     }
     if ("integrationKnowledge" in item && selectedIntegrationKnowledge) {
       if (!selectedIntegrationKnowledge.some(k => k.id === item.integrationKnowledge.id)) {
         selectedIntegrationKnowledge = [...selectedIntegrationKnowledge, item.integrationKnowledge];
+        didChange = true;
       }
     }
     if ("integrationWrapper" in item && selectedIntegrationKnowledge) {
@@ -536,7 +547,11 @@
       const toAdd = item.integrationWrapper.items.filter((k) => !selectedIds.has(k.id));
       if (toAdd.length > 0) {
         selectedIntegrationKnowledge = [...selectedIntegrationKnowledge, ...toAdd];
+        didChange = true;
       }
+    }
+    if (didChange) {
+      emitChange();
     }
   }
 
@@ -705,6 +720,7 @@
             selectedCollections = selectedCollections?.filter((item) => item.id !== collection.id);
             if ($openPersonal) inputPersonalEl?.focus();
             if ($openOrg)      inputOrgEl?.focus();
+            emitChange();
           }}><IconTrash /></Button>
         </div>
         {#if isExpanded}
@@ -802,6 +818,7 @@
             selectedWebsites = selectedWebsites?.filter((item) => item.id !== website.id);
             if ($openPersonal) inputPersonalEl?.focus();
             if ($openOrg)      inputOrgEl?.focus();
+            emitChange();
           }}><IconTrash /></Button>
         </div>
         {#if isExpanded}
@@ -978,6 +995,7 @@
             selectedCollections = selectedCollections?.filter((item) => item.id !== collection.id);
             if ($openPersonal) inputPersonalEl?.focus();
             if ($openOrg)      inputOrgEl?.focus();
+            emitChange();
           }}><IconTrash /></Button>
         </div>
         {#if isExpanded}
@@ -1075,6 +1093,7 @@
             selectedWebsites = selectedWebsites?.filter((item) => item.id !== website.id);
             if ($openPersonal) inputPersonalEl?.focus();
             if ($openOrg)      inputOrgEl?.focus();
+            emitChange();
           }}><IconTrash /></Button>
         </div>
         {#if isExpanded}
