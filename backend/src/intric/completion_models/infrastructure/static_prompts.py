@@ -31,6 +31,18 @@ ANALYSIS_PROMPT = (
     "- Be concise and factual."
 )
 
+QUERY_REWRITE_PROMPT = (
+    "Given this conversation history:\n\n"
+    "{history}\n\n"
+    "The user now asks: {question}\n\n"
+    "If the question is a follow-up that references the conversation "
+    "(e.g. pronouns, 'the costs', 'that', 'it', etc.), rewrite it as a "
+    "standalone search query with the necessary context filled in.\n"
+    "If the question is about a NEW topic unrelated to the conversation, "
+    "return it unchanged.\n"
+    "Return ONLY the search query, nothing else."
+)
+
 SET_TITLE_OF_CONVERSATION_PROMPT = """
 You are an expert in summarizing conversations.
 

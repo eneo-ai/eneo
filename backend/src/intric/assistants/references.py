@@ -45,7 +45,14 @@ class ReferencesService:
             if version == 1:
                 search_params = dict(autocut_cutoff=3, num_chunks=30)
             elif version == 2:
-                search_params = dict(autocut_cutoff=None, num_chunks=num_chunks)
+                # num_chunks is the max candidates fetched from the vector DB;
+                # autocut then trims to relevant chunks based on score gaps
+                search_params = dict(
+                    autocut_cutoff=3,
+                    num_chunks=num_chunks,
+                    expand_context=True,
+                    context_window=2,
+                )
 
             embedding_model = None
             if collections:

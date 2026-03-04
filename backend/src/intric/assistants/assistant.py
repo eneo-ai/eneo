@@ -6,6 +6,9 @@ from intric.ai_models.completion_models.completion_model import (
     CompletionModelPublic,
     ModelKwargs,
 )
+from intric.assistants.references import EmbedMethod
+from intric.completion_models.infrastructure.static_prompts import QUERY_REWRITE_PROMPT
+from intric.main.logging import get_logger
 from intric.assistants.api.assistant_models import AssistantType
 from intric.base.base_entity import Entity
 from intric.completion_models.domain.completion_model import CompletionModel
@@ -34,6 +37,8 @@ if TYPE_CHECKING:
     from intric.templates.assistant_template.assistant_template import AssistantTemplate
     from intric.websites.domain.website import Website
 
+
+logger = get_logger(__name__)
 
 UNAUTHORIZED_EXCEPTION_MESSAGE = "Unauthorized. User has no permissions to access."
 
@@ -312,6 +317,45 @@ class Assistant(Entity):
             model_kwargs=model_kwargs,
         )
 
+    async def _rewrite_query_for_search(
+        self,
+        question: str,
+        session: SessionInDB,
+        completion_service: "CompletionService",
+    ) -> str:
+        recent_turns = session.questions[-3:]
+
+        history_lines = []
+        for turn in recent_turns:
+            history_lines.append(f"User: {turn.question}")
+            history_lines.append(f"Assistant: {turn.answer}")
+        history_text = "\n".join(history_lines)
+
+        rewrite_prompt = QUERY_REWRITE_PROMPT.format(
+            history=history_text,
+            question=question,
+        )
+
+        try:
+            response = await completion_service.get_response(
+                model=self.completion_model,
+                text_input=rewrite_prompt,
+                stream=False,
+                model_kwargs=ModelKwargs(temperature=0.0),
+                files=[],
+                prompt="",
+                prompt_files=[],
+                info_blob_chunks=[],
+                session=None,
+            )
+            rewritten = response.completion.text.strip()
+            if rewritten:
+                return rewritten
+            return question
+        except Exception:
+            logger.exception("Query rewrite failed, falling back to original question")
+            return question
+
     async def ask(
         self,
         question: str,
@@ -330,17 +374,45 @@ class Assistant(Entity):
                     f"Completion model {self.completion_model.name} do not support vision."
                 )
 
-        # Fill half the context
-        num_chunks = self.completion_model.token_limit // 200 // 2 if version == 2 else 30
+        # Fetch enough vector DB candidates to surface all relevant chunks.
+        # Capped at 60: with too many candidates (e.g. 300+ for 128k models),
+        # the score distribution becomes very gradual, preventing autocut from
+        # finding sharp relevance boundaries. 60 is sufficient to capture all
+        # relevant content while keeping score gaps detectable. The context
+        # builder's token budget is the final guard on how much actually gets used.
+        num_chunks = min(self.completion_model.token_limit // 200 // 2, 60) if version == 2 else 30
+
+        # Rewrite question for better semantic search (v2 only)
+        search_question = question
+        if version == 2 and session and session.questions and self.has_knowledge():
+            search_question = await self._rewrite_query_for_search(
+                question=question,
+                session=session,
+                completion_service=completion_service,
+            )
+            logger.info(
+                "Query rewrite: original=%r, rewritten=%r",
+                question,
+                search_question,
+            )
+
+        # When query rewriting handled context resolution, embed only the
+        # rewritten query — don't concatenate session history again.
+        embed_method = (
+            EmbedMethod.LAST_QUESTION
+            if version == 2 and session and session.questions
+            else EmbedMethod.CONCATENATE
+        )
 
         datastore_result = await references_service.get_references(
-            question=question,
+            question=search_question,
             session=session,
             collections=self.collections,
             websites=self.websites,
             integration_knowledge_list=self.integration_knowledge_list,
             num_chunks=num_chunks,
             version=version,
+            embed_method=embed_method,
         )
 
         response = await completion_service.get_response(
