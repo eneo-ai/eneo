@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import httpx
 import pytest
 
 from intric.flows.flow import (
@@ -15,6 +16,8 @@ from intric.flows.flow import (
     FlowStepResultStatus,
     FlowVersion,
 )
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.outcome import Outcome
 from intric.flows.runtime.executor import FlowRunExecutor, RunExecutionState, RuntimeStep, StepExecutionOutput
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
 
@@ -185,6 +188,180 @@ async def test_webhook_failure_keeps_completed_step_evidence(user):
     assert second_saved.status == FlowStepResultStatus.COMPLETED
     assert second_saved.output_payload_json["webhook_delivered"] is False
     assert "webhook_error" in second_saved.output_payload_json
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_uses_interpolated_url_and_body_template(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        user_description=None,
+        input_source="flow_input",
+        input_bindings=None,
+        input_config=None,
+        output_mode="http_post",
+        output_config={
+            "url": "https://example.org/hook/{{flow_input.id}}",
+            "timeout_seconds": 9,
+            "body_template": '{"result":"{{text}}"}',
+        },
+        output_type="text",
+    )
+    run = run.model_copy(update={"input_payload_json": {"id": "abc-123"}})
+    request = httpx.Request("POST", "https://example.org/hook/abc-123")
+    executor._send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
+
+    await executor._deliver_webhook(
+        step=step,
+        text_payload="done",
+        run=run,
+        context={"flow_input": {"id": "abc-123"}, "text": "done"},
+    )
+
+    executor._send_http_request.assert_awaited_once()
+    kwargs = executor._send_http_request.await_args.kwargs
+    assert kwargs["method"] == "POST"
+    assert kwargs["url"] == "https://example.org/hook/abc-123"
+    assert kwargs["timeout_seconds"] == 9
+    assert kwargs["body_bytes"] == b'{"result":"done"}'
+    assert kwargs["read_response_body"] is False
+    assert kwargs["headers"]["Idempotency-Key"]
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_uses_interpolated_body_json_and_headers(user):
+    executor, _, _, _ = _build_executor(user)
+    executor.encryption_service.is_encrypted = MagicMock(return_value=False)
+    executor.encryption_service.decrypt = MagicMock(side_effect=lambda value: value)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=2,
+        assistant_id=uuid4(),
+        user_description=None,
+        input_source="flow_input",
+        input_bindings=None,
+        input_config=None,
+        output_mode="http_post",
+        output_config={
+            "url": "https://example.org/hook/{{flow_input.case_id}}",
+            "headers": {"X-Case-Id": "{{flow_input.case_id}}"},
+            "body_json": {
+                "result": "{{text}}",
+                "case_id": "{{flow_input.case_id}}",
+            },
+        },
+        output_type="text",
+    )
+    request = httpx.Request("POST", "https://example.org/hook/777")
+    executor._send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
+
+    await executor._deliver_webhook(
+        step=step,
+        text_payload='Svar med "citat" och åäö',
+        run=run,
+        context={
+            "flow_input": {"case_id": "777"},
+            "text": 'Svar med "citat" och åäö',
+        },
+    )
+
+    executor._send_http_request.assert_awaited_once()
+    kwargs = executor._send_http_request.await_args.kwargs
+    assert kwargs["url"] == "https://example.org/hook/777"
+    assert kwargs["headers"]["X-Case-Id"] == "777"
+    assert kwargs["body_bytes"] is None
+    assert kwargs["read_response_body"] is False
+    assert kwargs["json_body"] == {
+        "result": 'Svar med "citat" och åäö',
+        "case_id": 777,
+    }
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_rejects_conflicting_body_template_and_body_json(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        user_description=None,
+        input_source="flow_input",
+        input_bindings=None,
+        input_config=None,
+        output_mode="http_post",
+        output_config={
+            "url": "https://example.org/hook",
+            "body_template": "{\"result\":\"{{text}}\"}",
+            "body_json": {"result": "{{text}}"},
+        },
+        output_type="text",
+    )
+
+    with pytest.raises(TypedIOValidationException, match="cannot define both body_template and body_json"):
+        await executor._deliver_webhook(
+            step=step,
+            text_payload="done",
+            run=run,
+            context={"flow_input": {}, "text": "done"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_ssrf_blocked_url_raises_bad_request(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        user_description=None,
+        input_source="flow_input",
+        input_bindings=None,
+        input_config=None,
+        output_mode="http_post",
+        output_config={"url": "http://127.0.0.1/hook"},
+        output_type="text",
+    )
+
+    with pytest.raises(BadRequestException, match="SSRF"):
+        await executor._deliver_webhook(
+            step=step,
+            text_payload="done",
+            run=run,
+            context={"text": "done", "flow_input": {}},
+        )
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_timeout_raises_bad_request(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        user_description=None,
+        input_source="flow_input",
+        input_bindings=None,
+        input_config=None,
+        output_mode="http_post",
+        output_config={"url": "https://example.org/hook"},
+        output_type="text",
+    )
+    executor._send_http_request = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+
+    with pytest.raises(BadRequestException, match="timed out"):
+        await executor._deliver_webhook(
+            step=step,
+            text_payload="done",
+            run=run,
+            context={"text": "done", "flow_input": {}},
+        )
 
 
 @pytest.mark.asyncio
@@ -1072,6 +1249,66 @@ def test_parse_runtime_steps_rejects_non_object_webhook_headers(user):
         )
 
 
+def test_parse_runtime_steps_rejects_all_previous_steps_json_input(user):
+    executor, _, _, _ = _build_executor(user)
+
+    with pytest.raises(BadRequestException, match="incompatible with input_source 'all_previous_steps'"):
+        executor._parse_runtime_steps(
+            {
+                "steps": [
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": 1,
+                        "assistant_id": str(uuid4()),
+                        "input_source": "flow_input",
+                        "input_type": "text",
+                        "output_type": "text",
+                        "output_mode": "pass_through",
+                    },
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": 2,
+                        "assistant_id": str(uuid4()),
+                        "input_source": "all_previous_steps",
+                        "input_type": "json",
+                        "output_type": "text",
+                        "output_mode": "pass_through",
+                    },
+                ]
+            }
+        )
+
+
+def test_parse_runtime_steps_rejects_incompatible_previous_step_chain(user):
+    executor, _, _, _ = _build_executor(user)
+
+    with pytest.raises(BadRequestException, match="incompatible type chain"):
+        executor._parse_runtime_steps(
+            {
+                "steps": [
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": 1,
+                        "assistant_id": str(uuid4()),
+                        "input_source": "flow_input",
+                        "input_type": "text",
+                        "output_type": "docx",
+                        "output_mode": "pass_through",
+                    },
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": 2,
+                        "assistant_id": str(uuid4()),
+                        "input_source": "previous_step",
+                        "input_type": "json",
+                        "output_type": "text",
+                        "output_mode": "pass_through",
+                    },
+                ]
+            }
+        )
+
+
 # --- RunExecutionState ---
 
 
@@ -1338,3 +1575,156 @@ async def test_file_cache_hit(user):
     await executor._resolve_step_input(step=step, context=context, run=run, prior_results=[], state=state)
 
     assert executor.file_repo.get_list_by_id_and_user.call_count == 1
+
+
+# --- Audit logging tests for webhook delivery ---
+
+
+def _make_audit_service():
+    audit_service = AsyncMock()
+    audit_service.log_async = AsyncMock(return_value=None)
+    return audit_service
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_audit_logged_on_success(user):
+    audit_service = _make_audit_service()
+    executor, _, _, _ = _build_executor(user)
+    executor.audit_service = audit_service
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        user_description="Send result",
+        input_source="flow_input",
+        input_bindings=None,
+        input_config=None,
+        output_mode="http_post",
+        output_config={"url": "https://user:pass@example.org/hook/abc?key=secret"},
+        output_type="text",
+    )
+    request = httpx.Request("POST", "https://example.org/hook/abc")
+    executor._send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
+
+    await executor._deliver_webhook(
+        step=step, text_payload="done", run=run, context={"text": "done"},
+    )
+
+    audit_service.log_async.assert_awaited_once()
+    call_kwargs = audit_service.log_async.await_args.kwargs
+    assert call_kwargs["action"] == ActionType.FLOW_HTTP_OUTBOUND_CALL
+    assert call_kwargs["outcome"] == Outcome.SUCCESS
+    extra = call_kwargs["metadata"]["extra"]
+    assert extra["call_type"] == "webhook_delivery"
+    assert extra["http_method"] == "POST"
+    assert extra["status_code"] == 200
+    assert "duration_ms" in extra
+    # URL sanitization: no query params or userinfo leaked
+    assert "key=secret" not in extra["url_host"]
+    assert "key=secret" not in extra["url_path"]
+    assert "pass" not in extra["url_host"]
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_audit_logged_on_failure(user):
+    audit_service = _make_audit_service()
+    executor, _, _, _ = _build_executor(user)
+    executor.audit_service = audit_service
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        user_description=None,
+        input_source="flow_input",
+        input_bindings=None,
+        input_config=None,
+        output_mode="http_post",
+        output_config={"url": "https://example.org/hook"},
+        output_type="text",
+    )
+    executor._send_http_request = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+
+    with pytest.raises(BadRequestException, match="timed out"):
+        await executor._deliver_webhook(
+            step=step, text_payload="done", run=run, context={"text": "done"},
+        )
+
+    audit_service.log_async.assert_awaited_once()
+    call_kwargs = audit_service.log_async.await_args.kwargs
+    assert call_kwargs["action"] == ActionType.FLOW_HTTP_OUTBOUND_CALL
+    assert call_kwargs["outcome"] == Outcome.FAILURE
+    assert call_kwargs["error_message"] is not None
+
+
+@pytest.mark.asyncio
+async def test_audit_service_failure_does_not_break_webhook(user):
+    audit_service = _make_audit_service()
+    audit_service.log_async = AsyncMock(side_effect=RuntimeError("audit down"))
+    executor, _, _, _ = _build_executor(user)
+    executor.audit_service = audit_service
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        user_description=None,
+        input_source="flow_input",
+        input_bindings=None,
+        input_config=None,
+        output_mode="http_post",
+        output_config={"url": "https://example.org/hook"},
+        output_type="text",
+    )
+    request = httpx.Request("POST", "https://example.org/hook")
+    executor._send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
+
+    # Should NOT raise despite audit failure
+    await executor._deliver_webhook(
+        step=step, text_payload="done", run=run, context={"text": "done"},
+    )
+
+    executor._send_http_request.assert_awaited_once()
+
+
+# --- Encrypted header tests for webhook delivery ---
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_decrypts_encrypted_headers(user):
+    executor, _, _, _ = _build_executor(user)
+    executor.encryption_service.is_encrypted = MagicMock(
+        side_effect=lambda v: v.startswith("enc:")
+    )
+    executor.encryption_service.decrypt = MagicMock(
+        side_effect=lambda v: v[len("enc:"):]
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        user_description=None,
+        input_source="flow_input",
+        input_bindings=None,
+        input_config=None,
+        output_mode="http_post",
+        output_config={
+            "url": "https://example.org/hook",
+            "headers": {"Authorization": "enc:Bearer secret123", "X-Plain": "visible"},
+        },
+        output_type="text",
+    )
+    request = httpx.Request("POST", "https://example.org/hook")
+    executor._send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
+
+    await executor._deliver_webhook(
+        step=step, text_payload="done", run=run, context={"text": "done"},
+    )
+
+    executor._send_http_request.assert_awaited_once()
+    headers = executor._send_http_request.await_args.kwargs["headers"]
+    assert headers["Authorization"] == "Bearer secret123"
+    assert headers["X-Plain"] == "visible"
+    executor.encryption_service.decrypt.assert_called_once_with("enc:Bearer secret123")

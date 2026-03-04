@@ -15,9 +15,9 @@
   export let targetY: number;
   export let sourcePosition: Position;
   export let targetPosition: Position;
-  export let markerStart: string | undefined;
-  export let markerEnd: string | undefined;
-export let data:
+  export let markerStart: string | undefined = undefined;
+  export let markerEnd: string | undefined = undefined;
+  export let data:
     | {
         mode?: "user" | "power_user";
         readOnly?: boolean;
@@ -40,7 +40,7 @@ export let data:
           payload: Record<string, unknown> | null;
         }) => void;
       }
-    | undefined;
+    | undefined = undefined;
 
   $: [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX,
@@ -106,7 +106,10 @@ export let data:
       {#if data?.dataType}
         <button
           class="rounded px-1.5 py-0.5 text-[10px] font-medium hover:bg-black/5 dark:hover:bg-white/10"
-          on:click|stopPropagation={inspectEdge}
+          onclick={(event) => {
+            event.stopPropagation();
+            inspectEdge();
+          }}
           aria-label={m.flow_graph_inspect_edge()}
         >
           {data.dataType}
@@ -116,7 +119,10 @@ export let data:
       {#if !data?.readOnly && data?.allowInsert !== false}
         <button
           class="rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/10"
-          on:click|stopPropagation={insertStep}
+          onclick={(event) => {
+            event.stopPropagation();
+            insertStep();
+          }}
           aria-label={m.flow_graph_insert_step_after({ order: String(data?.sourceStepOrder ?? 0) })}
         >
           <IconPlus size="sm" />

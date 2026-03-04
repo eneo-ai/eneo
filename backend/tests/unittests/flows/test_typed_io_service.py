@@ -24,7 +24,9 @@ def _step(
         id=uuid4(),
         assistant_id=uuid4(),
         step_order=step_order,
-        user_description="Step",
+        # Keep deterministic unique names per step so publish-time
+        # uniqueness validation doesn't fail unrelated typed I/O tests.
+        user_description=f"Step {step_order}",
         input_source=input_source,
         input_type=input_type,
         input_contract=input_contract,
@@ -101,6 +103,80 @@ def test_accepts_compatible_chain(user):
     service._validate_steps(steps)  # should not raise
 
 
+@pytest.mark.parametrize(
+    ("previous_output_type", "current_input_type"),
+    [
+        ("text", "json"),
+        ("json", "json"),
+        ("text", "any"),
+        ("json", "any"),
+        ("pdf", "any"),
+        ("docx", "any"),
+    ],
+)
+def test_accepts_previous_step_compatible_coercions_matrix(
+    user,
+    previous_output_type: str,
+    current_input_type: str,
+):
+    """Allowed previous_step coercions should pass publish validation."""
+    service = _service(user)
+    steps = [
+        _step(step_order=1, output_type=previous_output_type),
+        _step(step_order=2, input_source="previous_step", input_type=current_input_type),
+    ]
+    service._validate_steps(steps)
+
+
+@pytest.mark.parametrize(
+    ("previous_output_type", "current_input_type"),
+    [
+        ("docx", "json"),
+        ("pdf", "json"),
+        ("text", "file"),
+        ("json", "file"),
+    ],
+)
+def test_rejects_previous_step_incompatible_coercions_matrix(
+    user,
+    previous_output_type: str,
+    current_input_type: str,
+):
+    """Unsupported previous_step coercions should fail with deterministic chain error."""
+    service = _service(user)
+    steps = [
+        _step(step_order=1, output_type=previous_output_type),
+        _step(step_order=2, input_source="previous_step", input_type=current_input_type),
+    ]
+    with pytest.raises(BadRequestException, match="incompatible type chain"):
+        service._validate_steps(steps)
+
+
+def test_accepts_five_step_mixed_chain(user):
+    """Five-step mixed chain should validate when each previous_step coercion is compatible."""
+    service = _service(user)
+    steps = [
+        _step(step_order=1, input_source="flow_input", input_type="text", output_type="json"),
+        _step(step_order=2, input_source="previous_step", input_type="text", output_type="pdf"),
+        _step(step_order=3, input_source="previous_step", input_type="text", output_type="docx"),
+        _step(step_order=4, input_source="previous_step", input_type="text", output_type="text"),
+        _step(step_order=5, input_source="all_previous_steps", input_type="text", output_type="text"),
+    ]
+    service._validate_steps(steps)  # should not raise
+
+
+def test_rejects_five_step_mixed_chain_with_incompatible_hop(user):
+    """A later incompatible previous_step hop should still be rejected deterministically."""
+    service = _service(user)
+    steps = [
+        _step(step_order=1, input_source="flow_input", input_type="text", output_type="json"),
+        _step(step_order=2, input_source="previous_step", input_type="text", output_type="pdf"),
+        _step(step_order=3, input_source="previous_step", input_type="json", output_type="text"),
+    ]
+    with pytest.raises(BadRequestException, match="incompatible type chain"):
+        service._validate_steps(steps)
+
+
 # --- Block all_previous_steps + json ---
 
 
@@ -112,6 +188,39 @@ def test_all_previous_steps_json_blocked(user):
         _step(step_order=2, input_source="all_previous_steps", input_type="json"),
     ]
     with pytest.raises(BadRequestException, match="incompatible with input_source 'all_previous_steps'"):
+        service._validate_steps(steps)
+
+
+def test_rejects_first_step_all_previous_steps_input_source_publish(user):
+    """Step 1 must not use all_previous_steps."""
+    service = _service(user)
+    steps = [_step(step_order=1, input_source="all_previous_steps", input_type="text")]
+    with pytest.raises(BadRequestException, match="Step 1 cannot use previous_step/all_previous_steps input source"):
+        service._validate_steps(steps)
+
+
+# --- Block document input on non-flow_input sources ---
+
+
+def test_previous_step_document_blocked(user):
+    """previous_step + input_type=document should be rejected at publish."""
+    service = _service(user)
+    steps = [
+        _step(step_order=1, output_type="pdf"),
+        _step(step_order=2, input_source="previous_step", input_type="document"),
+    ]
+    with pytest.raises(BadRequestException, match="input_type 'document' is only supported with input_source 'flow_input'"):
+        service._validate_steps(steps)
+
+
+def test_all_previous_steps_document_blocked(user):
+    """all_previous_steps + input_type=document should be rejected at publish."""
+    service = _service(user)
+    steps = [
+        _step(step_order=1),
+        _step(step_order=2, input_source="all_previous_steps", input_type="document"),
+    ]
+    with pytest.raises(BadRequestException, match="input_type 'document' is only supported with input_source 'flow_input'"):
         service._validate_steps(steps)
 
 

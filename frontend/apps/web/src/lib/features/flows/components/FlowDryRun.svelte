@@ -12,7 +12,9 @@
   const INPUT_SOURCE_LABELS: Record<string, () => string> = {
     flow_input: () => m.flow_input_source_flow_input(),
     previous_step: () => m.flow_input_source_previous_step(),
-    all_previous_steps: () => m.flow_input_source_all_previous_steps()
+    all_previous_steps: () => m.flow_input_source_all_previous_steps(),
+    http_get: () => m.flow_input_source_http_get(),
+    http_post: () => m.flow_input_source_http_post()
   };
 
   type StepValidation = {
@@ -44,11 +46,6 @@
       // Validate step 1 doesn't use previous_step
       if (step.step_order === 1 && (step.input_source === "previous_step" || step.input_source === "all_previous_steps")) {
         errors.push("First step cannot use previous step as input source");
-      }
-
-      // Validate http sources are not used
-      if (step.input_source === "http_get" || step.input_source === "http_post") {
-        errors.push("HTTP input sources are not yet supported");
       }
 
       // Validate variable references

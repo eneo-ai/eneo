@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 
 from intric.flows.flow import FlowStepResult, FlowStepResultStatus
-from intric.flows.variable_resolver import FlowVariableResolver
+from intric.flows.variable_resolver import FlowVariableResolver, iter_template_expressions
 from intric.main.exceptions import BadRequestException
 
 
@@ -172,3 +172,80 @@ def test_build_context_does_not_overwrite_reserved_keys_from_friendly_aliases():
     assert isinstance(context["flow"], dict)
     assert "step_1" not in context
     assert context["Namn på brukare"] == "Anna"
+
+
+def test_iter_template_expressions_extracts_all_expressions():
+    expressions = iter_template_expressions(
+        "Hej {{ flow_input.name }} och {{step_1.output.summary}} med {{ custom.value }}"
+    )
+
+    assert expressions == ["flow_input.name", "step_1.output.summary", "custom.value"]
+
+
+def test_interpolate_tolerates_whitespace_around_path_separators():
+    resolver = FlowVariableResolver()
+    context = resolver.build_context(
+        flow_input={"citizen_name": "Anna"},
+        prior_results=[],
+    )
+
+    rendered = resolver.interpolate(
+        template="Citizen: {{ flow_input . citizen_name }}",
+        context=context,
+    )
+
+    assert rendered == "Citizen: Anna"
+
+
+def test_interpolate_serializes_non_ascii_json_values_without_ascii_escaping():
+    resolver = FlowVariableResolver()
+    context = resolver.build_context(
+        flow_input={"structured": {"namn": "Åke", "stad": "Örebro"}},
+        prior_results=[],
+    )
+
+    rendered = resolver.interpolate(
+        template="Payload: {{ indata_json }}",
+        context=context,
+    )
+
+    assert rendered == 'Payload: {"namn": "Åke", "stad": "Örebro"}'
+
+
+def test_interpolate_raises_for_non_numeric_list_index():
+    resolver = FlowVariableResolver()
+    context = resolver.build_context(
+        flow_input={"file_ids": ["f1", "f2"]},
+        prior_results=[],
+    )
+
+    with pytest.raises(BadRequestException, match="Expected numeric index"):
+        resolver.interpolate(
+            template="{{ indata_filer.first }}",
+            context=context,
+        )
+
+
+def test_interpolate_raises_for_list_index_out_of_range():
+    resolver = FlowVariableResolver()
+    context = resolver.build_context(
+        flow_input={"file_ids": ["f1"]},
+        prior_results=[],
+    )
+
+    with pytest.raises(BadRequestException, match="out of range"):
+        resolver.interpolate(
+            template="{{ indata_filer.3 }}",
+            context=context,
+        )
+
+
+def test_build_context_skips_friendly_alias_with_dot_notation():
+    resolver = FlowVariableResolver()
+    context = resolver.build_context(
+        flow_input={"person.namn": "Should be skipped", "Namn": "Anna"},
+        prior_results=[],
+    )
+
+    assert "person.namn" not in context
+    assert context["Namn"] == "Anna"

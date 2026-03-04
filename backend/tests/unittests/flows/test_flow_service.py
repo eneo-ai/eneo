@@ -326,19 +326,119 @@ async def test_create_flow_rejects_previous_step_input_for_first_step(user):
 
 
 @pytest.mark.asyncio
-async def test_create_flow_rejects_http_input_sources_until_implemented(user):
+async def test_create_flow_allows_http_get_input_source_with_valid_config(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_repo.create = AsyncMock(side_effect=lambda **kwargs: kwargs["flow"])
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    step = _step(step_order=1).model_copy(
+        update={
+            "input_source": "http_get",
+            "input_config": {"url": "https://example.org/source", "timeout_seconds": 12},
+            "input_type": "text",
+        }
+    )
+
+    created = await service.create_flow(
+        space_id=uuid4(),
+        name="Flow",
+        steps=[step],
+        metadata_json=None,
+    )
+
+    assert created.steps[0].input_source == "http_get"
+    assert created.steps[0].input_config["url"] == "https://example.org/source"
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_http_get_input_without_url(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
-    step = _step(step_order=1).model_copy(update={"input_source": "http_get"})
+    step = _step(step_order=1).model_copy(
+        update={
+            "input_source": "http_get",
+            "input_config": {"timeout_seconds": 5},
+        }
+    )
 
-    with pytest.raises(BadRequestException, match="not supported yet"):
+    with pytest.raises(BadRequestException, match="input_config.url"):
         await service.create_flow(
             space_id=uuid4(),
             name="Flow",
             steps=[step],
             metadata_json=None,
         )
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_http_post_input_invalid_timeout(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    step = _step(step_order=1).model_copy(
+        update={
+            "input_source": "http_post",
+            "input_config": {"url": "https://example.org/source", "timeout_seconds": 0},
+        }
+    )
+
+    with pytest.raises(BadRequestException, match="timeout_seconds"):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[step],
+            metadata_json=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_http_post_output_without_url(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    step = _step(step_order=1).model_copy(
+        update={
+            "output_mode": "http_post",
+            "output_config": {},
+        }
+    )
+
+    with pytest.raises(BadRequestException, match="output_config.url"):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[step],
+            metadata_json=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_flow_allows_http_post_output_with_valid_config(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_repo.create = AsyncMock(side_effect=lambda **kwargs: kwargs["flow"])
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    step = _step(step_order=1).model_copy(
+        update={
+            "output_mode": "http_post",
+            "output_config": {
+                "url": "https://example.org/hook",
+                "timeout_seconds": 25,
+                "body_template": '{"message":"{{flow_input.text}}"}',
+            },
+        }
+    )
+
+    created = await service.create_flow(
+        space_id=uuid4(),
+        name="Flow",
+        steps=[step],
+        metadata_json=None,
+    )
+
+    assert created.steps[0].output_mode == "http_post"
+    assert created.steps[0].output_config["url"] == "https://example.org/hook"
 
 
 @pytest.mark.asyncio

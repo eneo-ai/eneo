@@ -155,6 +155,10 @@
 
   async function triggerRun() {
     if (!flow.id) return;
+    if (needsFileUpload && uploadedFiles.length === 0) {
+      toast.error(m.flow_run_document_placeholder());
+      return;
+    }
     isSubmitting = true;
     try {
       let payload: Record<string, unknown>;
@@ -344,7 +348,7 @@
       <Button
         onclick={triggerRun}
         variant="primary"
-        disabled={isSubmitting || isUploading}
+        disabled={isSubmitting || isUploading || (needsFileUpload && uploadedFiles.length === 0)}
       >
         {#if isSubmitting}
           <IconLoadingSpinner class="size-4 animate-spin" />

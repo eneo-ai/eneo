@@ -83,6 +83,9 @@ cd backend
 uv run arq src.intric.worker.arq.WorkerSettings
 ```
 
+## Celery
+uv run celery -A src.intric.flows.runtime.celery_app:celery_app worker --loglevel=INFO --queues flows.execute
+
 ## Verify Installation
 
 1. **Access the Application**

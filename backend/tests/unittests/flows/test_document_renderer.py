@@ -1,9 +1,11 @@
 """Tests for intric.flows.runtime.document_renderer — PDF/DOCX generation."""
 from __future__ import annotations
 
+import io
 from unittest.mock import patch
 
 import pytest
+from docx import Document
 
 from intric.flows.runtime.document_renderer import render_document
 from intric.main.exceptions import TypedIOValidationException
@@ -48,6 +50,55 @@ def test_render_docx_correct_mime():
 def test_render_docx_filename_pattern():
     _, _, filename = render_document("Test", "docx", step_order=5)
     assert filename == "step_5_output.docx"
+
+
+def test_render_docx_empty_output_still_valid():
+    """Empty markdown should still produce a readable DOCX file."""
+    blob, _, _ = render_document("", "docx", step_order=1)
+    doc = Document(io.BytesIO(blob))
+    assert isinstance(blob, bytes)
+    assert len(doc.paragraphs) >= 1
+
+
+def test_render_docx_preserves_swedish_characters():
+    """Swedish characters should survive DOCX rendering."""
+    text = "Svenska tecken: å ä ö"
+    blob, _, _ = render_document(text, "docx", step_order=1)
+    doc = Document(io.BytesIO(blob))
+    all_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+    assert "å" in all_text
+    assert "ä" in all_text
+    assert "ö" in all_text
+
+
+def test_render_docx_markdown_table_creates_table():
+    """Markdown table syntax should become a DOCX table."""
+    text = "| Namn | Värde |\n| --- | --- |\n| Kommun | Sundsvall |"
+    blob, _, _ = render_document(text, "docx", step_order=1)
+    doc = Document(io.BytesIO(blob))
+    assert len(doc.tables) == 1
+    assert doc.tables[0].cell(0, 0).text == "Namn"
+    assert doc.tables[0].cell(1, 1).text == "Sundsvall"
+
+
+def test_render_docx_markdown_lists_and_code_blocks():
+    """Lists and fenced code blocks should be represented in DOCX text."""
+    text = "# Titel\n\n- punkt ett\n- punkt två\n\n```python\nprint('hej')\n```"
+    blob, _, _ = render_document(text, "docx", step_order=1)
+    doc = Document(io.BytesIO(blob))
+    all_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+    assert "Titel" in all_text
+    assert "punkt ett" in all_text
+    assert "print('hej')" in all_text
+
+
+def test_render_docx_very_long_output():
+    """Very long markdown output should produce a valid DOCX without exceptions."""
+    text = ("Rad med innehåll och åäö.\n" * 5000).strip()
+    blob, _, _ = render_document(text, "docx", step_order=1)
+    doc = Document(io.BytesIO(blob))
+    assert len(blob) > 0
+    assert any("åäö" in paragraph.text for paragraph in doc.paragraphs)
 
 
 # --- Error handling ---

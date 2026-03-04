@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 
 from intric.database.tables.flow_tables import FlowRuns, FlowStepAttempts, FlowStepResults
 from intric.flows import Flow, FlowFactory, FlowRepository, FlowStep, FlowVersionRepository
@@ -276,9 +277,198 @@ async def test_list_runs_filters_by_flow_id(
             flow_id=first_flow.id,
         )
 
-        assert len(first_flow_runs) == 1
-        assert first_flow_runs[0].flow_id == first_flow.id
+    assert len(first_flow_runs) == 1
+    assert first_flow_runs[0].flow_id == first_flow.id
 
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_count_active_runs_counts_only_queued_and_running_statuses(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flows active-count space", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Flow active-count assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        await version_repo.create(
+            flow_id=flow.id,
+            version=1,
+            definition_checksum="checksum-active-count",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(flow.steps[0].id),
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    }
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        queued_run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "queued"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+        running_run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "running"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+        completed_run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "completed"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+
+        claimed = await run_repo.mark_running_if_claimable(
+            run_id=running_run.id,
+            tenant_id=admin_user.tenant_id,
+        )
+        assert claimed is True
+        await run_repo.update_status(
+            run_id=completed_run.id,
+            tenant_id=admin_user.tenant_id,
+            status=FlowRunStatus.COMPLETED,
+        )
+
+        active_count = await run_repo.count_active_runs(tenant_id=admin_user.tenant_id)
+        assert active_count == 2
+
+        await run_repo.cancel(run_id=queued_run.id, tenant_id=admin_user.tenant_id)
+        active_after_cancel = await run_repo.count_active_runs(tenant_id=admin_user.tenant_id)
+        assert active_after_cancel == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_create_run_rejects_cross_tenant_flow_reference(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flows tenant-active-count space", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Flow tenant-active-count assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        await version_repo.create(
+            flow_id=flow.id,
+            version=1,
+            definition_checksum="checksum-tenant-active-count",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(flow.steps[0].id),
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    }
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "tenant-a"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+        other_tenant_id = uuid4()
+        with pytest.raises(IntegrityError):
+            await run_repo.create(
+                flow_id=flow.id,
+                flow_version=1,
+                user_id=admin_user.id,
+                tenant_id=other_tenant_id,
+                input_payload_json={"case": "tenant-b"},
+                preseed_steps=[
+                    {
+                        "step_id": flow.steps[0].id,
+                        "assistant_id": flow.steps[0].assistant_id,
+                        "step_order": 1,
+                    }
+                ],
+            )
 
 @pytest.mark.asyncio
 @pytest.mark.integration

@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import ipaddress
 import json
 import logging
+import re
+import socket
+import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import httpx
@@ -26,15 +32,27 @@ from intric.flows.flow_repo import FlowRepository
 from intric.flows.flow_run_repo import FlowRunRepository
 from intric.flows.flow_version_repo import FlowVersionRepository
 from intric.flows.step_config_secrets import decrypt_step_headers_for_runtime
+from intric.flows.step_chain_rules import find_first_step_chain_violation
 from intric.flows.type_policies import INPUT_TYPE_POLICIES
 from intric.flows.variable_resolver import FlowVariableResolver
+from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
 from intric.settings.encryption_service import EncryptionService
 from intric.spaces.space_repo import SpaceRepository
 from intric.completion_models.infrastructure.completion_service import CompletionService
 from intric.files.file_repo import FileRepository
 from intric.completion_models.infrastructure.context_builder import count_tokens
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
+from intric.audit.domain.outcome import Outcome
+from intric.audit.application.audit_metadata import AuditMetadata
 from intric.users.user import UserInDB
+
+if TYPE_CHECKING:
+    from intric.audit.application.audit_service import AuditService
+
+_TEMPLATE_ONLY_PATTERN = re.compile(r"^\s*\{\{\s*([^{}]+)\s*\}\}\s*$")
+IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
 
 @dataclass(frozen=True)
@@ -54,6 +72,14 @@ class RuntimeStep:
     input_contract: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class StepDiagnostic:
+    """Machine-readable diagnostic emitted during step input resolution or execution."""
+    code: str
+    message: str
+    severity: str = "warning"  # "warning" | "info"
+
+
 @dataclass
 class StepExecutionOutput:
     input_text: str
@@ -71,6 +97,7 @@ class StepExecutionOutput:
     model_parameters_json: dict[str, Any]
     contract_validation: dict[str, Any] | None = None
     structured_output: dict[str, Any] | list[Any] | None = None
+    diagnostics: list[StepDiagnostic] = field(default_factory=list)
     artifacts: list[dict[str, Any]] | None = None
 
 
@@ -78,12 +105,14 @@ class StepExecutionOutput:
 class StepInputValue:
     """Typed step input — carries text, files, or structured data."""
     text: str
+    source_text: str = ""
     files: list[Any] | None = None
     structured: dict[str, Any] | list[Any] | None = None
     raw_extracted_text: str = ""
     input_source: str = "flow_input"
     used_question_binding: bool = False
     legacy_prompt_binding_used: bool = False
+    diagnostics: list[StepDiagnostic] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -142,6 +171,7 @@ class FlowRunExecutor:
         file_repo: FileRepository,
         encryption_service: EncryptionService,
         max_inline_text_bytes: int,
+        audit_service: AuditService | None = None,
     ):
         self.user = user
         self.flow_repo = flow_repo
@@ -152,7 +182,12 @@ class FlowRunExecutor:
         self.file_repo = file_repo
         self.encryption_service = encryption_service
         self.max_inline_text_bytes = max_inline_text_bytes
+        self.audit_service = audit_service
         self.variable_resolver = FlowVariableResolver()
+        settings = get_settings()
+        self.http_request_timeout_seconds = float(settings.flow_http_request_timeout_seconds)
+        self.http_max_timeout_seconds = float(settings.flow_http_max_timeout_seconds)
+        self.http_allow_private_networks = bool(settings.flow_http_allow_private_networks)
 
     async def execute(
         self,
@@ -426,6 +461,14 @@ class FlowRunExecutor:
                         if output.contract_validation is not None
                         else {}
                     ),
+                    **(
+                        {"diagnostics": [
+                            {"code": d.code, "message": d.message, "severity": d.severity}
+                            for d in output.diagnostics
+                        ]}
+                        if output.diagnostics
+                        else {}
+                    ),
                 },
                 effective_prompt=output.effective_prompt,
                 output_payload_json=self._build_output_payload(output),
@@ -460,10 +503,20 @@ class FlowRunExecutor:
 
             if step.output_mode == "http_post":
                 try:
+                    webhook_context = self.variable_resolver.build_context(
+                        latest_run.input_payload_json,
+                        state.prior_results,
+                        current_step_order=step.step_order + 1,
+                        step_names_by_order=state.step_names_by_order,
+                    )
+                    webhook_context["text"] = output.full_text
+                    if output.structured_output is not None:
+                        webhook_context["structured"] = output.structured_output
                     await self._deliver_webhook(
                         step=step,
                         text_payload=output.full_text,
                         run=latest_run,
+                        context=webhook_context,
                     )
                 except Exception as exc:
                     failed_delivery_payload = dict(step_result.output_payload_json or {})
@@ -599,7 +652,7 @@ class FlowRunExecutor:
         input_payload_for_result.update(
             {
                 "text": step_input.text,
-                "source_text": step_input.text,
+                "source_text": step_input.source_text,
                 "input_source": step_input.input_source,
                 "used_question_binding": step_input.used_question_binding,
                 "legacy_prompt_binding_used": step_input.legacy_prompt_binding_used,
@@ -620,6 +673,15 @@ class FlowRunExecutor:
                 TypedIOValidationException(
                     f"Input type '{step.input_type}' is not yet supported in runtime execution.",
                     code="typed_io_unsupported_type",
+                ),
+                input_payload_for_result=input_payload_for_result,
+                effective_prompt=effective_prompt,
+            )
+        if step.input_type == "document" and step.input_source != "flow_input":
+            raise self._attach_typed_failure_context(
+                TypedIOValidationException(
+                    f"Step {step.step_order}: input_type 'document' is not supported with input_source '{step.input_source}'.",
+                    code="typed_io_document_source_unsupported",
                 ),
                 input_payload_for_result=input_payload_for_result,
                 effective_prompt=effective_prompt,
@@ -829,7 +891,7 @@ class FlowRunExecutor:
         )
         return StepExecutionOutput(
             input_text=step_input.text,
-            source_text=step_input.text,
+            source_text=step_input.source_text,
             input_source=step_input.input_source,
             used_question_binding=step_input.used_question_binding,
             legacy_prompt_binding_used=step_input.legacy_prompt_binding_used,
@@ -844,6 +906,7 @@ class FlowRunExecutor:
             contract_validation=contract_validation,
             structured_output=structured_output,
             artifacts=artifacts,
+            diagnostics=step_input.diagnostics,
         )
 
     async def _flow_is_active(self, *, flow_id: UUID, tenant_id: UUID) -> bool:
@@ -865,13 +928,32 @@ class FlowRunExecutor:
         assistant_prompt_text: str | None = None,
         state: RunExecutionState | None = None,
     ) -> StepInputValue:
-        source_text = self._resolve_input_source_text(
-            input_source=step.input_source,
-            run=run,
-            step_order=step.step_order,
-            prior_results=prior_results,
-            state=state,
-        )
+        if step.step_order == 1 and step.input_source in {"previous_step", "all_previous_steps"}:
+            raise TypedIOValidationException(
+                "Step 1 cannot use previous_step/all_previous_steps input source. Use flow_input.",
+                code="typed_io_invalid_input_source_position",
+            )
+        if step.input_type == "json" and step.input_source == "all_previous_steps":
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: input_type 'json' is incompatible with input_source "
+                f"'all_previous_steps' (concatenated text is not valid JSON).",
+                code="typed_io_invalid_input_source_combination",
+            )
+        structured: dict[str, Any] | list[Any] | None = None
+        if step.input_source in ("http_get", "http_post"):
+            source_text, structured = await self._resolve_http_input_source_text(
+                step=step,
+                run=run,
+                context=context,
+            )
+        else:
+            source_text = self._resolve_input_source_text(
+                input_source=step.input_source,
+                run=run,
+                step_order=step.step_order,
+                prior_results=prior_results,
+                state=state,
+            )
         input_text = source_text
         raw_extracted_text = ""
         used_question_binding = False
@@ -904,8 +986,19 @@ class FlowRunExecutor:
                 "flow_executor.file_resolve run_id=%s step_order=%d input_type=%s file_ids=%s",
                 run.id, step.step_order, step.input_type, raw_file_ids,
             )
+            if raw_file_ids is not None and not isinstance(raw_file_ids, list):
+                raise TypedIOValidationException(
+                    "file_ids must be a list.",
+                    code="typed_io_invalid_file_ids",
+                )
             if raw_file_ids:
-                requested_ids = [UUID(fid) for fid in raw_file_ids]
+                try:
+                    requested_ids = [UUID(str(fid)) for fid in raw_file_ids]
+                except (TypeError, ValueError, AttributeError) as exc:
+                    raise TypedIOValidationException(
+                        f"Invalid file_ids payload: {raw_file_ids}",
+                        code="typed_io_invalid_file_ids",
+                    ) from exc
                 cache_key = frozenset(requested_ids)
                 if state and cache_key in state.file_cache:
                     files = state.file_cache[cache_key]
@@ -926,21 +1019,25 @@ class FlowRunExecutor:
                         f"File(s) not found or not accessible: {missing}",
                         code="typed_io_file_not_found",
                     )
-                if step.input_type == "document" and files:
-                    extracted = [f.text for f in files if f.text]
+                if step.input_type in ("document", "file") and files:
+                    extracted = [
+                        str(f.text).strip()
+                        for f in files
+                        if isinstance(getattr(f, "text", None), str) and str(f.text).strip()
+                    ]
                     logger.info(
                         "flow_executor.document_text_extracted run_id=%s step_order=%d file_count=%d extracted_count=%d",
                         run.id, step.step_order, len(files), len(extracted),
                     )
                     if extracted:
                         input_text = "\n\n".join(extracted)
-                    # Capture raw extraction before bindings can override
-                    raw_extracted_text = input_text
+                        raw_extracted_text = input_text
 
-        # For json input, prefer structured data from previous step
-        structured = None
+        # For json input, prefer structured data from source-specific parsing or previous step
         if step.input_type == "json":
-            if step.input_source == "previous_step":
+            if structured is not None:
+                input_text = json.dumps(structured, ensure_ascii=False)
+            elif step.input_source == "previous_step":
                 prev = next(
                     (r for r in prior_results if r.step_order == step.step_order - 1),
                     None,
@@ -956,14 +1053,59 @@ class FlowRunExecutor:
                 except (json.JSONDecodeError, ValueError):
                     pass
 
+        self._enforce_inline_input_cap(
+            text=input_text,
+            step_order=step.step_order,
+            input_source=step.input_source,
+        )
+
+        # Flag empty input from previous_step/all_previous_steps for debug visibility
+        diagnostics: list[StepDiagnostic] = []
+        if step.input_source in ("previous_step", "all_previous_steps"):
+            has_substantive_input = False
+            if step.input_source == "previous_step":
+                has_substantive_input = bool(source_text.strip())
+            else:
+                # all_previous_steps wraps content in XML tags even when inner text is empty;
+                # check actual prior result text instead of the assembled source_text
+                for pr in prior_results:
+                    if pr.step_order < step.step_order and isinstance(pr.output_payload_json, dict):
+                        if str(pr.output_payload_json.get("text", "")).strip():
+                            has_substantive_input = True
+                            break
+            if not has_substantive_input:
+                diagnostics.append(StepDiagnostic(
+                    code="empty_prior_step_input",
+                    message=(
+                        f"Step {step.step_order}: input_source '{step.input_source}' resolved to "
+                        f"empty text. The LLM received no substantive input from prior steps."
+                    ),
+                ))
+
         return StepInputValue(
             text=input_text,
+            source_text=source_text,
             files=files,
             structured=structured,
             raw_extracted_text=raw_extracted_text,
             input_source=step.input_source,
             used_question_binding=used_question_binding,
             legacy_prompt_binding_used=legacy_prompt_binding_used,
+            diagnostics=diagnostics,
+        )
+
+    def _enforce_inline_input_cap(
+        self,
+        *,
+        text: str,
+        step_order: int,
+        input_source: str,
+    ) -> None:
+        if len(text.encode("utf-8")) <= self.max_inline_text_bytes:
+            return
+        raise TypedIOValidationException(
+            f"Step {step_order}: resolved input for '{input_source}' exceeded max inline text bytes.",
+            code="typed_io_input_too_large",
         )
 
     @staticmethod
@@ -1002,7 +1144,20 @@ class FlowRunExecutor:
         if input_source == "previous_step":
             previous = next((item for item in prior_results if item.step_order == step_order - 1), None)
             if previous and isinstance(previous.output_payload_json, dict):
-                return str(previous.output_payload_json.get("text", ""))
+                text = str(previous.output_payload_json.get("text", ""))
+                if not text.strip():
+                    logger.warning(
+                        "flow_executor.empty_previous_step_input run_id=%s step_order=%d "
+                        "previous_step_order=%d reason=previous_output_text_empty",
+                        run.id, step_order, step_order - 1,
+                    )
+                return text
+            logger.warning(
+                "flow_executor.empty_previous_step_input run_id=%s step_order=%d "
+                "previous_step_order=%d reason=%s",
+                run.id, step_order, step_order - 1,
+                "no_previous_result" if previous is None else "output_not_dict",
+            )
             return ""
         if input_source == "all_previous_steps":
             # Use pre-built accumulated text from state when available
@@ -1022,6 +1177,462 @@ class FlowRunExecutor:
                 f"Input source '{input_source}' is not yet supported in runtime execution."
             )
         raise BadRequestException(f"Unsupported input source '{input_source}'.")
+
+    async def _resolve_http_input_source_text(
+        self,
+        *,
+        step: RuntimeStep,
+        run: FlowRun,
+        context: dict[str, Any],
+    ) -> tuple[str, dict[str, Any] | list[Any] | None]:
+        if not isinstance(step.input_config, dict):
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: HTTP input source requires input_config object.",
+                code="typed_io_http_invalid_config",
+            )
+        resolved_config = decrypt_step_headers_for_runtime(
+            config=step.input_config,
+            encryption_service=self.encryption_service,
+        ) or {}
+        if not isinstance(resolved_config, dict):
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: HTTP input config must be an object.",
+                code="typed_io_http_invalid_config",
+            )
+
+        url_raw = resolved_config.get("url")
+        if not isinstance(url_raw, str) or not url_raw.strip():
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: input_config.url is required for HTTP input.",
+                code="typed_io_http_invalid_config",
+            )
+        url = self.variable_resolver.interpolate(url_raw, context).strip()
+        timeout_seconds = self._resolve_http_timeout_seconds(
+            resolved_config.get("timeout_seconds"),
+            step_order=step.step_order,
+            config_label="input_config",
+        )
+        headers = self._build_http_headers(
+            resolved_config.get("headers"),
+            context=context,
+            step_order=step.step_order,
+            config_label="input_config",
+        )
+
+        method = "GET" if step.input_source == "http_get" else "POST"
+        body_bytes, json_body = self._resolve_http_request_body(
+            method=method,
+            config=resolved_config,
+            context=context,
+            step_order=step.step_order,
+            config_label="input_config",
+        )
+
+        start_time = time.monotonic()
+        try:
+            response = await self._send_http_request(
+                method=method,
+                url=url,
+                headers=headers,
+                timeout_seconds=timeout_seconds,
+                body_bytes=body_bytes,
+                json_body=json_body,
+            )
+        except TypedIOValidationException as exc:
+            duration_ms = (time.monotonic() - start_time) * 1000
+            await self._audit_http_outbound(
+                run=run, step=step, url=url, method=method,
+                call_type="http_input", outcome=Outcome.FAILURE,
+                error_message=str(exc), duration_ms=duration_ms,
+            )
+            raise
+        except httpx.TimeoutException as exc:
+            duration_ms = (time.monotonic() - start_time) * 1000
+            err_msg = f"Step {step.step_order}: HTTP {method} input timed out after {timeout_seconds:g}s."
+            await self._audit_http_outbound(
+                run=run, step=step, url=url, method=method,
+                call_type="http_input", outcome=Outcome.FAILURE,
+                error_message=err_msg, duration_ms=duration_ms,
+            )
+            raise TypedIOValidationException(
+                err_msg,
+                code="typed_io_http_timeout",
+            ) from exc
+        except httpx.HTTPError as exc:
+            duration_ms = (time.monotonic() - start_time) * 1000
+            err_msg = f"Step {step.step_order}: HTTP {method} input request failed: {exc}"
+            await self._audit_http_outbound(
+                run=run, step=step, url=url, method=method,
+                call_type="http_input", outcome=Outcome.FAILURE,
+                error_message=err_msg, duration_ms=duration_ms,
+            )
+            raise TypedIOValidationException(
+                err_msg,
+                code="typed_io_http_connection_error",
+            ) from exc
+
+        duration_ms = (time.monotonic() - start_time) * 1000
+        if response.status_code >= 400:
+            err_msg = f"Step {step.step_order}: HTTP {method} input returned status {response.status_code}."
+            await self._audit_http_outbound(
+                run=run, step=step, url=url, method=method,
+                call_type="http_input", outcome=Outcome.FAILURE,
+                error_message=err_msg, status_code=response.status_code,
+                duration_ms=duration_ms,
+            )
+            raise TypedIOValidationException(
+                err_msg,
+                code="typed_io_http_non_success",
+            )
+
+        response_text = self._read_http_response_text(
+            response=response,
+            step_order=step.step_order,
+            code="typed_io_http_response_too_large",
+        )
+
+        expects_json = (
+            step.input_type == "json"
+            or str(resolved_config.get("response_format", "text")) == "json"
+        )
+        if expects_json:
+            try:
+                parsed = response.json()
+            except (ValueError, json.JSONDecodeError) as exc:
+                err_msg = f"Step {step.step_order}: HTTP {method} input returned malformed JSON response."
+                await self._audit_http_outbound(
+                    run=run, step=step, url=url, method=method,
+                    call_type="http_input", outcome=Outcome.FAILURE,
+                    error_message=err_msg, status_code=response.status_code,
+                    duration_ms=duration_ms,
+                )
+                raise TypedIOValidationException(
+                    err_msg,
+                    code="typed_io_http_malformed_response",
+                ) from exc
+            await self._audit_http_outbound(
+                run=run, step=step, url=url, method=method,
+                call_type="http_input", outcome=Outcome.SUCCESS,
+                status_code=response.status_code, duration_ms=duration_ms,
+            )
+            return json.dumps(parsed, ensure_ascii=False), parsed
+        await self._audit_http_outbound(
+            run=run, step=step, url=url, method=method,
+            call_type="http_input", outcome=Outcome.SUCCESS,
+            status_code=response.status_code, duration_ms=duration_ms,
+        )
+        return response_text, None
+
+    def _resolve_http_timeout_seconds(
+        self,
+        timeout_value: Any,
+        *,
+        step_order: int,
+        config_label: str,
+    ) -> float:
+        if timeout_value is None:
+            return self.http_request_timeout_seconds
+        if not isinstance(timeout_value, (int, float)):
+            raise TypedIOValidationException(
+                f"Step {step_order}: {config_label}.timeout_seconds must be a number.",
+                code="typed_io_http_invalid_config",
+            )
+        timeout_seconds = float(timeout_value)
+        if timeout_seconds <= 0:
+            raise TypedIOValidationException(
+                f"Step {step_order}: {config_label}.timeout_seconds must be greater than zero.",
+                code="typed_io_http_invalid_config",
+            )
+        if timeout_seconds > self.http_max_timeout_seconds:
+            raise TypedIOValidationException(
+                f"Step {step_order}: {config_label}.timeout_seconds cannot exceed {self.http_max_timeout_seconds:g}.",
+                code="typed_io_http_invalid_config",
+            )
+        return timeout_seconds
+
+    def _build_http_headers(
+        self,
+        headers_raw: Any,
+        *,
+        context: dict[str, Any],
+        step_order: int,
+        config_label: str,
+    ) -> dict[str, str]:
+        if headers_raw is None:
+            return {}
+        if not isinstance(headers_raw, dict):
+            raise TypedIOValidationException(
+                f"Step {step_order}: {config_label}.headers must be an object.",
+                code="typed_io_http_invalid_config",
+            )
+        headers: dict[str, str] = {}
+        for key, value in headers_raw.items():
+            if not isinstance(key, str):
+                raise TypedIOValidationException(
+                    f"Step {step_order}: {config_label}.headers keys must be strings.",
+                    code="typed_io_http_invalid_config",
+                )
+            rendered = self._interpolate_http_value(value, context=context)
+            headers[key] = str(rendered)
+        return headers
+
+    def _resolve_http_request_body(
+        self,
+        *,
+        method: str,
+        config: dict[str, Any],
+        context: dict[str, Any],
+        step_order: int,
+        config_label: str,
+    ) -> tuple[bytes | None, dict[str, Any] | list[Any] | None]:
+        if method != "POST":
+            return None, None
+        body_template = config.get("body_template")
+        body_json = config.get("body_json")
+        if body_template is not None and not isinstance(body_template, str):
+            raise TypedIOValidationException(
+                f"Step {step_order}: {config_label}.body_template must be a string.",
+                code="typed_io_http_invalid_config",
+            )
+        if body_json is not None and not isinstance(body_json, (dict, list)):
+            raise TypedIOValidationException(
+                f"Step {step_order}: {config_label}.body_json must be an object or array.",
+                code="typed_io_http_invalid_config",
+            )
+        if body_template is not None and body_json is not None:
+            raise TypedIOValidationException(
+                f"Step {step_order}: {config_label} cannot define both body_template and body_json.",
+                code="typed_io_http_invalid_config",
+            )
+        if body_json is not None:
+            interpolated_json = self._interpolate_http_value(body_json, context=context)
+            if not isinstance(interpolated_json, (dict, list)):
+                raise TypedIOValidationException(
+                    f"Step {step_order}: {config_label}.body_json interpolation must produce object or array.",
+                    code="typed_io_http_invalid_config",
+                )
+            return None, interpolated_json
+        if body_template is not None:
+            rendered = self.variable_resolver.interpolate(body_template, context)
+            return rendered.encode("utf-8"), None
+        return None, None
+
+    def _interpolate_http_value(self, value: Any, *, context: dict[str, Any]) -> Any:
+        if isinstance(value, str):
+            if _TEMPLATE_ONLY_PATTERN.match(value):
+                rendered = self.variable_resolver.interpolate(value, context)
+                try:
+                    return json.loads(rendered)
+                except (ValueError, json.JSONDecodeError):
+                    return rendered
+            return self.variable_resolver.interpolate(value, context)
+        if isinstance(value, list):
+            return [self._interpolate_http_value(item, context=context) for item in value]
+        if isinstance(value, dict):
+            return {
+                str(item_key): self._interpolate_http_value(item_value, context=context)
+                for item_key, item_value in value.items()
+            }
+        return value
+
+    @staticmethod
+    def _read_http_response_text(
+        *,
+        response: httpx.Response,
+        step_order: int,
+        code: str,
+    ) -> str:
+        response_bytes = response.content
+        if len(response_bytes) > get_settings().flow_max_inline_text_bytes:
+            raise TypedIOValidationException(
+                f"Step {step_order}: HTTP response exceeded max inline text bytes.",
+                code=code,
+            )
+        return response.text
+
+    async def _send_http_request(
+        self,
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        timeout_seconds: float,
+        body_bytes: bytes | None = None,
+        json_body: dict[str, Any] | list[Any] | None = None,
+        read_response_body: bool = True,
+    ) -> httpx.Response:
+        preflight_resolved_ips = await self._assert_http_url_allowed(url)
+        timeout = httpx.Timeout(timeout_seconds)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            request = client.build_request(
+                method,
+                url,
+                headers=headers,
+                content=body_bytes,
+                json=json_body,
+            )
+            response = await client.send(request, stream=True)
+            try:
+                self._assert_http_connected_peer_allowed(
+                    response=response,
+                    preflight_resolved_ips=preflight_resolved_ips,
+                )
+            except Exception:
+                await response.aclose()
+                raise
+            if not read_response_body:
+                detached = httpx.Response(
+                    status_code=response.status_code,
+                    headers=response.headers,
+                    request=request,
+                )
+                await response.aclose()
+                return detached
+
+            max_bytes = get_settings().flow_max_inline_text_bytes
+            response_bytes = bytearray()
+            async for chunk in response.aiter_bytes():
+                response_bytes.extend(chunk)
+                if len(response_bytes) > max_bytes:
+                    await response.aclose()
+                    raise TypedIOValidationException(
+                        "HTTP response exceeded max inline text bytes.",
+                        code="typed_io_http_response_too_large",
+                    )
+
+            detached = httpx.Response(
+                status_code=response.status_code,
+                headers=response.headers,
+                content=bytes(response_bytes),
+                request=request,
+            )
+            await response.aclose()
+            return detached
+
+    async def _assert_http_url_allowed(self, url: str) -> set[IPAddress] | None:
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"}:
+            raise TypedIOValidationException(
+                f"Unsupported HTTP URL scheme: '{parsed.scheme}'.",
+                code="typed_io_http_invalid_url",
+            )
+        host = parsed.hostname
+        if not host:
+            raise TypedIOValidationException(
+                "HTTP URL must include a hostname.",
+                code="typed_io_http_invalid_url",
+            )
+        host_lower = host.strip().lower()
+        if host_lower in {"localhost", "localhost.localdomain"}:
+            raise TypedIOValidationException(
+                "HTTP URL blocked by SSRF policy.",
+                code="typed_io_http_ssrf_blocked",
+            )
+        if self.http_allow_private_networks:
+            return None
+
+        resolved_ips: list[IPAddress]
+        try:
+            resolved_ips = self._resolve_ip_literal(host_lower)
+        except ValueError:
+            resolved_ips = await self._resolve_host_ips(
+                host=host_lower,
+                port=parsed.port or (443 if parsed.scheme == "https" else 80),
+            )
+
+        if any(self._is_private_or_local_ip(item) for item in resolved_ips):
+            raise TypedIOValidationException(
+                "HTTP URL blocked by SSRF policy.",
+                code="typed_io_http_ssrf_blocked",
+            )
+        return set(resolved_ips)
+
+    def _assert_http_connected_peer_allowed(
+        self,
+        *,
+        response: httpx.Response,
+        preflight_resolved_ips: set[IPAddress] | None,
+    ) -> None:
+        if self.http_allow_private_networks:
+            return
+
+        network_stream = response.extensions.get("network_stream")
+        if network_stream is None:
+            raise TypedIOValidationException(
+                "Unable to verify HTTP peer address.",
+                code="typed_io_http_connection_error",
+            )
+
+        server_addr = network_stream.get_extra_info("server_addr")
+        if not isinstance(server_addr, tuple) or not server_addr:
+            raise TypedIOValidationException(
+                "Unable to verify HTTP peer address.",
+                code="typed_io_http_connection_error",
+            )
+
+        peer_value = server_addr[0]
+        if not isinstance(peer_value, str):
+            raise TypedIOValidationException(
+                "Unable to verify HTTP peer address.",
+                code="typed_io_http_connection_error",
+            )
+
+        try:
+            peer_ip = ipaddress.ip_address(peer_value)
+        except ValueError as exc:
+            raise TypedIOValidationException(
+                "Unable to verify HTTP peer address.",
+                code="typed_io_http_connection_error",
+            ) from exc
+
+        if self._is_private_or_local_ip(peer_ip):
+            raise TypedIOValidationException(
+                "HTTP URL blocked by SSRF policy.",
+                code="typed_io_http_ssrf_blocked",
+            )
+
+        if preflight_resolved_ips and peer_ip not in preflight_resolved_ips:
+            raise TypedIOValidationException(
+                "HTTP URL blocked by SSRF policy.",
+                code="typed_io_http_ssrf_blocked",
+            )
+
+    @staticmethod
+    def _resolve_ip_literal(host: str) -> list[IPAddress]:
+        return [ipaddress.ip_address(host)]
+
+    async def _resolve_host_ips(self, *, host: str, port: int) -> list[IPAddress]:
+        loop = asyncio.get_running_loop()
+        try:
+            infos = await loop.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except socket.gaierror as exc:
+            raise TypedIOValidationException(
+                f"Unable to resolve HTTP host '{host}'.",
+                code="typed_io_http_connection_error",
+            ) from exc
+        resolved: list[IPAddress] = []
+        for _, _, _, _, sockaddr in infos:
+            try:
+                resolved.append(ipaddress.ip_address(sockaddr[0]))
+            except ValueError:
+                continue
+        if not resolved:
+            raise TypedIOValidationException(
+                f"Unable to resolve HTTP host '{host}'.",
+                code="typed_io_http_connection_error",
+            )
+        return resolved
+
+    @staticmethod
+    def _is_private_or_local_ip(value: IPAddress) -> bool:
+        return (
+            value.is_loopback
+            or value.is_private
+            or value.is_link_local
+            or value.is_multicast
+            or value.is_reserved
+            or value.is_unspecified
+        )
 
     async def _load_assistant(self, assistant_id: UUID, state: RunExecutionState | None = None) -> Any:
         if state and assistant_id in state.assistant_cache:
@@ -1113,33 +1724,153 @@ class FlowRunExecutor:
         msg = str(exc).lower()
         return any(term in msg for term in ("response_format", "json_object", "json mode"))
 
-    async def _deliver_webhook(self, *, step: RuntimeStep, text_payload: str, run: FlowRun) -> None:
+    async def _audit_http_outbound(
+        self,
+        *,
+        run: FlowRun,
+        step: RuntimeStep,
+        url: str,
+        method: str,
+        call_type: str,
+        outcome: Outcome,
+        error_message: str | None = None,
+        status_code: int | None = None,
+        duration_ms: float | None = None,
+    ) -> None:
+        if self.audit_service is None:
+            return
+        try:
+            parts = urlsplit(url)
+            safe_url_host = f"{parts.scheme}://{parts.hostname}" if parts.hostname else ""
+            safe_url_path = parts.path or "/"
+            extra: dict[str, Any] = {
+                "call_type": call_type,
+                "http_method": method,
+                "url_host": safe_url_host,
+                "url_path": safe_url_path,
+                "flow_id": str(run.flow_id),
+                "step_order": step.step_order,
+                "step_id": str(step.step_id),
+            }
+            if step.user_description:
+                extra["step_description"] = step.user_description
+            if status_code is not None:
+                extra["status_code"] = status_code
+            if duration_ms is not None:
+                extra["duration_ms"] = round(duration_ms, 2)
+            await self.audit_service.log_async(
+                tenant_id=run.tenant_id,
+                actor_id=self.user.id,
+                action=ActionType.FLOW_HTTP_OUTBOUND_CALL,
+                entity_type=EntityType.FLOW_RUN,
+                entity_id=run.id,
+                description=f"Flow HTTP {call_type} {method} to {safe_url_host}{safe_url_path}",
+                metadata=AuditMetadata.standard(actor=self.user, target=run, extra=extra),
+                outcome=outcome,
+                error_message=error_message,
+            )
+        except Exception:
+            logger.warning(
+                "flow_executor.audit_http_outbound_failed run_id=%s step_order=%d",
+                run.id, step.step_order, exc_info=True,
+            )
+
+    async def _deliver_webhook(
+        self,
+        *,
+        step: RuntimeStep,
+        text_payload: str,
+        run: FlowRun,
+        context: dict[str, Any],
+    ) -> None:
         if not step.output_config:
             return
         if not isinstance(step.output_config, dict):
             raise BadRequestException("Webhook output_config must be an object.")
-        url = str(step.output_config.get("url", "")).strip()
-        if not url:
-            raise BadRequestException("Webhook output mode requires output_config.url.")
         resolved_config = decrypt_step_headers_for_runtime(
             config=step.output_config,
             encryption_service=self.encryption_service,
         ) or {}
         if not isinstance(resolved_config, dict):
             raise BadRequestException("Webhook output_config must be an object.")
-        headers_raw = resolved_config.get("headers")
-        if headers_raw is not None and not isinstance(headers_raw, dict):
-            raise BadRequestException("Webhook output_config.headers must be an object.")
-        headers = {
-            str(key): str(value)
-            for key, value in (headers_raw or {}).items()
-            if value is not None
-        }
+        url_raw = resolved_config.get("url")
+        if not isinstance(url_raw, str) or not url_raw.strip():
+            raise BadRequestException("Webhook output mode requires output_config.url.")
+        url = self.variable_resolver.interpolate(url_raw, context).strip()
+        timeout_seconds = self._resolve_http_timeout_seconds(
+            resolved_config.get("timeout_seconds"),
+            step_order=step.step_order,
+            config_label="output_config",
+        )
+        headers = self._build_http_headers(
+            resolved_config.get("headers"),
+            context=context,
+            step_order=step.step_order,
+            config_label="output_config",
+        )
+        body_bytes, json_body = self._resolve_http_request_body(
+            method="POST",
+            config=resolved_config,
+            context=context,
+            step_order=step.step_order,
+            config_label="output_config",
+        )
+        if body_bytes is None and json_body is None:
+            body_bytes = text_payload.encode("utf-8")
         idempotency = hashlib.sha256(f"{run.id}:{step.step_id}".encode("utf-8")).hexdigest()
         headers["Idempotency-Key"] = idempotency
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, headers=headers, content=text_payload.encode("utf-8"))
-            response.raise_for_status()
+        start_time = time.monotonic()
+        try:
+            response = await self._send_http_request(
+                method="POST",
+                url=url,
+                headers=headers,
+                timeout_seconds=timeout_seconds,
+                body_bytes=body_bytes,
+                json_body=json_body,
+                read_response_body=False,
+            )
+        except TypedIOValidationException as exc:
+            duration_ms = (time.monotonic() - start_time) * 1000
+            await self._audit_http_outbound(
+                run=run, step=step, url=url, method="POST",
+                call_type="webhook_delivery", outcome=Outcome.FAILURE,
+                error_message=str(exc), duration_ms=duration_ms,
+            )
+            raise BadRequestException(str(exc)) from exc
+        except httpx.TimeoutException as exc:
+            duration_ms = (time.monotonic() - start_time) * 1000
+            err_msg = f"Webhook delivery timed out after {timeout_seconds:g}s."
+            await self._audit_http_outbound(
+                run=run, step=step, url=url, method="POST",
+                call_type="webhook_delivery", outcome=Outcome.FAILURE,
+                error_message=err_msg, duration_ms=duration_ms,
+            )
+            raise BadRequestException(err_msg) from exc
+        except httpx.HTTPError as exc:
+            duration_ms = (time.monotonic() - start_time) * 1000
+            err_msg = f"Webhook delivery failed: {exc}"
+            await self._audit_http_outbound(
+                run=run, step=step, url=url, method="POST",
+                call_type="webhook_delivery", outcome=Outcome.FAILURE,
+                error_message=err_msg, duration_ms=duration_ms,
+            )
+            raise BadRequestException(err_msg) from exc
+        duration_ms = (time.monotonic() - start_time) * 1000
+        if response.status_code >= 400:
+            err_msg = f"Webhook delivery returned status {response.status_code}."
+            await self._audit_http_outbound(
+                run=run, step=step, url=url, method="POST",
+                call_type="webhook_delivery", outcome=Outcome.FAILURE,
+                error_message=err_msg, status_code=response.status_code,
+                duration_ms=duration_ms,
+            )
+            raise BadRequestException(err_msg)
+        await self._audit_http_outbound(
+            run=run, step=step, url=url, method="POST",
+            call_type="webhook_delivery", outcome=Outcome.SUCCESS,
+            status_code=response.status_code, duration_ms=duration_ms,
+        )
 
     async def _process_typed_output(
         self,
@@ -1242,6 +1973,15 @@ class FlowRunExecutor:
             input_source = str(item.get("input_source", "flow_input"))
             if input_source not in FlowRunExecutor._ALLOWED_INPUT_SOURCES:
                 raise BadRequestException(f"Unsupported input source '{input_source}'.")
+            raw_input_config = item.get("input_config")
+            if input_source in {"http_get", "http_post"}:
+                if not isinstance(raw_input_config, dict):
+                    raise BadRequestException("HTTP input source requires input_config object.")
+                raw_headers = raw_input_config.get("headers")
+                if raw_headers is not None and not isinstance(raw_headers, dict):
+                    raise BadRequestException("HTTP input_config.headers must be an object.")
+            elif raw_input_config is not None and not isinstance(raw_input_config, dict):
+                raise BadRequestException("Step input_config must be an object.")
             output_mode = str(item.get("output_mode", "pass_through"))
             if output_mode not in FlowRunExecutor._ALLOWED_OUTPUT_MODES:
                 raise BadRequestException(f"Unsupported output mode '{output_mode}'.")
@@ -1268,7 +2008,7 @@ class FlowRunExecutor:
                     else None,
                     input_source=input_source,
                     input_bindings=item.get("input_bindings"),
-                    input_config=item.get("input_config"),
+                    input_config=raw_input_config,
                     output_mode=output_mode,
                     output_config=raw_output_config,
                     output_type=str(item.get("output_type", "text")),
@@ -1277,6 +2017,9 @@ class FlowRunExecutor:
                     input_contract=item.get("input_contract"),
                 )
             )
+        chain_violation = find_first_step_chain_violation(parsed)
+        if chain_violation is not None:
+            raise BadRequestException(chain_violation.message)
         return parsed
 
     @staticmethod

@@ -4,7 +4,8 @@
   import { IconCopy } from "@intric/icons/copy";
   import { IconCheck } from "@intric/icons/check";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { Button } from "@intric/ui";
+  import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
+  import { Button, Markdown } from "@intric/ui";
   import { highlightJson } from "./highlightJson";
   import { onDestroy, onMount } from "svelte";
   import { slide } from "svelte/transition";
@@ -72,11 +73,21 @@
 
   function getStatusColor(status: string): string {
     switch (status) {
-      case "completed": return "bg-positive-dimmer text-positive-stronger";
-      case "failed": return "bg-negative-dimmer text-negative-stronger";
-      case "running": return "bg-accent-dimmer text-accent-stronger";
-      case "pending": return "bg-hover-dimmer text-secondary";
-      default: return "bg-hover-dimmer text-secondary";
+      case "completed": return "text-positive-stronger";
+      case "failed": return "text-negative-stronger";
+      case "running": return "text-accent-stronger";
+      case "pending": return "text-secondary";
+      default: return "text-secondary";
+    }
+  }
+
+  function getStatusDotColor(status: string): string {
+    switch (status) {
+      case "completed": return "bg-positive-default";
+      case "failed": return "bg-negative-default";
+      case "running": return "bg-accent-default animate-pulse";
+      case "pending": return "bg-secondary";
+      default: return "bg-secondary";
     }
   }
 
@@ -213,19 +224,22 @@
       {@const duration = getStepDuration(result.step_order)}
       <div class="bg-primary border-default overflow-hidden rounded-lg border shadow-sm transition-shadow hover:shadow-md">
         <button
-          class="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-hover-dimmer"
+          class="flex w-full items-center justify-between px-5 py-3.5 text-left hover:bg-hover-dimmer"
           aria-expanded={expandedSteps.includes(result.step_order)}
           aria-controls={getStepPanelId(result.step_order)}
           on:click={() => toggleStep(result.step_order)}
         >
-          <div class="flex items-center gap-2">
-            <span class="bg-hover-default flex size-5 items-center justify-center rounded text-xs font-bold">
+          <div class="flex items-center gap-2.5">
+            <span class="bg-hover-dimmer flex size-6 items-center justify-center rounded-full text-xs font-semibold">
               {result.step_order}
             </span>
             <span class="text-sm font-medium">
               {stepDef?.user_description ?? m.flow_step_fallback_label({ order: String(result.step_order) })}
             </span>
-            <span class="{getStatusColor(result.status)} inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium">{getStatusLabel(result.status)}</span>
+            <span class="{getStatusColor(result.status)} inline-flex items-center gap-1.5 text-[11px] font-medium">
+              <span class="{getStatusDotColor(result.status)} size-1.5 shrink-0 rounded-full"></span>
+              {getStatusLabel(result.status)}
+            </span>
             {#if duration}
               <span class="text-xs tabular-nums text-secondary">{duration}</span>
             {/if}
@@ -237,13 +251,13 @@
 
         {#if expandedSteps.includes(result.step_order)}
           <div id={getStepPanelId(result.step_order)} transition:slide={{ duration: 200 }}>
-            <div class="border-default flex min-w-0 flex-col gap-3 border-t px-4 py-3">
+            <div class="border-default flex min-w-0 flex-col gap-4 border-t px-5 py-4">
               {#if result.effective_prompt}
                 <div>
                   <div class="flex items-center justify-between">
-                    <h4 class="text-xs font-semibold uppercase tracking-wider text-secondary">{m.flow_run_effective_prompt()}</h4>
+                    <h4 class="text-xs font-semibold text-muted">{m.flow_run_effective_prompt()}</h4>
                     <button
-                      class="rounded p-1 text-muted transition-colors hover:bg-hover-default hover:text-secondary"
+                      class="rounded-md p-1.5 text-muted transition-colors hover:bg-hover-default hover:text-secondary focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
                       aria-label={m.copy()}
                       on:click={() => copyPayload(
                         `step-${result.step_order}-prompt`,
@@ -258,16 +272,16 @@
                       {/if}
                     </button>
                   </div>
-                  <pre class="bg-hover-dimmer mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md p-3 text-sm">{result.effective_prompt}</pre>
+                  <pre class="bg-hover-dimmer mt-1.5 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg p-3 text-sm leading-relaxed">{result.effective_prompt}</pre>
                 </div>
               {/if}
 
               {#if result.input_payload_json}
                 <div>
                   <div class="flex items-center justify-between">
-                    <h4 class="text-xs font-semibold uppercase tracking-wider text-secondary">{m.flow_run_input()}</h4>
+                    <h4 class="text-xs font-semibold text-muted">{m.flow_run_input()}</h4>
                     <button
-                      class="rounded p-1 text-muted transition-colors hover:bg-hover-default hover:text-secondary"
+                      class="rounded-md p-1.5 text-muted transition-colors hover:bg-hover-default hover:text-secondary focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
                       aria-label={m.copy()}
                       on:click={() => copyPayload(
                         `step-${result.step_order}-input`,
@@ -282,16 +296,16 @@
                       {/if}
                     </button>
                   </div>
-                  <pre class="json-hl border-accent-default/30 bg-hover-dimmer mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border-l-2 p-3 font-mono text-xs">{@html highlightJson(JSON.stringify(result.input_payload_json, null, 2))}</pre>
+                  <pre class="json-hl bg-hover-dimmer mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg p-3 font-mono text-[13px] leading-relaxed">{@html highlightJson(JSON.stringify(result.input_payload_json, null, 2))}</pre>
                 </div>
               {/if}
 
               {#if result.output_payload_json}
                 <div>
                   <div class="flex items-center justify-between">
-                    <h4 class="text-xs font-semibold uppercase tracking-wider text-secondary">{m.flow_run_output()}</h4>
+                    <h4 class="text-xs font-semibold text-muted">{m.flow_run_output()}</h4>
                     <button
-                      class="rounded p-1 text-muted transition-colors hover:bg-hover-default hover:text-secondary"
+                      class="rounded-md p-1.5 text-muted transition-colors hover:bg-hover-default hover:text-secondary focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
                       aria-label={m.copy()}
                       on:click={() => copyPayload(
                         `step-${result.step_order}-output`,
@@ -310,28 +324,37 @@
                   {#if result.output_payload_json.structured}
                     <div class="mt-1">
                       <span class="mb-1 inline-block rounded bg-accent-dimmer px-1.5 py-0.5 text-[10px] font-semibold uppercase text-accent-stronger">JSON</span>
-                      <pre class="json-hl border-accent-default/30 bg-hover-dimmer max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border-l-2 p-3 font-mono text-sm">{@html highlightJson(JSON.stringify(result.output_payload_json.structured, null, 2))}</pre>
+                      <pre class="json-hl border-accent-default bg-hover-dimmer max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border-l-2 p-3 font-mono text-[13px] leading-relaxed">{@html highlightJson(JSON.stringify(result.output_payload_json.structured, null, 2))}</pre>
                     </div>
                   {/if}
 
                   {#if result.output_payload_json.artifacts?.length}
-                    <div class="mt-2 flex flex-wrap gap-2">
-                      {#each result.output_payload_json.artifacts as artifact}
-                        <button
-                          class="inline-flex items-center gap-1.5 rounded-md border border-default bg-primary px-3 py-1.5 text-xs font-medium shadow-sm transition-colors hover:bg-hover-dimmer"
-                          on:click={() => downloadArtifact(artifact.file_id)}
-                        >
-                          <span>{m.download()}</span>
-                          <span class="text-secondary">{artifact.name}</span>
-                        </button>
-                      {/each}
+                    <div class="mt-2">
+                      <h4 class="text-xs font-semibold text-muted">{m.flow_run_files()}</h4>
+                      <div class="mt-1.5 flex flex-wrap gap-2">
+                        {#each result.output_payload_json.artifacts as artifact}
+                          {@const ext = artifact.name?.includes('.') ? artifact.name.split('.').pop()?.toLowerCase() : ''}
+                          <button
+                            class="group inline-flex items-center gap-2 rounded-lg border border-default bg-primary px-3 py-2 text-sm font-medium shadow-sm transition-all hover:-translate-y-px hover:shadow-md"
+                            on:click={() => downloadArtifact(artifact.file_id)}
+                          >
+                            <IconArrowDownToLine class="size-4 text-muted group-hover:text-secondary" />
+                            <span>{artifact.name}</span>
+                            {#if ext}
+                              <span class="rounded bg-accent-dimmer px-1.5 py-0.5 text-[10px] font-semibold uppercase text-accent-stronger">{ext}</span>
+                            {/if}
+                          </button>
+                        {/each}
+                      </div>
                     </div>
                   {/if}
 
                   {#if result.output_payload_json.text && !result.output_payload_json.structured}
-                    <pre class="bg-hover-dimmer mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md p-3 font-mono text-xs">{result.output_payload_json.text}</pre>
+                    <div class="mt-1 max-h-96 overflow-auto rounded-lg bg-hover-dimmer p-4">
+                      <Markdown source={result.output_payload_json.text} class="text-sm" />
+                    </div>
                   {:else if !result.output_payload_json.structured && !result.output_payload_json.artifacts?.length}
-                    <pre class="json-hl border-accent-default/30 bg-hover-dimmer mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border-l-2 p-3 font-mono text-xs">{@html highlightJson(JSON.stringify(result.output_payload_json, null, 2))}</pre>
+                    <pre class="json-hl border-accent-default bg-hover-dimmer mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border-l-2 p-3 font-mono text-[13px] leading-relaxed">{@html highlightJson(JSON.stringify(result.output_payload_json, null, 2))}</pre>
                   {/if}
                 </div>
               {/if}
@@ -339,9 +362,9 @@
               {#if $mode === "power_user" && getStepAttempts(result.step_order).length > 0}
                 <div>
                   <div class="flex items-center justify-between">
-                    <h4 class="text-xs font-semibold uppercase tracking-wider text-secondary">{m.flow_run_attempts()}</h4>
+                    <h4 class="text-xs font-semibold text-muted">{m.flow_run_attempts()}</h4>
                     <button
-                      class="rounded p-1 text-muted transition-colors hover:bg-hover-default hover:text-secondary"
+                      class="rounded-md p-1.5 text-muted transition-colors hover:bg-hover-default hover:text-secondary focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
                       aria-label={m.copy()}
                       on:click={() => copyPayload(
                         `step-${result.step_order}-attempts`,
@@ -356,19 +379,23 @@
                       {/if}
                     </button>
                   </div>
-                  <pre class="json-hl border-accent-default/30 bg-hover-dimmer mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border-l-2 p-3 font-mono text-xs">{@html highlightJson(JSON.stringify(getStepAttempts(result.step_order), null, 2))}</pre>
+                  <pre class="json-hl border-accent-default bg-hover-dimmer mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border-l-2 p-3 font-mono text-[13px] leading-relaxed">{@html highlightJson(JSON.stringify(getStepAttempts(result.step_order), null, 2))}</pre>
                 </div>
               {/if}
 
               {#if result.num_tokens_input != null || result.num_tokens_output != null}
-                <div class="border-default flex items-center gap-3 border-t pt-2 text-xs text-muted">
-                  <span class="font-mono tabular-nums">{m.flow_run_tokens()}: {result.num_tokens_input ?? 0} in / {result.num_tokens_output ?? 0} out</span>
+                <div class="border-default flex items-center gap-2 border-t pt-3 text-xs text-muted">
+                  <span class="tabular-nums">{m.flow_run_tokens()}</span>
+                  <span class="text-dimmer">&middot;</span>
+                  <span class="tabular-nums">{result.num_tokens_input ?? 0} in</span>
+                  <span class="text-dimmer">&middot;</span>
+                  <span class="tabular-nums">{result.num_tokens_output ?? 0} out</span>
                 </div>
               {/if}
 
               {#if result.error_message}
                 <div>
-                  <h4 class="text-xs font-semibold uppercase tracking-wider text-negative-stronger">{m.flow_run_error()}</h4>
+                  <h4 class="text-xs font-semibold text-negative-stronger">{m.flow_run_error()}</h4>
                   <pre class="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-md bg-negative-dimmer p-3 font-mono text-xs text-negative-stronger">{result.error_message}</pre>
                 </div>
               {/if}

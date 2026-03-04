@@ -81,6 +81,7 @@ async def _execute_flow_run_async(
             file_repo=container.file_repo(),
             encryption_service=container.encryption_service(),
             max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
+            audit_service=container.audit_service(),
         )
         result = await executor.execute(
             run_id=run_id,

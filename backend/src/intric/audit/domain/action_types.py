@@ -84,6 +84,7 @@ class ActionType(str, Enum):
     FLOW_CLASSIFICATION_OVERRIDE = "flow_classification_override"
     FLOW_RUN_DOCUMENT_GENERATED = "flow_run_document_generated"
     FLOW_RUN_CONTRACT_REJECTED = "flow_run_contract_rejected"
+    FLOW_HTTP_OUTBOUND_CALL = "flow_http_outbound_call"
 
     # Security Classification Actions
     SECURITY_CLASSIFICATION_CREATED = "security_classification_created"

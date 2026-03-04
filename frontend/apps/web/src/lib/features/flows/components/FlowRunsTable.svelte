@@ -2,6 +2,7 @@
   import type { Flow, FlowRun, Intric } from "@intric/intric-js";
   import { Button, Dialog } from "@intric/ui";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import FlowRunDialog from "./FlowRunDialog.svelte";
   import FlowRunEvidence from "./FlowRunEvidence.svelte";
   import { onDestroy } from "svelte";
@@ -73,12 +74,23 @@
 
   function getStatusColor(status: string): string {
     switch (status) {
-      case "completed": return "bg-positive-dimmer text-positive-stronger";
-      case "failed": return "bg-negative-dimmer text-negative-stronger";
-      case "running": return "bg-accent-dimmer text-accent-stronger";
-      case "queued": return "bg-hover-dimmer text-secondary";
-      case "cancelled": return "bg-warning-dimmer text-warning-stronger";
-      default: return "bg-hover-dimmer text-secondary";
+      case "completed": return "text-positive-stronger";
+      case "failed": return "text-negative-stronger";
+      case "running": return "text-accent-stronger";
+      case "queued": return "text-secondary";
+      case "cancelled": return "text-warning-stronger";
+      default: return "text-secondary";
+    }
+  }
+
+  function getStatusDotColor(status: string): string {
+    switch (status) {
+      case "completed": return "bg-positive-default";
+      case "failed": return "bg-negative-default";
+      case "running": return "bg-accent-default animate-pulse";
+      case "queued": return "bg-secondary";
+      case "cancelled": return "bg-warning-default";
+      default: return "bg-secondary";
     }
   }
 
@@ -189,27 +201,28 @@
       <div class="overflow-x-auto">
         <table class="w-full min-w-[600px] text-sm" aria-label={m.flow_history()}>
           <thead>
-            <tr class="border-default border-b bg-secondary/50 text-left">
-              <th scope="col" class="px-4 py-2 font-medium">{m.status()}</th>
-              <th scope="col" class="px-4 py-2 font-medium">{m.version()}</th>
-              <th scope="col" class="px-4 py-2 font-medium">{m.flow_run_started()}</th>
-              <th scope="col" class="px-4 py-2 font-medium">{m.duration()}</th>
-              <th scope="col" class="px-4 py-2 font-medium">{m.actions()}</th>
+            <tr class="border-default border-b text-left">
+              <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted">{m.status()}</th>
+              <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted">{m.version()}</th>
+              <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted">{m.flow_run_started()}</th>
+              <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted">{m.duration()}</th>
+              <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted">{m.actions()}</th>
             </tr>
           </thead>
           <tbody>
             {#each runs as run (run.id)}
-              <tr class="border-default border-b last:border-b-0 transition-colors hover:bg-hover-dimmer">
-                <td class="px-4 py-2">
-                  <span class="{getStatusColor(run.status)} inline-flex rounded-full px-2 py-0.5 text-xs font-medium">
+              <tr class="border-dimmer border-b last:border-b-0 transition-colors hover:bg-hover-dimmer">
+                <td class="px-4 py-3">
+                  <span class="{getStatusColor(run.status)} inline-flex items-center gap-1.5 text-xs font-medium">
+                    <span class="{getStatusDotColor(run.status)} size-1.5 shrink-0 rounded-full"></span>
                     {getStatusLabel(run.status)}
                   </span>
                 </td>
-                <td class="px-4 py-2 tabular-nums text-secondary">v{run.flow_version}</td>
-                <td class="px-4 py-2 text-secondary">
+                <td class="px-4 py-3 tabular-nums text-secondary">v{run.flow_version}</td>
+                <td class="px-4 py-3 text-secondary">
                   {new Date(run.created_at).toLocaleString()}
                 </td>
-                <td class="px-4 py-2 tabular-nums text-secondary">
+                <td class="px-4 py-3 tabular-nums text-secondary">
                   {#if run.status === "completed" || run.status === "failed"}
                     {formatDuration(run.created_at, run.updated_at)}
                   {:else if run.status === "running"}
@@ -255,7 +268,7 @@
               {#if run.status === "failed" && run.error_message}
                 <tr>
                   <td colspan="5" class="border-default border-b px-4 py-2">
-                    <div class="flex min-w-0 items-start gap-2 rounded-md border border-negative-default/20 bg-negative-dimmer px-3 py-2 text-xs text-negative-stronger">
+                    <div class="flex min-w-0 items-start gap-2 rounded-md border-l-2 border-l-negative-default bg-hover-dimmer px-3 py-2 text-xs text-negative-stronger">
                       <span class="shrink-0 font-semibold">{m.flow_run_error()}:</span>
                       <span class="min-w-0 break-words">{run.error_message}</span>
                     </div>
@@ -265,7 +278,7 @@
               {#if run.status === "completed" && run.output_payload_json}
                 <tr>
                   <td colspan="5" class="border-default border-b px-4 py-2">
-                    <div class="flex flex-col gap-1.5 rounded-md border border-positive-default/20 bg-positive-dimmer px-3 py-2 text-xs">
+                    <div class="flex flex-col gap-1.5 rounded-md border-l-2 border-l-positive-default bg-hover-dimmer px-3 py-2 text-xs">
                       {#if run.output_payload_json.structured}
                         {@const structured = run.output_payload_json.structured}
                         {#if Array.isArray(structured)}
@@ -305,10 +318,11 @@
                         <div class="flex flex-wrap items-center gap-2">
                           {#each run.output_payload_json.artifacts as artifact}
                             <button
-                              class="inline-flex items-center gap-1 rounded-md border border-positive-default/30 bg-primary px-2 py-1 text-xs font-medium text-positive-stronger hover:bg-positive-dimmer transition-colors"
+                              class="group inline-flex items-center gap-1.5 rounded-md border border-default bg-primary px-2.5 py-1 text-xs font-medium shadow-sm transition-all hover:shadow"
                               on:click={() => downloadArtifact(artifact.file_id)}
                             >
-                              {m.download()} {artifact.name}
+                              <IconArrowDownToLine class="size-3 text-muted group-hover:text-secondary" />
+                              {artifact.name}
                             </button>
                           {/each}
                         </div>

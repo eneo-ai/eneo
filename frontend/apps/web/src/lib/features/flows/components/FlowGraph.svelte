@@ -489,7 +489,7 @@
         <p class="text-sm font-semibold">{m.flow_graph_preview()} · {inspectedEdge.title}</p>
         <button
           class="hover:bg-hover-dimmer rounded px-2 py-1 text-xs"
-          on:click={() => (inspectedEdge = null)}
+          onclick={() => (inspectedEdge = null)}
         >
           {m.cancel()}
         </button>

@@ -29,6 +29,7 @@
   const dispatch = createEventDispatcher<{
     stepChanged: { index: number; step: FlowStep };
     removeStep: number;
+    jsonValidationChanged: { hasErrors: boolean; fields: string[] };
   }>();
 
   const mode = getFlowUserMode();
@@ -37,6 +38,109 @@
 
   $: activeIndex = steps.findIndex((s) => s.id === activeStepId);
   $: activeStep = activeIndex >= 0 ? steps[activeIndex] : null;
+
+  type AdvancedJsonField = "input_contract" | "output_contract" | "input_config" | "output_config";
+  const ADVANCED_JSON_FIELDS: AdvancedJsonField[] = [
+    "input_contract",
+    "output_contract",
+    "input_config",
+    "output_config",
+  ];
+  let advancedJsonDraftStepKey: string | null = null;
+  let advancedJsonDrafts: Record<AdvancedJsonField, string> = {
+    input_contract: "",
+    output_contract: "",
+    input_config: "",
+    output_config: "",
+  };
+  let advancedJsonErrors: Partial<Record<AdvancedJsonField, string>> = {};
+
+  function getStepKeyForAdvancedJson(step: FlowStep | null): string | null {
+    if (!step) return null;
+    return `${step.id ?? "new"}:${step.step_order}`;
+  }
+
+  function formatAdvancedJson(value: unknown): string {
+    return value == null ? "" : JSON.stringify(value, null, 2);
+  }
+
+  function getStepAdvancedJsonValue(step: FlowStep, field: AdvancedJsonField): unknown {
+    switch (field) {
+      case "input_contract":
+        return step.input_contract;
+      case "output_contract":
+        return step.output_contract;
+      case "input_config":
+        return step.input_config;
+      case "output_config":
+        return step.output_config;
+      default:
+        return null;
+    }
+  }
+
+  function getVisibleAdvancedJsonFields(step: FlowStep | null): Set<AdvancedJsonField> {
+    const visible = new Set<AdvancedJsonField>(["input_contract", "output_contract"]);
+    if (step && (step.input_source === "http_get" || step.input_source === "http_post")) {
+      visible.add("input_config");
+    }
+    if (step?.output_mode === "http_post") {
+      visible.add("output_config");
+    }
+    return visible;
+  }
+
+  function emitAdvancedJsonValidationState() {
+    const fields = ADVANCED_JSON_FIELDS.filter((field) => Boolean(advancedJsonErrors[field]));
+    dispatch("jsonValidationChanged", { hasErrors: fields.length > 0, fields });
+  }
+
+  function syncAdvancedJsonDrafts(step: FlowStep | null) {
+    advancedJsonDrafts = {
+      input_contract: formatAdvancedJson(step?.input_contract ?? null),
+      output_contract: formatAdvancedJson(step?.output_contract ?? null),
+      input_config: formatAdvancedJson(step?.input_config ?? null),
+      output_config: formatAdvancedJson(step?.output_config ?? null),
+    };
+    advancedJsonErrors = {};
+    emitAdvancedJsonValidationState();
+  }
+
+  function clearAdvancedJsonError(field: AdvancedJsonField) {
+    if (!advancedJsonErrors[field]) return;
+    const nextErrors = { ...advancedJsonErrors };
+    delete nextErrors[field];
+    advancedJsonErrors = nextErrors;
+    emitAdvancedJsonValidationState();
+  }
+
+  function setAdvancedJsonError(field: AdvancedJsonField, message: string) {
+    const currentMessage = advancedJsonErrors[field];
+    if (currentMessage === message) return;
+    advancedJsonErrors = { ...advancedJsonErrors, [field]: message };
+    emitAdvancedJsonValidationState();
+  }
+
+  function updateAdvancedJsonField(field: AdvancedJsonField, rawValue: string) {
+    advancedJsonDrafts = { ...advancedJsonDrafts, [field]: rawValue };
+    const trimmed = rawValue.trim();
+    if (trimmed.length === 0) {
+      clearAdvancedJsonError(field);
+      updateStep(field, null);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(rawValue);
+      clearAdvancedJsonError(field);
+      updateStep(field, parsed);
+    } catch (error) {
+      const detail =
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "Invalid JSON syntax";
+      setAdvancedJsonError(field, `${m.flow_run_error()}: ${detail}`);
+    }
+  }
 
   // Assistant state for the active step
   let assistant: any = null;
@@ -119,12 +223,54 @@
 
   function handleInputSourceChange(nextSource: FlowStep["input_source"]) {
     if (activeStep === null || activeIndex < 0) return;
+    const httpSourceSelected = nextSource === "http_get" || nextSource === "http_post";
+    const unsupportedHttpInputType =
+      activeStep.input_type === "document" ||
+      activeStep.input_type === "file" ||
+      activeStep.input_type === "image" ||
+      activeStep.input_type === "audio";
+    const nextInputConfig = (() => {
+      if (!httpSourceSelected) return activeStep.input_config ?? null;
+      const currentConfig =
+        activeStep.input_config && typeof activeStep.input_config === "object"
+          ? (activeStep.input_config as Record<string, unknown>)
+          : {};
+      return {
+        ...currentConfig,
+        timeout_seconds:
+          typeof currentConfig.timeout_seconds === "number"
+            ? currentConfig.timeout_seconds
+            : 30,
+        url:
+          typeof currentConfig.url === "string"
+            ? currentConfig.url
+            : "",
+      };
+    })();
     const updated = {
       ...activeStep,
       input_source: nextSource,
+      input_type:
+        (nextSource !== "flow_input" && activeStep.input_type === "document") || (httpSourceSelected && unsupportedHttpInputType)
+          ? "text"
+          : activeStep.input_type,
+      input_config: nextInputConfig,
       input_bindings: sanitizeBindingsForSource(
         activeStep.input_bindings as Record<string, unknown> | null | undefined
       )
+    };
+    dispatch("stepChanged", { index: activeIndex, step: updated });
+  }
+
+  function handleInputTypeChange(nextType: FlowStep["input_type"]) {
+    if (activeStep === null || activeIndex < 0) return;
+    const updated = {
+      ...activeStep,
+      input_type: nextType,
+      input_source:
+        nextType === "document" && activeStep.input_source !== "flow_input"
+          ? "flow_input"
+          : activeStep.input_source
     };
     dispatch("stepChanged", { index: activeIndex, step: updated });
   }
@@ -187,10 +333,52 @@
     return templateStepRefs;
   })();
 
+  $: {
+    const nextStepKey = getStepKeyForAdvancedJson(activeStep);
+    if (nextStepKey !== advancedJsonDraftStepKey) {
+      advancedJsonDraftStepKey = nextStepKey;
+      syncAdvancedJsonDrafts(activeStep);
+    }
+  }
+
+  $: if (activeStep !== null) {
+    const nextDrafts = { ...advancedJsonDrafts };
+    let changed = false;
+    for (const field of ADVANCED_JSON_FIELDS) {
+      if (advancedJsonErrors[field]) continue;
+      const nextValue = formatAdvancedJson(getStepAdvancedJsonValue(activeStep, field));
+      if (nextDrafts[field] !== nextValue) {
+        nextDrafts[field] = nextValue;
+        changed = true;
+      }
+    }
+    if (changed) {
+      advancedJsonDrafts = nextDrafts;
+    }
+  }
+
+  $: if (activeStep !== null) {
+    const visibleFields = getVisibleAdvancedJsonFields(activeStep);
+    const nextErrors = { ...advancedJsonErrors };
+    let changed = false;
+    for (const field of ADVANCED_JSON_FIELDS) {
+      if (!visibleFields.has(field) && nextErrors[field]) {
+        delete nextErrors[field];
+        changed = true;
+      }
+    }
+    if (changed) {
+      advancedJsonErrors = nextErrors;
+      emitAdvancedJsonValidationState();
+    }
+  }
+
   const INPUT_SOURCE_LABELS: Record<string, () => string> = {
     flow_input: () => m.flow_input_source_flow_input(),
     previous_step: () => m.flow_input_source_previous_step(),
-    all_previous_steps: () => m.flow_input_source_all_previous_steps()
+    all_previous_steps: () => m.flow_input_source_all_previous_steps(),
+    http_get: () => m.flow_input_source_http_get(),
+    http_post: () => m.flow_input_source_http_post(),
   };
 
   // Legacy cleanup: old builder versions could accidentally mirror instruction -> input template.
@@ -227,8 +415,8 @@
   const COMPATIBLE_COERCIONS = new Set([
     "text:text", "text:json", "text:any",
     "json:text", "json:json", "json:any",
-    "pdf:text", "pdf:document", "pdf:any",
-    "docx:text", "docx:document", "docx:any",
+    "pdf:text", "pdf:any",
+    "docx:text", "docx:any",
   ]);
 
   $: previousStep = activeStep && activeStep.step_order > 1
@@ -245,8 +433,8 @@
     { value: "flow_input", get label() { return m.flow_input_source_flow_input(); } },
     { value: "previous_step", get label() { return m.flow_input_source_previous_step(); } },
     { value: "all_previous_steps", get label() { return m.flow_input_source_all_previous_steps(); } },
-    { value: "http_get", get label() { return m.flow_input_source_http_get(); }, disabled: true },
-    { value: "http_post", get label() { return m.flow_input_source_http_post(); }, disabled: true }
+    { value: "http_get", get label() { return m.flow_input_source_http_get(); } },
+    { value: "http_post", get label() { return m.flow_input_source_http_post(); } }
   ];
 
   const INPUT_TYPES = [
@@ -340,8 +528,8 @@
               on:change={(e) => handleInputSourceChange(e.currentTarget.value as FlowStep["input_source"])}
             >
               {#each INPUT_SOURCES as source}
-                <option value={source.value} disabled={source.disabled ?? false}>
-                  {source.label}{source.disabled ? ` (${m.flow_coming_soon()})` : ""}
+                <option value={source.value}>
+                  {source.label}
                 </option>
               {/each}
             </select>
@@ -357,7 +545,7 @@
             class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
             value={activeStep.input_type}
             disabled={isPublished}
-            on:change={(e) => updateStep("input_type", e.currentTarget.value)}
+            on:change={(e) => handleInputTypeChange(e.currentTarget.value as FlowStep["input_type"])}
           >
             {#each INPUT_TYPES as t}
               <option value={t.value}>{t.label}</option>
@@ -664,16 +852,14 @@
             </svelte:fragment>
             <textarea
               class="border-default bg-primary ring-default min-h-[80px] w-full rounded-lg border px-3 py-2 font-mono text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-              value={activeStep.input_contract ? JSON.stringify(activeStep.input_contract, null, 2) : ""}
+              value={advancedJsonDrafts.input_contract}
               disabled={isPublished}
-              on:input={(e) => {
-                try {
-                  const val = e.currentTarget.value.trim() ? JSON.parse(e.currentTarget.value) : null;
-                  updateStep("input_contract", val);
-                } catch { /* ignore parse errors while typing */ }
-              }}
+              on:input={(e) => updateAdvancedJsonField("input_contract", e.currentTarget.value)}
               placeholder={'{"type": "object", "properties": {...}}'}
             ></textarea>
+            {#if advancedJsonErrors.input_contract}
+              <p class="mt-1 text-xs text-warning-stronger" role="alert">{advancedJsonErrors.input_contract}</p>
+            {/if}
           </Settings.Row>
 
           <Settings.Row title={m.flow_step_output_contract()} description={m.flow_step_output_contract_desc()}>
@@ -684,32 +870,28 @@
             </svelte:fragment>
             <textarea
               class="border-default bg-primary ring-default min-h-[80px] w-full rounded-lg border px-3 py-2 font-mono text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-              value={activeStep.output_contract ? JSON.stringify(activeStep.output_contract, null, 2) : ""}
+              value={advancedJsonDrafts.output_contract}
               disabled={isPublished}
-              on:input={(e) => {
-                try {
-                  const val = e.currentTarget.value.trim() ? JSON.parse(e.currentTarget.value) : null;
-                  updateStep("output_contract", val);
-                } catch { /* ignore parse errors while typing */ }
-              }}
+              on:input={(e) => updateAdvancedJsonField("output_contract", e.currentTarget.value)}
               placeholder={'{"type": "object", "properties": {...}}'}
             ></textarea>
+            {#if advancedJsonErrors.output_contract}
+              <p class="mt-1 text-xs text-warning-stronger" role="alert">{advancedJsonErrors.output_contract}</p>
+            {/if}
           </Settings.Row>
 
           {#if activeStep.input_source === "http_get" || activeStep.input_source === "http_post"}
             <Settings.Row title={m.flow_step_input_config()} description={m.flow_step_input_config_desc()}>
               <textarea
                 class="border-default bg-primary ring-default min-h-[80px] w-full rounded-lg border px-3 py-2 font-mono text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-                value={activeStep.input_config ? JSON.stringify(activeStep.input_config, null, 2) : ""}
+                value={advancedJsonDrafts.input_config}
                 disabled={isPublished}
-                on:input={(e) => {
-                  try {
-                    const val = e.currentTarget.value.trim() ? JSON.parse(e.currentTarget.value) : null;
-                    updateStep("input_config", val);
-                  } catch { /* ignore parse errors while typing */ }
-                }}
+                on:input={(e) => updateAdvancedJsonField("input_config", e.currentTarget.value)}
                 placeholder={'{"url": "https://...", "headers": {...}}'}
               ></textarea>
+              {#if advancedJsonErrors.input_config}
+                <p class="mt-1 text-xs text-warning-stronger" role="alert">{advancedJsonErrors.input_config}</p>
+              {/if}
             </Settings.Row>
           {/if}
 
@@ -717,16 +899,14 @@
             <Settings.Row title={m.flow_step_output_config()} description={m.flow_step_output_config_desc()}>
               <textarea
                 class="border-default bg-primary ring-default min-h-[80px] w-full rounded-lg border px-3 py-2 font-mono text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-                value={activeStep.output_config ? JSON.stringify(activeStep.output_config, null, 2) : ""}
+                value={advancedJsonDrafts.output_config}
                 disabled={isPublished}
-                on:input={(e) => {
-                  try {
-                    const val = e.currentTarget.value.trim() ? JSON.parse(e.currentTarget.value) : null;
-                    updateStep("output_config", val);
-                  } catch { /* ignore parse errors while typing */ }
-                }}
+                on:input={(e) => updateAdvancedJsonField("output_config", e.currentTarget.value)}
                 placeholder={'{"url": "https://...", "headers": {...}}'}
               ></textarea>
+              {#if advancedJsonErrors.output_config}
+                <p class="mt-1 text-xs text-warning-stronger" role="alert">{advancedJsonErrors.output_config}</p>
+              {/if}
             </Settings.Row>
           {/if}
         </Settings.Group>

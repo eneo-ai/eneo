@@ -26,9 +26,15 @@
   let publishLoading = false;
   let showRunDialog = false;
   let runsReloadTrigger = 0;
+  let hasStepJsonValidationErrors = false;
+  let stepJsonValidationFields: string[] = [];
   type BuilderStageId = 1 | 2 | 3 | 4 | 5;
   type FlowMetadataJson = Record<string, unknown>;
-  type FlowWizardMetadata = { transcription_enabled?: boolean; transcription_model?: { id: string } | null; transcription_language?: string };
+  type FlowWizardMetadata = {
+    transcription_enabled?: boolean;
+    transcription_model?: { id: string } | null;
+    transcription_language?: string;
+  };
   let builderStage: BuilderStageId = 1;
 
   const {
@@ -46,7 +52,21 @@
     state: { resource, update, activeStepId, isPublished, saveStatus, validationErrors }
   } = flowEditor;
 
-  $: canPublish = !$isPublished && $saveStatus === "saved" && $validationErrors.size === 0;
+  const STEP_JSON_FIELD_LABELS: Record<string, () => string> = {
+    input_contract: () => m.flow_step_input_contract(),
+    output_contract: () => m.flow_step_output_contract(),
+    input_config: () => m.flow_step_input_config(),
+    output_config: () => m.flow_step_output_config(),
+  };
+
+  $: stepJsonValidationSummary = stepJsonValidationFields
+    .map((field) => STEP_JSON_FIELD_LABELS[field]?.() ?? field)
+    .join(", ");
+  $: canPublish =
+    !$isPublished &&
+    $saveStatus === "saved" &&
+    $validationErrors.size === 0 &&
+    !hasStepJsonValidationErrors;
 
   onDestroy(() => {
     flowEditor.destroy();
@@ -84,12 +104,17 @@
       : hasAudioInputStep;
   $: latestStep = ($update.steps ?? []).at(-1) ?? null;
   $: isTranscriptionSkipped = !transcriptionEnabled;
-  $: transcriptionModel = (wizardMetadata as FlowWizardMetadata).transcription_model ?? null;
+  $: transcriptionModelId =
+    typeof (wizardMetadata as FlowWizardMetadata).transcription_model?.id === "string"
+      ? (wizardMetadata as FlowWizardMetadata).transcription_model?.id
+      : null;
+  $: transcriptionModel =
+    ($currentSpace.transcription_models ?? []).find((model) => model.id === transcriptionModelId) ?? null;
   $: transcriptionLanguage = (wizardMetadata as FlowWizardMetadata).transcription_language ?? "sv";
   $: stepsCount = $update.steps?.length ?? 0;
   $: checklistHasName = ($update.name ?? "").trim().length > 0;
   $: checklistHasSteps = stepsCount > 0;
-  $: checklistHasNoErrors = $validationErrors.size === 0;
+  $: checklistHasNoErrors = $validationErrors.size === 0 && !hasStepJsonValidationErrors;
   $: isFlowConfigured = checklistHasName && checklistHasSteps;
 
   function setBuilderStage(stage: BuilderStageId) {
@@ -214,6 +239,11 @@
         </div>
       {/if}
       <FlowValidationBanner errors={$validationErrors} />
+      {#if hasStepJsonValidationErrors}
+        <div class="border-b border-warning-default/40 bg-warning-dimmer px-4 py-2 text-sm text-warning-stronger" role="status">
+          {m.flow_step_json_invalid({ fields: stepJsonValidationSummary })}
+        </div>
+      {/if}
 
       <!-- Wizard Stepper -->
       <div class="sticky top-0 z-10 border-b border-default bg-primary/95 backdrop-blur-sm px-4 py-3.5 md:px-6">
@@ -467,16 +497,20 @@
                   <h3 class="text-sm font-semibold">{m.flow_transcription_model_settings()}</h3>
                   <div class="mt-4 grid gap-4 sm:grid-cols-2">
                     <div class="flex flex-col gap-1.5">
-                      <label class="text-xs font-medium text-secondary">{m.flow_transcription_model_label()}</label>
+                      <span class="text-xs font-medium text-secondary">{m.flow_transcription_model_label()}</span>
                       <SelectAIModelV2
                         bind:selectedModel={transcriptionModel}
                         availableModels={$currentSpace.transcription_models}
-                        on:change={() => setWizardMeta({ transcription_model: transcriptionModel })}
+                        on:change={() =>
+                          setWizardMeta({
+                            transcription_model: transcriptionModel ? { id: transcriptionModel.id } : null
+                          })}
                       />
                     </div>
                     <div class="flex flex-col gap-1.5">
-                      <label class="text-xs font-medium text-secondary">{m.flow_transcription_language_label()}</label>
+                      <label for="flow-transcription-language" class="text-xs font-medium text-secondary">{m.flow_transcription_language_label()}</label>
                       <select class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2"
+                        id="flow-transcription-language"
                         value={transcriptionLanguage} disabled={$isPublished}
                         on:change={(e) => setWizardMeta({ transcription_language: e.currentTarget.value })}>
                         <option value="sv">Svenska</option>
@@ -543,6 +577,10 @@
                   isPublished={$isPublished}
                   transcriptionEnabled={transcriptionEnabled}
                   formSchema={$update.metadata_json?.form_schema as { fields: { name: string; type: string; required?: boolean; options?: string[]; order?: number }[] } | undefined}
+                  on:jsonValidationChanged={(e) => {
+                    hasStepJsonValidationErrors = e.detail.hasErrors;
+                    stepJsonValidationFields = e.detail.fields;
+                  }}
                   on:stepChanged={(e) => {
                     const { index, step } = e.detail;
                     $update.steps[index] = step;

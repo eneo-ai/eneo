@@ -207,6 +207,9 @@ class Settings(BaseSettings):
     celery_visibility_timeout_seconds: int = 3600
     flow_task_timeout_seconds: int = 3600
     flow_max_inline_text_bytes: int = 1_048_576
+    flow_http_request_timeout_seconds: int = 30
+    flow_http_max_timeout_seconds: int = 120
+    flow_http_allow_private_networks: bool = False
 
     # Orphaned crawl run cleanup (prevents "Crawl already in progress" blocking)
     orphan_crawl_run_timeout_hours: int = (
@@ -712,6 +715,28 @@ class Settings(BaseSettings):
             logging.error(
                 "FLOW_MAX_INLINE_TEXT_BYTES must be greater than zero. Current value: %s",
                 self.flow_max_inline_text_bytes,
+            )
+            sys.exit(1)
+
+        if self.flow_http_request_timeout_seconds <= 0:
+            logging.error(
+                "FLOW_HTTP_REQUEST_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.flow_http_request_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.flow_http_max_timeout_seconds <= 0:
+            logging.error(
+                "FLOW_HTTP_MAX_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.flow_http_max_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.flow_http_max_timeout_seconds < self.flow_http_request_timeout_seconds:
+            logging.error(
+                "FLOW_HTTP_MAX_TIMEOUT_SECONDS must be >= FLOW_HTTP_REQUEST_TIMEOUT_SECONDS. Current values: max=%s default=%s",
+                self.flow_http_max_timeout_seconds,
+                self.flow_http_request_timeout_seconds,
             )
             sys.exit(1)
 

@@ -120,6 +120,11 @@ class FlowVariableResolver:
     def _resolve_path(self, context: dict[str, Any], path: str) -> Any:
         current: Any = context
         for token in path.split("."):
+            token = token.strip()
+            if not token:
+                raise BadRequestException(
+                    f"Unknown variable reference: '{path}'. Empty path segment is not allowed."
+                )
             if isinstance(current, dict):
                 if token not in current:
                     raise BadRequestException(
