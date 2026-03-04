@@ -330,8 +330,13 @@ class Assistant(Entity):
                     f"Completion model {self.completion_model.name} do not support vision."
                 )
 
-        # Fill half the context
-        num_chunks = self.completion_model.token_limit // 200 // 2 if version == 2 else 30
+        # Fetch enough vector DB candidates to surface all relevant chunks.
+        # Capped at 60: with too many candidates (e.g. 300+ for 128k models),
+        # the score distribution becomes very gradual, preventing autocut from
+        # finding sharp relevance boundaries. 60 is sufficient to capture all
+        # relevant content while keeping score gaps detectable. The context
+        # builder's token budget is the final guard on how much actually gets used.
+        num_chunks = min(self.completion_model.token_limit // 200 // 2, 60) if version == 2 else 30
 
         datastore_result = await references_service.get_references(
             question=question,

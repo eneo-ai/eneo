@@ -1,5 +1,7 @@
 import time
+from collections import defaultdict
 from typing import TYPE_CHECKING, Optional
+from uuid import UUID
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from pydantic_settings import BaseSettings
@@ -151,6 +153,47 @@ class Datastore:
         logger.debug(f"Adding {len(info_blob_chunks)} info-blob chunks to datastore.")
         await self._add(chunk_embedding_list)
 
+    async def _expand_chunks_with_context(
+        self,
+        hits: list[InfoBlobChunkInDBWithScore],
+        window: int = 2,
+    ) -> list[InfoBlobChunkInDBWithScore]:
+        """Expand hit chunks with neighboring chunks from the same documents."""
+        hit_keys: set[tuple[UUID, int]] = {
+            (c.info_blob_id, c.chunk_no) for c in hits
+        }
+
+        # Compute needed neighbors per info_blob
+        needed: dict[UUID, list[int]] = defaultdict(list)
+        for info_blob_id, chunk_no in hit_keys:
+            for offset in range(-window, window + 1):
+                neighbor_no = chunk_no + offset
+                if neighbor_no >= 0 and (info_blob_id, neighbor_no) not in hit_keys:
+                    needed[info_blob_id].append(neighbor_no)
+
+        # Deduplicate chunk_nos per info_blob
+        needed = {
+            blob_id: sorted(set(chunk_nos))
+            for blob_id, chunk_nos in needed.items()
+            if chunk_nos
+        }
+
+        if not needed:
+            return hits
+
+        expanded = await self.chunk_repo.get_neighboring_chunks(needed)
+
+        num_blobs = len(needed)
+        logger.debug(
+            "Context expansion: hits=%d, expanded=%d, from %d info_blobs",
+            len(hits),
+            len(expanded),
+            num_blobs,
+        )
+
+        # Hits first to preserve priority in context builder's token fitting
+        return hits + expanded
+
     async def semantic_search(
         self,
         search_string: str,
@@ -160,6 +203,8 @@ class Datastore:
         integration_knowledge_list: list[IntegrationKnowledge] = [],
         num_chunks: Optional[int] = 30,
         autocut_cutoff: Optional[int] = None,
+        expand_context: bool = False,
+        context_window: int = 2,
     ) -> list[InfoBlobChunkInDBWithScore]:
         group_ids = [group.id for group in collections]
         website_ids = [website.id for website in websites]
@@ -200,6 +245,8 @@ class Datastore:
                     f"{r.info_blob_title}({r.score:.4f})" for r in kept
                 ),
             )
+            if expand_context and kept:
+                return await self._expand_chunks_with_context(kept, window=context_window)
             return kept
 
         logger.debug(
@@ -207,4 +254,8 @@ class Datastore:
             len(semantic_results),
             ", ".join(f"{s:.4f}" for s in scores[:10]),
         )
+        if expand_context and semantic_results:
+            return await self._expand_chunks_with_context(
+                semantic_results, window=context_window
+            )
         return semantic_results

@@ -114,6 +114,45 @@ class InfoBlobChunkRepo:
 
         return chunks_with_score
 
+    async def get_neighboring_chunks(
+        self,
+        neighbors: dict[UUID, list[int]],
+    ) -> list[InfoBlobChunkInDBWithScore]:
+        """Batch-fetch chunks by (info_blob_id, chunk_no) pairs.
+
+        Args:
+            neighbors: mapping of info_blob_id -> list of chunk_no values to fetch
+        """
+        if not neighbors:
+            return []
+
+        conditions = []
+        for info_blob_id, chunk_nos in neighbors.items():
+            conditions.append(
+                sa.and_(
+                    InfoBlobChunks.info_blob_id == info_blob_id,
+                    InfoBlobChunks.chunk_no.in_(chunk_nos),
+                )
+            )
+
+        stmt = (
+            sa.select(InfoBlobChunks, InfoBlobs.title)
+            .join(InfoBlobs)
+            .options(defer(InfoBlobChunks.embedding))
+            .where(sa.or_(*conditions))
+        )
+
+        results = await self.session.execute(stmt)
+
+        return [
+            InfoBlobChunkInDBWithScore(
+                **row[0].to_dict(exclude="embedding"),
+                score=0.0,
+                info_blob_title=row[1],
+            )
+            for row in results
+        ]
+
     async def keyword_search(
         self,
         search_string: str,
