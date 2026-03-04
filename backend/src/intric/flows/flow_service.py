@@ -15,6 +15,11 @@ from intric.database.tables.spaces_table import Spaces
 from intric.flows.flow import Flow, FlowSparse, FlowStep, JsonObject
 from intric.flows.flow_repo import FlowRepository
 from intric.flows.flow_version_repo import FlowVersionRepository
+from intric.flows.transcription_config import (
+    FlowTranscriptionConfigError,
+    parse_transcription_config,
+)
+from intric.flows.output_modes import transcribe_only_violation
 from intric.flows.step_config_secrets import encrypt_step_headers_for_storage
 from intric.flows.step_chain_rules import find_first_step_chain_violation
 from intric.flows.variable_resolver import iter_template_expressions
@@ -79,7 +84,7 @@ class FlowService:
     ) -> Flow:
         normalized_metadata = self._normalize_legacy_form_schema(metadata_json)
         self._validate_form_schema(normalized_metadata)
-        self._validate_steps(steps)
+        self._validate_steps(steps, metadata_json=normalized_metadata)
         self._validate_variable_alias_collisions(
             steps=steps,
             metadata_json=normalized_metadata,
@@ -148,7 +153,6 @@ class FlowService:
             raise BadRequestException("Cannot mutate a published flow. Unpublish first.")
 
         next_steps = steps if steps is not None else existing.steps
-        self._validate_steps(next_steps)
         await self._validate_assistant_scope_for_steps(
             space_id=existing.space_id,
             steps=next_steps,
@@ -159,6 +163,7 @@ class FlowService:
         if metadata_json is not NOT_PROVIDED:
             next_metadata = self._normalize_legacy_form_schema(cast(JsonObject | None, metadata_json))
         self._validate_form_schema(next_metadata)
+        self._validate_steps(next_steps, metadata_json=next_metadata)
         self._validate_variable_alias_collisions(
             steps=next_steps,
             metadata_json=next_metadata,
@@ -256,7 +261,7 @@ class FlowService:
         flow = await self.get_flow(flow_id)
         normalized_metadata = self._normalize_legacy_form_schema(flow.metadata_json)
         self._validate_form_schema(normalized_metadata)
-        self._validate_publishable(flow)
+        self._validate_publishable(flow, metadata_json=normalized_metadata)
         self._validate_variable_alias_collisions(
             steps=flow.steps,
             metadata_json=normalized_metadata,
@@ -292,12 +297,17 @@ class FlowService:
         )
         return await self.flow_repo.update(updated, tenant_id=self.user.tenant_id)
 
-    def _validate_publishable(self, flow: Flow) -> None:
-        self._validate_steps(flow.steps)
+    def _validate_publishable(self, flow: Flow, *, metadata_json: JsonObject | None) -> None:
+        self._validate_steps(flow.steps, metadata_json=metadata_json)
         if not flow.steps:
             raise BadRequestException("Flow must contain at least one step before publish.")
 
-    def _validate_steps(self, steps: list[FlowStep]) -> None:
+    def _validate_steps(
+        self,
+        steps: list[FlowStep],
+        *,
+        metadata_json: JsonObject | None = None,
+    ) -> None:
         if not steps:
             return
 
@@ -336,6 +346,14 @@ class FlowService:
                 self._validate_http_input_config(step=step)
             if step.output_mode == "http_post":
                 self._validate_http_output_config(step=step)
+            transcribe_only_error = transcribe_only_violation(
+                step_order=step.step_order,
+                input_type=step.input_type,
+                output_type=step.output_type,
+                output_mode=step.output_mode,
+            )
+            if transcribe_only_error is not None:
+                raise BadRequestException(transcribe_only_error)
             # Typed I/O publish-time validation
             input_policy = INPUT_TYPE_POLICIES.get(step.input_type)
             if input_policy and not input_policy.supported:
@@ -365,6 +383,34 @@ class FlowService:
                     current_step_order=step.step_order,
                     available_orders=seen,
                 )
+
+        self._validate_audio_transcription_settings(
+            steps=sorted_steps,
+            metadata_json=metadata_json,
+        )
+
+    def _validate_audio_transcription_settings(
+        self,
+        *,
+        steps: list[FlowStep],
+        metadata_json: JsonObject | None,
+    ) -> None:
+        if not any(step.input_type == "audio" for step in steps):
+            return
+
+        try:
+            config = parse_transcription_config(cast(dict[str, Any] | None, metadata_json))
+        except FlowTranscriptionConfigError as exc:
+            raise BadRequestException(str(exc)) from exc
+
+        if not config.enabled:
+            raise BadRequestException(
+                "Transcription must be enabled when using audio input steps."
+            )
+        if config.model_id is None:
+            raise BadRequestException(
+                "A transcription model must be selected when using audio input steps."
+            )
 
     def _validate_binding_references(
         self,

@@ -126,7 +126,7 @@ export type FlowStep = {
   input_source: "flow_input" | "previous_step" | "all_previous_steps" | "http_get" | "http_post";
   input_type: "text" | "json" | "image" | "audio" | "document" | "file" | "any";
   input_contract?: Record<string, unknown> | null;
-  output_mode: "pass_through" | "http_post";
+  output_mode: "pass_through" | "http_post" | "transcribe_only";
   output_type: "text" | "json" | "pdf" | "docx";
   output_contract?: Record<string, unknown> | null;
   input_bindings?: Record<string, unknown> | null;

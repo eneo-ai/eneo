@@ -66,6 +66,15 @@ def find_first_step_chain_violation(steps: Sequence[StepChainShape]) -> StepChai
                 ),
                 code="typed_io_document_source_unsupported",
             )
+        if step.input_type == "audio" and step.input_source != "flow_input":
+            return StepChainViolation(
+                step_order=step.step_order,
+                message=(
+                    f"Step {step.step_order}: input_type 'audio' is only supported with input_source "
+                    f"'flow_input'."
+                ),
+                code="typed_io_audio_source_unsupported",
+            )
         if step.input_type == "json" and step.input_source == "all_previous_steps":
             return StepChainViolation(
                 step_order=step.step_order,

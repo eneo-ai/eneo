@@ -225,27 +225,47 @@ function initFlowEditor(data: {
     scheduleAutoSave();
   }
 
-  let assistantSaveTimer: ReturnType<typeof setTimeout> | null = null;
   const pendingAssistantChanges = new Map<string, Record<string, unknown>>();
-  let assistantSaveInFlight = false;
+  const assistantSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const assistantSaveInFlight = new Set<string>();
+  const assistantSavePromises = new Map<string, Promise<void>>();
 
-  async function saveAssistant(assistantId: string, changes: Record<string, unknown>) {
-    // Merge into pending changes so rapid edits accumulate instead of clobbering
-    const current = pendingAssistantChanges.get(assistantId) ?? {};
-    pendingAssistantChanges.set(assistantId, { ...current, ...changes });
+  function clearAssistantSaveTimer(assistantId: string) {
+    const existingTimer = assistantSaveTimers.get(assistantId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      assistantSaveTimers.delete(assistantId);
+    }
+  }
 
-    if (assistantSaveTimer) clearTimeout(assistantSaveTimer);
-    assistantSaveStatus.set("pending");
-    setAssistantValidationError(assistantId, null);
-
-    assistantSaveTimer = setTimeout(async () => {
-      if (assistantSaveInFlight) return;
-      const merged = pendingAssistantChanges.get(assistantId);
-      if (!merged) return;
-      pendingAssistantChanges.delete(assistantId);
-
-      assistantSaveInFlight = true;
+  function refreshAssistantSaveStatus() {
+    if (assistantSaveInFlight.size > 0) {
       assistantSaveStatus.set("saving");
+      return;
+    }
+    if (assistantSaveTimers.size > 0 || pendingAssistantChanges.size > 0) {
+      assistantSaveStatus.set("pending");
+      return;
+    }
+    if (get(assistantSaveStatus) !== "error") {
+      assistantSaveStatus.set("idle");
+    }
+  }
+
+  async function runAssistantSaveNow(assistantId: string): Promise<void> {
+    if (!assistantId || assistantId === "") return;
+    if (assistantSaveInFlight.has(assistantId)) {
+      await assistantSavePromises.get(assistantId);
+      return;
+    }
+    const merged = pendingAssistantChanges.get(assistantId);
+    if (!merged) return;
+
+    pendingAssistantChanges.delete(assistantId);
+    assistantSaveInFlight.add(assistantId);
+    assistantSaveStatus.set("saving");
+
+    const savePromise = (async () => {
       try {
         const updated = await data.intric.flows.assistants.update({
           id: getFlowId(),
@@ -253,23 +273,79 @@ function initFlowEditor(data: {
           update: merged
         });
         assistantCache.set(assistantId, updated);
-        assistantSaveStatus.set("idle");
         setAssistantValidationError(assistantId, null);
-        // If more changes accumulated during the in-flight save, re-trigger
-        if (pendingAssistantChanges.has(assistantId)) {
-          saveAssistant(assistantId, {});
-        }
       } catch (e) {
+        const queued = pendingAssistantChanges.get(assistantId) ?? {};
+        pendingAssistantChanges.set(assistantId, { ...merged, ...queued });
         assistantSaveStatus.set("error");
         const msg =
           e instanceof IntricError
             ? e.getReadableMessage()
             : "Failed to save step configuration";
         setAssistantValidationError(assistantId, msg);
+        throw e;
       } finally {
-        assistantSaveInFlight = false;
+        assistantSaveInFlight.delete(assistantId);
+        assistantSavePromises.delete(assistantId);
+        refreshAssistantSaveStatus();
       }
-    }, 500);
+    })();
+
+    assistantSavePromises.set(assistantId, savePromise);
+    await savePromise;
+    if (pendingAssistantChanges.has(assistantId)) {
+      queueAssistantSave(assistantId, 0);
+    }
+  }
+
+  function queueAssistantSave(assistantId: string, delayMs = 500) {
+    clearAssistantSaveTimer(assistantId);
+    const timer = setTimeout(() => {
+      assistantSaveTimers.delete(assistantId);
+      void runAssistantSaveNow(assistantId).catch(() => {
+        // Validation/UI status is updated in runAssistantSaveNow.
+      });
+    }, delayMs);
+    assistantSaveTimers.set(assistantId, timer);
+    refreshAssistantSaveStatus();
+  }
+
+  async function saveAssistant(assistantId: string, changes: Record<string, unknown>) {
+    if (!assistantId || assistantId === "") return;
+    const current = pendingAssistantChanges.get(assistantId) ?? {};
+    pendingAssistantChanges.set(assistantId, { ...current, ...changes });
+    setAssistantValidationError(assistantId, null);
+    if (get(assistantSaveStatus) === "error") {
+      assistantSaveStatus.set("pending");
+    }
+    queueAssistantSave(assistantId);
+  }
+
+  async function flushAssistantSaves(): Promise<void> {
+    let guard = 0;
+    while (guard < 25) {
+      guard += 1;
+      const ids = new Set<string>([
+        ...assistantSaveTimers.keys(),
+        ...pendingAssistantChanges.keys(),
+        ...assistantSavePromises.keys(),
+      ]);
+      if (ids.size === 0) {
+        refreshAssistantSaveStatus();
+        return;
+      }
+      for (const assistantId of ids) {
+        clearAssistantSaveTimer(assistantId);
+      }
+      const results = await Promise.allSettled(
+        [...ids].map((assistantId) => runAssistantSaveNow(assistantId))
+      );
+      const rejected = results.find((result) => result.status === "rejected");
+      if (rejected && rejected.status === "rejected") {
+        throw rejected.reason;
+      }
+    }
+    throw new Error("Assistant save flush exceeded retry guard.");
   }
 
   // Unified save status combining flow + assistant saves
@@ -641,7 +717,13 @@ function initFlowEditor(data: {
 
   function destroy() {
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
-    if (assistantSaveTimer) clearTimeout(assistantSaveTimer);
+    for (const timer of assistantSaveTimers.values()) {
+      clearTimeout(timer);
+    }
+    assistantSaveTimers.clear();
+    void flushAssistantSaves().catch(() => {
+      // Best-effort flush during teardown.
+    });
     unsubscribe();
   }
 
@@ -664,6 +746,7 @@ function initFlowEditor(data: {
     applyStepsWithSafeOrderRemap,
     rewriteInputFieldVariableReferences,
     rewriteStepNameVariableReferences,
+    flushAssistantSaves,
     scheduleAutoSave,
     destroy
   });

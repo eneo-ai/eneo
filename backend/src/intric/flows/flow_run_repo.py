@@ -225,6 +225,29 @@ class FlowRunRepository:
             return self.factory.from_flow_run_db(existing)
         return self.factory.from_flow_run_db(run_row)
 
+    async def update_input_payload(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        input_payload_json: dict[str, Any],
+    ) -> None:
+        # Merge-patch under row lock to avoid clobbering concurrent key updates.
+        current_payload = await self.session.scalar(
+            sa.select(FlowRuns.input_payload_json)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        merged_payload = dict(current_payload or {})
+        merged_payload.update(dict(input_payload_json))
+        await self.session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .values(input_payload_json=merged_payload)
+        )
+
     async def cancel(self, *, run_id: UUID, tenant_id: UUID) -> FlowRun:
         return await self.update_status(
             run_id=run_id,

@@ -698,6 +698,96 @@ async def test_mark_running_if_claimable_is_single_winner(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_update_input_payload_merges_audio_patch_without_clobbering_claimed_run_state(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flows payload-merge space", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Flow payload-merge assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        await version_repo.create(
+            flow_id=flow.id,
+            version=1,
+            definition_checksum="checksum-payload-merge",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(flow.steps[0].id),
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    }
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"file_ids": ["f-1"], "case": "audio-case"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+
+        claimed = await run_repo.mark_running_if_claimable(
+            run_id=run.id,
+            tenant_id=admin_user.tenant_id,
+        )
+        assert claimed is True
+
+        await run_repo.update_input_payload(
+            run_id=run.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"transkribering": "transcribed text"},
+        )
+        await run_repo.update_input_payload(
+            run_id=run.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"transcription_meta": {"files_count": 1}},
+        )
+
+        refreshed = await run_repo.get(run_id=run.id, tenant_id=admin_user.tenant_id)
+        assert refreshed.status.value == FlowRunStatus.RUNNING.value
+        assert refreshed.input_payload_json == {
+            "file_ids": ["f-1"],
+            "case": "audio-case",
+            "transkribering": "transcribed text",
+            "transcription_meta": {"files_count": 1},
+        }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_list_runs_supports_limit_and_offset(
     db_container,
     completion_model_factory,

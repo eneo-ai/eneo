@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import ipaddress
 import json
 import logging
 import re
-import socket
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit
 from uuid import UUID
 
 import httpx
@@ -31,11 +28,40 @@ from intric.flows.flow import (
 from intric.flows.flow_repo import FlowRepository
 from intric.flows.flow_run_repo import FlowRunRepository
 from intric.flows.flow_version_repo import FlowVersionRepository
-from intric.flows.step_config_secrets import decrypt_step_headers_for_runtime
+from intric.flows.output_modes import (
+    ALLOWED_OUTPUT_MODES,
+    transcribe_only_violation,
+)
 from intric.flows.step_chain_rules import find_first_step_chain_violation
-from intric.flows.type_policies import INPUT_TYPE_POLICIES
 from intric.flows.variable_resolver import FlowVariableResolver
+from intric.flows.runtime.input_files import (
+    load_files_by_requested_ids,
+    parse_requested_file_ids,
+)
+from intric.flows.runtime.http_runtime import FlowHttpRuntimeHelper, IPAddress
+from intric.flows.runtime.http_orchestration import (
+    FlowHttpOrchestrationDeps,
+    deliver_webhook as deliver_webhook_orchestrated,
+    resolve_http_input_source_text as resolve_http_input_source_text_orchestrated,
+)
+from intric.flows.runtime.http_audit import (
+    HttpAuditDeps,
+    audit_http_outbound as audit_http_outbound_runtime,
+)
+from intric.flows.runtime.output_runtime import (
+    OutputRuntimeDeps,
+    process_typed_output as process_typed_output_runtime,
+)
 from intric.flows.runtime.rag_metadata import build_rag_references
+from intric.flows.runtime.step_input_validation import (
+    validate_input_contract,
+    validate_runtime_input_policy,
+)
+from intric.flows.runtime.transcription_runtime import (
+    AudioRuntimeDeps,
+    AudioRuntimeRequest,
+    resolve_transcribe_and_attach_audio_input,
+)
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
 from intric.settings.encryption_service import EncryptionService
@@ -43,18 +69,15 @@ from intric.spaces.space_repo import SpaceRepository
 from intric.completion_models.infrastructure.completion_service import CompletionService
 from intric.files.file_repo import FileRepository
 from intric.completion_models.infrastructure.context_builder import count_tokens
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
-from intric.audit.application.audit_metadata import AuditMetadata
 from intric.users.user import UserInDB
 
 if TYPE_CHECKING:
     from intric.audit.application.audit_service import AuditService
     from intric.assistants.references import ReferencesService
+    from intric.files.transcriber import Transcriber
 
 _TEMPLATE_ONLY_PATTERN = re.compile(r"^\s*\{\{\s*([^{}]+)\s*\}\}\s*$")
-IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
 
 @dataclass(frozen=True)
@@ -102,6 +125,7 @@ class StepExecutionOutput:
     diagnostics: list[StepDiagnostic] = field(default_factory=list)
     artifacts: list[dict[str, Any]] | None = None
     rag_metadata: dict[str, Any] | None = None
+    transcription_metadata: dict[str, Any] | None = None
 
 
 @dataclass
@@ -116,6 +140,7 @@ class StepInputValue:
     used_question_binding: bool = False
     legacy_prompt_binding_used: bool = False
     diagnostics: list[StepDiagnostic] = field(default_factory=list)
+    transcription_metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -160,7 +185,7 @@ class FlowRunExecutor:
         FlowRunStatus.CANCELLED,
     }
     _ALLOWED_INPUT_SOURCES = {"flow_input", "previous_step", "all_previous_steps", "http_get", "http_post"}
-    _ALLOWED_OUTPUT_MODES = {"pass_through", "http_post"}
+    _ALLOWED_OUTPUT_MODES = ALLOWED_OUTPUT_MODES
 
     def __init__(
         self,
@@ -176,6 +201,7 @@ class FlowRunExecutor:
         max_inline_text_bytes: int,
         audit_service: AuditService | None = None,
         references_service: ReferencesService | None = None,
+        transcriber: Transcriber | None = None,
     ):
         self.user = user
         self.flow_repo = flow_repo
@@ -188,14 +214,22 @@ class FlowRunExecutor:
         self.max_inline_text_bytes = max_inline_text_bytes
         self.audit_service = audit_service
         self.references_service = references_service
+        self.transcriber = transcriber
         self.variable_resolver = FlowVariableResolver()
         settings = get_settings()
         self.http_request_timeout_seconds = float(settings.flow_http_request_timeout_seconds)
         self.http_max_timeout_seconds = float(settings.flow_http_max_timeout_seconds)
         self.http_allow_private_networks = bool(settings.flow_http_allow_private_networks)
+        self.http_runtime = FlowHttpRuntimeHelper(
+            variable_resolver=self.variable_resolver,
+            request_timeout_seconds=self.http_request_timeout_seconds,
+            max_timeout_seconds=self.http_max_timeout_seconds,
+            allow_private_networks=self.http_allow_private_networks,
+        )
         self.rag_retrieval_timeout_seconds = 30
         self.rag_max_reference_sources = 25
         self.rag_max_chunks_per_source = 5
+        self.max_audio_files = 10
 
     async def execute(
         self,
@@ -255,6 +289,11 @@ class FlowRunExecutor:
             )
             await self._commit()
             return {"status": "failed", "error": "invalid_flow_definition"}
+        version_metadata = (
+            version.definition_json.get("metadata_json")
+            if isinstance(version.definition_json, dict)
+            else None
+        )
 
         # Bootstrap run-scoped state (single DB call for prior results)
         persisted_results = await self.flow_run_repo.list_step_results(run_id=run_id, tenant_id=tenant_id)
@@ -352,7 +391,12 @@ class FlowRunExecutor:
                 run_id, step.step_order, step.step_id, step.input_type, step.output_type,
             )
             try:
-                output = await self._execute_step(step=step, run=latest_run, state=state)
+                output = await self._execute_step(
+                    step=step,
+                    run=latest_run,
+                    state=state,
+                    version_metadata=version_metadata,
+                )
             except TypedIOValidationException as typed_exc:
                 contract_diag = None
                 failed_input_payload = getattr(typed_exc, "input_payload_json", None)
@@ -464,6 +508,11 @@ class FlowRunExecutor:
                     "input_source": output.input_source,
                     "used_question_binding": output.used_question_binding,
                     "legacy_prompt_binding_used": output.legacy_prompt_binding_used,
+                    **(
+                        {"transcription": output.transcription_metadata}
+                        if output.transcription_metadata is not None
+                        else {}
+                    ),
                     **(
                         {"rag": output.rag_metadata}
                         if output.rag_metadata is not None
@@ -612,6 +661,7 @@ class FlowRunExecutor:
         step: RuntimeStep,
         run: FlowRun,
         state: RunExecutionState | None = None,
+        version_metadata: dict[str, Any] | None = None,
     ) -> StepExecutionOutput:
         if state is None:
             state = RunExecutionState(
@@ -655,6 +705,7 @@ class FlowRunExecutor:
                 prior_results=state.prior_results,
                 assistant_prompt_text=prompt_text,
                 state=state,
+                version_metadata=version_metadata,
             )
         except TypedIOValidationException as exc:
             raise self._attach_typed_failure_context(
@@ -671,6 +722,8 @@ class FlowRunExecutor:
                 "legacy_prompt_binding_used": step_input.legacy_prompt_binding_used,
             }
         )
+        if step_input.transcription_metadata is not None:
+            input_payload_for_result["transcription"] = step_input.transcription_metadata
 
         logger.info(
             "flow_executor.input_resolved run_id=%s step_order=%d has_files=%s has_structured=%s text_len=%d",
@@ -679,123 +732,42 @@ class FlowRunExecutor:
         )
         contract_validation: dict[str, Any] | None = None
 
-        # Runtime guards for unsupported types (driven by type_policies)
-        policy = INPUT_TYPE_POLICIES.get(step.input_type)
-        if policy and not policy.supported:
+        try:
+            policy = validate_runtime_input_policy(
+                step_order=step.step_order,
+                input_type=step.input_type,
+                input_source=step.input_source,
+                raw_extracted_text=step_input.raw_extracted_text,
+                files=step_input.files,
+            )
+        except TypedIOValidationException as exc:
             raise self._attach_typed_failure_context(
-                TypedIOValidationException(
-                    f"Input type '{step.input_type}' is not yet supported in runtime execution.",
-                    code="typed_io_unsupported_type",
-                ),
+                exc,
                 input_payload_for_result=input_payload_for_result,
                 effective_prompt=effective_prompt,
-            )
-        if step.input_type == "document" and step.input_source != "flow_input":
-            raise self._attach_typed_failure_context(
-                TypedIOValidationException(
-                    f"Step {step.step_order}: input_type 'document' is not supported with input_source '{step.input_source}'.",
-                    code="typed_io_document_source_unsupported",
-                ),
-                input_payload_for_result=input_payload_for_result,
-                effective_prompt=effective_prompt,
-            )
-
-        # Strict extraction validation (uses raw, pre-binding text)
-        if policy and policy.requires_extraction and not step_input.raw_extracted_text.strip():
-            raise self._attach_typed_failure_context(
-                TypedIOValidationException(
-                    f"Step {step.step_order}: {step.input_type} extraction produced empty text.",
-                    code="typed_io_empty_extraction",
-                ),
-                input_payload_for_result=input_payload_for_result,
-                effective_prompt=effective_prompt,
-            )
-
-        # Image file validation
-        if policy and policy.requires_files:
-            usable = [f for f in (step_input.files or []) if (getattr(f, "mimetype", None) or "").startswith("image/")]
-            if not usable:
-                raise self._attach_typed_failure_context(
-                    TypedIOValidationException(
-                        f"Step {step.step_order}: image input requires at least one valid image file.",
-                        code="typed_io_missing_required_files",
-                    ),
-                    input_payload_for_result=input_payload_for_result,
-                    effective_prompt=effective_prompt,
-                )
-            non_images = [
-                getattr(f, "name", "unknown")
-                for f in (step_input.files or [])
-                if not (getattr(f, "mimetype", None) or "").startswith("image/")
-            ]
-            if non_images:
-                raise self._attach_typed_failure_context(
-                    TypedIOValidationException(
-                        f"Step {step.step_order}: non-image file(s) for image input: {non_images}",
-                        code="typed_io_invalid_file_type",
-                    ),
-                    input_payload_for_result=input_payload_for_result,
-                    effective_prompt=effective_prompt,
-                )
+            ) from exc
 
         effective_prompt = (
             self.variable_resolver.interpolate(prompt_text, context) if prompt_text else ""
         )
 
-        # Input contract validation
-        if step.input_contract:
-            from intric.flows.output_processing import validate_against_contract
-            if step.input_type == "json" and step_input.structured is not None:
-                contract_validation = {
-                    "schema_type_hint": self._schema_type_hint(step.input_contract),
-                    "parse_attempted": False,
-                    "parse_succeeded": True,
-                    "candidate_type": type(step_input.structured).__name__,
-                }
-                try:
-                    validate_against_contract(
-                        step_input.structured, step.input_contract, label=f"Step {step.step_order} input"
-                    )
-                except TypedIOValidationException as exc:
-                    input_payload_for_result["contract_validation"] = contract_validation
-                    raise self._attach_typed_failure_context(
-                        exc,
-                        input_payload_for_result=input_payload_for_result,
-                        effective_prompt=effective_prompt,
-                    ) from exc
-            elif step.input_type == "json":
-                contract_validation = {
-                    "schema_type_hint": self._schema_type_hint(step.input_contract),
-                    "parse_attempted": False,
-                    "parse_succeeded": False,
-                    "candidate_type": "str",
-                }
-                input_payload_for_result["contract_validation"] = contract_validation
-                typed_error = TypedIOValidationException(
-                    f"Step {step.step_order}: input_type 'json' requires valid JSON input before contract validation.",
-                    code="typed_io_invalid_json_input",
-                )
-                raise self._attach_typed_failure_context(
-                    typed_error,
-                    input_payload_for_result=input_payload_for_result,
-                    effective_prompt=effective_prompt,
-                ) from typed_error
-            elif step.input_type == "text":
-                candidate, contract_validation = self._prepare_text_contract_candidate(
-                    text=step_input.text,
-                    schema=step.input_contract,
-                )
-                try:
-                    validate_against_contract(
-                        candidate, step.input_contract, label=f"Step {step.step_order} input"
-                    )
-                except TypedIOValidationException as exc:
-                    input_payload_for_result["contract_validation"] = contract_validation
-                    raise self._attach_typed_failure_context(
-                        exc,
-                        input_payload_for_result=input_payload_for_result,
-                        effective_prompt=effective_prompt,
-                    ) from exc
+        try:
+            contract_validation = validate_input_contract(
+                step_order=step.step_order,
+                input_type=step.input_type,
+                input_contract=step.input_contract,
+                text=step_input.text,
+                structured=step_input.structured,
+            )
+        except TypedIOValidationException as exc:
+            contract_validation_payload = getattr(exc, "contract_validation", None)
+            if isinstance(contract_validation_payload, dict):
+                input_payload_for_result["contract_validation"] = contract_validation_payload
+            raise self._attach_typed_failure_context(
+                exc,
+                input_payload_for_result=input_payload_for_result,
+                effective_prompt=effective_prompt,
+            ) from exc
 
         if contract_validation is not None:
             input_payload_for_result["contract_validation"] = contract_validation
@@ -813,6 +785,76 @@ class FlowRunExecutor:
         await self._commit()
 
         diagnostics = list(step_input.diagnostics)
+        if step.output_mode == "transcribe_only":
+            mode_error = transcribe_only_violation(
+                step_order=step.step_order,
+                input_type=step.input_type,
+                output_type=step.output_type,
+                output_mode=step.output_mode,
+            )
+            if mode_error is not None:
+                raise self._attach_typed_failure_context(
+                    TypedIOValidationException(
+                        mode_error,
+                        code="typed_io_invalid_output_mode_combination",
+                    ),
+                    input_payload_for_result=input_payload_for_result,
+                    effective_prompt=effective_prompt,
+                )
+            diagnostics.append(
+                StepDiagnostic(
+                    code="audio_transcribe_only_used",
+                    message=(
+                        f"Step {step.step_order}: transcribe_only mode used; "
+                        "completion LLM and RAG were skipped."
+                    ),
+                    severity="info",
+                )
+            )
+            rag_metadata = {
+                "attempted": False,
+                "status": "skipped_transcribe_only",
+                "version": 1,
+                "timeout_seconds": int(self.rag_retrieval_timeout_seconds),
+                "include_info_blobs": False,
+                "chunks_retrieved": 0,
+                "raw_chunks_count": 0,
+                "deduped_chunks_count": 0,
+                "unique_sources": 0,
+                "source_ids": [],
+                "source_ids_short": [],
+                "error_code": None,
+                "retrieval_duration_ms": None,
+                "retrieval_error_type": None,
+                "references": [],
+                "references_truncated": False,
+            }
+            persisted_text, generated_file_ids = await self._apply_output_cap(
+                text=step_input.text,
+                run=run,
+                step=step,
+            )
+            return StepExecutionOutput(
+                input_text=step_input.text,
+                source_text=step_input.source_text,
+                input_source=step_input.input_source,
+                used_question_binding=step_input.used_question_binding,
+                legacy_prompt_binding_used=step_input.legacy_prompt_binding_used,
+                full_text=step_input.text,
+                persisted_text=persisted_text,
+                generated_file_ids=generated_file_ids,
+                tool_calls_metadata=None,
+                num_tokens_input=0,
+                num_tokens_output=0,
+                effective_prompt="",
+                model_parameters_json={"mode": "transcribe_only"},
+                contract_validation=contract_validation,
+                structured_output=None,
+                artifacts=None,
+                diagnostics=diagnostics,
+                rag_metadata=rag_metadata,
+                transcription_metadata=step_input.transcription_metadata,
+            )
         info_blob_chunks, rag_metadata, rag_diagnostics = await self._retrieve_rag_chunks(
             assistant=assistant,
             question=step_input.text,
@@ -821,8 +863,10 @@ class FlowRunExecutor:
         )
         diagnostics.extend(rag_diagnostics)
 
-        # Channel dispatch — files_only types send files, not text to LLM
-        llm_files: list[Any] = step_input.files or []
+        # Channel dispatch — only files_only input types should forward files to the LLM.
+        llm_files: list[Any] = []
+        if policy is not None and policy.channel == "files_only":
+            llm_files = step_input.files or []
 
         # Prepare model kwargs — inject JSON mode when applicable
         model_kwargs = assistant.completion_model_kwargs
@@ -928,6 +972,7 @@ class FlowRunExecutor:
             artifacts=artifacts,
             diagnostics=diagnostics,
             rag_metadata=rag_metadata,
+            transcription_metadata=step_input.transcription_metadata,
         )
 
     async def _retrieve_rag_chunks(
@@ -1064,6 +1109,7 @@ class FlowRunExecutor:
         prior_results: list[FlowStepResult],
         assistant_prompt_text: str | None = None,
         state: RunExecutionState | None = None,
+        version_metadata: dict[str, Any] | None = None,
     ) -> StepInputValue:
         if step.step_order == 1 and step.input_source in {"previous_step", "all_previous_steps"}:
             raise TypedIOValidationException(
@@ -1075,6 +1121,11 @@ class FlowRunExecutor:
                 f"Step {step.step_order}: input_type 'json' is incompatible with input_source "
                 f"'all_previous_steps' (concatenated text is not valid JSON).",
                 code="typed_io_invalid_input_source_combination",
+            )
+        if step.input_type == "audio" and step.input_source != "flow_input":
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: input_type 'audio' is only supported with input_source 'flow_input'.",
+                code="typed_io_audio_source_unsupported",
             )
         structured: dict[str, Any] | list[Any] | None = None
         if step.input_source in ("http_get", "http_post"):
@@ -1095,6 +1146,8 @@ class FlowRunExecutor:
         raw_extracted_text = ""
         used_question_binding = False
         legacy_prompt_binding_used = False
+        diagnostics: list[StepDiagnostic] = []
+        transcription_metadata: dict[str, Any] | None = None
 
         bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
         if bindings is not None:
@@ -1115,36 +1168,24 @@ class FlowRunExecutor:
             if isinstance(legacy_text_template, str):
                 legacy_prompt_binding_used = True
 
-        # Resolve files from flow input for document/image/file types
+        # Resolve files from flow input for document/image/file/audio types
         files = None
-        if step.input_source == "flow_input" and step.input_type in ("document", "image", "file"):
+        if step.input_source == "flow_input" and step.input_type in ("document", "image", "file", "audio"):
             raw_file_ids = (run.input_payload_json or {}).get("file_ids", [])
             logger.info(
                 "flow_executor.file_resolve run_id=%s step_order=%d input_type=%s file_ids=%s",
                 run.id, step.step_order, step.input_type, raw_file_ids,
             )
-            if raw_file_ids is not None and not isinstance(raw_file_ids, list):
-                raise TypedIOValidationException(
-                    "file_ids must be a list.",
-                    code="typed_io_invalid_file_ids",
+            requested_ids = parse_requested_file_ids(raw_file_ids=raw_file_ids)
+            files = None
+            if requested_ids:
+                file_cache = state.file_cache if state else None
+                files = await load_files_by_requested_ids(
+                    file_repo=self.file_repo,
+                    requested_ids=requested_ids,
+                    user_id=self.user.id,
+                    file_cache=file_cache,
                 )
-            if raw_file_ids:
-                try:
-                    requested_ids = [UUID(str(fid)) for fid in raw_file_ids]
-                except (TypeError, ValueError, AttributeError) as exc:
-                    raise TypedIOValidationException(
-                        f"Invalid file_ids payload: {raw_file_ids}",
-                        code="typed_io_invalid_file_ids",
-                    ) from exc
-                cache_key = frozenset(requested_ids)
-                if state and cache_key in state.file_cache:
-                    files = state.file_cache[cache_key]
-                else:
-                    files = await self.file_repo.get_list_by_id_and_user(
-                        requested_ids, user_id=self.user.id
-                    )
-                    if state:
-                        state.file_cache[cache_key] = files
                 returned_ids = {f.id for f in files}
                 missing = [fid for fid in requested_ids if fid not in returned_ids]
                 logger.info(
@@ -1156,19 +1197,56 @@ class FlowRunExecutor:
                         f"File(s) not found or not accessible: {missing}",
                         code="typed_io_file_not_found",
                     )
-                if step.input_type in ("document", "file") and files:
-                    extracted = [
-                        str(f.text).strip()
-                        for f in files
-                        if isinstance(getattr(f, "text", None), str) and str(f.text).strip()
-                    ]
-                    logger.info(
-                        "flow_executor.document_text_extracted run_id=%s step_order=%d file_count=%d extracted_count=%d",
-                        run.id, step.step_order, len(files), len(extracted),
+            if step.input_type == "audio":
+                if self.transcriber is None:
+                    raise TypedIOValidationException(
+                        "Transcriber service is not available for audio input execution.",
+                        code="typed_io_transcription_failed",
                     )
-                    if extracted:
-                        input_text = "\n\n".join(extracted)
-                        raw_extracted_text = input_text
+                audio_request = AudioRuntimeRequest(
+                    run=run,
+                    step=step,
+                    context=context,
+                    version_metadata=version_metadata,
+                    files=files or [],
+                    requested_ids=requested_ids,
+                    max_audio_files=self.max_audio_files,
+                    max_inline_text_bytes=self.max_inline_text_bytes,
+                )
+                audio_deps = AudioRuntimeDeps(
+                    transcriber=self.transcriber,
+                    space_repo=self.space_repo,
+                    flow_run_repo=self.flow_run_repo,
+                    audit_service=self.audit_service,
+                    actor=self.user,
+                )
+                audio_resolution = await resolve_transcribe_and_attach_audio_input(
+                    request=audio_request,
+                    deps=audio_deps,
+                )
+                input_text = audio_resolution.text
+                transcription_metadata = audio_resolution.transcription_metadata
+                if audio_resolution.near_inline_limit_message is not None:
+                    diagnostics.append(
+                        StepDiagnostic(
+                            code="typed_io_transcript_near_limit",
+                            message=audio_resolution.near_inline_limit_message,
+                            severity="info",
+                        )
+                    )
+            elif step.input_type in ("document", "file") and files:
+                extracted = [
+                    str(f.text).strip()
+                    for f in files
+                    if isinstance(getattr(f, "text", None), str) and str(f.text).strip()
+                ]
+                logger.info(
+                    "flow_executor.document_text_extracted run_id=%s step_order=%d file_count=%d extracted_count=%d",
+                    run.id, step.step_order, len(files), len(extracted),
+                )
+                if extracted:
+                    input_text = "\n\n".join(extracted)
+                    raw_extracted_text = input_text
 
         # For json input, prefer structured data from source-specific parsing or previous step
         if step.input_type == "json":
@@ -1197,7 +1275,6 @@ class FlowRunExecutor:
         )
 
         # Flag empty input from previous_step/all_previous_steps for debug visibility
-        diagnostics: list[StepDiagnostic] = []
         if step.input_source in ("previous_step", "all_previous_steps"):
             has_substantive_input = False
             if step.input_source == "previous_step":
@@ -1229,6 +1306,7 @@ class FlowRunExecutor:
             used_question_binding=used_question_binding,
             legacy_prompt_binding_used=legacy_prompt_binding_used,
             diagnostics=diagnostics,
+            transcription_metadata=transcription_metadata,
         )
 
     def _enforce_inline_input_cap(
@@ -1322,143 +1400,22 @@ class FlowRunExecutor:
         run: FlowRun,
         context: dict[str, Any],
     ) -> tuple[str, dict[str, Any] | list[Any] | None]:
-        if not isinstance(step.input_config, dict):
-            raise TypedIOValidationException(
-                f"Step {step.step_order}: HTTP input source requires input_config object.",
-                code="typed_io_http_invalid_config",
-            )
-        resolved_config = decrypt_step_headers_for_runtime(
-            config=step.input_config,
+        deps = FlowHttpOrchestrationDeps(
             encryption_service=self.encryption_service,
-        ) or {}
-        if not isinstance(resolved_config, dict):
-            raise TypedIOValidationException(
-                f"Step {step.step_order}: HTTP input config must be an object.",
-                code="typed_io_http_invalid_config",
-            )
-
-        url_raw = resolved_config.get("url")
-        if not isinstance(url_raw, str) or not url_raw.strip():
-            raise TypedIOValidationException(
-                f"Step {step.step_order}: input_config.url is required for HTTP input.",
-                code="typed_io_http_invalid_config",
-            )
-        url = self.variable_resolver.interpolate(url_raw, context).strip()
-        timeout_seconds = self._resolve_http_timeout_seconds(
-            resolved_config.get("timeout_seconds"),
-            step_order=step.step_order,
-            config_label="input_config",
+            variable_resolver=self.variable_resolver,
+            resolve_timeout_seconds=self._resolve_http_timeout_seconds,
+            build_headers=self._build_http_headers,
+            resolve_request_body=self._resolve_http_request_body,
+            read_response_text=self._read_http_response_text,
+            send_http_request=self._send_http_request,
+            audit_http_outbound=self._audit_http_outbound,
         )
-        headers = self._build_http_headers(
-            resolved_config.get("headers"),
+        return await resolve_http_input_source_text_orchestrated(
+            step=step,
+            run=run,
             context=context,
-            step_order=step.step_order,
-            config_label="input_config",
+            deps=deps,
         )
-
-        method = "GET" if step.input_source == "http_get" else "POST"
-        body_bytes, json_body = self._resolve_http_request_body(
-            method=method,
-            config=resolved_config,
-            context=context,
-            step_order=step.step_order,
-            config_label="input_config",
-        )
-
-        start_time = time.monotonic()
-        try:
-            response = await self._send_http_request(
-                method=method,
-                url=url,
-                headers=headers,
-                timeout_seconds=timeout_seconds,
-                body_bytes=body_bytes,
-                json_body=json_body,
-            )
-        except TypedIOValidationException as exc:
-            duration_ms = (time.monotonic() - start_time) * 1000
-            await self._audit_http_outbound(
-                run=run, step=step, url=url, method=method,
-                call_type="http_input", outcome=Outcome.FAILURE,
-                error_message=str(exc), duration_ms=duration_ms,
-            )
-            raise
-        except httpx.TimeoutException as exc:
-            duration_ms = (time.monotonic() - start_time) * 1000
-            err_msg = f"Step {step.step_order}: HTTP {method} input timed out after {timeout_seconds:g}s."
-            await self._audit_http_outbound(
-                run=run, step=step, url=url, method=method,
-                call_type="http_input", outcome=Outcome.FAILURE,
-                error_message=err_msg, duration_ms=duration_ms,
-            )
-            raise TypedIOValidationException(
-                err_msg,
-                code="typed_io_http_timeout",
-            ) from exc
-        except httpx.HTTPError as exc:
-            duration_ms = (time.monotonic() - start_time) * 1000
-            err_msg = f"Step {step.step_order}: HTTP {method} input request failed: {exc}"
-            await self._audit_http_outbound(
-                run=run, step=step, url=url, method=method,
-                call_type="http_input", outcome=Outcome.FAILURE,
-                error_message=err_msg, duration_ms=duration_ms,
-            )
-            raise TypedIOValidationException(
-                err_msg,
-                code="typed_io_http_connection_error",
-            ) from exc
-
-        duration_ms = (time.monotonic() - start_time) * 1000
-        if response.status_code >= 400:
-            err_msg = f"Step {step.step_order}: HTTP {method} input returned status {response.status_code}."
-            await self._audit_http_outbound(
-                run=run, step=step, url=url, method=method,
-                call_type="http_input", outcome=Outcome.FAILURE,
-                error_message=err_msg, status_code=response.status_code,
-                duration_ms=duration_ms,
-            )
-            raise TypedIOValidationException(
-                err_msg,
-                code="typed_io_http_non_success",
-            )
-
-        response_text = self._read_http_response_text(
-            response=response,
-            step_order=step.step_order,
-            code="typed_io_http_response_too_large",
-        )
-
-        expects_json = (
-            step.input_type == "json"
-            or str(resolved_config.get("response_format", "text")) == "json"
-        )
-        if expects_json:
-            try:
-                parsed = response.json()
-            except (ValueError, json.JSONDecodeError) as exc:
-                err_msg = f"Step {step.step_order}: HTTP {method} input returned malformed JSON response."
-                await self._audit_http_outbound(
-                    run=run, step=step, url=url, method=method,
-                    call_type="http_input", outcome=Outcome.FAILURE,
-                    error_message=err_msg, status_code=response.status_code,
-                    duration_ms=duration_ms,
-                )
-                raise TypedIOValidationException(
-                    err_msg,
-                    code="typed_io_http_malformed_response",
-                ) from exc
-            await self._audit_http_outbound(
-                run=run, step=step, url=url, method=method,
-                call_type="http_input", outcome=Outcome.SUCCESS,
-                status_code=response.status_code, duration_ms=duration_ms,
-            )
-            return json.dumps(parsed, ensure_ascii=False), parsed
-        await self._audit_http_outbound(
-            run=run, step=step, url=url, method=method,
-            call_type="http_input", outcome=Outcome.SUCCESS,
-            status_code=response.status_code, duration_ms=duration_ms,
-        )
-        return response_text, None
 
     def _resolve_http_timeout_seconds(
         self,
@@ -1467,25 +1424,11 @@ class FlowRunExecutor:
         step_order: int,
         config_label: str,
     ) -> float:
-        if timeout_value is None:
-            return self.http_request_timeout_seconds
-        if not isinstance(timeout_value, (int, float)):
-            raise TypedIOValidationException(
-                f"Step {step_order}: {config_label}.timeout_seconds must be a number.",
-                code="typed_io_http_invalid_config",
-            )
-        timeout_seconds = float(timeout_value)
-        if timeout_seconds <= 0:
-            raise TypedIOValidationException(
-                f"Step {step_order}: {config_label}.timeout_seconds must be greater than zero.",
-                code="typed_io_http_invalid_config",
-            )
-        if timeout_seconds > self.http_max_timeout_seconds:
-            raise TypedIOValidationException(
-                f"Step {step_order}: {config_label}.timeout_seconds cannot exceed {self.http_max_timeout_seconds:g}.",
-                code="typed_io_http_invalid_config",
-            )
-        return timeout_seconds
+        return self.http_runtime.resolve_timeout_seconds(
+            timeout_value,
+            step_order=step_order,
+            config_label=config_label,
+        )
 
     def _build_http_headers(
         self,
@@ -1495,23 +1438,12 @@ class FlowRunExecutor:
         step_order: int,
         config_label: str,
     ) -> dict[str, str]:
-        if headers_raw is None:
-            return {}
-        if not isinstance(headers_raw, dict):
-            raise TypedIOValidationException(
-                f"Step {step_order}: {config_label}.headers must be an object.",
-                code="typed_io_http_invalid_config",
-            )
-        headers: dict[str, str] = {}
-        for key, value in headers_raw.items():
-            if not isinstance(key, str):
-                raise TypedIOValidationException(
-                    f"Step {step_order}: {config_label}.headers keys must be strings.",
-                    code="typed_io_http_invalid_config",
-                )
-            rendered = self._interpolate_http_value(value, context=context)
-            headers[key] = str(rendered)
-        return headers
+        return self.http_runtime.build_headers(
+            headers_raw,
+            context=context,
+            step_order=step_order,
+            config_label=config_label,
+        )
 
     def _resolve_http_request_body(
         self,
@@ -1522,70 +1454,29 @@ class FlowRunExecutor:
         step_order: int,
         config_label: str,
     ) -> tuple[bytes | None, dict[str, Any] | list[Any] | None]:
-        if method != "POST":
-            return None, None
-        body_template = config.get("body_template")
-        body_json = config.get("body_json")
-        if body_template is not None and not isinstance(body_template, str):
-            raise TypedIOValidationException(
-                f"Step {step_order}: {config_label}.body_template must be a string.",
-                code="typed_io_http_invalid_config",
-            )
-        if body_json is not None and not isinstance(body_json, (dict, list)):
-            raise TypedIOValidationException(
-                f"Step {step_order}: {config_label}.body_json must be an object or array.",
-                code="typed_io_http_invalid_config",
-            )
-        if body_template is not None and body_json is not None:
-            raise TypedIOValidationException(
-                f"Step {step_order}: {config_label} cannot define both body_template and body_json.",
-                code="typed_io_http_invalid_config",
-            )
-        if body_json is not None:
-            interpolated_json = self._interpolate_http_value(body_json, context=context)
-            if not isinstance(interpolated_json, (dict, list)):
-                raise TypedIOValidationException(
-                    f"Step {step_order}: {config_label}.body_json interpolation must produce object or array.",
-                    code="typed_io_http_invalid_config",
-                )
-            return None, interpolated_json
-        if body_template is not None:
-            rendered = self.variable_resolver.interpolate(body_template, context)
-            return rendered.encode("utf-8"), None
-        return None, None
+        return self.http_runtime.resolve_request_body(
+            method=method,
+            config=config,
+            context=context,
+            step_order=step_order,
+            config_label=config_label,
+        )
 
     def _interpolate_http_value(self, value: Any, *, context: dict[str, Any]) -> Any:
-        if isinstance(value, str):
-            if _TEMPLATE_ONLY_PATTERN.match(value):
-                rendered = self.variable_resolver.interpolate(value, context)
-                try:
-                    return json.loads(rendered)
-                except (ValueError, json.JSONDecodeError):
-                    return rendered
-            return self.variable_resolver.interpolate(value, context)
-        if isinstance(value, list):
-            return [self._interpolate_http_value(item, context=context) for item in value]
-        if isinstance(value, dict):
-            return {
-                str(item_key): self._interpolate_http_value(item_value, context=context)
-                for item_key, item_value in value.items()
-            }
-        return value
+        return self.http_runtime.interpolate_value(value, context=context)
 
-    @staticmethod
     def _read_http_response_text(
+        self,
         *,
         response: httpx.Response,
         step_order: int,
         code: str,
     ) -> str:
-        response_bytes = response.content
-        if len(response_bytes) > get_settings().flow_max_inline_text_bytes:
-            raise TypedIOValidationException(
-                f"Step {step_order}: HTTP response exceeded max inline text bytes.",
-                code=code,
-            )
-        return response.text
+        return self.http_runtime.read_response_text(
+            response=response,
+            step_order=step_order,
+            code=code,
+        )
 
     async def _send_http_request(
         self,
@@ -1599,90 +1490,20 @@ class FlowRunExecutor:
         read_response_body: bool = True,
     ) -> httpx.Response:
         preflight_resolved_ips = await self._assert_http_url_allowed(url)
-        timeout = httpx.Timeout(timeout_seconds)
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
-            request = client.build_request(
-                method,
-                url,
-                headers=headers,
-                content=body_bytes,
-                json=json_body,
-            )
-            response = await client.send(request, stream=True)
-            try:
-                self._assert_http_connected_peer_allowed(
-                    response=response,
-                    preflight_resolved_ips=preflight_resolved_ips,
-                )
-            except Exception:
-                await response.aclose()
-                raise
-            if not read_response_body:
-                detached = httpx.Response(
-                    status_code=response.status_code,
-                    headers=response.headers,
-                    request=request,
-                )
-                await response.aclose()
-                return detached
-
-            max_bytes = get_settings().flow_max_inline_text_bytes
-            response_bytes = bytearray()
-            async for chunk in response.aiter_bytes():
-                response_bytes.extend(chunk)
-                if len(response_bytes) > max_bytes:
-                    await response.aclose()
-                    raise TypedIOValidationException(
-                        "HTTP response exceeded max inline text bytes.",
-                        code="typed_io_http_response_too_large",
-                    )
-
-            detached = httpx.Response(
-                status_code=response.status_code,
-                headers=response.headers,
-                content=bytes(response_bytes),
-                request=request,
-            )
-            await response.aclose()
-            return detached
+        return await self.http_runtime.send_request(
+            method=method,
+            url=url,
+            headers=headers,
+            timeout_seconds=timeout_seconds,
+            body_bytes=body_bytes,
+            json_body=json_body,
+            read_response_body=read_response_body,
+            preflight_resolved_ips=preflight_resolved_ips,
+            assert_connected_peer_allowed=self._assert_http_connected_peer_allowed,
+        )
 
     async def _assert_http_url_allowed(self, url: str) -> set[IPAddress] | None:
-        parsed = urlsplit(url)
-        if parsed.scheme not in {"http", "https"}:
-            raise TypedIOValidationException(
-                f"Unsupported HTTP URL scheme: '{parsed.scheme}'.",
-                code="typed_io_http_invalid_url",
-            )
-        host = parsed.hostname
-        if not host:
-            raise TypedIOValidationException(
-                "HTTP URL must include a hostname.",
-                code="typed_io_http_invalid_url",
-            )
-        host_lower = host.strip().lower()
-        if host_lower in {"localhost", "localhost.localdomain"}:
-            raise TypedIOValidationException(
-                "HTTP URL blocked by SSRF policy.",
-                code="typed_io_http_ssrf_blocked",
-            )
-        if self.http_allow_private_networks:
-            return None
-
-        resolved_ips: list[IPAddress]
-        try:
-            resolved_ips = self._resolve_ip_literal(host_lower)
-        except ValueError:
-            resolved_ips = await self._resolve_host_ips(
-                host=host_lower,
-                port=parsed.port or (443 if parsed.scheme == "https" else 80),
-            )
-
-        if any(self._is_private_or_local_ip(item) for item in resolved_ips):
-            raise TypedIOValidationException(
-                "HTTP URL blocked by SSRF policy.",
-                code="typed_io_http_ssrf_blocked",
-            )
-        return set(resolved_ips)
+        return await self.http_runtime.assert_url_allowed(url)
 
     def _assert_http_connected_peer_allowed(
         self,
@@ -1690,86 +1511,21 @@ class FlowRunExecutor:
         response: httpx.Response,
         preflight_resolved_ips: set[IPAddress] | None,
     ) -> None:
-        if self.http_allow_private_networks:
-            return
-
-        network_stream = response.extensions.get("network_stream")
-        if network_stream is None:
-            raise TypedIOValidationException(
-                "Unable to verify HTTP peer address.",
-                code="typed_io_http_connection_error",
-            )
-
-        server_addr = network_stream.get_extra_info("server_addr")
-        if not isinstance(server_addr, tuple) or not server_addr:
-            raise TypedIOValidationException(
-                "Unable to verify HTTP peer address.",
-                code="typed_io_http_connection_error",
-            )
-
-        peer_value = server_addr[0]
-        if not isinstance(peer_value, str):
-            raise TypedIOValidationException(
-                "Unable to verify HTTP peer address.",
-                code="typed_io_http_connection_error",
-            )
-
-        try:
-            peer_ip = ipaddress.ip_address(peer_value)
-        except ValueError as exc:
-            raise TypedIOValidationException(
-                "Unable to verify HTTP peer address.",
-                code="typed_io_http_connection_error",
-            ) from exc
-
-        if self._is_private_or_local_ip(peer_ip):
-            raise TypedIOValidationException(
-                "HTTP URL blocked by SSRF policy.",
-                code="typed_io_http_ssrf_blocked",
-            )
-
-        if preflight_resolved_ips and peer_ip not in preflight_resolved_ips:
-            raise TypedIOValidationException(
-                "HTTP URL blocked by SSRF policy.",
-                code="typed_io_http_ssrf_blocked",
-            )
+        self.http_runtime.assert_connected_peer_allowed(
+            response=response,
+            preflight_resolved_ips=preflight_resolved_ips,
+        )
 
     @staticmethod
     def _resolve_ip_literal(host: str) -> list[IPAddress]:
-        return [ipaddress.ip_address(host)]
+        return FlowHttpRuntimeHelper.resolve_ip_literal(host)
 
     async def _resolve_host_ips(self, *, host: str, port: int) -> list[IPAddress]:
-        loop = asyncio.get_running_loop()
-        try:
-            infos = await loop.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-        except socket.gaierror as exc:
-            raise TypedIOValidationException(
-                f"Unable to resolve HTTP host '{host}'.",
-                code="typed_io_http_connection_error",
-            ) from exc
-        resolved: list[IPAddress] = []
-        for _, _, _, _, sockaddr in infos:
-            try:
-                resolved.append(ipaddress.ip_address(sockaddr[0]))
-            except ValueError:
-                continue
-        if not resolved:
-            raise TypedIOValidationException(
-                f"Unable to resolve HTTP host '{host}'.",
-                code="typed_io_http_connection_error",
-            )
-        return resolved
+        return await self.http_runtime.resolve_host_ips(host=host, port=port)
 
     @staticmethod
     def _is_private_or_local_ip(value: IPAddress) -> bool:
-        return (
-            value.is_loopback
-            or value.is_private
-            or value.is_link_local
-            or value.is_multicast
-            or value.is_reserved
-            or value.is_unspecified
-        )
+        return FlowHttpRuntimeHelper.is_private_or_local_ip(value)
 
     async def _load_assistant(self, assistant_id: UUID, state: RunExecutionState | None = None) -> Any:
         if state and assistant_id in state.assistant_cache:
@@ -1787,52 +1543,6 @@ class FlowRunExecutor:
         name = cm.name if cm else "unknown"
         mid = str(cm.id) if cm and cm.id else "none"
         return f"{provider}:{name}:{mid}"
-
-    @staticmethod
-    def _schema_type_hint(schema: dict[str, Any]) -> str:
-        raw_type = schema.get("type")
-        if isinstance(raw_type, str):
-            return raw_type
-        if isinstance(raw_type, list):
-            type_entries = sorted(str(item) for item in raw_type if isinstance(item, str))
-            if type_entries:
-                return "|".join(type_entries)
-        if isinstance(schema.get("properties"), dict):
-            return "object"
-        if "items" in schema:
-            return "array"
-        return "unknown"
-
-    @staticmethod
-    def _schema_expects_structured(schema: dict[str, Any]) -> bool:
-        raw_type = schema.get("type")
-        if isinstance(raw_type, str):
-            return raw_type in {"object", "array"}
-        if isinstance(raw_type, list):
-            return any(item in {"object", "array"} for item in raw_type if isinstance(item, str))
-        return isinstance(schema.get("properties"), dict) or "items" in schema
-
-    def _prepare_text_contract_candidate(
-        self,
-        *,
-        text: str,
-        schema: dict[str, Any],
-    ) -> tuple[Any, dict[str, Any]]:
-        parse_attempted = self._schema_expects_structured(schema)
-        parse_succeeded = False
-        candidate: Any = text
-        if parse_attempted:
-            try:
-                candidate = json.loads(text)
-                parse_succeeded = True
-            except (json.JSONDecodeError, ValueError):
-                candidate = text
-        return candidate, {
-            "schema_type_hint": self._schema_type_hint(schema),
-            "parse_attempted": parse_attempted,
-            "parse_succeeded": parse_succeeded,
-            "candidate_type": type(candidate).__name__,
-        }
 
     @staticmethod
     def _attach_typed_failure_context(
@@ -1874,43 +1584,23 @@ class FlowRunExecutor:
         status_code: int | None = None,
         duration_ms: float | None = None,
     ) -> None:
-        if self.audit_service is None:
-            return
-        try:
-            parts = urlsplit(url)
-            safe_url_host = f"{parts.scheme}://{parts.hostname}" if parts.hostname else ""
-            safe_url_path = parts.path or "/"
-            extra: dict[str, Any] = {
-                "call_type": call_type,
-                "http_method": method,
-                "url_host": safe_url_host,
-                "url_path": safe_url_path,
-                "flow_id": str(run.flow_id),
-                "step_order": step.step_order,
-                "step_id": str(step.step_id),
-            }
-            if step.user_description:
-                extra["step_description"] = step.user_description
-            if status_code is not None:
-                extra["status_code"] = status_code
-            if duration_ms is not None:
-                extra["duration_ms"] = round(duration_ms, 2)
-            await self.audit_service.log_async(
-                tenant_id=run.tenant_id,
-                actor_id=self.user.id,
-                action=ActionType.FLOW_HTTP_OUTBOUND_CALL,
-                entity_type=EntityType.FLOW_RUN,
-                entity_id=run.id,
-                description=f"Flow HTTP {call_type} {method} to {safe_url_host}{safe_url_path}",
-                metadata=AuditMetadata.standard(actor=self.user, target=run, extra=extra),
-                outcome=outcome,
-                error_message=error_message,
-            )
-        except Exception:
-            logger.warning(
-                "flow_executor.audit_http_outbound_failed run_id=%s step_order=%d",
-                run.id, step.step_order, exc_info=True,
-            )
+        deps = HttpAuditDeps(
+            audit_service=self.audit_service,
+            user=self.user,
+            logger=logger,
+        )
+        await audit_http_outbound_runtime(
+            run=run,
+            step=step,
+            url=url,
+            method=method,
+            call_type=call_type,
+            outcome=outcome,
+            error_message=error_message,
+            status_code=status_code,
+            duration_ms=duration_ms,
+            deps=deps,
+        )
 
     async def _deliver_webhook(
         self,
@@ -1920,93 +1610,22 @@ class FlowRunExecutor:
         run: FlowRun,
         context: dict[str, Any],
     ) -> None:
-        if not step.output_config:
-            return
-        if not isinstance(step.output_config, dict):
-            raise BadRequestException("Webhook output_config must be an object.")
-        resolved_config = decrypt_step_headers_for_runtime(
-            config=step.output_config,
+        deps = FlowHttpOrchestrationDeps(
             encryption_service=self.encryption_service,
-        ) or {}
-        if not isinstance(resolved_config, dict):
-            raise BadRequestException("Webhook output_config must be an object.")
-        url_raw = resolved_config.get("url")
-        if not isinstance(url_raw, str) or not url_raw.strip():
-            raise BadRequestException("Webhook output mode requires output_config.url.")
-        url = self.variable_resolver.interpolate(url_raw, context).strip()
-        timeout_seconds = self._resolve_http_timeout_seconds(
-            resolved_config.get("timeout_seconds"),
-            step_order=step.step_order,
-            config_label="output_config",
+            variable_resolver=self.variable_resolver,
+            resolve_timeout_seconds=self._resolve_http_timeout_seconds,
+            build_headers=self._build_http_headers,
+            resolve_request_body=self._resolve_http_request_body,
+            read_response_text=self._read_http_response_text,
+            send_http_request=self._send_http_request,
+            audit_http_outbound=self._audit_http_outbound,
         )
-        headers = self._build_http_headers(
-            resolved_config.get("headers"),
+        await deliver_webhook_orchestrated(
+            step=step,
+            text_payload=text_payload,
+            run=run,
             context=context,
-            step_order=step.step_order,
-            config_label="output_config",
-        )
-        body_bytes, json_body = self._resolve_http_request_body(
-            method="POST",
-            config=resolved_config,
-            context=context,
-            step_order=step.step_order,
-            config_label="output_config",
-        )
-        if body_bytes is None and json_body is None:
-            body_bytes = text_payload.encode("utf-8")
-        idempotency = hashlib.sha256(f"{run.id}:{step.step_id}".encode("utf-8")).hexdigest()
-        headers["Idempotency-Key"] = idempotency
-        start_time = time.monotonic()
-        try:
-            response = await self._send_http_request(
-                method="POST",
-                url=url,
-                headers=headers,
-                timeout_seconds=timeout_seconds,
-                body_bytes=body_bytes,
-                json_body=json_body,
-                read_response_body=False,
-            )
-        except TypedIOValidationException as exc:
-            duration_ms = (time.monotonic() - start_time) * 1000
-            await self._audit_http_outbound(
-                run=run, step=step, url=url, method="POST",
-                call_type="webhook_delivery", outcome=Outcome.FAILURE,
-                error_message=str(exc), duration_ms=duration_ms,
-            )
-            raise BadRequestException(str(exc)) from exc
-        except httpx.TimeoutException as exc:
-            duration_ms = (time.monotonic() - start_time) * 1000
-            err_msg = f"Webhook delivery timed out after {timeout_seconds:g}s."
-            await self._audit_http_outbound(
-                run=run, step=step, url=url, method="POST",
-                call_type="webhook_delivery", outcome=Outcome.FAILURE,
-                error_message=err_msg, duration_ms=duration_ms,
-            )
-            raise BadRequestException(err_msg) from exc
-        except httpx.HTTPError as exc:
-            duration_ms = (time.monotonic() - start_time) * 1000
-            err_msg = f"Webhook delivery failed: {exc}"
-            await self._audit_http_outbound(
-                run=run, step=step, url=url, method="POST",
-                call_type="webhook_delivery", outcome=Outcome.FAILURE,
-                error_message=err_msg, duration_ms=duration_ms,
-            )
-            raise BadRequestException(err_msg) from exc
-        duration_ms = (time.monotonic() - start_time) * 1000
-        if response.status_code >= 400:
-            err_msg = f"Webhook delivery returned status {response.status_code}."
-            await self._audit_http_outbound(
-                run=run, step=step, url=url, method="POST",
-                call_type="webhook_delivery", outcome=Outcome.FAILURE,
-                error_message=err_msg, status_code=response.status_code,
-                duration_ms=duration_ms,
-            )
-            raise BadRequestException(err_msg)
-        await self._audit_http_outbound(
-            run=run, step=step, url=url, method="POST",
-            call_type="webhook_delivery", outcome=Outcome.SUCCESS,
-            status_code=response.status_code, duration_ms=duration_ms,
+            deps=deps,
         )
 
     async def _process_typed_output(
@@ -2016,59 +1635,27 @@ class FlowRunExecutor:
         step: RuntimeStep,
         run: FlowRun,
     ) -> tuple[dict[str, Any] | list[Any] | None, list[dict[str, Any]] | None]:
-        """Process typed output: JSON parsing, contract validation, document rendering."""
         from intric.flows.output_processing import (
             compile_validators,
             parse_json_output,
+            validate_against_contract,
         )
         from intric.flows.runtime.document_renderer import render_document
 
-        structured_output = None
-        artifacts = None
-
-        compiled = compile_validators([step])
-
-        if step.output_type == "json":
-            structured_output = parse_json_output(full_text)
-            validator = compiled.get(("output", step.step_order))
-            if validator:
-                from intric.flows.output_processing import validate_against_contract
-                validate_against_contract(
-                    structured_output, step.output_contract or {},
-                    label=f"Step {step.step_order} output",
-                )
-
-        elif step.output_type in ("pdf", "docx"):
-            if step.output_contract:
-                pre_render_data = parse_json_output(full_text)
-                from intric.flows.output_processing import validate_against_contract
-                validate_against_contract(
-                    pre_render_data, step.output_contract,
-                    label=f"Step {step.step_order} output (pre-render)",
-                )
-            blob, mimetype, filename = render_document(
-                full_text, step.output_type, step_order=step.step_order
-            )
-            file_record = await self.file_repo.add(
-                FileCreate(
-                    file_type=FileType.DOCUMENT,
-                    blob=blob,
-                    name=filename,
-                    mimetype=mimetype,
-                    checksum=hashlib.sha256(blob).hexdigest(),
-                    size=len(blob),
-                    user_id=self.user.id,
-                    tenant_id=run.tenant_id,
-                )
-            )
-            artifacts = [{
-                "file_id": str(file_record.id),
-                "name": filename,
-                "mimetype": mimetype,
-                "size": len(blob),
-            }]
-
-        return structured_output, artifacts
+        deps = OutputRuntimeDeps(
+            file_repo=self.file_repo,
+            user_id=self.user.id,
+            compile_validators=compile_validators,
+            parse_json_output=parse_json_output,
+            validate_against_contract=validate_against_contract,
+            render_document=render_document,
+        )
+        return await process_typed_output_runtime(
+            full_text=full_text,
+            step=step,
+            run=run,
+            deps=deps,
+        )
 
     async def _apply_output_cap(
         self,
@@ -2122,6 +1709,8 @@ class FlowRunExecutor:
             output_mode = str(item.get("output_mode", "pass_through"))
             if output_mode not in FlowRunExecutor._ALLOWED_OUTPUT_MODES:
                 raise BadRequestException(f"Unsupported output mode '{output_mode}'.")
+            output_type = str(item.get("output_type", "text"))
+            input_type = str(item.get("input_type", "text"))
             raw_output_config = item.get("output_config")
             if raw_output_config is not None and not isinstance(raw_output_config, dict):
                 raise BadRequestException("Webhook output_config must be an object.")
@@ -2135,6 +1724,14 @@ class FlowRunExecutor:
                 step_order = int(item["step_order"])
             except (KeyError, TypeError, ValueError) as exc:
                 raise BadRequestException("Invalid step identifiers in flow snapshot.") from exc
+            transcribe_only_error = transcribe_only_violation(
+                step_order=step_order,
+                input_type=input_type,
+                output_type=output_type,
+                output_mode=output_mode,
+            )
+            if transcribe_only_error is not None:
+                raise BadRequestException(transcribe_only_error)
             parsed.append(
                 RuntimeStep(
                     step_id=step_id,
@@ -2148,9 +1745,9 @@ class FlowRunExecutor:
                     input_config=raw_input_config,
                     output_mode=output_mode,
                     output_config=raw_output_config,
-                    output_type=str(item.get("output_type", "text")),
+                    output_type=output_type,
                     output_contract=item.get("output_contract"),
-                    input_type=str(item.get("input_type", "text")),
+                    input_type=input_type,
                     input_contract=item.get("input_contract"),
                 )
             )

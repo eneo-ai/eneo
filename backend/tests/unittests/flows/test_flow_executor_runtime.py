@@ -182,6 +182,12 @@ async def test_webhook_failure_keeps_completed_step_evidence(user):
                 "parse_succeeded": True,
                 "candidate_type": "dict",
             },
+            transcription_metadata={
+                "model": "kb-whisper-large",
+                "language": "sv",
+                "files_count": 1,
+                "elapsed_ms": 1200,
+            },
         )
     )
     executor._deliver_webhook = AsyncMock(side_effect=RuntimeError("webhook unavailable"))
@@ -205,6 +211,12 @@ async def test_webhook_failure_keeps_completed_step_evidence(user):
         "input_source": "flow_input",
         "used_question_binding": False,
         "legacy_prompt_binding_used": False,
+        "transcription": {
+            "model": "kb-whisper-large",
+            "language": "sv",
+            "files_count": 1,
+            "elapsed_ms": 1200,
+        },
         "contract_validation": {
             "schema_type_hint": "object",
             "parse_attempted": True,
@@ -1254,6 +1266,29 @@ def test_parse_runtime_steps_rejects_invalid_output_mode(user):
                 ]
             }
         )
+
+
+def test_parse_runtime_steps_accepts_transcribe_only_output_mode(user):
+    executor, _, _, _ = _build_executor(user)
+
+    parsed = executor._parse_runtime_steps(
+        {
+            "steps": [
+                {
+                    "step_id": str(uuid4()),
+                    "step_order": 1,
+                    "assistant_id": str(uuid4()),
+                    "input_source": "flow_input",
+                    "input_type": "audio",
+                    "output_type": "text",
+                    "output_mode": "transcribe_only",
+                }
+            ]
+        }
+    )
+
+    assert len(parsed) == 1
+    assert parsed[0].output_mode == "transcribe_only"
 
 
 def test_parse_runtime_steps_rejects_non_object_webhook_headers(user):

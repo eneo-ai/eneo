@@ -38,7 +38,7 @@ INPUT_TYPE_POLICIES: dict[str, InputTypePolicy] = {
         contract_allowed=False,
         requires_extraction=False,
         requires_files=False,
-        supported=False,
+        supported=True,
     ),
     "any": InputTypePolicy(
         channel="text_only", contract_allowed=False, requires_extraction=False, requires_files=False

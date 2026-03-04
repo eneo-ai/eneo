@@ -45,7 +45,10 @@
 
   // Detect if first step expects file/document input
   $: firstStep = flow.steps?.length > 0 ? flow.steps[0] : null;
-  $: needsFileUpload = firstStep?.input_type === "document" || firstStep?.input_type === "file";
+  $: isAudioUpload = firstStep?.input_type === "audio";
+  $: needsFileUpload = firstStep?.input_type === "document" || firstStep?.input_type === "file" || isAudioUpload;
+  const AUDIO_ACCEPT_FILTER = "audio/*,video/webm,video/mp4";
+  $: fileInputAccept = isAudioUpload ? AUDIO_ACCEPT_FILTER : undefined;
 
   let formValues: Record<string, unknown> = {};
 
@@ -118,6 +121,19 @@
     input.value = "";
   }
 
+  function openFilePicker() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    if (fileInputAccept) {
+      input.accept = fileInputAccept;
+    }
+    input.onchange = (event) => {
+      void handleFileSelect(event);
+    };
+    input.click();
+  }
+
   function handleDrop(event: DragEvent) {
     event.preventDefault();
     isDragging = false;
@@ -156,7 +172,7 @@
   async function triggerRun() {
     if (!flow.id) return;
     if (needsFileUpload && uploadedFiles.length === 0) {
-      toast.error(m.flow_run_document_placeholder());
+      toast.error(isAudioUpload ? m.flow_run_audio_placeholder() : m.flow_run_document_placeholder());
       return;
     }
     isSubmitting = true;
@@ -269,7 +285,11 @@
             <textarea
               class="border-default bg-primary ring-default min-h-[120px] w-full rounded-lg border px-3 py-2 font-mono text-sm shadow focus-within:ring-2"
               bind:value={inputText}
-              placeholder={needsFileUpload ? m.flow_run_document_placeholder() : m.flow_run_input_placeholder()}
+              placeholder={
+                needsFileUpload
+                  ? (isAudioUpload ? m.flow_run_audio_placeholder() : m.flow_run_document_placeholder())
+                  : m.flow_run_input_placeholder()
+              }
             ></textarea>
           </div>
         {/if}
@@ -285,23 +305,13 @@
               on:dragover={handleDragOver}
               on:dragleave={handleDragLeave}
               on:drop={handleDrop}
-              on:click={() => {
-                const input = document.createElement("input");
-                input.type = "file";
-                input.multiple = true;
-                input.onchange = (e) => handleFileSelect(e);
-                input.click();
-              }}
+              on:click={openFilePicker}
               role="button"
               tabindex="0"
               on:keydown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  const input = document.createElement("input");
-                  input.type = "file";
-                  input.multiple = true;
-                  input.onchange = (ev) => handleFileSelect(ev);
-                  input.click();
+                  openFilePicker();
                 }
               }}
             >
@@ -309,7 +319,9 @@
                 <span class="text-secondary text-sm">{m.uploading()}</span>
               {:else}
                 <span class="text-secondary text-sm">{m.upload_files()}</span>
-                <span class="text-xs text-secondary">{m.upload_files_description()}</span>
+                <span class="text-xs text-secondary">
+                  {isAudioUpload ? m.flow_run_audio_upload_hint() : m.upload_files_description()}
+                </span>
               {/if}
             </div>
 

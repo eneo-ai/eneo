@@ -47,12 +47,20 @@ class Transcriber:
         self.encryption_service = encryption_service
         self.session = session
 
-    async def transcribe(self, file: File, transcription_model: "TranscriptionModel"):
+    async def transcribe(
+        self,
+        file: File,
+        transcription_model: "TranscriptionModel",
+        *,
+        language: str | None = None,
+    ):
         if file.blob is None or not AudioMimeTypes.has_value(file.mimetype):
             raise ValueError("File needs to be an audio file")
 
-        # If file already has a transcription, return it
-        if file.transcription:
+        # Cached transcription is only safe when language is auto-detected.
+        # Explicit language requests must bypass cache to avoid serving stale
+        # transcriptions produced with a different language setting.
+        if language is None and file.transcription:
             return file.transcription
 
         try:
@@ -61,7 +69,9 @@ class Transcriber:
                 temp_file_path = Path(temp_file.name)
 
             result = await self.transcribe_from_filepath(
-                filepath=temp_file_path, transcription_model=transcription_model
+                filepath=temp_file_path,
+                transcription_model=transcription_model,
+                language=language,
             )
 
             # Store the transcription in the file object
@@ -150,9 +160,13 @@ class Transcriber:
         )
 
     async def transcribe_from_filepath(
-        self, *, filepath: Path, transcription_model: "TranscriptionModel"
+        self,
+        *,
+        filepath: Path,
+        transcription_model: "TranscriptionModel",
+        language: str | None = None,
     ):
         adapter = await self._get_adapter(transcription_model)
 
         async with audio.to_wav(filepath) as wav_file:
-            return await adapter.get_text_from_file(wav_file)
+            return await adapter.get_text_from_file(wav_file, language=language)

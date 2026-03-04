@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { FlowStep } from "@intric/intric-js";
-  import { createEventDispatcher, onMount, tick } from "svelte";
+  import { createEventDispatcher, onDestroy, onMount, tick } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import {
     classifyVariable,
@@ -39,6 +39,10 @@
   onMount(() => {
     // Initial auto-resize after first render
     tick().then(() => autoResize());
+  });
+
+  onDestroy(() => {
+    commitIfDirty(currentEditorValue);
   });
 
   let textareaEl: HTMLTextAreaElement | null = null;

@@ -35,6 +35,16 @@
   let copiedTimer: ReturnType<typeof setTimeout> | null = null;
   const mode = getFlowUserMode();
   let stepAttemptsByOrder: Record<number, Record<string, unknown>[]> = {};
+  type FlowRunTranscriptionTelemetry = {
+    transcript_bytes?: number;
+    estimated_tokens?: number;
+    elapsed_ms?: number;
+    files_count?: number;
+    model?: string;
+    language?: string;
+    used_cache?: boolean;
+    cached_files_count?: number;
+  };
 
   onMount(async () => {
     try {
@@ -183,6 +193,46 @@
     const debugStep = evidence?.debug_export?.steps?.find((step) => step.step_order === stepOrder);
     return debugStep?.rag ?? null;
   }
+
+  function getStepTranscription(result: FlowStepResult): FlowRunTranscriptionTelemetry | null {
+    const payload = result.input_payload_json;
+    if (payload === null || payload === undefined || typeof payload !== "object") {
+      return null;
+    }
+    const raw = (payload as Record<string, unknown>).transcription;
+    if (raw === null || raw === undefined || typeof raw !== "object" || Array.isArray(raw)) {
+      return null;
+    }
+    return raw as FlowRunTranscriptionTelemetry;
+  }
+
+  function formatElapsedMs(value: number | undefined): string {
+    if (value === undefined) return "—";
+    if (value < 1000) return `${value}ms`;
+    return `${(value / 1000).toFixed(1)}s`;
+  }
+
+  function formatBytes(value: number | undefined): string {
+    if (value === undefined) return "—";
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function getCacheStatusLabel(
+    usedCache: boolean | undefined,
+    cachedFilesCount: number | undefined,
+    filesCount: number | undefined,
+  ): string {
+    if (usedCache === true) return m.flow_run_transcription_cache_hit();
+    if ((cachedFilesCount ?? 0) > 0 && (filesCount ?? 0) > 0) {
+      return m.flow_run_transcription_cache_partial({
+        cached: String(cachedFilesCount ?? 0),
+        total: String(filesCount ?? 0),
+      });
+    }
+    return m.flow_run_transcription_cache_miss();
+  }
 </script>
 
 <svelte:options runes={false} />
@@ -236,6 +286,7 @@
         (s) => s.step_order === result.step_order
       )}
       {@const duration = getStepDuration(result.step_order)}
+      {@const transcription = getStepTranscription(result)}
       <div class="bg-primary border-default overflow-hidden rounded-lg border shadow-sm transition-shadow hover:shadow-md">
         <button
           class="flex w-full items-center justify-between px-5 py-3.5 text-left hover:bg-hover-dimmer"
@@ -311,6 +362,41 @@
                     </button>
                   </div>
                   <pre class="json-hl bg-hover-dimmer mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg p-3 font-mono text-[13px] leading-relaxed">{@html highlightJson(JSON.stringify(result.input_payload_json, null, 2))}</pre>
+                </div>
+              {/if}
+
+              {#if transcription}
+                <div class="rounded-lg border border-default bg-hover-dimmer p-3">
+                  <h4 class="text-xs font-semibold text-muted">{m.flow_run_transcription_label()}</h4>
+                  <div class="mt-2 flex flex-wrap gap-2 text-[11px] text-secondary">
+                    <span class="rounded-md border border-default bg-primary px-2 py-1">
+                      {m.flow_run_transcription_model({ model: transcription.model ?? "—" })}
+                    </span>
+                    <span class="rounded-md border border-default bg-primary px-2 py-1">
+                      {m.flow_run_transcription_language({ language: transcription.language ?? "—" })}
+                    </span>
+                    <span class="rounded-md border border-default bg-primary px-2 py-1">
+                      {m.flow_run_transcription_files({ count: String(transcription.files_count ?? 0) })}
+                    </span>
+                    <span class="rounded-md border border-default bg-primary px-2 py-1">
+                      {m.flow_run_transcription_duration({ duration: formatElapsedMs(transcription.elapsed_ms) })}
+                    </span>
+                    <span class="rounded-md border border-default bg-primary px-2 py-1">
+                      {m.flow_run_transcription_size({ size: formatBytes(transcription.transcript_bytes) })}
+                    </span>
+                    <span class="rounded-md border border-default bg-primary px-2 py-1">
+                      {m.flow_run_transcription_estimated_tokens({ tokens: String(transcription.estimated_tokens ?? 0) })}
+                    </span>
+                    <span class="rounded-md border border-default bg-primary px-2 py-1">
+                      {m.flow_run_transcription_cache({
+                        status: getCacheStatusLabel(
+                          transcription.used_cache,
+                          transcription.cached_files_count,
+                          transcription.files_count,
+                        ),
+                      })}
+                    </span>
+                  </div>
                 </div>
               {/if}
 

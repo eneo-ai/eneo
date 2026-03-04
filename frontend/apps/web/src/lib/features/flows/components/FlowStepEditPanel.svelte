@@ -34,12 +34,15 @@
   export let activeStepId: string | null;
   export let isPublished: boolean;
   export let transcriptionEnabled: boolean = true;
+  export let transcriptionModelConfigured: boolean = false;
+  export let transcriptionModelLabel: string | null = null;
   export let formSchema: { fields: { name: string; type: string; required?: boolean; options?: string[]; order?: number }[] } | undefined;
 
   const dispatch = createEventDispatcher<{
     stepChanged: { index: number; step: FlowStep };
     removeStep: number;
     jsonValidationChanged: { hasErrors: boolean; fields: string[] };
+    openTranscriptionSettings: void;
   }>();
 
   const mode = getFlowUserMode();
@@ -184,6 +187,9 @@
 
   // Load assistant when active step changes
   $: if (activeStep?.assistant_id && activeStep.assistant_id !== lastLoadedAssistantId) {
+    void flowEditor.flushAssistantSaves().catch(() => {
+      // Save errors are surfaced in editor validation/toasts.
+    });
     cancelUploadsAndClearQueue();
     void loadAssistantForStep(activeStep.assistant_id);
   } else if (!activeStep || !activeStep.assistant_id) {
@@ -195,6 +201,9 @@
 
   onDestroy(() => {
     cancelUploadsAndClearQueue();
+    void flowEditor.flushAssistantSaves().catch(() => {
+      // Best-effort flush on unmount.
+    });
   });
 
   $: runningUploads = $newAttachments.filter((attachment) => attachment.status !== "completed");
@@ -234,8 +243,6 @@
       assistant && typeof assistant === "object" && assistant.prompt && typeof assistant.prompt === "object"
         ? assistant.prompt
         : { text: "", description: "" };
-    const currentText = typeof currentPrompt.text === "string" ? currentPrompt.text : "";
-    if (value === currentText) return;
     const nextPrompt = { ...currentPrompt, text: value, description: "" };
     assistant = { ...(assistant ?? {}), prompt: nextPrompt };
     flowEditor.saveAssistant(activeStep.assistant_id, { prompt: nextPrompt });
@@ -300,7 +307,10 @@
       ...activeStep,
       input_source: nextSource,
       input_type:
-        (nextSource !== "flow_input" && activeStep.input_type === "document") || (httpSourceSelected && unsupportedHttpInputType)
+        (
+          nextSource !== "flow_input" &&
+          (activeStep.input_type === "document" || activeStep.input_type === "audio")
+        ) || (httpSourceSelected && unsupportedHttpInputType)
           ? "text"
           : activeStep.input_type,
       input_config: nextInputConfig,
@@ -313,15 +323,46 @@
 
   function handleInputTypeChange(nextType: FlowStep["input_type"]) {
     if (activeStep === null || activeIndex < 0) return;
+    const isAudioInput = nextType === "audio";
+    const nextOutputMode =
+      isAudioInput
+        ? "transcribe_only"
+        : activeStep.output_mode === "transcribe_only"
+          ? "pass_through"
+          : activeStep.output_mode;
+    const nextOutputType = isAudioInput ? "text" : activeStep.output_type;
     const updated = {
       ...activeStep,
       input_type: nextType,
       input_source:
-        nextType === "document" && activeStep.input_source !== "flow_input"
+        (nextType === "document" || nextType === "audio") && activeStep.input_source !== "flow_input"
           ? "flow_input"
-          : activeStep.input_source
+          : activeStep.input_source,
+      output_mode: nextOutputMode,
+      output_type: nextOutputType,
     };
     dispatch("stepChanged", { index: activeIndex, step: updated });
+  }
+
+  function handleOutputModeChange(nextMode: FlowStep["output_mode"]) {
+    if (activeStep === null || activeIndex < 0) return;
+    if (nextMode === "transcribe_only") {
+      dispatch("stepChanged", {
+        index: activeIndex,
+        step: {
+          ...activeStep,
+          input_type: "audio",
+          input_source: "flow_input",
+          output_mode: "transcribe_only",
+          output_type: "text",
+        },
+      });
+      return;
+    }
+    dispatch("stepChanged", {
+      index: activeIndex,
+      step: { ...activeStep, output_mode: nextMode },
+    });
   }
 
   function updateInputTemplate(value: string) {
@@ -528,6 +569,10 @@
     { value: "pdf", get label() { return m.flow_output_type_pdf(); } },
     { value: "docx", get label() { return m.flow_output_type_docx(); } },
   ];
+  $: availableOutputTypes =
+    activeStep?.output_mode === "transcribe_only"
+      ? OUTPUT_TYPES.filter((type) => type.value === "text")
+      : OUTPUT_TYPES;
 
   const INPUT_SOURCE_HINTS: Record<string, () => string> = {
     flow_input: () => m.flow_input_source_hint_flow_input(),
@@ -536,12 +581,36 @@
   };
   const OUTPUT_MODES = [
     { value: "pass_through", get label() { return m.flow_output_mode_pass_through(); } },
+    { value: "transcribe_only", get label() { return m.flow_output_mode_transcribe_only(); } },
     { value: "http_post", get label() { return m.flow_output_mode_http_post(); } }
   ];
+  $: availableOutputModes =
+    activeStep?.input_type === "audio"
+      ? OUTPUT_MODES
+      : OUTPUT_MODES.filter((mode) => mode.value !== "transcribe_only");
   const MCP_POLICIES = [
     { value: "inherit", get label() { return m.flow_mcp_policy_inherit(); } },
     { value: "restricted", get label() { return m.flow_mcp_policy_restricted(); } }
   ];
+  $: isTranscribeOnly = activeStep?.output_mode === "transcribe_only";
+
+  $: if (
+    activeStep &&
+    activeIndex >= 0 &&
+    activeStep.output_mode === "transcribe_only" &&
+    activeStep.output_type !== "text"
+  ) {
+    updateStep("output_type", "text");
+  }
+
+  $: if (
+    activeStep &&
+    activeIndex >= 0 &&
+    activeStep.input_type !== "audio" &&
+    activeStep.output_mode === "transcribe_only"
+  ) {
+    updateStep("output_mode", "pass_through");
+  }
 
   let showDeleteConfirm: Dialog.OpenState;
 </script>
@@ -629,8 +698,40 @@
         </Settings.Row>
       </Settings.Group>
 
+      {#if activeStep.input_type === "audio"}
+        <div
+          class={`mb-3 flex items-start gap-3 rounded-lg border px-3 py-2.5 text-xs ${
+            !transcriptionEnabled || !transcriptionModelConfigured
+              ? "border-warning-default/40 bg-warning-dimmer text-warning-stronger"
+              : "border-accent-default/30 bg-accent-dimmer text-accent-stronger"
+          }`}
+        >
+          <span class="flex-1">
+            {#if !transcriptionEnabled}
+              {m.flow_transcription_audio_nudge()}
+            {:else if !transcriptionModelConfigured}
+              {m.flow_transcription_model_label()}: {m.no_model_selected()}.
+            {:else}
+              {m.flow_transcription_model_label()}: {transcriptionModelLabel ?? "—"}.
+            {/if}
+          </span>
+          <Button
+            variant="outlined"
+            size="small"
+            on:click={() => dispatch("openTranscriptionSettings")}
+          >
+            {m.edit()} {m.flow_stage_transcription()}
+          </Button>
+        </div>
+      {/if}
+
       <!-- AI Model Section -->
       <Settings.Group title={m.completion_model()}>
+        {#if activeStep.output_mode === "transcribe_only"}
+          <div class="mb-3 rounded-lg border border-accent-default/30 bg-accent-dimmer px-3 py-2.5 text-xs text-accent-stronger">
+            {m.flow_transcribe_only_prompt_ignored_hint()}
+          </div>
+        {/if}
         {#if assistantLoading}
           <div class="flex items-center gap-2 px-4 py-3 text-sm text-secondary">
             <IconLoadingSpinner class="size-4 animate-spin" />
@@ -638,18 +739,20 @@
           </div>
         {:else if assistant}
           <Settings.Row title={m.completion_model()} description="">
-            <SelectAIModelV2
-              bind:selectedModel={assistant.completion_model}
-              availableModels={$currentSpace.completion_models}
-              on:change={() => updateAssistantField("completion_model", assistant.completion_model)}
-            />
+            <div class:pointer-events-none={isTranscribeOnly} class:opacity-60={isTranscribeOnly}>
+              <SelectAIModelV2
+                bind:selectedModel={assistant.completion_model}
+                availableModels={$currentSpace.completion_models}
+                on:change={() => updateAssistantField("completion_model", assistant.completion_model)}
+              />
+            </div>
           </Settings.Row>
 
           <Settings.Row title={m.model_behaviour()} description="">
             <SelectBehaviourV2
               bind:kwArgs={assistant.completion_model_kwargs}
               selectedModel={assistant.completion_model}
-              isDisabled={!supportsTemperature(assistant.completion_model?.name)}
+              isDisabled={isTranscribeOnly || !supportsTemperature(assistant.completion_model?.name)}
               on:change={() => updateAssistantField("completion_model_kwargs", assistant.completion_model_kwargs)}
             />
           </Settings.Row>
@@ -784,7 +887,7 @@
           </svelte:fragment>
           <FlowPromptEditor
             value={instructionText}
-            disabled={isPublished || assistantLoading || !assistant}
+            disabled={isPublished || assistantLoading || !assistant || isTranscribeOnly}
             placeholder={m.flow_step_instructions_placeholder()}
             {steps}
             currentStepOrder={activeStep.step_order}
@@ -798,7 +901,7 @@
             on:commit={(e) => updateInstruction(e.detail)}
           >
             <svelte:fragment slot="toolbar">
-              {#if assistant?.id && !isPublished}
+              {#if assistant?.id && !isPublished && !isTranscribeOnly}
                 <PromptVersionDialog
                   title={m.prompt_history()}
                   loadPromptVersionHistory={() => {
@@ -879,7 +982,7 @@
             disabled={isPublished}
             on:change={(e) => updateStep("output_type", e.currentTarget.value)}
           >
-            {#each OUTPUT_TYPES as t}
+            {#each availableOutputTypes as t}
               <option value={t.value}>{t.label}</option>
             {/each}
           </select>
@@ -890,9 +993,9 @@
             class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
             value={activeStep.output_mode}
             disabled={isPublished}
-            on:change={(e) => updateStep("output_mode", e.currentTarget.value)}
+            on:change={(e) => handleOutputModeChange(e.currentTarget.value as FlowStep["output_mode"])}
           >
-            {#each OUTPUT_MODES as mode}
+            {#each availableOutputModes as mode}
               <option value={mode.value}>{mode.label}</option>
             {/each}
           </select>
@@ -930,12 +1033,6 @@
       {#if activeStep.input_type === "document" && activeStep.step_order === 1}
         <div class="flex items-start gap-2 mb-3 rounded-lg border border-accent-default/30 bg-accent-dimmer px-3 py-2.5 text-xs text-accent-stronger">
           {m.flow_typed_io_document_input_info()}
-        </div>
-      {/if}
-
-      {#if activeStep.input_type === "audio"}
-        <div class="flex items-start gap-2 mb-3 rounded-lg border border-warning-default/40 bg-warning-dimmer px-3 py-2.5 text-xs text-warning-stronger">
-          {m.flow_typed_io_audio_not_supported()}
         </div>
       {/if}
 

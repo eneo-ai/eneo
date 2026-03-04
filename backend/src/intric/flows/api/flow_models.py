@@ -38,6 +38,7 @@ class FlowOutputType(str, Enum):
 class FlowOutputMode(str, Enum):
     PASS_THROUGH = "pass_through"
     HTTP_POST = "http_post"
+    TRANSCRIBE_ONLY = "transcribe_only"
 
 
 class FlowMcpPolicy(str, Enum):

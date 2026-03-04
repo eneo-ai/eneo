@@ -3214,6 +3214,7 @@ export interface components {
       | "flow_classification_override"
       | "flow_run_document_generated"
       | "flow_run_contract_rejected"
+      | "flow_run_audio_transcribed"
       | "flow_http_outbound_call"
       | "security_classification_created"
       | "security_classification_updated"

@@ -110,6 +110,14 @@
       : null;
   $: transcriptionModel =
     ($currentSpace.transcription_models ?? []).find((model) => model.id === transcriptionModelId) ?? null;
+  $: selectedTranscriptionModelId =
+    transcriptionModel && typeof transcriptionModel.id === "string" ? transcriptionModel.id : null;
+  $: if (selectedTranscriptionModelId && selectedTranscriptionModelId !== transcriptionModelId) {
+    setWizardMeta({
+      transcription_model: { id: selectedTranscriptionModelId }
+    });
+  }
+  $: transcriptionModelMissingInSpace = transcriptionModelId !== null && transcriptionModel === null;
   $: transcriptionLanguage = (wizardMetadata as FlowWizardMetadata).transcription_language ?? "sv";
   $: stepsCount = $update.steps?.length ?? 0;
   $: checklistHasName = ($update.name ?? "").trim().length > 0;
@@ -217,6 +225,7 @@
         <Button variant="primary" disabled={!canPublish || publishLoading} on:click={async () => {
           publishLoading = true;
           try {
+            await flowEditor.flushAssistantSaves();
             const published = await data.intric.flows.publish({ id: $resource.id });
             flowEditor.setResource(published);
           } catch (e) {
@@ -501,10 +510,6 @@
                       <SelectAIModelV2
                         bind:selectedModel={transcriptionModel}
                         availableModels={$currentSpace.transcription_models}
-                        on:change={() =>
-                          setWizardMeta({
-                            transcription_model: transcriptionModel ? { id: transcriptionModel.id } : null
-                          })}
                       />
                     </div>
                     <div class="flex flex-col gap-1.5">
@@ -524,6 +529,11 @@
                     <span class="text-sm text-secondary">{m.flow_transcription_diarization()}</span>
                     <span class="rounded-full bg-secondary/40 px-2 py-0.5 text-[10px] text-muted">{m.flow_coming_soon()}</span>
                   </div>
+                  {#if transcriptionModelMissingInSpace}
+                    <div class="mt-4 rounded-lg border border-warning-default/40 bg-warning-dimmer px-3 py-2 text-xs text-warning-stronger">
+                      {m.flow_transcription_model_unavailable_warning()}
+                    </div>
+                  {/if}
                 </div>
 
                 {#if hasAudioInputStep}
@@ -554,7 +564,18 @@
                 steps={$update.steps}
                 activeStepId={$activeStepId}
                 isPublished={$isPublished}
-                on:selectStep={(e) => activeStepId.set(e.detail)}
+                on:selectStep={async (e) => {
+                  try {
+                    await flowEditor.flushAssistantSaves();
+                  } catch (error) {
+                    const message =
+                      error instanceof IntricError
+                        ? error.getReadableMessage()
+                        : "Kunde inte spara stegets ändringar.";
+                    toast.error(message);
+                  }
+                  activeStepId.set(e.detail);
+                }}
                 on:stepsChanged={async (e) => {
                   try {
                     await flowEditor.applyStepsWithSafeOrderRemap(e.detail);
@@ -576,7 +597,10 @@
                   activeStepId={$activeStepId}
                   isPublished={$isPublished}
                   transcriptionEnabled={transcriptionEnabled}
+                  transcriptionModelConfigured={transcriptionModel !== null}
+                  transcriptionModelLabel={transcriptionModel?.nickname ?? transcriptionModel?.name ?? null}
                   formSchema={$update.metadata_json?.form_schema as { fields: { name: string; type: string; required?: boolean; options?: string[]; order?: number }[] } | undefined}
+                  on:openTranscriptionSettings={() => setBuilderStage(2)}
                   on:jsonValidationChanged={(e) => {
                     hasStepJsonValidationErrors = e.detail.hasErrors;
                     stepJsonValidationFields = e.detail.fields;

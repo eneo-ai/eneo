@@ -83,6 +83,7 @@ async def _execute_flow_run_async(
             max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
             audit_service=container.audit_service(),
             references_service=container.references_service(),
+            transcriber=container.transcriber(),
         )
         result = await executor.execute(
             run_id=run_id,

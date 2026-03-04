@@ -17,6 +17,7 @@ def _step(
     input_source: str = "flow_input",
     input_type: str = "text",
     input_contract: dict | None = None,
+    output_mode: str = "pass_through",
     output_type: str = "text",
     output_contract: dict | None = None,
 ) -> FlowStep:
@@ -30,7 +31,7 @@ def _step(
         input_source=input_source,
         input_type=input_type,
         input_contract=input_contract,
-        output_mode="pass_through",
+        output_mode=output_mode,
         output_type=output_type,
         output_contract=output_contract,
         mcp_policy="inherit",
@@ -224,15 +225,111 @@ def test_all_previous_steps_document_blocked(user):
         service._validate_steps(steps)
 
 
-# --- Block audio/image input types ---
+# --- Audio/Image input type validation ---
 
 
-def test_audio_input_blocked_publish(user):
-    """audio input type should be blocked at publish."""
+def test_audio_input_requires_transcription_enabled(user):
+    """audio input requires wizard transcription_enabled=true."""
     service = _service(user)
     steps = [_step(input_type="audio")]
-    with pytest.raises(BadRequestException, match="audio is not yet supported"):
+    metadata = {
+        "wizard": {
+            "transcription_enabled": False,
+            "transcription_model": {"id": str(uuid4())},
+            "transcription_language": "sv",
+        }
+    }
+    with pytest.raises(BadRequestException, match="Transcription must be enabled"):
+        service._validate_steps(steps, metadata_json=metadata)
+
+
+def test_audio_input_requires_transcription_model(user):
+    """audio input requires wizard transcription model selection."""
+    service = _service(user)
+    steps = [_step(input_type="audio")]
+    metadata = {
+        "wizard": {
+            "transcription_enabled": True,
+            "transcription_language": "sv",
+        }
+    }
+    with pytest.raises(BadRequestException, match="transcription model must be selected"):
+        service._validate_steps(steps, metadata_json=metadata)
+
+
+def test_audio_input_accepts_valid_transcription_config(user):
+    """audio input should pass publish validation with valid transcription wizard config."""
+    service = _service(user)
+    steps = [_step(input_type="audio", input_source="flow_input")]
+    metadata = {
+        "wizard": {
+            "transcription_enabled": True,
+            "transcription_model": {"id": str(uuid4())},
+            "transcription_language": "sv",
+        }
+    }
+    service._validate_steps(steps, metadata_json=metadata)
+
+
+def test_audio_input_source_must_be_flow_input(user):
+    """audio input type should be rejected when source is previous_step."""
+    service = _service(user)
+    steps = [
+        _step(step_order=1, output_type="text"),
+        _step(step_order=2, input_source="previous_step", input_type="audio"),
+    ]
+    metadata = {
+        "wizard": {
+            "transcription_enabled": True,
+            "transcription_model": {"id": str(uuid4())},
+            "transcription_language": "sv",
+        }
+    }
+    with pytest.raises(BadRequestException, match="input_type 'audio' is only supported with input_source 'flow_input'"):
+        service._validate_steps(steps, metadata_json=metadata)
+
+
+def test_transcribe_only_requires_audio_input(user):
+    """transcribe_only mode is only valid for audio input steps."""
+    service = _service(user)
+    steps = [
+        _step(input_type="text", output_mode="transcribe_only", output_type="text"),
+    ]
+    with pytest.raises(BadRequestException, match="transcribe_only.*input_type 'audio'"):
         service._validate_steps(steps)
+
+
+def test_transcribe_only_requires_text_output(user):
+    """transcribe_only mode is only valid for text output."""
+    service = _service(user)
+    steps = [
+        _step(input_type="audio", output_mode="transcribe_only", output_type="docx"),
+    ]
+    metadata = {
+        "wizard": {
+            "transcription_enabled": True,
+            "transcription_model": {"id": str(uuid4())},
+            "transcription_language": "sv",
+        }
+    }
+    with pytest.raises(BadRequestException, match="transcribe_only.*output_type 'text'"):
+        service._validate_steps(steps, metadata_json=metadata)
+
+
+def test_transcribe_only_accepts_audio_text_combination(user):
+    """transcribe_only should be accepted for audio -> text steps."""
+    service = _service(user)
+    steps = [
+        _step(input_type="audio", output_mode="transcribe_only", output_type="text"),
+    ]
+    metadata = {
+        "wizard": {
+            "transcription_enabled": True,
+            "transcription_model": {"id": str(uuid4())},
+            "transcription_language": "sv",
+        }
+    }
+    service._validate_steps(steps, metadata_json=metadata)
 
 
 def test_image_input_blocked_publish(user):

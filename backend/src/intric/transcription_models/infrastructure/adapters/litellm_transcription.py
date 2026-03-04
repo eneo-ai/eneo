@@ -81,7 +81,7 @@ class LiteLLMTranscriptionAdapter:
 
         return kwargs
 
-    async def get_text_from_file(self, audio_file: AudioFile) -> str:
+    async def get_text_from_file(self, audio_file: AudioFile, *, language: str | None = None) -> str:
         """
         Transcribe an audio file, splitting into 5-minute chunks with timestamps.
         """
@@ -94,7 +94,7 @@ class LiteLLMTranscriptionAdapter:
             total_chunks = len(files)
 
             for i, path in enumerate(files):
-                block_text = await self._transcribe_chunk(path)
+                block_text = await self._transcribe_chunk(path, language=language)
                 start_time = chunk_index * five_minutes
 
                 # For the last chunk, calculate the correct end time based on total duration
@@ -122,17 +122,23 @@ class LiteLLMTranscriptionAdapter:
         retry=retry_if_not_exception_type(BadRequestException),
         reraise=True,
     )
-    async def _transcribe_chunk(self, file_path: Path) -> str:
+    async def _transcribe_chunk(self, file_path: Path, *, language: str | None = None) -> str:
         """
         Transcribe a single audio chunk using LiteLLM.
         """
         kwargs = self._prepare_kwargs()
 
-        # Set language for Swedish models (KB-Whisper)
-        if "kb-whisper" in self.model.model_name.lower():
+        if language is not None:
+            kwargs["language"] = language
+            logger.debug(
+                f"[LiteLLM] {self.litellm_model}: Setting language=%s from flow/app input",
+                language,
+            )
+        # Keep legacy default for KB-Whisper when no explicit language hint is provided.
+        elif "kb-whisper" in self.model.model_name.lower():
             kwargs["language"] = "sv"
             logger.debug(
-                f"[LiteLLM] {self.litellm_model}: Setting language=sv for KB-Whisper"
+                f"[LiteLLM] {self.litellm_model}: Setting language=sv fallback for KB-Whisper"
             )
 
         logger.info(

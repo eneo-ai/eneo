@@ -441,6 +441,60 @@ async def test_flow_update_deletes_orphaned_flow_managed_assistant(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_flow_repository_update_allows_transcribe_only_output_mode(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flow transcribe-only mode", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Flow Transcribe Assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        repo = FlowRepository(session=session, factory=FlowFactory())
+        created = await repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+
+        step = created.steps[0]
+        updated = created.model_copy(
+            update={
+                "steps": [
+                    step.model_copy(
+                        update={
+                            "flow_id": created.id,
+                            "tenant_id": admin_user.tenant_id,
+                            "input_type": "audio",
+                            "output_type": "text",
+                            "output_mode": "transcribe_only",
+                        }
+                    )
+                ]
+            }
+        )
+
+        persisted = await repo.update(updated, tenant_id=admin_user.tenant_id)
+        assert persisted.steps[0].output_mode == "transcribe_only"
+        assert persisted.steps[0].input_type == "audio"
+        assert persisted.steps[0].output_type == "text"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_flow_delete_cascades_owned_flow_managed_assistants(
     db_container,
     completion_model_factory,

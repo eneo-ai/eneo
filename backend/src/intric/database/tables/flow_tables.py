@@ -129,7 +129,10 @@ class FlowSteps(BasePublic):
         UniqueConstraint("id", "tenant_id", name="uq_flow_steps_id_tenant_id"),
         CheckConstraint("input_source IN ('flow_input','previous_step','all_previous_steps','http_get','http_post')", name="ck_flow_steps_input_source"),
         CheckConstraint("input_type IN ('text','json','image','audio','document','file','any')", name="ck_flow_steps_input_type"),
-        CheckConstraint("output_mode IN ('pass_through','http_post')", name="ck_flow_steps_output_mode"),
+        CheckConstraint(
+            "output_mode IN ('pass_through','http_post','transcribe_only')",
+            name="ck_flow_steps_output_mode",
+        ),
         CheckConstraint("output_type IN ('text','json','pdf','docx')", name="ck_flow_steps_output_type"),
         CheckConstraint("mcp_policy IN ('inherit','restricted')", name="ck_flow_steps_mcp_policy"),
         ForeignKeyConstraint(

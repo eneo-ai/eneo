@@ -1110,18 +1110,32 @@ async def test_send_http_request_blocks_peer_not_in_preflight_resolution(user, m
 
 
 @pytest.mark.asyncio
-async def test_audio_input_blocked_runtime(user):
-    """Audio input type raises at runtime (always active, no canary flag)."""
+async def test_audio_input_previous_step_rejected_runtime(user):
+    """Audio input is flow_input-only at runtime."""
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
-    step = _runtime_step(input_type="audio")
+    step = _runtime_step(input_type="audio", input_source="previous_step", step_order=2)
+    prev = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text="prior output",
+    )
+    run_state = RunExecutionState(
+        completed_by_order={1: prev},
+        prior_results=[prev],
+        all_previous_segments=["<step_1_output>\nprior output\n</step_1_output>\n"],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    executor._load_assistant = AsyncMock(return_value=_mock_assistant_for_execute_step())
 
-    mock_assistant = MagicMock()
-    mock_assistant.get_prompt_text.return_value = ""
-    executor._load_assistant = AsyncMock(return_value=mock_assistant)
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(step=step, run=run, state=run_state)
 
-    with pytest.raises(TypedIOValidationException, match="not yet supported"):
-        await executor._execute_step(step=step, run=run)
+    assert exc.value.code == "typed_io_audio_source_unsupported"
 
 
 # --- Typed validation tests ---
@@ -1245,6 +1259,75 @@ async def test_image_requires_valid_files(user):
 
     with pytest.raises(TypedIOValidationException, match="not yet supported|requires"):
         await executor._execute_step(step=step, run=run)
+
+
+@pytest.mark.asyncio
+async def test_audio_step_does_not_forward_audio_files_to_llm(user):
+    """Audio input uses transcribed text; raw audio files should not be forwarded to LLM."""
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"file_ids": [str(uuid4())]},
+    )
+    step = _runtime_step(input_type="audio")
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="Transcribed text",
+            source_text="Transcribed text",
+            files=[SimpleNamespace(id=uuid4(), mimetype="audio/wav")],
+            input_source="flow_input",
+        )
+    )
+
+    output = await executor._execute_step(step=step, run=run)
+
+    assert output.input_text == "Transcribed text"
+    assert assistant.get_response.await_args.kwargs["files"] == []
+
+
+@pytest.mark.asyncio
+async def test_audio_transcribe_only_skips_llm_and_rag(user):
+    """Audio + transcribe_only should return transcript directly without LLM/RAG."""
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"file_ids": [str(uuid4())]},
+    )
+    step = _runtime_step(
+        input_type="audio",
+        output_type="text",
+        output_mode="transcribe_only",
+    )
+    assistant = _mock_assistant_for_execute_step(response_text="should_not_be_used")
+    assistant.get_prompt_text.return_value = "ignore this prompt"
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="Raw transcript text",
+            source_text="Raw transcript text",
+            files=[SimpleNamespace(id=uuid4(), mimetype="audio/wav")],
+            input_source="flow_input",
+            transcription_metadata={"model": "whisper-1", "language": "sv"},
+        )
+    )
+    executor._retrieve_rag_chunks = AsyncMock(
+        return_value=([], {"status": "should_not_run"}, [])
+    )
+
+    output = await executor._execute_step(step=step, run=run)
+
+    assistant.get_response.assert_not_awaited()
+    executor._retrieve_rag_chunks.assert_not_awaited()
+    assert output.full_text == "Raw transcript text"
+    assert output.persisted_text == "Raw transcript text"
+    assert output.num_tokens_input == 0
+    assert output.num_tokens_output == 0
+    assert output.transcription_metadata == {"model": "whisper-1", "language": "sv"}
+    assert any(d.code == "audio_transcribe_only_used" for d in output.diagnostics)
 
 
 @pytest.mark.asyncio
