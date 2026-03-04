@@ -4,11 +4,21 @@ from intric.ai_models.ai_models_service import AIModelsService
 from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.flows.flow_input_limits import (
+    apply_flow_input_limits_patch,
+    resolve_flow_input_limits,
+)
 from intric.main.config import get_settings as get_app_settings
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.roles.permissions import Permission, validate_permissions
-from intric.settings.settings import SettingsInDB, SettingsPublic, SettingsUpsert
+from intric.settings.settings import (
+    FlowInputLimitsPublic,
+    FlowInputLimitsUpdate,
+    SettingsInDB,
+    SettingsPublic,
+    SettingsUpsert,
+)
 from intric.settings.settings_repo import SettingsRepository
 from intric.tenants.tenant import TenantUpdate
 from intric.tenants.tenant_repo import TenantRepository
@@ -452,4 +462,70 @@ class SettingService:
         return await self._build_settings_public(
             settings_in_db=settings,
             overrides={"api_key_expiry_notifications": enabled},
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def get_flow_input_limits(self) -> FlowInputLimitsPublic:
+        tenant = await self.tenant_repo.get(self.user.tenant_id)
+        limits = resolve_flow_input_limits(tenant.flow_settings if tenant else None)
+        return FlowInputLimitsPublic(
+            file_max_size_bytes=limits.file_max_size_bytes,
+            audio_max_size_bytes=limits.audio_max_size_bytes,
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_flow_input_limits(
+        self, payload: FlowInputLimitsUpdate
+    ) -> FlowInputLimitsPublic:
+        if (
+            payload.file_max_size_bytes is None
+            and payload.audio_max_size_bytes is None
+        ):
+            raise BadRequestException(
+                "At least one flow input limit field must be provided."
+            )
+
+        tenant = await self.tenant_repo.get(self.user.tenant_id)
+        current_flow_settings = tenant.flow_settings if tenant else {}
+        previous = resolve_flow_input_limits(current_flow_settings)
+
+        updated_flow_settings = apply_flow_input_limits_patch(
+            current_flow_settings=current_flow_settings,
+            file_max_size_bytes=payload.file_max_size_bytes,
+            audio_max_size_bytes=payload.audio_max_size_bytes,
+        )
+        updated_tenant = await self.tenant_repo.set_flow_settings(
+            tenant_id=self.user.tenant_id,
+            flow_settings=updated_flow_settings,
+        )
+        current = resolve_flow_input_limits(updated_tenant.flow_settings)
+
+        changes: dict[str, dict[str, int]] = {}
+        if payload.file_max_size_bytes is not None:
+            changes["file_max_size_bytes"] = {
+                "old": previous.file_max_size_bytes,
+                "new": current.file_max_size_bytes,
+            }
+        if payload.audio_max_size_bytes is not None:
+            changes["audio_max_size_bytes"] = {
+                "old": previous.audio_max_size_bytes,
+                "new": current.audio_max_size_bytes,
+            }
+
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            actor_id=self.user.id,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description="Updated flow input limits",
+            metadata={
+                "setting": "flow_input_limits",
+                "changes": changes,
+            },
+        )
+
+        return FlowInputLimitsPublic(
+            file_max_size_bytes=current.file_max_size_bytes,
+            audio_max_size_bytes=current.audio_max_size_bytes,
         )

@@ -59,6 +59,10 @@ export type Limits = components["schemas"]["Limits"];
 export type UploadedFile = components["schemas"]["FilePublic"];
 export type Website = components["schemas"]["WebsitePublic"];
 export type Settings = components["schemas"]["SettingsPublic"];
+export type FlowInputLimits = {
+  file_max_size_bytes: number;
+  audio_max_size_bytes: number;
+};
 export type WebsiteSparse = components["schemas"]["WebsiteSparse"];
 export type Space = components["schemas"]["SpacePublic"];
 export type SpaceSparse = components["schemas"]["SpaceSparse"];
@@ -200,6 +204,33 @@ export type FlowRun = {
   output_payload_json?: FlowRunOutputPayload | null;
   error_message?: string | null;
   job_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FlowInputPolicy = {
+  flow_id: string;
+  input_type?: string | null;
+  input_source?: string | null;
+  accepts_file_upload: boolean;
+  accepted_mimetypes: string[];
+  max_file_size_bytes?: number | null;
+  max_files_per_run?: number | null;
+  recommended_run_payload?: Record<string, unknown> | null;
+};
+
+export type FlowRunStepOutput = {
+  id?: string | null;
+  step_id?: string | null;
+  step_order: number;
+  assistant_id?: string | null;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  input_payload_json?: Record<string, unknown> | null;
+  output_payload_json?: FlowRunOutputPayload | null;
+  num_tokens_input?: number | null;
+  num_tokens_output?: number | null;
+  error_message?: string | null;
+  diagnostics?: Record<string, unknown>[];
   created_at: string;
   updated_at: string;
 };

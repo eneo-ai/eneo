@@ -4,7 +4,16 @@ from typing import Any, cast
 from uuid import UUID
 
 from dependency_injector import providers
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 
 from intric.assistants.api.assistant_models import (
     AssistantPublic,
@@ -15,19 +24,23 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.authentication.auth_dependencies import get_scope_filter
 from intric.database.database import sessionmanager
+from intric.files.file_models import FilePublic
 from intric.flows.flow import FlowRunStatus
 from intric.flows.api.flow_assembler import FlowAssembler
 from intric.flows.api.flow_graph import build_graph_from_steps, enrich_nodes_with_run_results
 from intric.flows.api.flow_models import (
     FlowAssistantCreateRequest,
     FlowCreateRequest,
+    FlowInputPolicyPublic,
     FlowPublic,
     FlowRunCreateRequest,
     FlowRunPublic,
+    FlowRunStepPublic,
     FlowSparsePublic,
     FlowUpdateRequest,
     GraphResponse,
 )
+from intric.flows.flow_file_upload_service import FlowFileUploadService
 from intric.main.container.container import Container
 from intric.main.models import NOT_PROVIDED, NotProvided, PaginatedResponse
 from intric.server.dependencies.container import get_container
@@ -145,6 +158,34 @@ def _required_uuid(value: UUID | None, *, field: str) -> UUID:
             detail=f"Expected non-null UUID for {field}.",
         )
     return value
+
+
+def _raise_scope_mismatch() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "code": "insufficient_scope",
+            "message": "API key space scope does not match requested flow.",
+            "context": {"auth_layer": "api_key_scope"},
+        },
+    )
+
+
+async def _enforce_flow_scope(request: Request, container: Container, *, flow_id: UUID) -> None:
+    scope_filter = get_scope_filter(request)
+    if scope_filter.space_id is None:
+        return
+    flow = await container.flow_service().get_flow(flow_id)
+    if scope_filter.space_id != flow.space_id:
+        _raise_scope_mismatch()
+
+
+def _flow_upload_service(container: Container) -> FlowFileUploadService:
+    return FlowFileUploadService(
+        flow_service=container.flow_service(),
+        file_service=container.file_service(),
+        settings_service=container.settings_service(),
+    )
 
 
 @router.post("/", response_model=FlowPublic, status_code=status.HTTP_201_CREATED)
@@ -486,13 +527,32 @@ async def delete_flow_assistant(
     )
 
 
-@router.post("/{id}/runs/", response_model=FlowRunPublic, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{id}/runs/",
+    response_model=FlowRunPublic,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create flow run",
+    description="""
+Create a new run for a published flow.
+
+Speech-to-text consumer sequence:
+1. Upload one or more files via `POST /api/v1/flows/{id}/files/`
+2. Submit the returned `file_ids` in this run request
+3. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs
+    """,
+    responses={
+        403: {"description": "Forbidden: API key scope does not match flow space."},
+        404: {"description": "Flow not found in tenant scope."},
+    },
+)
 async def create_flow_run(
     id: UUID,
+    request: Request,
     run_in: FlowRunCreateRequest,
     background_tasks: BackgroundTasks,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    await _enforce_flow_scope(request, container, flow_id=id)
     assembler = FlowAssembler()
     run_service = container.flow_run_service()
     user = container.user()
@@ -519,6 +579,200 @@ async def create_flow_run(
         user_id=user.id,
     )
     return assembler.to_run_public(run)
+
+
+@router.get(
+    "/{id}/input-policy/",
+    response_model=FlowInputPolicyPublic,
+    status_code=status.HTTP_200_OK,
+    summary="Get flow input policy",
+    description="""
+Return effective runtime input policy for a flow's first `flow_input` step.
+
+Use this endpoint before upload/run to discover:
+- whether file upload is accepted
+- which mimetypes are allowed
+- the effective max file size limit in bytes
+- max files per run (when constrained)
+- recommended run payload shape for API consumers
+    """,
+    responses={
+        403: {"description": "Forbidden: API key scope does not match flow space."},
+        404: {"description": "Flow not found in tenant scope."},
+    },
+)
+async def get_flow_input_policy(
+    id: UUID,
+    request: Request,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await _enforce_flow_scope(request, container, flow_id=id)
+    policy = await _flow_upload_service(container).get_input_policy(flow_id=id)
+    return FlowInputPolicyPublic(
+        flow_id=id,
+        input_type=policy.input_type,
+        input_source=policy.input_source,
+        accepts_file_upload=policy.accepts_file_upload,
+        accepted_mimetypes=policy.accepted_mimetypes,
+        max_file_size_bytes=policy.max_file_size_bytes,
+        max_files_per_run=policy.max_files_per_run,
+        recommended_run_payload=policy.recommended_run_payload,
+    )
+
+
+@router.post(
+    "/{id}/files/",
+    response_model=FilePublic,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload flow input file",
+    description="""
+Upload a file using flow-specific policy checks.
+
+This endpoint is flow-first and intended for external API consumers that should not call
+generic file routes directly. Validation is based on the first `flow_input` step:
+- accepted input types: audio/document/image/file
+- allowed mimetypes
+- effective tenant flow size limits
+    """,
+    responses={
+        400: {"description": "Flow does not accept file upload for its flow_input step."},
+        403: {"description": "Forbidden: API key scope does not match flow space."},
+        404: {"description": "Flow not found in tenant scope."},
+        413: {"description": "Uploaded file exceeds effective flow max size limit."},
+        415: {"description": "Unsupported media type for this flow input policy."},
+    },
+)
+async def upload_flow_file(
+    id: UUID,
+    request: Request,
+    upload_file: UploadFile,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await _enforce_flow_scope(request, container, flow_id=id)
+    file = await _flow_upload_service(container).upload_file_for_flow(
+        flow_id=id,
+        upload_file=upload_file,
+    )
+    user = container.user()
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.FILE_UPLOADED,
+        entity_type=EntityType.FILE,
+        entity_id=file.id,
+        description=f"Uploaded flow input file '{file.name}' for flow {id}",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=file,
+            extra={
+                "flow_id": str(id),
+                "size_bytes": file.size,
+                "mimetype": getattr(file, "mimetype", None),
+            },
+        ),
+    )
+    return file
+
+
+@router.get(
+    "/{id}/runs/",
+    response_model=PaginatedResponse[FlowRunPublic],
+    status_code=status.HTTP_200_OK,
+    summary="List flow runs",
+    description="""
+List runs for a specific flow.
+
+This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
+    """,
+    responses={
+        403: {"description": "Forbidden: API key scope does not match flow space."},
+        404: {"description": "Flow not found in tenant scope."},
+    },
+)
+async def list_flow_runs_alias(
+    id: UUID,
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await _enforce_flow_scope(request, container, flow_id=id)
+    runs = await container.flow_run_service().list_runs(
+        flow_id=id,
+        limit=limit,
+        offset=offset,
+    )
+    assembler = FlowAssembler()
+    return {"count": len(runs), "items": [assembler.to_run_public(item) for item in runs]}
+
+
+@router.get(
+    "/{id}/runs/{run_id}/",
+    response_model=FlowRunPublic,
+    status_code=status.HTTP_200_OK,
+    summary="Get flow run",
+    description="""
+Get one run for a flow using flow-first routing.
+
+Use this endpoint for run status and top-level output payload when building consumer apps.
+    """,
+    responses={
+        403: {"description": "Forbidden: API key scope does not match flow space."},
+        404: {"description": "Run not found for this flow and tenant."},
+    },
+)
+async def get_flow_run_alias(
+    id: UUID,
+    run_id: UUID,
+    request: Request,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await _enforce_flow_scope(request, container, flow_id=id)
+    run = await container.flow_run_service().get_run(run_id=run_id, flow_id=id)
+    return FlowAssembler().to_run_public(run)
+
+
+@router.get(
+    "/{id}/runs/{run_id}/steps/",
+    response_model=list[FlowRunStepPublic],
+    status_code=status.HTTP_200_OK,
+    summary="List flow run step outputs",
+    description="""
+Return ordered step-level execution results for one flow run.
+
+Designed for consumer UIs that need to inspect intermediate outputs, diagnostics, and token usage
+without relying on debug-export internals.
+    """,
+    responses={
+        403: {"description": "Forbidden: API key scope does not match flow space."},
+        404: {"description": "Run not found for this flow and tenant."},
+    },
+)
+async def list_flow_run_steps(
+    id: UUID,
+    run_id: UUID,
+    request: Request,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await _enforce_flow_scope(request, container, flow_id=id)
+    step_results = await container.flow_run_service().list_step_results(
+        run_id=run_id,
+        flow_id=id,
+    )
+    items: list[FlowRunStepPublic] = []
+    for result in step_results:
+        diagnostics: list[dict[str, Any]] = []
+        input_payload = result.input_payload_json
+        if isinstance(input_payload, dict):
+            raw_diagnostics = input_payload.get("diagnostics")
+            if isinstance(raw_diagnostics, list):
+                diagnostics = [item for item in raw_diagnostics if isinstance(item, dict)]
+        items.append(
+            FlowRunStepPublic.model_validate(result).model_copy(
+                update={"diagnostics": diagnostics}
+            )
+        )
+    return items
 
 
 @router.get("/{id}/graph/", response_model=GraphResponse, status_code=status.HTTP_200_OK)

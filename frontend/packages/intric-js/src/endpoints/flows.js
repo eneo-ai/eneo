@@ -105,6 +105,31 @@ export function initFlows(client) {
       });
     },
 
+    /**
+     * Get effective flow input policy (input type, accepted mimes, size limit).
+     * @param {{id: string}} params
+     * @throws {IntricError}
+     */
+    inputPolicy: async ({ id }) => {
+      return _fetch(`/api/v1/flows/${id}/input-policy/`, { method: "get" });
+    },
+
+    files: {
+      /**
+       * Upload a file scoped to a specific flow.
+       * @param {{id: string, file: File}} params
+       * @throws {IntricError}
+       */
+      upload: async ({ id, file }) => {
+        const formData = new FormData();
+        formData.append("upload_file", file);
+        return _fetch(`/api/v1/flows/${id}/files/`, {
+          method: "post",
+          requestBody: { "multipart/form-data": formData }
+        });
+      }
+    },
+
     assistants: {
       /**
        * Create a flow-managed assistant owned by the flow.
@@ -185,19 +210,35 @@ export function initFlows(client) {
        * @throws {IntricError}
        */
       list: async ({ flowId, limit = 50, offset = 0 }) => {
-        return _fetch("/api/v1/flow-runs/", {
+        return _fetch(`/api/v1/flows/${flowId}/runs/`, {
           method: "get",
-          params: { query: { flow_id: flowId, limit, offset } }
+          params: { query: { limit, offset } }
         });
       },
 
       /**
        * Get a specific flow run
-       * @param {{id: string}} run
+       * @param {{id: string, flowId?: string}} run
        * @throws {IntricError}
        */
       get: async (run) => {
+        if (run.flowId) {
+          return _fetch(`/api/v1/flows/${run.flowId}/runs/${run.id}/`, {
+            method: "get"
+          });
+        }
         return _fetch(`/api/v1/flow-runs/${run.id}/`, { method: "get" });
+      },
+
+      /**
+       * List step outputs for a specific run under a flow.
+       * @param {{flowId: string, runId: string}} params
+       * @throws {IntricError}
+       */
+      steps: async ({ flowId, runId }) => {
+        return _fetch(`/api/v1/flows/${flowId}/runs/${runId}/steps/`, {
+          method: "get"
+        });
       },
 
       /**

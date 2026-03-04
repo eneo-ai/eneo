@@ -151,6 +151,35 @@ class FlowRunPublic(BaseModel):
     updated_at: datetime
 
 
+class FlowInputPolicyPublic(BaseModel):
+    flow_id: UUID
+    input_type: str | None = None
+    input_source: str | None = None
+    accepts_file_upload: bool
+    accepted_mimetypes: list[str] = Field(default_factory=list)
+    max_file_size_bytes: int | None = None
+    max_files_per_run: int | None = None
+    recommended_run_payload: dict[str, Any] | None = None
+
+
+class FlowRunStepPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID | None = None
+    step_id: UUID | None = None
+    step_order: int
+    assistant_id: UUID | None = None
+    status: str
+    input_payload_json: dict[str, Any] | None = None
+    output_payload_json: dict[str, Any] | None = None
+    num_tokens_input: int | None = None
+    num_tokens_output: int | None = None
+    error_message: str | None = None
+    diagnostics: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
 class FlowRunRedispatchResponse(BaseModel):
     run: FlowRunPublic
     redispatched_count: int

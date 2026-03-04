@@ -1159,3 +1159,35 @@ async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
     evidence = await service.get_evidence(run_id=run.id)
 
     assert evidence["debug_export"]["steps"][0]["rag"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_step_results_filters_by_run_and_flow(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+    )
+    run = _run(user=user, flow_id=uuid4())
+    flow_run_repo.get.return_value = run
+    flow_run_repo.list_step_results.return_value = [
+        SimpleNamespace(step_order=1),
+        SimpleNamespace(step_order=2),
+    ]
+
+    results = await service.list_step_results(run_id=run.id, flow_id=run.flow_id)
+
+    assert len(results) == 2
+    flow_run_repo.get.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        flow_id=run.flow_id,
+    )
+    flow_run_repo.list_step_results.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+    )

@@ -624,3 +624,22 @@ class TenantRepository:
         )
         model = await self.delegate.get_model_from_query(stmt)
         return cast(TenantInDB, model)
+
+    async def set_flow_settings(
+        self,
+        tenant_id: UUID,
+        flow_settings: dict[str, Any],
+    ) -> TenantInDB:
+        """Replace flow_settings JSONB for a tenant."""
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(
+                flow_settings=flow_settings,
+                updated_at=datetime.now(timezone.utc),
+            )
+            .returning(Tenants)
+            .options(selectinload(Tenants.modules))
+        )
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)

@@ -30,9 +30,14 @@ class FileService:
         async with session.begin():
             yield
 
-    async def save_file(self, upload_file: UploadFile):
+    async def save_file(self, upload_file: UploadFile, *, max_size: int | None = None):
         file = await self.protocol.to_domain(
-            upload_file, max_size=get_settings().upload_max_file_size
+            upload_file,
+            max_size=(
+                max_size
+                if max_size is not None
+                else get_settings().upload_max_file_size
+            ),
         )
 
         async with self._write_transaction():

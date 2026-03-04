@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Flow, Intric, UploadedFile } from "@intric/intric-js";
+  import type { Flow, FlowInputPolicy, Intric, UploadedFile } from "@intric/intric-js";
   import { Button, Dialog } from "@intric/ui";
   import { createEventDispatcher } from "svelte";
   import { writable } from "svelte/store";
@@ -43,12 +43,42 @@
 
   $: stepCount = flow.steps?.length ?? 0;
 
-  // Detect if first step expects file/document input
+  let flowInputPolicy: FlowInputPolicy | null = null;
+  let policyLoadError: string | null = null;
+  let policyLoadedForFlowId: string | null = null;
+
+  async function loadFlowInputPolicy(flowId: string) {
+    try {
+      policyLoadError = null;
+      flowInputPolicy = await intric.flows.inputPolicy({ id: flowId });
+    } catch (e) {
+      flowInputPolicy = null;
+      policyLoadError = e instanceof IntricError ? e.getReadableMessage() : String(e);
+    }
+  }
+
+  $: if (open && flow?.id && policyLoadedForFlowId !== flow.id) {
+    policyLoadedForFlowId = flow.id;
+    void loadFlowInputPolicy(flow.id);
+  }
+  $: if (!open) {
+    policyLoadedForFlowId = null;
+  }
+
+  // Legacy first-step fallback when policy endpoint is unavailable
   $: firstStep = flow.steps?.length > 0 ? flow.steps[0] : null;
-  $: isAudioUpload = firstStep?.input_type === "audio";
-  $: needsFileUpload = firstStep?.input_type === "document" || firstStep?.input_type === "file" || isAudioUpload;
+  $: resolvedInputType = flowInputPolicy?.input_type ?? firstStep?.input_type ?? null;
+  $: isAudioUpload = resolvedInputType === "audio";
+  $: needsFileUpload = flowInputPolicy
+    ? flowInputPolicy.accepts_file_upload
+    : resolvedInputType === "document" || resolvedInputType === "file" || isAudioUpload;
   const AUDIO_ACCEPT_FILTER = "audio/*,video/webm,video/mp4";
-  $: fileInputAccept = isAudioUpload ? AUDIO_ACCEPT_FILTER : undefined;
+  $: fileInputAccept = flowInputPolicy?.accepted_mimetypes?.length
+    ? flowInputPolicy.accepted_mimetypes.join(",")
+    : isAudioUpload
+      ? AUDIO_ACCEPT_FILTER
+      : undefined;
+  $: effectiveMaxFileSizeBytes = flowInputPolicy?.max_file_size_bytes ?? null;
 
   let formValues: Record<string, unknown> = {};
 
@@ -154,9 +184,14 @@
   async function uploadFiles(files: File[]) {
     isUploading = true;
     uploadError = null;
+    if (!flow.id) {
+      uploadError = m.something_went_wrong();
+      isUploading = false;
+      return;
+    }
     for (const file of files) {
       try {
-        const uploaded = await intric.files.upload({ file });
+        const uploaded = await intric.flows.files.upload({ id: flow.id, file });
         uploadedFiles = [...uploadedFiles, uploaded];
       } catch (e) {
         uploadError = e instanceof IntricError ? e.getReadableMessage() : String(e);
@@ -212,6 +247,18 @@
       toast.error(message);
     }
     isSubmitting = false;
+  }
+
+  function formatBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB"];
+    let value = bytes;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex += 1;
+    }
+    return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
   }
 </script>
 
@@ -315,19 +362,27 @@
                 }
               }}
             >
-              {#if isUploading}
-                <span class="text-secondary text-sm">{m.uploading()}</span>
-              {:else}
-                <span class="text-secondary text-sm">{m.upload_files()}</span>
+            {#if isUploading}
+              <span class="text-secondary text-sm">{m.uploading()}</span>
+            {:else}
+              <span class="text-secondary text-sm">{m.upload_files()}</span>
+              <span class="text-xs text-secondary">
+                {isAudioUpload ? m.flow_run_audio_upload_hint() : m.upload_files_description()}
+              </span>
+              {#if effectiveMaxFileSizeBytes}
                 <span class="text-xs text-secondary">
-                  {isAudioUpload ? m.flow_run_audio_upload_hint() : m.upload_files_description()}
+                  {m.flow_run_upload_max_size({ size: formatBytes(effectiveMaxFileSizeBytes) })}
                 </span>
               {/if}
-            </div>
-
-            {#if uploadError}
-              <p class="text-xs text-red-600">{uploadError}</p>
             {/if}
+          </div>
+
+          {#if policyLoadError}
+            <p class="text-xs text-secondary">{policyLoadError}</p>
+          {/if}
+          {#if uploadError}
+            <p class="text-xs text-red-600">{uploadError}</p>
+          {/if}
 
             {#if uploadedFiles.length > 0}
               <div class="flex flex-col gap-1">

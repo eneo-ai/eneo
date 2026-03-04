@@ -36,3 +36,13 @@ class GetModelsResponse(BaseModel):
 
 class ToggleSettingUpdate(BaseModel):
     enabled: bool
+
+
+class FlowInputLimitsPublic(BaseModel):
+    file_max_size_bytes: int
+    audio_max_size_bytes: int
+
+
+class FlowInputLimitsUpdate(BaseModel):
+    file_max_size_bytes: int | None = None
+    audio_max_size_bytes: int | None = None

@@ -12,7 +12,13 @@ from intric.server.dependencies.container import get_container
 from intric.server.protocol import to_paginated_response
 from intric.settings import settings_factory
 from intric.settings.setting_service import SettingService
-from intric.settings.settings import GetModelsResponse, SettingsPublic, ToggleSettingUpdate
+from intric.settings.settings import (
+    FlowInputLimitsPublic,
+    FlowInputLimitsUpdate,
+    GetModelsResponse,
+    SettingsPublic,
+    ToggleSettingUpdate,
+)
 
 logger = get_logger(__name__)
 
@@ -252,6 +258,55 @@ async def update_strict_mode_setting(
 ):
     service = container.settings_service()
     return await service.update_strict_mode_setting(enabled=data.enabled)
+
+
+@settings_admin_router.patch(
+    "/flow-input-limits",
+    response_model=FlowInputLimitsPublic,
+    summary="Update Flow input size limits",
+    description="""
+Update tenant-level Flow input file size limits.
+
+**Admin Only:** Requires admin permissions.
+
+Values are persisted under tenant `flow_settings` and take effect immediately.
+
+Example:
+```json
+{
+  "audio_max_size_bytes": 104857600
+}
+```
+    """,
+    responses={
+        400: {"description": "Invalid patch (range/type) or empty payload."},
+        403: {"description": "Forbidden: admin permission required."},
+    },
+)
+async def update_flow_input_limits(
+    payload: FlowInputLimitsUpdate,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.settings_service()
+    return await service.update_flow_input_limits(payload)
+
+
+@settings_admin_router.get(
+    "/flow-input-limits",
+    response_model=FlowInputLimitsPublic,
+    summary="Get effective Flow input size limits",
+    description="""
+Returns effective tenant-level Flow input size limits, including defaults when no override exists.
+    """,
+    responses={
+        403: {"description": "Forbidden: admin permission required."},
+    },
+)
+async def get_flow_input_limits(
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.settings_service()
+    return await service.get_flow_input_limits()
 
 
 @settings_admin_router.patch(

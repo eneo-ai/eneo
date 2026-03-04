@@ -426,6 +426,29 @@ export interface paths {
      */
     patch: operations["update_strict_mode_setting_api_v1_settings_strict_mode_patch"];
   };
+  "/api/v1/settings/flow-input-limits": {
+    /**
+     * Get effective Flow input size limits
+     * @description Returns effective tenant-level Flow input size limits, including defaults when no override exists.
+     */
+    get: operations["get_flow_input_limits_api_v1_settings_flow_input_limits_get"];
+    /**
+     * Update Flow input size limits
+     * @description Update tenant-level Flow input file size limits.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * Values are persisted under tenant `flow_settings` and take effect immediately.
+     *
+     * Example:
+     * ```json
+     * {
+     *   "audio_max_size_bytes": 104857600
+     * }
+     * ```
+     */
+    patch: operations["update_flow_input_limits_api_v1_settings_flow_input_limits_patch"];
+  };
   "/api/v1/settings/api-key-expiry-notifications": {
     /**
      * Toggle API key expiry notifications
@@ -1921,8 +1944,69 @@ export interface paths {
     patch: operations["update_flow_assistant_api_v1_flows__id__assistants__assistant_id___patch"];
   };
   "/api/v1/flows/{id}/runs/": {
-    /** Create Flow Run */
+    /**
+     * List flow runs
+     * @description List runs for a specific flow.
+     *
+     * This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
+     */
+    get: operations["list_flow_runs_alias_api_v1_flows__id__runs__get"];
+    /**
+     * Create flow run
+     * @description Create a new run for a published flow.
+     *
+     * Speech-to-text consumer sequence:
+     * 1. Upload one or more files via `POST /api/v1/flows/{id}/files/`
+     * 2. Submit the returned `file_ids` in this run request
+     * 3. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs
+     */
     post: operations["create_flow_run_api_v1_flows__id__runs__post"];
+  };
+  "/api/v1/flows/{id}/input-policy/": {
+    /**
+     * Get flow input policy
+     * @description Return effective runtime input policy for a flow's first `flow_input` step.
+     *
+     * Use this endpoint before upload/run to discover:
+     * - whether file upload is accepted
+     * - which mimetypes are allowed
+     * - the effective max file size limit in bytes
+     * - max files per run (when constrained)
+     * - recommended run payload shape for API consumers
+     */
+    get: operations["get_flow_input_policy_api_v1_flows__id__input_policy__get"];
+  };
+  "/api/v1/flows/{id}/files/": {
+    /**
+     * Upload flow input file
+     * @description Upload a file using flow-specific policy checks.
+     *
+     * This endpoint is flow-first and intended for external API consumers that should not call
+     * generic file routes directly. Validation is based on the first `flow_input` step:
+     * - accepted input types: audio/document/image/file
+     * - allowed mimetypes
+     * - effective tenant flow size limits
+     */
+    post: operations["upload_flow_file_api_v1_flows__id__files__post"];
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/": {
+    /**
+     * Get flow run
+     * @description Get one run for a flow using flow-first routing.
+     *
+     * Use this endpoint for run status and top-level output payload when building consumer apps.
+     */
+    get: operations["get_flow_run_alias_api_v1_flows__id__runs__run_id___get"];
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/steps/": {
+    /**
+     * List flow run step outputs
+     * @description Return ordered step-level execution results for one flow run.
+     *
+     * Designed for consumer UIs that need to inspect intermediate outputs, diagnostics, and token usage
+     * without relying on debug-export internals.
+     */
+    get: operations["list_flow_run_steps_api_v1_flows__id__runs__run_id__steps__get"];
   };
   "/api/v1/flows/{id}/graph/": {
     /** Get Flow Graph */
@@ -4874,6 +4958,14 @@ export interface components {
        */
       file: string;
     };
+    /** Body_upload_flow_file_api_v1_flows__id__files__post */
+    Body_upload_flow_file_api_v1_flows__id__files__post: {
+      /**
+       * Upload File
+       * Format: binary
+       */
+      upload_file: string;
+    };
     /**
      * BulkCrawlRequest
      * @description Request model for triggering crawls on multiple websites.
@@ -6767,6 +6859,44 @@ export interface components {
       /** Data Retention Days */
       data_retention_days?: number | null;
     };
+    /** FlowInputLimitsPublic */
+    FlowInputLimitsPublic: {
+      /** File Max Size Bytes */
+      file_max_size_bytes: number;
+      /** Audio Max Size Bytes */
+      audio_max_size_bytes: number;
+    };
+    /** FlowInputLimitsUpdate */
+    FlowInputLimitsUpdate: {
+      /** File Max Size Bytes */
+      file_max_size_bytes?: number | null;
+      /** Audio Max Size Bytes */
+      audio_max_size_bytes?: number | null;
+    };
+    /** FlowInputPolicyPublic */
+    FlowInputPolicyPublic: {
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /** Input Type */
+      input_type?: string | null;
+      /** Input Source */
+      input_source?: string | null;
+      /** Accepts File Upload */
+      accepts_file_upload: boolean;
+      /** Accepted Mimetypes */
+      accepted_mimetypes?: string[];
+      /** Max File Size Bytes */
+      max_file_size_bytes?: number | null;
+      /** Max Files Per Run */
+      max_files_per_run?: number | null;
+      /** Recommended Run Payload */
+      recommended_run_payload?: {
+        [key: string]: unknown;
+      } | null;
+    };
     /** FlowPublic */
     FlowPublic: {
       /** Id */
@@ -7074,6 +7204,47 @@ export interface components {
       run: components["schemas"]["FlowRunPublic"];
       /** Redispatched Count */
       redispatched_count: number;
+    };
+    /** FlowRunStepPublic */
+    FlowRunStepPublic: {
+      /** Id */
+      id?: string | null;
+      /** Step Id */
+      step_id?: string | null;
+      /** Step Order */
+      step_order: number;
+      /** Assistant Id */
+      assistant_id?: string | null;
+      /** Status */
+      status: string;
+      /** Input Payload Json */
+      input_payload_json?: {
+        [key: string]: unknown;
+      } | null;
+      /** Output Payload Json */
+      output_payload_json?: {
+        [key: string]: unknown;
+      } | null;
+      /** Num Tokens Input */
+      num_tokens_input?: number | null;
+      /** Num Tokens Output */
+      num_tokens_output?: number | null;
+      /** Error Message */
+      error_message?: string | null;
+      /** Diagnostics */
+      diagnostics?: {
+        [key: string]: unknown;
+      }[];
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
     };
     /** FlowSparsePublic */
     FlowSparsePublic: {
@@ -11323,6 +11494,10 @@ export interface components {
       api_key_policy?: {
         [key: string]: unknown;
       };
+      /** Flow Settings */
+      flow_settings?: {
+        [key: string]: unknown;
+      };
     };
     /**
      * TenantInfo
@@ -11665,6 +11840,10 @@ export interface components {
       };
       /** Api Key Policy */
       api_key_policy?: {
+        [key: string]: unknown;
+      };
+      /** Flow Settings */
+      flow_settings?: {
         [key: string]: unknown;
       };
     };
@@ -15880,6 +16059,68 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["SettingsPublic"];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get effective Flow input size limits
+   * @description Returns effective tenant-level Flow input size limits, including defaults when no override exists.
+   */
+  get_flow_input_limits_api_v1_settings_flow_input_limits_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowInputLimitsPublic"];
+        };
+      };
+      /** @description Forbidden: admin permission required. */
+      403: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Update Flow input size limits
+   * @description Update tenant-level Flow input file size limits.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * Values are persisted under tenant `flow_settings` and take effect immediately.
+   *
+   * Example:
+   * ```json
+   * {
+   *   "audio_max_size_bytes": 104857600
+   * }
+   * ```
+   */
+  update_flow_input_limits_api_v1_settings_flow_input_limits_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowInputLimitsUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowInputLimitsPublic"];
+        };
+      };
+      /** @description Invalid patch (range/type) or empty payload. */
+      400: {
+        content: never;
+      };
+      /** @description Forbidden: admin permission required. */
+      403: {
+        content: never;
       };
       /** @description Validation Error */
       422: {
@@ -24102,7 +24343,54 @@ export interface operations {
       };
     };
   };
-  /** Create Flow Run */
+  /**
+   * List flow runs
+   * @description List runs for a specific flow.
+   *
+   * This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
+   */
+  list_flow_runs_alias_api_v1_flows__id__runs__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_FlowRunPublic_"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: never;
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create flow run
+   * @description Create a new run for a published flow.
+   *
+   * Speech-to-text consumer sequence:
+   * 1. Upload one or more files via `POST /api/v1/flows/{id}/files/`
+   * 2. Submit the returned `file_ids` in this run request
+   * 3. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs
+   */
   create_flow_run_api_v1_flows__id__runs__post: {
     parameters: {
       path: {
@@ -24120,6 +24408,183 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["FlowRunPublic"];
         };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: never;
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get flow input policy
+   * @description Return effective runtime input policy for a flow's first `flow_input` step.
+   *
+   * Use this endpoint before upload/run to discover:
+   * - whether file upload is accepted
+   * - which mimetypes are allowed
+   * - the effective max file size limit in bytes
+   * - max files per run (when constrained)
+   * - recommended run payload shape for API consumers
+   */
+  get_flow_input_policy_api_v1_flows__id__input_policy__get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowInputPolicyPublic"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: never;
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Upload flow input file
+   * @description Upload a file using flow-specific policy checks.
+   *
+   * This endpoint is flow-first and intended for external API consumers that should not call
+   * generic file routes directly. Validation is based on the first `flow_input` step:
+   * - accepted input types: audio/document/image/file
+   * - allowed mimetypes
+   * - effective tenant flow size limits
+   */
+  upload_flow_file_api_v1_flows__id__files__post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_flow_file_api_v1_flows__id__files__post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["FilePublic"];
+        };
+      };
+      /** @description Flow does not accept file upload for its flow_input step. */
+      400: {
+        content: never;
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: never;
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        content: never;
+      };
+      /** @description Uploaded file exceeds effective flow max size limit. */
+      413: {
+        content: never;
+      };
+      /** @description Unsupported media type for this flow input policy. */
+      415: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get flow run
+   * @description Get one run for a flow using flow-first routing.
+   *
+   * Use this endpoint for run status and top-level output payload when building consumer apps.
+   */
+  get_flow_run_alias_api_v1_flows__id__runs__run_id___get: {
+    parameters: {
+      path: {
+        id: string;
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowRunPublic"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: never;
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List flow run step outputs
+   * @description Return ordered step-level execution results for one flow run.
+   *
+   * Designed for consumer UIs that need to inspect intermediate outputs, diagnostics, and token usage
+   * without relying on debug-export internals.
+   */
+  list_flow_run_steps_api_v1_flows__id__runs__run_id__steps__get: {
+    parameters: {
+      path: {
+        id: string;
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowRunStepPublic"][];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: never;
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        content: never;
       };
       /** @description Validation Error */
       422: {

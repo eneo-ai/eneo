@@ -61,6 +61,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     federation_config: dict[str, Any] = Field(default_factory=dict)
     crawler_settings: dict[str, Any] = Field(default_factory=dict)
     api_key_policy: dict[str, Any] = Field(default_factory=dict)
+    flow_settings: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("slug")
     @classmethod
@@ -192,6 +193,41 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             errors = validate_crawler_setting(key, value)
             if errors:
                 raise ValueError(errors[0])
+
+        return v
+
+    @field_validator("flow_settings")
+    @classmethod
+    def validate_flow_settings(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Validate JSONB structure for flow settings.
+
+        flow_settings currently supports:
+        - input_limits.file_max_size_bytes
+        - input_limits.audio_max_size_bytes
+        """
+        if not v:
+            return {}
+
+        if not isinstance(v, dict):
+            raise ValueError("flow_settings must be an object")
+
+        input_limits = v.get("input_limits")
+        if input_limits is None:
+            return v
+
+        if not isinstance(input_limits, dict):
+            raise ValueError("flow_settings.input_limits must be an object")
+
+        for key in ("file_max_size_bytes", "audio_max_size_bytes"):
+            if key not in input_limits:
+                continue
+            value = input_limits[key]
+            if not isinstance(value, int):
+                raise ValueError(f"flow_settings.input_limits.{key} must be an integer")
+            if value < 1:
+                raise ValueError(
+                    f"flow_settings.input_limits.{key} must be greater than 0"
+                )
 
         return v
 

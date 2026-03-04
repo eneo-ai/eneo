@@ -13,6 +13,7 @@
   import TokenOverviewBar from "./usage/tokens/TokenOverviewBar.svelte";
   import { m } from "$lib/paraglide/messages";
   import { invalidate, invalidateAll } from "$app/navigation";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   const { tenant } = getAppContext();
   const intric = getIntric();
@@ -130,6 +131,17 @@
             class="text-accent-default hover:text-accent-default/80 text-sm font-medium"
           >
             Open `/admin/api-keys`
+          </a>
+        </Settings.Row>
+        <Settings.Row
+          title={m.flow_admin_open_input_limits()}
+          description={m.flow_admin_open_input_limits_description()}
+        >
+          <a
+            href={localizeHref("/admin/flow-input-limits")}
+            class="text-accent-default hover:text-accent-default/80 text-sm font-medium"
+          >
+            {m.flow_admin_open_input_limits()}
           </a>
         </Settings.Row>
       </Settings.Group>

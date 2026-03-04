@@ -450,6 +450,18 @@ class FlowRunService:
             offset=offset,
         )
 
+    async def list_step_results(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID | None = None,
+    ) -> list[FlowStepResult]:
+        run = await self.get_run(run_id=run_id, flow_id=flow_id)
+        return await self.flow_run_repo.list_step_results(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+        )
+
     async def redispatch_stale_queued_runs(
         self,
         *,
