@@ -32,6 +32,10 @@ CONTEXT_SIZE_BUFFER = 1000  # Counting tokens is not an exakt science, leave som
 MIN_PERCENTAGE_KNOWLEDGE = (
     0.8  # Strive towards a minimum of 80% of the context as knowledge
 )
+# v2: knowledge may use at most 70% of the context window.
+# This is a ceiling, not a reservation — if knowledge uses less,
+# messages are free to use the remaining space.
+MAX_PERCENTAGE_KNOWLEDGE_V2 = 0.7
 
 # Cache tiktoken encoder to avoid expensive re-instantiation on every call
 _TIKTOKEN_ENCODING = None
@@ -460,12 +464,17 @@ class ContextBuilder:
             prompt_text = str(_prompt)
             tokens_used += _prompt.get_tokens_of_knowledge()
         else:
-            # v2: Knowledge-first — knowledge gets all remaining space (autocut-limited),
-            # then messages fill whatever is left
+            # v2: Knowledge-first — knowledge is fitted before messages, capped
+            # at 70% of the context window. Messages then fill whatever remains.
+            # If knowledge uses less than the cap, messages get all leftover space.
             if tokens_used > max_tokens_usable:
                 raise QueryException("Query too long")
 
-            tokens_left_for_knowledge = max_tokens_usable - tokens_used
+            max_knowledge_budget = int(max_tokens_usable * MAX_PERCENTAGE_KNOWLEDGE_V2)
+            tokens_left_for_knowledge = min(
+                max_tokens_usable - tokens_used,
+                max_knowledge_budget,
+            )
             _prompt.add_knowledge(
                 chunks=info_blob_chunks, max_tokens=tokens_left_for_knowledge
             )
