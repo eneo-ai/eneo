@@ -743,14 +743,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                 res.tool_calls_acc = {}
 
                 async for chunk in s:
-                    logger.debug(f"[DEBUG] Raw chunk: {chunk}")
 
                     if not (chunk.choices and len(chunk.choices) > 0):
                         continue
 
                     delta = chunk.choices[0].delta
                     finish_reason = chunk.choices[0].finish_reason
-                    logger.debug(f"[DEBUG] Delta: {delta}")
 
                     # Accumulate tool call deltas
                     if delta and hasattr(delta, 'tool_calls') and delta.tool_calls:
