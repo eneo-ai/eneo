@@ -188,15 +188,19 @@ class Datastore:
 
         if autocut_cutoff is not None:
             cut_point = autocut(scores, autocut_cutoff)
+            kept = semantic_results[:cut_point]
             logger.debug(
                 "Semantic search: fetched=%d, autocut=%d/%d, "
-                "scores=[%s]",
+                "scores=[%s], sources=[%s]",
                 len(semantic_results),
                 cut_point,
                 len(semantic_results),
                 ", ".join(f"{s:.4f}" for s in scores[:10]),
+                ", ".join(
+                    f"{r.info_blob_title}({r.score:.4f})" for r in kept
+                ),
             )
-            return semantic_results[:cut_point]
+            return kept
 
         logger.debug(
             "Semantic search: fetched=%d (no autocut), scores=[%s]",
