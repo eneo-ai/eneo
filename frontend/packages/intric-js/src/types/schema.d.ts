@@ -6906,6 +6906,10 @@ export interface components {
       include_info_blobs?: boolean | null;
       /** Chunks Retrieved */
       chunks_retrieved?: number | null;
+      /** Raw Chunks Count */
+      raw_chunks_count?: number | null;
+      /** Deduped Chunks Count */
+      deduped_chunks_count?: number | null;
       /** Unique Sources */
       unique_sources?: number | null;
       /** Source Ids */
@@ -6914,6 +6918,53 @@ export interface components {
       source_ids_short?: string[] | null;
       /** Error Code */
       error_code?: string | null;
+      /** Retrieval Duration Ms */
+      retrieval_duration_ms?: number | null;
+      /** Retrieval Error Type */
+      retrieval_error_type?: string | null;
+      /** References */
+      references?: components["schemas"]["FlowRunDebugRagReference"][] | null;
+      /** References Truncated */
+      references_truncated?: boolean | null;
+    };
+    /** FlowRunDebugRagReference */
+    FlowRunDebugRagReference: {
+      /** Id */
+      id: string;
+      /** Id Short */
+      id_short: string;
+      /** Title */
+      title?: string | null;
+      /**
+       * Hit Count
+       * @default 0
+       */
+      hit_count?: number;
+      /**
+       * Best Score
+       * @default 0
+       */
+      best_score?: number;
+      /** Chunks */
+      chunks?: components["schemas"]["FlowRunDebugRagReferenceChunk"][];
+    };
+    /** FlowRunDebugRagReferenceChunk */
+    FlowRunDebugRagReferenceChunk: {
+      /**
+       * Chunk No
+       * @default 0
+       */
+      chunk_no?: number;
+      /**
+       * Score
+       * @default 0
+       */
+      score?: number;
+      /**
+       * Snippet
+       * @default
+       */
+      snippet?: string;
     };
     /** FlowRunDebugRun */
     FlowRunDebugRun: {

@@ -576,7 +576,7 @@
     <div class="flow-step-editor [&_section>div:last-child]:gap-6 [&_section>div:last-child]:pb-6">
     <Settings.Page>
       <!-- Data Source Section -->
-      <Settings.Group title={$mode === "power_user" ? m.flow_step_input_source() : ""}>
+      <Settings.Group title={m.flow_step_input_source()}>
         <Settings.Row title={m.flow_step_name()} description="" let:aria>
           <input
             {...aria}
@@ -593,7 +593,6 @@
           />
         </Settings.Row>
 
-        {#if $mode === "power_user"}
         <Settings.Row title={m.flow_step_input_source_label()} description="" let:aria>
           <div class="flex flex-col gap-1.5">
             <select
@@ -628,7 +627,6 @@
             {/each}
           </select>
         </Settings.Row>
-        {/if}
       </Settings.Group>
 
       <!-- AI Model Section -->
@@ -656,27 +654,23 @@
             />
           </Settings.Row>
 
-          {#if $mode === "power_user"}
-            <div class="border-l border-l-amber-300/50">
-              <Settings.Row title={m.flow_step_security_classification()} description="">
-                <select
-                  class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-                  value={activeStep.output_classification_override ?? ""}
-                  disabled={isPublished}
-                  on:change={(e) => {
-                    const val = e.currentTarget.value === "" ? null : Number(e.currentTarget.value);
-                    updateStep("output_classification_override", val);
-                  }}
-                >
-                  <option value="">{m.flow_step_security_inherit()}</option>
-                  <option value="1">K1</option>
-                  <option value="2">K2</option>
-                  <option value="3">K3</option>
-                  <option value="4">K4</option>
-                </select>
-              </Settings.Row>
-            </div>
-          {/if}
+          <Settings.Row title={m.flow_step_security_classification()} description="">
+            <select
+              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+              value={activeStep.output_classification_override ?? ""}
+              disabled={isPublished}
+              on:change={(e) => {
+                const val = e.currentTarget.value === "" ? null : Number(e.currentTarget.value);
+                updateStep("output_classification_override", val);
+              }}
+            >
+              <option value="">{m.flow_step_security_inherit()}</option>
+              <option value="1">K1</option>
+              <option value="2">K2</option>
+              <option value="3">K3</option>
+              <option value="4">K4</option>
+            </select>
+          </Settings.Row>
         {/if}
       </Settings.Group>
 
@@ -876,8 +870,7 @@
         </div>
       {/if}
 
-      <!-- Output Section (hidden in user mode when defaults are active) -->
-      {#if $mode === "power_user" || activeStep.output_type !== "text" || activeStep.output_mode !== "pass_through"}
+      <!-- Output Section -->
       <Settings.Group title={m.flow_step_output_section()}>
         <Settings.Row title={m.flow_step_output_type()} description="">
           <select
@@ -920,7 +913,6 @@
           </Settings.Row>
         {/if}
       </Settings.Group>
-      {/if}
 
       <!-- Typed I/O info banners -->
       {#if activeStep.output_type === "json" && activeStep.output_contract}

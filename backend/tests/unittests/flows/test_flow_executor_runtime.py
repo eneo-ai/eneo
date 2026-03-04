@@ -1485,10 +1485,26 @@ async def test_execute_step_uses_rag_chunks_when_knowledge_present(user):
     executor._process_typed_output = AsyncMock(return_value=(None, None))
     executor._apply_output_cap = AsyncMock(return_value=("answer", []))
     executor._commit = AsyncMock()
-    chunks = [SimpleNamespace(info_blob_id=uuid4()), SimpleNamespace(info_blob_id=uuid4())]
+    source_id = uuid4()
+    chunks = [
+        SimpleNamespace(
+            info_blob_id=source_id,
+            info_blob_title="Finance update",
+            chunk_no=1,
+            score=0.91,
+            text="Sundsvalls kommun redovisar ett positivt resultat för 2025.",
+        ),
+        SimpleNamespace(
+            info_blob_id=source_id,
+            info_blob_title="Finance update",
+            chunk_no=2,
+            score=0.77,
+            text="I november låg prognosen på lägre nivå men utfallet förbättrades.",
+        ),
+    ]
     executor.references_service = AsyncMock()
     executor.references_service.get_references = AsyncMock(
-        return_value=SimpleNamespace(chunks=chunks)
+        return_value=SimpleNamespace(chunks=chunks, no_duplicate_chunks=[chunks[0]])
     )
 
     output = await executor._execute_step(step=step, run=run, state=state)
@@ -1501,7 +1517,17 @@ async def test_execute_step_uses_rag_chunks_when_knowledge_present(user):
     assert output.rag_metadata is not None
     assert output.rag_metadata["status"] == "success"
     assert output.rag_metadata["chunks_retrieved"] == 2
+    assert output.rag_metadata["raw_chunks_count"] == 2
+    assert output.rag_metadata["deduped_chunks_count"] == 1
     assert output.rag_metadata["attempted"] is True
+    assert output.rag_metadata["retrieval_duration_ms"] is not None
+    assert output.rag_metadata["retrieval_error_type"] is None
+    assert output.rag_metadata["references_truncated"] is False
+    assert len(output.rag_metadata["references"]) == 1
+    assert output.rag_metadata["references"][0]["id"] == str(source_id)
+    assert output.rag_metadata["references"][0]["hit_count"] == 2
+    assert output.rag_metadata["references"][0]["best_score"] == pytest.approx(0.91)
+    assert len(output.rag_metadata["references"][0]["chunks"]) == 2
 
 
 @pytest.mark.asyncio
@@ -1567,6 +1593,7 @@ async def test_execute_step_rag_timeout_appends_diagnostic_and_continues(user):
     assert output.rag_metadata is not None
     assert output.rag_metadata["status"] == "timeout"
     assert output.rag_metadata["error_code"] == "rag_retrieval_timeout"
+    assert output.rag_metadata["retrieval_error_type"] == "TimeoutError"
     assert any(d.code == "rag_retrieval_timeout" for d in output.diagnostics)
 
 
@@ -1600,7 +1627,80 @@ async def test_execute_step_rag_failure_appends_diagnostic_and_continues(user):
     assert output.rag_metadata is not None
     assert output.rag_metadata["status"] == "error"
     assert output.rag_metadata["error_code"] == "rag_retrieval_failed"
+    assert output.rag_metadata["retrieval_error_type"] == "RuntimeError"
     assert any(d.code == "rag_retrieval_failed" for d in output.diagnostics)
+
+
+@pytest.mark.asyncio
+async def test_execute_step_skips_rag_when_input_is_whitespace(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step()
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        all_previous_segments=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    assistant = _assistant_for_execute_step(has_knowledge=True)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(text="   ", source_text="   ", input_source="flow_input")
+    )
+    executor._process_typed_output = AsyncMock(return_value=(None, None))
+    executor._apply_output_cap = AsyncMock(return_value=("answer", []))
+    executor._commit = AsyncMock()
+    executor.references_service = AsyncMock()
+    executor.references_service.get_references = AsyncMock()
+
+    output = await executor._execute_step(step=step, run=run, state=state)
+
+    executor.references_service.get_references.assert_not_awaited()
+    assert output.rag_metadata is not None
+    assert output.rag_metadata["status"] == "skipped_no_input"
+    assert output.rag_metadata["attempted"] is False
+
+
+@pytest.mark.asyncio
+async def test_retrieve_rag_chunks_caps_sources_and_chunks(user):
+    executor, _, _, _ = _build_executor(user)
+    assistant = _assistant_for_execute_step(has_knowledge=True)
+    executor.references_service = AsyncMock()
+
+    chunks = []
+    for source_index in range(27):
+        source_id = uuid4()
+        for chunk_index in range(7):
+            chunks.append(
+                SimpleNamespace(
+                    info_blob_id=source_id,
+                    info_blob_title=f"Source {source_index}",
+                    chunk_no=chunk_index + 1,
+                    score=1.0 - (chunk_index * 0.01),
+                    text=f"Chunk {chunk_index} from source {source_index} " * 8,
+                )
+            )
+
+    executor.references_service.get_references = AsyncMock(
+        return_value=SimpleNamespace(chunks=chunks, no_duplicate_chunks=chunks[:27])
+    )
+
+    _, metadata, diagnostics = await executor._retrieve_rag_chunks(
+        assistant=assistant,
+        question="what happened?",
+        run_id=uuid4(),
+        step_order=1,
+    )
+
+    assert diagnostics == []
+    assert metadata["status"] == "success"
+    assert metadata["references_truncated"] is True
+    assert len(metadata["references"]) == 25
+    assert metadata["raw_chunks_count"] == len(chunks)
+    assert metadata["deduped_chunks_count"] == 27
+    assert all(len(reference["chunks"]) <= 5 for reference in metadata["references"])
 
 
 # --- Prior results bootstrap ---

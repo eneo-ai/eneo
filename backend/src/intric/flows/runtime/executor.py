@@ -35,6 +35,7 @@ from intric.flows.step_config_secrets import decrypt_step_headers_for_runtime
 from intric.flows.step_chain_rules import find_first_step_chain_violation
 from intric.flows.type_policies import INPUT_TYPE_POLICIES
 from intric.flows.variable_resolver import FlowVariableResolver
+from intric.flows.runtime.rag_metadata import build_rag_references
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
 from intric.settings.encryption_service import EncryptionService
@@ -193,6 +194,8 @@ class FlowRunExecutor:
         self.http_max_timeout_seconds = float(settings.flow_http_max_timeout_seconds)
         self.http_allow_private_networks = bool(settings.flow_http_allow_private_networks)
         self.rag_retrieval_timeout_seconds = 30
+        self.rag_max_reference_sources = 25
+        self.rag_max_chunks_per_source = 5
 
     async def execute(
         self,
@@ -819,11 +822,7 @@ class FlowRunExecutor:
         diagnostics.extend(rag_diagnostics)
 
         # Channel dispatch — files_only types send files, not text to LLM
-        llm_files: list[Any] = []
-        if policy and policy.channel == "files_only":
-            llm_files = step_input.files or []
-        else:
-            llm_files = step_input.files or []
+        llm_files: list[Any] = step_input.files or []
 
         # Prepare model kwargs — inject JSON mode when applicable
         model_kwargs = assistant.completion_model_kwargs
@@ -945,13 +944,19 @@ class FlowRunExecutor:
             "attempted": False,
             "status": "skipped_no_service",
             "version": 1,
-            "timeout_seconds": self.rag_retrieval_timeout_seconds,
+            "timeout_seconds": int(self.rag_retrieval_timeout_seconds),
             "include_info_blobs": False,
             "chunks_retrieved": 0,
+            "raw_chunks_count": 0,
+            "deduped_chunks_count": 0,
             "unique_sources": 0,
             "source_ids": [],
             "source_ids_short": [],
             "error_code": None,
+            "retrieval_duration_ms": None,
+            "retrieval_error_type": None,
+            "references": [],
+            "references_truncated": False,
         }
         if self.references_service is None:
             rag_metadata["status"] = "skipped_no_service"
@@ -964,6 +969,7 @@ class FlowRunExecutor:
             return info_blob_chunks, rag_metadata, rag_diagnostics
 
         rag_metadata["attempted"] = True
+        retrieval_started = time.monotonic()
         try:
             # Flow runtime intentionally uses v1 retrieval (autocut + bounded chunks)
             datastore_result = await asyncio.wait_for(
@@ -977,7 +983,10 @@ class FlowRunExecutor:
                 ),
                 timeout=self.rag_retrieval_timeout_seconds,
             )
-            info_blob_chunks = datastore_result.chunks
+            info_blob_chunks = list(getattr(datastore_result, "chunks", []) or [])
+            no_duplicate_chunks = list(
+                getattr(datastore_result, "no_duplicate_chunks", info_blob_chunks) or []
+            )
             source_ids = list(
                 dict.fromkeys(
                     str(getattr(chunk, "info_blob_id", ""))
@@ -985,14 +994,27 @@ class FlowRunExecutor:
                     if getattr(chunk, "info_blob_id", None) is not None
                 )
             )
+            references, references_truncated = build_rag_references(
+                info_blob_chunks,
+                max_sources=self.rag_max_reference_sources,
+                max_chunks_per_source=self.rag_max_chunks_per_source,
+                snippet_chars=200,
+            )
             rag_metadata["status"] = "success"
+            rag_metadata["retrieval_duration_ms"] = int((time.monotonic() - retrieval_started) * 1000)
             rag_metadata["chunks_retrieved"] = len(info_blob_chunks)
+            rag_metadata["raw_chunks_count"] = len(info_blob_chunks)
+            rag_metadata["deduped_chunks_count"] = len(no_duplicate_chunks)
             rag_metadata["unique_sources"] = len(source_ids)
             rag_metadata["source_ids"] = source_ids
             rag_metadata["source_ids_short"] = [source_id[:8] for source_id in source_ids]
+            rag_metadata["references"] = references
+            rag_metadata["references_truncated"] = references_truncated
         except asyncio.TimeoutError:
             rag_metadata["status"] = "timeout"
             rag_metadata["error_code"] = "rag_retrieval_timeout"
+            rag_metadata["retrieval_error_type"] = "TimeoutError"
+            rag_metadata["retrieval_duration_ms"] = int((time.monotonic() - retrieval_started) * 1000)
             rag_diagnostics.append(
                 StepDiagnostic(
                     code="rag_retrieval_timeout",
@@ -1005,9 +1027,11 @@ class FlowRunExecutor:
                 step_order,
                 self.rag_retrieval_timeout_seconds,
             )
-        except Exception:
+        except Exception as exc:
             rag_metadata["status"] = "error"
             rag_metadata["error_code"] = "rag_retrieval_failed"
+            rag_metadata["retrieval_error_type"] = exc.__class__.__name__
+            rag_metadata["retrieval_duration_ms"] = int((time.monotonic() - retrieval_started) * 1000)
             rag_diagnostics.append(
                 StepDiagnostic(
                     code="rag_retrieval_failed",

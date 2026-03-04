@@ -14,6 +14,7 @@
   import { getFlowRunStatusLabel } from "./flowRunStatusLabel";
   import { m } from "$lib/paraglide/messages";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
+  import FlowRunKnowledgeTrace from "./FlowRunKnowledgeTrace.svelte";
 
   export let runId: string;
   export let intric: Intric;
@@ -29,6 +30,7 @@
   let loading = true;
   let loadError = false;
   let expandedSteps: number[] = [];
+  let hasAutoExpanded = false;
   let copiedKey: string | null = null;
   let copiedTimer: ReturnType<typeof setTimeout> | null = null;
   const mode = getFlowUserMode();
@@ -50,6 +52,11 @@
       (runStatus === "completed" || runStatus === "failed" || runStatus === "cancelled")) {
     lastFetchedStatus = runStatus;
     void refetchEvidence();
+  }
+
+  $: if (evidence && evidence.step_results.length > 0 && !hasAutoExpanded) {
+    hasAutoExpanded = true;
+    expandedSteps = [evidence.step_results[0].step_order];
   }
 
   async function refetchEvidence() {
@@ -171,7 +178,14 @@
   function getStepPanelId(stepOrder: number): string {
     return `flow-run-step-panel-${runId}-${stepOrder}`;
   }
+
+  function getStepRag(stepOrder: number) {
+    const debugStep = evidence?.debug_export?.steps?.find((step) => step.step_order === stepOrder);
+    return debugStep?.rag ?? null;
+  }
 </script>
+
+<svelte:options runes={false} />
 
 {#if loading}
   <div class="flex items-center gap-2 text-sm text-secondary">
@@ -300,6 +314,12 @@
                 </div>
               {/if}
 
+              <FlowRunKnowledgeTrace
+                rag={getStepRag(result.step_order)}
+                stepOrder={result.step_order}
+                {intric}
+              />
+
               {#if result.output_payload_json}
                 <div>
                   <div class="flex items-center justify-between">
@@ -332,7 +352,7 @@
                     <div class="mt-2">
                       <h4 class="text-xs font-semibold text-muted">{m.flow_run_files()}</h4>
                       <div class="mt-1.5 flex flex-wrap gap-2">
-                        {#each result.output_payload_json.artifacts as artifact}
+                        {#each result.output_payload_json.artifacts as artifact (artifact.file_id)}
                           {@const ext = artifact.name?.includes('.') ? artifact.name.split('.').pop()?.toLowerCase() : ''}
                           <button
                             class="group inline-flex items-center gap-2 rounded-lg border border-default bg-primary px-3 py-2 text-sm font-medium shadow-sm transition-all hover:-translate-y-px hover:shadow-md"

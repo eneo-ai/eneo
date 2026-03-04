@@ -211,7 +211,14 @@
           </thead>
           <tbody>
             {#each runs as run (run.id)}
-              <tr class="border-dimmer border-b last:border-b-0 transition-colors hover:bg-hover-dimmer">
+              <tr
+                class="border-dimmer border-b last:border-b-0 cursor-pointer transition-colors hover:bg-hover-dimmer"
+                class:bg-hover-dimmer={selectedRunId === run.id}
+                tabindex="0"
+                on:click={() => (selectedRunId = selectedRunId === run.id ? null : run.id)}
+                on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectedRunId = selectedRunId === run.id ? null : run.id; } }}
+                style:border-left={selectedRunId === run.id ? "2px solid var(--accent-default)" : undefined}
+              >
                 <td class="px-4 py-3">
                   <span class="{getStatusColor(run.status)} inline-flex items-center gap-1.5 text-xs font-medium">
                     <span class="{getStatusDotColor(run.status)} size-1.5 shrink-0 rounded-full"></span>
@@ -231,7 +238,7 @@
                     -
                   {/if}
                 </td>
-                <td class="px-4 py-2">
+                <td class="px-4 py-2" on:click|stopPropagation>
                   <div class="flex items-center gap-1">
                     <Button
                       variant="outlined"

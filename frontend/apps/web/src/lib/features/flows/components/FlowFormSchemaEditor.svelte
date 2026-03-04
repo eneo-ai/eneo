@@ -107,7 +107,6 @@
   }
 
   function syncToStore(fields: LocalFormField[]) {
-    localDirty = false;
     $update.metadata_json = {
       ...($update.metadata_json ?? {}),
       form_schema: { fields: normalizeForPersist(fields) }
@@ -115,6 +114,7 @@
   }
 
   function addField() {
+    localDirty = true;
     localFields = [
       ...localFields,
       { name: "", type: "text", required: false, options: [], order: localFields.length + 1, _localId: uid() },
@@ -136,6 +136,7 @@
   }
 
   function updateField(index: number, patch: Partial<FormField>) {
+    localDirty = true;
     localFields[index] = { ...localFields[index], ...patch };
     localFields = localFields;
     if (hasValidFieldNames(localFields)) {

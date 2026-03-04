@@ -1016,10 +1016,31 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
                     "timeout_seconds": 30,
                     "include_info_blobs": False,
                     "chunks_retrieved": 5,
+                    "raw_chunks_count": 5,
+                    "deduped_chunks_count": 2,
                     "unique_sources": 2,
                     "source_ids": ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
                     "source_ids_short": ["aaaaaaaa"],
                     "error_code": None,
+                    "retrieval_duration_ms": 87,
+                    "retrieval_error_type": None,
+                    "references_truncated": False,
+                    "references": [
+                        {
+                            "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                            "id_short": "aaaaaaaa",
+                            "title": "Sundsvall source",
+                            "hit_count": 2,
+                            "best_score": 0.92,
+                            "chunks": [
+                                {
+                                    "chunk_no": 1,
+                                    "score": 0.92,
+                                    "snippet": "Sundsvall redovisar positivt resultat.",
+                                }
+                            ],
+                        }
+                    ],
                 },
             },
             model_dump=lambda mode="json": {
@@ -1033,10 +1054,31 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
                         "timeout_seconds": 30,
                         "include_info_blobs": False,
                         "chunks_retrieved": 5,
+                        "raw_chunks_count": 5,
+                        "deduped_chunks_count": 2,
                         "unique_sources": 2,
                         "source_ids": ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
                         "source_ids_short": ["aaaaaaaa"],
                         "error_code": None,
+                        "retrieval_duration_ms": 87,
+                        "retrieval_error_type": None,
+                        "references_truncated": False,
+                        "references": [
+                            {
+                                "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                                "id_short": "aaaaaaaa",
+                                "title": "Sundsvall source",
+                                "hit_count": 2,
+                                "best_score": 0.92,
+                                "chunks": [
+                                    {
+                                        "chunk_no": 1,
+                                        "score": 0.92,
+                                        "snippet": "Sundsvall redovisar positivt resultat.",
+                                    }
+                                ],
+                            }
+                        ],
                     },
                 },
             },
@@ -1056,4 +1098,64 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
 
     assert evidence["debug_export"]["steps"][0]["rag"]["status"] == "success"
     assert evidence["debug_export"]["steps"][0]["rag"]["chunks_retrieved"] == 5
+    assert evidence["debug_export"]["steps"][0]["rag"]["retrieval_duration_ms"] == 87
+    assert evidence["debug_export"]["steps"][0]["rag"]["raw_chunks_count"] == 5
+    assert evidence["debug_export"]["steps"][0]["rag"]["deduped_chunks_count"] == 2
+    assert evidence["debug_export"]["steps"][0]["rag"]["references"][0]["title"] == "Sundsvall source"
+    assert evidence["debug_export"]["steps"][0]["rag"]["references"][0]["chunks"][0]["chunk_no"] == 1
     assert evidence["debug_export"]["steps"][0]["rag"]["source_ids_short"] == ["aaaaaaaa"]
+
+
+@pytest.mark.asyncio
+async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    run = _run(user=user, flow_id=flow.id)
+    flow_run_repo.get.return_value = run
+    flow_version_repo.get.return_value = FlowVersion(
+        flow_id=flow.id,
+        version=1,
+        tenant_id=user.tenant_id,
+        definition_checksum="checksum",
+        definition_json={
+            "steps": [
+                {
+                    "step_order": 1,
+                    "step_id": str(uuid4()),
+                    "assistant_id": str(uuid4()),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "text",
+                    "mcp_policy": "inherit",
+                }
+            ]
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    flow_run_repo.list_step_results.return_value = [
+        SimpleNamespace(
+            step_order=1,
+            input_payload_json={"text": "hello"},
+            model_dump=lambda mode="json": {
+                "step_order": 1,
+                "input_payload_json": {"text": "hello"},
+            },
+        )
+    ]
+    flow_run_repo.list_step_attempts.return_value = []
+
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    evidence = await service.get_evidence(run_id=run.id)
+
+    assert evidence["debug_export"]["steps"][0]["rag"] is None

@@ -186,6 +186,21 @@ class FlowRunDebugMcp(BaseModel):
     tool_allowlist: list[str] = Field(default_factory=list)
 
 
+class FlowRunDebugRagReferenceChunk(BaseModel):
+    chunk_no: int = 0
+    score: float = 0.0
+    snippet: str = ""
+
+
+class FlowRunDebugRagReference(BaseModel):
+    id: str
+    id_short: str
+    title: str | None = None
+    hit_count: int = 0
+    best_score: float = 0.0
+    chunks: list[FlowRunDebugRagReferenceChunk] = Field(default_factory=list)
+
+
 class FlowRunDebugRag(BaseModel):
     attempted: bool | None = None
     status: str | None = None
@@ -193,10 +208,16 @@ class FlowRunDebugRag(BaseModel):
     timeout_seconds: int | None = None
     include_info_blobs: bool | None = None
     chunks_retrieved: int | None = None
+    raw_chunks_count: int | None = None
+    deduped_chunks_count: int | None = None
     unique_sources: int | None = None
     source_ids: list[str] | None = None
     source_ids_short: list[str] | None = None
     error_code: str | None = None
+    retrieval_duration_ms: int | None = None
+    retrieval_error_type: str | None = None
+    references: list[FlowRunDebugRagReference] | None = None
+    references_truncated: bool | None = None
 
 
 class FlowRunDebugStep(BaseModel):

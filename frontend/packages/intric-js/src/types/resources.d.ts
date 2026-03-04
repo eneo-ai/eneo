@@ -278,6 +278,40 @@ export type FlowRunDebugMcp = {
   tool_allowlist: string[];
 };
 
+export type FlowRunDebugRagReferenceChunk = {
+  chunk_no: number;
+  score: number;
+  snippet: string;
+};
+
+export type FlowRunDebugRagReference = {
+  id: string;
+  id_short: string;
+  title?: string | null;
+  hit_count?: number | null;
+  best_score?: number | null;
+  chunks?: FlowRunDebugRagReferenceChunk[] | null;
+};
+
+export type FlowRunDebugRag = {
+  attempted?: boolean | null;
+  status?: string | null;
+  version?: number | null;
+  timeout_seconds?: number | null;
+  include_info_blobs?: boolean | null;
+  chunks_retrieved?: number | null;
+  raw_chunks_count?: number | null;
+  deduped_chunks_count?: number | null;
+  unique_sources?: number | null;
+  source_ids?: string[] | null;
+  source_ids_short?: string[] | null;
+  error_code?: string | null;
+  retrieval_duration_ms?: number | null;
+  retrieval_error_type?: string | null;
+  references?: FlowRunDebugRagReference[] | null;
+  references_truncated?: boolean | null;
+};
+
 export type FlowRunDebugStep = {
   step_id?: string | null;
   step_order?: number | null;
@@ -286,6 +320,7 @@ export type FlowRunDebugStep = {
   input: FlowRunDebugInput;
   output: FlowRunDebugOutput;
   mcp: FlowRunDebugMcp;
+  rag?: FlowRunDebugRag | null;
 };
 
 export type FlowRunDebugExport = {
