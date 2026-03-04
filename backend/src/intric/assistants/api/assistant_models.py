@@ -48,6 +48,25 @@ class AssistantType(str, Enum):
     DEFAULT_ASSISTANT = "default-assistant"
 
 
+class RagContextType(str, Enum):
+    """Type of RAG context limit configuration."""
+    PERCENTAGE = "percentage"  # Use a percentage of model's context length
+    FIXED_CHUNKS = "fixed_chunks"  # Use a fixed number of chunks
+    AUTO_RELEVANCE = "auto_relevance"  # Automatically include chunks based on relevance
+
+
+class RagContextConfig(BaseModel):
+    """Configuration for RAG context limits."""
+    type: Optional[RagContextType] = Field(
+        default=None,
+        description="The type of RAG context limit to use. If null, defaults to 50% of context."
+    )
+    value: Optional[int] = Field(
+        default=None,
+        description="The value for the context limit. For 'percentage', this is 1-100. For 'fixed_chunks', this is the number of chunks."
+    )
+
+
 class ModelInfo(BaseModel):
     """Information about the model used by the assistant."""
 
@@ -188,6 +207,21 @@ class AssistantUpdatePublic(AssistantCreatePublic):
         default=NOT_PROVIDED,
         description="Icon ID referencing an uploaded icon. Set to null to remove.",
     )
+    rag_context_type: Union[RagContextType, None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        description=(
+            "The type of RAG context limit to use. Options: 'percentage', 'fixed_chunks', "
+            "or 'auto_relevance'. If null, defaults to 50%% of context."
+        ),
+    )
+    rag_context_value: Union[int, None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        description=(
+            "The value for the context limit. For 'percentage', this is 1-100. "
+            "For 'fixed_chunks', this is the number of chunks. "
+            "Ignored for 'auto_relevance'."
+        ),
+    )
 
 
 class AssistantCreate(AssistantBase):
@@ -307,6 +341,21 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     metadata_json: Optional[dict] = Field(
         default=None,
         description="Metadata for the assistant",
+    )
+    rag_context_type: Optional[RagContextType] = Field(
+        default=None,
+        description=(
+            "The type of RAG context limit to use. Options: 'percentage', 'fixed_chunks', "
+            "or 'auto_relevance'. If null, defaults to 50%% of context."
+        ),
+    )
+    rag_context_value: Optional[int] = Field(
+        default=None,
+        description=(
+            "The value for the context limit. For 'percentage', this is 1-100. "
+            "For 'fixed_chunks', this is the number of chunks. "
+            "Ignored for 'auto_relevance'."
+        ),
     )
 
 
