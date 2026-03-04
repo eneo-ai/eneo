@@ -2795,6 +2795,8 @@
   "flow_typed_io_image_not_supported": "Bildindata stöds inte ännu. Publicering kommer att misslyckas.",
   "flow_typed_io_chain_incompatible": "Typkedja inkompatibel: Steg {prevStep} ger '{outputType}' men detta steg förväntar '{inputType}'.",
   "flow_transcribe_only_prompt_ignored_hint": "Läget Endast transkribera returnerar rå transkriptionstext och hoppar över completion-modell + RAG för detta steg.",
+  "flow_transcribe_only_title": "Endast transkribera",
+  "flow_transcribe_only_description": "Returnerar rå transkriptionstext. Completion-modell, RAG och instruktioner hoppas över för detta steg.",
   "flow_step_input_source_label": "Källa",
   "flow_step_output_delivery": "Leverans",
   "flow_step_input_contract": "Indatakontrakt",

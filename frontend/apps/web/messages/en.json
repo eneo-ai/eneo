@@ -2760,6 +2760,8 @@
   "flow_typed_io_image_not_supported": "Image input is not yet supported. This step will fail at publish.",
   "flow_typed_io_chain_incompatible": "Type chain incompatible: Step {prevStep} outputs '{outputType}' but this step expects '{inputType}'.",
   "flow_transcribe_only_prompt_ignored_hint": "Transcribe-only mode returns raw transcript text and skips completion model + RAG for this step.",
+  "flow_transcribe_only_title": "Transcribe only",
+  "flow_transcribe_only_description": "Returns raw transcript text. Completion model, RAG and instructions are skipped for this step.",
   "flow_step_input_source_label": "Source",
   "flow_step_output_delivery": "Delivery",
   "flow_step_input_contract": "Input contract",

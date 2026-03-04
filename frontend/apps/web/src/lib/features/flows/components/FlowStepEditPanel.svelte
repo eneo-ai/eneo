@@ -25,6 +25,9 @@
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconWorkflow } from "@intric/icons/workflow";
   import { IconQuestionMark } from "@intric/icons/question-mark";
+  import { IconMicrophone } from "@intric/icons/microphone";
+  import { IconLockClosed } from "@intric/icons/lock-closed";
+  import { IconChevronRight } from "@intric/icons/chevron-right";
   import { Button, Dialog, Tooltip } from "@intric/ui";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
@@ -700,36 +703,57 @@
 
       {#if activeStep.input_type === "audio"}
         <div
-          class={`mb-3 flex items-start gap-3 rounded-lg border px-3 py-2.5 text-xs ${
+          class={`mb-3 rounded-lg border px-4 py-3 ${
             !transcriptionEnabled || !transcriptionModelConfigured
-              ? "border-warning-default/40 bg-warning-dimmer text-warning-stronger"
-              : "border-accent-default/30 bg-accent-dimmer text-accent-stronger"
+              ? "border-warning-default/40 bg-warning-dimmer"
+              : "border-accent-default/20 bg-accent-dimmer/50"
           }`}
         >
-          <span class="flex-1">
-            {#if !transcriptionEnabled}
-              {m.flow_transcription_audio_nudge()}
-            {:else if !transcriptionModelConfigured}
-              {m.flow_transcription_model_label()}: {m.no_model_selected()}.
-            {:else}
-              {m.flow_transcription_model_label()}: {transcriptionModelLabel ?? "—"}.
-            {/if}
-          </span>
-          <Button
-            variant="outlined"
-            size="small"
-            on:click={() => dispatch("openTranscriptionSettings")}
-          >
-            {m.edit()} {m.flow_stage_transcription()}
-          </Button>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <IconMicrophone class={`size-4 shrink-0 ${
+                !transcriptionEnabled || !transcriptionModelConfigured
+                  ? "text-warning-stronger/70"
+                  : "text-accent-default"
+              }`} />
+              <span class={`text-sm ${
+                !transcriptionEnabled || !transcriptionModelConfigured
+                  ? "text-warning-stronger"
+                  : "text-primary"
+              }`}>
+                {#if !transcriptionEnabled}
+                  {m.flow_transcription_audio_nudge()}
+                {:else if !transcriptionModelConfigured}
+                  {m.flow_transcription_model_label()}: <span class="text-warning-stronger font-medium">{m.no_model_selected()}</span>
+                {:else}
+                  {m.flow_transcription_model_label()}: <span class="font-medium">{transcriptionModelLabel ?? "—"}</span>
+                {/if}
+              </span>
+            </div>
+            <button
+              class={`flex items-center gap-1 text-xs font-medium transition-colors ${
+                !transcriptionEnabled || !transcriptionModelConfigured
+                  ? "text-warning-stronger/80 hover:text-warning-stronger"
+                  : "text-accent-default hover:text-accent-stronger"
+              }`}
+              on:click={() => dispatch("openTranscriptionSettings")}
+            >
+              {m.edit()} {m.flow_stage_transcription()}
+              <IconChevronRight class="size-3.5" />
+            </button>
+          </div>
         </div>
       {/if}
 
       <!-- AI Model Section -->
       <Settings.Group title={m.completion_model()}>
         {#if activeStep.output_mode === "transcribe_only"}
-          <div class="mb-3 rounded-lg border border-accent-default/30 bg-accent-dimmer px-3 py-2.5 text-xs text-accent-stronger">
-            {m.flow_transcribe_only_prompt_ignored_hint()}
+          <div class="mb-4 flex items-start gap-3 rounded-lg border border-accent-default/20 border-l-4 border-l-accent-default/60 bg-accent-dimmer/60 px-4 py-3">
+            <IconLockClosed class="mt-0.5 size-4 shrink-0 text-accent-default" />
+            <div class="flex flex-col gap-0.5">
+              <span class="text-sm font-medium text-accent-stronger">{m.flow_transcribe_only_title()}</span>
+              <span class="text-xs text-accent-stronger/80">{m.flow_transcribe_only_description()}</span>
+            </div>
           </div>
         {/if}
         {#if assistantLoading}
@@ -738,15 +762,13 @@
             {m.flow_step_assistant_loading()}
           </div>
         {:else if assistant}
-          <Settings.Row title={m.completion_model()} description="">
-            <div class:pointer-events-none={isTranscribeOnly} class:opacity-60={isTranscribeOnly}>
-              <SelectAIModelV2
-                bind:selectedModel={assistant.completion_model}
-                availableModels={$currentSpace.completion_models}
-                on:change={() => updateAssistantField("completion_model", assistant.completion_model)}
-              />
-            </div>
-          </Settings.Row>
+          <div class="w-full [&>button]:w-full" class:pointer-events-none={isTranscribeOnly} class:opacity-40={isTranscribeOnly} class:saturate-[.25]={isTranscribeOnly}>
+            <SelectAIModelV2
+              bind:selectedModel={assistant.completion_model}
+              availableModels={$currentSpace.completion_models}
+              on:change={() => updateAssistantField("completion_model", assistant.completion_model)}
+            />
+          </div>
 
           <Settings.Row title={m.model_behaviour()} description="">
             <SelectBehaviourV2
@@ -777,6 +799,7 @@
         {/if}
       </Settings.Group>
 
+      {#if !isTranscribeOnly}
       <!-- Knowledge Section -->
       <Settings.Group title={m.knowledge()}>
         {#if assistantLoading}
@@ -887,7 +910,7 @@
           </svelte:fragment>
           <FlowPromptEditor
             value={instructionText}
-            disabled={isPublished || assistantLoading || !assistant || isTranscribeOnly}
+            disabled={isPublished || assistantLoading || !assistant}
             placeholder={m.flow_step_instructions_placeholder()}
             {steps}
             currentStepOrder={activeStep.step_order}
@@ -901,7 +924,7 @@
             on:commit={(e) => updateInstruction(e.detail)}
           >
             <svelte:fragment slot="toolbar">
-              {#if assistant?.id && !isPublished && !isTranscribeOnly}
+              {#if assistant?.id && !isPublished}
                 <PromptVersionDialog
                   title={m.prompt_history()}
                   loadPromptVersionHistory={() => {
@@ -916,61 +939,64 @@
           </FlowPromptEditor>
         </Settings.Row>
       </Settings.Group>
-
-      {#if $mode !== "power_user" && hasInputTemplateOverride}
-        <div class="mb-3 flex items-start gap-3 rounded-lg border border-warning-default/40 bg-warning-dimmer px-3 py-2.5 text-xs text-warning-stronger">
-          <span class="flex-1">{m.flow_input_template_override_warning()}</span>
-          <Button variant="outlined" size="small" on:click={() => updateInputTemplate("")}>
-            {m.clear()}
-          </Button>
-        </div>
       {/if}
 
-      {#if templateSourceConflict && $mode === "power_user"}
-        <div class="mb-3 flex items-start gap-3 rounded-lg border border-warning-default/40 bg-warning-dimmer px-3 py-2.5 text-xs text-warning-stronger">
-          <span class="flex-1">
-            {m.flow_template_source_conflict_warning({
-              steps: templateSourceConflict.map((n) => `Step ${n}`).join(", "),
-              source: INPUT_SOURCE_LABELS[activeStep.input_source]?.() ?? activeStep.input_source
-            })}
-          </span>
-          <div class="flex shrink-0 gap-1.5">
-            {#if activeStep.input_source === "flow_input" && templateStepRefs.length === 1 && templateStepRefs[0] === activeStep.step_order - 1}
-              <Button variant="outlined" size="small"
-                on:click={() => handleInputSourceChange("previous_step")}
-              >{m.flow_template_source_conflict_fix_source()}</Button>
-            {/if}
-            <Button variant="outlined" size="small"
-              on:click={() => updateInputTemplate("")}
-            >{m.flow_template_source_conflict_fix_clear()}</Button>
+      {#if !isTranscribeOnly}
+        {#if $mode !== "power_user" && hasInputTemplateOverride}
+          <div class="mb-3 flex items-start gap-3 rounded-lg border border-warning-default/40 bg-warning-dimmer px-3 py-2.5 text-xs text-warning-stronger">
+            <span class="flex-1">{m.flow_input_template_override_warning()}</span>
+            <Button variant="outlined" size="small" on:click={() => updateInputTemplate("")}>
+              {m.clear()}
+            </Button>
           </div>
-        </div>
-      {/if}
+        {/if}
 
-      <!-- Custom Input Section (Power User for all sources) -->
-      {#if showInputTemplate}
-        <div transition:slide={{ duration: 200 }}>
-        <Settings.Group title={m.flow_step_input_template()}>
-          <Settings.Row title={m.flow_step_input_template()} description={m.flow_step_input_template_desc()}>
-            <svelte:fragment slot="title">
-              <Tooltip text={m.flow_step_input_template_tooltip()}>
-                <IconQuestionMark class="ml-1.5 text-muted hover:text-primary" />
-              </Tooltip>
-            </svelte:fragment>
-            <FlowPromptEditor
-              value={inputTemplateText}
-              disabled={isPublished}
-              placeholder={m.flow_step_input_template_placeholder()}
-              {steps}
-              currentStepOrder={activeStep.step_order}
-              {formSchema}
-              {transcriptionEnabled}
-              isAdvancedMode={true}
-              on:change={(e) => updateInputTemplate(e.detail)}
-            />
-          </Settings.Row>
-        </Settings.Group>
-        </div>
+        {#if templateSourceConflict && $mode === "power_user"}
+          <div class="mb-3 flex items-start gap-3 rounded-lg border border-warning-default/40 bg-warning-dimmer px-3 py-2.5 text-xs text-warning-stronger">
+            <span class="flex-1">
+              {m.flow_template_source_conflict_warning({
+                steps: templateSourceConflict.map((n) => `Step ${n}`).join(", "),
+                source: INPUT_SOURCE_LABELS[activeStep.input_source]?.() ?? activeStep.input_source
+              })}
+            </span>
+            <div class="flex shrink-0 gap-1.5">
+              {#if activeStep.input_source === "flow_input" && templateStepRefs.length === 1 && templateStepRefs[0] === activeStep.step_order - 1}
+                <Button variant="outlined" size="small"
+                  on:click={() => handleInputSourceChange("previous_step")}
+                >{m.flow_template_source_conflict_fix_source()}</Button>
+              {/if}
+              <Button variant="outlined" size="small"
+                on:click={() => updateInputTemplate("")}
+              >{m.flow_template_source_conflict_fix_clear()}</Button>
+            </div>
+          </div>
+        {/if}
+
+        <!-- Custom Input Section (Power User for all sources) -->
+        {#if showInputTemplate}
+          <div transition:slide={{ duration: 200 }}>
+          <Settings.Group title={m.flow_step_input_template()}>
+            <Settings.Row title={m.flow_step_input_template()} description={m.flow_step_input_template_desc()}>
+              <svelte:fragment slot="title">
+                <Tooltip text={m.flow_step_input_template_tooltip()}>
+                  <IconQuestionMark class="ml-1.5 text-muted hover:text-primary" />
+                </Tooltip>
+              </svelte:fragment>
+              <FlowPromptEditor
+                value={inputTemplateText}
+                disabled={isPublished}
+                placeholder={m.flow_step_input_template_placeholder()}
+                {steps}
+                currentStepOrder={activeStep.step_order}
+                {formSchema}
+                {transcriptionEnabled}
+                isAdvancedMode={true}
+                on:change={(e) => updateInputTemplate(e.detail)}
+              />
+            </Settings.Row>
+          </Settings.Group>
+          </div>
+        {/if}
       {/if}
 
       <!-- Output Section -->
