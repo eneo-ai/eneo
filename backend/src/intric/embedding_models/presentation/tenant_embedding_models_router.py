@@ -5,11 +5,20 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+import sqlalchemy as sa
+
 from intric.ai_models.model_enums import ModelStability
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.roles.permissions import Permission, validate_permission
-from intric.embedding_models.presentation.embedding_model_models import EmbeddingModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
+from intric.database.tables.ai_models_table import EmbeddingModels
+from intric.database.tables.collections_table import CollectionsTable
+from intric.database.tables.integration_table import IntegrationKnowledge
+from intric.database.tables.model_providers_table import ModelProviders
+from intric.database.tables.websites_table import Websites
+from intric.embedding_models.domain.embedding_model_repo import EmbeddingModelRepository
+from intric.embedding_models.presentation.embedding_model_models import EmbeddingModelPublic
+from intric.main.exceptions import BadRequestException, NotFoundException, UnauthorizedException
 from intric.server.protocol import responses
 from intric.users.user import UserInDB
 
@@ -57,10 +66,6 @@ async def create_tenant_embedding_model(
 ):
     """Create a new tenant-specific embedding model."""
     validate_permission(user, Permission.ADMIN)
-    from intric.database.tables.ai_models_table import EmbeddingModels
-    from intric.database.tables.model_providers_table import ModelProviders
-    import sqlalchemy as sa
-    from intric.main.exceptions import BadRequestException, NotFoundException
 
     # Verify provider exists and belongs to user's tenant
     stmt = sa.select(ModelProviders).where(
@@ -113,7 +118,6 @@ async def create_tenant_embedding_model(
     await session.flush()
 
     # Load the model BEFORE committing
-    from intric.embedding_models.domain.embedding_model_repo import EmbeddingModelRepository
     repo = EmbeddingModelRepository(session, user)
     embedding_model = await repo.one(new_model.id)
 
@@ -136,9 +140,6 @@ async def update_tenant_embedding_model(
 ):
     """Update a tenant-specific embedding model."""
     validate_permission(user, Permission.ADMIN)
-    from intric.database.tables.ai_models_table import EmbeddingModels
-    import sqlalchemy as sa
-    from intric.main.exceptions import UnauthorizedException, NotFoundException
 
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(EmbeddingModels).where(
@@ -176,7 +177,6 @@ async def update_tenant_embedding_model(
     await session.flush()
 
     # Load the updated model
-    from intric.embedding_models.domain.embedding_model_repo import EmbeddingModelRepository
     repo = EmbeddingModelRepository(session, user)
     embedding_model = await repo.one(model.id)
 
@@ -196,9 +196,6 @@ async def delete_tenant_embedding_model(
 ):
     """Delete a tenant-specific embedding model."""
     validate_permission(user, Permission.ADMIN)
-    from intric.database.tables.ai_models_table import EmbeddingModels
-    import sqlalchemy as sa
-    from intric.main.exceptions import UnauthorizedException, NotFoundException, BadRequestException
 
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(EmbeddingModels).where(
@@ -214,6 +211,18 @@ async def delete_tenant_embedding_model(
     # Cannot delete global models
     if model.tenant_id is None:
         raise UnauthorizedException("Cannot delete global models")
+
+    # Check if the model is in use by any collections, websites, or integrations
+    usage_counts = await session.execute(
+        sa.select(
+            sa.select(sa.func.count()).where(CollectionsTable.embedding_model_id == model_id).correlate(None).scalar_subquery().label("collections"),
+            sa.select(sa.func.count()).where(Websites.embedding_model_id == model_id).correlate(None).scalar_subquery().label("websites"),
+            sa.select(sa.func.count()).where(IntegrationKnowledge.embedding_model_id == model_id).correlate(None).scalar_subquery().label("integrations"),
+        )
+    )
+    row = usage_counts.one()
+    if row.collections > 0 or row.websites > 0 or row.integrations > 0:
+        raise BadRequestException("MODEL_IN_USE")
 
     # Delete the model (settings are now on the model itself)
     try:

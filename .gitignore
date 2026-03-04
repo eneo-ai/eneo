@@ -43,3 +43,19 @@ specs/
 .serena/
 .speckit/
 .playwright-mcp/
+modules/
+progress*
+REVIEW-PLAYBOOK.md
+
+# Beads - track JSONL (git-friendly), ignore SQLite (local working copy)
+.beads/*.db
+.beads/*.db-shm
+.beads/*.db-wal
+!.beads/issues.jsonl
+!.beads/config.yaml
+
+backend/.venv
+backend/.venv-docker
+.beads/
+docs/agent-memory/
+modulesdocs

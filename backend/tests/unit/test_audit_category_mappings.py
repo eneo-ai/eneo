@@ -139,8 +139,25 @@ class TestCategoryMappings:
             if cat == "integration_events"
         ]
         assert (
-            len(integration_actions) == 12
-        ), f"Expected 12 integration events, got {len(integration_actions)}"
+            len(integration_actions) == 19
+        ), f"Expected 19 integration events, got {len(integration_actions)}"
+
+    def test_mcp_events_mapping(self):
+        """Verify MCP action types are correctly mapped to integration_events."""
+        mcp_actions = [
+            ActionType.MCP_SERVER_CREATED,
+            ActionType.MCP_SERVER_UPDATED,
+            ActionType.MCP_SERVER_DELETED,
+            ActionType.MCP_SERVER_ENABLED,
+            ActionType.MCP_SERVER_DISABLED,
+            ActionType.MCP_SERVER_TOOL_ENABLED,
+            ActionType.MCP_SERVER_TOOL_DISABLED,
+        ]
+
+        for action_type in mcp_actions:
+            assert (
+                CATEGORY_MAPPINGS[action_type] == "integration_events"
+            ), f"{action_type} should be mapped to 'integration_events'"
 
     def test_system_actions_mapping(self):
         """Verify system action types are correctly mapped."""
@@ -240,7 +257,7 @@ class TestCategoryDescriptions:
             "File uploads and deletions"
         )
         assert CATEGORY_DESCRIPTIONS["integration_events"] == (
-            "Integration connections, knowledge sources, website crawling"
+            "Integration connections, knowledge sources, website crawling, MCP servers"
         )
         assert CATEGORY_DESCRIPTIONS["system_actions"] == (
             "Retention policies, encryption, maintenance"
@@ -286,7 +303,7 @@ class TestCategoryDistribution:
             "user_actions": 41,
             "security_events": 6,
             "file_operations": 2,
-            "integration_events": 12,
+            "integration_events": 19,
             "system_actions": 3,
             "audit_access": 3,  # Includes AUDIT_SESSION_CREATED
         }

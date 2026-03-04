@@ -691,6 +691,30 @@ export interface paths {
      */
     get: operations["get_metadata_api_v1_analysis_metadata_statistics__get"];
   };
+  "/api/v1/analysis/assistant-activity/": {
+    /**
+     * Get Assistant Activity
+     * @description Get assistant activity statistics for the tenant.
+     *
+     * Returns:
+     * - active_assistant_count: Number of assistants with sessions in the period
+     * - total_trackable_assistants: Number of published assistants with insights enabled
+     * - active_assistant_pct: Percentage of trackable assistants that are active
+     * - active_user_count: Number of unique users with sessions (excluding service sessions
+     *   and deleted users)
+     *
+     * Note on datetime parameters:
+     * - If no time is provided in the datetime, time components default to 00:00:00
+     */
+    get: operations["get_assistant_activity_api_v1_analysis_assistant_activity__get"];
+  };
+  "/api/v1/analysis/metadata-statistics/aggregated/": {
+    /**
+     * Get Metadata Aggregated
+     * @description Aggregated data for analytics (hourly buckets).
+     */
+    get: operations["get_metadata_aggregated_api_v1_analysis_metadata_statistics_aggregated__get"];
+  };
   "/api/v1/analysis/assistants/{assistant_id}/": {
     /**
      * Get Most Recent Questions
@@ -728,6 +752,15 @@ export interface paths {
      */
     post: operations["ask_question_about_questions_api_v1_analysis_assistants__assistant_id___post"];
   };
+  "/api/v1/analysis/assistants/{assistant_id}/questions/": {
+    /**
+     * Get Most Recent Questions Paginated
+     * @description Get paginated question history for an assistant.
+     *
+     * Optimized for admin insights history view and large datasets.
+     */
+    get: operations["get_most_recent_questions_paginated_api_v1_analysis_assistants__assistant_id__questions__get"];
+  };
   "/api/v1/analysis/conversation-insights/": {
     /**
      * Get Conversation Insights
@@ -760,6 +793,10 @@ export interface paths {
      *     AnalysisAnswer containing the AI response
      */
     post: operations["ask_unified_questions_about_questions_api_v1_analysis_conversation_insights__post"];
+  };
+  "/api/v1/analysis/conversation-insights/jobs/{job_id}/": {
+    /** Get Conversation Insight Job */
+    get: operations["get_conversation_insight_job_api_v1_analysis_conversation_insights_jobs__job_id___get"];
   };
   "/api/v1/analysis/conversation-insights/sessions/": {
     /**
@@ -3177,12 +3214,20 @@ export interface components {
       | "flow_classification_override"
       | "flow_run_document_generated"
       | "flow_run_contract_rejected"
+      | "flow_http_outbound_call"
       | "security_classification_created"
       | "security_classification_updated"
       | "security_classification_deleted"
       | "security_classification_levels_updated"
       | "security_classification_enabled"
       | "security_classification_disabled"
+      | "mcp_server_created"
+      | "mcp_server_updated"
+      | "mcp_server_deleted"
+      | "mcp_server_enabled"
+      | "mcp_server_disabled"
+      | "mcp_server_tool_enabled"
+      | "mcp_server_tool_disabled"
       | "retention_policy_applied"
       | "encryption_key_rotated"
       | "system_maintenance"
@@ -3284,6 +3329,39 @@ export interface components {
       /** Url */
       url: string;
     };
+    /**
+     * AnalysisJobStatus
+     * @enum {string}
+     */
+    AnalysisJobStatus: "queued" | "processing" | "completed" | "failed";
+    /** AnalysisJobStatusResponse */
+    AnalysisJobStatusResponse: {
+      /**
+       * Job Id
+       * Format: uuid
+       */
+      job_id: string;
+      status: components["schemas"]["AnalysisJobStatus"];
+      /** Answer */
+      answer?: string | null;
+      /** Error */
+      error?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * AnalysisProcessingMode
+     * @enum {string}
+     */
+    AnalysisProcessingMode: "sync" | "auto";
     /** ApiKey */
     ApiKey: {
       /** Truncated Key */
@@ -4119,6 +4197,20 @@ export interface components {
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
       model?: components["schemas"]["CompletionModelPublic"] | null;
     };
+    /**
+     * AssistantActivityStats
+     * @description Statistics about assistant activity within a period.
+     */
+    AssistantActivityStats: {
+      /** Active Assistant Count */
+      active_assistant_count: number;
+      /** Total Trackable Assistants */
+      total_trackable_assistants: number;
+      /** Active Assistant Pct */
+      active_assistant_pct: number;
+      /** Active User Count */
+      active_user_count: number;
+    };
     /** AssistantCreatePublic */
     AssistantCreatePublic: {
       /** Name */
@@ -4216,6 +4308,26 @@ export interface components {
         [key: string]: unknown;
       };
       prompt: components["schemas"]["PromptPublicAssistantTemplate"] | null;
+    };
+    /** AssistantInsightQuestion */
+    AssistantInsightQuestion: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Question */
+      question: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
     };
     /** AssistantMetadata */
     AssistantMetadata: {
@@ -5754,6 +5866,27 @@ export interface components {
        */
       count: number;
     };
+    /** CursorPaginatedResponse[AssistantInsightQuestion] */
+    CursorPaginatedResponse_AssistantInsightQuestion_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["AssistantInsightQuestion"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
     /** CursorPaginatedResponse[SessionMetadataPublic] */
     CursorPaginatedResponse_SessionMetadataPublic_: {
       /**
@@ -6292,6 +6425,8 @@ export interface components {
       | "embedding_model"
       | "transcription_model"
       | "audit_log"
+      | "mcp_server"
+      | "mcp_server_tool"
       | "session"
       | "flow"
       | "flow_run";
@@ -7679,7 +7814,7 @@ export interface components {
        * @default none
        * @enum {string}
        */
-      http_auth_type?: "none" | "bearer" | "api_key" | "custom_headers";
+      http_auth_type?: "none" | "bearer";
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -7719,10 +7854,10 @@ export interface components {
       http_url: string;
       /** Http Auth Type */
       http_auth_type: string;
-      /** Http Auth Config Schema */
-      http_auth_config_schema: {
-        [key: string]: unknown;
-      } | null;
+      /** Has Credentials */
+      has_credentials: boolean;
+      /** Credential Preview */
+      credential_preview?: string | null;
       /** Tags */
       tags: string[] | null;
       /** Icon Url */
@@ -7758,10 +7893,10 @@ export interface components {
       http_url: string;
       /** Http Auth Type */
       http_auth_type: string;
-      /** Http Auth Config Schema */
-      http_auth_config_schema: {
-        [key: string]: unknown;
-      } | null;
+      /** Has Credentials */
+      has_credentials: boolean;
+      /** Credential Preview */
+      credential_preview?: string | null;
       /** Tags */
       tags: string[] | null;
       /** Icon Url */
@@ -7775,8 +7910,6 @@ export interface components {
       mcp_server_id: string;
       /** Is Org Enabled */
       is_org_enabled: boolean;
-      /** Has Credentials */
-      has_credentials: boolean;
       /**
        * Credential Status
        * @default missing
@@ -7873,7 +8006,7 @@ export interface components {
       /** Http Url */
       http_url?: string | null;
       /** Http Auth Type */
-      http_auth_type?: ("none" | "bearer" | "api_key" | "custom_headers") | null;
+      http_auth_type?: ("none" | "bearer") | null;
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -7957,6 +8090,16 @@ export interface components {
       tool_calls?: components["schemas"]["ToolCallInfo"][];
       logging_details: components["schemas"]["LoggingDetailsPublic"];
     };
+    /** MetadataCount */
+    MetadataCount: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Count */
+      count: number;
+    };
     /** MetadataStatistics */
     MetadataStatistics: {
       /** Assistants */
@@ -7965,6 +8108,15 @@ export interface components {
       sessions: components["schemas"]["SessionMetadata"][];
       /** Questions */
       questions: components["schemas"]["QuestionMetadata"][];
+    };
+    /** MetadataStatisticsAggregated */
+    MetadataStatisticsAggregated: {
+      /** Assistants */
+      assistants: components["schemas"]["MetadataCount"][];
+      /** Sessions */
+      sessions: components["schemas"]["MetadataCount"][];
+      /** Questions */
+      questions: components["schemas"]["MetadataCount"][];
     };
     /**
      * MigrationResult
@@ -10742,7 +10894,8 @@ export interface components {
       | "pull_confluence_content"
       | "pull_sharepoint_content"
       | "sync_sharepoint_delta"
-      | "update_model_usage_stats";
+      | "update_model_usage_stats"
+      | "analyze_conversation_insights";
     /** TemplateCreate */
     TemplateCreate: {
       /**
@@ -17981,8 +18134,8 @@ export interface operations {
   get_metadata_api_v1_analysis_metadata_statistics__get: {
     parameters: {
       query?: {
-        start_date?: string;
-        end_date?: string;
+        start_date?: string | null;
+        end_date?: string | null;
       };
     };
     responses: {
@@ -17990,6 +18143,68 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["MetadataStatistics"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Assistant Activity
+   * @description Get assistant activity statistics for the tenant.
+   *
+   * Returns:
+   * - active_assistant_count: Number of assistants with sessions in the period
+   * - total_trackable_assistants: Number of published assistants with insights enabled
+   * - active_assistant_pct: Percentage of trackable assistants that are active
+   * - active_user_count: Number of unique users with sessions (excluding service sessions
+   *   and deleted users)
+   *
+   * Note on datetime parameters:
+   * - If no time is provided in the datetime, time components default to 00:00:00
+   */
+  get_assistant_activity_api_v1_analysis_assistant_activity__get: {
+    parameters: {
+      query?: {
+        start_date?: string | null;
+        end_date?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AssistantActivityStats"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Metadata Aggregated
+   * @description Aggregated data for analytics (hourly buckets).
+   */
+  get_metadata_aggregated_api_v1_analysis_metadata_statistics_aggregated__get: {
+    parameters: {
+      query?: {
+        start_date?: string | null;
+        end_date?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MetadataStatisticsAggregated"];
         };
       };
       /** @description Validation Error */
@@ -18093,6 +18308,42 @@ export interface operations {
     };
   };
   /**
+   * Get Most Recent Questions Paginated
+   * @description Get paginated question history for an assistant.
+   *
+   * Optimized for admin insights history view and large datasets.
+   */
+  get_most_recent_questions_paginated_api_v1_analysis_assistants__assistant_id__questions__get: {
+    parameters: {
+      query?: {
+        days_since?: number;
+        from_date?: string | null;
+        to_date?: string | null;
+        include_followups?: boolean;
+        limit?: number;
+        cursor?: string | null;
+        q?: string | null;
+      };
+      path: {
+        assistant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_AssistantInsightQuestion_"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Get Conversation Insights
    * @description Get statistics about conversations for either an assistant or a group chat.
    *
@@ -18158,6 +18409,7 @@ export interface operations {
         include_followups?: boolean;
         assistant_id?: string | null;
         group_chat_id?: string | null;
+        processing_mode?: components["schemas"]["AnalysisProcessingMode"];
       };
     };
     requestBody: {
@@ -18170,6 +18422,28 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Conversation Insight Job */
+  get_conversation_insight_job_api_v1_analysis_conversation_insights_jobs__job_id___get: {
+    parameters: {
+      path: {
+        job_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AnalysisJobStatusResponse"];
         };
       };
       /** @description Validation Error */

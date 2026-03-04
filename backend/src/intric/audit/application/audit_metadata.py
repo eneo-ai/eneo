@@ -32,7 +32,7 @@ Security considerations:
 - Use IDs instead of names where possible for data minimization
 """
 
-from typing import Any, Mapping, Optional
+from typing import Any, Optional
 from uuid import UUID
 
 
@@ -43,11 +43,11 @@ class AuditMetadata:
     def standard(
         actor: Any,
         target: Any,
-        changes: Optional[Mapping[str, object]] = None,
-        extra: Optional[Mapping[str, object]] = None,
+        changes: Optional[dict[str, Any]] = None,
+        extra: Optional[dict[str, Any]] = None,
         space: Optional[Any] = None,
         tenant: Optional[Any] = None,
-    ) -> Mapping[str, object]:
+    ) -> dict[str, Any]:
         """
         Create standard audit metadata with actor and target snapshots.
 
@@ -131,8 +131,8 @@ class AuditMetadata:
         actor: Any,
         targets: list[Any],
         operation: str,
-        extra: Optional[Mapping[str, object]] = None,
-    ) -> Mapping[str, object]:
+        extra: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         """
         Create metadata for operations affecting multiple entities.
 
@@ -194,8 +194,8 @@ class AuditMetadata:
         description: str,
         target: Optional[Any] = None,
         affected_count: Optional[int] = None,
-        extra: Optional[Mapping[str, object]] = None,
-    ) -> Mapping[str, object]:
+        extra: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         """
         Create metadata for system-initiated actions.
 
@@ -246,8 +246,8 @@ class AuditMetadata:
         method: str,
         success: bool,
         failure_reason: Optional[str] = None,
-        extra: Optional[dict] = None,
-    ) -> dict:
+        extra: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         """
         Create metadata for authentication events.
 
@@ -307,8 +307,8 @@ class AuditMetadata:
     def minimal(
         actor_id: UUID,
         target_id: UUID,
-        extra: Optional[Mapping[str, object]] = None,
-    ) -> Mapping[str, object]:
+        extra: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         """
         Create minimal metadata with just IDs (data minimization).
 

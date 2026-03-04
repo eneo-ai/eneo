@@ -22,3 +22,23 @@ tasks:
     cmds:
       - uv run alembic upgrade head
     dir: ./backend
+
+  beads:ready:
+    desc: "Show actionable beads (unblocked, open)"
+    cmds:
+      - br ready
+
+  beads:sync:
+    desc: "Export beads to JSONL for git"
+    cmds:
+      - br sync --flush-only
+
+  beads:import:
+    desc: "Import JSONL into local DB (after git pull)"
+    cmds:
+      - br sync --import-only
+
+  beads:status:
+    desc: "Show beads sync status"
+    cmds:
+      - br sync --status

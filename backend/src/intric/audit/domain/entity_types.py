@@ -27,6 +27,8 @@ class EntityType(str, Enum):
     EMBEDDING_MODEL = "embedding_model"
     TRANSCRIPTION_MODEL = "transcription_model"
     AUDIT_LOG = "audit_log"
+    MCP_SERVER = "mcp_server"
+    MCP_SERVER_TOOL = "mcp_server_tool"
     SESSION = "session"
     FLOW = "flow"
     FLOW_RUN = "flow_run"

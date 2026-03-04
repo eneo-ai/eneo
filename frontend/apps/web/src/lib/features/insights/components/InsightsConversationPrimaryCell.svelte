@@ -13,17 +13,21 @@
 
   const insights = getInsightsService();
   export let conversation: ConversationSparse;
+  let isSelected = false;
+  $: isSelected = insights.previewedConversation?.id === conversation.id;
 </script>
 
 <div class="flex w-full items-center justify-start">
   <Button
+    type="button"
     on:click={() => insights.loadConversationPreview(conversation)}
     class="max-w-full"
-    data-selected={insights.previewedConversation?.id !== conversation.id}
+    data-selected={isSelected}
+    aria-pressed={isSelected}
   >
     <div
       class="bg-accent-dimmer absolute inset-0 z-[-1] hidden mix-blend-multiply"
-      class:hidden={insights.previewedConversation?.id !== conversation.id}
+      class:hidden={!isSelected}
     ></div>
 
     <span class="truncate overflow-ellipsis">

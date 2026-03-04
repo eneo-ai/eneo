@@ -1,4 +1,4 @@
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 from intric.mcp_servers.presentation.models import (
@@ -9,9 +9,48 @@ from intric.mcp_servers.presentation.models import (
     MCPServerToolPublic,
 )
 
+if TYPE_CHECKING:
+    from intric.settings.encryption_service import EncryptionService
+
+# Keys in http_auth_config_schema that contain secrets
+_SECRET_KEYS = ("token",)
+
+
+def _compute_credential_preview(
+    config: dict[str, Any] | None,
+    encryption_service: "EncryptionService | None",
+) -> str | None:
+    """Compute a masked preview of stored credentials (e.g. '••••••••sk12')."""
+    if not config:
+        return None
+
+    for key in _SECRET_KEYS:
+        value = config.get(key)
+        if not value:
+            continue
+
+        try:
+            from intric.settings.encryption_service import EncryptionService
+
+            if encryption_service and encryption_service.is_encrypted(value):
+                decrypted = encryption_service.decrypt(value)
+                return EncryptionService.mask_secret(decrypted)
+            elif value:
+                return EncryptionService.mask_secret(value)
+        except Exception:
+            return "••••••••"
+
+    return None
+
 
 class MCPServerAssembler:
     """Assembler for converting MCP domain entities to presentation DTOs."""
+
+    def __init__(
+        self,
+        encryption_service: "EncryptionService | None" = None,
+    ):
+        self.encryption_service = encryption_service
 
     @staticmethod
     def to_dict_with_tools(mcp_server: MCPServer) -> dict[str, Any]:
@@ -38,8 +77,7 @@ class MCPServerAssembler:
             ],
         }
 
-    @staticmethod
-    def from_domain_to_model(mcp_server: MCPServer) -> MCPServerPublic:
+    def from_domain_to_model(self, mcp_server: MCPServer) -> MCPServerPublic:
         """Convert MCPServer domain entity to DTO."""
         return MCPServerPublic(
             id=mcp_server.id,
@@ -47,26 +85,31 @@ class MCPServerAssembler:
             description=mcp_server.description,
             http_url=mcp_server.http_url,
             http_auth_type=mcp_server.http_auth_type,
-            http_auth_config_schema=mcp_server.http_auth_config_schema,
+            has_credentials=bool(mcp_server.http_auth_config_schema),
+            credential_preview=_compute_credential_preview(
+                mcp_server.http_auth_config_schema, self.encryption_service
+            ),
             tags=mcp_server.tags,
             icon_url=mcp_server.icon_url,
             documentation_url=mcp_server.documentation_url,
         )
 
-    @staticmethod
-    def to_paginated_response(mcp_servers: list[MCPServer]) -> MCPServerList:
+    def to_paginated_response(self, mcp_servers: list[MCPServer]) -> MCPServerList:
         """Convert list of MCPServer entities to paginated response."""
-        items = [
-            MCPServerAssembler.from_domain_to_model(server) for server in mcp_servers
-        ]
+        items = [self.from_domain_to_model(server) for server in mcp_servers]
         return MCPServerList(items=items)
 
 
 class MCPServerSettingsAssembler:
     """Assembler for converting MCP servers to settings DTOs (simplified - no separate settings entity)."""
 
-    @staticmethod
-    def from_domain_to_model(mcp_server: MCPServer) -> MCPServerSettingsPublic:
+    def __init__(
+        self,
+        encryption_service: "EncryptionService | None" = None,
+    ):
+        self.encryption_service = encryption_service
+
+    def from_domain_to_model(self, mcp_server: MCPServer) -> MCPServerSettingsPublic:
         """Convert MCPServer domain entity to settings DTO."""
         # Sort tools by name for consistent ordering
         sorted_tools = sorted(mcp_server.tools, key=lambda t: t.name)
@@ -82,13 +125,8 @@ class MCPServerSettingsAssembler:
             for tool in sorted_tools
         ]
 
-        credential_status = getattr(mcp_server, "credential_status", None)
-        if credential_status is None:
-            credential_status = (
-                "ok"
-                if mcp_server.env_vars is not None and len(mcp_server.env_vars) > 0
-                else "missing"
-            )
+        has_creds = bool(mcp_server.http_auth_config_schema)
+        credential_status = "ok" if has_creds else "missing"
 
         return MCPServerSettingsPublic(
             id=mcp_server.id,
@@ -97,23 +135,22 @@ class MCPServerSettingsAssembler:
             description=mcp_server.description,
             http_url=mcp_server.http_url,
             http_auth_type=mcp_server.http_auth_type,
-            http_auth_config_schema=mcp_server.http_auth_config_schema,
+            has_credentials=bool(mcp_server.http_auth_config_schema),
+            credential_preview=_compute_credential_preview(
+                mcp_server.http_auth_config_schema, self.encryption_service
+            ),
             tags=mcp_server.tags,
             icon_url=mcp_server.icon_url,
             documentation_url=mcp_server.documentation_url,
             is_org_enabled=mcp_server.is_enabled,
-            has_credentials=credential_status == "ok",
             credential_status=credential_status,
             tools=tools,
         )
 
-    @staticmethod
     def to_paginated_response(
+        self,
         mcp_servers: list[MCPServer],
     ) -> MCPServerSettingsList:
         """Convert list of MCPServer entities to paginated settings response."""
-        items = [
-            MCPServerSettingsAssembler.from_domain_to_model(server)
-            for server in mcp_servers
-        ]
+        items = [self.from_domain_to_model(server) for server in mcp_servers]
         return MCPServerSettingsList(items=items)
