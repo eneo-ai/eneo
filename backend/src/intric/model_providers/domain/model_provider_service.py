@@ -50,6 +50,25 @@ class ModelProviderService:
         """Get a provider by ID."""
         return await self.repository.get_by_id(provider_id)
 
+    @staticmethod
+    def _validate_required_fields(
+        provider_type: str,
+        credentials: dict[str, Any],
+        config: dict[str, Any],
+    ) -> None:
+        """Validate that all required fields are present for the provider type."""
+        from intric.tenants.provider_field_config import get_field_definitions
+
+        field_defs = get_field_definitions(provider_type)
+        for field in field_defs:
+            if field["required"]:
+                source = credentials if field["in_"] == "credentials" else config
+                value = source.get(field["name"])
+                if not value or (isinstance(value, str) and not value.strip()):
+                    raise ValueError(
+                        f"Field '{field['name']}' is required for provider '{provider_type}'"
+                    )
+
     async def create(
         self,
         tenant_id: UUID,
@@ -64,6 +83,9 @@ class ModelProviderService:
         existing = await self.repository.get_by_name(name)
         if existing is not None:
             raise NameCollisionException(f"Provider with name '{name}' already exists")
+
+        # Validate required fields for this provider type
+        self._validate_required_fields(provider_type, credentials, config)
 
         # Encrypt credentials before storing
         encrypted_credentials = self._encrypt_credentials(credentials)
@@ -109,7 +131,9 @@ class ModelProviderService:
             provider.credentials = self._encrypt_credentials(credentials)
 
         if config is not None:
-            provider.config = config
+            # Merge with existing config so unchanged fields are preserved
+            merged = {**provider.config, **config}
+            provider.config = merged
 
         if is_active is not None:
             provider.is_active = is_active
