@@ -62,7 +62,7 @@
       href={localizeHref("/admin")}
       class="text-accent-default hover:text-accent-default/80 inline-flex items-center gap-1 text-sm font-medium"
     >
-      <span aria-hidden="true"><-</span>
+      <span aria-hidden="true">&larr;</span>
       <span>{m.flow_input_limits_back_to_organisation()}</span>
     </a>
     <Page.Title title={m.flow_input_limits_title()}></Page.Title>
