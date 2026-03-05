@@ -9,7 +9,7 @@ import pytest
 from fastapi import UploadFile
 
 from intric.flows.flow import Flow, FlowStep
-from intric.flows.flow_file_upload_service import FlowFileUploadService
+from intric.flows.flow_file_upload_service import FlowFileInputPolicy, FlowFileUploadService
 from intric.main.exceptions import BadRequestException, FileNotSupportedException, FileTooLargeException
 from intric.settings.settings import FlowInputLimitsPublic
 
@@ -104,7 +104,7 @@ async def test_policy_for_audio_includes_max_files_and_recommended_payload() -> 
 
 
 @pytest.mark.asyncio
-async def test_upload_rejects_mimetype_not_allowed_for_step_type() -> None:
+async def test_upload_rejects_mimetype_not_allowed_for_step_type(monkeypatch) -> None:
     flow_service = AsyncMock()
     file_service = AsyncMock()
     settings_service = AsyncMock()
@@ -127,15 +127,31 @@ async def test_upload_rejects_mimetype_not_allowed_for_step_type() -> None:
         file=BytesIO(b"fake"),
         headers={"content-type": "application/pdf"},
     )
+    monkeypatch.setattr(
+        "intric.flows.flow_file_upload_service._sniff_mimetype",
+        lambda _upload_file: None,
+    )
 
-    with pytest.raises(FileNotSupportedException, match="Allowed types:"):
+    with pytest.raises(FileNotSupportedException) as exc_info:
         await service.upload_file_for_flow(flow_id=flow.id, upload_file=upload)
+    message = str(exc_info.value)
+    assert exc_info.value.code == "unsupported_media_type"
+    assert exc_info.value.context == {
+        "flow_id": str(flow.id),
+        "input_type": "audio",
+        "received_type": "application/pdf",
+    }
+    assert "Unsupported file type 'application/pdf'" in message
+    assert "flow input type 'audio'" in message
+    assert "Allowed types:" in message
 
     file_service.save_file.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_upload_without_content_type_is_rejected_with_allowed_types_hint() -> None:
+async def test_upload_without_content_type_is_rejected_with_allowed_types_hint(
+    monkeypatch,
+) -> None:
     flow_service = AsyncMock()
     file_service = AsyncMock()
     settings_service = AsyncMock()
@@ -157,9 +173,23 @@ async def test_upload_without_content_type_is_rejected_with_allowed_types_hint()
         filename="audio.bin",
         file=BytesIO(b"fake"),
     )
+    monkeypatch.setattr(
+        "intric.flows.flow_file_upload_service._sniff_mimetype",
+        lambda _upload_file: None,
+    )
 
-    with pytest.raises(FileNotSupportedException, match="Allowed types:"):
+    with pytest.raises(FileNotSupportedException) as exc_info:
         await service.upload_file_for_flow(flow_id=flow.id, upload_file=upload)
+    message = str(exc_info.value)
+    assert exc_info.value.code == "unsupported_media_type"
+    assert exc_info.value.context == {
+        "flow_id": str(flow.id),
+        "input_type": "audio",
+        "received_type": "missing",
+    }
+    assert "Unsupported file type 'missing'" in message
+    assert "flow input type 'audio'" in message
+    assert "Allowed types:" in message
 
     file_service.save_file.assert_not_awaited()
 
@@ -193,8 +223,13 @@ async def test_upload_wraps_file_too_large_with_effective_limit_message(monkeypa
         lambda _upload_file: None,
     )
 
-    with pytest.raises(FileTooLargeException, match="25000000"):
+    with pytest.raises(FileTooLargeException, match="25000000") as exc_info:
         await service.upload_file_for_flow(flow_id=flow.id, upload_file=upload)
+    assert exc_info.value.code == "file_too_large"
+    assert exc_info.value.context == {
+        "flow_id": str(flow.id),
+        "max_file_size_bytes": 25_000_000,
+    }
 
     file_service.save_file.assert_awaited_once()
     assert file_service.save_file.await_args.kwargs["max_size"] == 25_000_000
@@ -297,8 +332,88 @@ async def test_upload_rejects_when_sniffed_content_type_is_not_allowed(monkeypat
         lambda _upload_file: "application/pdf",
     )
 
-    with pytest.raises(FileNotSupportedException, match="Detected file type 'application/pdf'"):
+    with pytest.raises(
+        FileNotSupportedException,
+        match="Detected file type 'application/pdf'",
+    ) as exc_info:
         await service.upload_file_for_flow(flow_id=flow.id, upload_file=upload)
+    assert exc_info.value.code == "unsupported_media_type"
+    assert exc_info.value.context == {
+        "flow_id": str(flow.id),
+        "input_type": "audio",
+        "received_type": "audio/mpeg",
+        "detected_type": "application/pdf",
+    }
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_zero_byte_file_with_clear_error(monkeypatch) -> None:
+    flow_service = AsyncMock()
+    file_service = AsyncMock()
+    settings_service = AsyncMock()
+
+    flow = _flow(step=_step(step_order=1, input_type="audio"))
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits.return_value = FlowInputLimitsPublic(
+        file_max_size_bytes=11_000_000,
+        audio_max_size_bytes=25_000_000,
+    )
+
+    service = FlowFileUploadService(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+    )
+    upload = UploadFile(
+        filename="empty.wav",
+        file=BytesIO(b""),
+        headers={"content-type": "audio/wav"},
+    )
+    monkeypatch.setattr(
+        "intric.flows.flow_file_upload_service._sniff_mimetype",
+        lambda _upload_file: None,
+    )
+
+    with pytest.raises(BadRequestException, match="Uploaded file is empty") as exc_info:
+        await service.upload_file_for_flow(flow_id=flow.id, upload_file=upload)
+    assert exc_info.value.code == "flow_input_file_empty"
+    assert exc_info.value.context == {"flow_id": str(flow.id)}
+
+    file_service.save_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_declared_type_even_if_sniffed_type_is_allowed(monkeypatch) -> None:
+    flow_service = AsyncMock()
+    file_service = AsyncMock()
+    settings_service = AsyncMock()
+
+    flow = _flow(step=_step(step_order=1, input_type="audio"))
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits.return_value = FlowInputLimitsPublic(
+        file_max_size_bytes=11_000_000,
+        audio_max_size_bytes=25_000_000,
+    )
+
+    service = FlowFileUploadService(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+    )
+    upload = UploadFile(
+        filename="declared-pdf-but-audio.mp3",
+        file=BytesIO(b"fake"),
+        headers={"content-type": "application/pdf"},
+    )
+    monkeypatch.setattr(
+        "intric.flows.flow_file_upload_service._sniff_mimetype",
+        lambda _upload_file: "audio/mpeg",
+    )
+
+    with pytest.raises(FileNotSupportedException) as exc_info:
+        await service.upload_file_for_flow(flow_id=flow.id, upload_file=upload)
+    assert "Unsupported file type 'application/pdf'" in str(exc_info.value)
+    assert "flow input type 'audio'" in str(exc_info.value)
 
     file_service.save_file.assert_not_awaited()
 
@@ -338,6 +453,40 @@ async def test_upload_uses_declared_type_when_sniffer_returns_unknown(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_upload_accepts_declared_audio_mp3_alias(monkeypatch) -> None:
+    flow_service = AsyncMock()
+    file_service = AsyncMock()
+    settings_service = AsyncMock()
+
+    flow = _flow(step=_step(step_order=1, input_type="audio"))
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits.return_value = FlowInputLimitsPublic(
+        file_max_size_bytes=11_000_000,
+        audio_max_size_bytes=25_000_000,
+    )
+    file_service.save_file.return_value = AsyncMock()
+
+    service = FlowFileUploadService(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+    )
+    upload = UploadFile(
+        filename="audio.mp3",
+        file=BytesIO(b"fake"),
+        headers={"content-type": "audio/mp3"},
+    )
+    monkeypatch.setattr(
+        "intric.flows.flow_file_upload_service._sniff_mimetype",
+        lambda _upload_file: "audio/mpeg",
+    )
+
+    await service.upload_file_for_flow(flow_id=flow.id, upload_file=upload)
+
+    file_service.save_file.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_upload_rejects_flows_without_file_upload_input() -> None:
     flow_service = AsyncMock()
     file_service = AsyncMock()
@@ -361,7 +510,55 @@ async def test_upload_rejects_flows_without_file_upload_input() -> None:
         headers={"content-type": "audio/mpeg"},
     )
 
-    with pytest.raises(BadRequestException, match="does not accept file uploads"):
+    with pytest.raises(BadRequestException, match="does not accept file uploads") as exc_info:
         await service.upload_file_for_flow(flow_id=flow.id, upload_file=upload)
+    assert exc_info.value.code == "flow_input_upload_not_supported"
 
+    file_service.save_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_when_policy_limit_is_missing(monkeypatch) -> None:
+    flow_service = AsyncMock()
+    file_service = AsyncMock()
+    settings_service = AsyncMock()
+
+    flow = _flow(step=_step(step_order=1, input_type="audio"))
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits.return_value = FlowInputLimitsPublic(
+        file_max_size_bytes=10_000_000,
+        audio_max_size_bytes=25_000_000,
+    )
+
+    service = FlowFileUploadService(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+    )
+    service.get_input_policy = AsyncMock(
+        return_value=FlowFileInputPolicy(
+            flow_id=flow.id,
+            input_type="audio",
+            input_source="flow_input",
+            accepts_file_upload=True,
+            accepted_mimetypes=["audio/mpeg"],
+            max_file_size_bytes=None,
+            max_files_per_run=10,
+            recommended_run_payload={"file_ids": ["<file-id-uuid>"]},
+        )
+    )
+    upload = UploadFile(
+        filename="audio.mp3",
+        file=BytesIO(b"fake"),
+        headers={"content-type": "audio/mpeg"},
+    )
+    monkeypatch.setattr(
+        "intric.flows.flow_file_upload_service._sniff_mimetype",
+        lambda _upload_file: None,
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.upload_file_for_flow(flow_id=flow.id, upload_file=upload)
+    assert exc_info.value.code == "flow_input_policy_missing_limit"
+    assert exc_info.value.context == {"flow_id": str(flow.id)}
     file_service.save_file.assert_not_awaited()

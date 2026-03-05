@@ -1069,7 +1069,7 @@ class TestScopeRouteGuardCoverage:
             "/spaces", "/assistants", "/apps", "/app-runs",
             "/conversations", "/services", "/group-chats",
             "/groups", "/websites", "/crawl-runs",
-            "/flows", "/flow-runs",
+            "/flows",
         }
         found_prefixes = set()
         routes_missing_scope_dep = []

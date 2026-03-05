@@ -136,6 +136,9 @@ def test_execute_flow_run_marks_failed_when_user_id_is_missing(monkeypatch):
 
     assert result == {"status": "failed", "reason": "missing_user_id"}
     assert mark_run_failed.await_count == 1
+    assert mark_run_failed.await_args.kwargs["error_message"] == (
+        "flow_missing_user_id: Flow run execution skipped because run has no user_id."
+    )
 
 
 def test_execute_flow_run_handles_timeout_and_marks_run_failed(monkeypatch):
@@ -190,6 +193,9 @@ def test_execute_flow_run_handles_timeout_and_marks_run_failed(monkeypatch):
 
     assert result == {"status": "failed", "reason": "timeout"}
     assert mark_run_failed.await_count == 1
+    assert mark_run_failed.await_args.kwargs["error_message"] == (
+        "flow_task_timeout: Flow execution timed out before task completion."
+    )
 
 
 def test_execute_flow_run_handles_generic_exception(monkeypatch):
@@ -234,6 +240,10 @@ def test_execute_flow_run_handles_generic_exception(monkeypatch):
 
     assert result == {"status": "failed", "reason": "task_failure"}
     assert mark_run_failed.await_count == 1
+    assert mark_run_failed.await_args.kwargs["error_message"] == (
+        "flow_task_failure: Flow execution task failed before run completion."
+    )
+    assert "boom" not in mark_run_failed.await_args.kwargs["error_message"]
 
 
 def test_flow_worker_process_init_initializes_db_and_http_client(monkeypatch):

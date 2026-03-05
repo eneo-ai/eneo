@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -146,8 +146,9 @@ async def test_create_run_rejects_unpublished_flow(user):
     )
     flow_repo.get.return_value = _flow(user=user, published_version=None)
 
-    with pytest.raises(BadRequestException):
+    with pytest.raises(BadRequestException) as exc_info:
         await service.create_run(flow_id=uuid4(), input_payload_json={"x": 1})
+    assert exc_info.value.code == "flow_not_published"
 
 
 @pytest.mark.asyncio
@@ -166,8 +167,9 @@ async def test_create_run_enforces_tenant_concurrency_limit(user):
     flow_repo.get.return_value = flow
     flow_run_repo.count_active_runs.return_value = 1
 
-    with pytest.raises(BadRequestException):
+    with pytest.raises(BadRequestException) as exc_info:
         await service.create_run(flow_id=flow.id, input_payload_json={"x": 1})
+    assert exc_info.value.code == "flow_run_concurrency_limit_reached"
 
 
 @pytest.mark.asyncio
@@ -196,7 +198,18 @@ async def test_create_run_creates_preseeded_run(user):
     assert kwargs["flow_id"] == flow.id
     assert kwargs["flow_version"] == 2
     assert kwargs["tenant_id"] == user.tenant_id
-    assert len(kwargs["preseed_steps"]) == 2
+    assert kwargs["preseed_steps"] == [
+        {
+            "step_id": flow.steps[0].id,
+            "assistant_id": flow.steps[0].assistant_id,
+            "step_order": flow.steps[0].step_order,
+        },
+        {
+            "step_id": flow.steps[1].id,
+            "assistant_id": flow.steps[1].assistant_id,
+            "step_order": flow.steps[1].step_order,
+        },
+    ]
 
 
 @pytest.mark.asyncio
@@ -253,8 +266,18 @@ async def test_create_run_raises_if_dispatch_fails(user):
     flow_run_repo.create.return_value = created_run
     execution_backend.dispatch.side_effect = RuntimeError("broker unavailable")
 
-    with pytest.raises(RuntimeError, match="broker unavailable"):
-        await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
+    with patch("intric.flows.flow_run_service.logger") as logger_mock:
+        with pytest.raises(RuntimeError, match="broker unavailable"):
+            await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
+
+    logger_mock.exception.assert_called_once_with(
+        "Failed to dispatch newly created flow run",
+        extra={
+            "run_id": str(created_run.id),
+            "flow_id": str(flow.id),
+            "tenant_id": str(user.tenant_id),
+        },
+    )
     flow_run_repo.update_status.assert_not_awaited()
 
 
@@ -275,7 +298,9 @@ async def test_create_run_rejects_missing_required_form_field(user):
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
 
-    with pytest.raises(BadRequestException, match="Missing required input field 'Personnummer'"):
+    with pytest.raises(
+        BadRequestException, match="Missing required input field 'Personnummer'"
+    ) as exc_info:
         await service.create_run(
             flow_id=flow.id,
             input_payload_json={
@@ -283,6 +308,11 @@ async def test_create_run_rejects_missing_required_form_field(user):
                 "Typ av insats": ["Hemtjänst"],
             },
         )
+    assert exc_info.value.code == "flow_input_required_field_missing"
+    assert exc_info.value.context == {
+        "field_name": "Personnummer",
+        "field_type": "text",
+    }
 
 
 @pytest.mark.asyncio
@@ -302,7 +332,9 @@ async def test_create_run_rejects_invalid_select_option(user):
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
 
-    with pytest.raises(BadRequestException, match="must be one of the configured options"):
+    with pytest.raises(
+        BadRequestException, match="must be one of the configured options"
+    ) as exc_info:
         await service.create_run(
             flow_id=flow.id,
             input_payload_json={
@@ -312,6 +344,11 @@ async def test_create_run_rejects_invalid_select_option(user):
                 "Prioritet": "Akut",
             },
         )
+    assert exc_info.value.code == "flow_input_invalid_option"
+    assert exc_info.value.context == {
+        "field_name": "Prioritet",
+        "field_type": "select",
+    }
 
 
 @pytest.mark.asyncio
@@ -331,7 +368,7 @@ async def test_create_run_rejects_invalid_multiselect_shape(user):
     flow_run_repo.count_active_runs.return_value = 0
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
 
-    with pytest.raises(BadRequestException, match="contains invalid option values"):
+    with pytest.raises(BadRequestException, match="contains invalid option values") as exc_info:
         await service.create_run(
             flow_id=flow.id,
             input_payload_json={
@@ -340,6 +377,11 @@ async def test_create_run_rejects_invalid_multiselect_shape(user):
                 "Typ av insats": ["Ogiltig"],
             },
         )
+    assert exc_info.value.code == "flow_input_invalid_option"
+    assert exc_info.value.context == {
+        "field_name": "Typ av insats",
+        "field_type": "multiselect",
+    }
 
 
 @pytest.mark.asyncio
@@ -377,6 +419,39 @@ async def test_create_run_normalizes_multiselect_number_and_date_fields(user):
     assert payload["Typ av insats"] == ["Hemtjänst", "Trygghetslarm"]
     assert payload["Antal timmar"] == 12
     assert payload["Mötesdatum"] == "2026-03-03"
+
+
+@pytest.mark.asyncio
+async def test_create_run_preserves_unknown_payload_fields_for_forward_compat(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _form_schema_flow(user)
+    created_run = _run(user=user, flow_id=flow.id)
+    flow_run_repo.create.return_value = created_run
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+    flow_repo.get.return_value = flow
+    flow_run_repo.count_active_runs.return_value = 0
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+
+    await service.create_run(
+        flow_id=flow.id,
+        input_payload_json={
+            "Namn på brukare": "Anna",
+            "Personnummer": "19121212-1212",
+            "Typ av insats": ["Hemtjänst"],
+            "trace_id": "flow-consumer-abc123",
+        },
+    )
+
+    payload = flow_run_repo.create.await_args.kwargs["input_payload_json"]
+    assert payload["trace_id"] == "flow-consumer-abc123"
 
 
 @pytest.mark.asyncio
@@ -663,23 +738,60 @@ async def test_create_run_rejects_oversized_input_payload(user):
     flow_repo.get.return_value = flow
     flow_run_repo.count_active_runs.return_value = 0
 
-    with pytest.raises(BadRequestException, match="exceeds allowed size limit"):
+    with pytest.raises(BadRequestException, match="exceeds allowed size limit") as exc_info:
         await service.create_run(
             flow_id=flow.id,
             input_payload_json={"text": "x" * (2 * 1024 * 1024)},
         )
+    assert exc_info.value.code == "flow_run_input_payload_too_large"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("definition_json", "message_fragment"),
+    ("definition_json", "message_fragment", "error_code", "error_context"),
     [
-        ({}, "does not contain executable steps"),
-        ({"steps": []}, "does not contain executable steps"),
-        ({"steps": ["bad-step"]}, "Invalid flow version step definition"),
+        ({}, "does not contain executable steps", "flow_version_no_executable_steps", None),
+        (
+            {"steps": []},
+            "does not contain executable steps",
+            "flow_version_no_executable_steps",
+            None,
+        ),
+        (
+            {"steps": ["bad-step"]},
+            "Invalid flow version step definition",
+            "flow_version_invalid_step_definition",
+            None,
+        ),
         (
             {"steps": [{"step_order": 0, "step_id": str(uuid4()), "assistant_id": str(uuid4())}]},
             "Invalid flow version step order",
+            "flow_version_invalid_step_order",
+            {"step_order": 0},
+        ),
+        (
+            {"steps": [{"step_order": "abc", "step_id": str(uuid4()), "assistant_id": str(uuid4())}]},
+            "Invalid flow version step order",
+            "flow_version_invalid_step_order",
+            {"step_order": "abc"},
+        ),
+        (
+            {"steps": [{"step_order": True, "step_id": str(uuid4()), "assistant_id": str(uuid4())}]},
+            "Invalid flow version step order",
+            "flow_version_invalid_step_order",
+            {"step_order": True},
+        ),
+        (
+            {"steps": [{"step_order": 1, "step_id": "not-a-uuid", "assistant_id": str(uuid4())}]},
+            "Invalid flow version step identifier",
+            "flow_version_invalid_step_identifier",
+            {"step_order": 1, "field": "step_id", "value": "not-a-uuid"},
+        ),
+        (
+            {"steps": [{"step_order": 1, "step_id": str(uuid4()), "assistant_id": "bad-assistant-id"}]},
+            "Invalid flow version step identifier",
+            "flow_version_invalid_step_identifier",
+            {"step_order": 1, "field": "assistant_id", "value": "bad-assistant-id"},
         ),
     ],
 )
@@ -687,6 +799,8 @@ async def test_create_run_rejects_invalid_published_snapshot(
     user,
     definition_json,
     message_fragment,
+    error_code,
+    error_context,
 ):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
@@ -711,8 +825,10 @@ async def test_create_run_rejects_invalid_published_snapshot(
         updated_at=datetime.now(timezone.utc),
     )
 
-    with pytest.raises(BadRequestException, match=message_fragment):
+    with pytest.raises(BadRequestException, match=message_fragment) as exc_info:
         await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
+    assert exc_info.value.code == error_code
+    assert exc_info.value.context == error_context
 
 
 @pytest.mark.asyncio
@@ -815,6 +931,9 @@ async def test_create_run_resolves_missing_snapshot_identifiers_from_fallback_st
     assert preseed_steps[0]["step_order"] == 1
     assert preseed_steps[0]["step_id"] == flow.steps[0].id
     assert preseed_steps[0]["assistant_id"] == flow.steps[0].assistant_id
+    assert preseed_steps[1]["step_order"] == 2
+    assert preseed_steps[1]["step_id"] == flow.steps[1].id
+    assert preseed_steps[1]["assistant_id"] == flow.steps[1].assistant_id
 
 
 @pytest.mark.asyncio
@@ -850,8 +969,10 @@ async def test_create_run_rejects_missing_snapshot_identifiers_without_fallback(
         updated_at=datetime.now(timezone.utc),
     )
 
-    with pytest.raises(BadRequestException, match="missing stable step identifiers"):
+    with pytest.raises(BadRequestException, match="missing stable step identifiers") as exc_info:
         await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
+    assert exc_info.value.code == "flow_version_missing_step_identifiers"
+    assert exc_info.value.context == {"step_order": 2}
 
 
 @pytest.mark.asyncio
@@ -1143,6 +1264,67 @@ async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
             model_dump=lambda mode="json": {
                 "step_order": 1,
                 "input_payload_json": {"text": "hello"},
+            },
+        )
+    ]
+    flow_run_repo.list_step_attempts.return_value = []
+
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    evidence = await service.get_evidence(run_id=run.id)
+
+    assert evidence["debug_export"]["steps"][0]["rag"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_evidence_ignores_rag_metadata_when_step_order_is_boolean(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    run = _run(user=user, flow_id=flow.id)
+    flow_run_repo.get.return_value = run
+    flow_version_repo.get.return_value = FlowVersion(
+        flow_id=flow.id,
+        version=1,
+        tenant_id=user.tenant_id,
+        definition_checksum="checksum",
+        definition_json={
+            "steps": [
+                {
+                    "step_order": 1,
+                    "step_id": str(uuid4()),
+                    "assistant_id": str(uuid4()),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "text",
+                    "mcp_policy": "inherit",
+                }
+            ]
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    flow_run_repo.list_step_results.return_value = [
+        SimpleNamespace(
+            step_order=True,
+            input_payload_json={
+                "text": "hello",
+                "rag": {"status": "success", "chunks_retrieved": 1},
+            },
+            model_dump=lambda mode="json": {
+                "step_order": True,
+                "input_payload_json": {
+                    "text": "hello",
+                    "rag": {"status": "success", "chunks_retrieved": 1},
+                },
             },
         )
     ]

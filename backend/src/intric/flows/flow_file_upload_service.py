@@ -80,6 +80,34 @@ def _sniff_mimetype(upload_file: UploadFile) -> str | None:
         return None
 
 
+def _is_empty_upload_file(upload_file: UploadFile) -> bool:
+    file_obj = getattr(upload_file, "file", None)
+    if file_obj is None:
+        return False
+
+    start_position: int | None = None
+    if hasattr(file_obj, "tell"):
+        try:
+            start_position = int(file_obj.tell())
+        except Exception:
+            start_position = None
+
+    try:
+        chunk = file_obj.read(1)
+    except Exception:
+        return False
+    finally:
+        if start_position is not None and hasattr(file_obj, "seek"):
+            try:
+                file_obj.seek(start_position)
+            except Exception:
+                logger.debug("Failed to reset file pointer after empty-file check.", exc_info=True)
+
+    if isinstance(chunk, str):
+        chunk = chunk.encode("utf-8", errors="ignore")
+    return isinstance(chunk, bytes) and len(chunk) == 0
+
+
 class _FlowServiceProtocol(Protocol):
     async def get_flow(self, flow_id: UUID) -> Flow: ...
 
@@ -140,7 +168,10 @@ def _recommended_run_payload_for_input_type(
 
 def _build_policy(flow: Flow, limits: FlowInputLimitsPublic) -> FlowFileInputPolicy:
     if flow.id is None:
-        raise BadRequestException("Flow id is missing.")
+        raise BadRequestException(
+            "Flow id is missing.",
+            code="flow_id_missing",
+        )
 
     step = _first_flow_input_step(flow)
     if step is None:
@@ -209,7 +240,16 @@ class FlowFileUploadService:
         if not policy.accepts_file_upload:
             raise BadRequestException(
                 "Flow does not accept file uploads for flow_input. "
-                "Use text/json payload for this flow."
+                "Use text/json payload for this flow.",
+                code="flow_input_upload_not_supported",
+                context={"flow_id": str(flow_id), "input_type": policy.input_type},
+            )
+
+        if _is_empty_upload_file(upload_file):
+            raise BadRequestException(
+                "Uploaded file is empty.",
+                code="flow_input_file_empty",
+                context={"flow_id": str(flow_id)},
             )
 
         declared_type = _normalize_mimetype(upload_file.content_type)
@@ -228,7 +268,14 @@ class FlowFileUploadService:
             allowed_types = ", ".join(policy.accepted_mimetypes)
             raise FileNotSupportedException(
                 f"Detected file type '{sniffed_type}' is not allowed for flow input "
-                f"type '{policy.input_type}'. Allowed types: {allowed_types}."
+                f"type '{policy.input_type}'. Allowed types: {allowed_types}.",
+                code="unsupported_media_type",
+                context={
+                    "flow_id": str(flow_id),
+                    "input_type": policy.input_type,
+                    "received_type": declared_type or "missing",
+                    "detected_type": sniffed_type,
+                },
             )
 
         if not declared_canonical or declared_canonical not in allowed_canonical_types:
@@ -236,16 +283,31 @@ class FlowFileUploadService:
             allowed_types = ", ".join(policy.accepted_mimetypes)
             raise FileNotSupportedException(
                 f"Unsupported file type '{received_type}' for flow input type '{policy.input_type}'. "
-                f"Allowed types: {allowed_types}."
+                f"Allowed types: {allowed_types}.",
+                code="unsupported_media_type",
+                context={
+                    "flow_id": str(flow_id),
+                    "input_type": policy.input_type,
+                    "received_type": received_type,
+                },
             )
 
         max_size = policy.max_file_size_bytes
         if max_size is None:
-            raise BadRequestException("Flow input policy is missing a max file size.")
+            raise BadRequestException(
+                "Flow input policy is missing a max file size.",
+                code="flow_input_policy_missing_limit",
+                context={"flow_id": str(flow_id)},
+            )
 
         try:
             return await self.file_service.save_file(upload_file, max_size=max_size)
         except FileTooLargeException as exc:
             raise FileTooLargeException(
-                f"Uploaded file exceeds effective flow limit of {max_size} bytes."
+                f"Uploaded file exceeds effective flow limit of {max_size} bytes.",
+                code="file_too_large",
+                context={
+                    "flow_id": str(flow_id),
+                    "max_file_size_bytes": max_size,
+                },
             ) from exc

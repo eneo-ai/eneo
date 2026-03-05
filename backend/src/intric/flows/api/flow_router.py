@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, cast
 from uuid import UUID
 
@@ -27,14 +28,19 @@ from intric.database.database import sessionmanager
 from intric.files.file_models import FilePublic
 from intric.flows.flow import FlowRunStatus
 from intric.flows.api.flow_assembler import FlowAssembler
+from intric.flows.api.flow_api_common import enforce_flow_scope, error_response
 from intric.flows.api.flow_graph import build_graph_from_steps, enrich_nodes_with_run_results
 from intric.flows.api.flow_models import (
     FlowAssistantCreateRequest,
     FlowCreateRequest,
+    FlowInputSource,
     FlowInputPolicyPublic,
+    FlowInputType,
     FlowPublic,
     FlowRunCreateRequest,
+    FlowRunEvidenceResponse,
     FlowRunPublic,
+    FlowRunRedispatchResponse,
     FlowRunStepPublic,
     FlowSparsePublic,
     FlowUpdateRequest,
@@ -42,10 +48,12 @@ from intric.flows.api.flow_models import (
 )
 from intric.flows.flow_file_upload_service import FlowFileUploadService
 from intric.main.container.container import Container
+from intric.main.exceptions import ErrorCodes
 from intric.main.models import NOT_PROVIDED, NotProvided, PaginatedResponse
 from intric.server.dependencies.container import get_container
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 async def _dispatch_flow_run_after_commit(
@@ -66,13 +74,24 @@ async def _dispatch_flow_run_after_commit(
                 tenant_id=tenant_id,
                 user_id=user_id,
             )
-        except Exception as exc:
+        except Exception:
+            logger.exception(
+                "flow_dispatch_after_commit_failed run_id=%s flow_id=%s tenant_id=%s",
+                run_id,
+                flow_id,
+                tenant_id,
+            )
             async with session.begin():
                 await run_repo.update_status(
                     run_id=run_id,
                     tenant_id=tenant_id,
                     status=FlowRunStatus.FAILED,
-                    error_message=f"Flow dispatch failed: {exc}",
+                    # Keep consumer-facing run errors stable and non-sensitive.
+                    error_message=(
+                        "flow_dispatch_failed: "
+                        "Flow dispatch failed before execution started. "
+                        "Retry creating a new run."
+                    ),
                 )
 
 
@@ -160,32 +179,46 @@ def _required_uuid(value: UUID | None, *, field: str) -> UUID:
     return value
 
 
-def _raise_scope_mismatch() -> None:
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail={
-            "code": "insufficient_scope",
-            "message": "API key space scope does not match requested flow.",
-            "context": {"auth_layer": "api_key_scope"},
-        },
-    )
-
-
-async def _enforce_flow_scope(request: Request, container: Container, *, flow_id: UUID) -> None:
-    scope_filter = get_scope_filter(request)
-    if scope_filter.space_id is None:
-        return
-    flow = await container.flow_service().get_flow(flow_id)
-    if scope_filter.space_id != flow.space_id:
-        _raise_scope_mismatch()
-
-
 def _flow_upload_service(container: Container) -> FlowFileUploadService:
     return FlowFileUploadService(
         flow_service=container.flow_service(),
         file_service=container.file_service(),
         settings_service=container.settings_service(),
     )
+
+
+async def _enforce_flow_scope(
+    request: Request,
+    container: Container,
+    *,
+    flow_id: UUID,
+    require_flow_lookup_without_scope: bool = False,
+) -> None:
+    await enforce_flow_scope(
+        request,
+        container,
+        flow_id=flow_id,
+        require_flow_lookup_without_scope=require_flow_lookup_without_scope,
+        scope_filter_getter=get_scope_filter,
+    )
+
+
+def _coerce_input_type(value: str | None) -> FlowInputType | str | None:
+    if value is None:
+        return None
+    try:
+        return FlowInputType(value)
+    except ValueError:
+        return value
+
+
+def _coerce_input_source(value: str | None) -> FlowInputSource | str | None:
+    if value is None:
+        return None
+    try:
+        return FlowInputSource(value)
+    except ValueError:
+        return value
 
 
 @router.post("/", response_model=FlowPublic, status_code=status.HTTP_201_CREATED)
@@ -541,8 +574,30 @@ Speech-to-text consumer sequence:
 3. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs
     """,
     responses={
-        403: {"description": "Forbidden: API key scope does not match flow space."},
-        404: {"description": "Flow not found in tenant scope."},
+        400: error_response(
+            description=(
+                "Flow cannot be run in its current state or request payload is invalid. "
+                "Representative machine-readable codes include: flow_not_published, "
+                "flow_run_input_payload_too_large, flow_run_concurrency_limit_reached, "
+                "flow_input_required_field_missing, flow_input_invalid_number."
+            ),
+            message="Flow must be published before creating runs.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="flow_not_published",
+        ),
+        403: error_response(
+            description="Forbidden: API key scope does not match flow space.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow not found in tenant scope.",
+            message="Flow not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
     },
 )
 async def create_flow_run(
@@ -552,7 +607,12 @@ async def create_flow_run(
     background_tasks: BackgroundTasks,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await _enforce_flow_scope(request, container, flow_id=id)
+    await enforce_flow_scope(
+        request,
+        container,
+        flow_id=id,
+        scope_filter_getter=get_scope_filter,
+    )
     assembler = FlowAssembler()
     run_service = container.flow_run_service()
     user = container.user()
@@ -597,8 +657,19 @@ Use this endpoint before upload/run to discover:
 - recommended run payload shape for API consumers
     """,
     responses={
-        403: {"description": "Forbidden: API key scope does not match flow space."},
-        404: {"description": "Flow not found in tenant scope."},
+        403: error_response(
+            description="Forbidden: API key scope does not match flow space.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow not found in tenant scope.",
+            message="Flow not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
     },
 )
 async def get_flow_input_policy(
@@ -606,12 +677,17 @@ async def get_flow_input_policy(
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await _enforce_flow_scope(request, container, flow_id=id)
+    await enforce_flow_scope(
+        request,
+        container,
+        flow_id=id,
+        scope_filter_getter=get_scope_filter,
+    )
     policy = await _flow_upload_service(container).get_input_policy(flow_id=id)
     return FlowInputPolicyPublic(
         flow_id=id,
-        input_type=policy.input_type,
-        input_source=policy.input_source,
+        input_type=_coerce_input_type(policy.input_type),
+        input_source=_coerce_input_source(policy.input_source),
         accepts_file_upload=policy.accepts_file_upload,
         accepted_mimetypes=policy.accepted_mimetypes,
         max_file_size_bytes=policy.max_file_size_bytes,
@@ -633,13 +709,45 @@ generic file routes directly. Validation is based on the first `flow_input` step
 - accepted input types: audio/document/image/file
 - allowed mimetypes
 - effective tenant flow size limits
+- multipart form field name: `upload_file`
     """,
     responses={
-        400: {"description": "Flow does not accept file upload for its flow_input step."},
-        403: {"description": "Forbidden: API key scope does not match flow space."},
-        404: {"description": "Flow not found in tenant scope."},
-        413: {"description": "Uploaded file exceeds effective flow max size limit."},
-        415: {"description": "Unsupported media type for this flow input policy."},
+        400: error_response(
+            description=(
+                "Upload request is invalid for this flow input policy. "
+                "Representative machine-readable codes include: "
+                "flow_input_upload_not_supported, flow_input_file_empty, "
+                "flow_input_policy_missing_limit."
+            ),
+            message="Flow input policy does not allow file upload.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="flow_input_upload_not_supported",
+        ),
+        403: error_response(
+            description="Forbidden: API key scope does not match flow space.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow not found in tenant scope.",
+            message="Flow not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+        413: error_response(
+            description="Uploaded file exceeds effective flow max size limit.",
+            message="Uploaded file exceeds effective flow max size limit.",
+            intric_error_code=ErrorCodes.FILE_TOO_LARGE,
+            code="file_too_large",
+        ),
+        415: error_response(
+            description="Unsupported media type for this flow input policy.",
+            message="Unsupported media type for this flow input policy.",
+            intric_error_code=ErrorCodes.FILE_NOT_SUPPORTED,
+            code="unsupported_media_type",
+        ),
     },
 )
 async def upload_flow_file(
@@ -648,7 +756,12 @@ async def upload_flow_file(
     upload_file: UploadFile,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await _enforce_flow_scope(request, container, flow_id=id)
+    await enforce_flow_scope(
+        request,
+        container,
+        flow_id=id,
+        scope_filter_getter=get_scope_filter,
+    )
     file = await _flow_upload_service(container).upload_file_for_flow(
         flow_id=id,
         upload_file=upload_file,
@@ -678,15 +791,26 @@ async def upload_flow_file(
     "/{id}/runs/",
     response_model=PaginatedResponse[FlowRunPublic],
     status_code=status.HTTP_200_OK,
-    summary="List flow runs",
+    summary="List flow runs (flow-first)",
     description="""
 List runs for a specific flow.
 
 This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
     """,
     responses={
-        403: {"description": "Forbidden: API key scope does not match flow space."},
-        404: {"description": "Flow not found in tenant scope."},
+        403: error_response(
+            description="Forbidden: API key scope does not match flow space.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow not found in tenant scope.",
+            message="Flow not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
     },
 )
 async def list_flow_runs_alias(
@@ -696,7 +820,12 @@ async def list_flow_runs_alias(
     offset: int = Query(default=0, ge=0),
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await _enforce_flow_scope(request, container, flow_id=id)
+    await _enforce_flow_scope(
+        request,
+        container,
+        flow_id=id,
+        require_flow_lookup_without_scope=True,
+    )
     runs = await container.flow_run_service().list_runs(
         flow_id=id,
         limit=limit,
@@ -710,15 +839,26 @@ async def list_flow_runs_alias(
     "/{id}/runs/{run_id}/",
     response_model=FlowRunPublic,
     status_code=status.HTTP_200_OK,
-    summary="Get flow run",
+    summary="Get flow run (flow-first)",
     description="""
 Get one run for a flow using flow-first routing.
 
 Use this endpoint for run status and top-level output payload when building consumer apps.
     """,
     responses={
-        403: {"description": "Forbidden: API key scope does not match flow space."},
-        404: {"description": "Run not found for this flow and tenant."},
+        403: error_response(
+            description="Forbidden: API key scope does not match flow space.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Run not found for this flow and tenant.",
+            message="Flow run not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
     },
 )
 async def get_flow_run_alias(
@@ -727,16 +867,175 @@ async def get_flow_run_alias(
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await _enforce_flow_scope(request, container, flow_id=id)
+    await enforce_flow_scope(
+        request,
+        container,
+        flow_id=id,
+        scope_filter_getter=get_scope_filter,
+    )
     run = await container.flow_run_service().get_run(run_id=run_id, flow_id=id)
     return FlowAssembler().to_run_public(run)
+
+
+@router.post(
+    "/{id}/runs/{run_id}/cancel/",
+    response_model=FlowRunPublic,
+    status_code=status.HTTP_200_OK,
+    summary="Cancel flow run (flow-first)",
+    description="""
+Cancel a flow run if it is not already terminal.
+
+This is the canonical run control endpoint for flow consumers.
+    """,
+    responses={
+        403: error_response(
+            description="Forbidden: API key scope does not match flow space.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Run not found for this flow and tenant.",
+            message="Flow run not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
+)
+async def cancel_flow_run_alias(
+    id: UUID,
+    run_id: UUID,
+    request: Request,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await _enforce_flow_scope(
+        request,
+        container,
+        flow_id=id,
+        require_flow_lookup_without_scope=True,
+    )
+    user = container.user()
+    run_service = container.flow_run_service()
+    await run_service.get_run(run_id=run_id, flow_id=id)
+    run = await run_service.cancel_run(run_id=run_id)
+
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.FLOW_RUN_CANCELLED,
+        entity_type=EntityType.FLOW_RUN,
+        entity_id=run.id,
+        description=f"Cancelled flow run {run.id}",
+        metadata=AuditMetadata.standard(actor=user, target=run),
+    )
+    return FlowAssembler().to_run_public(run)
+
+
+@router.post(
+    "/{id}/runs/{run_id}/redispatch/",
+    response_model=FlowRunRedispatchResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Redispatch stale queued run (flow-first)",
+    description="""
+Attempt to redispatch a stale queued run.
+
+Returns `redispatched_count` indicating whether dispatch was re-triggered.
+    """,
+    responses={
+        403: error_response(
+            description="Forbidden: API key scope does not match flow space.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Run not found for this flow and tenant.",
+            message="Flow run not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
+)
+async def redispatch_flow_run_alias(
+    id: UUID,
+    run_id: UUID,
+    request: Request,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await _enforce_flow_scope(request, container, flow_id=id)
+    user = container.user()
+    run_service = container.flow_run_service()
+    run = await run_service.get_run(run_id=run_id, flow_id=id)
+
+    redispatched = await run_service.redispatch_stale_queued_runs(
+        flow_id=id,
+        run_id=run.id,
+        limit=1,
+        execution_backend=container.flow_execution_backend(),
+    )
+    refreshed = await run_service.get_run(run_id=run_id, flow_id=id)
+
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.FLOW_RUN_REDISPATCHED,
+        entity_type=EntityType.FLOW_RUN,
+        entity_id=refreshed.id,
+        description=f"Redispatch requested for flow run {refreshed.id} (dispatch_count={redispatched})",
+        metadata=AuditMetadata.standard(actor=user, target=refreshed),
+    )
+    return {
+        "run": FlowAssembler().to_run_public(refreshed),
+        "redispatched_count": redispatched,
+    }
+
+
+@router.get(
+    "/{id}/runs/{run_id}/evidence/",
+    response_model=FlowRunEvidenceResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get flow run evidence export (flow-first)",
+    description="""
+Get redacted debug/evidence payload for one flow run.
+
+Prefer `.../steps/` for consumer UIs unless debug-export fields are required.
+    """,
+    responses={
+        403: error_response(
+            description="Forbidden: API key scope does not match flow space.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Run not found for this flow and tenant.",
+            message="Flow run not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
+)
+async def get_flow_run_evidence_alias(
+    id: UUID,
+    run_id: UUID,
+    request: Request,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await _enforce_flow_scope(request, container, flow_id=id)
+    run_service = container.flow_run_service()
+    await run_service.get_run(run_id=run_id, flow_id=id)
+    evidence = await run_service.get_evidence(run_id=run_id)
+    return FlowRunEvidenceResponse(**evidence)
 
 
 @router.get(
     "/{id}/runs/{run_id}/steps/",
     response_model=list[FlowRunStepPublic],
     status_code=status.HTTP_200_OK,
-    summary="List flow run step outputs",
+    summary="List flow run step outputs (flow-first)",
     description="""
 Return ordered step-level execution results for one flow run.
 
@@ -744,8 +1043,19 @@ Designed for consumer UIs that need to inspect intermediate outputs, diagnostics
 without relying on debug-export internals.
     """,
     responses={
-        403: {"description": "Forbidden: API key scope does not match flow space."},
-        404: {"description": "Run not found for this flow and tenant."},
+        403: error_response(
+            description="Forbidden: API key scope does not match flow space.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Run not found for this flow and tenant.",
+            message="Flow run not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
     },
 )
 async def list_flow_run_steps(
@@ -754,7 +1064,12 @@ async def list_flow_run_steps(
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await _enforce_flow_scope(request, container, flow_id=id)
+    await enforce_flow_scope(
+        request,
+        container,
+        flow_id=id,
+        scope_filter_getter=get_scope_filter,
+    )
     step_results = await container.flow_run_service().list_step_results(
         run_id=run_id,
         flow_id=id,

@@ -7,6 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from intric.flows.flow import FlowRunStatus, FlowStepResultStatus
 from intric.main.models import NOT_PROVIDED, NotProvided, partial_model
 
 
@@ -47,23 +48,69 @@ class FlowMcpPolicy(str, Enum):
 
 
 class FlowStepCreateRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "assistant_id": "00000000-0000-0000-0000-000000000001",
+                "step_order": 1,
+                "user_description": "Transcribe incoming audio",
+                "input_source": "flow_input",
+                "input_type": "audio",
+                "output_mode": "transcribe_only",
+                "output_type": "text",
+                "mcp_policy": "inherit",
+            }
+        }
+    )
+
     assistant_id: UUID
     step_order: int
     user_description: str | None = None
-    input_source: str
-    input_type: str
+    input_source: str = Field(
+        json_schema_extra={"enum": [item.value for item in FlowInputSource]}
+    )
+    input_type: str = Field(
+        json_schema_extra={"enum": [item.value for item in FlowInputType]}
+    )
     input_contract: dict[str, Any] | None = None
-    output_mode: str
-    output_type: str
+    output_mode: str = Field(
+        json_schema_extra={"enum": [item.value for item in FlowOutputMode]}
+    )
+    output_type: str = Field(
+        json_schema_extra={"enum": [item.value for item in FlowOutputType]}
+    )
     output_contract: dict[str, Any] | None = None
     input_bindings: dict[str, Any] | None = None
     output_classification_override: int | None = None
-    mcp_policy: str
+    mcp_policy: str = Field(
+        json_schema_extra={"enum": [item.value for item in FlowMcpPolicy]}
+    )
     input_config: dict[str, Any] | None = None
     output_config: dict[str, Any] | None = None
 
 
 class FlowCreateRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "space_id": "00000000-0000-0000-0000-000000000001",
+                "name": "Municipality Intake Transcription",
+                "description": "Transcribe and summarize citizen audio",
+                "steps": [
+                    {
+                        "assistant_id": "00000000-0000-0000-0000-000000000002",
+                        "step_order": 1,
+                        "input_source": "flow_input",
+                        "input_type": "audio",
+                        "output_mode": "transcribe_only",
+                        "output_type": "text",
+                        "mcp_policy": "inherit",
+                    }
+                ],
+            }
+        }
+    )
+
     space_id: UUID
     name: str
     description: str | None = None
@@ -88,15 +135,15 @@ class FlowStepPublic(BaseModel):
     assistant_id: UUID
     step_order: int
     user_description: str | None = None
-    input_source: str
-    input_type: str
+    input_source: FlowInputSource
+    input_type: FlowInputType
     input_contract: dict[str, Any] | None = None
-    output_mode: str
-    output_type: str
+    output_mode: FlowOutputMode
+    output_type: FlowOutputType
     output_contract: dict[str, Any] | None = None
     input_bindings: dict[str, Any] | None = None
     output_classification_override: int | None = None
-    mcp_policy: str
+    mcp_policy: FlowMcpPolicy
     input_config: dict[str, Any] | None = None
     output_config: dict[str, Any] | None = None
     created_at: datetime | None = None
@@ -106,7 +153,7 @@ class FlowStepPublic(BaseModel):
 class FlowSparsePublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID | None = None
+    id: UUID
     tenant_id: UUID
     space_id: UUID
     name: str
@@ -125,11 +172,26 @@ class FlowPublic(FlowSparsePublic):
 
 
 class FlowRunCreateRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "file_ids": ["00000000-0000-0000-0000-000000000003"],
+                "input_payload_json": {
+                    "text": "optional context for downstream prompt steps"
+                },
+            }
+        }
+    )
+
     input_payload_json: dict[str, Any] | None = None
     file_ids: list[UUID] | None = None
 
 
 class FlowAssistantCreateRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"name": "Flow Step Assistant"}}
+    )
+
     name: str
 
 
@@ -141,7 +203,7 @@ class FlowRunPublic(BaseModel):
     flow_version: int
     user_id: UUID | None = None
     tenant_id: UUID
-    status: str
+    status: FlowRunStatus
     cancelled_at: datetime | None = None
     input_payload_json: dict[str, Any] | None = None
     output_payload_json: dict[str, Any] | None = None
@@ -152,9 +214,27 @@ class FlowRunPublic(BaseModel):
 
 
 class FlowInputPolicyPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "flow_id": "00000000-0000-0000-0000-000000000001",
+                "input_type": "audio",
+                "input_source": "flow_input",
+                "accepts_file_upload": True,
+                "accepted_mimetypes": ["audio/wav", "audio/mpeg"],
+                "max_file_size_bytes": 52428800,
+                "max_files_per_run": 10,
+                "recommended_run_payload": {
+                    "file_ids": ["00000000-0000-0000-0000-000000000002"]
+                },
+            }
+        }
+    )
+
     flow_id: UUID
-    input_type: str | None = None
-    input_source: str | None = None
+    # Keep enum docs for known values, but allow passthrough strings for forward/legacy compatibility.
+    input_type: FlowInputType | str | None = None
+    input_source: FlowInputSource | str | None = None
     accepts_file_upload: bool
     accepted_mimetypes: list[str] = Field(default_factory=list)
     max_file_size_bytes: int | None = None
@@ -169,7 +249,7 @@ class FlowRunStepPublic(BaseModel):
     step_id: UUID | None = None
     step_order: int
     assistant_id: UUID | None = None
-    status: str
+    status: FlowStepResultStatus
     input_payload_json: dict[str, Any] | None = None
     output_payload_json: dict[str, Any] | None = None
     num_tokens_input: int | None = None

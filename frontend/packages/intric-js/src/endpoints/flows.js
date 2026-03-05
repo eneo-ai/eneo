@@ -6,6 +6,18 @@
 export function initFlows(client) {
   /** @param {string} path @param {object} options */
   const _fetch = (path, options) => /** @type {any} */ (client).fetch(path, options);
+  /**
+   * @param {{flowId?: string, flow_id?: string}} run
+   * @param {string} operation
+   * @returns {string}
+   */
+  const _requireFlowIdForRunRoute = (run, operation) => {
+    const flowId = run.flowId ?? run.flow_id;
+    if (!flowId) {
+      throw new Error(`Flow run ${operation} requires flowId.`);
+    }
+    return flowId;
+  };
 
   return {
     /**
@@ -117,15 +129,16 @@ export function initFlows(client) {
     files: {
       /**
        * Upload a file scoped to a specific flow.
-       * @param {{id: string, file: File}} params
+       * @param {{id: string, file: File, signal?: AbortSignal}} params
        * @throws {IntricError}
        */
-      upload: async ({ id, file }) => {
+      upload: async ({ id, file, signal }) => {
         const formData = new FormData();
         formData.append("upload_file", file);
         return _fetch(`/api/v1/flows/${id}/files/`, {
           method: "post",
-          requestBody: { "multipart/form-data": formData }
+          requestBody: { "multipart/form-data": formData },
+          signal
         });
       }
     },
@@ -218,16 +231,14 @@ export function initFlows(client) {
 
       /**
        * Get a specific flow run
-       * @param {{id: string, flowId?: string}} run
+       * @param {{id: string, flowId: string, flow_id?: string}} run
        * @throws {IntricError}
        */
       get: async (run) => {
-        if (run.flowId) {
-          return _fetch(`/api/v1/flows/${run.flowId}/runs/${run.id}/`, {
-            method: "get"
-          });
-        }
-        return _fetch(`/api/v1/flow-runs/${run.id}/`, { method: "get" });
+        const flowId = _requireFlowIdForRunRoute(run, "get");
+        return _fetch(`/api/v1/flows/${flowId}/runs/${run.id}/`, {
+          method: "get"
+        });
       },
 
       /**
@@ -243,30 +254,39 @@ export function initFlows(client) {
 
       /**
        * Cancel a flow run
-       * @param {{id: string}} run
+       * @param {{id: string, flowId: string, flow_id?: string}} run
        * @throws {IntricError}
        */
       cancel: async (run) => {
-        return _fetch(`/api/v1/flow-runs/${run.id}/cancel/`, { method: "post" });
+        const flowId = _requireFlowIdForRunRoute(run, "cancel");
+        return _fetch(`/api/v1/flows/${flowId}/runs/${run.id}/cancel/`, {
+          method: "post"
+        });
       },
 
       /**
        * Redispatch a stale queued flow run
-       * @param {{id: string}} run
+       * @param {{id: string, flowId: string, flow_id?: string}} run
        * @returns {Promise<import('../types/resources').FlowRunRedispatchResult>}
        * @throws {IntricError}
        */
       redispatch: async (run) => {
-        return _fetch(`/api/v1/flow-runs/${run.id}/redispatch/`, { method: "post" });
+        const flowId = _requireFlowIdForRunRoute(run, "redispatch");
+        return _fetch(`/api/v1/flows/${flowId}/runs/${run.id}/redispatch/`, {
+          method: "post"
+        });
       },
 
       /**
        * Get evidence for a flow run
-       * @param {{id: string}} run
+       * @param {{id: string, flowId: string, flow_id?: string}} run
        * @throws {IntricError}
        */
       evidence: async (run) => {
-        return _fetch(`/api/v1/flow-runs/${run.id}/evidence/`, { method: "get" });
+        const flowId = _requireFlowIdForRunRoute(run, "evidence");
+        return _fetch(`/api/v1/flows/${flowId}/runs/${run.id}/evidence/`, {
+          method: "get"
+        });
       }
     }
   };

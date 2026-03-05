@@ -17,6 +17,7 @@
   import FlowRunKnowledgeTrace from "./FlowRunKnowledgeTrace.svelte";
 
   export let runId: string;
+  export let flowId: string;
   export let intric: Intric;
   export let runStatus: string;
 
@@ -48,7 +49,7 @@
 
   onMount(async () => {
     try {
-      evidence = await intric.flows.runs.evidence({ id: runId });
+      evidence = await intric.flows.runs.evidence({ id: runId, flowId });
     } catch (e) {
       console.error("Error loading evidence", e);
       loadError = true;
@@ -71,7 +72,7 @@
 
   async function refetchEvidence() {
     try {
-      evidence = await intric.flows.runs.evidence({ id: runId });
+      evidence = await intric.flows.runs.evidence({ id: runId, flowId });
     } catch { /* ignore — already have stale data */ }
   }
 

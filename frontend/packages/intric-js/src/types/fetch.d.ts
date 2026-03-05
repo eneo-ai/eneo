@@ -51,22 +51,25 @@ type IntricFetchFunction = <
   endpoint: Endpoint,
   args: IntricParams<Endpoint, Method> extends never
     ? IntricRequestBody<Endpoint, Method> extends never
-      ? { method: Method; params?: never; requestBody?: never }
+      ? { method: Method; params?: never; requestBody?: never; signal?: AbortSignal }
       : {
           method: Method;
           params?: never;
           requestBody: IntricRequestBody<Endpoint, Method>;
+          signal?: AbortSignal;
         }
     : IntricRequestBody<Endpoint, Method> extends never
       ? {
           method: Method;
           params: IntricParams<Endpoint, Method>;
           requestBody?: never;
+          signal?: AbortSignal;
         }
       : {
           method: Method;
           params: IntricParams<Endpoint, Method>;
           requestBody: IntricRequestBody<Endpoint, Method>;
+          signal?: AbortSignal;
         }
 ) => Promise<SuccessResponse<Responses<Endpoint, Method>>>;
 

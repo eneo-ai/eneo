@@ -127,7 +127,7 @@
   async function redispatchRun(runId: string) {
     redispatchingRunId = runId;
     try {
-      const result = await intric.flows.runs.redispatch({ id: runId });
+      const result = await intric.flows.runs.redispatch({ id: runId, flowId: flow.id });
       if (getRedispatchToastKind(result?.redispatched_count) === "success") {
         toast.success(m.flow_run_redispatch_requested());
       } else {
@@ -154,7 +154,7 @@
     pendingCancelRunId = null;
     cancellingRunId = runId;
     try {
-      await intric.flows.runs.cancel({ id: runId });
+      await intric.flows.runs.cancel({ id: runId, flowId: flow.id });
       toast.success(m.flow_run_cancel_requested());
       await loadRuns();
     } catch (error) {
@@ -341,7 +341,7 @@
               {#if selectedRunId === run.id}
                 <tr>
                   <td id={getEvidenceRowId(run.id)} colspan="5" class="border-default border-b bg-hover-dimmer/50 px-4 py-4">
-                    <FlowRunEvidence runId={run.id} {intric} runStatus={run.status} />
+                    <FlowRunEvidence runId={run.id} flowId={flow.id} {intric} runStatus={run.status} />
                   </td>
                 </tr>
               {/if}

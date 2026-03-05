@@ -12,28 +12,34 @@ from fastapi import HTTPException
 from fastapi import UploadFile
 
 from intric.authentication.auth_dependencies import ScopeFilter
+from intric.audit.domain.action_types import ActionType
 from intric.flows.flow import Flow, FlowRun, FlowRunStatus, FlowStep, FlowVersion
 from intric.flows.api.flow_models import (
     FlowAssistantCreateRequest,
     FlowCreateRequest,
+    FlowInputSource,
+    FlowInputType,
     FlowRunCreateRequest,
     FlowStepCreateRequest,
 )
 from intric.flows.api.flow_router import (
+    cancel_flow_run_alias,
     create_flow,
     create_flow_assistant,
     create_flow_run,
+    get_flow_run_evidence_alias,
     get_flow_input_policy,
     get_flow_run_alias,
     get_flow_graph,
     list_flow_run_steps,
     list_flow_runs_alias,
+    redispatch_flow_run_alias,
     upload_flow_file,
     update_flow_assistant,
 )
 from intric.settings.settings import FlowInputLimitsPublic
 from intric.assistants.api.assistant_models import AssistantUpdatePublic
-from intric.main.exceptions import BadRequestException
+from intric.main.exceptions import BadRequestException, NotFoundException
 
 
 def _flow_step(step_id, step_order: int) -> FlowStep:
@@ -286,7 +292,10 @@ async def test_dispatch_flow_run_after_commit_marks_failed_on_dispatch_error(mon
     assert kwargs["run_id"] == run_id
     assert kwargs["tenant_id"] == tenant_id
     assert kwargs["status"] == FlowRunStatus.FAILED
-    assert kwargs["error_message"].startswith("Flow dispatch failed:")
+    assert kwargs["error_message"] == (
+        "flow_dispatch_failed: Flow dispatch failed before execution started. "
+        "Retry creating a new run."
+    )
 
 
 @pytest.mark.asyncio
@@ -452,13 +461,104 @@ async def test_get_flow_input_policy_for_audio_step_returns_audio_mime_and_limit
         container=container,
     )
 
-    assert policy.input_type == "audio"
+    assert policy.input_type == FlowInputType.AUDIO
+    assert policy.input_source == FlowInputSource.FLOW_INPUT
     assert policy.accepts_file_upload is True
     assert policy.max_file_size_bytes == 25_000_000
     assert policy.max_files_per_run == 10
     assert policy.recommended_run_payload is not None
     assert policy.recommended_run_payload["file_ids"] == ["<file-id-uuid>"]
     assert "audio/mpeg" in policy.accepted_mimetypes
+
+
+@pytest.mark.asyncio
+async def test_get_flow_input_policy_tolerates_unexpected_policy_enums(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+
+    class _BadPolicyService:
+        async def get_input_policy(self, *, flow_id):
+            return SimpleNamespace(
+                flow_id=flow_id,
+                input_type="unexpected",
+                input_source="flow_input",
+                accepts_file_upload=False,
+                accepted_mimetypes=[],
+                max_file_size_bytes=None,
+                max_files_per_run=None,
+                recommended_run_payload=None,
+            )
+
+    router_module = __import__("intric.flows.api.flow_router", fromlist=["get_scope_filter"])
+    monkeypatch.setattr(
+        router_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    monkeypatch.setattr(
+        router_module,
+        "_flow_upload_service",
+        lambda _container: _BadPolicyService(),
+    )
+    monkeypatch.setattr(
+        router_module,
+        "enforce_flow_scope",
+        AsyncMock(),
+    )
+
+    policy = await get_flow_input_policy(
+        id=flow_id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert policy.input_type == "unexpected"
+    assert policy.input_source == FlowInputSource.FLOW_INPUT
+
+
+@pytest.mark.asyncio
+async def test_get_flow_input_policy_tolerates_unexpected_input_source(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+
+    class _BadSourcePolicyService:
+        async def get_input_policy(self, *, flow_id):
+            return SimpleNamespace(
+                flow_id=flow_id,
+                input_type="audio",
+                input_source="unexpected_source",
+                accepts_file_upload=True,
+                accepted_mimetypes=["audio/mpeg"],
+                max_file_size_bytes=25_000_000,
+                max_files_per_run=10,
+                recommended_run_payload={"file_ids": ["<file-id-uuid>"]},
+            )
+
+    router_module = __import__("intric.flows.api.flow_router", fromlist=["get_scope_filter"])
+    monkeypatch.setattr(
+        router_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    monkeypatch.setattr(
+        router_module,
+        "_flow_upload_service",
+        lambda _container: _BadSourcePolicyService(),
+    )
+    monkeypatch.setattr(
+        router_module,
+        "enforce_flow_scope",
+        AsyncMock(),
+    )
+
+    policy = await get_flow_input_policy(
+        id=flow_id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert policy.input_type == FlowInputType.AUDIO
+    assert policy.input_source == "unexpected_source"
 
 
 @pytest.mark.asyncio
@@ -606,9 +706,337 @@ async def test_flow_run_alias_endpoints_delegate_to_run_service(monkeypatch):
     assert list_response["count"] == 1
     assert get_response.id == run.id
     assert step_response == []
+    flow_service.get_flow.assert_awaited_once_with(flow_id)
     run_service.list_runs.assert_awaited_once_with(flow_id=flow_id, limit=20, offset=2)
     run_service.get_run.assert_awaited_once_with(run_id=run.id, flow_id=flow_id)
     run_service.list_step_results.assert_awaited_once_with(run_id=run.id, flow_id=flow_id)
+
+
+@pytest.mark.asyncio
+async def test_flow_run_alias_list_raises_not_found_when_flow_missing_without_scope_filter(
+    monkeypatch,
+):
+    container = MagicMock()
+    flow_id = uuid4()
+    run_service = AsyncMock()
+    container.flow_run_service.return_value = run_service
+    flow_service = AsyncMock()
+    flow_service.get_flow.side_effect = NotFoundException("Flow not found.")
+    container.flow_service.return_value = flow_service
+
+    router_module = __import__("intric.flows.api.flow_router", fromlist=["get_scope_filter"])
+    monkeypatch.setattr(
+        router_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    with pytest.raises(NotFoundException):
+        await list_flow_runs_alias(
+            id=flow_id,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            limit=20,
+            offset=0,
+            container=container,
+        )
+
+    run_service.list_runs.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_flow_run_alias_cancel_logs_audit_entry(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
+    cancelled_run = run.model_copy(update={"status": FlowRunStatus.CANCELLED})
+    run_service = AsyncMock()
+    run_service.get_run.return_value = run
+    run_service.cancel_run.return_value = cancelled_run
+    container.flow_run_service.return_value = run_service
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+    container.user.return_value = user
+    container.audit_service.return_value = AsyncMock()
+
+    router_module = __import__("intric.flows.api.flow_router", fromlist=["get_scope_filter"])
+    monkeypatch.setattr(
+        router_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    response = await cancel_flow_run_alias(
+        id=flow_id,
+        run_id=run.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert response.id == cancelled_run.id
+    run_service.get_run.assert_awaited_once_with(run_id=run.id, flow_id=flow_id)
+    run_service.cancel_run.assert_awaited_once_with(run_id=run.id)
+    kwargs = container.audit_service.return_value.log_async.await_args.kwargs
+    assert kwargs["action"] == ActionType.FLOW_RUN_CANCELLED
+    assert kwargs["entity_id"] == cancelled_run.id
+
+
+@pytest.mark.asyncio
+async def test_flow_run_alias_redispatch_uses_run_scoped_dispatch_and_audits(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
+    run_service = AsyncMock()
+    run_service.get_run.side_effect = [run, run]
+    run_service.redispatch_stale_queued_runs.return_value = 1
+    container.flow_run_service.return_value = run_service
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+    container.user.return_value = user
+    container.audit_service.return_value = AsyncMock()
+    backend = MagicMock()
+    container.flow_execution_backend.return_value = backend
+
+    router_module = __import__("intric.flows.api.flow_router", fromlist=["get_scope_filter"])
+    monkeypatch.setattr(
+        router_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    response = await redispatch_flow_run_alias(
+        id=flow_id,
+        run_id=run.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert response["run"].id == run.id
+    assert response["redispatched_count"] == 1
+    run_service.redispatch_stale_queued_runs.assert_awaited_once_with(
+        flow_id=flow_id,
+        run_id=run.id,
+        limit=1,
+        execution_backend=backend,
+    )
+    kwargs = container.audit_service.return_value.log_async.await_args.kwargs
+    assert kwargs["action"] == ActionType.FLOW_RUN_REDISPATCHED
+    assert kwargs["entity_id"] == run.id
+
+
+@pytest.mark.asyncio
+async def test_flow_run_alias_redispatch_returns_zero_when_nothing_redispatched(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
+    run_service = AsyncMock()
+    run_service.get_run.side_effect = [run, run]
+    run_service.redispatch_stale_queued_runs.return_value = 0
+    container.flow_run_service.return_value = run_service
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+    container.user.return_value = user
+    container.audit_service.return_value = AsyncMock()
+    container.flow_execution_backend.return_value = MagicMock()
+
+    router_module = __import__("intric.flows.api.flow_router", fromlist=["get_scope_filter"])
+    monkeypatch.setattr(
+        router_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    response = await redispatch_flow_run_alias(
+        id=flow_id,
+        run_id=run.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert response["run"].id == run.id
+    assert response["redispatched_count"] == 0
+    kwargs = container.audit_service.return_value.log_async.await_args.kwargs
+    assert kwargs["action"] == ActionType.FLOW_RUN_REDISPATCHED
+    assert "dispatch_count=0" in kwargs["description"]
+
+
+@pytest.mark.asyncio
+async def test_flow_run_alias_redispatch_propagates_dispatch_failure(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    run = _run(flow_id=flow_id, tenant_id=uuid4())
+    run_service = AsyncMock()
+    run_service.get_run.return_value = run
+    run_service.redispatch_stale_queued_runs.side_effect = RuntimeError("broker down")
+    container.flow_run_service.return_value = run_service
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+    container.flow_execution_backend.return_value = MagicMock()
+    container.audit_service.return_value = AsyncMock()
+
+    router_module = __import__("intric.flows.api.flow_router", fromlist=["get_scope_filter"])
+    monkeypatch.setattr(
+        router_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    with pytest.raises(RuntimeError, match="broker down"):
+        await redispatch_flow_run_alias(
+            id=flow_id,
+            run_id=run.id,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            container=container,
+        )
+
+    container.audit_service.return_value.log_async.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_flow_run_alias_evidence_delegates_to_run_service(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    run = _run(flow_id=flow_id, tenant_id=uuid4())
+    evidence = {
+        "run": run.model_dump(mode="json"),
+        "definition_snapshot": {"steps": []},
+        "step_results": [],
+        "step_attempts": [],
+        "debug_export": {
+            "schema_version": "eneo.flow.debug-export.v1",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "run": {
+                "run_id": str(run.id),
+                "flow_id": str(run.flow_id),
+                "flow_version": run.flow_version,
+                "status": run.status.value,
+            },
+            "definition": {
+                "flow_id": str(run.flow_id),
+                "version": 1,
+                "checksum": "abc",
+                "steps_count": 0,
+            },
+            "definition_snapshot": {"steps": []},
+            "steps": [],
+            "security": {
+                "redaction_applied": True,
+                "classification_field": "output_classification_override",
+                "mcp_policy_field": "mcp_policy",
+            },
+        },
+    }
+    run_service = AsyncMock()
+    run_service.get_run.return_value = run
+    run_service.get_evidence.return_value = evidence
+    container.flow_run_service.return_value = run_service
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+
+    router_module = __import__("intric.flows.api.flow_router", fromlist=["get_scope_filter"])
+    monkeypatch.setattr(
+        router_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    response = await get_flow_run_evidence_alias(
+        id=flow_id,
+        run_id=run.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert response.run["id"] == str(run.id)
+    run_service.get_run.assert_awaited_once_with(run_id=run.id, flow_id=flow_id)
+    run_service.get_evidence.assert_awaited_once_with(run_id=run.id)
+
+
+@pytest.mark.asyncio
+async def test_flow_run_alias_control_endpoints_reject_scope_mismatch(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    run = _run(flow_id=flow_id, tenant_id=uuid4())
+    run_service = AsyncMock()
+    run_service.get_run.return_value = run
+    run_service.cancel_run.return_value = run
+    run_service.get_evidence.return_value = {
+        "run": run.model_dump(mode="json"),
+        "definition_snapshot": {"steps": []},
+        "step_results": [],
+        "step_attempts": [],
+        "debug_export": {
+            "schema_version": "eneo.flow.debug-export.v1",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "run": {
+                "run_id": str(run.id),
+                "flow_id": str(run.flow_id),
+                "flow_version": run.flow_version,
+                "status": run.status.value,
+            },
+            "definition": {
+                "flow_id": str(run.flow_id),
+                "version": 1,
+                "checksum": "abc",
+                "steps_count": 0,
+            },
+            "definition_snapshot": {"steps": []},
+            "steps": [],
+            "security": {
+                "redaction_applied": True,
+                "classification_field": "output_classification_override",
+                "mcp_policy_field": "mcp_policy",
+            },
+        },
+    }
+    container.flow_run_service.return_value = run_service
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+    container.flow_execution_backend.return_value = MagicMock()
+    container.user.return_value = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    container.audit_service.return_value = AsyncMock()
+
+    router_module = __import__("intric.flows.api.flow_router", fromlist=["get_scope_filter"])
+    monkeypatch.setattr(
+        router_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=uuid4()),
+    )
+
+    request = SimpleNamespace(state=SimpleNamespace())
+    with pytest.raises(HTTPException):
+        await cancel_flow_run_alias(
+            id=flow_id,
+            run_id=run.id,
+            request=request,
+            container=container,
+        )
+    with pytest.raises(HTTPException):
+        await redispatch_flow_run_alias(
+            id=flow_id,
+            run_id=run.id,
+            request=request,
+            container=container,
+        )
+    with pytest.raises(HTTPException):
+        await get_flow_run_evidence_alias(
+            id=flow_id,
+            run_id=run.id,
+            request=request,
+            container=container,
+        )
+
+    run_service.cancel_run.assert_not_awaited()
+    run_service.redispatch_stale_queued_runs.assert_not_awaited()
+    run_service.get_evidence.assert_not_awaited()
 
 
 @pytest.mark.asyncio

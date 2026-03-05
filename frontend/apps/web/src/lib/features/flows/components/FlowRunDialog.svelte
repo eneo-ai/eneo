@@ -120,6 +120,7 @@
   let isUploading = false;
   let uploadError: string | null = null;
   let isDragging = false;
+  const FLOW_UPLOAD_TIMEOUT_MS = 120_000;
 
   function reuseLastInput() {
     if (lastInputPayload) {
@@ -181,6 +182,31 @@
     isDragging = false;
   }
 
+  async function uploadFileWithTimeout(file: File): Promise<UploadedFile> {
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        controller.abort();
+        reject(
+          new Error(
+            `Upload timed out after ${Math.round(FLOW_UPLOAD_TIMEOUT_MS / 1000)}s for ${file.name}.`
+          )
+        );
+      }, FLOW_UPLOAD_TIMEOUT_MS);
+    });
+    try {
+      const uploadPromise = intric.flows.files.upload({
+        id: flow.id,
+        file,
+        signal: controller.signal
+      });
+      return await Promise.race([uploadPromise, timeoutPromise]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  }
+
   async function uploadFiles(files: File[]) {
     isUploading = true;
     uploadError = null;
@@ -191,10 +217,29 @@
     }
     for (const file of files) {
       try {
-        const uploaded = await intric.flows.files.upload({ id: flow.id, file });
+        if (effectiveMaxFileSizeBytes !== null && file.size > effectiveMaxFileSizeBytes) {
+          uploadError = `${file.name}: ${m.flow_run_upload_max_size({ size: formatBytes(effectiveMaxFileSizeBytes) })}`;
+          continue;
+        }
+        const uploaded = await uploadFileWithTimeout(file);
         uploadedFiles = [...uploadedFiles, uploaded];
       } catch (e) {
-        uploadError = e instanceof IntricError ? e.getReadableMessage() : String(e);
+        if (e instanceof IntricError) {
+          const readable = e.getReadableMessage();
+          const status = e.status ? `status=${e.status}` : "status=unknown";
+          const code = e.code ? ` code=${e.code}` : "";
+          uploadError = `${readable} (${status}${code})`;
+          console.error("Flow file upload failed", {
+            status: e.status,
+            code: e.code,
+            stage: e.stage,
+            request: e.request,
+            response: e.response,
+          });
+        } else {
+          uploadError = String(e);
+          console.error("Flow file upload failed (non-IntricError)", e);
+        }
       }
     }
     isUploading = false;

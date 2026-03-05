@@ -35,7 +35,7 @@ export function createClient(args) {
         : {};
 
   return {
-    fetch: async (endpoint, { method, params, requestBody }) => {
+    fetch: async (endpoint, { method, params, requestBody, signal }) => {
       const url = parseUrl(baseUrl, endpoint, params);
       const payload = parsePayload(requestBody);
       const httpMethod = String(method).toUpperCase();
@@ -48,6 +48,7 @@ export function createClient(args) {
             ...payload.header
           },
           body: payload.body,
+          signal,
           credentials: "include" // Required for cookies (audit sessions, etc.)
         });
         /** @type {any} We need to cast this through any – we just got to hope for the correctness of the schema... */

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import re
 from typing import Any, cast
@@ -11,7 +11,6 @@ import sqlalchemy as sa
 
 from intric.database.tables.tenant_table import Tenants
 from intric.flows.flow import (
-    Flow,
     FlowRun,
     FlowRunStatus,
     FlowStep,
@@ -20,6 +19,7 @@ from intric.flows.flow import (
     JsonObject,
 )
 from intric.flows.execution_backend import FlowExecutionBackend
+from intric.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
 from intric.flows.flow_repo import FlowRepository
 from intric.flows.flow_run_repo import FlowRunRepository, PreseedStep
 from intric.flows.flow_version_repo import FlowVersionRepository
@@ -45,11 +45,6 @@ _SENSITIVE_FIELD_FRAGMENTS = (
 )
 _BEARER_TOKEN_PATTERN = re.compile(r"(?i)\bbearer\s+[a-z0-9._\-~+/]+=*")
 logger = get_logger(__name__)
-_RUN_FIELD_TYPE_LEGACY_NORMALIZATION = {
-    "string": "text",
-    "email": "text",
-    "textarea": "text",
-}
 
 
 def _is_sensitive_key(key: str | None) -> bool:
@@ -153,15 +148,19 @@ class FlowRunService:
     ) -> FlowRun:
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
         if flow.published_version is None:
-            raise BadRequestException("Flow must be published before a run can be created.")
+            raise BadRequestException(
+                "Flow must be published before a run can be created.",
+                code="flow_not_published",
+                context={"flow_id": str(flow_id)},
+            )
 
         if file_ids:
             effective_payload = dict(input_payload_json or {})
             effective_payload["file_ids"] = [str(fid) for fid in file_ids]
             input_payload_json = effective_payload
 
-        input_payload_json = self._normalize_and_validate_run_input_payload(
-            flow=flow,
+        input_payload_json = normalize_and_validate_flow_run_payload(
+            metadata_json=flow.metadata_json if isinstance(flow.metadata_json, dict) else None,
             payload=input_payload_json,
         )
 
@@ -175,7 +174,14 @@ class FlowRunService:
                 ).encode("utf-8")
             )
             if payload_size > get_settings().flow_max_inline_text_bytes:
-                raise BadRequestException("Flow run input payload exceeds allowed size limit.")
+                raise BadRequestException(
+                    "Flow run input payload exceeds allowed size limit.",
+                    code="flow_run_input_payload_too_large",
+                    context={
+                        "flow_id": str(flow_id),
+                        "max_inline_text_bytes": get_settings().flow_max_inline_text_bytes,
+                    },
+                )
 
         # Serialize run creation per tenant to prevent concurrency-limit race conditions.
         await self.flow_repo.session.execute(
@@ -186,10 +192,15 @@ class FlowRunService:
         active_runs = await self.flow_run_repo.count_active_runs(tenant_id=self.user.tenant_id)
         if active_runs >= self.max_concurrent_runs:
             raise BadRequestException(
-                "Concurrent flow run limit reached for this tenant."
+                "Concurrent flow run limit reached for this tenant.",
+                code="flow_run_concurrency_limit_reached",
+                context={"max_concurrent_runs": self.max_concurrent_runs},
             )
         if flow.id is None:
-            raise BadRequestException("Flow id missing for run creation.")
+            raise BadRequestException(
+                "Flow id missing for run creation.",
+                code="flow_id_missing",
+            )
         version = await self.flow_version_repo.get(
             flow_id=flow.id,
             version=flow.published_version,
@@ -218,216 +229,18 @@ class FlowRunService:
                 user_id=self.user.id,
             )
         except Exception:
+            logger.exception(
+                "Failed to dispatch newly created flow run",
+                extra={
+                    "run_id": str(created.id),
+                    "flow_id": str(flow.id),
+                    "tenant_id": str(self.user.tenant_id),
+                },
+            )
             # If dispatch fails here, request-level transaction handling decides
             # whether run creation is committed or rolled back as one unit.
             raise
         return created
-
-    def _normalize_and_validate_run_input_payload(
-        self,
-        *,
-        flow: Flow,
-        payload: dict[str, Any] | None,
-    ) -> dict[str, Any] | None:
-        metadata = flow.metadata_json if isinstance(flow.metadata_json, dict) else None
-        form_schema = metadata.get("form_schema") if metadata else None
-        fields = form_schema.get("fields") if isinstance(form_schema, dict) else None
-        if not isinstance(fields, list) or len(fields) == 0:
-            return payload
-
-        normalized_payload = dict(payload or {})
-
-        ordered_fields: list[dict[str, Any]] = []
-        for index, raw in enumerate(fields):
-            if not isinstance(raw, dict):
-                continue
-            field = cast(dict[str, Any], raw)
-            order = field.get("order")
-            if not isinstance(order, int):
-                order = index + 1
-            ordered_fields.append({"index": index, "order": order, "field": field})
-        ordered_fields.sort(key=lambda item: (item["order"], item["index"]))
-
-        for item in ordered_fields:
-            index = cast(int, item["index"])
-            field = cast(dict[str, Any], item["field"])
-            field_name = field.get("name")
-            if not isinstance(field_name, str) or not field_name.strip():
-                continue
-            key = field_name.strip()
-            required = bool(field.get("required"))
-            raw_type = field.get("type")
-            field_type = (
-                raw_type.strip().casefold()
-                if isinstance(raw_type, str) and raw_type.strip()
-                else "text"
-            )
-            field_type = _RUN_FIELD_TYPE_LEGACY_NORMALIZATION.get(field_type, field_type)
-            options_raw = field.get("options")
-            options = (
-                [option.strip() for option in options_raw if isinstance(option, str) and option.strip()]
-                if isinstance(options_raw, list)
-                else []
-            )
-
-            if key not in normalized_payload:
-                if required:
-                    raise BadRequestException(f"Missing required input field '{key}'.")
-                continue
-
-            value = normalized_payload.get(key)
-            if value is None:
-                if required:
-                    raise BadRequestException(f"Missing required input field '{key}'.")
-                continue
-
-            if field_type == "number":
-                normalized_payload[key] = self._coerce_number_field(
-                    field_name=key,
-                    value=value,
-                    required=required,
-                )
-                continue
-
-            if field_type == "date":
-                normalized_payload[key] = self._coerce_date_field(
-                    field_name=key,
-                    value=value,
-                    required=required,
-                )
-                continue
-
-            if field_type == "select":
-                normalized_payload[key] = self._coerce_select_field(
-                    field_name=key,
-                    value=value,
-                    options=options,
-                    required=required,
-                )
-                continue
-
-            if field_type == "multiselect":
-                normalized_payload[key] = self._coerce_multiselect_field(
-                    field_name=key,
-                    value=value,
-                    options=options,
-                    required=required,
-                )
-                continue
-
-            normalized_payload[key] = self._coerce_text_field(
-                field_name=key,
-                value=value,
-                required=required,
-            )
-
-        return normalized_payload
-
-    @staticmethod
-    def _coerce_text_field(*, field_name: str, value: Any, required: bool) -> str:
-        if isinstance(value, str):
-            text_value = value
-        elif isinstance(value, (int, float, bool)):
-            text_value = str(value)
-        else:
-            raise BadRequestException(f"Field '{field_name}' must be a string.")
-        if required and text_value.strip() == "":
-            raise BadRequestException(f"Field '{field_name}' cannot be empty.")
-        return text_value
-
-    @staticmethod
-    def _coerce_number_field(*, field_name: str, value: Any, required: bool) -> int | float | None:
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            number_value: int | float = value
-        elif isinstance(value, str):
-            stripped = value.strip()
-            if stripped == "":
-                if required:
-                    raise BadRequestException(f"Field '{field_name}' cannot be empty.")
-                return None
-            try:
-                number_value = float(stripped) if "." in stripped else int(stripped)
-            except ValueError as exc:
-                raise BadRequestException(f"Field '{field_name}' must be a valid number.") from exc
-        else:
-            raise BadRequestException(f"Field '{field_name}' must be a valid number.")
-        return number_value
-
-    @staticmethod
-    def _coerce_date_field(*, field_name: str, value: Any, required: bool) -> str | None:
-        if isinstance(value, date):
-            date_value = value.isoformat()
-        elif isinstance(value, str):
-            stripped = value.strip()
-            if stripped == "":
-                if required:
-                    raise BadRequestException(f"Field '{field_name}' cannot be empty.")
-                return None
-            try:
-                date.fromisoformat(stripped)
-            except ValueError as exc:
-                raise BadRequestException(
-                    f"Field '{field_name}' must be a valid ISO date (YYYY-MM-DD)."
-                ) from exc
-            date_value = stripped
-        else:
-            raise BadRequestException(f"Field '{field_name}' must be a valid ISO date (YYYY-MM-DD).")
-        return date_value
-
-    @staticmethod
-    def _coerce_select_field(
-        *,
-        field_name: str,
-        value: Any,
-        options: list[str],
-        required: bool,
-    ) -> str | None:
-        if not isinstance(value, str):
-            raise BadRequestException(f"Field '{field_name}' must be a string.")
-        selected = value.strip()
-        if selected == "":
-            if required:
-                raise BadRequestException(f"Field '{field_name}' cannot be empty.")
-            return None
-        if options and selected not in options:
-            raise BadRequestException(
-                f"Field '{field_name}' must be one of the configured options."
-            )
-        return selected
-
-    @staticmethod
-    def _coerce_multiselect_field(
-        *,
-        field_name: str,
-        value: Any,
-        options: list[str],
-        required: bool,
-    ) -> list[str]:
-        raw_values: list[str]
-        if isinstance(value, list):
-            raw_values = []
-            for item in value:
-                if not isinstance(item, str):
-                    raise BadRequestException(
-                        f"Field '{field_name}' must contain only string options."
-                    )
-                stripped_item = item.strip()
-                if stripped_item:
-                    raw_values.append(stripped_item)
-        elif isinstance(value, str):
-            raw_values = [item.strip() for item in value.split(",") if item.strip()]
-        else:
-            raise BadRequestException(f"Field '{field_name}' must be an array of strings.")
-
-        if required and len(raw_values) == 0:
-            raise BadRequestException(f"Field '{field_name}' must contain at least one value.")
-        if options:
-            invalid = [item for item in raw_values if item not in options]
-            if invalid:
-                raise BadRequestException(
-                    f"Field '{field_name}' contains invalid option values."
-                )
-        return raw_values
 
     async def get_run(self, *, run_id: UUID, flow_id: UUID | None = None) -> FlowRun:
         return await self.flow_run_repo.get(
@@ -610,20 +423,18 @@ class FlowRunService:
             rag_metadata = input_payload.get("rag")
             if not isinstance(rag_metadata, dict):
                 continue
-            try:
-                rag_by_step_order[int(step_order)] = rag_metadata
-            except (TypeError, ValueError):
+            normalized_step_order = self._parse_step_order(step_order)
+            if normalized_step_order is None:
                 continue
+            rag_by_step_order[normalized_step_order] = rag_metadata
 
         raw_steps = definition_snapshot.get("steps")
         normalized_steps = []
         if isinstance(raw_steps, list):
             for raw_step in raw_steps:
                 if isinstance(raw_step, dict):
-                    try:
-                        step_order = int(raw_step.get("step_order", 0))
-                    except (TypeError, ValueError):
-                        step_order = 0
+                    parsed_step_order = self._parse_step_order(raw_step.get("step_order"), default=0)
+                    step_order = parsed_step_order if parsed_step_order is not None else 0
                     normalized_steps.append(
                         self._normalize_debug_step(
                             raw_step,
@@ -654,6 +465,22 @@ class FlowRunService:
                 "mcp_policy_field": "mcp_policy",
             },
         }
+
+    @staticmethod
+    def _parse_step_order(value: Any, *, default: int | None = None) -> int | None:
+        if isinstance(value, bool):
+            return default
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped == "":
+                return default
+            try:
+                return int(stripped)
+            except ValueError:
+                return default
+        return default
 
     @staticmethod
     def _normalize_debug_step(
@@ -702,7 +529,10 @@ class FlowRunService:
     ) -> list[PreseedStep]:
         raw_steps = definition_json.get("steps")
         if not isinstance(raw_steps, list) or not raw_steps:
-            raise BadRequestException("Published flow version does not contain executable steps.")
+            raise BadRequestException(
+                "Published flow version does not contain executable steps.",
+                code="flow_version_no_executable_steps",
+            )
 
         by_step_order: dict[int, FlowStep] = {}
         for step in fallback_steps:
@@ -713,10 +543,31 @@ class FlowRunService:
         preseed: list[PreseedStep] = []
         for raw_step in raw_steps:
             if not isinstance(raw_step, dict):
-                raise BadRequestException("Invalid flow version step definition.")
-            step_order = int(raw_step.get("step_order", 0))
+                raise BadRequestException(
+                    "Invalid flow version step definition.",
+                    code="flow_version_invalid_step_definition",
+                )
+            step_order_raw = raw_step.get("step_order", 0)
+            if isinstance(step_order_raw, bool):
+                raise BadRequestException(
+                    "Invalid flow version step order.",
+                    code="flow_version_invalid_step_order",
+                    context={"step_order": step_order_raw},
+                )
+            try:
+                step_order = int(step_order_raw)
+            except (TypeError, ValueError) as exc:
+                raise BadRequestException(
+                    "Invalid flow version step order.",
+                    code="flow_version_invalid_step_order",
+                    context={"step_order": step_order_raw},
+                ) from exc
             if step_order <= 0:
-                raise BadRequestException("Invalid flow version step order.")
+                raise BadRequestException(
+                    "Invalid flow version step order.",
+                    code="flow_version_invalid_step_order",
+                    context={"step_order": step_order},
+                )
 
             step_id_raw = raw_step.get("step_id")
             assistant_id_raw = raw_step.get("assistant_id")
@@ -724,15 +575,43 @@ class FlowRunService:
                 fallback = by_step_order.get(step_order)
                 if fallback is None:
                     raise BadRequestException(
-                        f"Flow version step {step_order} is missing stable step identifiers."
+                        f"Flow version step {step_order} is missing stable step identifiers.",
+                        code="flow_version_missing_step_identifiers",
+                        context={"step_order": step_order},
                     )
                 step_id_raw = fallback.id
                 assistant_id_raw = fallback.assistant_id
 
+            try:
+                step_id = UUID(str(step_id_raw))
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise BadRequestException(
+                    "Invalid flow version step identifier.",
+                    code="flow_version_invalid_step_identifier",
+                    context={
+                        "step_order": step_order,
+                        "field": "step_id",
+                        "value": step_id_raw,
+                    },
+                ) from exc
+
+            try:
+                assistant_id = UUID(str(assistant_id_raw))
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise BadRequestException(
+                    "Invalid flow version step identifier.",
+                    code="flow_version_invalid_step_identifier",
+                    context={
+                        "step_order": step_order,
+                        "field": "assistant_id",
+                        "value": assistant_id_raw,
+                    },
+                ) from exc
+
             preseed.append(
                 {
-                    "step_id": UUID(str(step_id_raw)),
-                    "assistant_id": UUID(str(assistant_id_raw)),
+                    "step_id": step_id,
+                    "assistant_id": assistant_id,
                     "step_order": step_order,
                 }
             )

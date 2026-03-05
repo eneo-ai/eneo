@@ -166,7 +166,10 @@ def _execute_flow_run_task(
             _mark_run_failed(
                 run_id=run_id_uuid,
                 tenant_id=tenant_id_uuid,
-                error_message="Flow run execution skipped because run has no user_id.",
+                error_message=(
+                    "flow_missing_user_id: "
+                    "Flow run execution skipped because run has no user_id."
+                ),
             ),
             loop,
         ).result(timeout=10)
@@ -192,7 +195,7 @@ def _execute_flow_run_task(
         return future.result(timeout=get_settings().flow_task_timeout_seconds)
     except concurrent.futures.TimeoutError:
         future.cancel()
-        error_message = "Flow execution timed out before task completion."
+        error_message = "flow_task_timeout: Flow execution timed out before task completion."
         logger.exception(
             "Flow execution task timed out",
             extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
@@ -206,8 +209,8 @@ def _execute_flow_run_task(
             loop,
         ).result(timeout=10)
         return {"status": "failed", "reason": "timeout"}
-    except Exception as exc:
-        error_message = f"Flow execution task failed: {exc}"
+    except Exception:
+        error_message = "flow_task_failure: Flow execution task failed before run completion."
         logger.exception(
             "Flow execution task failed",
             extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},

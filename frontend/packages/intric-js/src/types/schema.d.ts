@@ -1945,7 +1945,7 @@ export interface paths {
   };
   "/api/v1/flows/{id}/runs/": {
     /**
-     * List flow runs
+     * List flow runs (flow-first)
      * @description List runs for a specific flow.
      *
      * This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
@@ -1986,21 +1986,49 @@ export interface paths {
      * - accepted input types: audio/document/image/file
      * - allowed mimetypes
      * - effective tenant flow size limits
+     * - multipart form field name: `upload_file`
      */
     post: operations["upload_flow_file_api_v1_flows__id__files__post"];
   };
   "/api/v1/flows/{id}/runs/{run_id}/": {
     /**
-     * Get flow run
+     * Get flow run (flow-first)
      * @description Get one run for a flow using flow-first routing.
      *
      * Use this endpoint for run status and top-level output payload when building consumer apps.
      */
     get: operations["get_flow_run_alias_api_v1_flows__id__runs__run_id___get"];
   };
+  "/api/v1/flows/{id}/runs/{run_id}/cancel/": {
+    /**
+     * Cancel flow run (flow-first)
+     * @description Cancel a flow run if it is not already terminal.
+     *
+     * This is the canonical run control endpoint for flow consumers.
+     */
+    post: operations["cancel_flow_run_alias_api_v1_flows__id__runs__run_id__cancel__post"];
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/redispatch/": {
+    /**
+     * Redispatch stale queued run (flow-first)
+     * @description Attempt to redispatch a stale queued run.
+     *
+     * Returns `redispatched_count` indicating whether dispatch was re-triggered.
+     */
+    post: operations["redispatch_flow_run_alias_api_v1_flows__id__runs__run_id__redispatch__post"];
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/evidence/": {
+    /**
+     * Get flow run evidence export (flow-first)
+     * @description Get redacted debug/evidence payload for one flow run.
+     *
+     * Prefer `.../steps/` for consumer UIs unless debug-export fields are required.
+     */
+    get: operations["get_flow_run_evidence_alias_api_v1_flows__id__runs__run_id__evidence__get"];
+  };
   "/api/v1/flows/{id}/runs/{run_id}/steps/": {
     /**
-     * List flow run step outputs
+     * List flow run step outputs (flow-first)
      * @description Return ordered step-level execution results for one flow run.
      *
      * Designed for consumer UIs that need to inspect intermediate outputs, diagnostics, and token usage
@@ -2011,26 +2039,6 @@ export interface paths {
   "/api/v1/flows/{id}/graph/": {
     /** Get Flow Graph */
     get: operations["get_flow_graph_api_v1_flows__id__graph__get"];
-  };
-  "/api/v1/flow-runs/": {
-    /** List Flow Runs */
-    get: operations["list_flow_runs_api_v1_flow_runs__get"];
-  };
-  "/api/v1/flow-runs/{id}/": {
-    /** Get Flow Run */
-    get: operations["get_flow_run_api_v1_flow_runs__id___get"];
-  };
-  "/api/v1/flow-runs/{id}/cancel/": {
-    /** Cancel Flow Run */
-    post: operations["cancel_flow_run_api_v1_flow_runs__id__cancel__post"];
-  };
-  "/api/v1/flow-runs/{id}/redispatch/": {
-    /** Redispatch Flow Run */
-    post: operations["redispatch_flow_run_api_v1_flow_runs__id__redispatch__post"];
-  };
-  "/api/v1/flow-runs/{id}/evidence/": {
-    /** Get Flow Run Evidence */
-    get: operations["get_flow_run_evidence_api_v1_flow_runs__id__evidence__get"];
   };
   "/api/v1/prompts/{id}/": {
     /** Get Prompt */
@@ -6834,12 +6842,35 @@ export interface components {
       accepted_file_types: components["schemas"]["AcceptedFileType"][];
       limit: components["schemas"]["Limit"];
     };
-    /** FlowAssistantCreateRequest */
+    /**
+     * FlowAssistantCreateRequest
+     * @example {
+     *   "name": "Flow Step Assistant"
+     * }
+     */
     FlowAssistantCreateRequest: {
       /** Name */
       name: string;
     };
-    /** FlowCreateRequest */
+    /**
+     * FlowCreateRequest
+     * @example {
+     *   "description": "Transcribe and summarize citizen audio",
+     *   "name": "Municipality Intake Transcription",
+     *   "space_id": "00000000-0000-0000-0000-000000000001",
+     *   "steps": [
+     *     {
+     *       "assistant_id": "00000000-0000-0000-0000-000000000002",
+     *       "input_source": "flow_input",
+     *       "input_type": "audio",
+     *       "mcp_policy": "inherit",
+     *       "output_mode": "transcribe_only",
+     *       "output_type": "text",
+     *       "step_order": 1
+     *     }
+     *   ]
+     * }
+     */
     FlowCreateRequest: {
       /**
        * Space Id
@@ -6873,7 +6904,26 @@ export interface components {
       /** Audio Max Size Bytes */
       audio_max_size_bytes?: number | null;
     };
-    /** FlowInputPolicyPublic */
+    /**
+     * FlowInputPolicyPublic
+     * @example {
+     *   "accepted_mimetypes": [
+     *     "audio/wav",
+     *     "audio/mpeg"
+     *   ],
+     *   "accepts_file_upload": true,
+     *   "flow_id": "00000000-0000-0000-0000-000000000001",
+     *   "input_source": "flow_input",
+     *   "input_type": "audio",
+     *   "max_file_size_bytes": 52428800,
+     *   "max_files_per_run": 10,
+     *   "recommended_run_payload": {
+     *     "file_ids": [
+     *       "00000000-0000-0000-0000-000000000002"
+     *     ]
+     *   }
+     * }
+     */
     FlowInputPolicyPublic: {
       /**
        * Flow Id
@@ -6881,9 +6931,9 @@ export interface components {
        */
       flow_id: string;
       /** Input Type */
-      input_type?: string | null;
+      input_type?: components["schemas"]["FlowInputType"] | string | null;
       /** Input Source */
-      input_source?: string | null;
+      input_source?: components["schemas"]["FlowInputSource"] | string | null;
       /** Accepts File Upload */
       accepts_file_upload: boolean;
       /** Accepted Mimetypes */
@@ -6897,10 +6947,43 @@ export interface components {
         [key: string]: unknown;
       } | null;
     };
+    /**
+     * FlowInputSource
+     * @enum {string}
+     */
+    FlowInputSource:
+      | "flow_input"
+      | "previous_step"
+      | "all_previous_steps"
+      | "http_get"
+      | "http_post";
+    /**
+     * FlowInputType
+     * @enum {string}
+     */
+    FlowInputType: "text" | "json" | "image" | "audio" | "document" | "file" | "any";
+    /**
+     * FlowMcpPolicy
+     * @enum {string}
+     */
+    FlowMcpPolicy: "inherit" | "restricted";
+    /**
+     * FlowOutputMode
+     * @enum {string}
+     */
+    FlowOutputMode: "pass_through" | "http_post" | "transcribe_only";
+    /**
+     * FlowOutputType
+     * @enum {string}
+     */
+    FlowOutputType: "text" | "json" | "pdf" | "docx";
     /** FlowPublic */
     FlowPublic: {
-      /** Id */
-      id?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
       /**
        * Tenant Id
        * Format: uuid
@@ -6934,7 +7017,17 @@ export interface components {
       /** Steps */
       steps: components["schemas"]["FlowStepPublic"][];
     };
-    /** FlowRunCreateRequest */
+    /**
+     * FlowRunCreateRequest
+     * @example {
+     *   "file_ids": [
+     *     "00000000-0000-0000-0000-000000000003"
+     *   ],
+     *   "input_payload_json": {
+     *     "text": "optional context for downstream prompt steps"
+     *   }
+     * }
+     */
     FlowRunCreateRequest: {
       /** Input Payload Json */
       input_payload_json?: {
@@ -7172,8 +7265,7 @@ export interface components {
        * Format: uuid
        */
       tenant_id: string;
-      /** Status */
-      status: string;
+      status: components["schemas"]["FlowRunStatus"];
       /** Cancelled At */
       cancelled_at?: string | null;
       /** Input Payload Json */
@@ -7205,6 +7297,11 @@ export interface components {
       /** Redispatched Count */
       redispatched_count: number;
     };
+    /**
+     * FlowRunStatus
+     * @enum {string}
+     */
+    FlowRunStatus: "queued" | "running" | "completed" | "failed" | "cancelled";
     /** FlowRunStepPublic */
     FlowRunStepPublic: {
       /** Id */
@@ -7215,8 +7312,7 @@ export interface components {
       step_order: number;
       /** Assistant Id */
       assistant_id?: string | null;
-      /** Status */
-      status: string;
+      status: components["schemas"]["FlowStepResultStatus"];
       /** Input Payload Json */
       input_payload_json?: {
         [key: string]: unknown;
@@ -7248,8 +7344,11 @@ export interface components {
     };
     /** FlowSparsePublic */
     FlowSparsePublic: {
-      /** Id */
-      id?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
       /**
        * Tenant Id
        * Format: uuid
@@ -7281,7 +7380,19 @@ export interface components {
       /** Updated At */
       updated_at?: string | null;
     };
-    /** FlowStepCreateRequest */
+    /**
+     * FlowStepCreateRequest
+     * @example {
+     *   "assistant_id": "00000000-0000-0000-0000-000000000001",
+     *   "input_source": "flow_input",
+     *   "input_type": "audio",
+     *   "mcp_policy": "inherit",
+     *   "output_mode": "transcribe_only",
+     *   "output_type": "text",
+     *   "step_order": 1,
+     *   "user_description": "Transcribe incoming audio"
+     * }
+     */
     FlowStepCreateRequest: {
       /**
        * Assistant Id
@@ -7292,18 +7403,35 @@ export interface components {
       step_order: number;
       /** User Description */
       user_description?: string | null;
-      /** Input Source */
-      input_source: string;
-      /** Input Type */
-      input_type: string;
+      /**
+       * Input Source
+       * @enum {string}
+       */
+      input_source:
+        | "flow_input"
+        | "previous_step"
+        | "all_previous_steps"
+        | "http_get"
+        | "http_post";
+      /**
+       * Input Type
+       * @enum {string}
+       */
+      input_type: "text" | "json" | "image" | "audio" | "document" | "file" | "any";
       /** Input Contract */
       input_contract?: {
         [key: string]: unknown;
       } | null;
-      /** Output Mode */
-      output_mode: string;
-      /** Output Type */
-      output_type: string;
+      /**
+       * Output Mode
+       * @enum {string}
+       */
+      output_mode: "pass_through" | "http_post" | "transcribe_only";
+      /**
+       * Output Type
+       * @enum {string}
+       */
+      output_type: "text" | "json" | "pdf" | "docx";
       /** Output Contract */
       output_contract?: {
         [key: string]: unknown;
@@ -7314,8 +7442,11 @@ export interface components {
       } | null;
       /** Output Classification Override */
       output_classification_override?: number | null;
-      /** Mcp Policy */
-      mcp_policy: string;
+      /**
+       * Mcp Policy
+       * @enum {string}
+       */
+      mcp_policy: "inherit" | "restricted";
       /** Input Config */
       input_config?: {
         [key: string]: unknown;
@@ -7338,18 +7469,14 @@ export interface components {
       step_order: number;
       /** User Description */
       user_description?: string | null;
-      /** Input Source */
-      input_source: string;
-      /** Input Type */
-      input_type: string;
+      input_source: components["schemas"]["FlowInputSource"];
+      input_type: components["schemas"]["FlowInputType"];
       /** Input Contract */
       input_contract?: {
         [key: string]: unknown;
       } | null;
-      /** Output Mode */
-      output_mode: string;
-      /** Output Type */
-      output_type: string;
+      output_mode: components["schemas"]["FlowOutputMode"];
+      output_type: components["schemas"]["FlowOutputType"];
       /** Output Contract */
       output_contract?: {
         [key: string]: unknown;
@@ -7360,8 +7487,7 @@ export interface components {
       } | null;
       /** Output Classification Override */
       output_classification_override?: number | null;
-      /** Mcp Policy */
-      mcp_policy: string;
+      mcp_policy: components["schemas"]["FlowMcpPolicy"];
       /** Input Config */
       input_config?: {
         [key: string]: unknown;
@@ -7375,6 +7501,11 @@ export interface components {
       /** Updated At */
       updated_at?: string | null;
     };
+    /**
+     * FlowStepResultStatus
+     * @enum {string}
+     */
+    FlowStepResultStatus: "pending" | "running" | "completed" | "failed" | "cancelled";
     /** FormatLimit */
     FormatLimit: {
       /** Mimetype */
@@ -16082,7 +16213,9 @@ export interface operations {
       };
       /** @description Forbidden: admin permission required. */
       403: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
     };
   };
@@ -16116,11 +16249,15 @@ export interface operations {
       };
       /** @description Invalid patch (range/type) or empty payload. */
       400: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Forbidden: admin permission required. */
       403: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -24344,7 +24481,7 @@ export interface operations {
     };
   };
   /**
-   * List flow runs
+   * List flow runs (flow-first)
    * @description List runs for a specific flow.
    *
    * This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
@@ -24368,11 +24505,15 @@ export interface operations {
       };
       /** @description Forbidden: API key scope does not match flow space. */
       403: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Flow not found in tenant scope. */
       404: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -24409,13 +24550,23 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunPublic"];
         };
       };
+      /** @description Flow cannot be run in its current state or request payload is invalid. Representative machine-readable codes include: flow_not_published, flow_run_input_payload_too_large, flow_run_concurrency_limit_reached, flow_input_required_field_missing, flow_input_invalid_number. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Forbidden: API key scope does not match flow space. */
       403: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Flow not found in tenant scope. */
       404: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -24451,11 +24602,15 @@ export interface operations {
       };
       /** @description Forbidden: API key scope does not match flow space. */
       403: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Flow not found in tenant scope. */
       404: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -24474,6 +24629,7 @@ export interface operations {
    * - accepted input types: audio/document/image/file
    * - allowed mimetypes
    * - effective tenant flow size limits
+   * - multipart form field name: `upload_file`
    */
   upload_flow_file_api_v1_flows__id__files__post: {
     parameters: {
@@ -24493,25 +24649,35 @@ export interface operations {
           "application/json": components["schemas"]["FilePublic"];
         };
       };
-      /** @description Flow does not accept file upload for its flow_input step. */
+      /** @description Upload request is invalid for this flow input policy. Representative machine-readable codes include: flow_input_upload_not_supported, flow_input_file_empty, flow_input_policy_missing_limit. */
       400: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Forbidden: API key scope does not match flow space. */
       403: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Flow not found in tenant scope. */
       404: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Uploaded file exceeds effective flow max size limit. */
       413: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Unsupported media type for this flow input policy. */
       415: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -24522,7 +24688,7 @@ export interface operations {
     };
   };
   /**
-   * Get flow run
+   * Get flow run (flow-first)
    * @description Get one run for a flow using flow-first routing.
    *
    * Use this endpoint for run status and top-level output payload when building consumer apps.
@@ -24543,11 +24709,15 @@ export interface operations {
       };
       /** @description Forbidden: API key scope does not match flow space. */
       403: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Run not found for this flow and tenant. */
       404: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -24558,7 +24728,127 @@ export interface operations {
     };
   };
   /**
-   * List flow run step outputs
+   * Cancel flow run (flow-first)
+   * @description Cancel a flow run if it is not already terminal.
+   *
+   * This is the canonical run control endpoint for flow consumers.
+   */
+  cancel_flow_run_alias_api_v1_flows__id__runs__run_id__cancel__post: {
+    parameters: {
+      path: {
+        id: string;
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowRunPublic"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Redispatch stale queued run (flow-first)
+   * @description Attempt to redispatch a stale queued run.
+   *
+   * Returns `redispatched_count` indicating whether dispatch was re-triggered.
+   */
+  redispatch_flow_run_alias_api_v1_flows__id__runs__run_id__redispatch__post: {
+    parameters: {
+      path: {
+        id: string;
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowRunRedispatchResponse"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get flow run evidence export (flow-first)
+   * @description Get redacted debug/evidence payload for one flow run.
+   *
+   * Prefer `.../steps/` for consumer UIs unless debug-export fields are required.
+   */
+  get_flow_run_evidence_alias_api_v1_flows__id__runs__run_id__evidence__get: {
+    parameters: {
+      path: {
+        id: string;
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowRunEvidenceResponse"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List flow run step outputs (flow-first)
    * @description Return ordered step-level execution results for one flow run.
    *
    * Designed for consumer UIs that need to inspect intermediate outputs, diagnostics, and token usage
@@ -24580,11 +24870,15 @@ export interface operations {
       };
       /** @description Forbidden: API key scope does not match flow space. */
       403: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Run not found for this flow and tenant. */
       404: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -24609,118 +24903,6 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["GraphResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /** List Flow Runs */
-  list_flow_runs_api_v1_flow_runs__get: {
-    parameters: {
-      query: {
-        flow_id: string;
-        limit?: number;
-        offset?: number;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["PaginatedResponse_FlowRunPublic_"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /** Get Flow Run */
-  get_flow_run_api_v1_flow_runs__id___get: {
-    parameters: {
-      path: {
-        id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["FlowRunPublic"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /** Cancel Flow Run */
-  cancel_flow_run_api_v1_flow_runs__id__cancel__post: {
-    parameters: {
-      path: {
-        id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["FlowRunPublic"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /** Redispatch Flow Run */
-  redispatch_flow_run_api_v1_flow_runs__id__redispatch__post: {
-    parameters: {
-      path: {
-        id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["FlowRunRedispatchResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /** Get Flow Run Evidence */
-  get_flow_run_evidence_api_v1_flow_runs__id__evidence__get: {
-    parameters: {
-      path: {
-        id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["FlowRunEvidenceResponse"];
         };
       };
       /** @description Validation Error */

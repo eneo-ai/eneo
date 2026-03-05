@@ -466,6 +466,7 @@ class FlowRunExecutor:
                     "flow_executor.step_failed run_id=%s step_order=%d error=%s",
                     run_id, step.step_order, str(exc),
                 )
+                public_error = f"Flow step {step.step_order} execution failed."
                 await self._rollback()
                 await self.flow_run_repo.finish_attempt(
                     run_id=run_id,
@@ -474,12 +475,12 @@ class FlowRunExecutor:
                     tenant_id=tenant_id,
                     status=FlowStepAttemptStatus.FAILED,
                     error_code="step_execution_failed",
-                    error_message=str(exc),
+                    error_message=public_error,
                 )
                 failed_result = claimed.model_copy(
                     update={
                         "status": FlowStepResultStatus.FAILED,
-                        "error_message": str(exc),
+                        "error_message": public_error,
                     },
                     deep=True,
                 )
@@ -488,11 +489,11 @@ class FlowRunExecutor:
                     run_id=run_id,
                     tenant_id=tenant_id,
                     status=FlowRunStatus.FAILED,
-                    error_message=str(exc),
+                    error_message=public_error,
                     from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
                 )
                 await self._commit()
-                return {"status": "failed", "error": str(exc)}
+                return {"status": "failed", "error": "step_execution_failed"}
 
             step_result = FlowStepResult(
                 id=claimed.id,

@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import APIRouter, Depends
 
 from intric.authentication import auth_dependencies
@@ -5,8 +7,9 @@ from intric.files.audio import AudioMimeTypes
 from intric.files.image import ImageMimeTypes
 from intric.files.text import TextMimeTypes
 from intric.main.container.container import Container
+from intric.main.exceptions import ErrorCodes
 from intric.main.logging import get_logger
-from intric.main.models import PaginatedResponse
+from intric.main.models import GeneralError, PaginatedResponse
 from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import to_paginated_response
@@ -24,6 +27,26 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 settings_admin_router = APIRouter()
+
+
+def _error_response(
+    *,
+    description: str,
+    message: str,
+    intric_error_code: ErrorCodes,
+    code: str | None = None,
+) -> dict[str, Any]:
+    example: dict[str, Any] = {
+        "message": message,
+        "intric_error_code": int(intric_error_code),
+    }
+    if code is not None:
+        example["code"] = code
+    return {
+        "model": GeneralError,
+        "description": description,
+        "content": {"application/json": {"example": example}},
+    }
 
 
 @router.get("/", response_model=SettingsPublic)
@@ -279,8 +302,18 @@ Example:
 ```
     """,
     responses={
-        400: {"description": "Invalid patch (range/type) or empty payload."},
-        403: {"description": "Forbidden: admin permission required."},
+        400: _error_response(
+            description="Invalid patch (range/type) or empty payload.",
+            message="Flow input limits patch is invalid.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="flow_input_limits_invalid_patch",
+        ),
+        403: _error_response(
+            description="Forbidden: admin permission required.",
+            message="Admin permission required.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="forbidden",
+        ),
     },
 )
 async def update_flow_input_limits(
@@ -299,7 +332,12 @@ async def update_flow_input_limits(
 Returns effective tenant-level Flow input size limits, including defaults when no override exists.
     """,
     responses={
-        403: {"description": "Forbidden: admin permission required."},
+        403: _error_response(
+            description="Forbidden: admin permission required.",
+            message="Admin permission required.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="forbidden",
+        ),
     },
 )
 async def get_flow_input_limits(

@@ -556,14 +556,18 @@ async def test_step_execution_failure_marks_attempt_and_run_failed(user):
     )
 
     assert result["status"] == "failed"
+    assert result["error"] == "step_execution_failed"
     flow_run_repo.finish_attempt.assert_awaited_once()
     finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
     assert finish_kwargs["status"] == FlowStepAttemptStatus.FAILED
     assert finish_kwargs["error_code"] == "step_execution_failed"
+    assert finish_kwargs["error_message"] == "Flow step 1 execution failed."
     flow_run_repo.update_status.assert_awaited_once()
+    update_kwargs = flow_run_repo.update_status.await_args.kwargs
+    assert update_kwargs["error_message"] == "Flow step 1 execution failed."
     saved_result = flow_repo.save_step_result.await_args.args[1]
     assert saved_result.status == FlowStepResultStatus.FAILED
-    assert saved_result.error_message == "llm boom"
+    assert saved_result.error_message == "Flow step 1 execution failed."
 
 
 @pytest.mark.asyncio
