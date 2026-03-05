@@ -1,7 +1,7 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import { createEventDispatcher, onMount } from "svelte";
+  import { createEventDispatcher } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import type { ModelProviderPublic } from "@intric/intric-js";
   import ProviderGlyph from "../components/ProviderGlyph.svelte";
@@ -12,6 +12,8 @@
   export let providers: ModelProviderPublic[] = [];
   export let favoriteProviders: string[] = [];
   export let selectedProviderId: string | null = null;
+  /** Capabilities loaded by parent (AddWizard) */
+  export let capabilities: { providers: Record<string, any>; default_fields: any[] } | null = null;
 
   const dispatch = createEventDispatcher<{
     select: { providerId: string | null; isNew: boolean; providerType: string };
@@ -26,10 +28,14 @@
   let hoveredProvider: string | null = null;
   let selectedNewProviderType: string | null = null;
 
-  // All providers from capabilities
-  let allCapabilityProviders: { type: string; label: string }[] = [];
-  let loadingCapabilities = false;
-  let capabilitiesLoaded = false;
+  // All providers derived from capabilities prop
+  $: allCapabilityProviders = capabilities
+    ? Object.keys(capabilities.providers)
+        .map((type) => ({ type, label: formatProviderName(type) }))
+        .sort((a, b) => a.label.localeCompare(b.label))
+    : [];
+
+  $: loadingCapabilities = !capabilities;
 
   // Search
   let searchQuery = "";
@@ -62,27 +68,6 @@
       const q = searchQuery.toLowerCase();
       return p.label.toLowerCase().includes(q) || p.type.toLowerCase().includes(q);
     });
-
-  // Eagerly load capabilities on mount
-  onMount(async () => {
-    if (!capabilitiesLoaded) {
-      loadingCapabilities = true;
-      try {
-        const capabilities = await intric.modelProviders.getCapabilities();
-        allCapabilityProviders = Object.entries(capabilities)
-          .map(([type]) => ({
-            type,
-            label: formatProviderName(type)
-          }))
-          .sort((a, b) => a.label.localeCompare(b.label));
-        capabilitiesLoaded = true;
-      } catch {
-        // Silently fail — user can still use favorites
-      } finally {
-        loadingCapabilities = false;
-      }
-    }
-  });
 
   function formatProviderName(type: string): string {
     return type
