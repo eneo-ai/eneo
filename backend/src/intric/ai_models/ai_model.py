@@ -57,7 +57,7 @@ class AIModel(Entity):
         """
         if self.family == "claude":
             return "anthropic"
-        return self.family
+        return self.family or ""
 
     @property
     def is_locked(self):
