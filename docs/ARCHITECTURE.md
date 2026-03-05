@@ -508,7 +508,7 @@ Configure via: `PUT /api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}`
 
 **See Also:**
 - [Federation Per Tenant](./FEDERATION_PER_TENANT.md) - IdP architecture
-- [Multi-Tenant Credentials](./MULTI_TENANT_CREDENTIALS.md) - Detailed credential management
+- [AI Providers](https://docs.eneo.ai/guides/ai-providers) - Provider configuration & credential management
 - [Multi-Tenant OIDC Setup](./MULTITENANT_OIDC_SETUP_GUIDE.md) - Provisioning guide
 
 ### Observability & Debugging
@@ -616,21 +616,22 @@ sequenceDiagram
 
 ## AI Integration
 
-### Multi-Provider Architecture
+### LiteLLM-Based Provider Management
 
-Eneo supports multiple AI providers through a unified interface, allowing organizations to choose providers based on their needs, compliance requirements, and budget.
+Eneo routes all AI requests through **LiteLLM**, supporting 60+ providers (OpenAI, Anthropic, Azure, Google Gemini, Mistral, Cohere, and many more) with a unified API. Providers are managed per-tenant through the Admin UI and API — no environment variables or restarts needed.
 
-**Supported Providers:**
-- **OpenAI**: GPT models for general-purpose AI
-- **Anthropic**: Claude models for advanced reasoning
-- **Azure OpenAI**: Enterprise-grade OpenAI models
-- **Local Models**: Self-hosted models for data sovereignty
+**How It Works:**
+- Eneo reads LiteLLM's model registry to discover available providers and models
+- Admins add providers via an Admin UI wizard: select provider type, enter credentials, pick models
+- Each tenant can configure multiple providers with isolated, encrypted credentials
+- For self-hosted or unlisted providers, the `hosted_vllm` type supports any OpenAI-compatible API
 
 **Key Features:**
-- **Provider Switching**: Change AI providers without code changes
-- **Cost Optimization**: Automatic model selection based on cost/performance
-- **Fallback Support**: Automatic failover if primary provider is unavailable
-- **Usage Tracking**: Monitor costs and performance across providers
+- **Dynamic Configuration**: Add/remove providers and models through UI without restarts
+- **Per-Tenant Isolation**: Each tenant manages their own providers and credentials
+- **Model Discovery**: Automatic model listing from provider APIs
+- **Connection Testing**: Validate credentials and connectivity before going live
+- **Encrypted Credentials**: All API keys encrypted at rest with Fernet
 
 ---
 
