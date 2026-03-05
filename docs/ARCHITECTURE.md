@@ -38,7 +38,7 @@ graph LR
 
     LiteLLM["LiteLLM Adapter<br/>Unified AI Interface"]
 
-    AI["AI Providers<br/>(OpenAI, Anthropic, Azure,<br/>vLLM, Berget, Local Models)"]
+    AI["AI Providers<br/>(OpenAI, Anthropic, Azure,<br/>vLLM, any LiteLLM provider)"]
     IdP["Identity Providers<br/>(Optional: Entra ID,<br/>Auth0, MobilityGuard)"]
 
     Users -->|Create spaces,<br/>ask questions| Eneo
@@ -502,7 +502,7 @@ PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
 - **Shared Mode** (`TENANT_CREDENTIALS_ENABLED=false`) - All tenants use global API keys
 - **Strict Mode** (`TENANT_CREDENTIALS_ENABLED=true`) - Each tenant configures encrypted credentials
 
-Supported providers: OpenAI, Anthropic, Azure, vLLM, Berget, Mistral. All credentials encrypted with Fernet using `ENCRYPTION_KEY`. Additional encrypted data includes crawler HTTP auth and custom integration secrets.
+Any LiteLLM-supported provider can be used (OpenAI, Anthropic, Azure, vLLM, Mistral, and [100+ others](https://docs.litellm.ai/docs/providers)). Custom providers can be added via provider classes. All credentials encrypted with Fernet using `ENCRYPTION_KEY`. Additional encrypted data includes crawler HTTP auth and custom integration secrets.
 
 Configure via: `PUT /api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}`
 

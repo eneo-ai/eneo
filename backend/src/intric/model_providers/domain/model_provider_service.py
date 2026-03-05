@@ -90,7 +90,6 @@ class ModelProviderService:
         self,
         provider_id: UUID,
         name: Optional[str] = None,
-        provider_type: Optional[str] = None,
         credentials: Optional[dict[str, Any]] = None,
         config: Optional[dict[str, Any]] = None,
         is_active: Optional[bool] = None,
@@ -105,10 +104,6 @@ class ModelProviderService:
             if existing is not None:
                 raise NameCollisionException(f"Provider with name '{name}' already exists")
             provider.name = name
-
-        # Update fields if provided
-        if provider_type is not None:
-            provider.provider_type = provider_type
 
         if credentials is not None:
             provider.credentials = self._encrypt_credentials(credentials)

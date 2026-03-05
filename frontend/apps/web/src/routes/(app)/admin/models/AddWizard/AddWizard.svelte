@@ -17,6 +17,7 @@
 
   export let openController: Writable<boolean>;
   export let providers: ModelProviderPublic[] = [];
+  export let favoriteProviders: string[] = [];
   /** Pre-selected provider ID when opening wizard from a provider's "Add Model" button */
   export let preSelectedProviderId: string | null = null;
   /** Model type to add (for when starting from "Add Model" on a specific table) */
@@ -424,6 +425,7 @@
             {#if $currentStep === 1}
               <StepProvider
                 {providers}
+                {favoriteProviders}
                 selectedProviderId={$wizardData.selectedProviderId}
                 on:select={handleProviderSelected}
               />

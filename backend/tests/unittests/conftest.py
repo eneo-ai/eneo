@@ -2,12 +2,7 @@ import uuid
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import (
-    ModelHostingLocation,
-    ModelStability,
-)
 from intric.ai_models.embedding_models.embedding_model import (
-    EmbeddingModelFamily,
     EmbeddingModelLegacy,
 )
 from intric.main.config import Settings, reset_settings
@@ -27,7 +22,6 @@ def test_settings() -> Settings:
         openai_api_key="sk-fake-unit-test-key-for-adapter-instantiation",
         anthropic_api_key=None,
         azure_api_key=None,
-        berget_api_key=None,
         mistral_api_key=None,
         ovhcloud_api_key=None,
         vllm_api_key=None,
@@ -72,12 +66,12 @@ def embedding_model_small():
     return EmbeddingModelLegacy(
         id=uuid.uuid4(),
         name="text-embedding-3-small",
-        family=EmbeddingModelFamily.OPEN_AI,
+        family="openai",
         open_source=False,
         dimensions=512,
         max_input=8191,
-        stability=ModelStability.STABLE,
-        hosting=ModelHostingLocation.USA,
+        stability="stable",
+        hosting="usa",
         is_deprecated=False,
     )
 

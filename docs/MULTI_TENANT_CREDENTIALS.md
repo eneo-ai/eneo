@@ -96,7 +96,6 @@ Example response:
 > ⚠️ **Strict mode:** when `TENANT_CREDENTIALS_ENABLED=true`, both `api_key` and `endpoint`
 > must be provided for VLLM. The API now returns HTTP 400 if either value is missing so
 > misconfigured tenants never fall back to the shared global cluster by accident.
-| `berget`    | `api_key`                                         | Swedish-hosted embeddings          |
 | `mistral`   | `api_key`                                         | Mistral hosted models              |
 | `ovhcloud`  | `api_key`                                         | EU-hosted models                   |
 

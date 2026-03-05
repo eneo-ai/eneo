@@ -7,7 +7,7 @@
   import { writable, type Writable } from "svelte/store";
   import type { ModelProviderPublic } from "@intric/intric-js";
   import { m } from "$lib/paraglide/messages";
-  import { Loader2, AlertTriangle } from "lucide-svelte";
+  import { Loader2 } from "lucide-svelte";
   import ProviderGlyph from "./components/ProviderGlyph.svelte";
   import { toast } from "$lib/components/toast";
 
@@ -22,7 +22,6 @@
 
   let providerName = "";
   let providerType = "openai";
-  let originalProviderType = "openai"; // Track original for change detection
   let apiKey = "";
   let endpoint = "";
   let apiVersion = "";
@@ -53,9 +52,6 @@
     providerType = value;
   }
 
-  // Check if provider type has changed from original
-  $: hasProviderTypeChanged = isEditMode && providerType !== originalProviderType;
-
   // Initialize form when provider changes (for edit mode)
   $: if (provider) {
     initializeFromProvider(provider);
@@ -64,7 +60,6 @@
   function initializeFromProvider(p: ModelProviderPublic) {
     providerName = p.name;
     providerType = p.provider_type;
-    originalProviderType = p.provider_type; // Store original for change detection
     isActive = p.is_active;
     // API key is not returned from server - leave empty (user can update if needed)
     apiKey = "";
@@ -124,11 +119,6 @@
           config: {},
           is_active: isActive
         };
-
-        // Include provider_type if it has changed
-        if (hasProviderTypeChanged) {
-          updateData.provider_type = providerType;
-        }
 
         // Only include credentials if user provided a new API key
         if (apiKey.trim()) {
@@ -202,7 +192,6 @@
     providerName = "";
     providerTypeStore.set(providerTypes[0]);
     providerType = "openai";
-    originalProviderType = "openai";
     apiKey = "";
     endpoint = "";
     apiVersion = "";
@@ -237,35 +226,33 @@
         <div class="flex flex-col gap-2">
           <label class="text-sm font-medium text-secondary">{m.provider_type()}</label>
 
-          <!-- Custom trigger wrapper with glyph overlay -->
-          <div class="provider-type-select">
-            <!-- Glyph positioned inside the trigger visually, centered vertically -->
-            <div class="absolute left-3 top-0 h-10 z-10 pointer-events-none flex items-center">
+          {#if isEditMode}
+            <!-- Read-only display in edit mode -->
+            <div class="flex items-center gap-3 rounded-lg border border-dimmer bg-secondary px-4 py-2.5">
               <ProviderGlyph providerType={providerType} size="sm" />
+              <span class="text-sm">{getProviderTypeLabel(providerType)}</span>
             </div>
+          {:else}
+            <!-- Custom trigger wrapper with glyph overlay -->
+            <div class="provider-type-select">
+              <!-- Glyph positioned inside the trigger visually, centered vertically -->
+              <div class="absolute left-3 top-0 h-10 z-10 pointer-events-none flex items-center">
+                <ProviderGlyph providerType={providerType} size="sm" />
+              </div>
 
-            <Select.Root customStore={providerTypeStore}>
-              <Select.Trigger />
-              <Select.Options>
-                {#each providerTypes as type}
-                  <Select.Item value={type} label={type.label}>
-                    <div class="flex items-center gap-3 py-0.5">
-                      <ProviderGlyph providerType={type.value} size="sm" />
-                      <span class="flex-1">{type.label}</span>
-                    </div>
-                  </Select.Item>
-                {/each}
-              </Select.Options>
-            </Select.Root>
-          </div>
-
-          <!-- Contextual warning - only shows when type differs from original in edit mode -->
-          {#if hasProviderTypeChanged}
-            <div class="flex items-start gap-2.5 px-3 py-2.5 rounded-md bg-warning-dimmer border border-warning-default/20 transition-all duration-200">
-              <AlertTriangle class="w-4 h-4 text-warning-default flex-shrink-0 mt-px" />
-              <p class="text-xs text-warning-default leading-relaxed">
-                {m.provider_type_change_warning()}
-              </p>
+              <Select.Root customStore={providerTypeStore}>
+                <Select.Trigger />
+                <Select.Options>
+                  {#each providerTypes as type}
+                    <Select.Item value={type} label={type.label}>
+                      <div class="flex items-center gap-3 py-0.5">
+                        <ProviderGlyph providerType={type.value} size="sm" />
+                        <span class="flex-1">{type.label}</span>
+                      </div>
+                    </Select.Item>
+                  {/each}
+                </Select.Options>
+              </Select.Root>
             </div>
           {/if}
         </div>

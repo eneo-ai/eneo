@@ -3,12 +3,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from intric.ai_models.completion_models.completion_model import (
-    CompletionModelFamily,
-    ModelHostingLocation,
     ModelKwargs,
-    ModelStability,
 )
-from intric.ai_models.model_enums import ModelFamily
 from intric.apps.apps.api.app_assembler import AppAssembler
 from intric.apps.apps.api.app_models import InputField, InputFieldType
 from intric.apps.apps.app import App
@@ -39,11 +35,11 @@ TEST_COMPLETION_MODEL = CompletionModel(
     id=TEST_UUID,
     name=TEST_NAME,
     nickname=TEST_NAME,
-    family=CompletionModelFamily.OPEN_AI,
+    family="openai",
     token_limit=1000,
     is_deprecated=False,
-    stability=ModelStability.STABLE,
-    hosting=ModelHostingLocation.USA,
+    stability="stable",
+    hosting="usa",
     vision=False,
     reasoning=False,
     is_org_enabled=True,
@@ -62,10 +58,10 @@ TEST_TRANSCRIPTION_MODEL = TranscriptionModel(
     id=TEST_UUID,
     name=TEST_NAME,
     nickname=TEST_NAME,
-    family=ModelFamily.OPEN_AI,
+    family="openai",
     is_deprecated=False,
-    stability=ModelStability.STABLE,
-    hosting=ModelHostingLocation.USA,
+    stability="stable",
+    hosting="usa",
     open_source=False,
     description=None,
     hf_link=None,

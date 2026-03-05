@@ -102,6 +102,15 @@
     }
   }
 
+  function formatTokens(limit: number): string {
+    if (limit >= 1_000_000 || (limit >= 1_000 && Math.round(limit / 1_000) >= 1_000)) {
+      const val = limit / 1_000_000;
+      return `${val % 1 === 0 ? val.toFixed(0) : val.toFixed(1)}M`;
+    }
+    if (limit >= 1_000) return `${Math.round(limit / 1_000)}K`;
+    return limit.toString();
+  }
+
   // Providers that need live model listing from their API (not LiteLLM static data)
   const liveListProviders = new Set(["vllm"]);
 
@@ -362,7 +371,7 @@
                 <span class="font-medium">{model.name}</span>
                 <span class="flex gap-3 text-xs text-muted mt-0.5">
                   {#if model.max_input_tokens}
-                    <span>{(model.max_input_tokens / 1000).toFixed(0)}K context</span>
+                    <span>{formatTokens(model.max_input_tokens)} context</span>
                   {/if}
                   {#if model.supports_vision}
                     <span>Vision</span>

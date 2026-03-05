@@ -16,12 +16,12 @@ For providers that are natively supported by LiteLLM (OpenAI, Azure, Claude, Mis
 
 - **`BaseLiteLLMProvider`**: Base class that provides default behavior for standard LiteLLM providers
 - **`LiteLLMProviderRegistry`**: Central registry that manages all provider configurations
-- **Provider Classes**: Custom provider implementations (e.g., `BergetProvider`)
+- **Provider Classes**: Custom provider implementations (e.g., custom provider classes)
 
 ### How It Works
 
 1. Each AI model has a `litellm_model_name` field that determines which provider to use
-2. Models with custom providers use a `litellm_model_name` with a provider prefix (e.g., `berget/model-name`)
+2. Models with custom providers use a `litellm_model_name` with a provider prefix (e.g., `myprovider/model-name`)
 3. The registry detects the provider from the prefix and returns appropriate configuration
 4. The LiteLLM adapters use the provider to configure API calls
 
@@ -93,10 +93,6 @@ class LiteLLMProviderRegistry:
         if litellm_model_name and litellm_model_name.startswith("myprovider/"):
             return MyProvider()
         
-        # Check for Berget models
-        if litellm_model_name and litellm_model_name.startswith("berget/"):
-            return BergetProvider()
-        
         return cls._default_provider
 ```
 
@@ -122,42 +118,11 @@ MY_PROVIDER_API_KEY=your-api-key
 MY_PROVIDER_API_BASE=https://api.myprovider.com/v1
 ```
 
-## Example: Berget Provider
-
-The `BergetProvider` demonstrates integrating an OpenAI-compatible API:
-
-```python
-class BergetProvider(BaseLiteLLMProvider):
-    def get_model_prefix(self) -> str:
-        return "berget/"
-    
-    def get_litellm_model(self, model_name: str) -> str:
-        # Route through OpenAI-compatible endpoint
-        if model_name.startswith("berget/"):
-            return model_name.replace("berget/", "openai/")
-        return f"openai/{model_name}"
-    
-    def get_api_config(self) -> Dict[str, Any]:
-        return {
-            'api_base': os.getenv("BERGET_API_BASE", "https://api.berget.ai/v1"),
-            'api_key': os.getenv("BERGET_API_KEY"),
-        }
-```
-
-Usage in `ai_models.yml`:
-```yaml
-- name: 'multilingual-e5-large-berget'
-  family: 'e5'  # Use the API type, not the provider
-  litellm_model_name: 'berget/intfloat/multilingual-e5-large-instruct'
-  org: Berget  # For UI grouping
-  # LiteLLM will call openai/intfloat/multilingual-e5-large-instruct with Berget's API config
-```
-
 ## Model Compatibility System
 
 For embedding models, the system supports cross-provider compatibility. See `embedding_models/domain/model_compatibility.py` for details.
 
-This allows collections created with one provider (e.g., OpenAI) to work with the same model from another provider (e.g., Berget), as long as they're marked as compatible.
+This allows collections created with one provider (e.g., OpenAI) to work with the same model hosted by another provider, as long as they're marked as compatible.
 
 ## Testing Your Provider
 

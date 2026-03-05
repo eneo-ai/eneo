@@ -10,6 +10,7 @@ from intric.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
 from intric.model_providers.presentation.model_provider_models import (
+    FavoriteProvidersUpdate,
     ModelProviderCreate,
     ModelProviderPublic,
     ModelProviderUpdate,
@@ -17,6 +18,7 @@ from intric.model_providers.presentation.model_provider_models import (
 )
 from intric.server.protocol import responses
 from intric.settings.encryption_service import EncryptionService
+from intric.tenants.tenant_repo import TenantRepository
 from intric.users.user import UserInDB
 
 router = APIRouter()
@@ -85,6 +87,10 @@ async def get_provider_capabilities(
         if dep and dep <= today:
             continue
 
+        # Skip *-latest aliases (the concrete dated versions are more useful)
+        if model_key.endswith("-latest"):
+            continue
+
         if provider and mode and model_key not in raw[provider][mode]:
             model_info: dict = {"name": model_key}
             if mode == "completion":
@@ -102,17 +108,40 @@ async def get_provider_capabilities(
                 model_info["output_vector_size"] = info.get("output_vector_size")
             raw[provider][mode][model_key] = model_info
 
-    # Build response sorted alphabetically
+    # Build response sorted reverse-alphabetically (newest models first)
     result = {}
     for provider, modes in raw.items():
         provider_data: dict = {"modes": sorted(modes.keys()), "models": {}}
         for mode, models_dict in modes.items():
             provider_data["models"][mode] = sorted(
-                models_dict.values(), key=lambda m: m["name"]
+                models_dict.values(), key=lambda m: m["name"], reverse=True
             )
         result[provider] = provider_data
 
     return result
+
+
+@router.get("/favorites/")
+async def get_favorite_providers(
+    user: UserInDB = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_session_with_transaction),
+):
+    """Get the tenant's favorite provider types."""
+    repo = TenantRepository(session)
+    tenant = await repo.get(user.tenant_id)
+    return {"providers": tenant.favorite_providers}
+
+
+@router.put("/favorites/")
+async def set_favorite_providers(
+    body: FavoriteProvidersUpdate,
+    user: UserInDB = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_session_with_transaction),
+):
+    """Set the tenant's favorite provider types."""
+    repo = TenantRepository(session)
+    await repo.update_favorite_providers(user.tenant_id, body.providers)
+    return {"providers": body.providers}
 
 
 @router.get(
@@ -165,7 +194,6 @@ async def update_provider(
     provider = await service.update(
         provider_id=provider_id,
         name=data.name,
-        provider_type=data.provider_type,
         credentials=data.credentials,
         config=data.config,
         is_active=data.is_active,

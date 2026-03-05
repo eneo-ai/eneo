@@ -12,7 +12,6 @@ import redis.asyncio as aioredis
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.ai_models.model_enums import ModelFamily
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.main.container.container import Container
 from intric.main.config import get_settings
@@ -807,20 +806,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 orm_embedding_model = website.embedding_model
                 embedding_model_spec: EmbeddingModelSpec | None = None
                 if orm_embedding_model:
-                    # Convert family string to ModelFamily enum
-                    # DB stores string (e.g., "openai"), but adapters expect enum
-                    family_enum: ModelFamily | None = None
-                    if orm_embedding_model.family:
-                        try:
-                            family_enum = ModelFamily(orm_embedding_model.family)
-                        except ValueError:
-                            logger.warning(
-                                "Unknown ModelFamily value from DB, using None",
-                                extra={
-                                    "family": orm_embedding_model.family,
-                                    "model_name": orm_embedding_model.name,
-                                },
-                            )
+                    family_str: str | None = orm_embedding_model.family or None
 
                     # Pre-resolve provider data while session is active
                     provider_type = None
@@ -858,7 +844,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         id=orm_embedding_model.id,
                         name=orm_embedding_model.name,
                         litellm_model_name=litellm_model_name,
-                        family=family_enum,
+                        family=family_str,
                         max_input=orm_embedding_model.max_input,
                         max_batch_size=orm_embedding_model.max_batch_size,
                         dimensions=orm_embedding_model.dimensions,

@@ -533,6 +533,32 @@ class TenantRepository:
 
         return [TenantInDB.model_validate(tenant) for tenant in tenants]
 
+    async def update_favorite_providers(
+        self,
+        tenant_id: UUID,
+        favorites: list[str],
+    ) -> TenantInDB:
+        """Replace the tenant's favorite providers list.
+
+        Args:
+            tenant_id: The UUID of the tenant
+            favorites: Ordered list of provider type strings
+
+        Returns:
+            Updated TenantInDB instance
+        """
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(
+                favorite_providers=cast(favorites, JSONB),
+                updated_at=datetime.now(timezone.utc),
+            )
+            .returning(Tenants)
+            .options(selectinload(Tenants.modules))
+        )
+        return await self.delegate.get_model_from_query(stmt)
+
     async def update_crawler_settings(
         self,
         tenant_id: UUID,

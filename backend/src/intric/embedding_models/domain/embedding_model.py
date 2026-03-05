@@ -1,12 +1,6 @@
 from typing import TYPE_CHECKING, Optional, Union
 
 from intric.ai_models.ai_model import AIModel
-from intric.ai_models.model_enums import (
-    ModelFamily,
-    ModelHostingLocation,
-    ModelOrg,
-    ModelStability,
-)
 from intric.main.models import NOT_PROVIDED
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
@@ -32,10 +26,10 @@ class EmbeddingModel(AIModel):
         user: "UserInDB",
         nickname: Optional[str],
         name: str,
-        family: Union[ModelFamily, str],
-        hosting: Union[ModelHostingLocation, str],
-        org: Optional[Union[ModelOrg, str]],
-        stability: Union[ModelStability, str],
+        family: Optional[str],
+        hosting: Optional[str],
+        org: Optional[str],
+        stability: Optional[str],
         open_source: bool,
         description: Optional[str],
         hf_link: Optional[str],

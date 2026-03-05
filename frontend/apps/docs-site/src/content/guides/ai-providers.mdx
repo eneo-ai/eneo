@@ -6,13 +6,14 @@ import { Callout, Tabs } from 'nextra/components'
 
 ## Overview
 
-Eneo supports the following AI providers:
+Eneo is provider-agnostic and routes all AI requests through **LiteLLM**, which supports 100+ providers out of the box. Common providers include:
 - **OpenAI** (GPT-4o, GPT-4o-mini, GPT-5)
 - **Anthropic** (Claude 3.5, Claude 3.7, Claude Haiku 4.5)
 - **Azure OpenAI Service** (GPT-4o, GPT-5 variants)
 - **Google Gemini** (Gemini 1.5, Gemini 2.0)
-- **Regional Providers** (Berget AI, GDM - Swedish data residency)
 - **Self-hosted** (vLLM, compatible OpenAI API servers)
+
+Any provider supported by LiteLLM can be used — see the [LiteLLM providers list](https://docs.litellm.ai/docs/providers) for the full list. You can also add custom providers by implementing a provider class (see the [LiteLLM Provider README](/backend/src/intric/ai_models/litellm_providers/README.md)).
 
 You can configure multiple providers simultaneously and switch between them based on your needs.
 
@@ -24,7 +25,7 @@ Eneo routes all AI requests through **LiteLLM**, a unified API layer that suppor
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
 
-![LiteLLM Architecture Overview showing Service Layer (CompletionService, EmbeddingService) connecting through Adapter Layer (LiteLLMModelAdapter, LiteLLMEmbeddingAdapter) to LiteLLM Core with unified API supporting 100+ providers. Shows AI Providers categorized as Cloud (OpenAI, Azure, Anthropic, Gemini, Mistral), Regional/Swedish (Berget, GDM), and Self-hosted (vLLM). Provider Registry handles provider detection and Credential Resolver manages multi-tenant credentials.](/diagrams/litellm-overview.svg)
+![LiteLLM Architecture Overview showing Service Layer (CompletionService, EmbeddingService) connecting through Adapter Layer (LiteLLMModelAdapter, LiteLLMEmbeddingAdapter) to LiteLLM Core with unified API supporting 100+ providers. Shows AI Providers categorized as Cloud (OpenAI, Azure, Anthropic, Gemini, Mistral) and Self-hosted (vLLM). Provider Registry handles provider detection and Credential Resolver manages multi-tenant credentials.](/diagrams/litellm-overview.svg)
 
 </div>
 
@@ -41,8 +42,6 @@ The routing system uses model name prefixes to determine the target provider:
 | Prefix | Provider | Example |
 |--------|----------|---------|
 | `azure/` | Azure OpenAI | `azure/gpt-4o` |
-| `berget/` | Berget AI | `berget/llama-3-70b` |
-| `gdm/` | GDM (Swedish) | `gdm/mistral-large` |
 | `openai/` | OpenAI Direct | `openai/gpt-4o` |
 | (no prefix) | Default provider | `gpt-4o-mini` |
 
@@ -320,51 +319,9 @@ Google's Gemini models offer multimodal capabilities with very large context win
 
 ---
 
-## Regional Providers (Swedish Data Residency)
+## Self-Hosted & Custom Providers
 
-For organizations requiring data to remain within Sweden or the EU, Eneo supports regional AI providers.
-
-### Berget AI
-
-Swedish AI infrastructure with data residency guarantees.
-
-```bash
-curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/credentials/berget" \
-  -H "X-API-Key: your-super-admin-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "api_key": "your-berget-api-key",
-    "api_base": "https://api.berget.ai/v1"
-  }'
-```
-
-**Available Models:**
-- `berget/llama-3-70b` - Llama 3 70B hosted in Sweden
-- `berget/mistral-large` - Mistral Large with Swedish data residency
-
-### GDM (Government Digital Services)
-
-Swedish government-approved AI infrastructure.
-
-```bash
-curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/credentials/gdm" \
-  -H "X-API-Key: your-super-admin-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "api_key": "your-gdm-api-key",
-    "api_base": "https://api.gdm.se/v1"
-  }'
-```
-
-<Callout type="info">
-  Regional providers are ideal for Swedish municipalities, government agencies, and organizations with strict data sovereignty requirements.
-</Callout>
-
----
-
-## Self-Hosted Models (vLLM)
-
-Run AI models on your own infrastructure for complete data privacy and control.
+Run AI models on your own infrastructure or connect any OpenAI-compatible API endpoint. Since Eneo routes through LiteLLM, any provider with an OpenAI-compatible API can be integrated using the `hosted_vllm` provider type or by adding a custom provider class.
 
 ### vLLM Configuration
 
@@ -460,7 +417,7 @@ curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/cre
   }'
 ```
 
-**Supported providers:** `openai`, `anthropic`, `azure`, `google`, `mistral`, `berget`, `gdm`, `vllm`
+**Supported providers:** `openai`, `anthropic`, `azure`, `google`, `mistral`, `vllm`
 
 ### List Tenant Credentials
 
@@ -531,11 +488,6 @@ uv run python -m intric.cli.generate_encryption_key
 - You need massive 1M token context
 - Multimodal processing (text, images, audio) is required
 - You want fast response times with Flash variants
-
-### Choose Regional Providers (Berget/GDM) if:
-- Data must remain in Sweden
-- You're a Swedish municipality or government agency
-- Compliance with Swedish data sovereignty requirements
 
 ### Choose Self-Hosted (vLLM) if:
 - Complete data privacy is paramount
@@ -650,7 +602,7 @@ Check your usage regularly:
 
 5. **Data Handling**
    - Review provider data policies before use
-   - Use regional providers (Berget/GDM) or self-hosted for sensitive data
+   - Use self-hosted models for sensitive data
    - Consider data residency requirements
 
 ---

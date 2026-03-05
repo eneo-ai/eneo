@@ -16,8 +16,6 @@ PROVIDER_REQUIRED_FIELDS: dict[str, Set[str]] = {
     "anthropic": {"api_key"},
     "azure": {"api_key", "endpoint", "api_version", "deployment_name"},
     "hosted_vllm": {"api_key", "endpoint"},
-    "berget": {"api_key"},
-    "gdm": {"api_key"},
     "mistral": {"api_key"},
     "ovhcloud": {"api_key"},
     "gemini": {"api_key"},

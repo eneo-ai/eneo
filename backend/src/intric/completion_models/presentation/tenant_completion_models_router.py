@@ -5,7 +5,6 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from intric.ai_models.model_enums import ModelStability
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.completion_models.presentation import CompletionModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
@@ -106,7 +105,7 @@ async def create_tenant_completion_model(
         family=model_create.family,
         hosting=model_create.hosting,
         org=None,
-        stability=ModelStability.STABLE.value,
+        stability="stable",
         open_source=False,
         description=f"Tenant model: {model_create.display_name}",
         nr_billion_parameters=None,

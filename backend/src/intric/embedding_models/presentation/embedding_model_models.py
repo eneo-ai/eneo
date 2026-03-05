@@ -3,12 +3,6 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from intric.ai_models.model_enums import (
-    ModelFamily,
-    ModelHostingLocation,
-    ModelStability,
-)
-from intric.ai_models.model_enums import ModelOrg as Orgs
 from intric.embedding_models.domain.embedding_model import EmbeddingModel
 from intric.main.models import NOT_PROVIDED, BaseResponse, ModelId, NotProvided
 from intric.security_classifications.presentation.security_classification_models import (
@@ -18,16 +12,16 @@ from intric.security_classifications.presentation.security_classification_models
 
 class EmbeddingModelPublic(BaseResponse):
     name: str
-    family: ModelFamily
+    family: Optional[str] = None
     is_deprecated: bool
     open_source: bool
     dimensions: Optional[int] = None
     max_input: Optional[int] = None
     hf_link: Optional[str] = None
-    stability: ModelStability
-    hosting: ModelHostingLocation
+    stability: Optional[str] = None
+    hosting: Optional[str] = None
     description: Optional[str] = None
-    org: Optional[Orgs] = None
+    org: Optional[str] = None
     litellm_model_name: Optional[str] = None
     can_access: bool = False
     is_locked: bool = True

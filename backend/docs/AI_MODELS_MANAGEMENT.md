@@ -319,7 +319,7 @@ SELECT id, name FROM completion_models;
 - `usa`, `eu`, `swe`
 
 **ModelOrg:**
-- `OpenAI`, `Meta`, `Microsoft`, `Anthropic`, `Mistral`, `KBLab`, `Google`, `Berget`, `GDM`
+- `OpenAI`, `Meta`, `Microsoft`, `Anthropic`, `Mistral`, `KBLab`, `Google`
 
 ### Response Codes
 
