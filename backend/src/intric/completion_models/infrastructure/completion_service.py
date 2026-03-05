@@ -59,7 +59,9 @@ class CompletionService:
         self.encryption_service = encryption_service
         self.session = session
         self.redis_client = redis_client
-        self._mcp_proxy_factory = MCPProxySessionFactory()
+        self._mcp_proxy_factory = MCPProxySessionFactory(
+            encryption_service=encryption_service
+        )
 
     async def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
         """

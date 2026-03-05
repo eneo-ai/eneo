@@ -17,7 +17,6 @@
   import { formatNumber } from "$lib/core/formatting/formatNumber";
 
   import InteractiveGraph from "./InteractiveGraph.svelte";
-  import TenantAssistantTable from "./TenantAssistantTable.svelte";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { onMount } from "svelte";
@@ -519,7 +518,6 @@
     <Page.Title title={m.insights()}></Page.Title>
     <Page.Tabbar>
       <Page.TabTrigger tab="overview">{m.usage()}</Page.TabTrigger>
-      <Page.TabTrigger tab="assistants">{m.assistants()}</Page.TabTrigger>
     </Page.Tabbar>
   </Page.Header>
   <Page.Main>
@@ -863,11 +861,6 @@
             </Settings.Row>
           </Settings.Group>
         </Settings.Page>
-      {/if}
-    </Page.Tab>
-    <Page.Tab id="assistants">
-      {#if $selectedTab === "assistants"}
-        <TenantAssistantTable assistants={data.assistants} />
       {/if}
     </Page.Tab>
   </Page.Main>

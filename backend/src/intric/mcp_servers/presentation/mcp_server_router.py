@@ -302,7 +302,7 @@ async def update_mcp_server(
     # Get old state for change tracking
     old_server = await service.get_mcp_server(id)
 
-    mcp_server = await service.update_mcp_server(
+    result = await service.update_mcp_server(
         mcp_server_id=id,
         name=data.name,
         http_url=str(data.http_url) if data.http_url else None,
@@ -313,6 +313,14 @@ async def update_mcp_server(
         icon_url=str(data.icon_url) if data.icon_url else None,
         documentation_url=str(data.documentation_url) if data.documentation_url else None,
     )
+
+    # If connection validation failed, return 400 error with message
+    if result.connection and not result.connection.success:
+        raise BadRequestException(
+            result.connection.error_message or "Failed to connect to MCP server"
+        )
+
+    mcp_server = result.server
 
     # Build changes dict
     changes: dict[str, Any] = {}
@@ -326,6 +334,8 @@ async def update_mcp_server(
         changes["http_auth_type"] = {"old": old_server.http_auth_type, "new": data.http_auth_type}
     if data.tags is not None and data.tags != old_server.tags:
         changes["tags"] = {"old": old_server.tags, "new": data.tags}
+    if data.http_auth_config_schema is not None:
+        changes["credentials_updated"] = True
 
     # Audit logging
     user = container.user()
