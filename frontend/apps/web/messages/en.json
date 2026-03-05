@@ -2685,7 +2685,7 @@
   "flow_validation_issues": "{count} steps have issues",
   "flow_validation_no_issues": "Flow is valid",
   "flow_publish": "Publish",
-  "flow_unpublish_to_edit": "Unpublish to edit",
+  "flow_unpublish_to_edit": "Unpublish",
   "flow_published_readonly": "This flow is published. Unpublish to make changes.",
   "flow_save_status_saved": "Saved",
   "flow_save_status_saving": "Saving\u2026",

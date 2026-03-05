@@ -200,44 +200,55 @@
       </div>
     </Page.Tabbar>
 
-    <Page.Flex>
+    <div class="relative z-10 flex min-w-0 shrink items-center gap-2 overflow-hidden">
       <FlowVersionBadge publishedVersion={$resource.published_version} />
-      <FlowSaveStatus status={$saveStatus} />
-      <FlowUserModeToggle />
-      {#if $isPublished}
-        <Button variant="primary" on:click={() => { showRunDialog = true; }}>
-          {m.flow_run_trigger()}
-        </Button>
-        <Button variant="destructive" disabled={publishLoading} on:click={async () => {
-          publishLoading = true;
-          try {
-            const updated = await data.intric.flows.unpublish({ id: $resource.id });
-            flowEditor.setResource(updated);
-          } catch (e) {
-            const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
-            console.error("Unpublish failed:", msg);
-            toast.error(msg);
-          } finally {
-            publishLoading = false;
-          }
-        }}>{m.flow_unpublish_to_edit()}</Button>
-      {:else}
-        <Button variant="primary" disabled={!canPublish || publishLoading} on:click={async () => {
-          publishLoading = true;
-          try {
-            await flowEditor.flushAssistantSaves();
-            const published = await data.intric.flows.publish({ id: $resource.id });
-            flowEditor.setResource(published);
-          } catch (e) {
-            const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
-            console.error("Publish failed:", msg);
-            toast.error(msg);
-          } finally {
-            publishLoading = false;
-          }
-        }}>{m.flow_publish()}</Button>
+      {#if !$isPublished}
+        <FlowSaveStatus status={$saveStatus} />
       {/if}
-    </Page.Flex>
+      {#if $isPublished}
+        <!-- Hide mode toggle on narrower screens when published (read-only mode) -->
+        <div class="hidden xl:block">
+          <FlowUserModeToggle />
+        </div>
+      {:else}
+        <FlowUserModeToggle />
+      {/if}
+      <div class="flex shrink-0 items-center gap-2">
+        {#if $isPublished}
+          <Button variant="primary" on:click={() => { showRunDialog = true; }}>
+            {m.flow_run_trigger()}
+          </Button>
+          <Button variant="destructive" disabled={publishLoading} on:click={async () => {
+            publishLoading = true;
+            try {
+              const updated = await data.intric.flows.unpublish({ id: $resource.id });
+              flowEditor.setResource(updated);
+            } catch (e) {
+              const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
+              console.error("Unpublish failed:", msg);
+              toast.error(msg);
+            } finally {
+              publishLoading = false;
+            }
+          }}>{m.flow_unpublish_to_edit()}</Button>
+        {:else}
+          <Button variant="primary" disabled={!canPublish || publishLoading} on:click={async () => {
+            publishLoading = true;
+            try {
+              await flowEditor.flushAssistantSaves();
+              const published = await data.intric.flows.publish({ id: $resource.id });
+              flowEditor.setResource(published);
+            } catch (e) {
+              const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
+              console.error("Publish failed:", msg);
+              toast.error(msg);
+            } finally {
+              publishLoading = false;
+            }
+          }}>{m.flow_publish()}</Button>
+        {/if}
+      </div>
+    </div>
   </Page.Header>
 
   <Page.Main>
@@ -316,7 +327,7 @@
               </li>
             {/each}
           </ol>
-          <div class="flex shrink-0 items-center gap-2.5 border-l border-default pl-5">
+          <div class="flex shrink-0 items-center gap-2 border-l border-default pl-3 md:gap-2.5 md:pl-5">
             <Button variant="simple" size="default" disabled={!previousStage} on:click={goToPreviousStage}>
               &larr; {m.flow_stage_previous()}
             </Button>

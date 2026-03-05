@@ -2720,7 +2720,7 @@
   "flow_validation_issues": "{count} steg har problem",
   "flow_validation_no_issues": "Flödet är giltigt",
   "flow_publish": "Publicera",
-  "flow_unpublish_to_edit": "Avpublicera för att redigera",
+  "flow_unpublish_to_edit": "Avpublicera",
   "flow_published_readonly": "Detta flöde är publicerat. Avpublicera för att göra ändringar.",
   "flow_save_status_saved": "Sparad",
   "flow_save_status_saving": "Sparar\u2026",
