@@ -34,6 +34,18 @@ def test_validate_runtime_input_policy_rejects_document_non_flow_input() -> None
     assert exc.value.code == "typed_io_document_source_unsupported"
 
 
+def test_validate_runtime_input_policy_rejects_file_non_flow_input() -> None:
+    with pytest.raises(TypedIOValidationException) as exc:
+        validate_runtime_input_policy(
+            step_order=21,
+            input_type="file",
+            input_source="previous_step",
+            raw_extracted_text="hello",
+        )
+
+    assert exc.value.code == "typed_io_file_source_unsupported"
+
+
 def test_validate_runtime_input_policy_rejects_empty_extraction_when_required() -> None:
     with pytest.raises(TypedIOValidationException) as exc:
         validate_runtime_input_policy(

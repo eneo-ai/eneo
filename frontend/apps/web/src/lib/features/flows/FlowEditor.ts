@@ -6,22 +6,14 @@
 
 import { createContext } from "$lib/core/context";
 import { createResourceEditor } from "$lib/core/editing/ResourceEditor";
-import { IntricError, type Flow, type FlowStep, type Intric } from "@intric/intric-js";
+import { IntricError, type Flow, type FlowStep, type Intric, type PromptSparse } from "@intric/intric-js";
 import { derived, get, writable } from "svelte/store";
 import { uid } from "uid";
 import {
   remapStepOrderTemplateTokens,
   replaceExactTemplateToken,
 } from "./flowVariableTokens";
-
-/** Map output types to valid input types (pdf/docx → text) */
-function mapOutputToInputType(
-  outputType?: string
-): "text" | "json" | "image" | "audio" | "document" | "file" | "any" {
-  if (!outputType) return "text";
-  const validInputTypes = ["text", "json", "image", "audio", "document", "file", "any"];
-  return validInputTypes.includes(outputType) ? (outputType as any) : "text";
-}
+import { getFlowStepValidationIssues, mapOutputToInputType } from "./flowStepTypes";
 
 const [getFlowEditor, setFlowEditor] =
   createContext<ReturnType<typeof initFlowEditor>>("Edit a flow");
@@ -31,6 +23,7 @@ function initFlowEditor(data: {
   intric: Intric;
   onUpdateDone?: (flow: Flow) => void;
 }) {
+  type LoadedAssistant = Awaited<ReturnType<typeof data.intric.flows.assistants.get>>;
   const editor = createResourceEditor({
     intric: data.intric,
     resource: data.flow,
@@ -107,6 +100,7 @@ function initFlowEditor(data: {
   const assistantSaveStatus = writable<"idle" | "pending" | "saving" | "error">("idle");
   const assistantErrorPrefix = "assistant:";
   const flowErrorPrefix = "flow:";
+  const typedIOValidationPrefix = `${flowErrorPrefix}typed-io:`;
 
   function setAssistantValidationError(assistantId: string, message: string | null) {
     validationErrors.update((current) => {
@@ -134,11 +128,39 @@ function initFlowEditor(data: {
     });
   }
 
+  function replaceFlowValidationErrors(prefix: string, entries: Map<string, string[]>) {
+    validationErrors.update((current) => {
+      const next = new Map(current);
+      for (const key of next.keys()) {
+        if (key.startsWith(prefix)) {
+          next.delete(key);
+        }
+      }
+      for (const [key, value] of entries.entries()) {
+        next.set(key, value);
+      }
+      return next;
+    });
+  }
+
+  function syncTypedIOValidation(steps: FlowStep[] = get(editor.state.update).steps ?? []) {
+    const issues = getFlowStepValidationIssues(steps);
+    const entries = new Map<string, string[]>();
+    for (const issue of issues) {
+      entries.set(
+        `${typedIOValidationPrefix}${issue.code}:${issue.stepOrder}`,
+        [issue.code],
+      );
+    }
+    replaceFlowValidationErrors(typedIOValidationPrefix, entries);
+    return issues;
+  }
+
   function getFlowId(): string {
     return get(editor.state.resource).id;
   }
 
-  async function loadAssistant(assistantId: string): Promise<unknown | null> {
+  async function loadAssistant(assistantId: string): Promise<LoadedAssistant | null> {
     if (!assistantId || assistantId === "") return null;
     if (assistantCache.has(assistantId)) return assistantCache.get(assistantId)!;
     try {
@@ -364,6 +386,13 @@ function initFlowEditor(data: {
   // Debounced auto-save (500ms)
   let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
+  function clearAutoSaveTimer() {
+    if (autoSaveTimer) {
+      clearTimeout(autoSaveTimer);
+      autoSaveTimer = null;
+    }
+  }
+
   function scheduleAutoSave() {
     // CRITICAL: never auto-save when published
     if (get(isPublished)) return;
@@ -371,8 +400,15 @@ function initFlowEditor(data: {
     const { hasUnsavedChanges } = get(editor.state.currentChanges);
     if (!hasUnsavedChanges) return;
 
+    const stepIssues = syncTypedIOValidation((get(editor.state.update).steps ?? []) as FlowStep[]);
+    if (stepIssues.length > 0) {
+      clearAutoSaveTimer();
+      if (get(saveStatus) !== "unsaved") saveStatus.set("unsaved");
+      return;
+    }
+
     if (get(saveStatus) !== "unsaved") saveStatus.set("unsaved");
-    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+    clearAutoSaveTimer();
     autoSaveTimer = setTimeout(async () => {
       // Double-check published state before saving
       if (get(isPublished)) return;
@@ -396,6 +432,9 @@ function initFlowEditor(data: {
     if ($changes.hasUnsavedChanges && !get(isPublished)) {
       scheduleAutoSave();
     }
+  });
+  const unsubscribeValidation = editor.state.update.subscribe(($update) => {
+    syncTypedIOValidation(($update.steps ?? []) as FlowStep[]);
   });
 
   /** Instant step creation — no dialogs */
@@ -520,7 +559,7 @@ function initFlowEditor(data: {
     }
   }
 
-  async function listAssistantPrompts(assistantId: string): Promise<any[]> {
+  async function listAssistantPrompts(assistantId: string): Promise<PromptSparse[]> {
     return data.intric.assistants.listPrompts({ id: assistantId });
   }
 
@@ -583,7 +622,12 @@ function initFlowEditor(data: {
       ...resource,
       steps: rewrittenSteps,
     }));
-    scheduleAutoSave();
+    const stepIssues = syncTypedIOValidation(rewrittenSteps);
+    if (stepIssues.length === 0) {
+      scheduleAutoSave();
+    } else {
+      clearAutoSaveTimer();
+    }
 
     for (const step of rewrittenSteps) {
       if (!step.assistant_id) continue;
@@ -716,7 +760,7 @@ function initFlowEditor(data: {
   }
 
   function destroy() {
-    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+    clearAutoSaveTimer();
     for (const timer of assistantSaveTimers.values()) {
       clearTimeout(timer);
     }
@@ -725,6 +769,7 @@ function initFlowEditor(data: {
       // Best-effort flush during teardown.
     });
     unsubscribe();
+    unsubscribeValidation();
   }
 
   const flowEditor = Object.freeze({

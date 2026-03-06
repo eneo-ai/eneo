@@ -105,6 +105,7 @@ export function getChipClasses(category: VariableCategory): string {
 export type VariableClassificationContext = {
   knownFieldNames: Set<string>;
   knownStepNames: Map<number, string>;  // stepOrder -> user_description
+  stepOutputTypes: Map<number, string>;
   transcriptionEnabled: boolean;
   currentStepOrder: number;
 };
@@ -126,8 +127,13 @@ export function classifyVariable(
   }
 
   // 4. Structured step output (step_N.output.structured.*)
-  const structuredMatch = /^step_(\d+)\.output\.structured\./.exec(token);
-  if (structuredMatch) return "structured";
+  const structuredMatch = /^step_(\d+)\.output\.structured(?:\.|$)/.exec(token);
+  if (structuredMatch) {
+    const stepOrder = Number(structuredMatch[1]);
+    const outputType = context.stepOutputTypes.get(stepOrder);
+    if (stepOrder >= context.currentStepOrder || outputType !== "json") return "unknown";
+    return "structured";
+  }
 
   // 5. Step output reference (step_N.output.* or step_N.*)
   const stepMatch = /^step_(\d+)(\.|$)/.exec(token);
@@ -176,3 +182,34 @@ export function parsePromptSegments(
   return segments;
 }
 
+export type StructuredOutputReferenceIssue = {
+  token: string;
+  stepOrder: number;
+  reason: "non_json_output" | "unavailable_step";
+};
+
+export function collectInvalidStructuredOutputReferences(
+  text: string,
+  steps: Array<{ step_order: number; output_type: string }>,
+  currentStepOrder: number,
+): StructuredOutputReferenceIssue[] {
+  const stepOutputTypes = new Map(steps.map((step) => [step.step_order, step.output_type]));
+  const issues: StructuredOutputReferenceIssue[] = [];
+
+  for (const token of extractTemplateTokens(text)) {
+    const structuredMatch = /^step_(\d+)\.output\.structured(?:\.|$)/.exec(token);
+    if (!structuredMatch) continue;
+
+    const stepOrder = Number(structuredMatch[1]);
+    if (stepOrder >= currentStepOrder || !stepOutputTypes.has(stepOrder)) {
+      issues.push({ token, stepOrder, reason: "unavailable_step" });
+      continue;
+    }
+
+    if (stepOutputTypes.get(stepOrder) !== "json") {
+      issues.push({ token, stepOrder, reason: "non_json_output" });
+    }
+  }
+
+  return issues;
+}

@@ -32,6 +32,13 @@
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { slide } from "svelte/transition";
+  import {
+    getFlowStepValidationIssues,
+    getPreferredInputType,
+    getSelectableInputSourceOptions,
+    getSelectableInputTypeOptions,
+    type FlowStepValidationIssue,
+  } from "$lib/features/flows/flowStepTypes";
 
   export let steps: FlowStep[];
   export let activeStepId: string | null;
@@ -50,6 +57,7 @@
 
   const mode = getFlowUserMode();
   const flowEditor = getFlowEditor();
+  type LoadedAssistant = NonNullable<Awaited<ReturnType<typeof flowEditor.loadAssistant>>>;
   const { state: { currentSpace } } = getSpacesManager();
   const intric = getIntric();
   const attachmentRules = writable({});
@@ -66,6 +74,11 @@
 
   $: activeIndex = steps.findIndex((s) => s.id === activeStepId);
   $: activeStep = activeIndex >= 0 ? steps[activeIndex] : null;
+  $: isAdvancedMode = $mode === "power_user";
+  $: hasAudioInputSteps = steps.some((step) => step.input_type === "audio");
+  let inputSourceFeedback: string | null = null;
+  let inputTypeFeedback: string | null = null;
+  let lastFeedbackStepKey: string | null = null;
 
   type AdvancedJsonField = "input_contract" | "output_contract" | "input_config" | "output_config";
   const ADVANCED_JSON_FIELDS: AdvancedJsonField[] = [
@@ -171,7 +184,7 @@
   }
 
   // Assistant state for the active step
-  let assistant: any = null;
+  let assistant: LoadedAssistant | null = null;
   let assistantLoading = false;
   let lastLoadedAssistantId: string | null = null;
   const autoClearedLegacyTemplateByStepId = new Set<string>();
@@ -188,12 +201,13 @@
     clearUploads();
   }
 
-  // Load assistant when active step changes
+  // Load assistant when active step changes.
   $: if (activeStep?.assistant_id && activeStep.assistant_id !== lastLoadedAssistantId) {
     void flowEditor.flushAssistantSaves().catch(() => {
       // Save errors are surfaced in editor validation/toasts.
     });
     cancelUploadsAndClearQueue();
+    // eslint-disable-next-line svelte/infinite-reactive-loop
     void loadAssistantForStep(activeStep.assistant_id);
   } else if (!activeStep || !activeStep.assistant_id) {
     assistant = null;
@@ -220,6 +234,11 @@
     }
   }
 
+  /* eslint-disable svelte/infinite-reactive-loop --
+    Guarded async assistant sync intentionally mutates local component state in
+    response to active-step changes. Request tokens and assistant-id checks
+    prevent stale results from causing feedback loops.
+  */
   async function loadAssistantForStep(assistantId: string) {
     if (!assistantId || assistantId === "") return;
     const requestToken = ++assistantLoadRequestToken;
@@ -235,19 +254,17 @@
       console.error("Failed to load assistant for flow step:", error);
       assistant = null;
     } finally {
-      if (requestToken !== assistantLoadRequestToken) return;
-      assistantLoading = false;
+      if (requestToken === assistantLoadRequestToken) {
+        assistantLoading = false;
+      }
     }
   }
+  /* eslint-enable svelte/infinite-reactive-loop */
 
   function updateInstruction(value: string) {
-    if (!activeStep?.assistant_id) return;
-    const currentPrompt =
-      assistant && typeof assistant === "object" && assistant.prompt && typeof assistant.prompt === "object"
-        ? assistant.prompt
-        : { text: "", description: "" };
-    const nextPrompt = { ...currentPrompt, text: value, description: "" };
-    assistant = { ...(assistant ?? {}), prompt: nextPrompt };
+    if (!activeStep?.assistant_id || !assistant?.prompt) return;
+    const nextPrompt = { ...assistant.prompt, text: value, description: "" };
+    assistant = { ...assistant, prompt: nextPrompt };
     flowEditor.saveAssistant(activeStep.assistant_id, { prompt: nextPrompt });
   }
 
@@ -282,12 +299,16 @@
 
   function handleInputSourceChange(nextSource: FlowStep["input_source"]) {
     if (activeStep === null || activeIndex < 0) return;
+    inputSourceFeedback = null;
+    inputTypeFeedback = null;
     const httpSourceSelected = nextSource === "http_get" || nextSource === "http_post";
-    const unsupportedHttpInputType =
-      activeStep.input_type === "document" ||
-      activeStep.input_type === "file" ||
-      activeStep.input_type === "image" ||
-      activeStep.input_type === "audio";
+    const nextPreviousOutputType = nextSource === "previous_step" ? previousStep?.output_type : undefined;
+    const nextInputTypeOptions = getSelectableInputTypeOptions({
+      inputSource: nextSource,
+      previousOutputType: nextPreviousOutputType,
+      currentInputType: activeStep.input_type,
+      isAdvancedMode,
+    });
     const nextInputConfig = (() => {
       if (!httpSourceSelected) return activeStep.input_config ?? null;
       const currentConfig =
@@ -306,16 +327,24 @@
             : "",
       };
     })();
+    const nextInputType = nextInputTypeOptions.some(
+      (option) => option.value === activeStep.input_type && !option.disabled && !option.legacyInvalid
+    )
+      ? activeStep.input_type
+      : getPreferredInputType({
+          inputSource: nextSource,
+          previousOutputType: nextPreviousOutputType,
+          isAdvancedMode,
+        });
+    if (nextInputType !== activeStep.input_type) {
+      inputTypeFeedback = m.flow_step_input_type_adjusted({
+        inputType: getInputTypeLabel(nextInputType),
+      });
+    }
     const updated = {
       ...activeStep,
       input_source: nextSource,
-      input_type:
-        (
-          nextSource !== "flow_input" &&
-          (activeStep.input_type === "document" || activeStep.input_type === "audio")
-        ) || (httpSourceSelected && unsupportedHttpInputType)
-          ? "text"
-          : activeStep.input_type,
+      input_type: nextInputType,
       input_config: nextInputConfig,
       input_bindings: sanitizeBindingsForSource(
         activeStep.input_bindings as Record<string, unknown> | null | undefined
@@ -326,21 +355,30 @@
 
   function handleInputTypeChange(nextType: FlowStep["input_type"]) {
     if (activeStep === null || activeIndex < 0) return;
+    inputSourceFeedback = null;
+    inputTypeFeedback = null;
     const isAudioInput = nextType === "audio";
-    const nextOutputMode =
+    const nextOutputMode: FlowStep["output_mode"] =
       isAudioInput
         ? "transcribe_only"
         : activeStep.output_mode === "transcribe_only"
           ? "pass_through"
           : activeStep.output_mode;
-    const nextOutputType = isAudioInput ? "text" : activeStep.output_type;
-    const updated = {
+    const nextOutputType: FlowStep["output_type"] = isAudioInput ? "text" : activeStep.output_type;
+    const nextInputSource: FlowStep["input_source"] =
+      (nextType === "document" || nextType === "audio" || nextType === "file") &&
+      activeStep.input_source !== "flow_input"
+        ? "flow_input"
+        : activeStep.input_source;
+    if (nextInputSource !== activeStep.input_source) {
+      inputSourceFeedback = m.flow_step_input_source_adjusted({
+        inputSource: getInputSourceLabel(nextInputSource),
+      });
+    }
+    const updated: FlowStep = {
       ...activeStep,
       input_type: nextType,
-      input_source:
-        (nextType === "document" || nextType === "audio") && activeStep.input_source !== "flow_input"
-          ? "flow_input"
-          : activeStep.input_source,
+      input_source: nextInputSource,
       output_mode: nextOutputMode,
       output_type: nextOutputType,
     };
@@ -390,16 +428,6 @@
     activeStep && activeStep.input_bindings && typeof activeStep.input_bindings === "object"
       ? ((activeStep.input_bindings.question as string) ?? "")
       : "";
-  $: assistantSecurityLevel =
-    assistant &&
-    typeof assistant === "object" &&
-    assistant.completion_model &&
-    typeof assistant.completion_model === "object" &&
-    assistant.completion_model.security_classification &&
-    typeof assistant.completion_model.security_classification === "object" &&
-    typeof assistant.completion_model.security_classification.security_level === "number"
-      ? assistant.completion_model.security_classification.security_level
-      : null;
   $: showInputTemplate = $mode === "power_user" ||
     (activeStep !== null && activeStep.input_source !== "flow_input" && hasInputTemplateOverride);
   $: hasInputTemplateOverride = inputTemplateText.trim().length > 0;
@@ -500,7 +528,9 @@
 
   function updateAssistantField(field: string, value: unknown) {
     if (!activeStep?.assistant_id) return;
-    assistant = { ...assistant, [field]: value };
+    if (assistant) {
+      assistant = { ...assistant, [field]: value };
+    }
     flowEditor.saveAssistant(activeStep.assistant_id, { [field]: value });
   }
 
@@ -531,31 +561,29 @@
     );
   }
 
-  // Type chain compatibility (matching backend _COMPATIBLE_COERCIONS)
-  const COMPATIBLE_COERCIONS = new Set([
-    "text:text", "text:json", "text:any",
-    "json:text", "json:json", "json:any",
-    "pdf:text", "pdf:any",
-    "docx:text", "docx:any",
-  ]);
-
   $: previousStep = activeStep && activeStep.step_order > 1
     ? steps.find((s) => s.step_order === activeStep!.step_order - 1)
     : null;
-
-  $: typeChainIncompatible = (() => {
-    if (!activeStep || activeStep.input_source !== "previous_step" || !previousStep) return false;
-    const key = `${previousStep.output_type}:${activeStep.input_type}`;
-    return !COMPATIBLE_COERCIONS.has(key);
-  })();
-
-  const INPUT_SOURCES = [
-    { value: "flow_input", get label() { return m.flow_input_source_flow_input(); } },
-    { value: "previous_step", get label() { return m.flow_input_source_previous_step(); } },
-    { value: "all_previous_steps", get label() { return m.flow_input_source_all_previous_steps(); } },
-    { value: "http_get", get label() { return m.flow_input_source_http_get(); } },
-    { value: "http_post", get label() { return m.flow_input_source_http_post(); } }
-  ];
+  $: currentStepIssues = activeStep
+    ? getFlowStepValidationIssues(steps).filter((issue) => issue.stepOrder === activeStep.step_order)
+    : [];
+  $: sourceValidationIssue = currentStepIssues.find((issue) => issue.field === "input_source") ?? null;
+  $: inputTypeValidationIssue = currentStepIssues.find((issue) => issue.field === "input_type") ?? null;
+  $: selectableInputSourceOptions = activeStep
+    ? getSelectableInputSourceOptions({
+        steps,
+        stepOrder: activeStep.step_order,
+        currentInputSource: activeStep.input_source,
+      })
+    : [];
+  $: selectableInputTypeOptions = activeStep
+    ? getSelectableInputTypeOptions({
+        inputSource: activeStep.input_source,
+        previousOutputType: previousStep?.output_type,
+        currentInputType: activeStep.input_type,
+        isAdvancedMode,
+      })
+    : [];
 
   const INPUT_TYPES = [
     { value: "text", get label() { return m.flow_type_text(); } },
@@ -596,6 +624,71 @@
     { value: "restricted", get label() { return m.flow_mcp_policy_restricted(); } }
   ];
   $: isTranscribeOnly = activeStep?.output_mode === "transcribe_only";
+
+  $: {
+    const nextKey = activeStep ? `${activeStep.id ?? "new"}:${activeStep.step_order}` : null;
+    if (nextKey !== lastFeedbackStepKey) {
+      lastFeedbackStepKey = nextKey;
+      inputSourceFeedback = null;
+      inputTypeFeedback = null;
+    }
+  }
+
+  function getInputTypeLabel(value: string) {
+    return INPUT_TYPES.find((type) => type.value === value)?.label ?? value;
+  }
+
+  function getInputSourceLabel(value: string) {
+    return INPUT_SOURCE_LABELS[value]?.() ?? value;
+  }
+
+  function getInputSourceOptionLabel(value: string, legacyInvalid: boolean) {
+    const label = getInputSourceLabel(value);
+    return legacyInvalid ? `${label} (${m.flow_step_legacy_invalid_option()})` : label;
+  }
+
+  function getInputTypeOptionLabel(value: string, legacyInvalid: boolean) {
+    const label = getInputTypeLabel(value);
+    return legacyInvalid ? `${label} (${m.flow_step_legacy_invalid_option()})` : label;
+  }
+
+  function getIssueMessage(issue: FlowStepValidationIssue | null): string | null {
+    if (!issue || !activeStep) return null;
+    switch (issue.code) {
+      case "typed_io_multiple_flow_input_steps":
+      case "typed_io_flow_input_position_invalid":
+        return m.flow_step_issue_flow_input_position();
+      case "typed_io_invalid_input_source_position":
+        return m.flow_step_issue_first_step_input_source();
+      case "typed_io_missing_previous_step":
+        return m.flow_step_issue_missing_previous_step();
+      case "typed_io_document_source_unsupported":
+      case "typed_io_audio_source_unsupported":
+      case "typed_io_file_source_unsupported":
+        return m.flow_step_issue_flow_input_only({
+          inputType: getInputTypeLabel(activeStep.input_type),
+        });
+      case "typed_io_invalid_input_source_combination":
+        return m.flow_step_issue_all_previous_steps_json();
+      case "typed_io_incompatible_type_chain":
+        return previousStep
+          ? m.flow_typed_io_chain_incompatible({
+              outputType: previousStep.output_type,
+              inputType: activeStep.input_type,
+              prevStep: String(previousStep.step_order),
+            })
+          : m.flow_step_issue_missing_previous_step();
+      case "typed_io_unsupported_type":
+        return activeStep.input_type === "image"
+          ? m.flow_typed_io_image_not_supported()
+          : null;
+      default:
+        return null;
+    }
+  }
+
+  $: sourceValidationMessage = getIssueMessage(sourceValidationIssue);
+  $: inputTypeValidationMessage = getIssueMessage(inputTypeValidationIssue);
 
   $: if (
     activeStep &&
@@ -674,30 +767,44 @@
               disabled={isPublished}
               on:change={(e) => handleInputSourceChange(e.currentTarget.value as FlowStep["input_source"])}
             >
-              {#each INPUT_SOURCES as source}
+              {#each selectableInputSourceOptions as source (source.value)}
                 <option value={source.value}>
-                  {source.label}
+                  {getInputSourceOptionLabel(source.value, source.legacyInvalid)}
                 </option>
               {/each}
             </select>
             {#if INPUT_SOURCE_HINTS[activeStep.input_source]}
               <p class="text-xs text-muted leading-relaxed">{INPUT_SOURCE_HINTS[activeStep.input_source]()}</p>
             {/if}
+            {#if sourceValidationMessage || inputSourceFeedback}
+              <p class="text-xs leading-relaxed text-warning-stronger">
+                {sourceValidationMessage ?? inputSourceFeedback}
+              </p>
+            {/if}
           </div>
         </Settings.Row>
 
         <Settings.Row title={m.flow_step_input_type()} description="" let:aria>
-          <select
-            {...aria}
-            class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-            value={activeStep.input_type}
-            disabled={isPublished}
-            on:change={(e) => handleInputTypeChange(e.currentTarget.value as FlowStep["input_type"])}
-          >
-            {#each INPUT_TYPES as t}
-              <option value={t.value}>{t.label}</option>
-            {/each}
-          </select>
+          <div class="flex flex-col gap-1.5">
+            <select
+              {...aria}
+              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+              value={activeStep.input_type}
+              disabled={isPublished}
+              on:change={(e) => handleInputTypeChange(e.currentTarget.value as FlowStep["input_type"])}
+            >
+              {#each selectableInputTypeOptions as option (option.value)}
+                <option value={option.value} disabled={option.disabled}>
+                  {getInputTypeOptionLabel(option.value, option.legacyInvalid)}
+                </option>
+              {/each}
+            </select>
+            {#if inputTypeValidationMessage || inputTypeFeedback}
+              <p class="text-xs leading-relaxed text-warning-stronger">
+                {inputTypeValidationMessage ?? inputTypeFeedback}
+              </p>
+            {/if}
+          </div>
         </Settings.Row>
       </Settings.Group>
 
@@ -762,20 +869,21 @@
             {m.flow_step_assistant_loading()}
           </div>
         {:else if assistant}
+          {@const currentAssistant = assistant}
           <div class="w-full [&>button]:w-full" class:pointer-events-none={isTranscribeOnly} class:opacity-40={isTranscribeOnly} class:saturate-[.25]={isTranscribeOnly}>
             <SelectAIModelV2
-              bind:selectedModel={assistant.completion_model}
+              bind:selectedModel={currentAssistant.completion_model}
               availableModels={$currentSpace.completion_models}
-              on:change={() => updateAssistantField("completion_model", assistant.completion_model)}
+              on:change={() => updateAssistantField("completion_model", currentAssistant.completion_model)}
             />
           </div>
 
           <Settings.Row title={m.model_behaviour()} description="">
             <SelectBehaviourV2
-              bind:kwArgs={assistant.completion_model_kwargs}
-              selectedModel={assistant.completion_model}
-              isDisabled={isTranscribeOnly || !supportsTemperature(assistant.completion_model?.name)}
-              on:change={() => updateAssistantField("completion_model_kwargs", assistant.completion_model_kwargs)}
+              bind:kwArgs={currentAssistant.completion_model_kwargs}
+              selectedModel={currentAssistant.completion_model}
+              isDisabled={isTranscribeOnly || !supportsTemperature(currentAssistant.completion_model?.name)}
+              on:change={() => updateAssistantField("completion_model_kwargs", currentAssistant.completion_model_kwargs)}
             />
           </Settings.Row>
 
@@ -808,27 +916,28 @@
             {m.flow_step_assistant_loading()}
           </div>
         {:else if assistant}
-          <Settings.Row title="" description="" let:aria>
+          {@const currentAssistant = assistant}
+          <Settings.Row title="" description="">
             <SelectKnowledgeV2
               originMode="personal"
-              bind:selectedWebsites={assistant.websites}
-              bind:selectedCollections={assistant.groups}
-              bind:selectedIntegrationKnowledge={assistant.integration_knowledge_list}
+              bind:selectedWebsites={currentAssistant.websites}
+              bind:selectedCollections={currentAssistant.groups}
+              bind:selectedIntegrationKnowledge={currentAssistant.integration_knowledge_list}
               on:change={() => {
-                updateAssistantField("websites", assistant.websites);
-                updateAssistantField("groups", assistant.groups);
-                updateAssistantField("integration_knowledge_list", assistant.integration_knowledge_list);
+                updateAssistantField("websites", currentAssistant.websites);
+                updateAssistantField("groups", currentAssistant.groups);
+                updateAssistantField("integration_knowledge_list", currentAssistant.integration_knowledge_list);
               }}
             />
             <SelectKnowledgeV2
               originMode="organization"
-              bind:selectedWebsites={assistant.websites}
-              bind:selectedCollections={assistant.groups}
-              bind:selectedIntegrationKnowledge={assistant.integration_knowledge_list}
+              bind:selectedWebsites={currentAssistant.websites}
+              bind:selectedCollections={currentAssistant.groups}
+              bind:selectedIntegrationKnowledge={currentAssistant.integration_knowledge_list}
               on:change={() => {
-                updateAssistantField("websites", assistant.websites);
-                updateAssistantField("groups", assistant.groups);
-                updateAssistantField("integration_knowledge_list", assistant.integration_knowledge_list);
+                updateAssistantField("websites", currentAssistant.websites);
+                updateAssistantField("groups", currentAssistant.groups);
+                updateAssistantField("integration_knowledge_list", currentAssistant.integration_knowledge_list);
               }}
             />
           </Settings.Row>
@@ -915,11 +1024,12 @@
             {steps}
             currentStepOrder={activeStep.step_order}
             {formSchema}
-            {transcriptionEnabled}
-            isAdvancedMode={$mode === "power_user"}
+            transcriptionEnabled={transcriptionEnabled && hasAudioInputSteps}
+            {isAdvancedMode}
             on:change={(e) => {
-              const currentPrompt = assistant?.prompt ?? { text: "", description: "" };
-              assistant = { ...(assistant ?? {}), prompt: { ...currentPrompt, text: e.detail } };
+              if (assistant?.prompt) {
+                assistant = { ...assistant, prompt: { ...assistant.prompt, text: e.detail } };
+              }
             }}
             on:commit={(e) => updateInstruction(e.detail)}
           >
@@ -928,10 +1038,12 @@
                 <PromptVersionDialog
                   title={m.prompt_history()}
                   loadPromptVersionHistory={() => {
-                    return flowEditor.listAssistantPrompts(activeStep.assistant_id) as Promise<any[]>;
+                    return flowEditor.listAssistantPrompts(activeStep.assistant_id);
                   }}
                   onPromptSelected={(prompt) => {
-                    updateAssistantField("prompt", { ...assistant.prompt, text: prompt.text });
+                    if (assistant?.prompt) {
+                      updateAssistantField("prompt", { ...assistant.prompt, text: prompt.text });
+                    }
                   }}
                 />
               {/if}
@@ -989,7 +1101,7 @@
                 {steps}
                 currentStepOrder={activeStep.step_order}
                 {formSchema}
-                {transcriptionEnabled}
+                transcriptionEnabled={transcriptionEnabled && hasAudioInputSteps}
                 isAdvancedMode={true}
                 on:change={(e) => updateInputTemplate(e.detail)}
               />
@@ -1008,7 +1120,7 @@
             disabled={isPublished}
             on:change={(e) => updateStep("output_type", e.currentTarget.value)}
           >
-            {#each availableOutputTypes as t}
+            {#each availableOutputTypes as t (t.value)}
               <option value={t.value}>{t.label}</option>
             {/each}
           </select>
@@ -1021,7 +1133,7 @@
             disabled={isPublished}
             on:change={(e) => handleOutputModeChange(e.currentTarget.value as FlowStep["output_mode"])}
           >
-            {#each availableOutputModes as mode}
+            {#each availableOutputModes as mode (mode.value)}
               <option value={mode.value}>{mode.label}</option>
             {/each}
           </select>
@@ -1068,18 +1180,8 @@
         </div>
       {/if}
 
-      {#if typeChainIncompatible && previousStep}
-        <div class="flex items-start gap-2 mb-3 rounded-lg border border-warning-default/40 bg-warning-dimmer px-3 py-2.5 text-xs text-warning-stronger">
-          {m.flow_typed_io_chain_incompatible({
-            outputType: previousStep.output_type,
-            inputType: activeStep.input_type,
-            prevStep: String(previousStep.step_order),
-          })}
-        </div>
-      {/if}
-
       <!-- Advanced Section (Power User only) -->
-      {#if $mode === "power_user"}
+      {#if isAdvancedMode}
         <div transition:slide={{ duration: 200 }} class="border-l border-l-amber-300/50">
         <Settings.Group title={m.flow_step_advanced()}>
           <Settings.Row title={m.flow_step_mcp_policy()} description="">
@@ -1094,7 +1196,7 @@
               disabled={isPublished}
               on:change={(e) => updateStep("mcp_policy", e.currentTarget.value)}
             >
-              {#each MCP_POLICIES as policy}
+              {#each MCP_POLICIES as policy (policy.value)}
                 <option value={policy.value}>{policy.label}</option>
               {/each}
             </select>

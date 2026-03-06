@@ -3,10 +3,10 @@
   import { createEventDispatcher, onDestroy, onMount, tick } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import {
-    classifyVariable,
     getChipClasses,
     parsePromptSegments,
     collectUnresolvedTemplateTokens,
+    collectInvalidStructuredOutputReferences,
     type VariableCategory,
     type VariableClassificationContext,
   } from "$lib/features/flows/flowVariableTokens";
@@ -66,15 +66,17 @@
       if (name) knownFieldNames.add(name);
     }
     const knownStepNames = new Map<number, string>();
+    const stepOutputTypes = new Map<number, string>();
     for (const step of steps) {
       const name = (step.user_description ?? "").trim();
       if (name) knownStepNames.set(step.step_order, name);
+      stepOutputTypes.set(step.step_order, step.output_type);
     }
-    return { knownFieldNames, knownStepNames, transcriptionEnabled, currentStepOrder };
+    return { knownFieldNames, knownStepNames, stepOutputTypes, transcriptionEnabled, currentStepOrder };
   }
 
   // Parse segments for mirror rendering
-  $: segments = parsePromptSegments(value, classificationContext);
+  $: segments = parsePromptSegments(currentEditorValue, classificationContext);
 
   // Available variables for chip bar and autocomplete
   $: availableVariables = buildAvailableVariables(classificationContext, steps, isAdvancedMode);
@@ -102,7 +104,7 @@
     if (ctx.transcriptionEnabled) {
       suggestions.push({ token: "transkribering", label: "transkribering", description: m.flow_variable_transcription(), category: "system" });
     }
-    if (ctx.currentStepOrder > 1) {
+    if (showTechnical && ctx.currentStepOrder > 1) {
       suggestions.push({ token: "föregående_steg", label: "föregående_steg", description: m.flow_variable_previous_step(), category: "system" });
     }
 
@@ -134,9 +136,14 @@
 
   // Unresolved count
   $: unresolvedCount = collectUnresolvedTemplateTokens(
-    value,
+    currentEditorValue,
     new Set(availableVariables.map((v) => v.token)),
   ).length;
+  $: invalidStructuredReferences = collectInvalidStructuredOutputReferences(
+    currentEditorValue,
+    steps,
+    currentStepOrder,
+  );
 
   // Filtered suggestions for autocomplete
   $: filteredSuggestions = autocompleteQuery
@@ -335,6 +342,8 @@
           {steps}
           {currentStepOrder}
           {formSchema}
+          {isAdvancedMode}
+          {transcriptionEnabled}
           on:insert={(e) => {
             // e.detail is "{{token}}", extract the inner token
             const match = e.detail.match(/^\{\{(.+)\}\}$/);
@@ -353,7 +362,7 @@
       class="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-4 py-3 font-mono text-sm leading-relaxed"
       bind:this={mirrorEl}
     >
-      {#each segments as seg}
+      {#each segments as seg, index (`${seg.type}:${seg.value}:${index}`)}
         {#if seg.type === "text"}<span class="text-primary">{seg.value}</span>{:else}<span class="{getChipClasses(seg.category)} inline">{seg.value}</span>{/if}
       {/each}
       <span>&nbsp;</span>
@@ -381,7 +390,7 @@
         class="absolute z-20 mt-1 max-h-48 w-72 overflow-y-auto rounded-lg border border-default bg-primary shadow-lg"
         style="top: {autocompletePosition.top}px; left: {autocompletePosition.left}px"
       >
-        {#each filteredSuggestions as suggestion, i}
+        {#each filteredSuggestions as suggestion, i (suggestion.token)}
           <button
             type="button"
             class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-hover-dimmer"
@@ -399,7 +408,7 @@
   <!-- Quick-insert chip bar -->
   {#if chipBarVariables.length > 0 && !disabled}
     <div class="flex flex-wrap gap-1.5 border-t border-default bg-secondary/20 px-3 py-2">
-      {#each chipBarVariables as v}
+      {#each chipBarVariables as v (v.token)}
         <button
           type="button"
           class="{getChipClasses(v.category)} cursor-pointer transition-all hover:scale-105 hover:shadow-sm active:scale-95"
@@ -418,6 +427,17 @@
         <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
       </svg>
       {unresolvedCount} {m.flow_prompt_unresolved_variables()}
+    </div>
+  {/if}
+
+  {#if invalidStructuredReferences.length > 0}
+    <div class="flex items-center gap-2 border-t border-warning-default/40 bg-warning-dimmer px-3 py-1.5 text-xs text-warning-stronger">
+      <svg class="size-3.5 shrink-0" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+      </svg>
+      {m.flow_prompt_invalid_structured_reference({
+        tokens: invalidStructuredReferences.map((issue) => `{{${issue.token}}}`).join(", "),
+      })}
     </div>
   {/if}
 </div>

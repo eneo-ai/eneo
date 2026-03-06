@@ -30,6 +30,11 @@ def validate_runtime_input_policy(
             f"Step {step_order}: input_type 'document' is not supported with input_source '{input_source}'.",
             code="typed_io_document_source_unsupported",
         )
+    if input_type == "file" and input_source != "flow_input":
+        raise TypedIOValidationException(
+            f"Step {step_order}: input_type 'file' is not supported with input_source '{input_source}'.",
+            code="typed_io_file_source_unsupported",
+        )
 
     if policy and policy.requires_extraction and not raw_extracted_text.strip():
         raise TypedIOValidationException(

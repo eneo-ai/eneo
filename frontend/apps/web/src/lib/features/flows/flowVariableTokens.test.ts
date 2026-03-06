@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   collectUnresolvedTemplateTokens,
+  collectInvalidStructuredOutputReferences,
   remapStepOrderTemplateTokens,
   replaceExactTemplateToken,
   classifyVariable,
@@ -55,6 +56,7 @@ describe("classifyVariable", () => {
   const baseContext: VariableClassificationContext = {
     knownFieldNames: new Set(["Namn", "Personnummer"]),
     knownStepNames: new Map([[1, "Sammanfattning"], [2, "Analys"]]),
+    stepOutputTypes: new Map([[1, "text"], [2, "json"]]),
     transcriptionEnabled: true,
     currentStepOrder: 3,
   };
@@ -75,8 +77,12 @@ describe("classifyVariable", () => {
     expect(classifyVariable("Analys", baseContext)).toBe("step");
   });
 
-  it("classifies structured step output as 'structured'", () => {
-    expect(classifyVariable("step_1.output.structured.title", baseContext)).toBe("structured");
+  it("classifies valid structured step output as 'structured'", () => {
+    expect(classifyVariable("step_2.output.structured.title", baseContext)).toBe("structured");
+  });
+
+  it("classifies non-json structured references as 'unknown'", () => {
+    expect(classifyVariable("step_1.output.structured.title", baseContext)).toBe("unknown");
   });
 
   it("classifies step output references as 'step'", () => {
@@ -107,6 +113,7 @@ describe("parsePromptSegments", () => {
   const context: VariableClassificationContext = {
     knownFieldNames: new Set(["Namn"]),
     knownStepNames: new Map(),
+    stepOutputTypes: new Map(),
     transcriptionEnabled: true,
     currentStepOrder: 1,
   };
@@ -121,6 +128,46 @@ describe("parsePromptSegments", () => {
 
   it("handles empty text", () => {
     expect(parsePromptSegments("", context)).toEqual([]);
+  });
+});
+
+describe("collectInvalidStructuredOutputReferences", () => {
+  it("flags structured references to non-json steps", () => {
+    const issues = collectInvalidStructuredOutputReferences(
+      "Hej {{step_1.output.structured.name}}",
+      [
+        { step_order: 1, output_type: "text" } as any,
+        { step_order: 2, output_type: "json" } as any,
+      ],
+      3,
+    );
+
+    expect(issues).toEqual([
+      {
+        token: "step_1.output.structured.name",
+        stepOrder: 1,
+        reason: "non_json_output",
+      },
+    ]);
+  });
+
+  it("flags structured references to the current or future step", () => {
+    const issues = collectInvalidStructuredOutputReferences(
+      "Hej {{step_2.output.structured.name}}",
+      [
+        { step_order: 1, output_type: "json" } as any,
+        { step_order: 2, output_type: "json" } as any,
+      ],
+      2,
+    );
+
+    expect(issues).toEqual([
+      {
+        token: "step_2.output.structured.name",
+        stepOrder: 2,
+        reason: "unavailable_step",
+      },
+    ]);
   });
 });
 

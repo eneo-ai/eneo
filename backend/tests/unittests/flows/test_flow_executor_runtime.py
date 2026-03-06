@@ -1375,6 +1375,58 @@ def test_parse_runtime_steps_rejects_incompatible_previous_step_chain(user):
         )
 
 
+def test_parse_runtime_steps_rejects_duplicate_step_orders(user):
+    executor, _, _, _ = _build_executor(user)
+
+    with pytest.raises(BadRequestException, match="Duplicate step_order detected"):
+        executor._parse_runtime_steps(
+            {
+                "steps": [
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": 1,
+                        "assistant_id": str(uuid4()),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                    },
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": 1,
+                        "assistant_id": str(uuid4()),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                    },
+                ]
+            }
+        )
+
+
+def test_parse_runtime_steps_rejects_non_contiguous_step_orders(user):
+    executor, _, _, _ = _build_executor(user)
+
+    with pytest.raises(BadRequestException, match="Step order must be contiguous and start at 1"):
+        executor._parse_runtime_steps(
+            {
+                "steps": [
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": 1,
+                        "assistant_id": str(uuid4()),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                    },
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": 3,
+                        "assistant_id": str(uuid4()),
+                        "input_source": "previous_step",
+                        "output_mode": "pass_through",
+                    },
+                ]
+            }
+        )
+
+
 # --- RunExecutionState ---
 
 

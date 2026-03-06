@@ -1752,6 +1752,12 @@ class FlowRunExecutor:
                     input_contract=item.get("input_contract"),
                 )
             )
+        step_orders = [step.step_order for step in parsed]
+        if len(step_orders) != len(set(step_orders)):
+            raise BadRequestException("Duplicate step_order detected in flow snapshot.")
+        expected_orders = list(range(1, len(parsed) + 1))
+        if step_orders != expected_orders:
+            raise BadRequestException("Step order must be contiguous and start at 1.")
         chain_violation = find_first_step_chain_violation(parsed)
         if chain_violation is not None:
             raise BadRequestException(chain_violation.message)

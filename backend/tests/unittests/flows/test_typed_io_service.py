@@ -17,9 +17,11 @@ def _step(
     input_source: str = "flow_input",
     input_type: str = "text",
     input_contract: dict | None = None,
+    input_config: dict | None = None,
     output_mode: str = "pass_through",
     output_type: str = "text",
     output_contract: dict | None = None,
+    output_config: dict | None = None,
 ) -> FlowStep:
     return FlowStep(
         id=uuid4(),
@@ -31,9 +33,11 @@ def _step(
         input_source=input_source,
         input_type=input_type,
         input_contract=input_contract,
+        input_config=input_config,
         output_mode=output_mode,
         output_type=output_type,
         output_contract=output_contract,
+        output_config=output_config,
         mcp_policy="inherit",
     )
 
@@ -134,8 +138,6 @@ def test_accepts_previous_step_compatible_coercions_matrix(
     [
         ("docx", "json"),
         ("pdf", "json"),
-        ("text", "file"),
-        ("json", "file"),
     ],
 )
 def test_rejects_previous_step_incompatible_coercions_matrix(
@@ -223,6 +225,65 @@ def test_all_previous_steps_document_blocked(user):
     ]
     with pytest.raises(BadRequestException, match="input_type 'document' is only supported with input_source 'flow_input'"):
         service._validate_steps(steps)
+
+
+def test_file_input_source_must_be_flow_input(user):
+    """file input type should be rejected when source is previous_step."""
+    service = _service(user)
+    steps = [
+        _step(step_order=1, output_type="text"),
+        _step(step_order=2, input_source="previous_step", input_type="file"),
+    ]
+    with pytest.raises(BadRequestException, match="input_type 'file' is only supported with input_source 'flow_input'"):
+        service._validate_steps(steps)
+
+
+def test_rejects_multiple_flow_input_steps(user):
+    """Only one flow_input step is allowed."""
+    service = _service(user)
+    steps = [
+        _step(step_order=1, input_source="flow_input", input_type="text"),
+        _step(step_order=2, input_source="flow_input", input_type="text"),
+    ]
+    with pytest.raises(BadRequestException, match="Only one step may use input_source 'flow_input'"):
+        service._validate_steps(steps)
+
+
+def test_rejects_flow_input_when_not_step_one(user):
+    """flow_input is optional, but must be step 1 when present."""
+    service = _service(user)
+    steps = [
+        _step(
+            step_order=1,
+            input_source="http_get",
+            input_type="text",
+            input_config={"url": "https://example.org/input"},
+        ),
+        _step(step_order=2, input_source="flow_input", input_type="text"),
+    ]
+    with pytest.raises(BadRequestException, match="input_source 'flow_input' must be step 1 if present"):
+        service._validate_steps(steps)
+
+
+def test_allows_http_only_flow_without_flow_input(user):
+    """Zero-flow_input flows remain valid."""
+    service = _service(user)
+    steps = [
+        _step(
+            step_order=1,
+            input_source="http_get",
+            input_type="text",
+            input_config={"url": "https://example.org/input"},
+        ),
+        _step(
+            step_order=2,
+            input_source="http_post",
+            input_type="text",
+            input_config={"url": "https://example.org/input"},
+        ),
+    ]
+
+    service._validate_steps(steps)
 
 
 # --- Audio/Image input type validation ---

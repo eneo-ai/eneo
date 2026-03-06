@@ -8,6 +8,8 @@
   export let steps: FlowStep[];
   export let currentStepOrder: number;
   export let formSchema: { fields: { name: string; type: string; required?: boolean }[] } | undefined;
+  export let isAdvancedMode: boolean = false;
+  export let transcriptionEnabled: boolean = false;
 
   const dispatch = createEventDispatcher<{ insert: string }>();
 
@@ -40,6 +42,21 @@
     if (typeof propType === "string") return propType;
     return "";
   }
+
+  function getOutputTextDescription(step: FlowStep): string {
+    if (step.output_type === "json") return m.flow_variable_output_text_desc_json();
+    if (step.output_type === "pdf" || step.output_type === "docx") {
+      return m.flow_variable_output_text_desc_prerender();
+    }
+    return m.flow_variable_output_text_desc();
+  }
+
+  function getFullOutputDescription(step: FlowStep): string {
+    if (step.output_type === "pdf" || step.output_type === "docx") {
+      return m.flow_variable_full_output_desc_artifacts();
+    }
+    return m.flow_variable_full_output_desc();
+  }
 </script>
 
 <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
@@ -63,12 +80,12 @@
       </div>
 
       <!-- Flow Input Section -->
-      {#if formFields.length > 0 ? formFields.some(f => matchesSearch(f.name)) : matchesSearch("flow_input.text")}
+      {#if formFields.length > 0 ? formFields.some(f => matchesSearch(f.name)) : (isAdvancedMode && matchesSearch("flow_input.text"))}
       <div class="px-3 pt-2 pb-1">
         <span class="text-xs font-semibold text-secondary">{m.flow_variable_flow_input()}</span>
       </div>
       {#if formFields.length > 0}
-        {#each formFields as field}
+        {#each formFields as field (field.name)}
           {#if matchesSearch(field.name)}
           <Button is={item} onclick={() => insert(field.name)} class="!text-sm w-full !justify-start !px-3 !py-1.5">
             <span class="flex items-center gap-2">
@@ -81,7 +98,7 @@
           {/if}
         {/each}
       {:else}
-        {#if matchesSearch("flow_input.text")}
+        {#if isAdvancedMode && matchesSearch("flow_input.text")}
         <Button is={item} onclick={() => insert("flow_input.text")} class="!text-sm w-full !justify-start !px-3 !py-1.5">
           <span class="flex items-center justify-between w-full">
             <span class="{getChipClasses('technical')}">
@@ -94,19 +111,19 @@
       {/if}
       {/if}
 
-      {#if matchesSearch("transkribering") || (currentStepOrder > 1 && matchesSearch("föregående_steg"))}
+      {#if (transcriptionEnabled && matchesSearch("transkribering")) || (isAdvancedMode && currentStepOrder > 1 && matchesSearch("föregående_steg"))}
       <div class="border-default mx-2 my-1.5 border-t"></div>
       <div class="px-3 pt-1.5 pb-1">
         <span class="text-xs font-semibold text-secondary">System</span>
       </div>
-      {#if matchesSearch("transkribering")}
+      {#if transcriptionEnabled && matchesSearch("transkribering")}
       <Button is={item} onclick={() => insert("transkribering")} class="!text-sm w-full !justify-start !px-3 !py-1.5">
         <span class="{getChipClasses('system')}">
           transkribering
         </span>
       </Button>
       {/if}
-      {#if currentStepOrder > 1 && matchesSearch("föregående_steg")}
+      {#if isAdvancedMode && currentStepOrder > 1 && matchesSearch("föregående_steg")}
         <Button is={item} onclick={() => insert("föregående_steg")} class="!text-sm w-full !justify-start !px-3 !py-1.5">
           <span class="{getChipClasses('system')}">
             föregående_steg
@@ -117,9 +134,9 @@
 
       <!-- Previous Steps Sections -->
       {#if previousSteps.length > 0}
-        {#each previousSteps as prevStep}
+        {#each previousSteps as prevStep (prevStep.step_order)}
           {@const stepName = prevStep.user_description ?? `Step ${prevStep.step_order}`}
-          {@const hasStepMatches = matchesSearch(stepName) || matchesSearch("text") || matchesSearch("output") || matchesSearch(`step_${prevStep.step_order}`)}
+          {@const hasStepMatches = matchesSearch(stepName) || (isAdvancedMode && (matchesSearch("text") || matchesSearch("output") || matchesSearch(`step_${prevStep.step_order}`)))}
           {#if hasStepMatches}
           <div class="border-default mx-2 my-1.5 border-t"></div>
 
@@ -143,38 +160,38 @@
           {/if}
 
           <!-- Output text -->
-          {#if matchesSearch("text") || matchesSearch(`step_${prevStep.step_order}`)}
+          {#if isAdvancedMode && (matchesSearch("text") || matchesSearch(`step_${prevStep.step_order}`))}
           <Button is={item} onclick={() => insert(`step_${prevStep.step_order}.output.text`)} class="!text-sm w-full !justify-start !px-3 !py-1.5">
             <span class="flex items-center justify-between w-full">
               <span class="{getChipClasses('step')}">
                 text
               </span>
-              <span class="text-xs text-muted ml-2">{m.flow_variable_output_text_desc()}</span>
+              <span class="text-xs text-muted ml-2">{getOutputTextDescription(prevStep)}</span>
             </span>
           </Button>
           {/if}
 
           <!-- Full output -->
-          {#if matchesSearch("output") || matchesSearch(`step_${prevStep.step_order}`)}
+          {#if isAdvancedMode && (matchesSearch("output") || matchesSearch(`step_${prevStep.step_order}`))}
           <Button is={item} onclick={() => insert(`step_${prevStep.step_order}.output`)} class="!text-sm w-full !justify-start !px-3 !py-1.5">
             <span class="flex items-center justify-between w-full">
               <span class="{getChipClasses('step')}">
                 full output
               </span>
-              <span class="text-xs text-muted ml-2">{m.flow_variable_full_output_desc()}</span>
+              <span class="text-xs text-muted ml-2">{getFullOutputDescription(prevStep)}</span>
             </span>
           </Button>
           {/if}
 
           <!-- JSON fields sub-section -->
-          {#if prevStep.output_type === "json"}
+          {#if isAdvancedMode && prevStep.output_type === "json"}
             <div class="mx-3 mt-1.5 mb-1 flex items-center gap-2">
               <div class="border-default h-px flex-1 border-t"></div>
               <span class="text-xs font-medium uppercase tracking-wider text-muted">{m.flow_variable_json_fields()}</span>
               <div class="border-default h-px flex-1 border-t"></div>
             </div>
             {#if prevStep.output_contract?.properties}
-              {#each Object.keys(prevStep.output_contract.properties) as prop}
+              {#each Object.keys(prevStep.output_contract.properties) as prop (prop)}
                 {#if matchesSearch(prop)}
                 {@const propType = getSchemaType(prevStep, prop)}
                 <Button is={item} onclick={() => insert(`step_${prevStep.step_order}.output.structured.${prop}`)} class="!text-sm w-full !justify-start !px-3 !py-1.5">
