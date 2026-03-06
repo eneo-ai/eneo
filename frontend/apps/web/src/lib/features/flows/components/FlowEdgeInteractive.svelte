@@ -1,10 +1,5 @@
 <script lang="ts">
-  import {
-    BaseEdge,
-    EdgeLabel,
-    getSmoothStepPath,
-    type Position
-  } from "@xyflow/svelte";
+  import { BaseEdge, EdgeLabel, getSmoothStepPath, type Position } from "@xyflow/svelte";
   import { IconPlus } from "@intric/icons/plus";
   import { m } from "$lib/paraglide/messages";
 
@@ -84,26 +79,40 @@
     if (data.readOnly) return;
     void data.onInsert(data.sourceStepOrder ?? 0);
   }
+
+  function getDataTypeLabel(dataType: string): string | null {
+    switch (dataType) {
+      case "flow_input":
+        return m.flow_graph_edge_flow_input();
+      case "structured":
+        return m.flow_graph_edge_structured();
+      case "text":
+        return m.flow_graph_edge_text();
+      default:
+        return null;
+    }
+  }
 </script>
 
-<BaseEdge
-  {id}
-  path={edgePath}
-  {markerStart}
-  {markerEnd}
-  style={edgeStyle || undefined}
-/>
+<BaseEdge {id} path={edgePath} {markerStart} {markerEnd} style={edgeStyle || undefined} />
 
 {#if isPowerUser}
   <EdgeLabel x={labelX} y={labelY + labelOffsetY}>
-    <div class="edge-actions group nodrag nopan flex items-center gap-1 rounded-full bg-primary/70 px-1.5 py-0.5 text-secondary backdrop-blur-sm">
+    <div
+      class="edge-actions group nodrag nopan bg-primary/70 text-secondary flex items-center gap-1 rounded-full px-1.5 py-0.5 backdrop-blur-sm"
+    >
       {#if isEscalation || isViolation}
-        <span class="text-[11px]" title={isViolation ? m.flow_graph_classification_violation() : m.flow_graph_classification_escalation()}>
+        <span
+          class="text-[11px]"
+          title={isViolation
+            ? m.flow_graph_classification_violation()
+            : m.flow_graph_classification_escalation()}
+        >
           {#if isViolation}⛔{:else}🔒{/if}
         </span>
       {/if}
 
-      {#if data?.dataType}
+      {#if data?.dataType && getDataTypeLabel(data.dataType)}
         <button
           class="rounded px-1.5 py-0.5 text-[10px] font-medium hover:bg-black/5 dark:hover:bg-white/10"
           onclick={(event) => {
@@ -112,7 +121,7 @@
           }}
           aria-label={m.flow_graph_inspect_edge()}
         >
-          {data.dataType}
+          {getDataTypeLabel(data.dataType)}
         </button>
       {/if}
 

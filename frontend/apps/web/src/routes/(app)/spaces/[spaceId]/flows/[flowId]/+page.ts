@@ -1,5 +1,7 @@
 import { error } from "@sveltejs/kit";
 
+export const ssr = false;
+
 export const load = async (event) => {
   const { intric, currentSpace } = await event.parent();
   const flowId = event.params.flowId;

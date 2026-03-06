@@ -21,6 +21,7 @@
   import { slide } from "svelte/transition";
   import FlowDryRun from "$lib/features/flows/components/FlowDryRun.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
+  import { getFlowFormStats } from "$lib/features/flows/flowFormSchema";
 
   export let data;
   let publishLoading = false;
@@ -93,7 +94,24 @@
     ($update.metadata_json as { form_schema?: { fields?: { required?: boolean }[] } } | undefined)?.form_schema
       ?.fields ?? []
   );
-  $: requiredFormFieldsCount = formSchemaFields.filter((field) => field.required).length;
+  let formSchemaDraftStats: { definedCount: number; requiredCount: number } | null = null;
+  $: persistedFormSchemaStats = getFlowFormStats(formSchemaFields);
+  $: displayedFormSchemaStats = formSchemaDraftStats ?? persistedFormSchemaStats;
+  $: formSchemaDefinedLabel =
+    displayedFormSchemaStats.definedCount === 0
+      ? m.flow_fields_defined_zero()
+      : displayedFormSchemaStats.definedCount === 1
+      ? m.flow_fields_defined_singular({ count: displayedFormSchemaStats.definedCount })
+      : m.flow_fields_defined_plural({ count: displayedFormSchemaStats.definedCount });
+  $: formSchemaRequiredLabel =
+    displayedFormSchemaStats.requiredCount === 0
+      ? m.flow_fields_required_zero()
+      : displayedFormSchemaStats.requiredCount === 1
+      ? m.flow_fields_required_singular({ count: displayedFormSchemaStats.requiredCount })
+      : m.flow_fields_required_plural({ count: displayedFormSchemaStats.requiredCount });
+  $: if (builderStage !== 3 && formSchemaDraftStats !== null) {
+    formSchemaDraftStats = null;
+  }
   $: hasAudioInputStep = ($update.steps ?? []).some((step) => step.input_type === "audio");
   $: wizardMetadata =
     (((($update.metadata_json as FlowMetadataJson | null | undefined) ?? {})
@@ -562,10 +580,15 @@
         {:else if builderStage === 3}
           <div class="border-default flex-1 overflow-y-auto rounded-xl border p-4 md:p-6">
             <div class="border-default mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-primary px-3 py-2 text-sm text-secondary">
-              <span>{m.flow_fields_defined({ count: formSchemaFields.length })}</span>
-              <span>{m.flow_fields_required({ count: requiredFormFieldsCount })}</span>
+              <span>{formSchemaDefinedLabel}</span>
+              <span>{formSchemaRequiredLabel}</span>
             </div>
-            <FlowFormSchemaEditor isPublished={$isPublished} />
+            <FlowFormSchemaEditor
+              isPublished={$isPublished}
+              on:statsChanged={(e) => {
+                formSchemaDraftStats = e.detail;
+              }}
+            />
           </div>
         {:else if builderStage === 4}
           <!-- Side-by-side list-detail layout -->

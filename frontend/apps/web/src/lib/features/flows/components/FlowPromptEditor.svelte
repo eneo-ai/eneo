@@ -2,6 +2,7 @@
   import type { FlowStep } from "@intric/intric-js";
   import { createEventDispatcher, onDestroy, onMount, tick } from "svelte";
   import { m } from "$lib/paraglide/messages";
+  import { isFlowFormFieldNameUsableAsVariable } from "$lib/features/flows/flowFormSchema";
   import {
     getChipClasses,
     parsePromptSegments,
@@ -28,6 +29,8 @@
   }
   export let disabled: boolean = false;
   export let placeholder: string = "";
+  export let label: string = m.flow_step_prompt();
+  export let minHeight: number = 160;
   export let steps: FlowStep[];
   export let currentStepOrder: number;
   export let formSchema: { fields: { name: string; type: string; required?: boolean; options?: string[]; order?: number }[] } | undefined;
@@ -63,7 +66,7 @@
     const knownFieldNames = new Set<string>();
     for (const field of formSchema?.fields ?? []) {
       const name = (field.name ?? "").trim();
-      if (name) knownFieldNames.add(name);
+      if (isFlowFormFieldNameUsableAsVariable(name)) knownFieldNames.add(name);
     }
     const knownStepNames = new Map<number, string>();
     const stepOutputTypes = new Map<number, string>();
@@ -331,10 +334,10 @@
   }
 </script>
 
-<div class="flow-prompt-editor border-default rounded-lg border shadow-sm focus-within:ring-2 focus-within:ring-accent-default/30 transition-shadow">
+<div class="flow-prompt-editor border-default rounded-lg border shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-accent-default/30">
   <!-- Toolbar -->
   <div class="flex items-center justify-between border-b border-default bg-secondary/30 px-3 py-1.5">
-    <span class="text-[11px] text-muted">{m.flow_step_prompt()}</span>
+    <span class="text-[11px] text-muted">{label}</span>
     <div class="flex items-center gap-1">
       <slot name="toolbar" />
       {#if !disabled}
@@ -355,7 +358,7 @@
   </div>
 
   <!-- Editor area (overlay pattern) -->
-  <div class="relative min-h-[160px]">
+  <div class="relative" style={`min-height: ${minHeight}px`}>
     <!-- Mirror layer (behind, shows colored chips) -->
     <div
       aria-hidden="true"
@@ -372,7 +375,7 @@
     <textarea
       bind:this={textareaEl}
       class="relative z-10 w-full overflow-hidden bg-transparent px-4 py-3 font-mono text-sm leading-relaxed text-transparent caret-gray-900 dark:caret-gray-100 selection:bg-accent-dimmer selection:text-primary focus:outline-none"
-      style="min-height: 160px"
+      style={`min-height: ${minHeight}px`}
       on:input={handleInput}
       on:keydown={handleKeydown}
       on:scroll={syncScroll}

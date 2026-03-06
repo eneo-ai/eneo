@@ -7,6 +7,13 @@
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
+  import {
+    getFlowFormFieldRuntimeKey,
+    normalizeFlowFormFields,
+    type FlowFormField,
+    type NormalizedFlowFormField,
+  } from "$lib/features/flows/flowFormSchema";
+  import { getRuntimeFileOriginKind } from "$lib/features/flows/flowStepPresentation";
 
   export let open: boolean;
   export let flow: Flow;
@@ -22,24 +29,15 @@
   let inputText = "";
   let isSubmitting = false;
 
-  type FormFieldType = "text" | "number" | "date" | "select" | "multiselect" | "email" | "textarea" | "string";
-  type FormField = {
-    name: string;
-    type: FormFieldType;
-    required?: boolean;
-    options?: string[];
-    order?: number;
-  };
-  const LEGACY_TEXT_TYPES = new Set<FormFieldType>(["email", "textarea", "string"]);
-  $: formFields = (((flow.metadata_json?.form_schema as { fields: FormField[] })?.fields ?? []) as FormField[])
-    .map((field, index) => ({
-      ...field,
-      type: normalizeFieldType(field.type),
-      options: Array.isArray(field.options) ? field.options.filter((option) => option.trim().length > 0) : [],
-      order: typeof field.order === "number" ? field.order : index + 1,
-    }))
-    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+  $: formFields = normalizeFlowFormFields(
+    (((flow.metadata_json?.form_schema as { fields: FlowFormField[] })?.fields ?? []) as FlowFormField[]),
+  );
   $: hasFormFields = formFields.length > 0;
+  $: hasRequiredFormFields = formFields.some((field) => field.required);
+  $: missingRequiredFields = formFields.filter((field) => field.required && isFieldMissing(field));
+  $: missingRequiredFieldNames = missingRequiredFields
+    .map((field) => field.name.trim())
+    .filter((name) => name.length > 0);
 
   $: stepCount = flow.steps?.length ?? 0;
 
@@ -68,10 +66,15 @@
   // Legacy first-step fallback when policy endpoint is unavailable
   $: firstStep = flow.steps?.length > 0 ? flow.steps[0] : null;
   $: resolvedInputType = flowInputPolicy?.input_type ?? firstStep?.input_type ?? null;
+  $: hasFlowInputStep = Boolean(flowInputPolicy) || firstStep?.input_source === "flow_input";
   $: isAudioUpload = resolvedInputType === "audio";
   $: needsFileUpload = flowInputPolicy
     ? flowInputPolicy.accepts_file_upload
     : resolvedInputType === "document" || resolvedInputType === "file" || isAudioUpload;
+  $: runtimeFileOriginKind = getRuntimeFileOriginKind({
+    needsFileUpload,
+    hasFlowInputStep
+  });
   const AUDIO_ACCEPT_FILTER = "audio/*,video/webm,video/mp4";
   $: fileInputAccept = flowInputPolicy?.accepted_mimetypes?.length
     ? flowInputPolicy.accepted_mimetypes.join(",")
@@ -82,37 +85,38 @@
 
   let formValues: Record<string, unknown> = {};
 
-  function normalizeFieldType(type: FormFieldType | string | undefined): Exclude<FormFieldType, "email" | "textarea" | "string"> {
-    const normalized = (type ?? "text").toLowerCase() as FormFieldType;
-    if (LEGACY_TEXT_TYPES.has(normalized)) return "text";
-    if (normalized === "number") return "number";
-    if (normalized === "date") return "date";
-    if (normalized === "select") return "select";
-    if (normalized === "multiselect") return "multiselect";
-    return "text";
-  }
-
-  function getFieldValue(field: FormField): string {
-    const value = formValues[field.name];
+  function getFieldValue(field: NormalizedFlowFormField): string {
+    const value = formValues[getFlowFormFieldRuntimeKey(field.name)];
     if (Array.isArray(value)) return "";
     if (value === null || value === undefined) return "";
     return String(value);
   }
 
-  function getFieldMultiValue(field: FormField): string[] {
-    const value = formValues[field.name];
+  function getFieldMultiValue(field: NormalizedFlowFormField): string[] {
+    const value = formValues[getFlowFormFieldRuntimeKey(field.name)];
     if (Array.isArray(value)) return value.map((item) => String(item));
     if (typeof value === "string" && value.trim().length > 0) {
-      return value.split(",").map((item) => item.trim()).filter((item) => item.length > 0);
+      return value
+        .split(",")
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
     }
     return [];
   }
 
-  function setFieldValue(field: FormField, value: unknown) {
+  function setFieldValue(field: NormalizedFlowFormField, value: unknown) {
+    const key = getFlowFormFieldRuntimeKey(field.name);
     formValues = {
       ...formValues,
-      [field.name]: value
+      [key]: value
     };
+  }
+
+  function isFieldMissing(field: NormalizedFlowFormField): boolean {
+    if (field.type === "multiselect") {
+      return getFieldMultiValue(field).length === 0;
+    }
+    return getFieldValue(field).trim().length === 0;
   }
 
   // File upload state
@@ -126,17 +130,21 @@
     if (lastInputPayload) {
       if (hasFormFields) {
         for (const field of formFields) {
-          const previous = lastInputPayload[field.name];
+          const key = getFlowFormFieldRuntimeKey(field.name);
+          const previous = lastInputPayload[key];
           if (field.type === "multiselect") {
-            formValues[field.name] = Array.isArray(previous)
+            formValues[key] = Array.isArray(previous)
               ? previous.map((item) => String(item))
               : typeof previous === "string"
-                ? previous.split(",").map((item) => item.trim()).filter((item) => item.length > 0)
+                ? previous
+                    .split(",")
+                    .map((item) => item.trim())
+                    .filter((item) => item.length > 0)
                 : [];
           } else if (previous !== undefined) {
-            formValues[field.name] = previous;
+            formValues[key] = previous;
           } else {
-            formValues[field.name] = "";
+            formValues[key] = "";
           }
         }
         formValues = formValues;
@@ -234,7 +242,7 @@
             code: e.code,
             stage: e.stage,
             request: e.request,
-            response: e.response,
+            response: e.response
           });
         } else {
           uploadError = String(e);
@@ -251,8 +259,14 @@
 
   async function triggerRun() {
     if (!flow.id) return;
+    if (missingRequiredFields.length > 0) {
+      toast.error(m.flow_run_missing_required());
+      return;
+    }
     if (needsFileUpload && uploadedFiles.length === 0) {
-      toast.error(isAudioUpload ? m.flow_run_audio_placeholder() : m.flow_run_document_placeholder());
+      toast.error(
+        isAudioUpload ? m.flow_run_audio_placeholder() : m.flow_run_document_placeholder()
+      );
       return;
     }
     isSubmitting = true;
@@ -261,25 +275,24 @@
       if (hasFormFields) {
         payload = {};
         for (const field of formFields) {
+          const key = getFlowFormFieldRuntimeKey(field.name);
           if (field.type === "multiselect") {
-            payload[field.name] = getFieldMultiValue(field);
+            payload[key] = getFieldMultiValue(field);
           } else if (field.type === "number") {
             const raw = getFieldValue(field).trim();
-            payload[field.name] = raw.length > 0 ? Number(raw) : raw;
+            payload[key] = raw.length > 0 ? Number(raw) : raw;
           } else {
-            payload[field.name] = getFieldValue(field);
+            payload[key] = getFieldValue(field);
           }
         }
       } else {
         payload = { text: inputText };
       }
-      const fileIds = uploadedFiles.length > 0
-        ? uploadedFiles.map((f) => f.id)
-        : undefined;
+      const fileIds = uploadedFiles.length > 0 ? uploadedFiles.map((f) => f.id) : undefined;
       await intric.flows.runs.create({
         flow: { id: flow.id },
         input_payload_json: payload,
-        file_ids: fileIds,
+        file_ids: fileIds
       });
       dispatch("runCreated");
       $openController = false;
@@ -310,17 +323,43 @@
 <Dialog.Root {openController}>
   <Dialog.Content width="dynamic">
     <Dialog.Section class="relative mt-2 -mb-0.5">
-      <div class="flex w-full flex-col gap-6 px-10 pt-8 pb-8">
+      <div
+        class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-6 pb-8 sm:px-6 sm:pt-8 lg:px-10"
+      >
         <h3 class="text-xl font-bold">{m.flow_run_trigger()}</h3>
         <p class="text-secondary text-sm">
           {flow.name}
           {#if stepCount > 0}
-            <span class="text-muted ml-1">({m.flow_run_step_count({ count: String(stepCount) })})</span>
+            <span class="text-muted ml-1"
+              >({m.flow_run_step_count({ count: String(stepCount) })})</span
+            >
           {/if}
         </p>
 
         {#if hasFormFields}
-          {#each formFields as field, fieldIndex}
+          <div class="rounded-xl border border-default bg-secondary/20 px-4 py-3.5">
+            <p class="text-sm font-semibold">{m.flow_run_fields_intro_title()}</p>
+            <div class="mt-1.5 space-y-1">
+              <p class="text-xs leading-relaxed text-secondary">
+                {m.flow_run_fields_intro_desc()}
+              </p>
+              {#if hasRequiredFormFields}
+                <p class="text-xs text-secondary">{m.flow_run_required_hint()}</p>
+              {/if}
+            </div>
+          </div>
+
+          {#if missingRequiredFields.length > 0}
+            <div class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              {#if missingRequiredFieldNames.length > 0}
+                {m.flow_run_missing_required_named({ fields: missingRequiredFieldNames.join(", ") })}
+              {:else}
+                {m.flow_run_missing_required()}
+              {/if}
+            </div>
+          {/if}
+
+          {#each formFields as field, fieldIndex (field.name)}
             <div class="flex flex-col gap-1">
               <label class="text-sm font-medium" for={`flow-input-${fieldIndex}`}>
                 {field.name}
@@ -335,11 +374,13 @@
                   multiple
                   required={field.required}
                   on:change={(e) => {
-                    const selected = Array.from(e.currentTarget.selectedOptions).map((option) => option.value);
+                    const selected = Array.from(e.currentTarget.selectedOptions).map(
+                      (option) => option.value
+                    );
                     setFieldValue(field, selected);
                   }}
                 >
-                  {#each field.options ?? [] as option}
+                  {#each field.options ?? [] as option (option)}
                     <option value={option} selected={getFieldMultiValue(field).includes(option)}>
                       {option}
                     </option>
@@ -354,14 +395,18 @@
                   on:change={(e) => setFieldValue(field, e.currentTarget.value)}
                 >
                   <option value="">{m.flow_select_placeholder()}</option>
-                  {#each field.options ?? [] as option}
+                  {#each field.options ?? [] as option (option)}
                     <option value={option}>{option}</option>
                   {/each}
                 </select>
               {:else}
                 <input
                   id={`flow-input-${fieldIndex}`}
-                  type={field.type === "number" ? "number" : field.type === "date" ? "date" : "text"}
+                  type={field.type === "number"
+                    ? "number"
+                    : field.type === "date"
+                      ? "date"
+                      : "text"}
                   class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
                   value={getFieldValue(field)}
                   placeholder={field.name}
@@ -374,26 +419,37 @@
         {:else}
           <div class="flex flex-col gap-1">
             <span class="text-sm font-medium">{m.flow_run_input()}</span>
+            <span class="text-xs text-secondary">{m.flow_run_input_desc()}</span>
             <textarea
               class="border-default bg-primary ring-default min-h-[120px] w-full rounded-lg border px-3 py-2 font-mono text-sm shadow focus-within:ring-2"
               bind:value={inputText}
-              placeholder={
-                needsFileUpload
-                  ? (isAudioUpload ? m.flow_run_audio_placeholder() : m.flow_run_document_placeholder())
-                  : m.flow_run_input_placeholder()
-              }
+              placeholder={needsFileUpload
+                ? isAudioUpload
+                  ? m.flow_run_audio_placeholder()
+                  : m.flow_run_document_placeholder()
+                : m.flow_run_input_placeholder()}
             ></textarea>
           </div>
         {/if}
 
         {#if needsFileUpload}
           <div class="flex flex-col gap-2">
-            <span class="text-sm font-medium">{m.flow_attachments()}</span>
-            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div>
+              <p class="text-sm font-medium">{m.flow_run_files_section_title()}</p>
+              <p class="mt-1 text-xs leading-relaxed text-secondary">
+                {#if runtimeFileOriginKind === "flow_input_runtime"}
+                  {m.flow_run_file_origin_runtime()}
+                {:else if runtimeFileOriginKind === "no_runtime_upload"}
+                  {m.flow_run_file_origin_no_runtime_upload()}
+                {:else}
+                  {m.flow_run_file_origin_static_step_context()}
+                {/if}
+              </p>
+            </div>
             <div
               class="border-default flex min-h-[80px] cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-6 transition-colors"
-              class:border-blue-400={isDragging}
-              class:bg-blue-50={isDragging}
+              class:border-accent-default={isDragging}
+              class:bg-accent-dimmer={isDragging}
               on:dragover={handleDragOver}
               on:dragleave={handleDragLeave}
               on:drop={handleDrop}
@@ -407,32 +463,34 @@
                 }
               }}
             >
-            {#if isUploading}
-              <span class="text-secondary text-sm">{m.uploading()}</span>
-            {:else}
-              <span class="text-secondary text-sm">{m.upload_files()}</span>
-              <span class="text-xs text-secondary">
-                {isAudioUpload ? m.flow_run_audio_upload_hint() : m.upload_files_description()}
-              </span>
-              {#if effectiveMaxFileSizeBytes}
-                <span class="text-xs text-secondary">
-                  {m.flow_run_upload_max_size({ size: formatBytes(effectiveMaxFileSizeBytes) })}
+              {#if isUploading}
+                <span class="text-secondary text-sm">{m.loading()}</span>
+              {:else}
+                <span class="text-secondary text-sm">{m.upload_file()}</span>
+                <span class="text-secondary text-xs">
+                  {isAudioUpload ? m.flow_run_audio_upload_hint() : m.upload_files_description()}
                 </span>
+                {#if effectiveMaxFileSizeBytes}
+                  <span class="text-secondary text-xs">
+                    {m.flow_run_upload_max_size({ size: formatBytes(effectiveMaxFileSizeBytes) })}
+                  </span>
+                {/if}
               {/if}
-            {/if}
-          </div>
+            </div>
 
-          {#if policyLoadError}
-            <p class="text-xs text-secondary">{policyLoadError}</p>
-          {/if}
-          {#if uploadError}
-            <p class="text-xs text-red-600">{uploadError}</p>
-          {/if}
+            {#if policyLoadError}
+              <p class="text-secondary text-xs">{policyLoadError}</p>
+            {/if}
+            {#if uploadError}
+              <p class="text-xs text-red-600">{uploadError}</p>
+            {/if}
 
             {#if uploadedFiles.length > 0}
               <div class="flex flex-col gap-1">
                 {#each uploadedFiles as file (file.id)}
-                  <div class="bg-hover-dimmer flex items-center justify-between rounded-md px-3 py-2 text-sm">
+                  <div
+                    class="bg-hover-dimmer flex items-center justify-between rounded-md px-3 py-2 text-sm"
+                  >
                     <span class="min-w-0 truncate">{file.name ?? file.id}</span>
                     <button
                       class="ml-2 shrink-0 text-xs text-red-600 hover:text-red-800"
@@ -460,7 +518,7 @@
       <Button
         onclick={triggerRun}
         variant="primary"
-        disabled={isSubmitting || isUploading || (needsFileUpload && uploadedFiles.length === 0)}
+        disabled={isSubmitting || isUploading || missingRequiredFields.length > 0 || (needsFileUpload && uploadedFiles.length === 0)}
       >
         {#if isSubmitting}
           <IconLoadingSpinner class="size-4 animate-spin" />

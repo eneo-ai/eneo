@@ -4,7 +4,7 @@
   import { m } from "$lib/paraglide/messages";
 
   export let title: string;
-  export let description: string;
+  export let description: string = "";
   export let fullWidth = false;
 
   export let hasChanges = false;
@@ -49,9 +49,11 @@
           >
         {/if}
       </h3>
-      <p class="text-secondary whitespace-pre-wrap" id={descriptionId}>
-        {description}
-      </p>
+      {#if description}
+        <p class="text-secondary whitespace-pre-wrap" id={descriptionId}>
+          {description}
+        </p>
+      {/if}
       <slot name="description" />
     </div>
     <div class="p-4 pr-3">

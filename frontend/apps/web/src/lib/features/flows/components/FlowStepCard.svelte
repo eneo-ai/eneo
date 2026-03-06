@@ -3,6 +3,7 @@
   import { createEventDispatcher } from "svelte";
   import { IconTrash } from "@intric/icons/trash";
   import { m } from "$lib/paraglide/messages";
+  import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";
 
   export let step: FlowStep;
   export let isActive: boolean;
@@ -42,22 +43,77 @@
     pdf: () => m.flow_output_type_pdf(),
     docx: () => m.flow_output_type_docx()
   };
+  const RAIL_OUTPUT_LABELS: Record<string, string> = {
+    text: m.flow_output_type_text(),
+    json: m.flow_output_type_json(),
+    pdf: "PDF",
+    docx: "Word"
+  };
+  const INPUT_TYPE_LABELS: Record<string, () => string> = {
+    text: () => m.flow_type_text(),
+    json: () => m.flow_type_json(),
+    document: () => m.flow_type_document(),
+    file: () => m.flow_type_file(),
+    image: () => m.flow_type_image(),
+    audio: () => m.flow_type_audio(),
+    any: () => m.flow_type_any()
+  };
+  const BADGE_BASE = "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium";
+  const INPUT_BADGE_CLASSES: Record<string, string> = {
+    text: "bg-hover-dimmer text-secondary",
+    json: "bg-positive-dimmer text-positive-stronger",
+    document: "bg-warning-dimmer text-warning-stronger",
+    file: "bg-warning-dimmer text-warning-stronger",
+    image: "bg-hover-dimmer text-secondary",
+    audio: "bg-accent-dimmer text-accent-stronger",
+    any: "bg-warning-dimmer text-warning-stronger"
+  };
+  const OUTPUT_BADGE_CLASSES: Record<string, string> = {
+    text: "bg-hover-dimmer text-secondary",
+    json: "bg-positive-dimmer text-positive-stronger",
+    pdf: "bg-warning-dimmer text-warning-stronger",
+    docx: "bg-warning-dimmer text-warning-stronger"
+  };
 
-  $: label = step.user_description || m.flow_step_fallback_label({ order: String(step.step_order) });
+  $: label =
+    step.user_description || m.flow_step_fallback_label({ order: String(step.step_order) });
   $: inputLabel = INPUT_SOURCE_LABELS[step.input_source]?.() ?? step.input_source;
   $: outputLabel = OUTPUT_TYPE_LABELS[step.output_type]?.() ?? step.output_type;
-  $: modelName = (() => {
-    // Try to extract model name from the step's assistant model
-    const model = (step as any).completion_model?.name ?? (step as any).model_name;
-    return typeof model === "string" ? model : null;
+  $: railOutputLabel = RAIL_OUTPUT_LABELS[step.output_type] ?? outputLabel;
+  $: nextChannelLabel =
+    step.output_mode === "transcribe_only"
+      ? m.flow_step_summary_next_channel_transcript_short()
+      : getDownstreamKindForOutput(step.output_type) === "text_and_structured"
+      ? m.flow_step_summary_next_channel_text_and_structured_short()
+      : m.flow_step_summary_next_channel_text_short();
+  $: inputTypeLabel = INPUT_TYPE_LABELS[step.input_type]?.() ?? step.input_type;
+  $: sourceSummary = (() => {
+    switch (step.input_source) {
+      case "flow_input":
+        return m.flow_step_card_source_flow_input();
+      case "previous_step":
+        return m.flow_step_card_source_previous_step();
+      case "all_previous_steps":
+        return m.flow_step_card_source_all_previous_steps();
+      case "http_get":
+        return m.flow_step_card_source_http_get();
+      case "http_post":
+        return m.flow_step_card_source_http_post();
+      default:
+        return inputLabel;
+    }
   })();
+  $: inputBadgeClass = INPUT_BADGE_CLASSES[step.input_type] ?? "bg-hover-dimmer text-secondary";
+  $: outputBadgeClass = OUTPUT_BADGE_CLASSES[step.output_type] ?? "bg-hover-dimmer text-secondary";
 </script>
 
 <div
   role="listitem"
-  class="group flex w-full items-start gap-2.5 border-b px-3.5 py-3 text-left transition-all duration-150
-    {isActive ? 'bg-accent-dimmer border-l-[3px] border-l-accent-default border-b-default' : 'border-default border-l-[3px] border-l-transparent'}
-    {'hover:bg-hover-dimmer active:bg-hover-default'}"
+  class="group flex w-full items-start gap-2.5 border-b px-3.5 py-3 text-left transition-colors duration-150
+    {isActive
+    ? 'border-b-default border-l-accent-default bg-accent-dimmer/65 border-l-[3px]'
+    : 'border-default hover:bg-hover-dimmer/40 border-l-[3px] border-l-transparent'}
+    active:bg-hover-default"
 >
   <button
     type="button"
@@ -83,38 +139,25 @@
           class="truncate text-sm leading-snug"
           class:font-semibold={isActive}
           class:font-medium={!isActive}
-          title={label}
-        >{label}</span>
-
-        {#if modelName}
-          <span class="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-xs text-muted">
-            {modelName}
-          </span>
-        {/if}
+          title={label}>{label}</span
+        >
       </div>
 
-      <div class="truncate text-xs text-secondary">
-        {#if isPowerUser}
-          {inputLabel} &rarr; {outputLabel}
-        {:else if modelName}
-          {modelName}
-        {:else}
-          <span class="text-muted">{m.flow_step_not_configured()}</span>
-        {/if}
+      <div class="text-secondary truncate text-xs">
+        {sourceSummary}
       </div>
 
       {#if isPowerUser}
-        <div class="flex flex-wrap gap-1 pt-0.5">
-          <span class="rounded bg-hover-dimmer px-1.5 py-0.5 text-xs font-medium">
-            {step.input_type}
-          </span>
-          <span class="rounded bg-hover-dimmer px-1.5 py-0.5 text-xs font-medium">
-            {step.output_type}
+        <div class="mt-1 flex flex-wrap items-center gap-1.5">
+          <span class={`${BADGE_BASE} ${inputBadgeClass}`}>{inputTypeLabel}</span>
+          <span class="text-muted text-[11px]">→</span>
+          <span class={`${BADGE_BASE} ${outputBadgeClass}`}>{railOutputLabel}</span>
+          <span class="text-muted text-[11px]">·</span>
+          <span class="text-accent-stronger text-[11px] font-medium">
+            {m.flow_step_card_chain_short()}: {nextChannelLabel}
           </span>
           {#if step.mcp_policy === "restricted"}
-            <span class="rounded bg-warning-dimmer px-1.5 py-0.5 text-xs font-medium text-warning-stronger">
-              MCP
-            </span>
+            <span class={`${BADGE_BASE} bg-warning-dimmer text-warning-stronger`}> MCP </span>
           {/if}
         </div>
       {/if}
@@ -122,34 +165,53 @@
   </button>
 
   {#if !isPublished}
-    <div class="ml-1 flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100" class:opacity-100={isActive}>
+    <div
+      class="ml-1 flex shrink-0 items-center gap-1 opacity-35 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+      class:opacity-100={isActive}
+    >
       <button
         type="button"
-        class="inline-flex size-7 items-center justify-center rounded text-xs text-secondary hover:bg-hover-dimmer disabled:cursor-not-allowed disabled:opacity-40"
+        class="text-secondary hover:bg-hover-dimmer inline-flex size-7 items-center justify-center rounded text-xs disabled:cursor-not-allowed disabled:opacity-40"
         on:click|stopPropagation={() => dispatch("moveUp")}
         disabled={!canMoveUp}
         title={m.flow_step_move_up()}
         aria-label={m.flow_step_move_up()}
       >
-        <svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M8 12V4M4 7l4-3 4 3"/>
+        <svg
+          class="size-3.5"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M8 12V4M4 7l4-3 4 3" />
         </svg>
       </button>
       <button
         type="button"
-        class="inline-flex size-7 items-center justify-center rounded text-xs text-secondary hover:bg-hover-dimmer disabled:cursor-not-allowed disabled:opacity-40"
+        class="text-secondary hover:bg-hover-dimmer inline-flex size-7 items-center justify-center rounded text-xs disabled:cursor-not-allowed disabled:opacity-40"
         on:click|stopPropagation={() => dispatch("moveDown")}
         disabled={!canMoveDown}
         title={m.flow_step_move_down()}
         aria-label={m.flow_step_move_down()}
       >
-        <svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M8 4v8M4 9l4 3 4-3"/>
+        <svg
+          class="size-3.5"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M8 4v8M4 9l4 3 4-3" />
         </svg>
       </button>
       <button
         type="button"
-        class="inline-flex size-7 items-center justify-center rounded text-secondary hover:bg-hover-dimmer hover:text-red-600"
+        class="text-secondary hover:bg-hover-dimmer inline-flex size-7 items-center justify-center rounded hover:text-red-600"
         on:click|stopPropagation={() => dispatch("remove")}
         title={m.flow_step_remove()}
         aria-label={m.flow_step_remove()}

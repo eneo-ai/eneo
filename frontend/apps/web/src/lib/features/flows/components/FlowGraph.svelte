@@ -8,7 +8,8 @@
     MarkerType,
     Panel,
     type Node,
-    type Edge
+    type Edge,
+    type NodeEventWithPointer
   } from "@xyflow/svelte";
   import "@xyflow/svelte/dist/style.css";
   import dagre from "dagre";
@@ -18,6 +19,7 @@
   import FlowEdgeInteractive from "./FlowEdgeInteractive.svelte";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
+  import { getEdgePayloadKind } from "$lib/features/flows/flowStepPresentation";
   import { onMount, tick } from "svelte";
   import { m } from "$lib/paraglide/messages";
 
@@ -59,7 +61,10 @@
   $effect(() => {
     const assistantIds = (flow?.steps ?? [])
       .map((step) => step.assistant_id)
-      .filter((assistantId): assistantId is string => typeof assistantId === "string" && assistantId.length > 0);
+      .filter(
+        (assistantId): assistantId is string =>
+          typeof assistantId === "string" && assistantId.length > 0
+      );
     for (const assistantId of assistantIds) {
       if (assistantMetaById.has(assistantId) || loadingAssistantIds.has(assistantId)) continue;
       void loadAssistantMeta(assistantId);
@@ -120,7 +125,8 @@
       typeof (completionModel as { name?: unknown }).name === "string"
         ? (completionModel as { name: string }).name
         : null;
-    const securityClassification = (completionModel as { security_classification?: unknown }).security_classification;
+    const securityClassification = (completionModel as { security_classification?: unknown })
+      .security_classification;
     const assistantClassificationLevel =
       securityClassification &&
       typeof securityClassification === "object" &&
@@ -222,7 +228,7 @@
         id: "input",
         type: "input",
         position: { x: 0, y: 0 },
-        data: { label: "Input", nodeType: "input", mode: userMode }
+        data: { label: m.flow_graph_node_input(), nodeType: "input", mode: userMode }
       }
     ];
 
@@ -238,12 +244,9 @@
           step,
           isActive: id === activeId,
           mode: userMode,
-          modelName:
-            assistantMetaById.get(step.assistant_id)?.modelName ??
-            null,
+          modelName: assistantMetaById.get(step.assistant_id)?.modelName ?? null,
           assistantClassLevel:
-            assistantMetaById.get(step.assistant_id)?.assistantClassificationLevel ??
-            null,
+            assistantMetaById.get(step.assistant_id)?.assistantClassificationLevel ?? null,
           classLevel: getClassificationLevel(step)
         }
       });
@@ -254,7 +257,7 @@
       id: "output",
       type: "output",
       position: { x: 0, y: 0 },
-      data: { label: "Output", nodeType: "output", mode: userMode }
+      data: { label: m.flow_graph_node_output(), nodeType: "output", mode: userMode }
     });
 
     type EdgeSpec = {
@@ -318,13 +321,6 @@
             targetStepOrder: step.step_order
           });
         }
-        edgeSpecs.push({
-          source: "input",
-          target: stepId,
-          kind: "all_previous_steps",
-          sourceStepOrder: 0,
-          targetStepOrder: step.step_order
-        });
       }
     }
 
@@ -380,29 +376,31 @@
 
     const resultEdges: Edge[] = [];
     for (const edge of edgeSpecs) {
-      const sourceStep = edge.sourceStepOrder > 0 ? stepByOrder.get(edge.sourceStepOrder) : undefined;
+      const sourceStep =
+        edge.sourceStepOrder > 0 ? stepByOrder.get(edge.sourceStepOrder) : undefined;
       const targetStep =
         edge.targetStepOrder != null ? stepByOrder.get(edge.targetStepOrder) : undefined;
       const sourceLevel = getClassificationLevel(sourceStep);
       const targetLevel = getClassificationLevel(targetStep);
-      const isEscalation =
-        sourceLevel != null && targetLevel != null && targetLevel > sourceLevel;
-      const isViolation =
-        sourceLevel != null && targetLevel != null && targetLevel < sourceLevel;
+      const isEscalation = sourceLevel != null && targetLevel != null && targetLevel > sourceLevel;
+      const isViolation = sourceLevel != null && targetLevel != null && targetLevel < sourceLevel;
       const laneIndex = incomingEdgeLane.get(edge.target) ?? 0;
       incomingEdgeLane.set(edge.target, laneIndex + 1);
       const laneCount = incomingEdgeCounts.get(edge.target) ?? 1;
       const labelOffsetY = (laneIndex - (laneCount - 1) / 2) * 22;
       const sourceLabel =
         edge.source === "input"
-          ? "Input"
+          ? m.flow_graph_node_input()
           : (sourceStep?.user_description ?? `Step ${edge.sourceStepOrder}`);
       const targetLabel =
         edge.target === "output"
-          ? "Output"
+          ? m.flow_graph_node_output()
           : (targetStep?.user_description ?? `Step ${edge.targetStepOrder ?? "?"}`);
-      const dataType =
-        edge.source === "input" ? "input" : (sourceStep?.output_type ?? "text");
+      const payloadKind = getEdgePayloadKind({
+        edgeKind: edge.kind,
+        sourceStep,
+        targetStep
+      });
       const payload = buildPayloadPreview(sourceStep, targetStep, sourceLevel, targetLevel);
       const allowInsert = edge.kind !== "all_previous_steps" && edge.target !== "output";
 
@@ -412,12 +410,12 @@
         type: "interactive",
         source: edge.source,
         target: edge.target,
-        label: isPowerUser ? dataType : undefined,
+        label: isPowerUser ? payloadKind : undefined,
         markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12, color: markerColor },
         data: {
           mode: userMode,
           readOnly: flow.published_version != null,
-          dataType,
+          dataType: payloadKind,
           edgeKind: edge.kind,
           animate: false,
           allowInsert,
@@ -433,22 +431,25 @@
           onInsert: handleEdgeInsert,
           onInspect: handleEdgeInspect
         },
-        style: edge.kind === "all_previous_steps" ? "stroke-dasharray: 4 4; opacity: 0.6" : undefined
+        style:
+          edge.kind === "all_previous_steps" ? "stroke-dasharray: 4 4; opacity: 0.6" : undefined
       });
     }
 
     return { nodes: resultNodes, edges: resultEdges };
   }
 
-  function handleNodeClick(event: any) {
-    const node = event.detail?.node ?? event.node;
+  const handleNodeClick: NodeEventWithPointer<MouseEvent | TouchEvent, Node> = ({ node }) => {
     if (node?.type === "llm" && node.data?.step) {
       onnodeclick?.(node.id);
     }
-  }
+  };
 </script>
 
-<div class="flow-graph h-full w-full {$mode === 'power_user' ? '' : 'user-mode'}" id="flow-graph-container">
+<div
+  class="flow-graph h-full w-full {$mode === 'power_user' ? '' : 'user-mode'}"
+  id="flow-graph-container"
+>
   <SvelteFlow
     {nodes}
     {edges}
@@ -469,13 +470,28 @@
       <MiniMap width={140} height={90} />
       <Controls position="top-left" />
       <Panel position="bottom-left">
-        <div class="flex items-center gap-3 rounded bg-primary/90 px-2.5 py-1.5 text-[10px] text-secondary backdrop-blur-sm">
+        <div
+          class="bg-primary/90 text-secondary flex items-center gap-3 rounded px-2.5 py-1.5 text-[10px] backdrop-blur-sm"
+        >
           <span class="flex items-center gap-1.5">
-            <svg width="20" height="2"><line x1="0" y1="1" x2="20" y2="1" stroke="currentColor" stroke-width="1.5"/></svg>
+            <svg width="20" height="2"
+              ><line x1="0" y1="1" x2="20" y2="1" stroke="currentColor" stroke-width="1.5" /></svg
+            >
             {m.flow_graph_legend_direct()}
           </span>
           <span class="flex items-center gap-1.5">
-            <svg width="20" height="2"><line x1="0" y1="1" x2="20" y2="1" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.6"/></svg>
+            <svg width="20" height="2"
+              ><line
+                x1="0"
+                y1="1"
+                x2="20"
+                y2="1"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-dasharray="4 4"
+                opacity="0.6"
+              /></svg
+            >
             {m.flow_graph_legend_all_previous()}
           </span>
         </div>
@@ -484,7 +500,9 @@
   </SvelteFlow>
 
   {#if $mode === "power_user" && inspectedEdge}
-    <aside class="edge-inspector bg-primary border-default absolute right-3 top-3 z-20 w-[320px] rounded-lg border shadow-lg">
+    <aside
+      class="edge-inspector bg-primary border-default absolute top-3 right-3 left-3 z-20 w-auto rounded-lg border shadow-lg sm:left-auto sm:w-[320px]"
+    >
       <div class="border-default flex items-center justify-between border-b px-3 py-2">
         <p class="text-sm font-semibold">{m.flow_graph_preview()} · {inspectedEdge.title}</p>
         <button
@@ -496,10 +514,10 @@
       </div>
       <div class="max-h-[240px] overflow-auto p-3">
         <dl class="space-y-1.5 text-xs">
-          {#each Object.entries(inspectedEdge.payload ?? {}).filter(([, v]) => v != null) as [key, value]}
+          {#each Object.entries(inspectedEdge.payload ?? {}).filter(([, v]) => v != null) as [key, value] (key)}
             <div class="flex items-baseline gap-2">
               <dt class="text-secondary shrink-0 font-mono">{key.replace(/_/g, " ")}</dt>
-              <dd class="break-all font-medium">
+              <dd class="font-medium break-all">
                 {typeof value === "object" ? JSON.stringify(value) : String(value)}
               </dd>
             </div>
@@ -539,6 +557,8 @@
   }
 
   .flow-graph :global(.svelte-flow__edge-path) {
-    transition: stroke 160ms ease-in-out, stroke-width 160ms ease-in-out;
+    transition:
+      stroke 160ms ease-in-out,
+      stroke-width 160ms ease-in-out;
   }
 </style>
