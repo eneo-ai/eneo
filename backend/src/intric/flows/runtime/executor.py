@@ -202,6 +202,8 @@ class FlowRunExecutor:
         audit_service: AuditService | None = None,
         references_service: ReferencesService | None = None,
         transcriber: Transcriber | None = None,
+        max_audio_files: int = 10,
+        max_generic_files: int | None = None,
     ):
         self.user = user
         self.flow_repo = flow_repo
@@ -229,7 +231,8 @@ class FlowRunExecutor:
         self.rag_retrieval_timeout_seconds = 30
         self.rag_max_reference_sources = 25
         self.rag_max_chunks_per_source = 5
-        self.max_audio_files = 10
+        self.max_audio_files = max_audio_files
+        self.max_generic_files = max_generic_files
 
     async def execute(
         self,
@@ -1178,6 +1181,13 @@ class FlowRunExecutor:
                 run.id, step.step_order, step.input_type, raw_file_ids,
             )
             requested_ids = parse_requested_file_ids(raw_file_ids=raw_file_ids)
+            if requested_ids and step.input_type != "audio" and self.max_generic_files is not None:
+                if len(requested_ids) > self.max_generic_files:
+                    raise TypedIOValidationException(
+                        f"Step {step.step_order}: too many files "
+                        f"({len(requested_ids)}, max {self.max_generic_files}).",
+                        code="typed_io_too_many_files",
+                    )
             files = None
             if requested_ids:
                 file_cache = state.file_cache if state else None

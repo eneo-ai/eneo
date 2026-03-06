@@ -5,6 +5,7 @@ from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.flows.flow_input_limits import (
+    FlowInputLimits,
     apply_flow_input_limits_patch,
     resolve_flow_input_limits,
 )
@@ -464,23 +465,26 @@ class SettingService:
             overrides={"api_key_expiry_notifications": enabled},
         )
 
+    async def get_flow_input_limits_resolved(self) -> FlowInputLimits:
+        """Return domain-level flow input limits (no permission check)."""
+        tenant = await self.tenant_repo.get(self.user.tenant_id)
+        return resolve_flow_input_limits(tenant.flow_settings if tenant else None)
+
     @validate_permissions(Permission.ADMIN)
     async def get_flow_input_limits(self) -> FlowInputLimitsPublic:
-        tenant = await self.tenant_repo.get(self.user.tenant_id)
-        limits = resolve_flow_input_limits(tenant.flow_settings if tenant else None)
+        limits = await self.get_flow_input_limits_resolved()
         return FlowInputLimitsPublic(
             file_max_size_bytes=limits.file_max_size_bytes,
             audio_max_size_bytes=limits.audio_max_size_bytes,
+            max_files_per_run=limits.max_files_per_run,
+            audio_max_files_per_run=limits.audio_max_files_per_run,
         )
 
     @validate_permissions(Permission.ADMIN)
     async def update_flow_input_limits(
         self, payload: FlowInputLimitsUpdate
     ) -> FlowInputLimitsPublic:
-        if (
-            payload.file_max_size_bytes is None
-            and payload.audio_max_size_bytes is None
-        ):
+        if not payload.model_fields_set:
             raise BadRequestException(
                 "At least one flow input limit field must be provided."
             )
@@ -489,10 +493,22 @@ class SettingService:
         current_flow_settings = tenant.flow_settings if tenant else {}
         previous = resolve_flow_input_limits(current_flow_settings)
 
+        # Tri-state: omitted = no change, explicit null = remove (revert to default), value = set
+        remove_keys: set[str] = set()
+        file_count_fields = ("max_files_per_run", "audio_max_files_per_run")
+        for field_name in file_count_fields:
+            if field_name in payload.model_fields_set:
+                value = getattr(payload, field_name)
+                if value is None:
+                    remove_keys.add(field_name)
+
         updated_flow_settings = apply_flow_input_limits_patch(
             current_flow_settings=current_flow_settings,
             file_max_size_bytes=payload.file_max_size_bytes,
             audio_max_size_bytes=payload.audio_max_size_bytes,
+            max_files_per_run=payload.max_files_per_run,
+            audio_max_files_per_run=payload.audio_max_files_per_run,
+            remove_keys=remove_keys,
         )
         updated_tenant = await self.tenant_repo.set_flow_settings(
             tenant_id=self.user.tenant_id,
@@ -500,7 +516,7 @@ class SettingService:
         )
         current = resolve_flow_input_limits(updated_tenant.flow_settings)
 
-        changes: dict[str, dict[str, int]] = {}
+        changes: dict[str, dict[str, int | None]] = {}
         if payload.file_max_size_bytes is not None:
             changes["file_max_size_bytes"] = {
                 "old": previous.file_max_size_bytes,
@@ -510,6 +526,16 @@ class SettingService:
             changes["audio_max_size_bytes"] = {
                 "old": previous.audio_max_size_bytes,
                 "new": current.audio_max_size_bytes,
+            }
+        if "max_files_per_run" in payload.model_fields_set:
+            changes["max_files_per_run"] = {
+                "old": previous.max_files_per_run,
+                "new": current.max_files_per_run,
+            }
+        if "audio_max_files_per_run" in payload.model_fields_set:
+            changes["audio_max_files_per_run"] = {
+                "old": previous.audio_max_files_per_run,
+                "new": current.audio_max_files_per_run,
             }
 
         await self.audit_service.log_async(
@@ -528,4 +554,6 @@ class SettingService:
         return FlowInputLimitsPublic(
             file_max_size_bytes=current.file_max_size_bytes,
             audio_max_size_bytes=current.audio_max_size_bytes,
+            max_files_per_run=current.max_files_per_run,
+            audio_max_files_per_run=current.audio_max_files_per_run,
         )

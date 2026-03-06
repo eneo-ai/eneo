@@ -11,7 +11,15 @@
 
   let fileMaxSizeBytes = $state(String(data.flowInputLimits.file_max_size_bytes ?? ""));
   let audioMaxSizeBytes = $state(String(data.flowInputLimits.audio_max_size_bytes ?? ""));
+  let maxFilesPerRun = $state(data.flowInputLimits.max_files_per_run != null ? String(data.flowInputLimits.max_files_per_run) : "");
+  let audioMaxFilesPerRun = $state(data.flowInputLimits.audio_max_files_per_run != null ? String(data.flowInputLimits.audio_max_files_per_run) : "");
   let isSaving = $state(false);
+
+  // Track initial values to detect changes
+  let initialFileMaxSizeBytes = fileMaxSizeBytes;
+  let initialAudioMaxSizeBytes = audioMaxSizeBytes;
+  let initialMaxFilesPerRun = maxFilesPerRun;
+  let initialAudioMaxFilesPerRun = audioMaxFilesPerRun;
 
   function toPositiveInteger(value: string, label: string): number {
     const parsed = Number(value);
@@ -36,12 +44,39 @@
   async function saveLimits() {
     isSaving = true;
     try {
-      const updated = await intric.settings.updateFlowInputLimits({
-        file_max_size_bytes: toPositiveInteger(fileMaxSizeBytes, "File max size"),
-        audio_max_size_bytes: toPositiveInteger(audioMaxSizeBytes, "Audio max size")
-      });
+      const patch: Record<string, number | null> = {};
+
+      // Only include changed fields
+      if (fileMaxSizeBytes !== initialFileMaxSizeBytes) {
+        patch.file_max_size_bytes = toPositiveInteger(fileMaxSizeBytes, "File max size");
+      }
+      if (audioMaxSizeBytes !== initialAudioMaxSizeBytes) {
+        patch.audio_max_size_bytes = toPositiveInteger(audioMaxSizeBytes, "Audio max size");
+      }
+      if (maxFilesPerRun !== initialMaxFilesPerRun) {
+        patch.max_files_per_run = String(maxFilesPerRun).trim() === "" ? null : toPositiveInteger(String(maxFilesPerRun), m.flow_input_limits_max_files_title());
+      }
+      if (audioMaxFilesPerRun !== initialAudioMaxFilesPerRun) {
+        patch.audio_max_files_per_run = String(audioMaxFilesPerRun).trim() === "" ? null : toPositiveInteger(String(audioMaxFilesPerRun), m.flow_input_limits_audio_max_files_title());
+      }
+
+      if (Object.keys(patch).length === 0) {
+        toast.success(m.saved_successfully());
+        return;
+      }
+
+      const updated = await intric.settings.updateFlowInputLimits(patch);
       fileMaxSizeBytes = String(updated.file_max_size_bytes);
       audioMaxSizeBytes = String(updated.audio_max_size_bytes);
+      maxFilesPerRun = updated.max_files_per_run != null ? String(updated.max_files_per_run) : "";
+      audioMaxFilesPerRun = updated.audio_max_files_per_run != null ? String(updated.audio_max_files_per_run) : "";
+
+      // Update initial values after save
+      initialFileMaxSizeBytes = fileMaxSizeBytes;
+      initialAudioMaxSizeBytes = audioMaxSizeBytes;
+      initialMaxFilesPerRun = maxFilesPerRun;
+      initialAudioMaxFilesPerRun = audioMaxFilesPerRun;
+
       toast.success(m.saved_successfully());
     } catch (error) {
       const message = error?.getReadableMessage?.() ?? String(error);
@@ -69,7 +104,7 @@
   </Page.Header>
   <Page.Main>
     <Settings.Page>
-      <Settings.Group title={m.flow_input_limits_group()}>
+      <Settings.Group title={m.flow_input_limits_file_group()}>
         <Settings.Row title={m.flow_input_limits_file_title()} description={m.flow_input_limits_file_description()}>
           <div class="flex w-full max-w-sm flex-col gap-1">
             <input
@@ -81,6 +116,20 @@
             <p class="text-xs text-secondary">{formatBytes(Number(fileMaxSizeBytes))}</p>
           </div>
         </Settings.Row>
+        <Settings.Row title={m.flow_input_limits_max_files_title()} description={m.flow_input_limits_max_files_description()}>
+          <div class="flex w-full max-w-sm flex-col gap-1">
+            <input
+              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
+              type="number"
+              min="1"
+              placeholder={m.flow_input_limits_unlimited_hint()}
+              bind:value={maxFilesPerRun}
+            />
+          </div>
+        </Settings.Row>
+      </Settings.Group>
+
+      <Settings.Group title={m.flow_input_limits_audio_group()}>
         <Settings.Row title={m.flow_input_limits_audio_title()} description={m.flow_input_limits_audio_description()}>
           <div class="flex w-full max-w-sm flex-col gap-1">
             <input
@@ -90,6 +139,17 @@
               bind:value={audioMaxSizeBytes}
             />
             <p class="text-xs text-secondary">{formatBytes(Number(audioMaxSizeBytes))}</p>
+          </div>
+        </Settings.Row>
+        <Settings.Row title={m.flow_input_limits_audio_max_files_title()} description={m.flow_input_limits_audio_max_files_description()}>
+          <div class="flex w-full max-w-sm flex-col gap-1">
+            <input
+              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
+              type="number"
+              min="1"
+              placeholder={m.flow_input_limits_default_hint({ value: "10" })}
+              bind:value={audioMaxFilesPerRun}
+            />
           </div>
         </Settings.Row>
       </Settings.Group>

@@ -222,8 +222,23 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             if key not in input_limits:
                 continue
             value = input_limits[key]
-            if not isinstance(value, int):
+            if not isinstance(value, int) or isinstance(value, bool):
                 raise ValueError(f"flow_settings.input_limits.{key} must be an integer")
+            if value < 1:
+                raise ValueError(
+                    f"flow_settings.input_limits.{key} must be greater than 0"
+                )
+
+        for key in ("max_files_per_run", "audio_max_files_per_run"):
+            if key not in input_limits:
+                continue
+            value = input_limits[key]
+            if value is None:
+                continue  # None = use default
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError(
+                    f"flow_settings.input_limits.{key} must be an integer or null"
+                )
             if value < 1:
                 raise ValueError(
                     f"flow_settings.input_limits.{key} must be greater than 0"

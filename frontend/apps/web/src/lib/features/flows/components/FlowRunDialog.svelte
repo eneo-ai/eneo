@@ -20,7 +20,7 @@
   export let intric: Intric;
   export let lastInputPayload: Record<string, unknown> | null;
 
-  const dispatch = createEventDispatcher<{ runCreated: void }>();
+  const dispatch = createEventDispatcher<{ runCreated: { runId: string } }>();
   const openController = writable(false);
 
   $: openController.set(open);
@@ -82,6 +82,10 @@
       ? AUDIO_ACCEPT_FILTER
       : undefined;
   $: effectiveMaxFileSizeBytes = flowInputPolicy?.max_file_size_bytes ?? null;
+  $: showFreeformTextInput = !hasFormFields && !needsFileUpload;
+  $: effectiveMaxFiles = flowInputPolicy?.max_files_per_run ?? null;
+  $: remainingFileSlots = effectiveMaxFiles !== null ? effectiveMaxFiles - uploadedFiles.length : Infinity;
+  $: maxFilesReached = remainingFileSlots <= 0;
 
   let formValues: Record<string, unknown> = {};
 
@@ -123,6 +127,7 @@
   let uploadedFiles: UploadedFile[] = [];
   let isUploading = false;
   let uploadError: string | null = null;
+  let skippedFilesMessage: string | null = null;
   let isDragging = false;
   const FLOW_UPLOAD_TIMEOUT_MS = 120_000;
 
@@ -148,7 +153,7 @@
           }
         }
         formValues = formValues;
-      } else {
+      } else if (showFreeformTextInput) {
         inputText = String(lastInputPayload.text ?? JSON.stringify(lastInputPayload));
       }
     }
@@ -218,12 +223,26 @@
   async function uploadFiles(files: File[]) {
     isUploading = true;
     uploadError = null;
+    skippedFilesMessage = null;
     if (!flow.id) {
       uploadError = m.something_went_wrong();
       isUploading = false;
       return;
     }
-    for (const file of files) {
+    const toUpload = effectiveMaxFiles !== null ? files.slice(0, remainingFileSlots) : files;
+    if (toUpload.length < files.length) {
+      const skipped = files.length - toUpload.length;
+      skippedFilesMessage = m.flow_run_max_files_exceeded({
+        attempted: String(files.length),
+        limit: String(effectiveMaxFiles),
+        skipped: String(skipped),
+      });
+    }
+    if (toUpload.length === 0) {
+      isUploading = false;
+      return;
+    }
+    for (const file of toUpload) {
       try {
         if (effectiveMaxFileSizeBytes !== null && file.size > effectiveMaxFileSizeBytes) {
           uploadError = `${file.name}: ${m.flow_run_upload_max_size({ size: formatBytes(effectiveMaxFileSizeBytes) })}`;
@@ -255,6 +274,7 @@
 
   function removeFile(fileId: string) {
     uploadedFiles = uploadedFiles.filter((f) => f.id !== fileId);
+    skippedFilesMessage = null;
   }
 
   async function triggerRun() {
@@ -285,16 +305,19 @@
             payload[key] = getFieldValue(field);
           }
         }
-      } else {
+      } else if (showFreeformTextInput) {
         payload = { text: inputText };
+      } else {
+        payload = {};
       }
       const fileIds = uploadedFiles.length > 0 ? uploadedFiles.map((f) => f.id) : undefined;
-      await intric.flows.runs.create({
+      const createdRun = await intric.flows.runs.create({
         flow: { id: flow.id },
         input_payload_json: payload,
         file_ids: fileIds
       });
-      dispatch("runCreated");
+      dispatch("runCreated", { runId: createdRun.id });
+      toast.success(m.flow_run_started_toast());
       $openController = false;
       inputText = "";
       formValues = {};
@@ -326,7 +349,7 @@
       <div
         class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-6 pb-8 sm:px-6 sm:pt-8 lg:px-10"
       >
-        <h3 class="text-xl font-bold">{m.flow_run_trigger()}</h3>
+        <Dialog.Title class="text-xl font-bold">{m.flow_run_trigger()}</Dialog.Title>
         <p class="text-secondary text-sm">
           {flow.name}
           {#if stepCount > 0}
@@ -416,18 +439,14 @@
               {/if}
             </div>
           {/each}
-        {:else}
+        {:else if showFreeformTextInput}
           <div class="flex flex-col gap-1">
             <span class="text-sm font-medium">{m.flow_run_input()}</span>
             <span class="text-xs text-secondary">{m.flow_run_input_desc()}</span>
             <textarea
               class="border-default bg-primary ring-default min-h-[120px] w-full rounded-lg border px-3 py-2 font-mono text-sm shadow focus-within:ring-2"
               bind:value={inputText}
-              placeholder={needsFileUpload
-                ? isAudioUpload
-                  ? m.flow_run_audio_placeholder()
-                  : m.flow_run_document_placeholder()
-                : m.flow_run_input_placeholder()}
+              placeholder={m.flow_run_input_placeholder()}
             ></textarea>
           </div>
         {/if}
@@ -450,6 +469,8 @@
               class="border-default flex min-h-[80px] cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-6 transition-colors"
               class:border-accent-default={isDragging}
               class:bg-accent-dimmer={isDragging}
+              class:opacity-50={maxFilesReached}
+              class:pointer-events-none={maxFilesReached}
               on:dragover={handleDragOver}
               on:dragleave={handleDragLeave}
               on:drop={handleDrop}
@@ -478,6 +499,16 @@
               {/if}
             </div>
 
+            {#if effectiveMaxFiles !== null}
+              <span class="text-xs" class:text-warning-stronger={maxFilesReached} class:text-secondary={!maxFilesReached}>
+                {m.flow_run_files_count({ current: String(uploadedFiles.length), limit: String(effectiveMaxFiles) })}
+              </span>
+            {/if}
+            {#if skippedFilesMessage}
+              <p class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                {skippedFilesMessage}
+              </p>
+            {/if}
             {#if policyLoadError}
               <p class="text-secondary text-xs">{policyLoadError}</p>
             {/if}
@@ -508,7 +539,7 @@
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      {#if lastInputPayload}
+      {#if lastInputPayload && (hasFormFields || showFreeformTextInput)}
         <Button variant="outlined" on:click={reuseLastInput}>
           {m.flow_run_reuse_last_input()}
         </Button>

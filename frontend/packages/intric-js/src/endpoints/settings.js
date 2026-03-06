@@ -114,7 +114,7 @@ export function initSettings(client) {
 
     /**
      * Update Flow input limits for the tenant.
-     * @param {{file_max_size_bytes?: number, audio_max_size_bytes?: number}} patch
+     * @param {{file_max_size_bytes?: number, audio_max_size_bytes?: number, max_files_per_run?: number | null, audio_max_files_per_run?: number | null}} patch
      * @throws {IntricError}
      * @returns {Promise<import('../types/resources').FlowInputLimits>}
      */

@@ -10,6 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.database import sessionmanager
 from intric.flows.flow import FlowRunStatus
+from intric.flows.flow_input_limits import (
+    DEFAULT_MAX_AUDIO_FILES_PER_RUN,
+    resolve_flow_input_limits,
+)
 from intric.flows.flow_run_repo import FlowRunRepository
 from intric.flows.runtime.celery_app import celery_app
 from intric.flows.runtime.executor import FlowRunExecutor
@@ -71,6 +75,10 @@ async def _execute_flow_run_async(
 
         container = Container(session=providers.Object(session))
         override_user(container=container, user=user)
+
+        tenant = await container.tenant_repo().get(tenant_id)
+        flow_limits = resolve_flow_input_limits(tenant.flow_settings if tenant else None)
+
         executor = FlowRunExecutor(
             user=user,
             flow_repo=container.flow_repo(),
@@ -84,6 +92,8 @@ async def _execute_flow_run_async(
             audit_service=container.audit_service(),
             references_service=container.references_service(),
             transcriber=container.transcriber(),
+            max_audio_files=flow_limits.audio_max_files_per_run or DEFAULT_MAX_AUDIO_FILES_PER_RUN,
+            max_generic_files=flow_limits.max_files_per_run,
         )
         result = await executor.execute(
             run_id=run_id,

@@ -41,8 +41,12 @@ class ToggleSettingUpdate(BaseModel):
 class FlowInputLimitsPublic(BaseModel):
     file_max_size_bytes: int
     audio_max_size_bytes: int
+    max_files_per_run: int | None = None
+    audio_max_files_per_run: int | None = None
 
 
 class FlowInputLimitsUpdate(BaseModel):
     file_max_size_bytes: int | None = None
     audio_max_size_bytes: int | None = None
+    max_files_per_run: int | None = None
+    audio_max_files_per_run: int | None = None

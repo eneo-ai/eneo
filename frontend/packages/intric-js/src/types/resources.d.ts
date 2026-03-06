@@ -62,6 +62,8 @@ export type Settings = components["schemas"]["SettingsPublic"];
 export type FlowInputLimits = {
   file_max_size_bytes: number;
   audio_max_size_bytes: number;
+  max_files_per_run: number | null;
+  audio_max_files_per_run: number | null;
 };
 export type WebsiteSparse = components["schemas"]["WebsiteSparse"];
 export type Space = components["schemas"]["SpacePublic"];

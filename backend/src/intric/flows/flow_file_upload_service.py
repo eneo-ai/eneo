@@ -14,14 +14,12 @@ from intric.files.file_service import FileService
 from intric.files.image import ImageMimeTypes
 from intric.files.text import TextMimeTypes
 from intric.flows.flow import Flow, FlowStep
-from intric.flows.flow_input_limits import FlowInputLimits, effective_flow_input_limit
+from intric.flows.flow_input_limits import FlowInputLimits, effective_flow_input_limit, effective_max_files_per_run
 from intric.main.exceptions import BadRequestException, FileNotSupportedException, FileTooLargeException
-from intric.settings.settings import FlowInputLimitsPublic
 
 logger = logging.getLogger(__name__)
 
 _FILE_UPLOAD_INPUT_TYPES = {"audio", "document", "image", "file"}
-DEFAULT_MAX_AUDIO_FILES_PER_RUN = 10
 _SNIFF_BYTES = 8192
 _UNKNOWN_SNIFFED_TYPES = {"application/octet-stream"}
 _MIMETYPE_CANONICAL_ALIASES = {
@@ -113,7 +111,7 @@ class _FlowServiceProtocol(Protocol):
 
 
 class _SettingsServiceProtocol(Protocol):
-    async def get_flow_input_limits(self) -> FlowInputLimitsPublic: ...
+    async def get_flow_input_limits_resolved(self) -> FlowInputLimits: ...
 
 
 @dataclass(frozen=True)
@@ -166,7 +164,7 @@ def _recommended_run_payload_for_input_type(
     return {"input_payload_json": {"text": "<text-input>"}}
 
 
-def _build_policy(flow: Flow, limits: FlowInputLimitsPublic) -> FlowFileInputPolicy:
+def _build_policy(flow: Flow, limits: FlowInputLimits) -> FlowFileInputPolicy:
     if flow.id is None:
         raise BadRequestException(
             "Flow id is missing.",
@@ -194,13 +192,12 @@ def _build_policy(flow: Flow, limits: FlowInputLimitsPublic) -> FlowFileInputPol
     if accepts_file_upload:
         max_file_size_bytes = effective_flow_input_limit(
             input_type=input_type,
-            limits=FlowInputLimits(
-                file_max_size_bytes=limits.file_max_size_bytes,
-                audio_max_size_bytes=limits.audio_max_size_bytes,
-            ),
+            limits=limits,
         )
-        if input_type == "audio":
-            max_files_per_run = DEFAULT_MAX_AUDIO_FILES_PER_RUN
+        max_files_per_run = effective_max_files_per_run(
+            input_type=input_type,
+            limits=limits,
+        )
 
     return FlowFileInputPolicy(
         flow_id=flow.id,
@@ -231,7 +228,7 @@ class FlowFileUploadService:
 
     async def get_input_policy(self, *, flow_id: UUID) -> FlowFileInputPolicy:
         flow = await self.flow_service.get_flow(flow_id)
-        limits = await self.settings_service.get_flow_input_limits()
+        limits = await self.settings_service.get_flow_input_limits_resolved()
         return _build_policy(flow, limits)
 
     async def upload_file_for_flow(self, *, flow_id: UUID, upload_file: UploadFile) -> File:
