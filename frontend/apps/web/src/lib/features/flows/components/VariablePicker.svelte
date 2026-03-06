@@ -71,7 +71,7 @@
       padding="icon"
       variant="outlined"
       class="size-7 text-xs font-bold"
-      title={m.flow_variable_insert()}
+      title="{m.flow_variable_insert()} — @ för genväg"
     >
       &#123; &#125;
     </Button>
@@ -100,7 +100,7 @@
             {#if matchesSearch(field.name)}
               <Button
                 is={item}
-                onclick={() => insert(field.name)}
+                on:click={() => insert(field.name)}
                 class="w-full !justify-start !px-3 !py-1.5 !text-sm"
               >
                 <span class="flex items-center gap-2">
@@ -115,7 +115,7 @@
         {:else if isAdvancedMode && matchesSearch("flow_input.text")}
           <Button
             is={item}
-            onclick={() => insert("flow_input.text")}
+            on:click={() => insert("flow_input.text")}
             class="w-full !justify-start !px-3 !py-1.5 !text-sm"
           >
             <span class="flex w-full items-center justify-between">
@@ -136,7 +136,7 @@
         {#if transcriptionEnabled && matchesSearch("transkribering")}
           <Button
             is={item}
-            onclick={() => insert("transkribering")}
+            on:click={() => insert("transkribering")}
             class="w-full !justify-start !px-3 !py-1.5 !text-sm"
           >
             <span class={getChipClasses("system")}> transkribering </span>
@@ -145,7 +145,7 @@
         {#if isAdvancedMode && currentStepOrder > 1 && matchesSearch("föregående_steg")}
           <Button
             is={item}
-            onclick={() => insert("föregående_steg")}
+            on:click={() => insert("föregående_steg")}
             class="w-full !justify-start !px-3 !py-1.5 !text-sm"
           >
             <span class={getChipClasses("system")}> föregående_steg </span>
@@ -180,7 +180,7 @@
             {#if prevStep.user_description?.trim() && matchesSearch(prevStep.user_description)}
               <Button
                 is={item}
-                onclick={() => insert(prevStep.user_description ?? "")}
+                on:click={() => insert(prevStep.user_description ?? "")}
                 class="w-full !justify-start !px-3 !py-1.5 !text-sm"
               >
                 <span class="flex w-full items-center justify-between">
@@ -196,7 +196,7 @@
             {#if isAdvancedMode && (matchesSearch("text") || matchesSearch(`step_${prevStep.step_order}`))}
               <Button
                 is={item}
-                onclick={() => insert(`step_${prevStep.step_order}.output.text`)}
+                on:click={() => insert(`step_${prevStep.step_order}.output.text`)}
                 class="w-full !justify-start !px-3 !py-1.5 !text-sm"
               >
                 <span class="flex w-full items-center justify-between">
@@ -212,7 +212,7 @@
             {#if isAdvancedMode && (matchesSearch("output") || matchesSearch(`step_${prevStep.step_order}`))}
               <Button
                 is={item}
-                onclick={() => insert(`step_${prevStep.step_order}.output`)}
+                on:click={() => insert(`step_${prevStep.step_order}.output`)}
                 class="w-full !justify-start !px-3 !py-1.5 !text-sm"
               >
                 <span class="flex w-full items-center justify-between">
@@ -239,7 +239,7 @@
                     {@const propType = getSchemaType(prevStep, prop)}
                     <Button
                       is={item}
-                      onclick={() =>
+                      on:click={() =>
                         insert(`step_${prevStep.step_order}.output.structured.${prop}`)}
                       class="w-full !justify-start !px-3 !py-1.5 !text-sm"
                     >
@@ -257,7 +257,7 @@
               {:else if matchesSearch("structured")}
                 <Button
                   is={item}
-                  onclick={() => insert(`step_${prevStep.step_order}.output.structured`)}
+                  on:click={() => insert(`step_${prevStep.step_order}.output.structured`)}
                   class="w-full !justify-start !px-3 !py-1.5 !text-sm"
                 >
                   <span class="flex w-full items-center justify-between">

@@ -3,7 +3,6 @@
   import { Button, Dialog } from "@intric/ui";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
-  import FlowRunDialog from "./FlowRunDialog.svelte";
   import FlowRunEvidence from "./FlowRunEvidence.svelte";
   import { onDestroy } from "svelte";
   import { toast } from "$lib/components/toast";
@@ -15,11 +14,12 @@
   export let intric: Intric;
   export let visible = true;
   export let reloadTrigger = 0;
+  export let latestRunPayload: Record<string, unknown> | null = null;
+  export let pendingHighlightRunId: string | null = null;
 
   let runs: FlowRun[] = [];
   let loading = true;
   let loadError: string | null = null;
-  let showRunDialog = false;
   let selectedRunId: string | null = null;
   let lastLoadedFlowId: string | null = null;
   let isInitialLoad = true;
@@ -39,6 +39,11 @@
     try {
       const result = await intric.flows.runs.list({ flowId: flow.id });
       runs = (result.items ?? result) as FlowRun[];
+      latestRunPayload = runs.length > 0 ? (runs[0].input_payload_json ?? null) : null;
+      if (pendingHighlightRunId && runs.some(r => r.id === pendingHighlightRunId)) {
+        selectedRunId = pendingHighlightRunId;
+        pendingHighlightRunId = null;
+      }
       isInitialLoad = false;
     } catch (e) {
       console.error("Error loading flow runs", e);
@@ -174,11 +179,6 @@
   <div class="flex items-center justify-between">
     <h2 class="text-lg font-semibold">{m.flow_history()}</h2>
     <div class="flex items-center gap-2">
-      {#if flow.published_version != null}
-        <Button variant="primary" on:click={() => (showRunDialog = true)}>
-          {m.flow_run_trigger()}
-        </Button>
-      {/if}
     </div>
   </div>
 
@@ -353,13 +353,6 @@
   {/if}
 </div>
 
-<FlowRunDialog
-  bind:open={showRunDialog}
-  {flow}
-  {intric}
-  lastInputPayload={runs.length > 0 ? (runs[0].input_payload_json ?? null) : null}
-  on:runCreated={loadRuns}
-/>
 
 <Dialog.Root alert bind:isOpen={showCancelConfirm}>
   <Dialog.Content width="small">

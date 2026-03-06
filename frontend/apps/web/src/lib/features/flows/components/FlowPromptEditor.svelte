@@ -24,6 +24,7 @@
       if (!isLocalEcho) {
         currentEditorValue = value;
         lastCommittedValue = value;
+        tick().then(() => autoResize());
       }
     }
   }
@@ -53,6 +54,16 @@
   let autocompleteOpen = false;
   let autocompleteQuery = "";
   let selectedSuggestionIndex = 0;
+  let activeTrigger: "braces" | "at" | null = null;
+  let autocompleteAnchorIndex: number = -1;
+  let markerEl: HTMLSpanElement | null = null;
+
+  function resetAutocomplete() {
+    autocompleteOpen = false;
+    autocompleteQuery = "";
+    activeTrigger = null;
+    autocompleteAnchorIndex = -1;
+  }
 
   // Build classification context
   $: classificationContext = buildContext(steps, formSchema, transcriptionEnabled, currentStepOrder);
@@ -80,6 +91,52 @@
 
   // Parse segments for mirror rendering
   $: segments = parsePromptSegments(currentEditorValue, classificationContext);
+
+  // Build mirror segments with an optional marker at the autocomplete anchor position.
+  // The marker is a zero-width span used for accurate dropdown positioning.
+  type MirrorSegment = { type: "text" | "variable" | "marker"; value: string; category?: VariableCategory };
+  $: mirrorSegments = buildMirrorSegments(segments, autocompleteAnchorIndex, autocompleteOpen);
+
+  function toMirror(seg: (typeof segments)[number]): MirrorSegment {
+    return seg.type === "variable"
+      ? { type: "variable", value: seg.value, category: seg.category }
+      : { type: "text", value: seg.value };
+  }
+
+  function buildMirrorSegments(
+    segs: typeof segments,
+    anchorIdx: number,
+    isOpen: boolean,
+  ): MirrorSegment[] {
+    if (!isOpen || anchorIdx < 0) return segs.map(toMirror);
+    const result: MirrorSegment[] = [];
+    let charPos = 0;
+    let markerInserted = false;
+    for (const seg of segs) {
+      const segLen = seg.value.length;
+      if (!markerInserted && charPos + segLen > anchorIdx) {
+        const offset = anchorIdx - charPos;
+        if (seg.type === "text") {
+          if (offset > 0) result.push({ type: "text", value: seg.value.slice(0, offset) });
+          result.push({ type: "marker", value: "" });
+          if (offset < segLen) result.push({ type: "text", value: seg.value.slice(offset) });
+        } else {
+          result.push({ type: "marker", value: "" });
+          result.push(toMirror(seg));
+        }
+        markerInserted = true;
+      } else if (!markerInserted && charPos + segLen === anchorIdx) {
+        result.push(toMirror(seg));
+        result.push({ type: "marker", value: "" });
+        markerInserted = true;
+      } else {
+        result.push(toMirror(seg));
+      }
+      charPos += segLen;
+    }
+    if (!markerInserted) result.push({ type: "marker", value: "" });
+    return result;
+  }
 
   // Available variables for chip bar and autocomplete
   $: availableVariables = buildAvailableVariables(classificationContext, steps, isAdvancedMode);
@@ -162,23 +219,6 @@
     }
   }
 
-  // Char width measurement for autocomplete X positioning
-  let charWidthCache = 0;
-  function getCharWidth(): number {
-    if (charWidthCache > 0) return charWidthCache;
-    if (!textareaEl) return 8;
-    const span = document.createElement("span");
-    const computed = getComputedStyle(textareaEl);
-    span.style.font = computed.font;
-    span.style.position = "absolute";
-    span.style.visibility = "hidden";
-    span.textContent = "M";
-    document.body.appendChild(span);
-    charWidthCache = span.getBoundingClientRect().width;
-    document.body.removeChild(span);
-    return charWidthCache || 8;
-  }
-
   // Auto-resize textarea to fit content
   function autoResize() {
     if (!textareaEl) return;
@@ -186,8 +226,11 @@
     textareaEl.style.height = textareaEl.scrollHeight + "px";
   }
 
+  let lastInputType = "";
+
   function handleInput(e: Event) {
     const target = e.target as HTMLTextAreaElement;
+    lastInputType = (e as InputEvent).inputType ?? "";
     currentEditorValue = target.value;
     dispatch("change", target.value);
     updateAutocompleteState();
@@ -203,22 +246,52 @@
     return openIndex;
   }
 
+  function findAtTriggerStart(text: string, cursor: number): number | null {
+    // Don't trigger inside {{...}} tokens
+    if (findOpenTokenStart(text, cursor) !== null) return null;
+    const beforeCursor = text.slice(0, cursor);
+    const atIndex = beforeCursor.lastIndexOf("@");
+    if (atIndex < 0) return null;
+    // Word boundary: @ must be at start or preceded by whitespace / opening bracket
+    if (atIndex > 0 && !/[\s([{]/.test(beforeCursor[atIndex - 1])) return null;
+    // Space in query = user moved on, dismiss
+    if (beforeCursor.slice(atIndex + 1).includes(" ")) return null;
+    return atIndex;
+  }
+
   function updateAutocompleteState() {
-    if (!textareaEl) {
-      autocompleteOpen = false;
-      autocompleteQuery = "";
-      return;
-    }
+    if (!textareaEl) { resetAutocomplete(); return; }
+    if (lastInputType.startsWith("delete")) { resetAutocomplete(); return; }
+
     const cursor = textareaEl.selectionStart ?? currentEditorValue.length;
+
+    // Priority 1: {{ trigger (always checked, positional)
     const openIndex = findOpenTokenStart(currentEditorValue, cursor);
-    if (openIndex === null) {
-      autocompleteOpen = false;
-      autocompleteQuery = "";
+    if (openIndex !== null) {
+      activeTrigger = "braces";
+      autocompleteAnchorIndex = openIndex;
+      autocompleteOpen = true;
+      autocompleteQuery = currentEditorValue.slice(openIndex + 2, cursor).trimStart();
+      selectedSuggestionIndex = 0;
+      tick().then(measureAutocompletePosition);
       return;
     }
-    autocompleteOpen = true;
-    autocompleteQuery = currentEditorValue.slice(openIndex + 2, cursor).trimStart();
-    selectedSuggestionIndex = 0;
+
+    // Priority 2: @ trigger (only during active typing)
+    if (lastInputType === "insertText" || activeTrigger === "at") {
+      const atIndex = findAtTriggerStart(currentEditorValue, cursor);
+      if (atIndex !== null) {
+        activeTrigger = "at";
+        autocompleteAnchorIndex = atIndex;
+        autocompleteOpen = true;
+        autocompleteQuery = currentEditorValue.slice(atIndex + 1, cursor);
+        selectedSuggestionIndex = 0;
+        tick().then(measureAutocompletePosition);
+        return;
+      }
+    }
+
+    resetAutocomplete();
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -241,8 +314,7 @@
         void applySuggestion(filteredSuggestions[selectedSuggestionIndex]);
       }
     } else if (e.key === "Escape") {
-      autocompleteOpen = false;
-      autocompleteQuery = "";
+      resetAutocomplete();
     }
   }
 
@@ -251,16 +323,22 @@
     if (!textareaEl) return;
 
     const cursor = textareaEl.selectionStart ?? currentEditorValue.length;
-    const openIndex = findOpenTokenStart(currentEditorValue, cursor);
+    let replaceFrom: number | null = null;
 
-    if (openIndex !== null) {
-      const nextText = currentEditorValue.slice(0, openIndex) + token + currentEditorValue.slice(cursor);
+    if (activeTrigger === "braces") {
+      replaceFrom = findOpenTokenStart(currentEditorValue, cursor);
+    } else if (activeTrigger === "at") {
+      replaceFrom = findAtTriggerStart(currentEditorValue, cursor);
+    }
+
+    if (replaceFrom !== null) {
+      const nextText = currentEditorValue.slice(0, replaceFrom) + token + currentEditorValue.slice(cursor);
       currentEditorValue = nextText;
       dispatch("change", nextText);
       commitNow(nextText);
       await tick();
       if (textareaEl) {
-        const nextCursor = openIndex + token.length;
+        const nextCursor = replaceFrom + token.length;
         textareaEl.focus();
         textareaEl.setSelectionRange(nextCursor, nextCursor);
       }
@@ -268,8 +346,7 @@
       void insertAtCursor(suggestion.token);
     }
 
-    autocompleteOpen = false;
-    autocompleteQuery = "";
+    resetAutocomplete();
     autoResize();
   }
 
@@ -296,32 +373,27 @@
     }
   }
 
-  // Autocomplete position (both X and Y)
-  $: autocompletePosition = (() => {
-    if (!textareaEl || !autocompleteOpen) return { top: 0, left: 16 };
-    const cursor = textareaEl.selectionStart ?? 0;
-    const textBeforeCursor = currentEditorValue.slice(0, cursor);
-    const lineCount = (textBeforeCursor.match(/\n/g) ?? []).length;
+  // Autocomplete position — read from marker span in mirror div
+  let autocompletePosition = { top: 0, left: 16 };
 
-    const computed = getComputedStyle(textareaEl);
-    const lineHeight = parseFloat(computed.lineHeight) || 24;
-    const paddingTop = parseFloat(computed.paddingTop) || 12;
+  function measureAutocompletePosition() {
+    if (!mirrorEl || !textareaEl || !autocompleteOpen || !markerEl) {
+      autocompletePosition = { top: 0, left: 16 };
+      return;
+    }
+    const mirrorRect = mirrorEl.getBoundingClientRect();
+    const markerRect = markerEl.getBoundingClientRect();
+    const scrollTop = textareaEl.scrollTop;
 
-    // Y: account for scroll position
-    const rawTop = paddingTop + (lineCount + 1) * lineHeight;
-    const top = Math.min(rawTop - textareaEl.scrollTop, textareaEl.clientHeight);
+    const rawTop = markerRect.bottom - mirrorRect.top - scrollTop;
+    const top = Math.min(rawTop, textareaEl.clientHeight);
 
-    // X: characters on current line × char width
-    const lastNewline = textBeforeCursor.lastIndexOf("\n");
-    const charsOnLine = lastNewline >= 0 ? cursor - lastNewline - 1 : cursor;
-    const charWidth = getCharWidth();
-    const paddingLeft = parseFloat(computed.paddingLeft) || 16;
-    const rawLeft = paddingLeft + charsOnLine * charWidth;
+    const rawLeft = markerRect.left - mirrorRect.left;
     const maxLeft = textareaEl.clientWidth - 288; // 288px = w-72 dropdown width
     const left = Math.max(8, Math.min(rawLeft, maxLeft > 8 ? maxLeft : 8));
 
-    return { top, left };
-  })();
+    autocompletePosition = { top, left };
+  }
 
   function commitIfDirty(val: string) {
     if (val === lastCommittedValue) return;
@@ -365,8 +437,8 @@
       class="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-4 py-3 font-mono text-sm leading-relaxed"
       bind:this={mirrorEl}
     >
-      {#each segments as seg, index (`${seg.type}:${seg.value}:${index}`)}
-        {#if seg.type === "text"}<span class="text-primary">{seg.value}</span>{:else}<span class="{getChipClasses(seg.category)} inline">{seg.value}</span>{/if}
+      {#each mirrorSegments as seg, index (`${seg.type}:${seg.value}:${index}`)}
+        {#if seg.type === "marker"}<span bind:this={markerEl} aria-hidden="true" class="inline" style="width:0;overflow:hidden">&#8203;</span>{:else if seg.type === "text"}<span class="text-primary">{seg.value}</span>{:else}<span class="{getChipClasses(seg.category)} inline !px-0 !py-0 !text-sm">{seg.value}</span>{/if}
       {/each}
       <span>&nbsp;</span>
     </div>
@@ -379,10 +451,16 @@
       on:input={handleInput}
       on:keydown={handleKeydown}
       on:scroll={syncScroll}
-      on:click={updateAutocompleteState}
-      on:keyup={updateAutocompleteState}
+      on:click={() => { lastInputType = ""; updateAutocompleteState(); }}
+      on:keyup={(e) => {
+        // Only recheck on cursor movement keys (character keys already handled by on:input)
+        if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
+          lastInputType = "";
+          updateAutocompleteState();
+        }
+      }}
       on:blur={() => commitIfDirty(currentEditorValue)}
-      {value}
+      value={currentEditorValue}
       {disabled}
       {placeholder}
     ></textarea>

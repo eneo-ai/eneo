@@ -27,6 +27,8 @@
   let publishLoading = false;
   let showRunDialog = false;
   let runsReloadTrigger = 0;
+  let latestHistoryPayload: Record<string, unknown> | null = null;
+  let pendingRunHighlight: string | null = null;
   let hasStepJsonValidationErrors = false;
   let stepJsonValidationFields: string[] = [];
   type BuilderStageId = 1 | 2 | 3 | 4 | 5;
@@ -143,7 +145,19 @@
   $: checklistHasNoErrors = $validationErrors.size === 0 && !hasStepJsonValidationErrors;
   $: isFlowConfigured = checklistHasName && checklistHasSteps;
 
-  function setBuilderStage(stage: BuilderStageId) {
+  let stageNavigating = false;
+
+  async function navigateToStage(stage: BuilderStageId) {
+    if (stage === builderStage || stageNavigating) return;
+    stageNavigating = true;
+    try {
+      await flowEditor.flushAssistantSaves();
+    } catch (e) {
+      const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
+      toast.error(msg);
+    } finally {
+      stageNavigating = false;
+    }
     builderStage = stage;
   }
 
@@ -162,11 +176,11 @@
   }
 
   function goToPreviousStage() {
-    if (builderStage > 1) setBuilderStage((builderStage - 1) as BuilderStageId);
+    if (builderStage > 1) void navigateToStage((builderStage - 1) as BuilderStageId);
   }
 
   function goToNextStage() {
-    if (builderStage < 5) setBuilderStage((builderStage + 1) as BuilderStageId);
+    if (builderStage < 5) void navigateToStage((builderStage + 1) as BuilderStageId);
   }
 
   function isStageCompleted(stageId: BuilderStageId): boolean {
@@ -308,7 +322,7 @@
                   class:text-primary={isActive}
                   class:font-semibold={isActive}
                   aria-current={isActive ? "step" : undefined}
-                  on:click={() => setBuilderStage(stage.id)}
+                  on:click={() => void navigateToStage(stage.id)}
                 >
                   <!-- Number circle -->
                   {#if isCompleted}
@@ -346,11 +360,11 @@
             {/each}
           </ol>
           <div class="flex shrink-0 items-center gap-2 border-l border-default pl-3 md:gap-2.5 md:pl-5">
-            <Button variant="simple" size="default" disabled={!previousStage} on:click={goToPreviousStage}>
+            <Button variant="simple" size="default" disabled={!previousStage || stageNavigating} on:click={goToPreviousStage}>
               &larr; {m.flow_stage_previous()}
             </Button>
             {#if nextStage}
-              <Button variant="primary" size="default" on:click={goToNextStage}>
+              <Button variant="primary" size="default" disabled={stageNavigating} on:click={goToNextStage}>
                 {m.flow_stage_next()} &rarr;
               </Button>
             {:else}
@@ -634,7 +648,7 @@
                   transcriptionModelConfigured={transcriptionModel !== null}
                   transcriptionModelLabel={transcriptionModel?.nickname ?? transcriptionModel?.name ?? null}
                   formSchema={$update.metadata_json?.form_schema as { fields: { name: string; type: string; required?: boolean; options?: string[]; order?: number }[] } | undefined}
-                  on:openTranscriptionSettings={() => setBuilderStage(2)}
+                  on:openTranscriptionSettings={() => void navigateToStage(2)}
                   on:jsonValidationChanged={(e) => {
                     hasStepJsonValidationErrors = e.detail.hasErrors;
                     stepJsonValidationFields = e.detail.fields;
@@ -739,7 +753,9 @@
     </div>
 
     <div id="panel-history" role="tabpanel" class="flex-1 overflow-y-auto" class:hidden={activeTab !== "history"}>
-      <FlowRunsTable flow={$resource} intric={data.intric} visible={activeTab === "history"} reloadTrigger={runsReloadTrigger} />
+      <FlowRunsTable flow={$resource} intric={data.intric} visible={activeTab === "history"} reloadTrigger={runsReloadTrigger}
+        bind:latestRunPayload={latestHistoryPayload}
+        bind:pendingHighlightRunId={pendingRunHighlight} />
     </div>
   </Page.Main>
 </Page.Root>
@@ -748,9 +764,10 @@
   bind:open={showRunDialog}
   flow={$resource}
   intric={data.intric}
-  lastInputPayload={null}
-  on:runCreated={() => {
+  lastInputPayload={latestHistoryPayload}
+  on:runCreated={(e) => {
     activeTab = "history";
+    pendingRunHighlight = e.detail.runId;
     runsReloadTrigger++;
   }}
 />

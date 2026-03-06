@@ -6896,6 +6896,10 @@ export interface components {
       file_max_size_bytes: number;
       /** Audio Max Size Bytes */
       audio_max_size_bytes: number;
+      /** Max Files Per Run */
+      max_files_per_run?: number | null;
+      /** Audio Max Files Per Run */
+      audio_max_files_per_run?: number | null;
     };
     /** FlowInputLimitsUpdate */
     FlowInputLimitsUpdate: {
@@ -6903,6 +6907,10 @@ export interface components {
       file_max_size_bytes?: number | null;
       /** Audio Max Size Bytes */
       audio_max_size_bytes?: number | null;
+      /** Max Files Per Run */
+      max_files_per_run?: number | null;
+      /** Audio Max Files Per Run */
+      audio_max_files_per_run?: number | null;
     };
     /**
      * FlowInputPolicyPublic
