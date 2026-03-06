@@ -59,14 +59,14 @@
 
   $: borderColor = data.runStatus
     ? data.runStatus === "completed"
-      ? "border-green-500"
+      ? "border-positive-default"
       : data.runStatus === "failed"
-        ? "border-red-500"
+        ? "border-negative-default"
         : data.runStatus === "running"
-          ? "border-blue-500"
+          ? "border-accent-default"
           : "border-default"
     : data.isActive
-      ? "border-blue-500"
+      ? "border-accent-default"
       : "border-default";
 </script>
 
@@ -121,7 +121,7 @@
         </span>
       </div>
       {#if data.step.mcp_policy === "restricted"}
-        <div class="flex items-center gap-1 text-amber-600">
+        <div class="flex items-center gap-1 text-warning-stronger">
           {m.flow_step_mcp_policy()}: {m.flow_mcp_policy_restricted()}
         </div>
       {/if}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { BaseEdge, EdgeLabel, getSmoothStepPath, type Position } from "@xyflow/svelte";
+  import { BaseEdge, EdgeLabel, getBezierPath, type Position } from "@xyflow/svelte";
   import { IconPlus } from "@intric/icons/plus";
   import { m } from "$lib/paraglide/messages";
 
@@ -37,29 +37,28 @@
       }
     | undefined = undefined;
 
-  $: [edgePath, labelX, labelY] = getSmoothStepPath({
+  $: [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
     targetX,
     targetY,
     sourcePosition,
-    targetPosition,
-    borderRadius: 8
+    targetPosition
   });
   $: isPowerUser = data?.mode === "power_user";
   $: isEscalation = Boolean(data?.classificationEscalation);
   $: isViolation = Boolean(data?.classificationViolation);
   $: labelOffsetY = data?.labelOffsetY ?? 0;
   $: edgeColor = isViolation
-    ? "var(--color-error, #dc2626)"
+    ? "var(--color-negative-default)"
     : isEscalation
-      ? "var(--color-warning, #d97706)"
+      ? "var(--color-warning-default)"
       : undefined;
   $: edgeKind = data?.edgeKind ?? "previous_step";
+  $: isDirectEdge = edgeKind !== "all_previous_steps";
   $: edgeStyle = [
     edgeColor ? `stroke: ${edgeColor}` : null,
-    edgeKind === "all_previous_steps" ? "stroke-dasharray: 4 4; opacity: 0.6" : null,
-    data?.animate ? "stroke-dasharray: 6 6; animation: flow-edge-dash 1.1s linear infinite" : null
+    !isDirectEdge ? "stroke-dasharray: 4 4; opacity: 0.6" : null
   ]
     .filter(Boolean)
     .join(";");
@@ -96,22 +95,30 @@
 
 <BaseEdge {id} path={edgePath} {markerStart} {markerEnd} style={edgeStyle || undefined} />
 
+{#if isDirectEdge}
+  <circle r="3" class="flow-dot">
+    <animateMotion dur="2s" repeatCount="indefinite" path={edgePath} />
+  </circle>
+{/if}
+
 {#if isPowerUser}
+  {#if isEscalation || isViolation}
+    <EdgeLabel x={labelX} y={labelY + labelOffsetY - 14}>
+      <span
+        class="edge-actions text-[11px]"
+        title={isViolation
+          ? m.flow_graph_classification_violation()
+          : m.flow_graph_classification_escalation()}
+      >
+        {#if isViolation}⛔{:else}🔒{/if}
+      </span>
+    </EdgeLabel>
+  {/if}
+
   <EdgeLabel x={labelX} y={labelY + labelOffsetY}>
     <div
-      class="edge-actions group nodrag nopan bg-primary/70 text-secondary flex items-center gap-1 rounded-full px-1.5 py-0.5 backdrop-blur-sm"
+      class="edge-label-actions nodrag nopan text-secondary flex items-center gap-1 rounded-full px-1.5 py-0.5"
     >
-      {#if isEscalation || isViolation}
-        <span
-          class="text-[11px]"
-          title={isViolation
-            ? m.flow_graph_classification_violation()
-            : m.flow_graph_classification_escalation()}
-        >
-          {#if isViolation}⛔{:else}🔒{/if}
-        </span>
-      {/if}
-
       {#if data?.dataType && getDataTypeLabel(data.dataType)}
         <button
           class="rounded px-1.5 py-0.5 text-[10px] font-medium hover:bg-black/5 dark:hover:bg-white/10"
@@ -127,7 +134,7 @@
 
       {#if !data?.readOnly && data?.allowInsert !== false}
         <button
-          class="rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/10"
+          class="rounded p-0.5 hover:bg-black/5 dark:hover:bg-white/10"
           onclick={(event) => {
             event.stopPropagation();
             insertStep();
@@ -146,13 +153,34 @@
     transform: translate(-50%, -50%);
   }
 
-  @keyframes flow-edge-dash {
-    to {
-      stroke-dashoffset: -12;
-    }
+  :global(.edge-label-actions) {
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 150ms ease, visibility 150ms ease;
+    pointer-events: none;
+  }
+
+  :global(.svelte-flow__edge:hover) :global(.edge-label-actions) {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+    background: var(--background-color-primary);
+    backdrop-filter: blur(4px);
+  }
+
+  :global(.flow-dot) {
+    fill: #b1b1b7;
+    opacity: 0.8;
+  }
+
+  :global(.dark .flow-dot) {
+    fill: #6b6b73;
   }
 
   @media (prefers-reduced-motion: reduce) {
+    :global(.flow-dot) {
+      display: none;
+    }
     :global(.edge-actions *) {
       animation: none !important;
       transition: none !important;

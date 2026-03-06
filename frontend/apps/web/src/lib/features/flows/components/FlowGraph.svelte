@@ -7,6 +7,7 @@
     MiniMap,
     MarkerType,
     Panel,
+    Position,
     type Node,
     type Edge,
     type NodeEventWithPointer
@@ -20,6 +21,7 @@
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
   import { getEdgePayloadKind } from "$lib/features/flows/flowStepPresentation";
+  import { IconDownload } from "@intric/icons/download";
   import { onMount, tick } from "svelte";
   import { m } from "$lib/paraglide/messages";
 
@@ -227,6 +229,7 @@
       {
         id: "input",
         type: "input",
+        sourcePosition: Position.Right,
         position: { x: 0, y: 0 },
         data: { label: m.flow_graph_node_input(), nodeType: "input", mode: userMode }
       }
@@ -238,6 +241,8 @@
       resultNodes.push({
         id,
         type: "llm",
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
         position: { x: 0, y: 0 },
         data: {
           label: step.user_description ?? `Step ${step.step_order}`,
@@ -256,6 +261,7 @@
     resultNodes.push({
       id: "output",
       type: "output",
+      targetPosition: Position.Left,
       position: { x: 0, y: 0 },
       data: { label: m.flow_graph_node_output(), nodeType: "output", mode: userMode }
     });
@@ -404,13 +410,12 @@
       const payload = buildPayloadPreview(sourceStep, targetStep, sourceLevel, targetLevel);
       const allowInsert = edge.kind !== "all_previous_steps" && edge.target !== "output";
 
-      const markerColor = isViolation ? "#dc2626" : isEscalation ? "#d97706" : "#9ca3af";
+      const markerColor = isViolation ? "#dc2626" : isEscalation ? "#d97706" : undefined;
       resultEdges.push({
         id: `e-${edge.source}-${edge.target}-${edge.kind}-${laneIndex}`,
         type: "interactive",
         source: edge.source,
         target: edge.target,
-        label: isPowerUser ? payloadKind : undefined,
         markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12, color: markerColor },
         data: {
           mode: userMode,
@@ -439,6 +444,45 @@
     return { nodes: resultNodes, edges: resultEdges };
   }
 
+  let isExporting = $state(false);
+
+  async function exportPng() {
+    isExporting = true;
+    try {
+      const { toPng } = await import("html-to-image");
+      const el = document.querySelector("#flow-graph-container .svelte-flow") as HTMLElement | null;
+      if (!el) return;
+      doFitView = true;
+      await tick();
+      await new Promise((r) => requestAnimationFrame(r));
+      const dataUrl = await toPng(el, {
+        cacheBust: true,
+        pixelRatio: 2,
+        filter: (node: HTMLElement) => {
+          const cls = node.classList;
+          if (!cls) return true;
+          return (
+            !cls.contains("svelte-flow__panel") &&
+            !cls.contains("svelte-flow__controls") &&
+            !cls.contains("svelte-flow__minimap")
+          );
+        }
+      });
+      const link = document.createElement("a");
+      link.download = `${flow.name ?? "flow"}-graph.png`;
+      link.href = dataUrl;
+      link.click();
+    } finally {
+      isExporting = false;
+    }
+  }
+
+  function minimapNodeColor(node: Node): string {
+    if (node.type === "input") return "var(--color-accent-default)";
+    if (node.type === "output") return "var(--color-positive-default)";
+    return "var(--background-color-secondary)";
+  }
+
   const handleNodeClick: NodeEventWithPointer<MouseEvent | TouchEvent, Node> = ({ node }) => {
     if (node?.type === "llm" && node.data?.step) {
       onnodeclick?.(node.id);
@@ -456,7 +500,7 @@
     {nodeTypes}
     {edgeTypes}
     fitView={doFitView}
-    fitViewOptions={{ padding: 0.15 }}
+    fitViewOptions={{ padding: 0.3 }}
     proOptions={{ hideAttribution: true }}
     nodesDraggable={false}
     nodesConnectable={false}
@@ -467,8 +511,19 @@
   >
     {#if $mode === "power_user"}
       <Background variant={BackgroundVariant.Dots} />
-      <MiniMap width={140} height={90} />
+      <MiniMap width={140} height={90} nodeColor={minimapNodeColor} />
       <Controls position="top-left" />
+      <Panel position="top-right">
+        <button
+          class="bg-primary/90 text-secondary hover:bg-hover-dimmer flex items-center gap-1.5 rounded px-2 py-1 text-[10px] backdrop-blur-sm transition-colors"
+          onclick={exportPng}
+          disabled={isExporting}
+          aria-label={m.flow_graph_download_png()}
+        >
+          <IconDownload class="size-3" />
+          {m.flow_graph_download_png()}
+        </button>
+      </Panel>
       <Panel position="bottom-left">
         <div
           class="bg-primary/90 text-secondary flex items-center gap-3 rounded px-2.5 py-1.5 text-[10px] backdrop-blur-sm"
@@ -496,6 +551,8 @@
           </span>
         </div>
       </Panel>
+    {:else}
+      <Background variant={BackgroundVariant.Dots} size={0.5} gap={30} />
     {/if}
   </SvelteFlow>
 
@@ -530,20 +587,24 @@
 
 <style>
   .flow-graph :global(.svelte-flow) {
-    --xy-node-background-color-default: var(--color-bg-primary, #fff);
-    --xy-node-border-default: 1px solid var(--color-border-default, #e5e7eb);
-    --xy-node-boxshadow-hover-default: 0 2px 8px rgba(0, 0, 0, 0.08);
-    --xy-node-boxshadow-selected-default: 0 0 0 2px var(--color-accent, #3b82f6);
-    --xy-edge-stroke-default: var(--color-border-dimmer, #d1d5db);
-    --xy-edge-stroke-width-default: 1.5;
-    --xy-edge-stroke-selected-default: var(--color-accent, #3b82f6);
-    --xy-background-pattern-dot-color-default: var(--color-border-dimmer, #d1d5db);
-    --xy-handle-background-color-default: var(--color-border-dimmer, #d1d5db);
-    --xy-handle-border-color-default: transparent;
-    --xy-minimap-background-color-default: var(--color-bg-secondary, #f9fafb);
-    --xy-controls-button-background-color-default: var(--color-bg-primary, #fff);
-    --xy-controls-button-background-color-hover-default: var(--color-bg-secondary, #f3f4f6);
-    --xy-controls-button-border-color-default: var(--color-border-default, #e5e7eb);
+    --xy-node-background-color-default: var(--background-color-primary);
+    --xy-node-border-default: 1px solid var(--border-color-default);
+    --xy-node-border-radius-default: 8px;
+    --xy-node-boxshadow-default: 0px 3px 4px 0px rgba(0, 0, 0, 0.04),
+      0px 1px 2px 0px rgba(0, 0, 0, 0.08);
+    --xy-node-boxshadow-hover-default: 0 2px 8px rgba(0, 0, 0, 0.12);
+    --xy-node-boxshadow-selected-default: 0 0 0 2px var(--color-accent-default);
+    --xy-edge-label-background-color-default: transparent;
+    --xy-edge-stroke-default: #b1b1b7;
+    --xy-edge-stroke-width-default: 2;
+    --xy-edge-stroke-selected-default: var(--color-accent-default);
+    --xy-background-pattern-dot-color-default: var(--border-color-dimmer);
+    --xy-handle-background-color-default: var(--background-color-primary);
+    --xy-handle-border-color-default: #b1b1b7;
+    --xy-minimap-background-color-default: var(--background-color-secondary);
+    --xy-controls-button-background-color-default: var(--background-color-primary);
+    --xy-controls-button-background-color-hover-default: var(--background-color-secondary);
+    --xy-controls-button-border-color-default: var(--border-color-default);
   }
 
   .flow-graph :global(.svelte-flow__handle) {
@@ -560,5 +621,12 @@
     transition:
       stroke 160ms ease-in-out,
       stroke-width 160ms ease-in-out;
+  }
+
+  :global(.dark) .flow-graph :global(.svelte-flow) {
+    --xy-edge-stroke-default: #6b6b73;
+    --xy-handle-border-color-default: #6b6b73;
+    --xy-node-boxshadow-default: 0px 3px 4px 0px rgba(0, 0, 0, 0.2),
+      0px 1px 2px 0px rgba(0, 0, 0, 0.3);
   }
 </style>
