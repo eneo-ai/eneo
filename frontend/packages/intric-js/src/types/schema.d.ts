@@ -1911,37 +1911,37 @@ export interface paths {
   };
   "/api/v1/flows/": {
     /** List Flows */
-    get: operations["list_flows_api_v1_flows__get"];
+    get: operations["list_flows"];
     /** Create Flow */
-    post: operations["create_flow_api_v1_flows__post"];
+    post: operations["create_flow"];
   };
   "/api/v1/flows/{id}/": {
     /** Get Flow */
-    get: operations["get_flow_api_v1_flows__id___get"];
+    get: operations["get_flow"];
     /** Delete Flow */
-    delete: operations["delete_flow_api_v1_flows__id___delete"];
+    delete: operations["delete_flow"];
     /** Update Flow */
-    patch: operations["update_flow_api_v1_flows__id___patch"];
+    patch: operations["update_flow"];
   };
   "/api/v1/flows/{id}/publish/": {
     /** Publish Flow */
-    post: operations["publish_flow_api_v1_flows__id__publish__post"];
+    post: operations["publish_flow"];
   };
   "/api/v1/flows/{id}/unpublish/": {
     /** Unpublish Flow */
-    post: operations["unpublish_flow_api_v1_flows__id__unpublish__post"];
+    post: operations["unpublish_flow"];
   };
   "/api/v1/flows/{id}/assistants/": {
     /** Create Flow Assistant */
-    post: operations["create_flow_assistant_api_v1_flows__id__assistants__post"];
+    post: operations["create_flow_assistant"];
   };
   "/api/v1/flows/{id}/assistants/{assistant_id}/": {
     /** Get Flow Assistant */
-    get: operations["get_flow_assistant_api_v1_flows__id__assistants__assistant_id___get"];
+    get: operations["get_flow_assistant"];
     /** Delete Flow Assistant */
-    delete: operations["delete_flow_assistant_api_v1_flows__id__assistants__assistant_id___delete"];
+    delete: operations["delete_flow_assistant"];
     /** Update Flow Assistant */
-    patch: operations["update_flow_assistant_api_v1_flows__id__assistants__assistant_id___patch"];
+    patch: operations["update_flow_assistant"];
   };
   "/api/v1/flows/{id}/runs/": {
     /**
@@ -1950,7 +1950,7 @@ export interface paths {
      *
      * This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
      */
-    get: operations["list_flow_runs_alias_api_v1_flows__id__runs__get"];
+    get: operations["list_flow_runs_alias"];
     /**
      * Create flow run
      * @description Create a new run for a published flow.
@@ -1960,7 +1960,7 @@ export interface paths {
      * 2. Submit the returned `file_ids` in this run request
      * 3. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs
      */
-    post: operations["create_flow_run_api_v1_flows__id__runs__post"];
+    post: operations["create_flow_run"];
   };
   "/api/v1/flows/{id}/input-policy/": {
     /**
@@ -1974,7 +1974,7 @@ export interface paths {
      * - max files per run (when constrained)
      * - recommended run payload shape for API consumers
      */
-    get: operations["get_flow_input_policy_api_v1_flows__id__input_policy__get"];
+    get: operations["get_flow_input_policy"];
   };
   "/api/v1/flows/{id}/files/": {
     /**
@@ -1988,7 +1988,7 @@ export interface paths {
      * - effective tenant flow size limits
      * - multipart form field name: `upload_file`
      */
-    post: operations["upload_flow_file_api_v1_flows__id__files__post"];
+    post: operations["upload_flow_file"];
   };
   "/api/v1/flows/{id}/runs/{run_id}/": {
     /**
@@ -1997,7 +1997,7 @@ export interface paths {
      *
      * Use this endpoint for run status and top-level output payload when building consumer apps.
      */
-    get: operations["get_flow_run_alias_api_v1_flows__id__runs__run_id___get"];
+    get: operations["get_flow_run_alias"];
   };
   "/api/v1/flows/{id}/runs/{run_id}/cancel/": {
     /**
@@ -2006,7 +2006,7 @@ export interface paths {
      *
      * This is the canonical run control endpoint for flow consumers.
      */
-    post: operations["cancel_flow_run_alias_api_v1_flows__id__runs__run_id__cancel__post"];
+    post: operations["cancel_flow_run_alias"];
   };
   "/api/v1/flows/{id}/runs/{run_id}/redispatch/": {
     /**
@@ -2015,7 +2015,7 @@ export interface paths {
      *
      * Returns `redispatched_count` indicating whether dispatch was re-triggered.
      */
-    post: operations["redispatch_flow_run_alias_api_v1_flows__id__runs__run_id__redispatch__post"];
+    post: operations["redispatch_flow_run_alias"];
   };
   "/api/v1/flows/{id}/runs/{run_id}/evidence/": {
     /**
@@ -2024,7 +2024,7 @@ export interface paths {
      *
      * Prefer `.../steps/` for consumer UIs unless debug-export fields are required.
      */
-    get: operations["get_flow_run_evidence_alias_api_v1_flows__id__runs__run_id__evidence__get"];
+    get: operations["get_flow_run_evidence_alias"];
   };
   "/api/v1/flows/{id}/runs/{run_id}/steps/": {
     /**
@@ -2034,11 +2034,17 @@ export interface paths {
      * Designed for consumer UIs that need to inspect intermediate outputs, diagnostics, and token usage
      * without relying on debug-export internals.
      */
-    get: operations["list_flow_run_steps_api_v1_flows__id__runs__run_id__steps__get"];
+    get: operations["list_flow_run_steps"];
   };
   "/api/v1/flows/{id}/graph/": {
-    /** Get Flow Graph */
-    get: operations["get_flow_graph_api_v1_flows__id__graph__get"];
+    /**
+     * Get flow graph
+     * @description Return the graph representation for a flow definition or one version-pinned run snapshot.
+     *
+     * When `run_id` is provided, the graph is built from the run's published version snapshot and
+     * annotated with run execution results. Otherwise the current live flow definition is used.
+     */
+    get: operations["get_flow_graph"];
   };
   "/api/v1/prompts/{id}/": {
     /** Get Prompt */
@@ -4966,8 +4972,8 @@ export interface components {
        */
       file: string;
     };
-    /** Body_upload_flow_file_api_v1_flows__id__files__post */
-    Body_upload_flow_file_api_v1_flows__id__files__post: {
+    /** Body_upload_flow_file */
+    Body_upload_flow_file: {
       /**
        * Upload File
        * Format: binary
@@ -7411,35 +7417,14 @@ export interface components {
       step_order: number;
       /** User Description */
       user_description?: string | null;
-      /**
-       * Input Source
-       * @enum {string}
-       */
-      input_source:
-        | "flow_input"
-        | "previous_step"
-        | "all_previous_steps"
-        | "http_get"
-        | "http_post";
-      /**
-       * Input Type
-       * @enum {string}
-       */
-      input_type: "text" | "json" | "image" | "audio" | "document" | "file" | "any";
+      input_source: components["schemas"]["FlowInputSource"];
+      input_type: components["schemas"]["FlowInputType"];
       /** Input Contract */
       input_contract?: {
         [key: string]: unknown;
       } | null;
-      /**
-       * Output Mode
-       * @enum {string}
-       */
-      output_mode: "pass_through" | "http_post" | "transcribe_only";
-      /**
-       * Output Type
-       * @enum {string}
-       */
-      output_type: "text" | "json" | "pdf" | "docx";
+      output_mode: components["schemas"]["FlowOutputMode"];
+      output_type: components["schemas"]["FlowOutputType"];
       /** Output Contract */
       output_contract?: {
         [key: string]: unknown;
@@ -7450,11 +7435,7 @@ export interface components {
       } | null;
       /** Output Classification Override */
       output_classification_override?: number | null;
-      /**
-       * Mcp Policy
-       * @enum {string}
-       */
-      mcp_policy: "inherit" | "restricted";
+      mcp_policy: components["schemas"]["FlowMcpPolicy"];
       /** Input Config */
       input_config?: {
         [key: string]: unknown;
@@ -24231,7 +24212,7 @@ export interface operations {
     };
   };
   /** List Flows */
-  list_flows_api_v1_flows__get: {
+  list_flows: {
     parameters: {
       query: {
         space_id: string;
@@ -24255,7 +24236,7 @@ export interface operations {
     };
   };
   /** Create Flow */
-  create_flow_api_v1_flows__post: {
+  create_flow: {
     requestBody: {
       content: {
         "application/json": components["schemas"]["FlowCreateRequest"];
@@ -24277,7 +24258,7 @@ export interface operations {
     };
   };
   /** Get Flow */
-  get_flow_api_v1_flows__id___get: {
+  get_flow: {
     parameters: {
       path: {
         id: string;
@@ -24299,7 +24280,7 @@ export interface operations {
     };
   };
   /** Delete Flow */
-  delete_flow_api_v1_flows__id___delete: {
+  delete_flow: {
     parameters: {
       path: {
         id: string;
@@ -24319,7 +24300,7 @@ export interface operations {
     };
   };
   /** Update Flow */
-  update_flow_api_v1_flows__id___patch: {
+  update_flow: {
     parameters: {
       path: {
         id: string;
@@ -24346,7 +24327,7 @@ export interface operations {
     };
   };
   /** Publish Flow */
-  publish_flow_api_v1_flows__id__publish__post: {
+  publish_flow: {
     parameters: {
       path: {
         id: string;
@@ -24368,7 +24349,7 @@ export interface operations {
     };
   };
   /** Unpublish Flow */
-  unpublish_flow_api_v1_flows__id__unpublish__post: {
+  unpublish_flow: {
     parameters: {
       path: {
         id: string;
@@ -24390,7 +24371,7 @@ export interface operations {
     };
   };
   /** Create Flow Assistant */
-  create_flow_assistant_api_v1_flows__id__assistants__post: {
+  create_flow_assistant: {
     parameters: {
       path: {
         id: string;
@@ -24417,7 +24398,7 @@ export interface operations {
     };
   };
   /** Get Flow Assistant */
-  get_flow_assistant_api_v1_flows__id__assistants__assistant_id___get: {
+  get_flow_assistant: {
     parameters: {
       path: {
         id: string;
@@ -24440,7 +24421,7 @@ export interface operations {
     };
   };
   /** Delete Flow Assistant */
-  delete_flow_assistant_api_v1_flows__id__assistants__assistant_id___delete: {
+  delete_flow_assistant: {
     parameters: {
       path: {
         id: string;
@@ -24461,7 +24442,7 @@ export interface operations {
     };
   };
   /** Update Flow Assistant */
-  update_flow_assistant_api_v1_flows__id__assistants__assistant_id___patch: {
+  update_flow_assistant: {
     parameters: {
       path: {
         id: string;
@@ -24494,7 +24475,7 @@ export interface operations {
    *
    * This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
    */
-  list_flow_runs_alias_api_v1_flows__id__runs__get: {
+  list_flow_runs_alias: {
     parameters: {
       query?: {
         limit?: number;
@@ -24540,7 +24521,7 @@ export interface operations {
    * 2. Submit the returned `file_ids` in this run request
    * 3. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs
    */
-  create_flow_run_api_v1_flows__id__runs__post: {
+  create_flow_run: {
     parameters: {
       path: {
         id: string;
@@ -24595,7 +24576,7 @@ export interface operations {
    * - max files per run (when constrained)
    * - recommended run payload shape for API consumers
    */
-  get_flow_input_policy_api_v1_flows__id__input_policy__get: {
+  get_flow_input_policy: {
     parameters: {
       path: {
         id: string;
@@ -24639,7 +24620,7 @@ export interface operations {
    * - effective tenant flow size limits
    * - multipart form field name: `upload_file`
    */
-  upload_flow_file_api_v1_flows__id__files__post: {
+  upload_flow_file: {
     parameters: {
       path: {
         id: string;
@@ -24647,7 +24628,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "multipart/form-data": components["schemas"]["Body_upload_flow_file_api_v1_flows__id__files__post"];
+        "multipart/form-data": components["schemas"]["Body_upload_flow_file"];
       };
     };
     responses: {
@@ -24701,7 +24682,7 @@ export interface operations {
    *
    * Use this endpoint for run status and top-level output payload when building consumer apps.
    */
-  get_flow_run_alias_api_v1_flows__id__runs__run_id___get: {
+  get_flow_run_alias: {
     parameters: {
       path: {
         id: string;
@@ -24741,7 +24722,7 @@ export interface operations {
    *
    * This is the canonical run control endpoint for flow consumers.
    */
-  cancel_flow_run_alias_api_v1_flows__id__runs__run_id__cancel__post: {
+  cancel_flow_run_alias: {
     parameters: {
       path: {
         id: string;
@@ -24781,7 +24762,7 @@ export interface operations {
    *
    * Returns `redispatched_count` indicating whether dispatch was re-triggered.
    */
-  redispatch_flow_run_alias_api_v1_flows__id__runs__run_id__redispatch__post: {
+  redispatch_flow_run_alias: {
     parameters: {
       path: {
         id: string;
@@ -24821,7 +24802,7 @@ export interface operations {
    *
    * Prefer `.../steps/` for consumer UIs unless debug-export fields are required.
    */
-  get_flow_run_evidence_alias_api_v1_flows__id__runs__run_id__evidence__get: {
+  get_flow_run_evidence_alias: {
     parameters: {
       path: {
         id: string;
@@ -24862,7 +24843,7 @@ export interface operations {
    * Designed for consumer UIs that need to inspect intermediate outputs, diagnostics, and token usage
    * without relying on debug-export internals.
    */
-  list_flow_run_steps_api_v1_flows__id__runs__run_id__steps__get: {
+  list_flow_run_steps: {
     parameters: {
       path: {
         id: string;
@@ -24896,8 +24877,14 @@ export interface operations {
       };
     };
   };
-  /** Get Flow Graph */
-  get_flow_graph_api_v1_flows__id__graph__get: {
+  /**
+   * Get flow graph
+   * @description Return the graph representation for a flow definition or one version-pinned run snapshot.
+   *
+   * When `run_id` is provided, the graph is built from the run's published version snapshot and
+   * annotated with run execution results. Otherwise the current live flow definition is used.
+   */
+  get_flow_graph: {
     parameters: {
       query?: {
         run_id?: string | null;
@@ -24911,6 +24898,18 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["GraphResponse"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow or run not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */

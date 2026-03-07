@@ -101,6 +101,15 @@ def test_render_docx_very_long_output():
     assert any("åäö" in paragraph.text for paragraph in doc.paragraphs)
 
 
+def test_render_docx_still_works_when_package_default_template_is_missing():
+    """Renderer should not depend on python-docx package template layout."""
+    with patch("docx.api._default_docx_path", return_value="/tmp/missing-default.docx"):
+        blob, _, _ = render_document("Fallback template test", "docx", step_order=1)
+    doc = Document(io.BytesIO(blob))
+    all_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+    assert "Fallback template test" in all_text
+
+
 # --- Error handling ---
 
 

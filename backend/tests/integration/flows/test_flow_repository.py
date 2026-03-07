@@ -550,6 +550,103 @@ async def test_flow_delete_cascades_owned_flow_managed_assistants(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_flow_delete_keeps_shared_flow_managed_assistant_referenced_by_other_flow(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flow shared assistant guard", [model.id])
+        shared_assistant = await assistant_factory(
+            session,
+            "Shared Flow-owned Assistant",
+            model.id,
+            space_id=space.id,
+        )
+        other_assistant = await assistant_factory(
+            session,
+            "Other Flow Assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        repo = FlowRepository(session=session, factory=FlowFactory())
+        owner_flow = await repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=shared_assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        await session.execute(
+            sa.update(Assistants)
+            .where(Assistants.id == shared_assistant.id)
+            .values(
+                origin="flow_managed",
+                managing_flow_id=owner_flow.id,
+                hidden=True,
+            )
+        )
+
+        referencing_flow = await repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=other_assistant.id,
+            ).model_copy(
+                update={
+                    "name": "Referencing Flow",
+                    "steps": [
+                        FlowStep(
+                            id=None,
+                            flow_id=None,
+                            tenant_id=admin_user.tenant_id,
+                            assistant_id=shared_assistant.id,
+                            step_order=1,
+                            user_description="Reuses shared assistant",
+                            input_source="flow_input",
+                            input_type="text",
+                            input_contract=None,
+                            output_mode="pass_through",
+                            output_type="json",
+                            output_contract={"type": "object"},
+                            input_bindings={"question": "{{flow.input.question}}"},
+                            output_classification_override=None,
+                            mcp_policy="inherit",
+                            input_config=None,
+                            output_config=None,
+                        )
+                    ],
+                }
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+
+        await repo.delete(owner_flow.id, tenant_id=admin_user.tenant_id)
+
+        shared_assistant_row = await session.scalar(
+            sa.select(Assistants).where(Assistants.id == shared_assistant.id)
+        )
+        referencing_steps = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowSteps)
+            .where(FlowSteps.flow_id == referencing_flow.id)
+        )
+
+        assert shared_assistant_row is not None
+        assert shared_assistant_row.managing_flow_id == owner_flow.id
+        assert referencing_steps == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_flow_repository_rejects_duplicate_active_name_in_space(
     db_container,
     completion_model_factory,

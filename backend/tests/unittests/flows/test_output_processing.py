@@ -25,6 +25,21 @@ def test_parse_json_output_valid_array():
     assert result == [1, 2, 3]
 
 
+def test_parse_json_output_accepts_fenced_json_object():
+    result = parse_json_output('```json\n{"key": "val"}\n```')
+    assert result == {"key": "val"}
+
+
+def test_parse_json_output_accepts_wrapped_json_object():
+    result = parse_json_output('Here is the result:\n{"key": "val"}\nTack!')
+    assert result == {"key": "val"}
+
+
+def test_parse_json_output_empty_response_has_clearer_message():
+    with pytest.raises(TypedIOValidationException, match="response was empty"):
+        parse_json_output("   \n\t  ")
+
+
 def test_parse_json_output_invalid_json():
     with pytest.raises(TypedIOValidationException, match="not valid JSON"):
         parse_json_output("not json at all")

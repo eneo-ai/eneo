@@ -66,25 +66,15 @@ class FlowStepCreateRequest(BaseModel):
     assistant_id: UUID
     step_order: int
     user_description: str | None = None
-    input_source: str = Field(
-        json_schema_extra={"enum": [item.value for item in FlowInputSource]}
-    )
-    input_type: str = Field(
-        json_schema_extra={"enum": [item.value for item in FlowInputType]}
-    )
+    input_source: FlowInputSource
+    input_type: FlowInputType
     input_contract: dict[str, Any] | None = None
-    output_mode: str = Field(
-        json_schema_extra={"enum": [item.value for item in FlowOutputMode]}
-    )
-    output_type: str = Field(
-        json_schema_extra={"enum": [item.value for item in FlowOutputType]}
-    )
+    output_mode: FlowOutputMode
+    output_type: FlowOutputType
     output_contract: dict[str, Any] | None = None
     input_bindings: dict[str, Any] | None = None
     output_classification_override: int | None = None
-    mcp_policy: str = Field(
-        json_schema_extra={"enum": [item.value for item in FlowMcpPolicy]}
-    )
+    mcp_policy: FlowMcpPolicy
     input_config: dict[str, Any] | None = None
     output_config: dict[str, Any] | None = None
 

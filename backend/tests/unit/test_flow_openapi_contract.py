@@ -68,6 +68,30 @@ REQUIRED_SCHEMAS = {
     "FlowInputLimitsPublic",
 }
 
+REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
+    ("/api/v1/flows/", "post"): "create_flow",
+    ("/api/v1/flows/", "get"): "list_flows",
+    ("/api/v1/flows/{id}/", "get"): "get_flow",
+    ("/api/v1/flows/{id}/", "patch"): "update_flow",
+    ("/api/v1/flows/{id}/", "delete"): "delete_flow",
+    ("/api/v1/flows/{id}/publish/", "post"): "publish_flow",
+    ("/api/v1/flows/{id}/unpublish/", "post"): "unpublish_flow",
+    ("/api/v1/flows/{id}/assistants/", "post"): "create_flow_assistant",
+    ("/api/v1/flows/{id}/assistants/{assistant_id}/", "get"): "get_flow_assistant",
+    ("/api/v1/flows/{id}/assistants/{assistant_id}/", "patch"): "update_flow_assistant",
+    ("/api/v1/flows/{id}/assistants/{assistant_id}/", "delete"): "delete_flow_assistant",
+    ("/api/v1/flows/{id}/runs/", "post"): "create_flow_run",
+    ("/api/v1/flows/{id}/runs/", "get"): "list_flow_runs_alias",
+    ("/api/v1/flows/{id}/input-policy/", "get"): "get_flow_input_policy",
+    ("/api/v1/flows/{id}/files/", "post"): "upload_flow_file",
+    ("/api/v1/flows/{id}/runs/{run_id}/", "get"): "get_flow_run_alias",
+    ("/api/v1/flows/{id}/runs/{run_id}/cancel/", "post"): "cancel_flow_run_alias",
+    ("/api/v1/flows/{id}/runs/{run_id}/redispatch/", "post"): "redispatch_flow_run_alias",
+    ("/api/v1/flows/{id}/runs/{run_id}/evidence/", "get"): "get_flow_run_evidence_alias",
+    ("/api/v1/flows/{id}/runs/{run_id}/steps/", "get"): "list_flow_run_steps",
+    ("/api/v1/flows/{id}/graph/", "get"): "get_flow_graph",
+}
+
 REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
     (
         "/api/v1/flows/{id}/runs/",
@@ -142,6 +166,13 @@ def test_openapi_flow_consumer_paths_present(openapi_spec: dict) -> None:
         available = {method.lower() for method in paths[path].keys()}
         missing = {method.lower() for method in methods} - available
         assert not missing, f"Missing methods for {path}: {sorted(missing)}"
+
+
+def test_openapi_flow_operation_ids_are_pinned(openapi_spec: dict) -> None:
+    paths = openapi_spec.get("paths", {})
+    for (path, method), expected_operation_id in REQUIRED_OPERATION_IDS.items():
+        operation = paths[path][method]
+        assert operation.get("operationId") == expected_operation_id
 
 
 def test_openapi_legacy_flow_run_paths_absent(openapi_spec: dict) -> None:

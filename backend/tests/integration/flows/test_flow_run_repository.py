@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import asyncio
 from uuid import UUID, uuid4
 
 import pytest
@@ -8,6 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from intric.database.tables.flow_tables import FlowRuns, FlowStepAttempts, FlowStepResults
+from intric.database.database import sessionmanager
 from intric.flows import Flow, FlowFactory, FlowRepository, FlowStep, FlowVersionRepository
 from intric.flows.flow import FlowRunStatus, FlowStepAttemptStatus, FlowStepResultStatus
 from intric.flows.flow_run_repo import FlowRunRepository
@@ -623,6 +625,95 @@ async def test_claim_step_result_is_single_winner(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_claim_step_result_is_single_winner_under_concurrency(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session, session.begin():
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flows concurrent claim space", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Flow concurrent claim assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        await version_repo.create(
+            flow_id=flow.id,
+            version=1,
+            definition_checksum="checksum-claim-concurrency",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(flow.steps[0].id),
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    }
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "concurrent-claim"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+        run_id = run.id
+        step_id = flow.steps[0].id
+        tenant_id = admin_user.tenant_id
+
+    async def _claim_step() -> UUID | None:
+        async with sessionmanager.session() as session, session.begin():
+            repo = FlowRunRepository(session=session, factory=FlowFactory())
+            claimed = await repo.claim_step_result(
+                run_id=run_id,
+                step_id=step_id,
+                tenant_id=tenant_id,
+            )
+            return claimed.id if claimed is not None else None
+
+    claim_ids = await asyncio.gather(*[_claim_step() for _ in range(6)])
+
+    non_null_claim_ids = [claim_id for claim_id in claim_ids if claim_id is not None]
+    assert len(non_null_claim_ids) == 1
+
+    async with sessionmanager.session() as session, session.begin():
+        row = await session.scalar(
+            sa.select(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == run_id)
+            .where(FlowStepResults.step_id == step_id)
+        )
+        assert row is not None
+        assert row.status == FlowStepResultStatus.RUNNING.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_mark_running_if_claimable_is_single_winner(
     db_container,
     completion_model_factory,
@@ -694,6 +785,90 @@ async def test_mark_running_if_claimable_is_single_winner(
 
         assert first is True
         assert second is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_mark_running_if_claimable_is_single_winner_under_concurrency(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session, session.begin():
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flows concurrent run-claim space", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Flow concurrent run-claim assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        await version_repo.create(
+            flow_id=flow.id,
+            version=1,
+            definition_checksum="checksum-run-claim-concurrency",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(flow.steps[0].id),
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    }
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "concurrent-claim-run"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+        run_id = run.id
+        tenant_id = admin_user.tenant_id
+
+    async def _claim_run() -> bool:
+        async with sessionmanager.session() as session, session.begin():
+            repo = FlowRunRepository(session=session, factory=FlowFactory())
+            return await repo.mark_running_if_claimable(
+                run_id=run_id,
+                tenant_id=tenant_id,
+            )
+
+    claim_results = await asyncio.gather(*[_claim_run() for _ in range(6)])
+
+    assert sum(1 for claimed in claim_results if claimed) == 1
+
+    async with sessionmanager.session() as session, session.begin():
+        row = await session.scalar(
+            sa.select(FlowRuns)
+            .where(FlowRuns.id == run_id)
+        )
+        assert row is not None
+        assert row.status == FlowRunStatus.RUNNING.value
 
 
 @pytest.mark.asyncio
@@ -1024,6 +1199,102 @@ async def test_create_or_get_attempt_started_is_idempotent(
             sa.select(sa.func.count())
             .select_from(FlowStepAttempts)
             .where(FlowStepAttempts.flow_run_id == run.id)
+            .where(FlowStepAttempts.step_id == step_id)
+            .where(FlowStepAttempts.attempt_no == 1)
+        )
+        assert row_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_create_or_get_attempt_started_is_single_row_under_concurrency(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session, session.begin():
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flows concurrent attempt space", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Flow concurrent attempt assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        await version_repo.create(
+            flow_id=flow.id,
+            version=1,
+            definition_checksum="checksum-concurrent-attempt",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(flow.steps[0].id),
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    }
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "concurrent-attempt"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+        run_id = run.id
+        flow_id = flow.id
+        step_id = flow.steps[0].id
+        tenant_id = admin_user.tenant_id
+
+    async def _start_attempt(worker_name: str) -> UUID:
+        async with sessionmanager.session() as session, session.begin():
+            repo = FlowRunRepository(session=session, factory=FlowFactory())
+            attempt = await repo.create_or_get_attempt_started(
+                run_id=run_id,
+                flow_id=flow_id,
+                tenant_id=tenant_id,
+                step_id=step_id,
+                step_order=1,
+                attempt_no=1,
+                celery_task_id=worker_name,
+            )
+            return attempt.id
+
+    attempt_ids = await asyncio.gather(
+        *[_start_attempt(f"task-{index}") for index in range(6)]
+    )
+
+    assert len(set(attempt_ids)) == 1
+
+    async with sessionmanager.session() as session, session.begin():
+        row_count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run_id)
             .where(FlowStepAttempts.step_id == step_id)
             .where(FlowStepAttempts.attempt_no == 1)
         )

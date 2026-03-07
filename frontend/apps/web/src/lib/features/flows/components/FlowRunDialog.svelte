@@ -34,7 +34,15 @@
   );
   $: hasFormFields = formFields.length > 0;
   $: hasRequiredFormFields = formFields.some((field) => field.required);
-  $: missingRequiredFields = formFields.filter((field) => field.required && isFieldMissing(field));
+  $: missingRequiredFields = formFields.filter((field) => {
+    if (!field.required) return false;
+    const value = formValues[getFlowFormFieldRuntimeKey(field.name)];
+    if (field.type === "multiselect") {
+      return !Array.isArray(value) || value.length === 0;
+    }
+    if (value === null || value === undefined) return true;
+    return String(value).trim().length === 0;
+  });
   $: missingRequiredFieldNames = missingRequiredFields
     .map((field) => field.name.trim())
     .filter((name) => name.length > 0);

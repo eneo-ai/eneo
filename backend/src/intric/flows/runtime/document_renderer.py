@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 from intric.main.exceptions import TypedIOValidationException
 
 _DEJAVU_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+_DOCX_TEMPLATE_PATH = Path(__file__).with_name("templates") / "default.docx"
 _MARKDOWN_TABLE_SEPARATOR = re.compile(
     r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$"
 )
@@ -58,7 +60,9 @@ def _render_docx(text: str, *, step_order: int) -> tuple[bytes, str, str]:
 
     from docx import Document
 
-    doc = Document()
+    # Use a repo-owned template so DOCX rendering does not depend on how
+    # python-docx packaged its default template in the active environment.
+    doc = Document(str(_DOCX_TEMPLATE_PATH)) if _DOCX_TEMPLATE_PATH.exists() else Document()
     lines = text.splitlines()
     if not lines:
         doc.add_paragraph("")

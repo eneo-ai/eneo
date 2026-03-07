@@ -24,7 +24,7 @@ FLOW_STEP_INPUT_SOURCE_VALUES = (
     "http_post",
 )
 FLOW_STEP_INPUT_TYPE_VALUES = ("text", "json", "image", "audio", "document", "file", "any")
-FLOW_STEP_OUTPUT_MODE_VALUES = ("pass_through", "http_post")
+FLOW_STEP_OUTPUT_MODE_VALUES = ("pass_through", "http_post", "transcribe_only")
 FLOW_STEP_OUTPUT_TYPE_VALUES = ("text", "json", "pdf", "docx")
 FLOW_STEP_MCP_POLICY_VALUES = ("inherit", "restricted")
 FLOW_RUN_STATUS_VALUES = ("queued", "running", "completed", "failed", "cancelled")

@@ -72,12 +72,40 @@ def test_rejects_invalid_output_contract(user):
         service._validate_steps(steps)
 
 
+def test_rejects_output_contract_for_text_output(user):
+    service = _service(user)
+    steps = [_step(output_type="text", output_contract={"type": "object"})]
+    with pytest.raises(BadRequestException, match="output_contract is not supported for output_type 'text'"):
+        service._validate_steps(steps)
+
+
+@pytest.mark.parametrize("output_type", ["pdf", "docx"])
+def test_rejects_document_output_contract_with_scalar_schema(user, output_type: str):
+    service = _service(user)
+    steps = [_step(output_type=output_type, output_contract={"type": "string"})]
+    with pytest.raises(BadRequestException, match="must declare schema type 'object' or 'array'"):
+        service._validate_steps(steps)
+
+
+@pytest.mark.parametrize("output_type", ["pdf", "docx"])
+def test_accepts_document_output_contract_with_structured_schema(user, output_type: str):
+    service = _service(user)
+    steps = [
+        _step(
+            output_type=output_type,
+            output_contract={"type": "object", "properties": {"title": {"type": "string"}}},
+        )
+    ]
+    service._validate_steps(steps)
+
+
 def test_accepts_valid_contracts(user):
     """Valid contracts should pass validation."""
     service = _service(user)
     steps = [
         _step(
             input_contract={"type": "object", "properties": {"name": {"type": "string"}}},
+            output_type="json",
             output_contract={"type": "object", "required": ["result"]},
         )
     ]

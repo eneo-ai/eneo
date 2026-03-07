@@ -9,6 +9,7 @@ import { createResourceEditor } from "$lib/core/editing/ResourceEditor";
 import { IntricError, type Flow, type FlowStep, type Intric, type PromptSparse } from "@intric/intric-js";
 import { derived, get, writable } from "svelte/store";
 import { uid } from "uid";
+import { shouldSaveAssistantImmediately } from "./assistantSavePolicy";
 import {
   remapStepOrderTemplateTokens,
   replaceExactTemplateToken,
@@ -335,10 +336,21 @@ function initFlowEditor(data: {
   async function saveAssistant(assistantId: string, changes: Record<string, unknown>) {
     if (!assistantId || assistantId === "") return;
     const current = pendingAssistantChanges.get(assistantId) ?? {};
-    pendingAssistantChanges.set(assistantId, { ...current, ...changes });
+    const merged = { ...current, ...changes };
+    pendingAssistantChanges.set(assistantId, merged);
     setAssistantValidationError(assistantId, null);
     if (get(assistantSaveStatus) === "error") {
       assistantSaveStatus.set("pending");
+    }
+    if (shouldSaveAssistantImmediately(changes)) {
+      clearAssistantSaveTimer(assistantId);
+      try {
+        await runAssistantSaveNow(assistantId);
+      } catch (error) {
+        // Validation/UI status is updated in runAssistantSaveNow.
+        throw error;
+      }
+      return;
     }
     queueAssistantSave(assistantId);
   }

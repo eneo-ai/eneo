@@ -245,6 +245,35 @@ def get_application():
             for schema in openapi_schema["components"]["schemas"].values():
                 _remove_invalid_defaults(schema)
 
+        flow_upload_operation = (
+            openapi_schema.get("paths", {})
+            .get("/api/v1/flows/{id}/files/", {})
+            .get("post", {})
+        )
+        flow_upload_schema = (
+            flow_upload_operation.get("requestBody", {})
+            .get("content", {})
+            .get("multipart/form-data", {})
+            .get("schema", {})
+        )
+        if isinstance(flow_upload_schema, dict) and "$ref" in flow_upload_schema:
+            ref = str(flow_upload_schema["$ref"])
+            prefix = "#/components/schemas/"
+            if ref.startswith(prefix):
+                component_name = ref.removeprefix(prefix)
+                upload_component = (
+                    openapi_schema.get("components", {})
+                    .get("schemas", {})
+                    .get(component_name)
+                )
+                if isinstance(upload_component, dict):
+                    properties = upload_component.setdefault("properties", {})
+                    upload_field = properties.get("upload_file")
+                    if isinstance(upload_field, dict):
+                        upload_field["type"] = "string"
+                        upload_field["format"] = "binary"
+                        upload_field.pop("contentMediaType", None)
+
         # Fix only the missing SSE-related schemas that FastAPI doesn't auto-detect
         if "components" not in openapi_schema:
             openapi_schema["components"] = {}

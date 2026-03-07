@@ -224,6 +224,8 @@ class FlowRepository:
             sa.delete(Assistants)
             .where(Assistants.origin == "flow_managed")
             .where(Assistants.managing_flow_id == flow_id)
+            .where(self._managed_assistant_belongs_to_tenant(tenant_id=tenant_id))
+            .where(self._managed_assistant_has_no_step_references(tenant_id=tenant_id))
         )
 
     async def get_step_result(
@@ -378,12 +380,24 @@ class FlowRepository:
             .where(Assistants.id.in_(assistant_ids))
             .where(Assistants.origin == "flow_managed")
             .where(Assistants.managing_flow_id == flow_id)
-            .where(
-                ~sa.exists(
-                    sa.select(1)
-                    .select_from(FlowSteps)
-                    .where(FlowSteps.assistant_id == Assistants.id)
-                    .where(FlowSteps.tenant_id == tenant_id)
-                )
-            )
+            .where(self._managed_assistant_belongs_to_tenant(tenant_id=tenant_id))
+            .where(self._managed_assistant_has_no_step_references(tenant_id=tenant_id))
+        )
+
+    @staticmethod
+    def _managed_assistant_belongs_to_tenant(*, tenant_id: UUID) -> sa.ColumnElement[bool]:
+        return sa.exists(
+            sa.select(1)
+            .select_from(Flows)
+            .where(Flows.id == Assistants.managing_flow_id)
+            .where(Flows.tenant_id == tenant_id)
+        )
+
+    @staticmethod
+    def _managed_assistant_has_no_step_references(*, tenant_id: UUID) -> sa.ColumnElement[bool]:
+        return ~sa.exists(
+            sa.select(1)
+            .select_from(FlowSteps)
+            .where(FlowSteps.assistant_id == Assistants.id)
+            .where(FlowSteps.tenant_id == tenant_id)
         )

@@ -34,7 +34,7 @@ def _step(step_order: int = 1) -> FlowStep:
         assistant_id=uuid4(),
         step_order=step_order,
         user_description=f"Step {step_order}",
-        input_source="flow_input",
+        input_source="flow_input" if step_order == 1 else "previous_step",
         input_type="text",
         output_mode="pass_through",
         output_type="json",
@@ -774,7 +774,7 @@ async def test_create_flow_rejects_options_for_non_multiselect(user):
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
 
-    with pytest.raises(BadRequestException, match="only valid for multiselect"):
+    with pytest.raises(BadRequestException, match="only valid for select or multiselect"):
         await service.create_flow(
             space_id=uuid4(),
             name="Flow",
