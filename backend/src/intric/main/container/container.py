@@ -1115,6 +1115,7 @@ class Container(containers.DeclarativeContainer):
         flow_repo=flow_repo,
         flow_version_repo=flow_version_repo,
         assistant_service=assistant_service,
+        file_repo=file_repo,
         encryption_service=encryption_service,
     )
     group_chat_service = providers.Factory(

@@ -11,6 +11,8 @@ from intric.assistants.assistant import Assistant, AssistantOrigin
 from intric.assistants.assistant_service import AssistantService
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.spaces_table import Spaces
+from intric.files.file_models import File
+from intric.files.file_repo import FileRepository
 from intric.flows.flow import Flow, FlowSparse, FlowStep, JsonObject
 from intric.flows.flow_repo import FlowRepository
 from intric.flows.flow_version_repo import FlowVersionRepository
@@ -20,8 +22,12 @@ from intric.flows.flow_validators import (
     validate_steps,
     validate_variable_alias_collisions,
 )
+from intric.flows.runtime.docx_template_runtime import (
+    extract_docx_template_text_preview,
+    inspect_docx_template_bytes,
+)
 from intric.flows.step_config_secrets import encrypt_step_headers_for_storage
-from intric.main.exceptions import BadRequestException, NotFoundException
+from intric.main.exceptions import BadRequestException, NotFoundException, UnauthorizedException
 from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 from intric.settings.encryption_service import EncryptionService
 from intric.users.user import UserInDB
@@ -35,12 +41,14 @@ class FlowService:
         flow_repo: FlowRepository,
         flow_version_repo: FlowVersionRepository,
         assistant_service: AssistantService,
+        file_repo: FileRepository,
         encryption_service: EncryptionService | None = None,
     ):
         self.user = user
         self.flow_repo = flow_repo
         self.flow_version_repo = flow_version_repo
         self.assistant_service = assistant_service
+        self.file_repo = file_repo
         self.encryption_service = encryption_service
 
     async def create_flow(
@@ -229,6 +237,23 @@ class FlowService:
         updated = flow.model_copy(update={"published_version": None}, deep=True)
         return await self.flow_repo.update(updated, tenant_id=self.user.tenant_id)
 
+    async def inspect_template_file(
+        self,
+        *,
+        flow_id: UUID,
+        file_id: UUID,
+    ) -> dict[str, Any]:
+        await self.get_flow(flow_id)
+        template_file = await self._get_owned_docx_template_file(file_id)
+        return {
+            "file_id": template_file.id,
+            "file_name": template_file.name,
+            "placeholders": self._inspect_docx_template(template_file),
+            "extracted_text_preview": extract_docx_template_text_preview(
+                template_file.blob or b""
+            ),
+        }
+
     async def publish_flow(self, *, flow_id: UUID) -> Flow:
         flow = await self.get_flow(flow_id)
         normalized_metadata = self._normalize_legacy_form_schema(flow.metadata_json)
@@ -250,7 +275,7 @@ class FlowService:
         )
         next_version = 1 if latest is None else latest.version + 1
 
-        definition = self._build_definition(flow)
+        definition = await self._build_definition(flow)
         checksum = self._definition_checksum(definition)
         await self.flow_version_repo.create(
             flow_id=flow_id,
@@ -270,7 +295,11 @@ class FlowService:
         return await self.flow_repo.update(updated, tenant_id=self.user.tenant_id)
 
     def _validate_publishable(self, flow: Flow, *, metadata_json: JsonObject | None) -> None:
-        self._validate_steps(flow.steps, metadata_json=metadata_json)
+        self._validate_steps(
+            flow.steps,
+            metadata_json=metadata_json,
+            require_complete_template_fill_config=True,
+        )
         if not flow.steps:
             raise BadRequestException("Flow must contain at least one step before publish.")
 
@@ -279,8 +308,13 @@ class FlowService:
         steps: list[FlowStep],
         *,
         metadata_json: JsonObject | None = None,
+        require_complete_template_fill_config: bool = False,
     ) -> None:
-        validate_steps(steps, metadata_json=metadata_json)
+        validate_steps(
+            steps,
+            metadata_json=metadata_json,
+            require_complete_template_fill_config=require_complete_template_fill_config,
+        )
 
     def _validate_form_schema(self, metadata_json: JsonObject | None) -> None:
         validate_form_schema(metadata_json)
@@ -369,19 +403,22 @@ class FlowService:
             for step in steps
         ]
 
-    def _build_definition(self, flow: Flow) -> JsonObject:
+    async def _build_definition(self, flow: Flow) -> JsonObject:
         return {
             "flow_id": str(flow.id),
             "name": flow.name,
             "description": flow.description,
             "metadata_json": flow.metadata_json,
             "steps": [
-                self._step_to_definition(step)
+                await self._step_to_definition(step)
                 for step in sorted(flow.steps, key=lambda item: item.step_order)
             ],
         }
 
-    def _step_to_definition(self, step: FlowStep) -> JsonObject:
+    async def _step_to_definition(self, step: FlowStep) -> JsonObject:
+        output_config = step.output_config
+        if step.output_mode == "template_fill":
+            output_config = await self._prepare_template_output_config_for_publish(step)
         return {
             "step_id": str(step.id) if step.id is not None else None,
             "step_order": step.step_order,
@@ -397,7 +434,7 @@ class FlowService:
             "output_classification_override": step.output_classification_override,
             "mcp_policy": step.mcp_policy,
             "input_config": step.input_config,
-            "output_config": step.output_config,
+            "output_config": output_config,
         }
 
     def _ensure_flow_is_mutable(self, flow: Flow) -> None:
@@ -418,3 +455,77 @@ class FlowService:
             ensure_ascii=False,
         )
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    async def _prepare_template_output_config_for_publish(
+        self,
+        step: FlowStep,
+    ) -> dict[str, Any]:
+        if not isinstance(step.output_config, dict):
+            raise BadRequestException(
+                f"Step {step.step_order}: output_config must be an object for output_mode 'template_fill'."
+            )
+
+        template_file_id_raw = step.output_config.get("template_file_id")
+        try:
+            template_file_id = UUID(str(template_file_id_raw))
+        except Exception as exc:
+            raise BadRequestException(
+                f"Step {step.step_order}: output_config.template_file_id must be a UUID."
+            ) from exc
+
+        template_file = await self._get_owned_docx_template_file(template_file_id)
+        placeholders = self._inspect_docx_template(template_file)
+        placeholder_names: list[str] = []
+        for item in placeholders:
+            name = str(item["name"])
+            if name not in placeholder_names:
+                placeholder_names.append(name)
+        bindings = step.output_config.get("bindings")
+        if not isinstance(bindings, dict):
+            raise BadRequestException(
+                f"Step {step.step_order}: output_config.bindings must be an object."
+            )
+        missing = [name for name in placeholder_names if name not in bindings]
+        if missing:
+            raise BadRequestException(
+                f"Step {step.step_order}: template placeholders are missing bindings: {', '.join(missing)}."
+            )
+        for placeholder, binding in bindings.items():
+            if not isinstance(placeholder, str) or not placeholder.strip():
+                raise BadRequestException(
+                    f"Step {step.step_order}: output_config.bindings keys must be non-empty strings."
+                )
+            if not isinstance(binding, str):
+                raise BadRequestException(
+                    f"Step {step.step_order}: binding '{placeholder}' must be a template expression or an explicit empty string."
+                )
+
+        next_output_config = dict(step.output_config)
+        next_output_config["template_file_id"] = str(template_file.id)
+        next_output_config["template_checksum"] = template_file.checksum
+        next_output_config["template_name"] = template_file.name
+        next_output_config["placeholders"] = placeholder_names
+        return next_output_config
+
+    async def _get_owned_docx_template_file(self, file_id: UUID) -> File:
+        file = await self.file_repo.get_by_id(file_id=file_id)
+        if file.tenant_id != self.user.tenant_id:
+            raise NotFoundException()
+        if file.user_id != self.user.id:
+            raise UnauthorizedException(
+                "You can only use DOCX templates you own while editing a flow.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "file",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
+        if file.blob is None:
+            raise BadRequestException(
+                "The selected DOCX template could not be read because the file content is missing. Upload the template again or choose another DOCX file."
+            )
+        return file
+
+    def _inspect_docx_template(self, file: File) -> list[dict[str, Any]]:
+        return inspect_docx_template_bytes(file.blob or b"", filename=file.name)

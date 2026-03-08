@@ -126,6 +126,35 @@ export function initFlows(client) {
       return _fetch(`/api/v1/flows/${id}/input-policy/`, { method: "get" });
     },
 
+    /**
+     * Inspect placeholders in an uploaded DOCX template for a flow.
+     * @param {{id: string, fileId: string}} params
+     * @throws {IntricError}
+     */
+    inspectTemplate: async ({ id, fileId }) => {
+      return _fetch(`/api/v1/flows/${id}/template-inspect/`, {
+        method: "get",
+        params: { query: { file_id: fileId } }
+      });
+    },
+
+    templates: {
+      /**
+       * Upload a reusable DOCX template asset for Flow template_fill steps.
+       * @param {{id: string, file: File, signal?: AbortSignal}} params
+       * @throws {IntricError}
+       */
+      upload: async ({ id, file, signal }) => {
+        const formData = new FormData();
+        formData.append("upload_file", file);
+        return _fetch(`/api/v1/flows/${id}/template-files/`, {
+          method: "post",
+          requestBody: { "multipart/form-data": formData },
+          signal
+        });
+      }
+    },
+
     files: {
       /**
        * Upload a file scoped to a specific flow.

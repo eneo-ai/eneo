@@ -4,6 +4,11 @@
   import { IconTrash } from "@intric/icons/trash";
   import { m } from "$lib/paraglide/messages";
   import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";
+  import {
+    getTemplateFillOutputConfig,
+    getTemplateFillReadiness,
+    getTemplateFillTemplateName
+  } from "$lib/features/flows/templateFillConfig";
 
   export let step: FlowStep;
   export let isActive: boolean;
@@ -84,10 +89,13 @@
     step.output_mode === "transcribe_only"
       ? m.flow_step_summary_next_channel_transcript_short()
       : getDownstreamKindForOutput(step.output_type) === "text_and_structured"
-      ? m.flow_step_summary_next_channel_text_and_structured_short()
-      : m.flow_step_summary_next_channel_text_short();
+        ? m.flow_step_summary_next_channel_text_and_structured_short()
+        : m.flow_step_summary_next_channel_text_short();
   $: inputTypeLabel = INPUT_TYPE_LABELS[step.input_type]?.() ?? step.input_type;
   $: sourceSummary = (() => {
+    if (step.output_mode === "template_fill") {
+      return getTemplateFillTemplateName(step) ?? m.flow_template_fill_card_secondary();
+    }
     switch (step.input_source) {
       case "flow_input":
         return m.flow_step_card_source_flow_input();
@@ -105,6 +113,10 @@
   })();
   $: inputBadgeClass = INPUT_BADGE_CLASSES[step.input_type] ?? "bg-hover-dimmer text-secondary";
   $: outputBadgeClass = OUTPUT_BADGE_CLASSES[step.output_type] ?? "bg-hover-dimmer text-secondary";
+  $: templateReadiness =
+    step.output_mode === "template_fill"
+      ? getTemplateFillReadiness(getTemplateFillOutputConfig(step))
+      : null;
 </script>
 
 <div
@@ -117,7 +129,7 @@
 >
   <button
     type="button"
-    class="flex min-w-0 flex-1 items-start gap-2.5 text-left"
+    class="flex min-w-0 flex-1 items-start gap-2.5 rounded text-left focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
     aria-current={isActive ? "true" : undefined}
     on:click={() => dispatch("click")}
     on:keydown={handleKeydown}
@@ -134,21 +146,44 @@
     </div>
 
     <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-      <div class="flex items-center gap-2">
-        <span
-          class="truncate text-sm leading-snug"
-          class:font-semibold={isActive}
-          class:font-medium={!isActive}
-          title={label}>{label}</span
-        >
-      </div>
+      <span
+        class="truncate text-sm leading-snug"
+        class:font-semibold={isActive}
+        class:font-medium={!isActive}
+        title={label}>{label}</span
+      >
 
       <div class="text-secondary truncate text-xs">
         {sourceSummary}
       </div>
 
+      {#if step.output_mode === "template_fill" || step.output_mode === "transcribe_only"}
+        <div class="mt-0.5 flex flex-wrap items-center gap-1.5">
+          {#if step.output_mode === "template_fill"}
+            <span class={`${BADGE_BASE} bg-accent-dimmer text-accent-stronger`}>
+              {m.flow_template_fill_card_badge()}
+            </span>
+            {#if templateReadiness}
+              <span
+                class={`${BADGE_BASE} ${
+                  templateReadiness.incomplete
+                    ? "bg-warning-dimmer text-warning-stronger"
+                    : "bg-positive-dimmer text-positive-stronger"
+                }`}
+              >
+                {templateReadiness.matched}/{templateReadiness.total || 0}
+              </span>
+            {/if}
+          {:else}
+            <span class={`${BADGE_BASE} bg-accent-dimmer text-accent-stronger`}>
+              {m.flow_transcribe_only_title()}
+            </span>
+          {/if}
+        </div>
+      {/if}
+
       {#if isPowerUser}
-        <div class="mt-1 flex flex-wrap items-center gap-1.5">
+        <div class="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
           <span class={`${BADGE_BASE} ${inputBadgeClass}`}>{inputTypeLabel}</span>
           <span class="text-muted text-[11px]">→</span>
           <span class={`${BADGE_BASE} ${outputBadgeClass}`}>{railOutputLabel}</span>
@@ -166,23 +201,23 @@
 
   {#if !isPublished}
     <div
-      class="ml-1 flex shrink-0 items-center gap-1 opacity-35 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+      class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
       class:opacity-100={isActive}
     >
       <button
         type="button"
-        class="text-secondary hover:bg-hover-dimmer inline-flex size-7 items-center justify-center rounded text-xs disabled:cursor-not-allowed disabled:opacity-40"
+        class="text-secondary hover:bg-hover-dimmer inline-flex size-6 items-center justify-center rounded p-0.5 focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
         on:click|stopPropagation={() => dispatch("moveUp")}
         disabled={!canMoveUp}
         title={m.flow_step_move_up()}
         aria-label={m.flow_step_move_up()}
       >
         <svg
-          class="size-3.5"
+          class="size-3"
           viewBox="0 0 16 16"
           fill="none"
           stroke="currentColor"
-          stroke-width="2"
+          stroke-width="2.5"
           stroke-linecap="round"
           stroke-linejoin="round"
         >
@@ -191,18 +226,18 @@
       </button>
       <button
         type="button"
-        class="text-secondary hover:bg-hover-dimmer inline-flex size-7 items-center justify-center rounded text-xs disabled:cursor-not-allowed disabled:opacity-40"
+        class="text-secondary hover:bg-hover-dimmer inline-flex size-6 items-center justify-center rounded p-0.5 focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
         on:click|stopPropagation={() => dispatch("moveDown")}
         disabled={!canMoveDown}
         title={m.flow_step_move_down()}
         aria-label={m.flow_step_move_down()}
       >
         <svg
-          class="size-3.5"
+          class="size-3"
           viewBox="0 0 16 16"
           fill="none"
           stroke="currentColor"
-          stroke-width="2"
+          stroke-width="2.5"
           stroke-linecap="round"
           stroke-linejoin="round"
         >
@@ -211,12 +246,12 @@
       </button>
       <button
         type="button"
-        class="text-secondary hover:bg-hover-dimmer inline-flex size-7 items-center justify-center rounded hover:text-red-600"
+        class="text-secondary hover:bg-hover-dimmer inline-flex size-6 items-center justify-center rounded p-0.5 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
         on:click|stopPropagation={() => dispatch("remove")}
         title={m.flow_step_remove()}
         aria-label={m.flow_step_remove()}
       >
-        <IconTrash class="size-3.5" />
+        <IconTrash class="size-3" />
       </button>
     </div>
   {/if}

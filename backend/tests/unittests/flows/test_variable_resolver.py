@@ -153,6 +153,7 @@ def test_build_context_exposes_context_aware_system_aliases():
     assert context["indata_text"] == "Direkt text in"
     assert context["indata_json"] == {"key": "value"}
     assert context["indata_filer"] == ["f1", "f2"]
+    assert context["datum"].count("-") == 2
 
 
 def test_build_context_does_not_overwrite_reserved_keys_from_friendly_aliases():

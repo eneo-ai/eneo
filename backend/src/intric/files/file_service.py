@@ -40,6 +40,24 @@ class FileService:
             ),
         )
 
+        return await self._save_file_record(file)
+
+    async def save_docx_template(
+        self, upload_file: UploadFile, *, max_size: int | None = None
+    ):
+        file = await self.protocol.docx_template_to_domain(
+            upload_file,
+            max_size=(
+                max_size
+                if max_size is not None
+                else get_settings().upload_max_file_size
+            ),
+        )
+
+        return await self._save_file_record(file)
+
+    async def _save_file_record(self, file: FileBaseWithContent):
+
         async with self._write_transaction():
             saved_file = await self.repo.add(
                 FileCreate(

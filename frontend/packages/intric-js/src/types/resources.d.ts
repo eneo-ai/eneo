@@ -132,7 +132,7 @@ export type FlowStep = {
   input_source: "flow_input" | "previous_step" | "all_previous_steps" | "http_get" | "http_post";
   input_type: "text" | "json" | "image" | "audio" | "document" | "file" | "any";
   input_contract?: Record<string, unknown> | null;
-  output_mode: "pass_through" | "http_post" | "transcribe_only";
+  output_mode: "pass_through" | "http_post" | "transcribe_only" | "template_fill";
   output_type: "text" | "json" | "pdf" | "docx";
   output_contract?: Record<string, unknown> | null;
   input_bindings?: Record<string, unknown> | null;
@@ -175,6 +175,19 @@ export type FlowSparse = {
 
 export type Flow = FlowSparse & {
   steps: FlowStep[];
+};
+
+export type FlowTemplatePlaceholder = {
+  name: string;
+  location: string;
+  preview?: string | null;
+};
+
+export type FlowTemplateInspection = {
+  file_id: string;
+  file_name: string;
+  placeholders: FlowTemplatePlaceholder[];
+  extracted_text_preview?: string | null;
 };
 
 export type FlowRunArtifact = {

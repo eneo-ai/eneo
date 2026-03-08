@@ -76,3 +76,17 @@ def test_build_graph_connects_all_terminal_steps_to_output() -> None:
 
     assert any(edge["source"] == step_1_id and edge["target"] == "output" for edge in edges)
     assert any(edge["source"] == step_3_id and edge["target"] == "output" for edge in edges)
+
+
+def test_build_graph_marks_template_fill_steps_as_assembly_nodes() -> None:
+    steps = [
+        {
+            **_step(step_order=1, input_source="previous_step", output_type="docx"),
+            "output_mode": "template_fill",
+        }
+    ]
+
+    nodes, _ = build_graph_from_steps(steps)
+    assembly_node = next(node for node in nodes if node["id"] == str(steps[0]["step_id"]))
+
+    assert assembly_node["type"] == "assembly"

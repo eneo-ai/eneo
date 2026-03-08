@@ -133,7 +133,12 @@ async def test_webhook_failure_keeps_completed_step_evidence(user):
         assistant_id=assistant_id,
     )
 
-    flow_run_repo.get = AsyncMock(side_effect=[queued_run, running_run])
+    async def _get_run(*args, **kwargs):
+        if flow_run_repo.get.await_count == 1:
+            return queued_run
+        return running_run
+
+    flow_run_repo.get = AsyncMock(side_effect=_get_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.create_or_get_attempt_started = AsyncMock()
@@ -320,6 +325,137 @@ async def test_webhook_success_persists_delivery_and_completes_run(user):
         flow_run_repo.update_status.await_args_list[-1].kwargs["output_payload_json"]
         == second_saved.output_payload_json
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_persists_distinct_model_parameters_for_each_step(user):
+    executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    first_step_id = uuid4()
+    second_step_id = uuid4()
+    first_assistant_id = uuid4()
+    second_assistant_id = uuid4()
+    first_claimed = _claimed_step_result(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        step_id=first_step_id,
+        assistant_id=first_assistant_id,
+    )
+    second_claimed = _claimed_step_result(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        step_id=second_step_id,
+        assistant_id=second_assistant_id,
+    ).model_copy(update={"step_order": 2})
+
+    flow_run_repo.get = AsyncMock(side_effect=[queued_run, running_run])
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.claim_step_result = AsyncMock(side_effect=[first_claimed, second_claimed])
+    flow_run_repo.create_or_get_attempt_started = AsyncMock()
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_run_repo.update_status = AsyncMock()
+    flow_version_repo.get = AsyncMock(
+        return_value=FlowVersion(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum="checksum",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(first_step_id),
+                        "step_order": 1,
+                        "assistant_id": str(first_assistant_id),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                    },
+                    {
+                        "step_id": str(second_step_id),
+                        "step_order": 2,
+                        "assistant_id": str(second_assistant_id),
+                        "input_source": "previous_step",
+                        "output_mode": "pass_through",
+                    },
+                ]
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+    executor._execute_step = AsyncMock(
+        side_effect=[
+            StepExecutionOutput(
+                input_text="hello",
+                source_text="hello",
+                input_source="flow_input",
+                used_question_binding=False,
+                legacy_prompt_binding_used=False,
+                full_text="step-one",
+                persisted_text="step-one",
+                generated_file_ids=[],
+                tool_calls_metadata=None,
+                num_tokens_input=10,
+                num_tokens_output=11,
+                effective_prompt="prompt-one",
+                model_parameters_json={
+                    "model_id": str(uuid4()),
+                    "model_name": "claude-haiku-4-5",
+                    "provider": "anthropic",
+                },
+            ),
+            StepExecutionOutput(
+                input_text="step-one",
+                source_text="step-one",
+                input_source="previous_step",
+                used_question_binding=False,
+                legacy_prompt_binding_used=False,
+                full_text="step-two",
+                persisted_text="step-two",
+                generated_file_ids=[],
+                tool_calls_metadata=None,
+                num_tokens_input=12,
+                num_tokens_output=13,
+                effective_prompt="prompt-two",
+                model_parameters_json={
+                    "model_id": str(uuid4()),
+                    "model_name": "gpt-4o-mini",
+                    "provider": "openai",
+                },
+            ),
+        ]
+    )
+
+    async def _list_step_results(*args, **kwargs):
+        return [call.args[1] for call in flow_repo.save_step_result.await_args_list]
+
+    flow_run_repo.list_step_results = AsyncMock(side_effect=_list_step_results)
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        celery_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {"status": "completed"}
+    assert flow_repo.save_step_result.await_count == 2
+    first_saved = flow_repo.save_step_result.await_args_list[0].args[1]
+    second_saved = flow_repo.save_step_result.await_args_list[1].args[1]
+    assert first_saved.model_parameters_json == {
+        "model_id": first_saved.model_parameters_json["model_id"],
+        "model_name": "claude-haiku-4-5",
+        "provider": "anthropic",
+    }
+    assert second_saved.model_parameters_json == {
+        "model_id": second_saved.model_parameters_json["model_id"],
+        "model_name": "gpt-4o-mini",
+        "provider": "openai",
+    }
 
 
 @pytest.mark.asyncio

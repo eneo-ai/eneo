@@ -15,6 +15,7 @@ const json = readFileSync(file, "utf8");
 const pkg = JSON.parse(json);
 
 export default defineConfig({
+  cacheDir: process.env.VITEST ? "node_modules/.vitest" : "node_modules/.vite-web",
   plugins: [
     // visualizer({
     //   emitFile: true,
@@ -30,7 +31,10 @@ export default defineConfig({
     sveltekit() as PluginOption
   ],
   test: {
-    include: ["src/**/*.{test,spec}.{js,ts}"]
+    include: ["src/**/*.{test,spec}.{js,ts}"],
+    resolve: {
+      conditions: ["browser"]
+    }
   },
   ssr: {
     noExternal: ["@xyflow/svelte", "@xyflow/system"]

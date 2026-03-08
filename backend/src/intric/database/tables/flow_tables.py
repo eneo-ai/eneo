@@ -24,7 +24,7 @@ FLOW_STEP_INPUT_SOURCE_VALUES = (
     "http_post",
 )
 FLOW_STEP_INPUT_TYPE_VALUES = ("text", "json", "image", "audio", "document", "file", "any")
-FLOW_STEP_OUTPUT_MODE_VALUES = ("pass_through", "http_post", "transcribe_only")
+FLOW_STEP_OUTPUT_MODE_VALUES = ("pass_through", "http_post", "transcribe_only", "template_fill")
 FLOW_STEP_OUTPUT_TYPE_VALUES = ("text", "json", "pdf", "docx")
 FLOW_STEP_MCP_POLICY_VALUES = ("inherit", "restricted")
 FLOW_RUN_STATUS_VALUES = ("queued", "running", "completed", "failed", "cancelled")
@@ -130,7 +130,7 @@ class FlowSteps(BasePublic):
         CheckConstraint("input_source IN ('flow_input','previous_step','all_previous_steps','http_get','http_post')", name="ck_flow_steps_input_source"),
         CheckConstraint("input_type IN ('text','json','image','audio','document','file','any')", name="ck_flow_steps_input_type"),
         CheckConstraint(
-            "output_mode IN ('pass_through','http_post','transcribe_only')",
+            "output_mode IN ('pass_through','http_post','transcribe_only','template_fill')",
             name="ck_flow_steps_output_mode",
         ),
         CheckConstraint("output_type IN ('text','json','pdf','docx')", name="ck_flow_steps_output_type"),

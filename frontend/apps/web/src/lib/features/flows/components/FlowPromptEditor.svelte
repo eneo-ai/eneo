@@ -334,7 +334,6 @@
     if (replaceFrom !== null) {
       const nextText = currentEditorValue.slice(0, replaceFrom) + token + currentEditorValue.slice(cursor);
       currentEditorValue = nextText;
-      dispatch("change", nextText);
       commitNow(nextText);
       await tick();
       if (textareaEl) {
@@ -355,7 +354,6 @@
     if (!textareaEl) {
       const nextText = `${currentEditorValue}${token}`;
       currentEditorValue = nextText;
-      dispatch("change", nextText);
       commitNow(nextText);
       return;
     }
@@ -363,7 +361,6 @@
     const end = textareaEl.selectionEnd ?? currentEditorValue.length;
     const nextText = currentEditorValue.slice(0, start) + token + currentEditorValue.slice(end);
     currentEditorValue = nextText;
-    dispatch("change", nextText);
     commitNow(nextText);
     await tick();
     if (textareaEl) {

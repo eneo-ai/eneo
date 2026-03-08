@@ -40,6 +40,8 @@ from intric.flows.api.flow_consumer_router import (
     upload_flow_file,
 )
 from intric.flows.api.flow_definition_router import create_flow
+from intric.flows.api.flow_definition_router import inspect_flow_template
+from intric.flows.api.flow_definition_router import upload_flow_template_file
 from intric.flows.api.flow_router_common import dispatch_flow_run_after_commit
 from intric.settings.settings import FlowInputLimitsPublic
 from intric.assistants.api.assistant_models import AssistantUpdatePublic
@@ -249,6 +251,100 @@ async def test_create_flow_run_schedules_background_dispatch():
         file_ids=None,
     )
     audit_service.log_async.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_inspect_flow_template_enforces_scope_and_calls_service(monkeypatch):
+    container = MagicMock()
+    flow_service = AsyncMock()
+    container.flow_service.return_value = flow_service
+    flow_id = uuid4()
+    file_id = uuid4()
+    flow_service.inspect_template_file.return_value = {
+        "file_id": file_id,
+        "file_name": "rapport.docx",
+        "placeholders": [{"name": "summary", "location": "body", "preview": "{{summary}}"}],
+        "extracted_text_preview": "Titel: {{summary}}",
+    }
+
+    enforced: list[str] = []
+
+    async def fake_enforce(
+        request,
+        _container,
+        *,
+        flow_id,
+        require_flow_lookup_without_scope=False,
+    ):
+        enforced.append(str(flow_id))
+        assert require_flow_lookup_without_scope is False
+
+    monkeypatch.setattr(router_common_module, "enforce_flow_scope_for_request", fake_enforce)
+
+    result = await inspect_flow_template(
+        id=flow_id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        file_id=file_id,
+        container=container,
+    )
+
+    assert enforced == [str(flow_id)]
+    flow_service.inspect_template_file.assert_awaited_once_with(flow_id=flow_id, file_id=file_id)
+    assert result["file_name"] == "rapport.docx"
+    assert result["extracted_text_preview"] == "Titel: {{summary}}"
+
+
+@pytest.mark.asyncio
+async def test_upload_flow_template_file_enforces_scope_and_uses_docx_template_save(monkeypatch):
+    container = MagicMock()
+    file_service = AsyncMock()
+    audit_service = AsyncMock()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    file = SimpleNamespace(
+        id=uuid4(),
+        name="template.docx",
+        size=1024,
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        file_type=SimpleNamespace(value="document"),
+    )
+    container.file_service.return_value = file_service
+    container.audit_service.return_value = audit_service
+    container.user.return_value = user
+    file_service.save_docx_template.return_value = file
+    flow_id = uuid4()
+    upload = UploadFile(
+        filename="template.docx",
+        file=BytesIO(b"fake"),
+        headers={
+            "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        },
+    )
+
+    enforced: list[str] = []
+
+    async def fake_enforce(
+        request,
+        _container,
+        *,
+        flow_id,
+        require_flow_lookup_without_scope=False,
+    ):
+        enforced.append(str(flow_id))
+        assert require_flow_lookup_without_scope is True
+
+    monkeypatch.setattr(router_common_module, "enforce_flow_scope_for_request", fake_enforce)
+
+    result = await upload_flow_template_file(
+        id=flow_id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        upload_file=upload,
+        container=container,
+    )
+
+    assert enforced == [str(flow_id)]
+    file_service.save_docx_template.assert_awaited_once_with(upload)
+    audit_service.log_async.assert_awaited_once()
+    assert result.id == file.id
 
 
 @pytest.mark.asyncio
@@ -472,6 +568,7 @@ async def test_update_flow_assistant_forwards_payload():
     website_id = uuid4()
     group_id = uuid4()
     integration_knowledge_id = uuid4()
+    completion_model_id = uuid4()
     updated_assistant = SimpleNamespace(
         id=assistant_id,
         name="Updated assistant",
@@ -497,6 +594,7 @@ async def test_update_flow_assistant_forwards_payload():
             websites=[{"id": website_id}],
             groups=[{"id": group_id}],
             integration_knowledge_list=[{"id": integration_knowledge_id}],
+            completion_model={"id": completion_model_id},
         ),
         container=container,
     )
@@ -511,6 +609,7 @@ async def test_update_flow_assistant_forwards_payload():
     assert kwargs["websites"] == [website_id]
     assert kwargs["groups"] == [group_id]
     assert kwargs["integration_knowledge_ids"] == [integration_knowledge_id]
+    assert kwargs["completion_model_id"] == completion_model_id
     audit_service.log_async.assert_awaited_once()
 
 

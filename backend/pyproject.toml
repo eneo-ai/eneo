@@ -22,6 +22,7 @@ dependencies = [
     "black>=24.3.0,<25",
     "fpdf2>=2.8.5,<3",
     "python-docx>=1.2.0,<2",
+    "docxtpl>=0.20.1,<1",
     "pycryptodome~=3.17",
     "sse-starlette>=1.6.1,<2",
     "gunicorn>=23.0.0,<24",

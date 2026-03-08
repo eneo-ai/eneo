@@ -19,7 +19,7 @@
   import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import { createEventDispatcher, onDestroy } from "svelte";
-  import { writable } from "svelte/store";
+  import { get, writable } from "svelte/store";
   import { IconCancel } from "@intric/icons/cancel";
   import { IconTrash } from "@intric/icons/trash";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
@@ -28,6 +28,7 @@
   import { IconMicrophone } from "@intric/icons/microphone";
   import { IconLockClosed } from "@intric/icons/lock-closed";
   import { IconChevronRight } from "@intric/icons/chevron-right";
+  import { IconDownload } from "@intric/icons/download";
   import { Button, Dialog, Tooltip } from "@intric/ui";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
@@ -45,6 +46,25 @@
     getStepSummaryModel,
     sortSelectableInputTypeOptionsForDisplay
   } from "$lib/features/flows/flowStepPresentation";
+  import { buildNextFlowPrompt } from "$lib/features/flows/flowPromptDraft";
+  import {
+    applyAutoTemplateBindings,
+    applyTemplateInspection,
+    buildTemplateBindingAutoSuggestions,
+    buildTemplateBindingSuggestions,
+    createTemplateFillDraftConfig,
+    getTemplateFillOutputConfig,
+    getTemplateFillReadiness,
+    groupTemplateBindingSuggestions,
+    isTemplateFillStep,
+    listTemplateBindingRows,
+    listTemplatePlaceholders,
+    updateTemplateBinding,
+    type TemplateBindingSuggestionLabels,
+    type FlowTemplateInspection
+  } from "$lib/features/flows/templateFillConfig";
+  import { shouldShowTemplateBodyTextHint } from "$lib/features/flows/templateFillAuthoringHints";
+  import { getTemplateFillErrorMessage } from "$lib/features/flows/templateFillErrors";
 
   export let steps: FlowStep[];
   export let activeStepId: string | null;
@@ -113,6 +133,15 @@
     output_config: ""
   };
   let advancedJsonErrors: Partial<Record<AdvancedJsonField, string>> = {};
+  let availableTemplateFiles: UploadedFile[] = [];
+  let templateFilesLoaded = false;
+  let templateFilesLoading = false;
+  let templateInspecting = false;
+  let templateInspection: FlowTemplateInspection | null = null;
+  let templateConfigError: string | null = null;
+  let lastTemplateInspectionKey: string | null = null;
+  let templateUploadInput: HTMLInputElement | null = null;
+  let expandedTemplateExpressions = new Set<string>();
 
   function getStepKeyForAdvancedJson(step: FlowStep | null): string | null {
     if (!step) return null;
@@ -139,6 +168,9 @@
   }
 
   function getVisibleAdvancedJsonFields(step: FlowStep | null): Set<AdvancedJsonField> {
+    if (step?.output_mode === "template_fill") {
+      return new Set<AdvancedJsonField>();
+    }
     const visible = new Set<AdvancedJsonField>(["input_contract", "output_contract"]);
     if (step && (step.input_source === "http_get" || step.input_source === "http_post")) {
       visible.add("input_config");
@@ -225,20 +257,30 @@
     clearUploads();
   }
 
+  /* eslint-disable svelte/infinite-reactive-loop */
   // Load assistant when active step changes.
-  $: if (activeStep?.assistant_id && activeStep.assistant_id !== lastLoadedAssistantId) {
-    void flowEditor.flushAssistantSaves().catch(() => {
-      // Save errors are surfaced in editor validation/toasts.
-    });
+  $: if (activeStep?.output_mode === "template_fill") {
+    assistant = null;
+    lastLoadedAssistantId = null;
+    assistantLoading = false;
     cancelUploadsAndClearQueue();
-    // eslint-disable-next-line svelte/infinite-reactive-loop
-    void loadAssistantForStep(activeStep.assistant_id);
+  } else if (activeStep?.assistant_id && activeStep.assistant_id !== lastLoadedAssistantId) {
+    const targetId = activeStep.assistant_id;
+    lastLoadedAssistantId = targetId;
+    cancelUploadsAndClearQueue();
+    void (async () => {
+      await flowEditor.flushAssistantSaves().catch(() => {});
+      // Guard: if user switched again during flush, abort
+      if (activeStep?.assistant_id !== targetId) return;
+      await loadAssistantForStep(targetId);
+    })();
   } else if (!activeStep || !activeStep.assistant_id) {
     assistant = null;
     lastLoadedAssistantId = null;
     assistantLoading = false;
     cancelUploadsAndClearQueue();
   }
+  /* eslint-enable svelte/infinite-reactive-loop */
 
   onDestroy(() => {
     cancelUploadsAndClearQueue();
@@ -285,11 +327,20 @@
   }
   /* eslint-enable svelte/infinite-reactive-loop */
 
-  function updateInstruction(value: string) {
-    if (!activeStep?.assistant_id || !assistant?.prompt) return;
-    const nextPrompt = { ...assistant.prompt, text: value, description: "" };
+  async function updateInstruction(value: string) {
+    if (!activeStep?.assistant_id || !assistant) return;
+    const nextPrompt = buildNextFlowPrompt(assistant.prompt, value);
     assistant = { ...assistant, prompt: nextPrompt };
-    flowEditor.saveAssistant(activeStep.assistant_id, { prompt: nextPrompt });
+    await flowEditor.updateAssistantImmediately(activeStep.assistant_id, { prompt: nextPrompt });
+  }
+
+  function queueInstructionDraft(value: string) {
+    if (!activeStep?.assistant_id || !assistant) return;
+    const nextPrompt = buildNextFlowPrompt(assistant.prompt, value);
+    assistant = { ...assistant, prompt: nextPrompt };
+    void flowEditor.saveAssistant(activeStep.assistant_id, { prompt: nextPrompt }).catch(() => {
+      // Validation/UI status is updated in the editor save layer.
+    });
   }
 
   async function handleCommittedStepRename() {
@@ -419,9 +470,34 @@
       });
       return;
     }
+    if (nextMode === "template_fill") {
+      dispatch("stepChanged", {
+        index: activeIndex,
+        step: {
+          ...activeStep,
+          output_mode: "template_fill",
+          output_type: "docx",
+          output_contract: null,
+          output_config: createTemplateFillDraftConfig(templateFillConfig)
+        }
+      });
+      return;
+    }
     dispatch("stepChanged", {
       index: activeIndex,
       step: { ...activeStep, output_mode: nextMode }
+    });
+  }
+
+  function handleOutputTypeChange(nextType: FlowStep["output_type"]) {
+    if (activeStep === null || activeIndex < 0) return;
+    const nextMode =
+      activeStep.output_mode === "template_fill" && nextType !== "docx"
+        ? "pass_through"
+        : activeStep.output_mode;
+    dispatch("stepChanged", {
+      index: activeIndex,
+      step: { ...activeStep, output_type: nextType, output_mode: nextMode }
     });
   }
 
@@ -650,6 +726,61 @@
         hasAttachments: hasAttachmentSelections
       })
     : null;
+  $: isTemplateFill = isTemplateFillStep(activeStep);
+  $: templateFillConfig = getTemplateFillOutputConfig(activeStep);
+  $: templatePlaceholders = listTemplatePlaceholders(templateInspection, templateFillConfig);
+  $: templateBindingSuggestions = activeStep
+    ? buildTemplateBindingSuggestions({
+        steps,
+        currentStepOrder: activeStep.step_order,
+        labels: templateBindingLabels,
+        formSchema
+      })
+    : [];
+  $: templateBindingSuggestionGroups = groupTemplateBindingSuggestions(
+    templateBindingSuggestions,
+    templateBindingLabels
+  );
+  $: templateAutoBindings = activeStep
+    ? buildTemplateBindingAutoSuggestions({
+        placeholders: templatePlaceholders.map((item) => item.name),
+        steps,
+        currentStepOrder: activeStep.step_order,
+        formSchema
+      })
+    : {};
+  $: templateBindingRows = listTemplateBindingRows({
+    inspection: templateInspection,
+    currentConfig: templateFillConfig,
+    suggestions: templateBindingSuggestions,
+    autoSuggestions: templateAutoBindings,
+    labels: templateBindingLabels
+  });
+  $: templateReadiness = getTemplateFillReadiness(templateFillConfig);
+  $: templateOrphanedRows = templateBindingRows.filter((row) => row.status === "orphaned");
+  $: templateHasSelection = Boolean(templateFillConfig.template_file_id);
+  $: templateUnnamedStepWarning =
+    isTemplateFill &&
+    steps.some(
+      (step) =>
+        step.step_order < (activeStep?.step_order ?? Number.MAX_SAFE_INTEGER) &&
+        (!step.user_description || !step.user_description.trim())
+    );
+  $: templateAutoMatchableCount = templateBindingRows.filter(
+    (row) => row.status === "missing" && Boolean(templateAutoBindings[row.placeholderName])
+  ).length;
+
+  const templateBindingLabels: TemplateBindingSuggestionLabels = {
+    formField: m.flow_template_fill_group_form(),
+    aiSection: m.flow_template_fill_group_steps(),
+    systemVariable: m.flow_template_fill_group_system(),
+    formFieldItem: (name: string) => m.flow_template_fill_source_form({ name }),
+    stepTextItem: (stepLabel: string) => m.flow_template_fill_source_step_text({ name: stepLabel }),
+    stepJsonItem: (stepLabel: string) => m.flow_template_fill_source_step_json({ name: stepLabel }),
+    todayDate: m.flow_template_fill_source_date(),
+    leaveEmpty: m.flow_template_fill_leave_empty(),
+    emptyValue: ""
+  };
 
   const INPUT_TYPES = [
     {
@@ -724,7 +855,9 @@
   $: availableOutputTypes =
     activeStep?.output_mode === "transcribe_only"
       ? OUTPUT_TYPES.filter((type) => type.value === "text")
-      : OUTPUT_TYPES;
+      : activeStep?.output_mode === "template_fill"
+        ? OUTPUT_TYPES.filter((type) => type.value === "docx")
+        : OUTPUT_TYPES;
 
   const OUTPUT_MODES = [
     {
@@ -744,12 +877,25 @@
       get label() {
         return m.flow_output_mode_http_post();
       }
+    },
+    {
+      value: "template_fill",
+      get label() {
+        return m.flow_output_mode_template_fill();
+      }
     }
   ];
-  $: availableOutputModes =
-    activeStep?.input_type === "audio"
-      ? OUTPUT_MODES
-      : OUTPUT_MODES.filter((mode) => mode.value !== "transcribe_only");
+  $: availableOutputModes = (() => {
+    const base =
+      activeStep?.input_type === "audio"
+        ? OUTPUT_MODES
+        : OUTPUT_MODES.filter((mode) => mode.value !== "transcribe_only");
+    const visible =
+      isAdvancedMode || activeStep?.output_mode === "template_fill"
+        ? base
+        : base.filter((mode) => mode.value !== "template_fill");
+    return visible;
+  })();
   const MCP_POLICIES = [
     {
       value: "inherit",
@@ -765,6 +911,27 @@
     }
   ];
   $: isTranscribeOnly = activeStep?.output_mode === "transcribe_only";
+
+  $: {
+    const nextTemplateKey =
+      activeStep && isTemplateFill
+        ? `${activeStep.id ?? "new"}:${activeStep.output_config?.template_file_id ?? ""}`
+        : null;
+    if (nextTemplateKey !== lastTemplateInspectionKey) {
+      lastTemplateInspectionKey = nextTemplateKey;
+      templateInspection = null;
+      templateConfigError = null;
+      if (nextTemplateKey && templateFillConfig.template_file_id) {
+        // eslint-disable-next-line svelte/infinite-reactive-loop
+        void inspectTemplateFile(templateFillConfig.template_file_id, { persist: false });
+      }
+    }
+  }
+
+  $: if (isAdvancedMode && isTemplateFill && !templateFilesLoaded && !templateFilesLoading) {
+    // eslint-disable-next-line svelte/infinite-reactive-loop
+    void loadTemplateFiles();
+  }
 
   $: {
     const nextKey = activeStep ? `${activeStep.id ?? "new"}:${activeStep.step_order}` : null;
@@ -832,6 +999,9 @@
   }
 
   function getOutputHintText() {
+    if (activeStep?.output_mode === "template_fill") {
+      return m.flow_template_fill_summary();
+    }
     switch (outputHintKind) {
       case "structured_json":
         return m.flow_step_output_format_help_json();
@@ -844,7 +1014,8 @@
 
   function hasAdvancedSettingsActive(step: FlowStep): boolean {
     return Boolean(
-      step.input_type === "any" ||
+      step.output_mode === "template_fill" ||
+        step.input_type === "any" ||
         step.input_type === "file" ||
         step.mcp_policy === "restricted" ||
         step.input_contract ||
@@ -853,6 +1024,217 @@
         step.output_config ||
         hasInputTemplateOverride
     );
+  }
+
+  function isDocxTemplateFile(file: UploadedFile): boolean {
+    const name = file.name?.toLowerCase?.() ?? "";
+    const mimetype = file.mimetype?.toLowerCase?.() ?? "";
+    return (
+      name.endsWith(".docx") &&
+      !name.endsWith(".docm") &&
+      !name.endsWith(".dotm") &&
+      (mimetype.includes("wordprocessingml.document") ||
+        mimetype === "" ||
+        mimetype === "application/octet-stream")
+    );
+  }
+
+  function getFlowId() {
+    return (get(flowEditor.state.resource) as { id: string }).id;
+  }
+
+  /* eslint-disable svelte/infinite-reactive-loop */
+  async function loadTemplateFiles(force: boolean = false) {
+    if (!force && (templateFilesLoading || templateFilesLoaded)) return;
+    templateFilesLoading = true;
+    try {
+      const response = await intric.files.list();
+      availableTemplateFiles = (response.items ?? []).filter(isDocxTemplateFile);
+      templateFilesLoaded = true;
+    } catch (error) {
+      templateConfigError = getTemplateFillErrorMessage(error, {
+        missingFileContent: m.flow_template_fill_error_missing_content(),
+        fallback: m.flow_template_fill_template_help()
+      });
+    } finally {
+      templateFilesLoading = false;
+    }
+  }
+
+  async function inspectTemplateFile(fileId: string, options: { persist: boolean }) {
+    if (!activeStep) return;
+    templateInspecting = true;
+    templateConfigError = null;
+    try {
+      const inspection = await intric.flows.inspectTemplate({ id: getFlowId(), fileId });
+      templateInspection = inspection;
+      if (options.persist) {
+        updateStep(
+          "output_config",
+          applyTemplateInspection(
+            templateFillConfig,
+            inspection,
+            buildTemplateBindingAutoSuggestions({
+              placeholders: inspection.placeholders.map((item) => item.name),
+              steps,
+              currentStepOrder: activeStep.step_order,
+              formSchema
+            })
+          )
+        );
+      }
+    } catch (error) {
+      templateConfigError = getTemplateFillErrorMessage(error, {
+        missingFileContent: m.flow_template_fill_error_missing_content(),
+        fallback: m.flow_template_fill_template_help()
+      });
+    } finally {
+      templateInspecting = false;
+    }
+  }
+  /* eslint-enable svelte/infinite-reactive-loop */
+
+  async function handleTemplateFileSelection(fileId: string) {
+    if (!fileId) {
+      updateStep("output_config", {
+        ...templateFillConfig,
+        template_file_id: undefined,
+        template_name: undefined,
+        placeholders: [],
+        bindings: {}
+      });
+      templateInspection = null;
+      return;
+    }
+    await inspectTemplateFile(fileId, { persist: true });
+  }
+
+  async function handleTemplateUpload(event: Event) {
+    const input = event.currentTarget as HTMLInputElement | null;
+    const file = input?.files?.[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".docx")) {
+      templateConfigError = m.flow_template_fill_template_help();
+      input.value = "";
+      return;
+    }
+    templateConfigError = null;
+    templateInspecting = true;
+    try {
+      const uploaded = await intric.flows.templates.upload({ id: getFlowId(), file });
+      await loadTemplateFiles(true);
+      await inspectTemplateFile(uploaded.id, { persist: true });
+      toast.success(m.flow_template_fill_upload_action());
+    } catch (error) {
+      templateConfigError = getTemplateFillErrorMessage(error, {
+        missingFileContent: m.flow_template_fill_error_missing_content(),
+        fallback: m.flow_template_fill_template_help()
+      });
+    } finally {
+      templateInspecting = false;
+      if (input) input.value = "";
+    }
+  }
+
+  function updateTemplateBindingExpression(placeholder: string, expression: string) {
+    updateStep("output_config", updateTemplateBinding(templateFillConfig, placeholder, expression));
+  }
+
+  function updateTemplateBindingSelection(placeholder: string, value: string) {
+    if (value === "__unset__") {
+      const nextBindings = { ...(templateFillConfig.bindings ?? {}) };
+      delete nextBindings[placeholder];
+      updateStep("output_config", {
+        ...templateFillConfig,
+        bindings: nextBindings
+      });
+      return;
+    }
+    updateTemplateBindingExpression(placeholder, value);
+  }
+
+  async function downloadCurrentTemplate() {
+    if (!templateFillConfig.template_file_id) return;
+    try {
+      const { url } = await intric.files.generateSignedUrl({
+        fileId: templateFillConfig.template_file_id,
+        contentDisposition: "attachment"
+      });
+      window.open(url, "_blank");
+    } catch (error) {
+      console.error("Failed to download template", error);
+      templateConfigError = getTemplateFillErrorMessage(error, {
+        missingFileContent: m.flow_template_fill_error_missing_content(),
+        fallback: m.error_downloading_file()
+      });
+    }
+  }
+
+  function applyAllTemplateSuggestions() {
+    updateStep(
+      "output_config",
+      applyAutoTemplateBindings({
+        currentConfig: templateFillConfig,
+        autoSuggestions: templateAutoBindings,
+        placeholders: templatePlaceholders.map((item) => item.name)
+      })
+    );
+  }
+
+  function toggleTemplateExpressionEditor(placeholder: string) {
+    const next = new Set(expandedTemplateExpressions);
+    if (next.has(placeholder)) {
+      next.delete(placeholder);
+    } else {
+      next.add(placeholder);
+    }
+    expandedTemplateExpressions = next;
+  }
+
+  function getTemplateRowStatusText(status: "matched" | "missing" | "invalid" | "orphaned") {
+    switch (status) {
+      case "matched":
+        return m.flow_template_fill_status_matched();
+      case "invalid":
+        return m.flow_template_fill_status_invalid();
+      case "orphaned":
+        return m.flow_template_fill_status_orphaned();
+      case "missing":
+      default:
+        return m.flow_template_fill_status_missing();
+    }
+  }
+
+  function getTemplateRowStatusClass(status: "matched" | "missing" | "invalid" | "orphaned") {
+    switch (status) {
+      case "matched":
+        return "bg-positive-dimmer text-positive-stronger";
+      case "invalid":
+      case "orphaned":
+        return "bg-negative-dimmer text-negative-stronger";
+      case "missing":
+      default:
+        return "bg-warning-dimmer text-warning-stronger";
+    }
+  }
+
+  function getTemplateReadinessPillClass() {
+    if (!templateReadiness.total) {
+      return "bg-hover-dimmer text-secondary";
+    }
+    return templateReadiness.incomplete
+      ? "bg-warning-dimmer text-warning-stronger"
+      : "bg-positive-dimmer text-positive-stronger";
+  }
+
+  function showSectionNameHint() {
+    return shouldShowTemplateBodyTextHint({
+      steps,
+      activeStep,
+      isAdvancedMode,
+      isTemplateFill,
+      isTranscribeOnly
+    });
   }
 
   function getSummarySourceText() {
@@ -1052,286 +1434,274 @@
 
         <Settings.Group title={m.flow_step_section_details()}>
           <Settings.Row title={m.flow_step_name()} description="" let:aria>
-            <input
-              {...aria}
-              type="text"
-              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-              value={activeStep.user_description ?? ""}
-              placeholder={m.flow_step_name_placeholder()}
-              disabled={isPublished}
-              on:focus={() => {
-                stepNameBeforeEdit = activeStep.user_description ?? "";
-              }}
-              on:input={(e) => updateStep("user_description", e.currentTarget.value || null)}
-              on:change={() => void handleCommittedStepRename()}
-            />
-          </Settings.Row>
-        </Settings.Group>
-
-        <Settings.Group title={m.flow_step_section_input()}>
-          <Settings.Row
-            title={m.flow_step_input_source_label()}
-            description={m.flow_step_standard_input_desc()}
-            let:aria
-          >
             <div class="flex flex-col gap-2">
-              <select
+              <input
                 {...aria}
+                type="text"
                 class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-                value={activeStep.input_source}
+                value={activeStep.user_description ?? ""}
+                placeholder={m.flow_step_name_placeholder()}
                 disabled={isPublished}
-                on:change={(e) =>
-                  handleInputSourceChange(e.currentTarget.value as FlowStep["input_source"])}
-              >
-                {#each selectableInputSourceOptions as source (source.value)}
-                  <option value={source.value}>
-                    {getInputSourceOptionLabel(source.value, source.legacyInvalid)}
-                  </option>
-                {/each}
-              </select>
-              <p class="text-muted text-xs leading-relaxed" aria-live="polite">
-                {getSourceHintText()}
-              </p>
-              {#if sourceValidationMessage || inputSourceFeedback}
-                <p class="text-warning-stronger text-xs leading-relaxed" aria-live="polite">
-                  {sourceValidationMessage ?? inputSourceFeedback}
-                </p>
-              {/if}
-            </div>
-          </Settings.Row>
-
-          <Settings.Row
-            title={m.flow_step_input_type()}
-            description={m.flow_step_input_format_desc()}
-            let:aria
-          >
-            <div class="flex flex-col gap-2">
-              <select
-                {...aria}
-                class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-                value={activeStep.input_type}
-                disabled={isPublished}
-                on:change={(e) =>
-                  handleInputTypeChange(e.currentTarget.value as FlowStep["input_type"])}
-              >
-                {#each displayedInputTypeOptions as option (option.value)}
-                  <option value={option.value} disabled={option.disabled}>
-                    {getInputTypeOptionLabel(option.value, option.legacyInvalid)}
-                  </option>
-                {/each}
-              </select>
-              {#if getInputFormatHintText()}
-                <p class="text-muted text-xs leading-relaxed" aria-live="polite">
-                  {getInputFormatHintText()}
-                </p>
-              {/if}
-              {#if inputTypeValidationMessage || inputTypeFeedback}
-                <p class="text-warning-stronger text-xs leading-relaxed" aria-live="polite">
-                  {inputTypeValidationMessage ?? inputTypeFeedback}
+                on:focus={() => {
+                  stepNameBeforeEdit = activeStep.user_description ?? "";
+                }}
+                on:input={(e) => updateStep("user_description", e.currentTarget.value || null)}
+                on:change={() => void handleCommittedStepRename()}
+              />
+              {#if showSectionNameHint()}
+                <p class="bg-accent-dimmer/30 text-accent-stronger rounded-lg px-3 py-2 text-xs leading-relaxed">
+                  {m.flow_template_fill_step_name_hint()}
                 </p>
               {/if}
             </div>
           </Settings.Row>
         </Settings.Group>
 
-        {#if activeStep.input_type === "audio"}
-          <div
-            class={`mb-3 rounded-lg border px-4 py-3 ${
-              !transcriptionEnabled || !transcriptionModelConfigured
-                ? "border-warning-default/40 bg-warning-dimmer"
-                : "border-accent-default/20 bg-accent-dimmer/50"
-            }`}
-          >
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5">
-                <IconMicrophone
-                  class={`size-4 shrink-0 ${
-                    !transcriptionEnabled || !transcriptionModelConfigured
-                      ? "text-warning-stronger/70"
-                      : "text-accent-default"
-                  }`}
-                />
-                <span
-                  class={`text-sm ${
-                    !transcriptionEnabled || !transcriptionModelConfigured
-                      ? "text-warning-stronger"
-                      : "text-primary"
-                  }`}
-                >
-                  {#if !transcriptionEnabled}
-                    {m.flow_transcription_audio_nudge()}
-                  {:else if !transcriptionModelConfigured}
-                    {m.flow_transcription_model_label()}:
-                    <span class="text-warning-stronger font-medium">{m.select_a_model()}</span>
-                  {:else}
-                    {m.flow_transcription_model_label()}:
-                    <span class="font-medium">{transcriptionModelLabel ?? "—"}</span>
-                  {/if}
-                </span>
-              </div>
-              <button
-                class={`flex items-center gap-1 text-xs font-medium transition-colors ${
-                  !transcriptionEnabled || !transcriptionModelConfigured
-                    ? "text-warning-stronger/80 hover:text-warning-stronger"
-                    : "text-accent-default hover:text-accent-stronger"
-                }`}
-                on:click={() => dispatch("openTranscriptionSettings")}
-              >
-                {m.edit()}
-                {m.flow_stage_transcription()}
-                <IconChevronRight class="size-3.5" />
-              </button>
-            </div>
-          </div>
-        {/if}
-
-        <Settings.Group title={m.flow_step_section_behavior()}>
-          {#if activeStep.output_mode === "transcribe_only"}
-            <div
-              class="border-accent-default/20 border-l-accent-default/60 bg-accent-dimmer/60 mb-4 flex items-start gap-3 rounded-lg border border-l-4 px-4 py-3"
+        {#if !isTemplateFill}
+          <Settings.Group title={m.flow_step_section_input()}>
+            <Settings.Row
+              title={m.flow_step_input_source_label()}
+              description={m.flow_step_standard_input_desc()}
+              let:aria
             >
-              <IconLockClosed class="text-accent-default mt-0.5 size-4 shrink-0" />
-              <div class="flex flex-col gap-1">
-                <span class="text-accent-stronger text-sm font-medium"
-                  >{m.flow_transcribe_only_title()}</span
+              <div class="flex flex-col gap-2">
+                <select
+                  {...aria}
+                  class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+                  value={activeStep.input_source}
+                  disabled={isPublished}
+                  on:change={(e) =>
+                    handleInputSourceChange(e.currentTarget.value as FlowStep["input_source"])}
                 >
-                <span class="text-accent-stronger/80 text-xs"
-                  >{m.flow_transcribe_only_description()}</span
-                >
-                <span class="text-accent-stronger/75 text-xs leading-relaxed"
-                  >{m.flow_transcribe_only_next_step_hint()}</span
-                >
+                  {#each selectableInputSourceOptions as source (source.value)}
+                    <option value={source.value}>
+                      {getInputSourceOptionLabel(source.value, source.legacyInvalid)}
+                    </option>
+                  {/each}
+                </select>
+                <p class="text-muted text-xs leading-relaxed" aria-live="polite">
+                  {getSourceHintText()}
+                </p>
+                {#if sourceValidationMessage || inputSourceFeedback}
+                  <p class="text-warning-stronger text-xs leading-relaxed" aria-live="polite">
+                    {sourceValidationMessage ?? inputSourceFeedback}
+                  </p>
+                {/if}
               </div>
-            </div>
-          {/if}
-          {#if !isTranscribeOnly && assistantLoading}
-            <div class="text-secondary flex items-center gap-2 px-4 py-3 text-sm">
-              <IconLoadingSpinner class="size-4 animate-spin" />
-              {m.flow_step_assistant_loading()}
-            </div>
-          {/if}
-
-          {#if !isTranscribeOnly && assistant}
-            {@const currentAssistant = assistant}
-            <div class="w-full [&>button]:w-full">
-              <SelectAIModelV2
-                bind:selectedModel={currentAssistant.completion_model}
-                availableModels={$currentSpace.completion_models}
-                on:change={() =>
-                  updateAssistantField("completion_model", currentAssistant.completion_model)}
-              />
-            </div>
-
-            <Settings.Row title={m.model_behaviour()} description="">
-              <SelectBehaviourV2
-                bind:kwArgs={currentAssistant.completion_model_kwargs}
-                selectedModel={currentAssistant.completion_model}
-                isDisabled={!supportsTemperature(currentAssistant.completion_model?.name)}
-                on:change={() =>
-                  updateAssistantField(
-                    "completion_model_kwargs",
-                    currentAssistant.completion_model_kwargs
-                  )}
-              />
             </Settings.Row>
 
             <Settings.Row
-              title={m.instructions()}
-              description={isAdvancedMode ? m.flow_step_instructions_desc() : ""}
-              fullWidth
+              title={m.flow_step_input_type()}
+              description={m.flow_step_input_format_desc()}
+              let:aria
             >
-              <svelte:fragment slot="title">
-                <Tooltip text={m.flow_step_instructions_tooltip()}>
-                  <IconQuestionMark class="text-muted hover:text-primary ml-1.5" />
-                </Tooltip>
-              </svelte:fragment>
               <div class="flex flex-col gap-2">
-                {#if !isAdvancedMode}
-                  <div
-                    class="flex flex-wrap items-start justify-between gap-3 px-0.5 pt-0.5 pb-1.5"
-                  >
-                    <div class="min-w-0 max-w-2xl">
-                      <p class="text-primary text-sm font-medium">
-                        {m.flow_step_instructions_user_helper_title()}
-                      </p>
-                      <p class="text-muted mt-1 text-xs leading-relaxed">
-                        {m.flow_step_instructions_user_helper_body()}
-                      </p>
-                    </div>
-                    {#if canRevealInputTemplate && !showInputTemplate}
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        on:click={() => (revealInputTemplateInUserMode = true)}
-                      >
-                        {m.flow_step_input_template_cta_action()}
-                      </Button>
-                    {/if}
-                  </div>
-                {/if}
-                <FlowPromptEditor
-                  value={instructionText}
-                  disabled={isPublished || assistantLoading || !assistant}
-                  label={m.flow_step_instructions_editor_label()}
-                  placeholder={isAdvancedMode
-                    ? m.flow_step_instructions_placeholder()
-                    : m.flow_step_instructions_user_placeholder()}
-                  minHeight={isAdvancedMode ? 160 : 132}
-                  {steps}
-                  currentStepOrder={activeStep.step_order}
-                  {formSchema}
-                  transcriptionEnabled={transcriptionEnabled && hasAudioInputSteps}
-                  {isAdvancedMode}
-                  on:change={(e) => {
-                    if (assistant?.prompt) {
-                      assistant = { ...assistant, prompt: { ...assistant.prompt, text: e.detail } };
-                    }
-                  }}
-                  on:commit={(e) => updateInstruction(e.detail)}
+                <select
+                  {...aria}
+                  class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+                  value={activeStep.input_type}
+                  disabled={isPublished}
+                  on:change={(e) =>
+                    handleInputTypeChange(e.currentTarget.value as FlowStep["input_type"])}
                 >
-                  <svelte:fragment slot="toolbar">
-                    {#if assistant?.id && !isPublished}
-                      <PromptVersionDialog
-                        title={m.prompt_history_for({ name: m.instructions() })}
-                        loadPromptVersionHistory={() => {
-                          return flowEditor.listAssistantPrompts(activeStep.assistant_id);
-                        }}
-                        onPromptSelected={(prompt) => {
-                          if (assistant?.prompt) {
-                            updateAssistantField("prompt", {
-                              ...assistant.prompt,
-                              text: prompt.text
-                            });
-                          }
-                        }}
-                      />
-                    {/if}
-                  </svelte:fragment>
-                </FlowPromptEditor>
+                  {#each displayedInputTypeOptions as option (option.value)}
+                    <option value={option.value} disabled={option.disabled}>
+                      {getInputTypeOptionLabel(option.value, option.legacyInvalid)}
+                    </option>
+                  {/each}
+                </select>
+                {#if getInputFormatHintText()}
+                  <p class="text-muted text-xs leading-relaxed" aria-live="polite">
+                    {getInputFormatHintText()}
+                  </p>
+                {/if}
+                {#if inputTypeValidationMessage || inputTypeFeedback}
+                  <p class="text-warning-stronger text-xs leading-relaxed" aria-live="polite">
+                    {inputTypeValidationMessage ?? inputTypeFeedback}
+                  </p>
+                {/if}
               </div>
             </Settings.Row>
-          {/if}
+          </Settings.Group>
 
-          <Settings.Row title={m.flow_step_security_classification()} description="">
-            <select
-              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-              value={activeStep.output_classification_override ?? ""}
-              disabled={isPublished}
-              on:change={(e) => {
-                const val = e.currentTarget.value === "" ? null : Number(e.currentTarget.value);
-                updateStep("output_classification_override", val);
-              }}
+          {#if activeStep.input_type === "audio"}
+            <div
+              class={`mb-3 rounded-lg border px-4 py-3 ${
+                !transcriptionEnabled || !transcriptionModelConfigured
+                  ? "border-warning-default/40 bg-warning-dimmer"
+                  : "border-accent-default/20 bg-accent-dimmer/50"
+              }`}
             >
-              <option value="">{m.flow_step_security_inherit()}</option>
-              <option value="1">K1</option>
-              <option value="2">K2</option>
-              <option value="3">K3</option>
-              <option value="4">K4</option>
-            </select>
-          </Settings.Row>
-        </Settings.Group>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2.5">
+                  <IconMicrophone
+                    class={`size-4 shrink-0 ${
+                      !transcriptionEnabled || !transcriptionModelConfigured
+                        ? "text-warning-stronger/70"
+                        : "text-accent-default"
+                    }`}
+                  />
+                  <span
+                    class={`text-sm ${
+                      !transcriptionEnabled || !transcriptionModelConfigured
+                        ? "text-warning-stronger"
+                        : "text-primary"
+                    }`}
+                  >
+                    {#if !transcriptionEnabled}
+                      {m.flow_transcription_audio_nudge()}
+                    {:else if !transcriptionModelConfigured}
+                      {m.flow_transcription_model_label()}:
+                      <span class="text-warning-stronger font-medium">{m.select_a_model()}</span>
+                    {:else}
+                      {m.flow_transcription_model_label()}:
+                      <span class="font-medium">{transcriptionModelLabel ?? "—"}</span>
+                    {/if}
+                  </span>
+                </div>
+                <button
+                  class={`flex items-center gap-1 text-xs font-medium transition-colors ${
+                    !transcriptionEnabled || !transcriptionModelConfigured
+                      ? "text-warning-stronger/80 hover:text-warning-stronger"
+                      : "text-accent-default hover:text-accent-stronger"
+                  }`}
+                  on:click={() => dispatch("openTranscriptionSettings")}
+                >
+                  {m.edit()}
+                  {m.flow_stage_transcription()}
+                  <IconChevronRight class="size-3.5" />
+                </button>
+              </div>
+            </div>
+          {/if}
+        {/if}
 
-        {#if !isTranscribeOnly}
+        {#if !isTemplateFill}
+          <Settings.Group title={m.flow_step_section_behavior()}>
+            {#if activeStep.output_mode === "transcribe_only"}
+              <div
+                class="border-accent-default/20 border-l-accent-default/60 bg-accent-dimmer/60 mb-4 flex items-start gap-3 rounded-lg border border-l-4 px-4 py-3"
+              >
+                <IconLockClosed class="text-accent-default mt-0.5 size-4 shrink-0" />
+                <div class="flex flex-col gap-1">
+                  <span class="text-accent-stronger text-sm font-medium"
+                    >{m.flow_transcribe_only_title()}</span
+                  >
+                  <span class="text-accent-stronger/80 text-xs"
+                    >{m.flow_transcribe_only_description()}</span
+                  >
+                  <span class="text-accent-stronger/75 text-xs leading-relaxed"
+                    >{m.flow_transcribe_only_next_step_hint()}</span
+                  >
+                </div>
+              </div>
+            {/if}
+            {#if !isTranscribeOnly && !isTemplateFill && assistantLoading}
+              <div class="text-secondary flex items-center gap-2 px-4 py-3 text-sm">
+                <IconLoadingSpinner class="size-4 animate-spin" />
+                {m.flow_step_assistant_loading()}
+              </div>
+            {/if}
+
+            {#if !isTranscribeOnly && !isTemplateFill && assistant}
+              {@const currentAssistant = assistant}
+              <div class="w-full [&>button]:w-full">
+                <SelectAIModelV2
+                  bind:selectedModel={currentAssistant.completion_model}
+                  availableModels={$currentSpace.completion_models}
+                  on:change={() =>
+                    updateAssistantField("completion_model", currentAssistant.completion_model)}
+                />
+              </div>
+
+              <Settings.Row title={m.model_behaviour()} description="">
+                <SelectBehaviourV2
+                  bind:kwArgs={currentAssistant.completion_model_kwargs}
+                  selectedModel={currentAssistant.completion_model}
+                  isDisabled={!supportsTemperature(currentAssistant.completion_model?.name)}
+                  on:change={() =>
+                    updateAssistantField(
+                      "completion_model_kwargs",
+                      currentAssistant.completion_model_kwargs
+                    )}
+                />
+              </Settings.Row>
+
+              <Settings.Row
+                title={m.instructions()}
+                description={isAdvancedMode ? m.flow_step_instructions_desc() : ""}
+                fullWidth
+              >
+                <svelte:fragment slot="title">
+                  <Tooltip text={m.flow_step_instructions_tooltip()}>
+                    <IconQuestionMark class="text-muted hover:text-primary ml-1.5" />
+                  </Tooltip>
+                </svelte:fragment>
+                <div class="flex flex-col gap-2">
+                  {#if !isAdvancedMode}
+                    <div
+                      class="flex flex-wrap items-start justify-between gap-3 px-0.5 pt-0.5 pb-1.5"
+                    >
+                      <div class="max-w-2xl min-w-0">
+                        <p class="text-primary text-sm font-medium">
+                          {m.flow_step_instructions_user_helper_title()}
+                        </p>
+                        <p class="text-muted mt-1 text-xs leading-relaxed">
+                          {m.flow_step_instructions_user_helper_body()}
+                        </p>
+                      </div>
+                      {#if canRevealInputTemplate && !showInputTemplate}
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          on:click={() => (revealInputTemplateInUserMode = true)}
+                        >
+                          {m.flow_step_input_template_cta_action()}
+                        </Button>
+                      {/if}
+                    </div>
+                  {/if}
+                  <FlowPromptEditor
+                    value={instructionText}
+                    disabled={isPublished || assistantLoading || !assistant}
+                    label={m.flow_step_instructions_editor_label()}
+                    placeholder={isAdvancedMode
+                      ? m.flow_step_instructions_placeholder()
+                      : m.flow_step_instructions_user_placeholder()}
+                    minHeight={isAdvancedMode ? 160 : 132}
+                    {steps}
+                    currentStepOrder={activeStep.step_order}
+                    {formSchema}
+                    transcriptionEnabled={transcriptionEnabled && hasAudioInputSteps}
+                    {isAdvancedMode}
+                    on:change={(e) => queueInstructionDraft(e.detail)}
+                    on:commit={(e) => void updateInstruction(e.detail)}
+                  >
+                    <svelte:fragment slot="toolbar">
+                      {#if assistant?.id && !isPublished}
+                        <PromptVersionDialog
+                          title={m.prompt_history_for({ name: m.instructions() })}
+                          loadPromptVersionHistory={() => {
+                            return flowEditor.listAssistantPrompts(activeStep.assistant_id);
+                          }}
+                          onPromptSelected={(prompt) => {
+                            if (assistant?.prompt) {
+                              updateAssistantField("prompt", {
+                                ...buildNextFlowPrompt(assistant.prompt, prompt.text)
+                              });
+                            }
+                          }}
+                        />
+                      {/if}
+                    </svelte:fragment>
+                  </FlowPromptEditor>
+                </div>
+              </Settings.Row>
+            {/if}
+          </Settings.Group>
+        {/if}
+
+        {#if !isTranscribeOnly && !isTemplateFill}
           <Settings.Group title={m.flow_step_section_context()}>
             {#if assistantLoading}
               <div class="text-secondary flex items-center gap-2 px-4 py-3 text-sm">
@@ -1453,7 +1823,7 @@
           </Settings.Group>
         {/if}
 
-        {#if !isTranscribeOnly}
+        {#if !isTranscribeOnly && !isTemplateFill}
           {#if $mode !== "power_user" && hasInputTemplateOverride}
             <div
               class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mb-3 flex items-start gap-3 rounded-lg border px-3 py-2.5 text-xs"
@@ -1547,62 +1917,529 @@
           {/if}
         {/if}
 
-        <!-- Output Section -->
-        <Settings.Group title={m.flow_step_output_section()}>
-          <Settings.Row
-            title={m.flow_step_output_type()}
-            description={m.flow_step_output_format_desc()}
-          >
-            <div class="flex flex-col gap-2">
+        {#if isTemplateFill}
+          {#if isAdvancedMode}
+            <Settings.Group title={m.flow_template_fill_template_section()}>
+              <div class="border-accent-default/20 bg-accent-dimmer/40 rounded-xl border px-4 py-3">
+                <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div class="space-y-1">
+                    <p class="text-accent-stronger text-sm font-medium">
+                      {m.flow_template_fill_title()}
+                    </p>
+                    <p class="text-accent-stronger/90 text-sm leading-relaxed">
+                      {m.flow_template_fill_desc()}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={isPublished}
+                    on:click={() => handleOutputModeChange("pass_through")}
+                  >
+                    {m.flow_template_fill_switch_back()}
+                  </Button>
+                </div>
+              </div>
+              <div
+                class="grid gap-4 px-4 pt-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:px-0.5"
+              >
+                <div class="space-y-2 pr-4">
+                  <h3 class="text-lg font-medium">{m.flow_template_fill_template_label()}</h3>
+                  <p class="text-secondary whitespace-pre-wrap">
+                    {m.flow_template_fill_template_help()}
+                  </p>
+                </div>
+                <div class="flex flex-col gap-3">
+                  {#if templateFillConfig.template_file_id || templateReadiness.total > 0}
+                    <div
+                      class="border-default bg-secondary/10 flex items-center justify-between gap-3 rounded-xl border px-3 py-3"
+                    >
+                      <div class="min-w-0">
+                        <p class="text-primary truncate text-sm font-medium">
+                          {templateFillConfig.template_name ??
+                            m.flow_template_fill_select_placeholder()}
+                        </p>
+                        <p class="text-muted mt-1 text-xs leading-relaxed">
+                          <span
+                            class={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${getTemplateReadinessPillClass()}`}
+                          >
+                            {templateReadiness.matched}/{templateReadiness.total || 0}
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                  {/if}
+                  <select
+                    class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+                    value={templateFillConfig.template_file_id ?? ""}
+                    disabled={isPublished || templateInspecting}
+                    on:change={(e) => void handleTemplateFileSelection(e.currentTarget.value)}
+                  >
+                    <option value="">{m.flow_template_fill_select_placeholder()}</option>
+                    {#each availableTemplateFiles as file (file.id)}
+                      <option value={file.id}>{file.name}</option>
+                    {/each}
+                  </select>
+                  <input
+                    bind:this={templateUploadInput}
+                    type="file"
+                    accept=".docx"
+                    class="hidden"
+                    disabled={isPublished || templateInspecting}
+                    on:change={(e) => void handleTemplateUpload(e)}
+                  />
+                  <div class="flex flex-wrap items-center gap-3">
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      disabled={isPublished || templateInspecting}
+                      on:click={() => templateUploadInput?.click()}
+                    >
+                      {m.flow_template_fill_upload_action()}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      disabled={isPublished ||
+                        templateInspecting ||
+                        !templateFillConfig.template_file_id}
+                      on:click={() => void downloadCurrentTemplate()}
+                    >
+                      <IconDownload class="size-3.5" />
+                      {m.flow_template_fill_download_action()}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      disabled={isPublished ||
+                        templateInspecting ||
+                        !templateFillConfig.template_file_id}
+                      on:click={() =>
+                        templateFillConfig.template_file_id &&
+                        inspectTemplateFile(templateFillConfig.template_file_id, {
+                          persist: false
+                        })}
+                    >
+                      {m.flow_template_fill_refresh_action()}
+                    </Button>
+                    {#if templateFilesLoading}
+                      <span class="text-muted text-xs"
+                        >{m.flow_template_fill_loading_templates()}</span
+                      >
+                    {/if}
+                  </div>
+                  {#if templateUnnamedStepWarning}
+                    <p class="text-warning-stronger text-xs leading-relaxed">
+                      {m.flow_template_fill_naming_hint()}
+                    </p>
+                  {/if}
+                  {#if templateOrphanedRows.length > 0}
+                    <p class="text-warning-stronger text-xs leading-relaxed">
+                      {m.flow_template_fill_orphaned_warning({
+                        count: String(templateOrphanedRows.length)
+                      })}
+                    </p>
+                  {/if}
+                  {#if templateConfigError}
+                    <p class="text-warning-stronger text-xs" role="alert">{templateConfigError}</p>
+                  {/if}
+                </div>
+              </div>
+            </Settings.Group>
+
+            <Settings.Group title={m.flow_template_fill_placeholders_title()}>
+              <div
+                class="grid gap-4 px-4 pt-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:px-0.5"
+              >
+                <div class="space-y-2 pr-4">
+                  <p class="text-secondary whitespace-pre-wrap">
+                    {m.flow_template_fill_mapping_description()}
+                  </p>
+                </div>
+                <div class="flex flex-col gap-3">
+                  {#if templateHasSelection && templateReadiness.total > 0}
+                    <div
+                      class="border-default bg-secondary/10 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3"
+                    >
+                      <div class="flex items-center gap-3">
+                        <span
+                          class={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${getTemplateReadinessPillClass()}`}
+                        >
+                          {templateReadiness.matched}/{templateReadiness.total}
+                        </span>
+                        <div
+                          class="bg-hover-dimmer h-2 w-full max-w-48 overflow-hidden rounded-full"
+                        >
+                          <div
+                            class={`h-full transition-all ${templateReadiness.incomplete ? "bg-warning-default" : "bg-positive-default"}`}
+                            style={`width: ${(templateReadiness.matched / templateReadiness.total) * 100}%`}
+                          ></div>
+                        </div>
+                      </div>
+                      {#if templateAutoMatchableCount > 0}
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          disabled={isPublished}
+                          on:click={applyAllTemplateSuggestions}
+                        >
+                          {m.flow_template_fill_apply_all({
+                            count: String(templateAutoMatchableCount)
+                          })}
+                        </Button>
+                      {/if}
+                    </div>
+                  {/if}
+
+                  {#if !templateHasSelection}
+                    <div class="bg-secondary/10 rounded-xl px-4 py-3">
+                      <p class="text-primary text-sm font-medium">
+                        {m.flow_template_fill_select_template_first_title()}
+                      </p>
+                      <p class="text-muted mt-1 text-xs leading-relaxed">
+                        {m.flow_template_fill_select_template_first_body()}
+                      </p>
+                    </div>
+                  {:else if templatePlaceholders.length === 0}
+                    <div class="bg-secondary/10 rounded-xl px-4 py-3">
+                      <p class="text-primary text-sm font-medium">
+                        {m.flow_template_fill_no_placeholders()}
+                      </p>
+                      <p class="text-muted mt-1 text-xs leading-relaxed">
+                        {m.flow_template_fill_placeholder_guidance_prefix()}
+                        <span class="font-mono">{"{{nuläge}}"}</span>,
+                        <span class="font-mono">{"{{mål}}"}</span> eller
+                        <span class="font-mono">{"{{bedömning}}"}</span>
+                        {m.flow_template_fill_placeholder_guidance_suffix()}
+                      </p>
+                      <p class="text-muted mt-2 text-xs leading-relaxed">
+                        {m.flow_template_fill_placeholder_formatting_warning()}
+                      </p>
+                      {#if templateInspection?.extracted_text_preview}
+                        <div class="border-default bg-primary mt-3 rounded-lg border px-3 py-3">
+                          <p class="text-primary text-xs font-medium">
+                            {m.flow_template_fill_extracted_preview_title()}
+                          </p>
+                          <pre
+                            class="text-muted mt-2 overflow-auto text-xs leading-relaxed break-words whitespace-pre-wrap">{templateInspection.extracted_text_preview}</pre>
+                        </div>
+                      {/if}
+                    </div>
+                  {:else}
+                    <div class="flex flex-col gap-2">
+                      {#each templateBindingRows as row (row.key)}
+                        <div
+                          class="rounded-xl border px-3 py-3 transition-colors {row.status ===
+                          'matched'
+                            ? 'border-positive-default/30 bg-positive-dimmer/20 border-l-positive-default/40 border-l-[3px]'
+                            : row.status === 'missing'
+                              ? 'border-default bg-primary border-l-warning-default/60 border-l-[3px]'
+                              : row.status === 'orphaned'
+                                ? 'border-negative-default/30 bg-negative-dimmer/10 border-l-negative-default/40 border-l-[3px]'
+                                : 'border-default bg-primary'}"
+                        >
+                          <div class="flex flex-col gap-2">
+                            <div class="flex items-center justify-between gap-2">
+                              <div class="flex min-w-0 flex-wrap items-center gap-2">
+                                <span class="text-primary text-sm font-medium">
+                                  {`{{${row.placeholderName}}}`}
+                                </span>
+                                <span
+                                  class={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${getTemplateRowStatusClass(row.status)}`}
+                                >
+                                  {getTemplateRowStatusText(row.status)}
+                                </span>
+                                {#if row.autoSuggested}
+                                  <span
+                                    class="bg-accent-dimmer text-accent-stronger inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
+                                  >
+                                    {m.flow_template_fill_auto_badge()}
+                                  </span>
+                                {/if}
+                              </div>
+                              <button
+                                type="button"
+                                class="text-secondary hover:bg-hover-dimmer inline-flex size-7 shrink-0 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                                disabled={isPublished}
+                                title={expandedTemplateExpressions.has(row.key)
+                                  ? m.flow_template_fill_hide_expression()
+                                  : m.flow_template_fill_show_expression()}
+                                on:click={() => toggleTemplateExpressionEditor(row.key)}
+                              >
+                                <svg
+                                  class="size-3.5 transition-transform {expandedTemplateExpressions.has(
+                                    row.key
+                                  )
+                                    ? 'rotate-180'
+                                    : ''}"
+                                  viewBox="0 0 16 16"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  stroke-width="2"
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                >
+                                  <polyline points="4 6 8 10 12 6" />
+                                </svg>
+                              </button>
+                            </div>
+
+                            {#if row.preview}
+                              <p class="text-muted -mt-1 text-xs leading-relaxed">
+                                {row.preview}
+                              </p>
+                            {/if}
+
+                            {#if row.status === "orphaned"}
+                              <p class="text-negative-stronger text-xs leading-relaxed">
+                                {m.flow_template_fill_orphaned_row_warning()}
+                              </p>
+                            {/if}
+
+                            <div class="flex flex-col gap-2 md:flex-row md:items-start">
+                              <div class="min-w-0 flex-1">
+                                <select
+                                  class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm focus-within:ring-2 hover:ring-1 focus-visible:ring-2"
+                                  value={row.binding ?? "__unset__"}
+                                  disabled={isPublished}
+                                  on:change={(e) =>
+                                    updateTemplateBindingSelection(
+                                      row.placeholderName,
+                                      e.currentTarget.value
+                                    )}
+                                >
+                                  <option value="__unset__"
+                                    >{m.flow_template_fill_select_source()}</option
+                                  >
+                                  <option value="">{m.flow_template_fill_leave_empty()}</option>
+                                  {#each templateBindingSuggestionGroups as group (group.key)}
+                                    <optgroup label={group.label}>
+                                      {#each group.options as suggestion (suggestion.value)}
+                                        <option value={suggestion.value}>{suggestion.label}</option>
+                                      {/each}
+                                    </optgroup>
+                                  {/each}
+                                </select>
+                                {#if row.sourceOutputType === "json"}
+                                  <p class="text-warning-stronger mt-1 text-xs leading-relaxed">
+                                    {m.flow_template_fill_json_warning()}
+                                  </p>
+                                {/if}
+                              </div>
+                              {#if row.status === "missing" && templateAutoBindings[row.placeholderName]}
+                                <Button
+                                  variant="outlined"
+                                  size="small"
+                                  disabled={isPublished}
+                                  on:click={() =>
+                                    updateTemplateBindingExpression(
+                                      row.placeholderName,
+                                      templateAutoBindings[row.placeholderName]
+                                    )}
+                                >
+                                  {m.flow_template_fill_apply_suggestion()}
+                                </Button>
+                              {/if}
+                            </div>
+
+                            {#if expandedTemplateExpressions.has(row.key)}
+                              <input
+                                class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 font-mono text-sm focus-within:ring-2 hover:ring-1 focus-visible:ring-2"
+                                value={row.binding ?? ""}
+                                disabled={isPublished}
+                                placeholder={m.flow_template_fill_expression_placeholder()}
+                                on:input={(e) =>
+                                  updateTemplateBindingSelection(
+                                    row.placeholderName,
+                                    e.currentTarget.value
+                                  )}
+                              />
+                            {/if}
+                          </div>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              </div>
+            </Settings.Group>
+          {:else}
+            <Settings.Group title={m.flow_template_fill_template_section()}>
+              <div class="border-accent-default/20 bg-accent-dimmer/40 rounded-xl border px-4 py-3">
+                <p class="text-accent-stronger text-sm font-medium">
+                  {m.flow_template_fill_title()}
+                </p>
+                <p class="text-accent-stronger/90 mt-1 text-sm leading-relaxed">
+                  {m.flow_template_fill_desc()}
+                </p>
+              </div>
+              <div
+                class="grid gap-4 px-4 pt-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:px-0.5"
+              >
+                <div class="space-y-2 pr-4">
+                  <h3 class="text-lg font-medium">{m.flow_template_fill_template_label()}</h3>
+                  <p class="text-secondary whitespace-pre-wrap">{m.flow_template_fill_summary()}</p>
+                </div>
+                <div class="flex flex-col gap-3">
+                  {#if templateFillConfig.template_file_id || templateReadiness.total > 0}
+                    <div
+                      class="border-default bg-secondary/10 flex items-center justify-between gap-3 rounded-xl border px-3 py-3"
+                    >
+                      <div class="min-w-0">
+                        <p class="text-primary truncate text-sm font-medium">
+                          {templateFillConfig.template_name ??
+                            m.flow_template_fill_select_placeholder()}
+                        </p>
+                        <p class="text-muted mt-1 text-xs leading-relaxed">
+                          {m.flow_template_fill_readiness_summary({
+                            matched: String(templateReadiness.matched),
+                            total: String(templateReadiness.total || 0)
+                          })}
+                        </p>
+                      </div>
+                      <span
+                        class={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${getTemplateReadinessPillClass()}`}
+                      >
+                        {templateReadiness.matched}/{templateReadiness.total || 0}
+                      </span>
+                    </div>
+                  {/if}
+                  {#if templateOrphanedRows.length > 0}
+                    <p class="text-warning-stronger text-xs leading-relaxed">
+                      {m.flow_template_fill_orphaned_warning({
+                        count: String(templateOrphanedRows.length)
+                      })}
+                    </p>
+                  {/if}
+                  {#if templateConfigError}
+                    <p class="text-warning-stronger text-xs" role="alert">{templateConfigError}</p>
+                  {/if}
+                </div>
+              </div>
+            </Settings.Group>
+          {/if}
+
+          <Settings.Group title={m.flow_step_output_section()}>
+            <Settings.Row
+              title={m.flow_step_output_type()}
+              description={m.flow_template_fill_locked_output_help()}
+            >
+              <div class="flex items-center gap-2 text-sm">
+                <IconLockClosed class="text-muted size-4 shrink-0" />
+                <span class="text-primary">{m.flow_output_type_docx()}</span>
+              </div>
+            </Settings.Row>
+            <Settings.Row title={m.flow_step_output_mode()} description="">
+              <div class="flex items-center gap-2 text-sm">
+                <IconLockClosed class="text-muted size-4 shrink-0" />
+                <span class="text-primary">{m.flow_output_mode_template_fill()}</span>
+              </div>
+            </Settings.Row>
+          </Settings.Group>
+        {:else}
+          <!-- Output Section -->
+          <Settings.Group title={m.flow_step_output_section()}>
+            <Settings.Row
+              title={m.flow_step_output_type()}
+              description={m.flow_step_output_format_desc()}
+            >
+              <div class="flex flex-col gap-2">
+                <select
+                  class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+                  value={activeStep.output_type}
+                  disabled={isPublished}
+                  on:change={(e) =>
+                    handleOutputTypeChange(e.currentTarget.value as FlowStep["output_type"])}
+                >
+                  {#each availableOutputTypes as t (t.value)}
+                    <option value={t.value}>{t.label}</option>
+                  {/each}
+                </select>
+                {#if getOutputHintText()}
+                  <p class="text-muted text-xs leading-relaxed" aria-live="polite">
+                    {getOutputHintText()}
+                  </p>
+                {/if}
+              </div>
+            </Settings.Row>
+
+            {#if isAdvancedMode && activeStep.output_type === "docx"}
+              <div
+                class="border-accent-default/20 bg-accent-dimmer/30 mb-4 rounded-xl border px-4 py-3"
+              >
+                <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div class="space-y-1">
+                    <p class="text-accent-stronger text-sm font-medium">
+                      {m.flow_template_fill_title()}
+                    </p>
+                    <p class="text-accent-stronger/80 text-xs leading-relaxed">
+                      {m.flow_template_fill_summary()}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={isPublished}
+                    on:click={() => handleOutputModeChange("template_fill")}
+                  >
+                    {m.flow_output_mode_template_fill()}
+                  </Button>
+                </div>
+              </div>
+            {/if}
+
+            <Settings.Row title={m.flow_step_output_mode()} description="">
               <select
                 class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-                value={activeStep.output_type}
+                value={activeStep.output_mode}
                 disabled={isPublished}
-                on:change={(e) => updateStep("output_type", e.currentTarget.value)}
+                on:change={(e) =>
+                  handleOutputModeChange(e.currentTarget.value as FlowStep["output_mode"])}
               >
-                {#each availableOutputTypes as t (t.value)}
-                  <option value={t.value}>{t.label}</option>
+                {#each availableOutputModes as mode (mode.value)}
+                  <option value={mode.value}>{mode.label}</option>
                 {/each}
               </select>
-              {#if getOutputHintText()}
-                <p class="text-muted text-xs leading-relaxed" aria-live="polite">
-                  {getOutputHintText()}
-                </p>
-              {/if}
-            </div>
-          </Settings.Row>
+            </Settings.Row>
 
-          <Settings.Row title={m.flow_step_output_mode()} description="">
+            {#if activeStep.output_mode === "http_post"}
+              <Settings.Row title={m.flow_step_webhook_url()} description="">
+                <input
+                  type="url"
+                  class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+                  value={activeStep.output_config?.url ?? ""}
+                  disabled={isPublished}
+                  on:input={(e) => {
+                    updateStep("output_config", {
+                      ...(activeStep?.output_config ?? {}),
+                      url: e.currentTarget.value
+                    });
+                  }}
+                  placeholder="https://..."
+                />
+              </Settings.Row>
+            {/if}
+          </Settings.Group>
+        {/if}
+
+        <Settings.Group title={m.flow_step_security_classification()}>
+          <Settings.Row title={m.flow_step_security_classification()} description="">
             <select
               class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-              value={activeStep.output_mode}
+              value={activeStep.output_classification_override ?? ""}
               disabled={isPublished}
-              on:change={(e) =>
-                handleOutputModeChange(e.currentTarget.value as FlowStep["output_mode"])}
+              on:change={(e) => {
+                const val = e.currentTarget.value === "" ? null : Number(e.currentTarget.value);
+                updateStep("output_classification_override", val);
+              }}
             >
-              {#each availableOutputModes as mode (mode.value)}
-                <option value={mode.value}>{mode.label}</option>
-              {/each}
+              <option value="">{m.flow_step_security_inherit()}</option>
+              <option value="1">K1</option>
+              <option value="2">K2</option>
+              <option value="3">K3</option>
+              <option value="4">K4</option>
             </select>
           </Settings.Row>
-
-          {#if activeStep.output_mode === "http_post"}
-            <Settings.Row title={m.flow_step_webhook_url()} description="">
-              <input
-                type="url"
-                class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-                value={activeStep.output_config?.url ?? ""}
-                disabled={isPublished}
-                on:input={(e) => {
-                  updateStep("output_config", {
-                    ...(activeStep?.output_config ?? {}),
-                    url: e.currentTarget.value
-                  });
-                }}
-                placeholder="https://..."
-              />
-            </Settings.Row>
-          {/if}
         </Settings.Group>
 
         <!-- Typed I/O info banners -->
@@ -1639,7 +2476,7 @@
         {/if}
 
         <!-- Advanced Section (Power User only) -->
-        {#if isAdvancedMode}
+        {#if isAdvancedMode && !isTemplateFill}
           <div transition:slide={{ duration: 200 }} class="border-l border-l-amber-300/50">
             <Settings.Group title={m.flow_step_advanced()}>
               <Settings.Row title={m.flow_step_mcp_policy()} description="">
@@ -1789,7 +2626,17 @@
       </svg>
     </div>
     <Dialog.Title>{m.flow_step_remove()}</Dialog.Title>
-    <Dialog.Description>{m.flow_step_remove_confirm()}</Dialog.Description>
+    <Dialog.Description>
+      {#if activeStep?.output_mode === "template_fill"}
+        {m.flow_template_fill_remove_confirm_named({
+          name:
+            (activeStep.user_description ?? "").trim() ||
+            m.flow_step_fallback_label({ order: String(activeStep.step_order) })
+        })}
+      {:else}
+        {m.flow_step_remove_confirm()}
+      {/if}
+    </Dialog.Description>
     <Dialog.Controls let:close>
       <Button variant="simple" is={close}>{m.cancel()}</Button>
       <Button

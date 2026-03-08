@@ -688,6 +688,20 @@ wheels = [
 ]
 
 [[package]]
+name = "docxtpl"
+version = "0.20.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jinja2" },
+    { name = "lxml" },
+    { name = "python-docx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b2/b4/4435f3fcb1357ec441079c4af1dda3ea926fad6dcead4aed2d93b369944e/docxtpl-0.20.2.tar.gz", hash = "sha256:eddf3350d70b4d123208e801d585bcb313d21044a377a14f75a66d0965841de1", size = 17890, upload-time = "2025-11-13T12:47:15.943Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a4/ad/e07939d8e020e513d3860400413ba1e0e06102c469639b440d921337efef/docxtpl-0.20.2-py3-none-any.whl", hash = "sha256:626d5c570a46a62b2ca73b4d08f1c240fa031a5bc45371e1466a4fe184923d10", size = 17881, upload-time = "2025-11-13T12:47:13.704Z" },
+]
+
+[[package]]
 name = "email-validator"
 version = "2.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1199,6 +1213,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "dependency-injector" },
     { name = "docx2python" },
+    { name = "docxtpl" },
     { name = "fastapi" },
     { name = "fpdf2" },
     { name = "greenlet" },
@@ -1282,6 +1297,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43.0.0,<44" },
     { name = "dependency-injector", specifier = ">=4.41.0,<5" },
     { name = "docx2python", specifier = ">=3.5.0,<4" },
+    { name = "docxtpl", specifier = ">=0.20.1,<1" },
     { name = "fastapi", specifier = ">=0,<1" },
     { name = "fpdf2", specifier = ">=2.8.5,<3" },
     { name = "greenlet", specifier = ">=3.2.2,<4" },

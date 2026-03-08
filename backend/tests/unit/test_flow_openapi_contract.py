@@ -53,6 +53,8 @@ def _extract_enum_values(openapi_spec: dict, schema: dict) -> set[str]:
 REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/flows/{id}/input-policy/": {"get"},
     "/api/v1/flows/{id}/files/": {"post"},
+    "/api/v1/flows/{id}/template-files/": {"post"},
+    "/api/v1/flows/{id}/template-inspect/": {"get"},
     "/api/v1/flows/{id}/runs/": {"get", "post"},
     "/api/v1/flows/{id}/runs/{run_id}/": {"get"},
     "/api/v1/flows/{id}/runs/{run_id}/cancel/": {"post"},
@@ -66,6 +68,7 @@ REQUIRED_SCHEMAS = {
     "FlowInputPolicyPublic",
     "FlowRunStepPublic",
     "FlowInputLimitsPublic",
+    "FlowTemplateInspectionPublic",
 }
 
 REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
@@ -80,6 +83,8 @@ REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
     ("/api/v1/flows/{id}/assistants/{assistant_id}/", "get"): "get_flow_assistant",
     ("/api/v1/flows/{id}/assistants/{assistant_id}/", "patch"): "update_flow_assistant",
     ("/api/v1/flows/{id}/assistants/{assistant_id}/", "delete"): "delete_flow_assistant",
+    ("/api/v1/flows/{id}/template-files/", "post"): "upload_flow_template_file",
+    ("/api/v1/flows/{id}/template-inspect/", "get"): "inspect_flow_template",
     ("/api/v1/flows/{id}/runs/", "post"): "create_flow_run",
     ("/api/v1/flows/{id}/runs/", "get"): "list_flow_runs_alias",
     ("/api/v1/flows/{id}/input-policy/", "get"): "get_flow_input_policy",
@@ -93,6 +98,14 @@ REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
 }
 
 REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
+    (
+        "/api/v1/flows/{id}/template-files/",
+        "post",
+    ): {"400", "403", "404", "413", "415", "422"},
+    (
+        "/api/v1/flows/{id}/template-inspect/",
+        "get",
+    ): {"400", "403", "404", "422"},
     (
         "/api/v1/flows/{id}/runs/",
         "post",
@@ -128,6 +141,14 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
 }
 
 REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
+    (
+        "/api/v1/flows/{id}/template-files/",
+        "post",
+    ): {"400", "403", "404", "413", "415"},
+    (
+        "/api/v1/flows/{id}/template-inspect/",
+        "get",
+    ): {"400", "403", "404"},
     (
         "/api/v1/flows/{id}/runs/",
         "post",
@@ -351,7 +372,7 @@ def test_openapi_flow_step_create_enum_values_match_contract(openapi_spec: dict)
             "http_post",
         },
         "input_type": {"text", "json", "image", "audio", "document", "file", "any"},
-        "output_mode": {"pass_through", "http_post", "transcribe_only"},
+        "output_mode": {"pass_through", "http_post", "transcribe_only", "template_fill"},
         "output_type": {"text", "json", "pdf", "docx"},
         "mcp_policy": {"inherit", "restricted"},
     }

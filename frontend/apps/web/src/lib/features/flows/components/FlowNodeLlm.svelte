@@ -8,7 +8,12 @@
     label: string;
     step: Pick<
       FlowStep,
-      "step_order" | "input_type" | "output_type" | "mcp_policy" | "output_classification_override"
+      | "step_order"
+      | "input_type"
+      | "output_type"
+      | "output_mode"
+      | "mcp_policy"
+      | "output_classification_override"
     >;
     isActive: boolean;
     mode: "user" | "power_user";
@@ -21,9 +26,11 @@
   };
 
   $: isPowerUser = data.mode === "power_user";
-  $: nextChannelLabel =
-    getDownstreamKindForOutput(data.step.output_type as FlowStep["output_type"]) ===
-    "text_and_structured"
+  $: isAssembly = data.step.output_mode === "template_fill";
+  $: nextChannelLabel = isAssembly
+    ? m.flow_template_fill_card_badge()
+    : getDownstreamKindForOutput(data.step.output_type as FlowStep["output_type"]) ===
+        "text_and_structured"
       ? m.flow_step_summary_next_channel_text_and_structured_short()
       : m.flow_step_summary_next_channel_text_short();
   $: inputTypeLabel = (() => {
@@ -68,22 +75,31 @@
     : data.isActive
       ? "border-accent-default"
       : "border-default";
+  $: surfaceClass = isAssembly ? "bg-warning-dimmer/25" : "bg-primary";
+  $: headerClass = isAssembly ? "bg-warning-dimmer/50" : "bg-hover-dimmer";
 </script>
 
 {#if isPowerUser}
   <!-- Power User: Technical card -->
   <div
-    class="bg-primary rounded-lg border-2 shadow-sm transition-colors {borderColor}"
-    style="min-width: 200px;"
+    class="{surfaceClass} rounded-lg border-2 shadow-sm transition-colors {borderColor}"
+    style="width: 300px;"
   >
-    <div class="bg-hover-dimmer flex items-center justify-between px-3 py-1.5">
-      <div class="flex items-center gap-2">
+    <div class="{headerClass} flex items-center justify-between px-3 py-1.5">
+      <div class="min-w-0 flex items-center gap-2">
         <span
           class="bg-hover-default flex size-5 shrink-0 items-center justify-center rounded text-xs font-bold"
         >
           {data.step.step_order}
         </span>
         <span class="truncate text-sm font-semibold">{data.label}</span>
+        {#if isAssembly}
+          <span
+            class="bg-warning-dimmer text-warning-stronger rounded px-1.5 text-[10px] font-bold"
+          >
+            DOCX
+          </span>
+        {/if}
       </div>
       <div class="flex items-center gap-1">
         {#if data.assistantClassLevel != null}
@@ -116,12 +132,16 @@
         <span class="bg-positive-dimmer text-positive-stronger rounded px-1.5">
           {m.flow_step_card_output_short()}: {outputTypeLabel}
         </span>
-        <span class="bg-accent-dimmer text-accent-stronger rounded px-1.5">
+        <span
+          class="{isAssembly
+            ? 'bg-warning-dimmer text-warning-stronger'
+            : 'bg-accent-dimmer text-accent-stronger'} rounded px-1.5"
+        >
           {m.flow_step_card_chain_short()}: {nextChannelLabel}
         </span>
       </div>
       {#if data.step.mcp_policy === "restricted"}
-        <div class="flex items-center gap-1 text-warning-stronger">
+        <div class="text-warning-stronger flex items-center gap-1">
           {m.flow_step_mcp_policy()}: {m.flow_mcp_policy_restricted()}
         </div>
       {/if}

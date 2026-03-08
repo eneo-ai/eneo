@@ -52,6 +52,7 @@ class StepExecutionOutput:
     artifacts: list[dict[str, Any]] | None = None
     rag_metadata: dict[str, Any] | None = None
     transcription_metadata: dict[str, Any] | None = None
+    output_payload_extensions: dict[str, Any] | None = None
 
 
 @dataclass

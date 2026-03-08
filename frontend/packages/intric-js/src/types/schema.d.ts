@@ -1931,6 +1931,20 @@ export interface paths {
     /** Unpublish Flow */
     post: operations["unpublish_flow"];
   };
+  "/api/v1/flows/{id}/template-inspect/": {
+    /**
+     * Inspect DOCX template placeholders for a flow
+     * @description Scan an uploaded DOCX template and return placeholders discovered in the document body, tables, headers, and footers.
+     */
+    get: operations["inspect_flow_template"];
+  };
+  "/api/v1/flows/{id}/template-files/": {
+    /**
+     * Upload a DOCX template asset for a flow
+     * @description Upload a reusable DOCX template for Flow document assembly. This preserves the original DOCX file for placeholder inspection and deterministic template_fill steps. It is separate from flow input uploads and does not use the flow run input policy.
+     */
+    post: operations["upload_flow_template_file"];
+  };
   "/api/v1/flows/{id}/assistants/": {
     /** Create Flow Assistant */
     post: operations["create_flow_assistant"];
@@ -4980,6 +4994,14 @@ export interface components {
        */
       upload_file: string;
     };
+    /** Body_upload_flow_template_file */
+    Body_upload_flow_template_file: {
+      /**
+       * Upload File
+       * Format: binary
+       */
+      upload_file: string;
+    };
     /**
      * BulkCrawlRequest
      * @description Request model for triggering crawls on multiple websites.
@@ -6985,7 +7007,7 @@ export interface components {
      * FlowOutputMode
      * @enum {string}
      */
-    FlowOutputMode: "pass_through" | "http_post" | "transcribe_only";
+    FlowOutputMode: "pass_through" | "http_post" | "transcribe_only" | "template_fill";
     /**
      * FlowOutputType
      * @enum {string}
@@ -7495,6 +7517,29 @@ export interface components {
      * @enum {string}
      */
     FlowStepResultStatus: "pending" | "running" | "completed" | "failed" | "cancelled";
+    /** FlowTemplateInspectionPublic */
+    FlowTemplateInspectionPublic: {
+      /**
+       * File Id
+       * Format: uuid
+       */
+      file_id: string;
+      /** File Name */
+      file_name: string;
+      /** Placeholders */
+      placeholders: components["schemas"]["FlowTemplatePlaceholderPublic"][];
+      /** Extracted Text Preview */
+      extracted_text_preview?: string | null;
+    };
+    /** FlowTemplatePlaceholderPublic */
+    FlowTemplatePlaceholderPublic: {
+      /** Name */
+      name: string;
+      /** Location */
+      location: string;
+      /** Preview */
+      preview?: string | null;
+    };
     /** FormatLimit */
     FormatLimit: {
       /** Mimetype */
@@ -24360,6 +24405,112 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Inspect DOCX template placeholders for a flow
+   * @description Scan an uploaded DOCX template and return placeholders discovered in the document body, tables, headers, and footers.
+   */
+  inspect_flow_template: {
+    parameters: {
+      query: {
+        file_id: string;
+      };
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowTemplateInspectionPublic"];
+        };
+      };
+      /** @description The selected file is not a valid DOCX template or is not safe to inspect. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow or template file not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Upload a DOCX template asset for a flow
+   * @description Upload a reusable DOCX template for Flow document assembly. This preserves the original DOCX file for placeholder inspection and deterministic template_fill steps. It is separate from flow input uploads and does not use the flow run input policy.
+   */
+  upload_flow_template_file: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_flow_template_file"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["FilePublic"];
+        };
+      };
+      /** @description The uploaded file is not a valid DOCX template for Flow assembly. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The uploaded template exceeds the allowed file size. */
+      413: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The uploaded file is not a supported DOCX template. */
+      415: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */

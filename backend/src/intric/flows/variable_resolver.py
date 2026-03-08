@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from typing import Any
 
 from intric.flows.flow import FlowStepResult
@@ -42,6 +43,7 @@ class FlowVariableResolver:
         context: dict[str, Any] = {
             "flow_input": normalized_flow_input,
             "flow": {"input": normalized_flow_input},
+            "datum": datetime.now().date().isoformat(),
         }
 
         # Friendly input field aliases (for example {{Namn på brukare}})

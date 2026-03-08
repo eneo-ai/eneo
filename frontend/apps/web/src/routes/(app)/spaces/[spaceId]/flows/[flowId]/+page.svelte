@@ -152,13 +152,13 @@
     stageNavigating = true;
     try {
       await flowEditor.flushAssistantSaves();
+      builderStage = stage;
     } catch (e) {
       const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
       toast.error(msg);
     } finally {
       stageNavigating = false;
     }
-    builderStage = stage;
   }
 
   function setTranscriptionEnabled(enabled: boolean) {
@@ -607,7 +607,7 @@
         {:else if builderStage === 4}
           <!-- Side-by-side list-detail layout -->
           <div class="flex flex-1 flex-col overflow-hidden gap-3 lg:flex-row">
-            <div class="border-default w-full overflow-hidden rounded-xl border lg:w-72 lg:shrink-0">
+            <div class="border-default w-full max-h-[40vh] overflow-hidden rounded-xl border lg:max-h-none lg:w-80 xl:w-[340px] lg:shrink-0">
               <FlowStepList
                 steps={$update.steps}
                 activeStepId={$activeStepId}

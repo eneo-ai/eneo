@@ -132,3 +132,65 @@ def test_validate_form_schema_rejects_duplicate_field_names_case_insensitive():
                 }
             }
         )
+
+
+def test_validate_steps_rejects_template_fill_for_non_docx_output():
+    with pytest.raises(BadRequestException, match="template_fill requires output_type 'docx'"):
+        validate_steps(
+            [
+                _step(
+                    output_mode="template_fill",
+                    output_type="pdf",
+                    output_config={
+                        "template_file_id": str(uuid4()),
+                        "bindings": {"section": "{{step_1.output.text}}"},
+                    },
+                )
+            ]
+        )
+
+
+def test_validate_steps_allows_incomplete_template_fill_config_while_editing():
+    validate_steps(
+        [
+            _step(
+                output_mode="template_fill",
+                output_type="docx",
+                output_config={"bindings": {}},
+            )
+        ]
+    )
+
+
+def test_validate_steps_rejects_template_fill_binding_to_future_step():
+    with pytest.raises(BadRequestException, match="earlier steps"):
+        validate_steps(
+            [
+                _step(
+                    step_order=1,
+                    output_mode="template_fill",
+                    output_type="docx",
+                    output_config={
+                        "template_file_id": str(uuid4()),
+                        "bindings": {"section": "{{step_2.output.text}}"},
+                    },
+                ),
+                _step(step_order=2),
+            ]
+        )
+
+
+def test_validate_steps_allows_explicit_empty_template_bindings_for_publish():
+    validate_steps(
+        [
+            _step(
+                output_mode="template_fill",
+                output_type="docx",
+                output_config={
+                    "template_file_id": str(uuid4()),
+                    "bindings": {"optional_section": ""},
+                },
+            )
+        ],
+        require_complete_template_fill_config=True,
+    )

@@ -273,3 +273,67 @@ class TestGetByIdRepo:
 
         assert result is expected
         mock_validate.assert_called_once()
+
+
+class _RowWithDeferredTranscription:
+    def __init__(self):
+        self.id = uuid4()
+        self.created_at = None
+        self.updated_at = None
+        self.name = "template.docx"
+        self.checksum = "checksum"
+        self.size = 128
+        self.mimetype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        self.file_type = FileType.DOCUMENT
+        self.text = "preview"
+        self.blob = b"docx"
+        self.user_id = uuid4()
+        self.tenant_id = uuid4()
+
+    @property
+    def transcription(self):
+        raise AssertionError("transcription should not be accessed when include_transcription=False")
+
+
+class TestGetListWithoutTranscriptionRepo:
+    @pytest.mark.asyncio
+    async def test_get_list_by_id_and_tenant_does_not_touch_deferred_transcription(self):
+        from intric.files.file_repo import FileRepository
+
+        row = _RowWithDeferredTranscription()
+        mock_session = AsyncMock()
+        mock_session.scalars = AsyncMock(return_value=[row])
+
+        repo = FileRepository(session=mock_session)
+
+        result = await repo.get_list_by_id_and_tenant(
+            ids=[row.id],
+            tenant_id=row.tenant_id,
+            include_transcription=False,
+        )
+
+        assert len(result) == 1
+        assert result[0].id == row.id
+        assert result[0].transcription is None
+        assert result[0].blob == b"docx"
+
+    @pytest.mark.asyncio
+    async def test_get_list_by_id_and_user_does_not_touch_deferred_transcription(self):
+        from intric.files.file_repo import FileRepository
+
+        row = _RowWithDeferredTranscription()
+        mock_session = AsyncMock()
+        mock_session.scalars = AsyncMock(return_value=[row])
+
+        repo = FileRepository(session=mock_session)
+
+        result = await repo.get_list_by_id_and_user(
+            ids=[row.id],
+            user_id=row.user_id,
+            include_transcription=False,
+        )
+
+        assert len(result) == 1
+        assert result[0].id == row.id
+        assert result[0].transcription is None
+        assert result[0].blob == b"docx"

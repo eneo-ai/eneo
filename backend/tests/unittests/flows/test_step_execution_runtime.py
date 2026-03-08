@@ -462,6 +462,38 @@ def test_build_output_payload_includes_structured_and_artifacts():
     }
 
 
+def test_build_output_payload_merges_output_payload_extensions():
+    payload = build_output_payload(
+        StepExecutionOutput(
+            input_text="hello",
+            source_text="hello",
+            input_source="flow_input",
+            used_question_binding=False,
+            legacy_prompt_binding_used=False,
+            full_text="raw docx text",
+            persisted_text="## summary\n\nclean text",
+            generated_file_ids=[],
+            tool_calls_metadata=None,
+            num_tokens_input=0,
+            num_tokens_output=0,
+            effective_prompt="",
+            model_parameters_json={"mode": "template_fill"},
+            output_payload_extensions={
+                "template_fill_debug": {
+                    "rendered_docx_text_raw": "raw docx text",
+                    "summary_mode": "resolved_bindings",
+                }
+            },
+        )
+    )
+
+    assert payload["text"] == "## summary\n\nclean text"
+    assert payload["template_fill_debug"] == {
+        "rendered_docx_text_raw": "raw docx text",
+        "summary_mode": "resolved_bindings",
+    }
+
+
 def test_json_mode_cache_key_uses_provider_name_and_id():
     assistant = SimpleNamespace(
         completion_model=SimpleNamespace(id=uuid4(), name="gpt-4.1", provider_type="openai")

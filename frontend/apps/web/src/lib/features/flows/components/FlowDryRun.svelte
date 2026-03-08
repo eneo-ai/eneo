@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Flow } from "@intric/intric-js";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
+  import { getTemplateFillDryRunIssues } from "$lib/features/flows/templateFillConfig";
   import { Button } from "@intric/ui";
   import { IconPlay } from "@intric/icons/play";
   import { m } from "$lib/paraglide/messages";
@@ -44,7 +45,10 @@
       }
 
       // Validate step 1 doesn't use previous_step
-      if (step.step_order === 1 && (step.input_source === "previous_step" || step.input_source === "all_previous_steps")) {
+      if (
+        step.step_order === 1 &&
+        (step.input_source === "previous_step" || step.input_source === "all_previous_steps")
+      ) {
         errors.push("First step cannot use previous step as input source");
       }
 
@@ -56,9 +60,15 @@
         while ((match = refRegex.exec(bindingStr)) !== null) {
           const refOrder = parseInt(match[1], 10);
           if (refOrder >= step.step_order) {
-            errors.push(`Forward reference to step ${refOrder} (current step is ${step.step_order})`);
+            errors.push(
+              `Forward reference to step ${refOrder} (current step is ${step.step_order})`
+            );
           }
         }
+      }
+
+      if (step.output_mode === "template_fill") {
+        errors.push(...getTemplateFillDryRunIssues({ step }));
       }
 
       results.push({
@@ -82,41 +92,46 @@
 </script>
 
 <div class="contents">
-  <Button
-    variant="outlined"
-    disabled={isRunning || flow.steps.length === 0}
-    on:click={runDryRun}
-  >
+  <Button variant="outlined" disabled={isRunning || flow.steps.length === 0} on:click={runDryRun}>
     <IconPlay class="size-3.5" />
     {m.flow_dry_run()}
   </Button>
 
   {#if hasRun}
-    <div class="border-default divide-default order-1 w-full divide-y overflow-hidden rounded-lg border">
-      {#each dryRunResults as result}
+    <div
+      class="border-default divide-default order-1 w-full divide-y overflow-hidden rounded-lg border"
+    >
+      {#each dryRunResults as result (result.stepId ?? result.stepOrder)}
         {@const step = getStepByOrder(result.stepOrder)}
         <div class="flex items-start justify-between gap-3 px-4 py-3">
           <div class="flex min-w-0 items-start gap-3">
-            <span class="bg-hover-default mt-0.5 flex size-6 shrink-0 items-center justify-center rounded text-xs font-bold tabular-nums">
+            <span
+              class="bg-hover-default mt-0.5 flex size-6 shrink-0 items-center justify-center rounded text-xs font-bold tabular-nums"
+            >
               {result.stepOrder}
             </span>
             <div class="flex min-w-0 flex-col gap-0.5">
               <span class="text-sm font-medium">
-                {step?.user_description || m.flow_step_fallback_label({ order: String(result.stepOrder) })}
+                {step?.user_description ||
+                  m.flow_step_fallback_label({ order: String(result.stepOrder) })}
               </span>
-              <span class="truncate text-xs text-secondary">
+              <span class="text-secondary truncate text-xs">
                 {step?.input_type ?? "text"} &rarr; {step?.output_type ?? "text"}
                 <span class="text-tertiary">&middot;</span>
                 {INPUT_SOURCE_LABELS[step?.input_source ?? ""]?.() ?? step?.input_source ?? ""}
               </span>
               {#if !result.valid && $mode === "power_user"}
-                {#each result.errors as error}
-                  <span class="text-xs text-negative-stronger">{error}</span>
+                {#each result.errors as error (`${result.stepOrder}:${error}`)}
+                  <span class="text-negative-stronger text-xs">{error}</span>
                 {/each}
               {/if}
             </div>
           </div>
-          <span class="mt-1 shrink-0 text-sm font-medium" class:text-positive-stronger={result.valid} class:text-negative-stronger={!result.valid}>
+          <span
+            class="mt-1 shrink-0 text-sm font-medium"
+            class:text-positive-stronger={result.valid}
+            class:text-negative-stronger={!result.valid}
+          >
             {#if result.valid}&#10003;{:else}&#10007;{/if}
           </span>
         </div>

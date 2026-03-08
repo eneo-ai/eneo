@@ -2,20 +2,24 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
 
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.files.file_models import FilePublic
 from intric.flows.api import flow_router_common as common
+from intric.flows.api.flow_api_common import error_response
 from intric.flows.api.flow_assembler import FlowAssembler
 from intric.flows.api.flow_models import (
     FlowCreateRequest,
     FlowPublic,
     FlowSparsePublic,
+    FlowTemplateInspectionPublic,
     FlowUpdateRequest,
 )
 from intric.main.models import NOT_PROVIDED, PaginatedResponse
+from intric.main.exceptions import ErrorCodes
 from intric.server.dependencies.container import get_container
 
 from intric.main.container.container import Container
@@ -275,3 +279,120 @@ async def unpublish_flow(
         metadata=AuditMetadata.standard(actor=user, target=unpublished),
     )
     return assembler.to_public(unpublished)
+
+
+@router.get(
+    "/{id}/template-inspect/",
+    response_model=FlowTemplateInspectionPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="inspect_flow_template",
+    summary="Inspect DOCX template placeholders for a flow",
+    description="Scan an uploaded DOCX template and return placeholders discovered in the document body, tables, headers, and footers.",
+    responses={
+        400: error_response(
+            description="The selected file is not a valid DOCX template or is not safe to inspect.",
+            message="Invalid DOCX template.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="bad_request",
+        ),
+        403: error_response(
+            description="Forbidden: API key scope does not match flow space.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow or template file not found in tenant scope.",
+            message="Flow not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
+)
+async def inspect_flow_template(
+    id: UUID,
+    request: Request,
+    file_id: UUID = Query(...),
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await common.enforce_flow_scope_for_request(request, container, flow_id=id)
+    return await container.flow_service().inspect_template_file(flow_id=id, file_id=file_id)
+
+
+@router.post(
+    "/{id}/template-files/",
+    response_model=FilePublic,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="upload_flow_template_file",
+    summary="Upload a DOCX template asset for a flow",
+    description="Upload a reusable DOCX template for Flow document assembly. This preserves the original DOCX file for placeholder inspection and deterministic template_fill steps. It is separate from flow input uploads and does not use the flow run input policy.",
+    responses={
+        400: error_response(
+            description="The uploaded file is not a valid DOCX template for Flow assembly.",
+            message="Only .docx files can be uploaded as Flow templates.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="bad_request",
+        ),
+        403: error_response(
+            description="Forbidden: API key scope does not match flow space.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow not found in tenant scope.",
+            message="Flow not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+        413: error_response(
+            description="The uploaded template exceeds the allowed file size.",
+            message="Uploaded file is too large.",
+            intric_error_code=ErrorCodes.FILE_TOO_LARGE,
+            code="file_too_large",
+        ),
+        415: error_response(
+            description="The uploaded file is not a supported DOCX template.",
+            message="Only .docx files can be uploaded as Flow templates.",
+            intric_error_code=ErrorCodes.FILE_NOT_SUPPORTED,
+            code="unsupported_media_type",
+        ),
+    },
+)
+async def upload_flow_template_file(
+    id: UUID,
+    request: Request,
+    upload_file: UploadFile,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await common.enforce_flow_scope_for_request(
+        request,
+        container,
+        flow_id=id,
+        require_flow_lookup_without_scope=True,
+    )
+
+    file = await container.file_service().save_docx_template(upload_file)
+    user = container.user()
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.FILE_UPLOADED,
+        entity_type=EntityType.FILE,
+        entity_id=common.required_uuid(file.id, field="file.id"),
+        description=f"Uploaded DOCX template '{file.name}' for flow authoring",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=file,
+            extra={
+                "size_bytes": file.size,
+                "mimetype": file.mimetype,
+                "file_type": file.file_type.value if file.file_type else None,
+                "flow_id": str(id),
+                "upload_purpose": "flow_template",
+            },
+        ),
+    )
+    return file

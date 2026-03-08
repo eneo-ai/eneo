@@ -6,24 +6,23 @@
 
 import { createContext } from "$lib/core/context";
 import { createResourceEditor } from "$lib/core/editing/ResourceEditor";
-import { IntricError, type Flow, type FlowStep, type Intric, type PromptSparse } from "@intric/intric-js";
+import {
+  IntricError,
+  type Flow,
+  type FlowStep,
+  type Intric,
+  type PromptSparse
+} from "@intric/intric-js";
 import { derived, get, writable } from "svelte/store";
 import { uid } from "uid";
 import { shouldSaveAssistantImmediately } from "./assistantSavePolicy";
-import {
-  remapStepOrderTemplateTokens,
-  replaceExactTemplateToken,
-} from "./flowVariableTokens";
+import { remapStepOrderTemplateTokens, replaceExactTemplateToken } from "./flowVariableTokens";
 import { getFlowStepValidationIssues, mapOutputToInputType } from "./flowStepTypes";
 
 const [getFlowEditor, setFlowEditor] =
   createContext<ReturnType<typeof initFlowEditor>>("Edit a flow");
 
-function initFlowEditor(data: {
-  flow: Flow;
-  intric: Intric;
-  onUpdateDone?: (flow: Flow) => void;
-}) {
+function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow: Flow) => void }) {
   type LoadedAssistant = Awaited<ReturnType<typeof data.intric.flows.assistants.get>>;
   const editor = createResourceEditor({
     intric: data.intric,
@@ -148,10 +147,7 @@ function initFlowEditor(data: {
     const issues = getFlowStepValidationIssues(steps);
     const entries = new Map<string, string[]>();
     for (const issue of issues) {
-      entries.set(
-        `${typedIOValidationPrefix}${issue.code}:${issue.stepOrder}`,
-        [issue.code],
-      );
+      entries.set(`${typedIOValidationPrefix}${issue.code}:${issue.stepOrder}`, [issue.code]);
     }
     replaceFlowValidationErrors(typedIOValidationPrefix, entries);
     return issues;
@@ -163,22 +159,36 @@ function initFlowEditor(data: {
 
   async function loadAssistant(assistantId: string): Promise<LoadedAssistant | null> {
     if (!assistantId || assistantId === "") return null;
-    if (assistantCache.has(assistantId)) return assistantCache.get(assistantId)!;
-    try {
-      const assistant = await data.intric.flows.assistants.get({
-        id: getFlowId(),
-        assistantId
-      });
-      assistantCache.set(assistantId, assistant);
-      return assistant;
-    } catch {
-      return null;
+
+    // Wait for any in-flight save to land in the cache first
+    if (assistantSavePromises.has(assistantId)) {
+      await assistantSavePromises.get(assistantId)!.catch(() => {});
     }
+
+    let base = (assistantCache.get(assistantId) as LoadedAssistant) ?? null;
+    if (!base) {
+      try {
+        base = await data.intric.flows.assistants.get({
+          id: getFlowId(),
+          assistantId
+        });
+        assistantCache.set(assistantId, base);
+      } catch {
+        return null;
+      }
+    }
+
+    // Overlay any pending unsaved changes so the caller sees the latest state
+    const pending = pendingAssistantChanges.get(assistantId);
+    if (pending && base) {
+      return { ...base, ...pending } as LoadedAssistant;
+    }
+    return base;
   }
 
   async function updateAssistantImmediately(
     assistantId: string,
-    changes: Record<string, unknown>,
+    changes: Record<string, unknown>
   ): Promise<void> {
     if (!assistantId || assistantId === "") return;
     assistantSaveStatus.set("saving");
@@ -187,7 +197,7 @@ function initFlowEditor(data: {
       const updated = await data.intric.flows.assistants.update({
         id: getFlowId(),
         assistantId,
-        update: changes,
+        update: changes
       });
       assistantCache.set(assistantId, updated);
       assistantSaveStatus.set("idle");
@@ -302,9 +312,7 @@ function initFlowEditor(data: {
         pendingAssistantChanges.set(assistantId, { ...merged, ...queued });
         assistantSaveStatus.set("error");
         const msg =
-          e instanceof IntricError
-            ? e.getReadableMessage()
-            : "Failed to save step configuration";
+          e instanceof IntricError ? e.getReadableMessage() : "Failed to save step configuration";
         setAssistantValidationError(assistantId, msg);
         throw e;
       } finally {
@@ -344,12 +352,7 @@ function initFlowEditor(data: {
     }
     if (shouldSaveAssistantImmediately(changes)) {
       clearAssistantSaveTimer(assistantId);
-      try {
-        await runAssistantSaveNow(assistantId);
-      } catch (error) {
-        // Validation/UI status is updated in runAssistantSaveNow.
-        throw error;
-      }
+      await runAssistantSaveNow(assistantId);
       return;
     }
     queueAssistantSave(assistantId);
@@ -362,7 +365,7 @@ function initFlowEditor(data: {
       const ids = new Set<string>([
         ...assistantSaveTimers.keys(),
         ...pendingAssistantChanges.keys(),
-        ...assistantSavePromises.keys(),
+        ...assistantSavePromises.keys()
       ]);
       if (ids.size === 0) {
         refreshAssistantSaveStatus();
@@ -383,17 +386,14 @@ function initFlowEditor(data: {
   }
 
   // Unified save status combining flow + assistant saves
-  const unifiedSaveStatus = derived(
-    [saveStatus, assistantSaveStatus],
-    ([$flow, $assistant]) => {
-      if ($assistant === "pending" || $assistant === "saving" || $flow === "saving") {
-        return "saving" as const;
-      }
-      if ($assistant === "error") return "unsaved" as const;
-      if ($flow === "unsaved") return "unsaved" as const;
-      return "saved" as const;
+  const unifiedSaveStatus = derived([saveStatus, assistantSaveStatus], ([$flow, $assistant]) => {
+    if ($assistant === "saving" || $flow === "saving") {
+      return "saving" as const;
     }
-  );
+    if ($assistant === "error") return "unsaved" as const;
+    if ($flow === "unsaved") return "unsaved" as const;
+    return "saved" as const;
+  });
 
   // Debounced auto-save (500ms)
   let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -518,7 +518,9 @@ function initFlowEditor(data: {
       step_order: afterOrder + 1,
       user_description: defaultStepName,
       input_source: isFirstInsert ? "flow_input" : "previous_step",
-      input_type: isFirstInsert ? "text" : mapOutputToInputType((prevStep as FlowStep)?.output_type),
+      input_type: isFirstInsert
+        ? "text"
+        : mapOutputToInputType((prevStep as FlowStep)?.output_type),
       output_mode: "pass_through",
       output_type: "text",
       mcp_policy: "inherit"
@@ -533,9 +535,7 @@ function initFlowEditor(data: {
     });
 
     // Insert at correct position
-    const insertIndex = updatedSteps.findIndex(
-      (s: FlowStep) => s.step_order > afterOrder
-    );
+    const insertIndex = updatedSteps.findIndex((s: FlowStep) => s.step_order > afterOrder);
     if (insertIndex >= 0) {
       updatedSteps.splice(insertIndex, 0, newStep as FlowStep);
     } else {
@@ -569,6 +569,57 @@ function initFlowEditor(data: {
       });
       activeStepId.set(null);
     }
+  }
+
+  async function createTemplateFillStarter(): Promise<void> {
+    await addStep();
+    let steps = [...(get(editor.state.update).steps ?? [])];
+    const factStep = steps[steps.length - 1];
+    if (factStep) {
+      factStep.user_description = "Extrahera fakta";
+      if (factStep.assistant_id) {
+        await updateAssistantImmediately(factStep.assistant_id, {
+          name: factStep.user_description
+        });
+      }
+    }
+    editor.state.update.update((resource) => ({ ...resource, steps }));
+
+    await addStep();
+    steps = [...(get(editor.state.update).steps ?? [])];
+    const sectionStep = steps[steps.length - 1];
+    if (sectionStep) {
+      sectionStep.user_description = "Bakgrund";
+      if (sectionStep.assistant_id) {
+        await updateAssistantImmediately(sectionStep.assistant_id, {
+          name: sectionStep.user_description
+        });
+      }
+    }
+    editor.state.update.update((resource) => ({ ...resource, steps }));
+
+    await addStep();
+    steps = [...(get(editor.state.update).steps ?? [])];
+    const assemblyStep = steps[steps.length - 1];
+    if (assemblyStep) {
+      assemblyStep.user_description = "Sammanställ dokument";
+      assemblyStep.input_source = "previous_step";
+      assemblyStep.input_type = "text";
+      assemblyStep.output_type = "docx";
+      assemblyStep.output_mode = "template_fill";
+      assemblyStep.output_config = {
+        placeholders: [],
+        bindings: {}
+      };
+      if (assemblyStep.assistant_id) {
+        await updateAssistantImmediately(assemblyStep.assistant_id, {
+          name: assemblyStep.user_description
+        });
+      }
+      activeStepId.set(assemblyStep.id ?? null);
+    }
+    editor.state.update.update((resource) => ({ ...resource, steps }));
+    scheduleAutoSave();
   }
 
   async function listAssistantPrompts(assistantId: string): Promise<PromptSparse[]> {
@@ -620,8 +671,8 @@ function initFlowEditor(data: {
             ...step,
             input_bindings: {
               ...(bindings ?? {}),
-              question: remapped.text,
-            },
+              question: remapped.text
+            }
           };
         }
         for (const deletedReference of remapped.rewrittenDeletedReferences) {
@@ -632,7 +683,7 @@ function initFlowEditor(data: {
 
     editor.state.update.update((resource) => ({
       ...resource,
-      steps: rewrittenSteps,
+      steps: rewrittenSteps
     }));
     const stepIssues = syncTypedIOValidation(rewrittenSteps);
     if (stepIssues.length === 0) {
@@ -655,7 +706,7 @@ function initFlowEditor(data: {
 
       const nextPrompt = {
         text: remapped.text,
-        description: typeof prompt?.description === "string" ? prompt.description : "",
+        description: typeof prompt?.description === "string" ? prompt.description : ""
       };
       await updateAssistantImmediately(step.assistant_id, { prompt: nextPrompt });
       for (const deletedReference of remapped.rewrittenDeletedReferences) {
@@ -667,7 +718,7 @@ function initFlowEditor(data: {
       const sortedDeleted = [...impactedDeletedReferences].sort((a, b) => a - b).join(", ");
       setFlowValidationError(
         "deleted-step-reference",
-        `Step references to removed step order(s) ${sortedDeleted} were marked for manual repair.`,
+        `Step references to removed step order(s) ${sortedDeleted} were marked for manual repair.`
       );
     } else {
       setFlowValidationError("deleted-step-reference", null);
@@ -676,7 +727,7 @@ function initFlowEditor(data: {
 
   async function rewriteInputFieldVariableReferences(
     oldName: string,
-    newName: string,
+    newName: string
   ): Promise<number> {
     const fromToken = oldName.trim();
     const toToken = newName.trim();
@@ -695,7 +746,7 @@ function initFlowEditor(data: {
       if (nextText !== currentText) {
         const nextPrompt = {
           text: nextText,
-          description: typeof prompt?.description === "string" ? prompt.description : "",
+          description: typeof prompt?.description === "string" ? prompt.description : ""
         };
         await updateAssistantImmediately(step.assistant_id, { prompt: nextPrompt });
         rewrittenCount += 1;
@@ -710,7 +761,7 @@ function initFlowEditor(data: {
       if (rewritten === question) return step;
       return {
         ...step,
-        input_bindings: { ...(bindings ?? {}), question: rewritten },
+        input_bindings: { ...(bindings ?? {}), question: rewritten }
       };
     });
     editor.state.update.update((resource) => ({ ...resource, steps: nextSteps }));
@@ -722,7 +773,7 @@ function initFlowEditor(data: {
   async function rewriteStepNameVariableReferences({
     renamedStepOrder,
     oldName,
-    newName,
+    newName
   }: {
     renamedStepOrder: number;
     oldName: string;
@@ -734,7 +785,7 @@ function initFlowEditor(data: {
 
     let rewrittenCount = 0;
     const steps = (get(editor.state.update).steps ?? []).filter(
-      (step) => step.step_order > renamedStepOrder,
+      (step) => step.step_order > renamedStepOrder
     );
     for (const step of steps) {
       if (!step.assistant_id) continue;
@@ -746,7 +797,7 @@ function initFlowEditor(data: {
       if (nextText === currentText) continue;
       const nextPrompt = {
         text: nextText,
-        description: typeof prompt?.description === "string" ? prompt.description : "",
+        description: typeof prompt?.description === "string" ? prompt.description : ""
       };
       await updateAssistantImmediately(step.assistant_id, { prompt: nextPrompt });
       rewrittenCount += 1;
@@ -762,7 +813,7 @@ function initFlowEditor(data: {
       if (rewritten === question) return step;
       return {
         ...step,
-        input_bindings: { ...(bindings ?? {}), question: rewritten },
+        input_bindings: { ...(bindings ?? {}), question: rewritten }
       };
     });
     editor.state.update.update((resource) => ({ ...resource, steps: nextSteps }));
@@ -796,6 +847,7 @@ function initFlowEditor(data: {
     setResource: editor.setResource,
     addStep,
     insertStepAfter,
+    createTemplateFillStarter,
     loadAssistant,
     saveAssistant,
     updateAssistantImmediately,

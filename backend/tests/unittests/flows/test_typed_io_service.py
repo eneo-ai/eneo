@@ -48,6 +48,7 @@ def _service(user) -> FlowService:
         flow_repo=AsyncMock(),
         flow_version_repo=AsyncMock(),
         assistant_service=AsyncMock(),
+        file_repo=AsyncMock(),
     )
     service._validate_assistant_scope_for_steps = AsyncMock()
     return service

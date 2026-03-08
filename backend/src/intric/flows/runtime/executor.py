@@ -11,7 +11,6 @@ import sqlalchemy as sa
 logger = logging.getLogger(__name__)
 
 from intric.database.tables.flow_tables import Flows
-from intric.files.file_models import FileCreate, FileType
 from intric.flows.flow import (
     FlowRun,
     FlowRunStatus,
@@ -73,11 +72,16 @@ from intric.flows.runtime.step_attempt_runtime import (
     build_step_success_plan,
     build_typed_failure_plan,
 )
+from intric.flows.runtime.template_fill_runtime import (
+    TemplateFillRuntimeDeps,
+    execute_template_fill_step,
+)
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
 from intric.settings.encryption_service import EncryptionService
 from intric.spaces.space_repo import SpaceRepository
 from intric.completion_models.infrastructure.completion_service import CompletionService
+from intric.files.file_models import FileCreate, FileType
 from intric.files.file_repo import FileRepository
 from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.audit.domain.outcome import Outcome
@@ -520,6 +524,20 @@ class FlowRunExecutor:
             run.id, step.step_order, step.input_type, step.output_type,
         )
         logger.debug("flow_executor.resolving_input run_id=%s step_order=%d", run.id, step.step_order)
+        if step.output_mode == "template_fill":
+            template_fill_deps = TemplateFillRuntimeDeps(
+                variable_resolver=self.variable_resolver,
+                file_repo=self.file_repo,
+                apply_output_cap=self._apply_output_cap,
+                user_id=self.user.id,
+                logger=logger,
+            )
+            return await execute_template_fill_step(
+                step=step,
+                run=run,
+                state=state,
+                deps=template_fill_deps,
+            )
         execution_deps = StepExecutionRuntimeDeps(
             variable_resolver=self.variable_resolver,
             completion_service=self.completion_service,

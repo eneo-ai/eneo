@@ -13,16 +13,17 @@ def build_graph_from_steps(steps: list[dict[str, Any]]) -> tuple[list[dict[str, 
     for step in sorted_steps:
         step_id = str(step.get("step_id") or step.get("id"))
         label = step.get("user_description") or f"Steg {step['step_order']}"
+        output_mode = step.get("output_mode")
         nodes.append(
             {
                 "id": step_id,
                 "label": label,
-                "type": "llm",
+                "type": "assembly" if output_mode == "template_fill" else "llm",
                 "step_order": step["step_order"],
                 "input_source": step.get("input_source"),
                 "input_type": step.get("input_type"),
                 "output_type": step.get("output_type"),
-                "output_mode": step.get("output_mode"),
+                "output_mode": output_mode,
                 "mcp_policy": step.get("mcp_policy"),
                 "output_classification_override": step.get("output_classification_override"),
             }
@@ -135,7 +136,7 @@ def enrich_nodes_with_run_results(
 
     enriched: list[dict[str, Any]] = []
     for node in nodes:
-        if node["type"] != "llm":
+        if node["type"] not in {"llm", "assembly"}:
             enriched.append(node)
             continue
         result = by_step_id.get(node["id"]) or by_step_order.get(int(node["step_order"]))

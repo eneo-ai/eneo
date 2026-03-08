@@ -44,6 +44,7 @@
 
   const nodeTypes = {
     llm: FlowNodeLlm,
+    assembly: FlowNodeLlm,
     input: FlowNodeIO,
     output: FlowNodeIO
   };
@@ -209,8 +210,8 @@
   ): { nodes: Node[]; edges: Edge[] } {
     const orderedSteps = structuredClone(steps).sort((a, b) => a.step_order - b.step_order);
     const isPowerUser = userMode === "power_user";
-    const nodeWidth = isPowerUser ? 240 : 160;
-    const nodeHeight = isPowerUser ? 110 : 48;
+    const nodeWidth = isPowerUser ? 300 : 160;
+    const nodeHeight = isPowerUser ? 150 : 48;
     const inputNodeSize = { width: 160, height: 74 };
     const outputNodeSize = { width: 170, height: 78 };
 
@@ -240,7 +241,7 @@
       g.setNode(id, { width: nodeWidth, height: nodeHeight });
       resultNodes.push({
         id,
-        type: "llm",
+        type: step.output_mode === "template_fill" ? "assembly" : "llm",
         sourcePosition: Position.Right,
         targetPosition: Position.Left,
         position: { x: 0, y: 0 },
@@ -480,11 +481,12 @@
   function minimapNodeColor(node: Node): string {
     if (node.type === "input") return "var(--color-accent-default)";
     if (node.type === "output") return "var(--color-positive-default)";
+    if (node.type === "assembly") return "var(--color-warning-default)";
     return "var(--background-color-secondary)";
   }
 
   const handleNodeClick: NodeEventWithPointer<MouseEvent | TouchEvent, Node> = ({ node }) => {
-    if (node?.type === "llm" && node.data?.step) {
+    if ((node?.type === "llm" || node?.type === "assembly") && node.data?.step) {
       onnodeclick?.(node.id);
     }
   };
@@ -590,8 +592,8 @@
     --xy-node-background-color-default: var(--background-color-primary);
     --xy-node-border-default: 1px solid var(--border-color-default);
     --xy-node-border-radius-default: 8px;
-    --xy-node-boxshadow-default: 0px 3px 4px 0px rgba(0, 0, 0, 0.04),
-      0px 1px 2px 0px rgba(0, 0, 0, 0.08);
+    --xy-node-boxshadow-default:
+      0px 3px 4px 0px rgba(0, 0, 0, 0.04), 0px 1px 2px 0px rgba(0, 0, 0, 0.08);
     --xy-node-boxshadow-hover-default: 0 2px 8px rgba(0, 0, 0, 0.12);
     --xy-node-boxshadow-selected-default: 0 0 0 2px var(--color-accent-default);
     --xy-edge-label-background-color-default: transparent;
@@ -626,7 +628,7 @@
   :global(.dark) .flow-graph :global(.svelte-flow) {
     --xy-edge-stroke-default: #6b6b73;
     --xy-handle-border-color-default: #6b6b73;
-    --xy-node-boxshadow-default: 0px 3px 4px 0px rgba(0, 0, 0, 0.2),
-      0px 1px 2px 0px rgba(0, 0, 0, 0.3);
+    --xy-node-boxshadow-default:
+      0px 3px 4px 0px rgba(0, 0, 0, 0.2), 0px 1px 2px 0px rgba(0, 0, 0, 0.3);
   }
 </style>

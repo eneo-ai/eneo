@@ -24,7 +24,7 @@ from intric.flows.runtime.step_result_builder import build_transcribe_only_rag_m
 from intric.main.exceptions import TypedIOValidationException
 
 try:
-    from litellm import get_supported_openai_params as _litellm_get_supported_openai_params
+    from litellm import get_supported_openai_params as _litellm_get_supported_openai_params  # pyright: ignore[reportPrivateImportUsage]
 except Exception:  # pragma: no cover - defensive import guard
     _litellm_get_supported_openai_params = None
 
@@ -144,6 +144,8 @@ def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:
         payload["structured"] = output.structured_output
     if output.artifacts:
         payload["artifacts"] = output.artifacts
+    if output.output_payload_extensions:
+        payload.update(output.output_payload_extensions)
     return payload
 
 

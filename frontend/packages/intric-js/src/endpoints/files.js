@@ -9,6 +9,30 @@
 export function initFiles(client) {
   return {
     /**
+     * List files owned by the current user.
+     * @returns {Promise<{count: number, items: UploadedFile[]}>}
+     * @throws {IntricError}
+     */
+    list: async () => {
+      return client.fetch("/api/v1/files/", {
+        method: "get"
+      });
+    },
+
+    /**
+     * Get one file by id.
+     * @param {{fileId: string}} params
+     * @returns {Promise<UploadedFile>}
+     * @throws {IntricError}
+     */
+    get: async ({ fileId }) => {
+      return client.fetch(`/api/v1/files/{id}/`, {
+        method: "get",
+        params: { path: { id: fileId } }
+      });
+    },
+
+    /**
      * Upload a supported filetype and start converting it into an `InfoBlob`. Depending on the filetype and size the conversion can take some time,
      * so after a successful upload a `Job` is returned that can be independently tracked.
      * @param {Object} params

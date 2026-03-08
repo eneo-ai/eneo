@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { createEventDispatcher } from "svelte";
+  import type { CompletionModel } from "@intric/intric-js";
   import {
     behaviourList,
     getBehaviour,
@@ -16,8 +18,12 @@
   export let kwArgs: ModelKwArgs;
   export let isDisabled: boolean;
 
-  export let selectedModel: any = null; // CompletionModel from the parent
+  export let selectedModel: CompletionModel | null | undefined = null;
   export let aria: AriaProps = { "aria-label": m.select_model_behaviour() };
+
+  const dispatch = createEventDispatcher<{
+    change: { kwArgs: ModelKwArgs };
+  }>();
 
   const behaviourLabels: Record<ModelBehaviour, string> = {
     creative: m.creative(),
@@ -65,6 +71,7 @@
               };
         kwArgs = customArgs;
       }
+      dispatch("change", { kwArgs });
       return next;
     }
   });
@@ -81,6 +88,7 @@
         ...kwArgs,
         ...args
       };
+      dispatch("change", { kwArgs });
     }
   }
 

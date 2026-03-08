@@ -40,6 +40,7 @@ class FlowOutputMode(str, Enum):
     PASS_THROUGH = "pass_through"
     HTTP_POST = "http_post"
     TRANSCRIBE_ONLY = "transcribe_only"
+    TEMPLATE_FILL = "template_fill"
 
 
 class FlowMcpPolicy(str, Enum):
@@ -258,6 +259,19 @@ class FlowRunRedispatchResponse(BaseModel):
 class GraphResponse(BaseModel):
     nodes: list[dict[str, Any]]
     edges: list[dict[str, Any]]
+
+
+class FlowTemplatePlaceholderPublic(BaseModel):
+    name: str
+    location: str
+    preview: str | None = None
+
+
+class FlowTemplateInspectionPublic(BaseModel):
+    file_id: UUID
+    file_name: str
+    placeholders: list[FlowTemplatePlaceholderPublic]
+    extracted_text_preview: str | None = None
 
 
 class FlowRunDebugIoTypes(BaseModel):

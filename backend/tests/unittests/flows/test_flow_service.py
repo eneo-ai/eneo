@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -68,6 +69,7 @@ def _service(*, user, flow_repo, version_repo, encryption_service=None) -> FlowS
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=AsyncMock(),
+        file_repo=AsyncMock(),
         encryption_service=encryption_service,
     )
     service._validate_assistant_scope_for_steps = AsyncMock()  # type: ignore[method-assign]
@@ -166,6 +168,310 @@ async def test_publish_flow_creates_version_and_updates_published_version(user):
     assert result.published_version == 1
     version_repo.create.assert_awaited_once()
     flow_repo.update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_publish_flow_pins_template_metadata_for_template_fill(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    template_file_id = uuid4()
+    flow_id = uuid4()
+    source_flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Template flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[
+            _step(step_order=1).model_copy(
+                update={
+                    "output_mode": "template_fill",
+                    "output_type": "docx",
+                    "output_config": {
+                        "template_file_id": str(template_file_id),
+                        "bindings": {"section": "{{flow_input.title}}"},
+                    },
+                }
+            )
+        ],
+    )
+    flow_repo.get.return_value = source_flow
+    version_repo.get_latest.return_value = None
+    flow_repo.update.return_value = source_flow.model_copy(update={"published_version": 1})
+    service._get_owned_docx_template_file = AsyncMock(  # type: ignore[attr-defined]
+        return_value=SimpleNamespace(
+            id=template_file_id,
+            checksum="abc123",
+            name="rapport.docx",
+            blob=b"template-bytes",
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+    )
+    service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
+        return_value=[{"name": "section", "location": "body", "preview": "{{section}}"}]
+    )
+
+    await service.publish_flow(flow_id=flow_id)
+
+    definition = version_repo.create.await_args.kwargs["definition_json"]
+    output_config = definition["steps"][0]["output_config"]
+    assert output_config["template_file_id"] == str(template_file_id)
+    assert output_config["template_checksum"] == "abc123"
+    assert output_config["template_name"] == "rapport.docx"
+    assert output_config["placeholders"] == ["section"]
+
+
+@pytest.mark.asyncio
+async def test_publish_flow_preserves_template_placeholder_order(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    template_file_id = uuid4()
+    flow_id = uuid4()
+    source_flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Ordered template flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[
+            _step(step_order=1),
+                _step(step_order=1).model_copy(
+                    update={
+                        "step_order": 2,
+                        "user_description": "Sammanställ dokument",
+                        "input_source": "previous_step",
+                        "output_mode": "template_fill",
+                        "output_type": "docx",
+                    "output_config": {
+                        "template_file_id": str(template_file_id),
+                        "bindings": {
+                            "bakgrund": "{{step_1.output.text}}",
+                            "analys": "{{step_1.output.text}}",
+                            "slutsats": "{{step_1.output.text}}",
+                        },
+                    },
+                }
+            )
+        ],
+    )
+    flow_repo.get.return_value = source_flow
+    version_repo.get_latest.return_value = None
+    flow_repo.update.return_value = source_flow.model_copy(update={"published_version": 1})
+    service._get_owned_docx_template_file = AsyncMock(  # type: ignore[attr-defined]
+        return_value=SimpleNamespace(
+            id=template_file_id,
+            checksum="abc123",
+            name="rapport.docx",
+            blob=b"template-bytes",
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+    )
+    service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
+        return_value=[
+            {"name": "bakgrund", "location": "body", "preview": "{{bakgrund}}"},
+            {"name": "analys", "location": "body", "preview": "{{analys}}"},
+            {"name": "slutsats", "location": "body", "preview": "{{slutsats}}"},
+        ]
+    )
+
+    await service.publish_flow(flow_id=flow_id)
+
+    definition = version_repo.create.await_args.kwargs["definition_json"]
+    output_config = definition["steps"][1]["output_config"]
+    assert output_config["placeholders"] == ["bakgrund", "analys", "slutsats"]
+
+
+@pytest.mark.asyncio
+async def test_get_owned_docx_template_file_reports_missing_blob_clearly(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    file_id = uuid4()
+    service.file_repo.get_by_id.return_value = SimpleNamespace(
+        id=file_id,
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        blob=None,
+        name="template.docx",
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="could not be read because the file content is missing",
+    ):
+        await service._get_owned_docx_template_file(file_id)
+
+
+@pytest.mark.asyncio
+async def test_update_flow_allows_incomplete_template_fill_during_draft_editing(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    existing = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Draft flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1)],
+    )
+    draft_steps = [
+        _step(step_order=1).model_copy(
+            update={
+                "output_mode": "template_fill",
+                "output_type": "docx",
+                "output_config": {"bindings": {}},
+            }
+        )
+    ]
+    flow_repo.get.return_value = existing
+    flow_repo.update.return_value = existing.model_copy(update={"steps": draft_steps})
+
+    updated = await service.update_flow(flow_id=flow_id, steps=draft_steps)
+
+    assert updated.steps[0].output_mode == "template_fill"
+    assert updated.steps[0].output_config == {"bindings": {}}
+
+
+@pytest.mark.asyncio
+async def test_publish_flow_rejects_empty_template_bindings(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    template_file_id = uuid4()
+    flow_repo.get.return_value = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Template flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[
+            _step(step_order=1).model_copy(
+                update={
+                    "output_mode": "template_fill",
+                    "output_type": "docx",
+                    "output_config": {
+                        "template_file_id": str(template_file_id),
+                        "bindings": {},
+                    },
+                }
+            )
+        ],
+    )
+
+    service._get_owned_docx_template_file = AsyncMock(  # type: ignore[attr-defined]
+        return_value=SimpleNamespace(
+            id=template_file_id,
+            checksum="abc123",
+            name="rapport.docx",
+            blob=b"template-bytes",
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+    )
+    service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
+        return_value=[{"name": "section", "location": "body", "preview": "{{section}}"}]
+    )
+
+    with pytest.raises(BadRequestException, match="missing bindings"):
+        await service.publish_flow(flow_id=flow_id)
+
+
+@pytest.mark.asyncio
+async def test_publish_flow_allows_explicit_empty_template_binding(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    template_file_id = uuid4()
+    source_flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Template flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[
+            _step(step_order=1).model_copy(
+                update={
+                    "output_mode": "template_fill",
+                    "output_type": "docx",
+                    "output_config": {
+                        "template_file_id": str(template_file_id),
+                        "bindings": {"optional_section": ""},
+                    },
+                }
+            )
+        ],
+    )
+    flow_repo.get.return_value = source_flow
+    version_repo.get_latest.return_value = None
+    flow_repo.update.return_value = source_flow.model_copy(update={"published_version": 1})
+    service._get_owned_docx_template_file = AsyncMock(  # type: ignore[attr-defined]
+        return_value=SimpleNamespace(
+            id=template_file_id,
+            checksum="abc123",
+            name="rapport.docx",
+            blob=b"template-bytes",
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+    )
+    service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
+        return_value=[{"name": "optional_section", "location": "body", "preview": "{{optional_section}}"}]
+    )
+
+    await service.publish_flow(flow_id=flow_id)
+
+    definition = version_repo.create.await_args.kwargs["definition_json"]
+    assert definition["steps"][0]["output_config"]["bindings"]["optional_section"] == ""
 
 
 @pytest.mark.asyncio
@@ -457,6 +763,7 @@ async def test_create_flow_rejects_assistants_outside_space_or_tenant(user):
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=AsyncMock(),
+        file_repo=AsyncMock(),
     )
 
     with pytest.raises(BadRequestException, match="outside the selected space or tenant"):
@@ -506,6 +813,7 @@ async def test_update_flow_assistant_rejects_when_flow_published(user):
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
+        file_repo=AsyncMock(),
     )
 
     flow_id = uuid4()
@@ -544,6 +852,7 @@ async def test_create_flow_assistant_sets_flow_managed_origin(user):
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
+        file_repo=AsyncMock(),
     )
 
     flow_id = uuid4()
@@ -588,6 +897,7 @@ async def test_get_flow_assistant_rejects_wrong_owner(user):
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
+        file_repo=AsyncMock(),
     )
 
     flow_id = uuid4()
@@ -629,6 +939,7 @@ async def test_get_flow_assistant_rejects_non_flow_managed(user):
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
+        file_repo=AsyncMock(),
     )
 
     flow_id = uuid4()
@@ -669,6 +980,7 @@ async def test_update_flow_assistant_passes_include_hidden(user):
         flow_repo=flow_repo,
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
+        file_repo=AsyncMock(),
     )
 
     flow_id = uuid4()

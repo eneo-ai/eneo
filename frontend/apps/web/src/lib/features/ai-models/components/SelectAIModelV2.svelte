@@ -1,4 +1,5 @@
 <script lang="ts" generics="T extends TranscriptionModel | CompletionModel">
+  import { createEventDispatcher } from "svelte";
   import type { CompletionModel, TranscriptionModel } from "@intric/intric-js";
   import ModelNameAndVendor from "./ModelNameAndVendor.svelte";
   import { sortModels } from "../sortModels";
@@ -17,6 +18,10 @@
   export let selectedModel: T | undefined | null;
 
   export let aria: AriaProps = { "aria-label": m.select_ai_model() };
+
+  const dispatch = createEventDispatcher<{
+    change: { selectedModel: T | undefined | null };
+  }>();
 
   // Check if models have provider info (provider_name field exists and at least one model has a provider)
   function hasProviderInfo(models: T[]): boolean {
@@ -44,6 +49,7 @@
     portal: null,
     onSelectedChange: ({ next }) => {
       selectedModel = next?.value ?? availableModels[0];
+      dispatch("change", { selectedModel });
       return next;
     }
   });

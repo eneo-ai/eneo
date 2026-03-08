@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-ALLOWED_OUTPUT_MODES = {"pass_through", "http_post", "transcribe_only"}
+ALLOWED_OUTPUT_MODES = {"pass_through", "http_post", "transcribe_only", "template_fill"}
 
 
 def transcribe_only_violation(

@@ -36,7 +36,10 @@ class FileRepository:
 
         files_in_db = await self.session.scalars(stmt)
 
-        files = [File.model_validate(file) for file in files_in_db]
+        files = [
+            self._file_from_row(file, include_transcription=include_transcription)
+            for file in files_in_db
+        ]
 
         return files
 
@@ -55,7 +58,10 @@ class FileRepository:
 
         files_in_db = await self.session.scalars(stmt)
 
-        return [File.model_validate(file) for file in files_in_db]
+        return [
+            self._file_from_row(file, include_transcription=include_transcription)
+            for file in files_in_db
+        ]
 
     async def get_by_id(self, file_id: UUID) -> File:
         file = await self._delegate.get(id=file_id)
@@ -108,3 +114,26 @@ class FileRepository:
         files_in_db = await self.session.scalars(stmt)
 
         return [FileInfo.model_validate(file) for file in files_in_db]
+
+    @staticmethod
+    def _file_from_row(file: Files, *, include_transcription: bool) -> File:
+        if include_transcription:
+            return File.model_validate(file)
+
+        return File.model_validate(
+            {
+                "id": file.id,
+                "created_at": file.created_at,
+                "updated_at": file.updated_at,
+                "name": file.name,
+                "checksum": file.checksum,
+                "size": file.size,
+                "mimetype": file.mimetype,
+                "file_type": file.file_type,
+                "text": file.text,
+                "blob": file.blob,
+                "transcription": None,
+                "user_id": file.user_id,
+                "tenant_id": file.tenant_id,
+            }
+        )

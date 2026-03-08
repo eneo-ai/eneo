@@ -50,9 +50,22 @@ def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
         if raw_output_config is not None and not isinstance(raw_output_config, dict):
             raise BadRequestException("Webhook output_config must be an object.")
         if isinstance(raw_output_config, dict):
-            raw_headers = raw_output_config.get("headers")
-            if raw_headers is not None and not isinstance(raw_headers, dict):
-                raise BadRequestException("Webhook output_config.headers must be an object.")
+            if output_mode == "template_fill":
+                bindings = raw_output_config.get("bindings")
+                if not isinstance(bindings, dict):
+                    raise BadRequestException("Template fill output_config.bindings must be an object.")
+                if "template_file_id" not in raw_output_config:
+                    raise BadRequestException(
+                        "Template fill output_config.template_file_id is required."
+                    )
+                if output_type != "docx":
+                    raise BadRequestException(
+                        "Template fill output_mode requires output_type 'docx'."
+                    )
+            else:
+                raw_headers = raw_output_config.get("headers")
+                if raw_headers is not None and not isinstance(raw_headers, dict):
+                    raise BadRequestException("Webhook output_config.headers must be an object.")
         try:
             step_id = UUID(str(item["step_id"]))
             assistant_id = UUID(str(item["assistant_id"]))
