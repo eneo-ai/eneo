@@ -48,6 +48,19 @@ class FlowMcpPolicy(str, Enum):
     RESTRICTED = "restricted"
 
 
+class FlowRuntimeInputFormat(str, Enum):
+    DOCUMENT = "document"
+    AUDIO = "audio"
+    FILE = "file"
+
+
+class FlowTemplateAssetStatus(str, Enum):
+    READY = "ready"
+    NEEDS_ACTION = "needs_action"
+    READ_ONLY = "read_only"
+    UNAVAILABLE = "unavailable"
+
+
 class FlowStepCreateRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -166,15 +179,22 @@ class FlowRunCreateRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "file_ids": ["00000000-0000-0000-0000-000000000003"],
+                "expected_flow_version": 7,
                 "input_payload_json": {
                     "text": "optional context for downstream prompt steps"
+                },
+                "step_inputs": {
+                    "00000000-0000-0000-0000-000000000003": {
+                        "file_ids": ["00000000-0000-0000-0000-000000000004"]
+                    }
                 },
             }
         }
     )
 
+    expected_flow_version: int | None = None
     input_payload_json: dict[str, Any] | None = None
+    step_inputs: dict[UUID, dict[str, list[UUID]]] | None = None
     file_ids: list[UUID] | None = None
 
 
@@ -268,10 +288,66 @@ class FlowTemplatePlaceholderPublic(BaseModel):
 
 
 class FlowTemplateInspectionPublic(BaseModel):
+    asset_id: UUID | None = None
     file_id: UUID
     file_name: str
     placeholders: list[FlowTemplatePlaceholderPublic]
     extracted_text_preview: str | None = None
+    status: FlowTemplateAssetStatus | None = None
+
+
+class FlowTemplateAssetPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    flow_id: UUID
+    file_id: UUID
+    name: str
+    checksum: str
+    mimetype: str | None = None
+    placeholders: list[str] = Field(default_factory=list)
+    status: FlowTemplateAssetStatus
+    last_updated_by_name: str | None = None
+    can_edit: bool = False
+    can_download: bool = False
+    can_select: bool = False
+    can_inspect: bool = False
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class FlowRuntimeInputContractPublic(BaseModel):
+    step_id: UUID
+    step_order: int
+    label: str | None = None
+    description: str | None = None
+    required: bool
+    input_format: FlowRuntimeInputFormat
+    max_files: int | None = None
+    max_file_size_bytes: int | None = None
+    accepted_mimetypes: list[str] = Field(default_factory=list)
+
+
+class FlowTemplateReadinessPublic(BaseModel):
+    step_id: UUID
+    template_asset_id: UUID | None = None
+    template_file_id: UUID | None = None
+    template_name: str | None = None
+    checksum: str | None = None
+    published_flow_version: int | None = None
+    status: FlowTemplateAssetStatus
+    can_edit: bool = False
+    can_download: bool = False
+    message_code: str | None = None
+
+
+class FlowRunContractPublic(BaseModel):
+    flow_id: UUID
+    published_flow_version: int
+    form_fields: list[dict[str, Any]] = Field(default_factory=list)
+    steps_requiring_input: list[FlowRuntimeInputContractPublic] = Field(default_factory=list)
+    aggregate_max_files: int | None = None
+    template_readiness: list[FlowTemplateReadinessPublic] = Field(default_factory=list)
 
 
 class FlowRunDebugIoTypes(BaseModel):

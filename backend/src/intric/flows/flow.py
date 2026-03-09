@@ -36,6 +36,19 @@ class FlowStepAttemptStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class FlowRuntimeInputFormat(str, Enum):
+    DOCUMENT = "document"
+    AUDIO = "audio"
+    FILE = "file"
+
+
+class FlowTemplateAssetStatus(str, Enum):
+    READY = "ready"
+    NEEDS_ACTION = "needs_action"
+    READ_ONLY = "read_only"
+    UNAVAILABLE = "unavailable"
+
+
 class FlowStep(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -56,6 +69,40 @@ class FlowStep(BaseModel):
     mcp_policy: str
     input_config: JsonObject | None = None
     output_config: JsonObject | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class FlowRuntimeInputConfig(BaseModel):
+    enabled: bool = False
+    required: bool = False
+    max_files: int | None = None
+    input_format: FlowRuntimeInputFormat = FlowRuntimeInputFormat.DOCUMENT
+    accepted_mimetypes_override: list[str] | None = None
+    label: str | None = None
+    description: str | None = None
+
+
+class FlowTemplateAsset(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    flow_id: UUID
+    space_id: UUID
+    tenant_id: UUID
+    file_id: UUID
+    name: str
+    checksum: str
+    mimetype: str | None = None
+    placeholders: list[str] = Field(default_factory=list)
+    created_by_user_id: UUID | None = None
+    updated_by_user_id: UUID | None = None
+    last_updated_by_name: str | None = None
+    status: FlowTemplateAssetStatus = FlowTemplateAssetStatus.READY
+    can_edit: bool = False
+    can_download: bool = False
+    can_select: bool = False
+    can_inspect: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

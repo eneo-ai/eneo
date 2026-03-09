@@ -14,6 +14,7 @@ _STEP_ALIAS_PATTERN = re.compile(r"^step_\d+($|[._])")
 _RESERVED_CONTEXT_KEYS = {
     "flow",
     "flow_input",
+    "step_input",
     "transkribering",
     "föregående_steg",
     "indata_text",
@@ -38,6 +39,7 @@ class FlowVariableResolver:
         *,
         current_step_order: int | None = None,
         step_names_by_order: dict[int, str] | None = None,
+        current_step_input: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized_flow_input = flow_input or {}
         context: dict[str, Any] = {
@@ -83,7 +85,9 @@ class FlowVariableResolver:
             context["indata_filer"] = file_ids_value
 
         for result in prior_results:
+            runtime_input = self._extract_runtime_input(result)
             step_ctx = {
+                "input": runtime_input,
                 "output": result.output_payload_json or {},
                 "status": result.status.value,
                 "error_message": result.error_message,
@@ -108,6 +112,16 @@ class FlowVariableResolver:
                 if step_name in context:
                     continue
                 context[step_name] = self._extract_step_text(result)
+
+        if isinstance(current_step_input, dict):
+            context["step_input"] = current_step_input
+            if current_step_order is not None:
+                step_key = f"step_{current_step_order}"
+                existing = context.get(step_key)
+                if isinstance(existing, dict):
+                    existing["input"] = current_step_input
+                else:
+                    context[step_key] = {"input": current_step_input}
 
         return context
 
@@ -190,3 +204,11 @@ class FlowVariableResolver:
             if isinstance(value, str) and value.strip():
                 return value
         return None
+
+    @staticmethod
+    def _extract_runtime_input(result: FlowStepResult) -> dict[str, Any]:
+        payload = result.input_payload_json or {}
+        runtime_input = payload.get("runtime_input")
+        if isinstance(runtime_input, dict):
+            return dict(runtime_input)
+        return {}

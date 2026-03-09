@@ -1,9 +1,11 @@
+<svelte:options runes={false} />
+
 <script lang="ts">
   import type { Flow, FlowRun, Intric } from "@intric/intric-js";
   import { Button, Dialog } from "@intric/ui";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
-  import FlowRunEvidence from "./FlowRunEvidence.svelte";
+  import FlowRunEvidenceComponent from "./FlowRunEvidence.svelte";
   import { onDestroy } from "svelte";
   import { toast } from "$lib/components/toast";
   import { getFlowRunStatusLabel } from "./flowRunStatusLabel";
@@ -27,6 +29,7 @@
   let cancellingRunId: string | null = null;
   let showCancelConfirm: Dialog.OpenState;
   let pendingCancelRunId: string | null = null;
+  const FlowRunEvidence = FlowRunEvidenceComponent as any;
 
   async function loadRuns() {
     if (!flow?.id) {
@@ -40,7 +43,7 @@
       const result = await intric.flows.runs.list({ flowId: flow.id });
       runs = (result.items ?? result) as FlowRun[];
       latestRunPayload = runs.length > 0 ? (runs[0].input_payload_json ?? null) : null;
-      if (pendingHighlightRunId && runs.some(r => r.id === pendingHighlightRunId)) {
+      if (pendingHighlightRunId && runs.some((r) => r.id === pendingHighlightRunId)) {
         selectedRunId = pendingHighlightRunId;
         pendingHighlightRunId = null;
       }
@@ -61,7 +64,9 @@
     loading = false;
   }
 
-  $: if (reloadTrigger) { void loadRuns(); }
+  $: if (reloadTrigger) {
+    void loadRuns();
+  }
 
   // Poll for updates every 5s when there are running runs
   let pollInterval: ReturnType<typeof setInterval> | null = null;
@@ -79,23 +84,35 @@
 
   function getStatusColor(status: string): string {
     switch (status) {
-      case "completed": return "text-positive-stronger";
-      case "failed": return "text-negative-stronger";
-      case "running": return "text-accent-stronger";
-      case "queued": return "text-secondary";
-      case "cancelled": return "text-warning-stronger";
-      default: return "text-secondary";
+      case "completed":
+        return "text-positive-stronger";
+      case "failed":
+        return "text-negative-stronger";
+      case "running":
+        return "text-accent-stronger";
+      case "queued":
+        return "text-secondary";
+      case "cancelled":
+        return "text-warning-stronger";
+      default:
+        return "text-secondary";
     }
   }
 
   function getStatusDotColor(status: string): string {
     switch (status) {
-      case "completed": return "bg-positive-default";
-      case "failed": return "bg-negative-default";
-      case "running": return "bg-accent-default animate-pulse";
-      case "queued": return "bg-secondary";
-      case "cancelled": return "bg-warning-default";
-      default: return "bg-secondary";
+      case "completed":
+        return "bg-positive-default";
+      case "failed":
+        return "bg-negative-default";
+      case "running":
+        return "bg-accent-default animate-pulse";
+      case "queued":
+        return "bg-secondary";
+      case "cancelled":
+        return "bg-warning-default";
+      default:
+        return "bg-secondary";
     }
   }
 
@@ -105,7 +122,7 @@
       failed: m.flow_run_status_failed,
       queued: m.flow_run_status_queued,
       running: m.flow_run_status_running,
-      cancelled: m.flow_run_status_cancelled,
+      cancelled: m.flow_run_status_cancelled
     });
   }
 
@@ -120,7 +137,7 @@
     try {
       const { url } = await intric.files.generateSignedUrl({
         fileId,
-        contentDisposition: "attachment",
+        contentDisposition: "attachment"
       });
       window.open(url, "_blank");
     } catch (e) {
@@ -178,18 +195,19 @@
 <div class="flex flex-col gap-4 p-4">
   <div class="flex items-center justify-between">
     <h2 class="text-lg font-semibold">{m.flow_history()}</h2>
-    <div class="flex items-center gap-2">
-    </div>
+    <div class="flex items-center gap-2"></div>
   </div>
 
   {#if loading}
-    <div class="flex items-center justify-center gap-2 py-8 text-sm text-secondary">
+    <div class="text-secondary flex items-center justify-center gap-2 py-8 text-sm">
       <IconLoadingSpinner class="size-4 animate-spin" />
       {m.flow_loading()}
     </div>
   {:else if loadError}
-    <div class="flex items-center gap-3 rounded-lg border border-negative-default/20 bg-negative-dimmer px-5 py-4">
-      <p class="flex-1 text-sm text-negative-default">{loadError}</p>
+    <div
+      class="border-negative-default/20 bg-negative-dimmer flex items-center gap-3 rounded-lg border px-5 py-4"
+    >
+      <p class="text-negative-default flex-1 text-sm">{loadError}</p>
       <Button variant="outlined" size="sm" on:click={loadRuns} class="gap-1.5 text-xs">
         {m.flow_retry()}
       </Button>
@@ -202,34 +220,48 @@
         <table class="w-full min-w-[600px] text-sm" aria-label={m.flow_history()}>
           <thead>
             <tr class="border-default border-b text-left">
-              <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted">{m.status()}</th>
-              <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted">{m.version()}</th>
-              <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted">{m.flow_run_started()}</th>
-              <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted">{m.duration()}</th>
-              <th scope="col" class="px-4 py-2.5 text-xs font-medium text-muted">{m.actions()}</th>
+              <th scope="col" class="text-muted px-4 py-2.5 text-xs font-medium">{m.status()}</th>
+              <th scope="col" class="text-muted px-4 py-2.5 text-xs font-medium">{m.version()}</th>
+              <th scope="col" class="text-muted px-4 py-2.5 text-xs font-medium"
+                >{m.flow_run_started()}</th
+              >
+              <th scope="col" class="text-muted px-4 py-2.5 text-xs font-medium">{m.duration()}</th>
+              <th scope="col" class="text-muted px-4 py-2.5 text-xs font-medium">{m.actions()}</th>
             </tr>
           </thead>
           <tbody>
             {#each runs as run (run.id)}
               <tr
-                class="border-dimmer border-b last:border-b-0 cursor-pointer transition-colors hover:bg-hover-dimmer"
+                class="border-dimmer hover:bg-hover-dimmer cursor-pointer border-b transition-colors last:border-b-0"
                 class:bg-hover-dimmer={selectedRunId === run.id}
                 tabindex="0"
                 on:click={() => (selectedRunId = selectedRunId === run.id ? null : run.id)}
-                on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectedRunId = selectedRunId === run.id ? null : run.id; } }}
-                style:border-left={selectedRunId === run.id ? "2px solid var(--accent-default)" : undefined}
+                on:keydown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    selectedRunId = selectedRunId === run.id ? null : run.id;
+                  }
+                }}
+                style:border-left={selectedRunId === run.id
+                  ? "2px solid var(--accent-default)"
+                  : undefined}
               >
                 <td class="px-4 py-3">
-                  <span class="{getStatusColor(run.status)} inline-flex items-center gap-1.5 text-xs font-medium">
-                    <span class="{getStatusDotColor(run.status)} size-1.5 shrink-0 rounded-full"></span>
+                  <span
+                    class="{getStatusColor(
+                      run.status
+                    )} inline-flex items-center gap-1.5 text-xs font-medium"
+                  >
+                    <span class="{getStatusDotColor(run.status)} size-1.5 shrink-0 rounded-full"
+                    ></span>
                     {getStatusLabel(run.status)}
                   </span>
                 </td>
-                <td class="px-4 py-3 tabular-nums text-secondary">v{run.flow_version}</td>
-                <td class="px-4 py-3 text-secondary">
+                <td class="text-secondary px-4 py-3 tabular-nums">v{run.flow_version}</td>
+                <td class="text-secondary px-4 py-3">
                   {new Date(run.created_at).toLocaleString()}
                 </td>
-                <td class="px-4 py-3 tabular-nums text-secondary">
+                <td class="text-secondary px-4 py-3 tabular-nums">
                   {#if run.status === "completed" || run.status === "failed"}
                     {formatDuration(run.created_at, run.updated_at)}
                   {:else if run.status === "running"}
@@ -256,7 +288,9 @@
                         disabled={redispatchingRunId === run.id}
                         on:click={() => void redispatchRun(run.id)}
                       >
-                        {redispatchingRunId === run.id ? m.flow_run_redispatching() : m.flow_run_redispatch()}
+                        {redispatchingRunId === run.id
+                          ? m.flow_run_redispatching()
+                          : m.flow_run_redispatch()}
                       </Button>
                     {/if}
                     {#if run.status === "queued" || run.status === "running"}
@@ -275,7 +309,9 @@
               {#if run.status === "failed" && run.error_message}
                 <tr>
                   <td colspan="5" class="border-default border-b px-4 py-2">
-                    <div class="flex min-w-0 items-start gap-2 rounded-md border-l-2 border-l-negative-default bg-hover-dimmer px-3 py-2 text-xs text-negative-stronger">
+                    <div
+                      class="border-l-negative-default bg-hover-dimmer text-negative-stronger flex min-w-0 items-start gap-2 rounded-md border-l-2 px-3 py-2 text-xs"
+                    >
                       <span class="shrink-0 font-semibold">{m.flow_run_error()}:</span>
                       <span class="min-w-0 break-words">{run.error_message}</span>
                     </div>
@@ -285,15 +321,22 @@
               {#if run.status === "completed" && run.output_payload_json}
                 <tr>
                   <td colspan="5" class="border-default border-b px-4 py-2">
-                    <div class="flex flex-col gap-1.5 rounded-md border-l-2 border-l-positive-default bg-hover-dimmer px-3 py-2 text-xs">
+                    <div
+                      class="border-l-positive-default bg-hover-dimmer flex flex-col gap-1.5 rounded-md border-l-2 px-3 py-2 text-xs"
+                    >
                       {#if run.output_payload_json.structured}
                         {@const structured = run.output_payload_json.structured}
                         {#if Array.isArray(structured)}
                           <div class="text-secondary flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                            <span class="font-semibold text-positive-stronger">{m.flow_run_output()}:</span>
+                            <span class="text-positive-stronger font-semibold"
+                              >{m.flow_run_output()}:</span
+                            >
                             {#each structured.slice(0, 3) as item, i}
                               <span class="font-mono">
-                                #{i + 1}: {JSON.stringify(item).slice(0, 80)}{JSON.stringify(item).length > 80 ? "\u2026" : ""}
+                                #{i + 1}: {JSON.stringify(item).slice(0, 80)}{JSON.stringify(item)
+                                  .length > 80
+                                  ? "\u2026"
+                                  : ""}
                               </span>
                             {/each}
                             {#if structured.length > 3}
@@ -303,32 +346,48 @@
                         {:else}
                           {@const entries = Object.entries(structured).slice(0, 4)}
                           <div class="text-secondary flex flex-wrap items-baseline gap-x-4 gap-y-1">
-                            <span class="font-semibold text-positive-stronger">{m.flow_run_output()}:</span>
+                            <span class="text-positive-stronger font-semibold"
+                              >{m.flow_run_output()}:</span
+                            >
                             {#each entries as [key, val], i}
                               <span>
-                                <span class="font-semibold text-positive-stronger">{key}:</span>
-                                <span class="text-secondary">{String(val).slice(0, 80)}{String(val).length > 80 ? "\u2026" : ""}</span>
+                                <span class="text-positive-stronger font-semibold">{key}:</span>
+                                <span class="text-secondary"
+                                  >{String(val).slice(0, 80)}{String(val).length > 80
+                                    ? "\u2026"
+                                    : ""}</span
+                                >
                               </span>
                             {/each}
                             {#if Object.keys(structured).length > 4}
-                              <span class="text-muted">+{Object.keys(structured).length - 4} more</span>
+                              <span class="text-muted"
+                                >+{Object.keys(structured).length - 4} more</span
+                              >
                             {/if}
                           </div>
                         {/if}
                       {:else if run.output_payload_json.text}
                         <div class="text-secondary truncate">
-                          <span class="font-semibold text-positive-stronger">{m.flow_run_output()}:</span>
-                          {String(run.output_payload_json.text).slice(0, 200)}{String(run.output_payload_json.text).length > 200 ? "\u2026" : ""}
+                          <span class="text-positive-stronger font-semibold"
+                            >{m.flow_run_output()}:</span
+                          >
+                          {String(run.output_payload_json.text).slice(0, 200)}{String(
+                            run.output_payload_json.text
+                          ).length > 200
+                            ? "\u2026"
+                            : ""}
                         </div>
                       {/if}
                       {#if run.output_payload_json.artifacts?.length}
                         <div class="flex flex-wrap items-center gap-2">
                           {#each run.output_payload_json.artifacts as artifact}
                             <button
-                              class="group inline-flex items-center gap-1.5 rounded-md border border-default bg-primary px-2.5 py-1 text-xs font-medium shadow-sm transition-all hover:shadow"
+                              class="group border-default bg-primary inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium shadow-sm transition-all hover:shadow"
                               on:click={() => downloadArtifact(artifact.file_id)}
                             >
-                              <IconArrowDownToLine class="size-3 text-muted group-hover:text-secondary" />
+                              <IconArrowDownToLine
+                                class="text-muted group-hover:text-secondary size-3"
+                              />
                               {artifact.name}
                             </button>
                           {/each}
@@ -340,8 +399,17 @@
               {/if}
               {#if selectedRunId === run.id}
                 <tr>
-                  <td id={getEvidenceRowId(run.id)} colspan="5" class="border-default border-b bg-hover-dimmer/50 px-4 py-4">
-                    <FlowRunEvidence runId={run.id} flowId={flow.id} {intric} runStatus={run.status} />
+                  <td
+                    id={getEvidenceRowId(run.id)}
+                    colspan="5"
+                    class="border-default bg-hover-dimmer/50 border-b px-4 py-4"
+                  >
+                    <FlowRunEvidence
+                      runId={run.id}
+                      flowId={flow.id}
+                      {intric}
+                      runStatus={run.status}
+                    />
                   </td>
                 </tr>
               {/if}
@@ -352,7 +420,6 @@
     </div>
   {/if}
 </div>
-
 
 <Dialog.Root alert bind:isOpen={showCancelConfirm}>
   <Dialog.Content width="small">

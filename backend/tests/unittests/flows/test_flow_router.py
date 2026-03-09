@@ -13,7 +13,7 @@ from fastapi import UploadFile
 
 from intric.authentication.auth_dependencies import ScopeFilter
 from intric.audit.domain.action_types import ActionType
-from intric.flows.flow import Flow, FlowRun, FlowRunStatus, FlowStep, FlowVersion
+from intric.flows.flow import Flow, FlowRun, FlowRunStatus, FlowStep, FlowTemplateAsset, FlowVersion
 from intric.flows.api import flow_router_common as router_common_module
 from intric.flows.api.flow_models import (
     FlowAssistantCreateRequest,
@@ -30,6 +30,7 @@ from intric.flows.api.flow_assistant_router import (
 from intric.flows.api.flow_consumer_router import (
     cancel_flow_run_alias,
     create_flow_run,
+    get_flow_run_contract,
     get_flow_input_policy,
     get_flow_run_alias,
     get_flow_graph,
@@ -38,6 +39,7 @@ from intric.flows.api.flow_consumer_router import (
     list_flow_runs_alias,
     redispatch_flow_run_alias,
     upload_flow_file,
+    upload_flow_runtime_file,
 )
 from intric.flows.api.flow_definition_router import create_flow
 from intric.flows.api.flow_definition_router import inspect_flow_template
@@ -248,6 +250,8 @@ async def test_create_flow_run_schedules_background_dispatch():
     flow_run_service.create_run.assert_awaited_once_with(
         flow_id=flow_id,
         input_payload_json={"case_id": "123"},
+        expected_flow_version=None,
+        step_inputs=None,
         file_ids=None,
     )
     audit_service.log_async.assert_awaited_once()
@@ -256,11 +260,11 @@ async def test_create_flow_run_schedules_background_dispatch():
 @pytest.mark.asyncio
 async def test_inspect_flow_template_enforces_scope_and_calls_service(monkeypatch):
     container = MagicMock()
-    flow_service = AsyncMock()
-    container.flow_service.return_value = flow_service
+    template_asset_service = AsyncMock()
+    container.flow_template_asset_service.return_value = template_asset_service
     flow_id = uuid4()
     file_id = uuid4()
-    flow_service.inspect_template_file.return_value = {
+    template_asset_service.inspect_asset.return_value = {
         "file_id": file_id,
         "file_name": "rapport.docx",
         "placeholders": [{"name": "summary", "location": "body", "preview": "{{summary}}"}],
@@ -289,7 +293,7 @@ async def test_inspect_flow_template_enforces_scope_and_calls_service(monkeypatc
     )
 
     assert enforced == [str(flow_id)]
-    flow_service.inspect_template_file.assert_awaited_once_with(flow_id=flow_id, file_id=file_id)
+    template_asset_service.inspect_asset.assert_awaited_once_with(flow_id=flow_id, asset_id=file_id)
     assert result["file_name"] == "rapport.docx"
     assert result["extracted_text_preview"] == "Titel: {{summary}}"
 
@@ -297,20 +301,32 @@ async def test_inspect_flow_template_enforces_scope_and_calls_service(monkeypatc
 @pytest.mark.asyncio
 async def test_upload_flow_template_file_enforces_scope_and_uses_docx_template_save(monkeypatch):
     container = MagicMock()
-    file_service = AsyncMock()
+    template_asset_service = AsyncMock()
     audit_service = AsyncMock()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
-    file = SimpleNamespace(
-        id=uuid4(),
-        name="template.docx",
-        size=1024,
-        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        file_type=SimpleNamespace(value="document"),
+    asset = FlowTemplateAsset.model_validate(
+        {
+            "id": uuid4(),
+            "flow_id": uuid4(),
+            "space_id": uuid4(),
+            "tenant_id": user.tenant_id,
+            "file_id": uuid4(),
+            "name": "template.docx",
+            "checksum": "checksum",
+            "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "placeholders": ["summary"],
+            "status": "ready",
+            "last_updated_by_name": "User",
+            "can_edit": True,
+            "can_download": True,
+            "can_select": True,
+            "can_inspect": True,
+        }
     )
-    container.file_service.return_value = file_service
+    container.flow_template_asset_service.return_value = template_asset_service
     container.audit_service.return_value = audit_service
     container.user.return_value = user
-    file_service.save_docx_template.return_value = file
+    template_asset_service.upload_asset.return_value = asset
     flow_id = uuid4()
     upload = UploadFile(
         filename="template.docx",
@@ -342,9 +358,89 @@ async def test_upload_flow_template_file_enforces_scope_and_uses_docx_template_s
     )
 
     assert enforced == [str(flow_id)]
-    file_service.save_docx_template.assert_awaited_once_with(upload)
+    template_asset_service.upload_asset.assert_awaited_once_with(flow_id=flow_id, upload_file=upload)
     audit_service.log_async.assert_awaited_once()
-    assert result.id == file.id
+    assert result.id == asset.id
+
+
+@pytest.mark.asyncio
+async def test_get_flow_run_contract_enforces_scope_and_returns_contract(monkeypatch):
+    flow_id = uuid4()
+    container = MagicMock()
+    upload_service = AsyncMock()
+    container.flow_service.return_value = AsyncMock()
+    monkeypatch.setattr(router_common_module, "flow_upload_service", lambda _container: upload_service)
+
+    async def fake_enforce(
+        request,
+        _container,
+        *,
+        flow_id,
+        require_flow_lookup_without_scope=False,
+    ):
+        assert require_flow_lookup_without_scope is False
+
+    monkeypatch.setattr(router_common_module, "enforce_flow_scope_for_request", fake_enforce)
+    upload_service.get_run_contract.return_value = {
+        "flow_id": flow_id,
+        "published_flow_version": 2,
+        "form_fields": [],
+        "steps_requiring_input": [],
+        "aggregate_max_files": 3,
+        "template_readiness": [],
+    }
+
+    result = await get_flow_run_contract(
+        id=flow_id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    upload_service.get_run_contract.assert_awaited_once_with(flow_id=flow_id)
+    assert result.published_flow_version == 2
+
+
+@pytest.mark.asyncio
+async def test_upload_flow_runtime_file_calls_step_upload_service(monkeypatch):
+    flow_id = uuid4()
+    step_id = uuid4()
+    file_id = uuid4()
+    container = MagicMock()
+    upload_service = AsyncMock()
+    audit_service = AsyncMock()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    container.audit_service.return_value = audit_service
+    container.user.return_value = user
+    monkeypatch.setattr(router_common_module, "flow_upload_service", lambda _container: upload_service)
+
+    async def fake_enforce(
+        request,
+        _container,
+        *,
+        flow_id,
+        require_flow_lookup_without_scope=False,
+    ):
+        assert require_flow_lookup_without_scope is False
+
+    monkeypatch.setattr(router_common_module, "enforce_flow_scope_for_request", fake_enforce)
+    upload_service.upload_runtime_file_for_step.return_value = SimpleNamespace(
+        id=file_id,
+        name="audio.mp3",
+        size=123,
+        mimetype="audio/mpeg",
+    )
+
+    result = await upload_flow_runtime_file(
+        id=flow_id,
+        step_id=step_id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        upload_file=UploadFile(filename="audio.mp3", file=BytesIO(b"audio")),
+        container=container,
+    )
+
+    upload_service.upload_runtime_file_for_step.assert_awaited_once()
+    audit_service.log_async.assert_awaited_once()
+    assert result.id == file_id
 
 
 @pytest.mark.asyncio

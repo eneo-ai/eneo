@@ -4,7 +4,6 @@ import io
 import logging
 import re
 import tempfile
-import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -12,15 +11,14 @@ from docx import Document
 from docx.oxml.ns import qn
 from jinja2.sandbox import SandboxedEnvironment
 
-from intric.main.exceptions import BadRequestException, TypedIOValidationException
+from intric.files.docx_template_validation import validate_docx_template_archive
+from intric.main.exceptions import TypedIOValidationException
 
 logger = logging.getLogger(__name__)
 
 _PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*([^{}]+)\s*\}\}")
+_SAFE_TEMPLATE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
 _DOCX_MIMETYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-_MACRO_SUFFIXES = (".docm", ".dotm")
-_MAX_TEMPLATE_ARCHIVE_ENTRIES = 2048
-_MAX_TEMPLATE_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
 
 # OOXML header/footer reference types → python-docx section properties
 _HEADER_TYPE_TO_ATTR = {
@@ -78,7 +76,7 @@ def inspect_docx_template_bytes(
     *,
     filename: str,
 ) -> list[dict[str, str | None]]:
-    _validate_docx_template_archive(template_bytes, filename=filename)
+    validate_docx_template_archive(template_bytes, filename=filename)
     document = Document(io.BytesIO(template_bytes))
 
     discovered: list[dict[str, str | None]] = []
@@ -142,13 +140,21 @@ def render_docx_template(
             code="typed_io_template_render_failed",
         ) from exc
 
+    normalized_template_bytes, alias_by_name = _normalize_docx_template_placeholders(
+        template_bytes,
+        required_names=required_names,
+    )
+    render_context = _build_docxtpl_context(context)
+    for name, alias in alias_by_name.items():
+        render_context[alias] = context[name]
+
     with tempfile.TemporaryDirectory(prefix="flow-docx-template-") as temp_dir:
         template_path = Path(temp_dir) / "template.docx"
         output_path = Path(temp_dir) / f"step_{step_order}_output.docx"
-        template_path.write_bytes(template_bytes)
+        template_path.write_bytes(normalized_template_bytes)
         try:
             template = DocxTemplate(str(template_path))
-            template.render(context, jinja_env=SandboxedEnvironment(autoescape=False))
+            template.render(render_context, jinja_env=SandboxedEnvironment(autoescape=False))
             template.save(str(output_path))
             blob = output_path.read_bytes()
         except TypedIOValidationException:
@@ -166,6 +172,96 @@ def render_docx_template(
             ) from exc
 
     return blob, _DOCX_MIMETYPE, f"step_{step_order}_output.docx"
+
+
+def _normalize_docx_template_placeholders(
+    template_bytes: bytes,
+    *,
+    required_names: set[str],
+) -> tuple[bytes, dict[str, str]]:
+    alias_by_name = {
+        name: f"placeholder_{index}"
+        for index, name in enumerate(sorted(required_names), start=1)
+        if _SAFE_TEMPLATE_NAME_PATTERN.fullmatch(name) is None
+    }
+    if not alias_by_name:
+        return template_bytes, {}
+
+    document = Document(io.BytesIO(template_bytes))
+    for paragraph in _iter_story_paragraphs(document):
+        _replace_placeholder_aliases_in_paragraph(paragraph, alias_by_name)
+
+    output = io.BytesIO()
+    document.save(output)
+    return output.getvalue(), alias_by_name
+
+
+def _build_docxtpl_context(context: dict[str, Any]) -> dict[str, Any]:
+    """Expose flat placeholder bindings both directly and as nested dotted aliases."""
+    render_context: dict[str, Any] = dict(context)
+
+    for key, value in context.items():
+        if "." not in key:
+            continue
+
+        path = [segment.strip() for segment in key.split(".") if segment.strip()]
+        if len(path) < 2:
+            continue
+
+        current: dict[str, Any] = render_context
+        for segment in path[:-1]:
+            existing = current.get(segment)
+            if existing is None:
+                next_level: dict[str, Any] = {}
+                current[segment] = next_level
+                current = next_level
+                continue
+            if not isinstance(existing, dict):
+                current = {}
+                break
+            current = existing
+        else:
+            current[path[-1]] = value
+
+    return render_context
+
+
+def _iter_story_paragraphs(container: Any):
+    for paragraph in getattr(container, "paragraphs", []):
+        yield paragraph
+    for table in getattr(container, "tables", []):
+        for row in table.rows:
+            for cell in row.cells:
+                yield from _iter_story_paragraphs(cell)
+    for section in getattr(container, "sections", []):
+        for hdr in _iter_section_headers(section):
+            yield from _iter_story_paragraphs(hdr)
+        for ftr in _iter_section_footers(section):
+            yield from _iter_story_paragraphs(ftr)
+
+
+def _replace_placeholder_aliases_in_paragraph(
+    paragraph: Any,
+    alias_by_name: dict[str, str],
+) -> None:
+    original_text = paragraph.text
+    if not original_text or "{{" not in original_text:
+        return
+
+    replaced_text = _PLACEHOLDER_PATTERN.sub(
+        lambda match: "{{" + alias_by_name.get(match.group(1).strip(), match.group(1).strip()) + "}}",
+        original_text,
+    )
+    if replaced_text == original_text:
+        return
+
+    text_nodes = list(paragraph._p.iter(qn("w:t")))
+    if not text_nodes:
+        return
+
+    text_nodes[0].text = replaced_text
+    for node in text_nodes[1:]:
+        node.text = ""
 
 
 def extract_docx_text(document_bytes: bytes) -> str:
@@ -198,30 +294,3 @@ def extract_docx_text(document_bytes: bytes) -> str:
 
 def extract_docx_template_text_preview(template_bytes: bytes) -> str:
     return extract_docx_text(template_bytes)[:2000]
-
-
-def _validate_docx_template_archive(template_bytes: bytes, *, filename: str) -> None:
-    lower_name = filename.casefold()
-    if lower_name.endswith(_MACRO_SUFFIXES):
-        raise BadRequestException("Macro-enabled DOCX templates are not allowed.")
-
-    try:
-        archive = zipfile.ZipFile(io.BytesIO(template_bytes))
-    except zipfile.BadZipFile as exc:
-        raise BadRequestException("Invalid DOCX template archive.") from exc
-
-    with archive:
-        infos = archive.infolist()
-        if len(infos) > _MAX_TEMPLATE_ARCHIVE_ENTRIES:
-            raise BadRequestException("DOCX template archive contains too many files.")
-        total_uncompressed = sum(info.file_size for info in infos)
-        if total_uncompressed > _MAX_TEMPLATE_UNCOMPRESSED_BYTES:
-            raise BadRequestException("DOCX template archive is too large when unpacked.")
-        if archive.testzip() is not None:
-            raise BadRequestException("DOCX template archive is corrupted.")
-
-        names = {info.filename for info in infos}
-        if "[Content_Types].xml" not in names or "word/document.xml" not in names:
-            raise BadRequestException("Invalid DOCX template archive.")
-        if any(name.casefold().endswith("vbaproject.bin") for name in names):
-            raise BadRequestException("Macro-enabled DOCX templates are not allowed.")

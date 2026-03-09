@@ -126,6 +126,17 @@ export function initFlows(client) {
       return _fetch(`/api/v1/flows/${id}/input-policy/`, { method: "get" });
     },
 
+    runContract: {
+      /**
+       * Fetch canonical run contract for runtime step inputs and template readiness.
+       * @param {{id: string}} params
+       * @throws {IntricError}
+       */
+      get: async ({ id }) => {
+        return _fetch(`/api/v1/flows/${id}/run-contract/`, { method: "get" });
+      }
+    },
+
     /**
      * Inspect placeholders in an uploaded DOCX template for a flow.
      * @param {{id: string, fileId: string}} params
@@ -140,6 +151,17 @@ export function initFlows(client) {
 
     templates: {
       /**
+       * List flow-scoped DOCX template assets.
+       * @param {{id: string}} params
+       * @throws {IntricError}
+       */
+      list: async ({ id }) => {
+        return _fetch(`/api/v1/flows/${id}/template-files/`, {
+          method: "get"
+        });
+      },
+
+      /**
        * Upload a reusable DOCX template asset for Flow template_fill steps.
        * @param {{id: string, file: File, signal?: AbortSignal}} params
        * @throws {IntricError}
@@ -152,6 +174,54 @@ export function initFlows(client) {
           requestBody: { "multipart/form-data": formData },
           signal
         });
+      },
+
+      /**
+       * Inspect placeholders in a flow-scoped DOCX template asset.
+       * @param {{id: string, fileId: string}} params
+       * @throws {IntricError}
+       */
+      inspect: async ({ id, fileId }) => {
+        return _fetch(`/api/v1/flows/${id}/template-inspect/`, {
+          method: "get",
+          params: { query: { file_id: fileId } }
+        });
+      },
+
+      /**
+       * Generate signed URL for flow template asset download.
+       * @param {{id: string, fileId: string, expiresIn?: number, contentDisposition?: "attachment" | "inline"}} params
+       * @throws {IntricError}
+       */
+      signedUrl: async ({ id, fileId, expiresIn = 3600, contentDisposition = "attachment" }) => {
+        return _fetch(`/api/v1/flows/${id}/template-files/${fileId}/signed-url/`, {
+          method: "post",
+          requestBody: {
+            "application/json": {
+              expires_in: expiresIn,
+              content_disposition: contentDisposition
+            }
+          }
+        });
+      }
+    },
+
+    steps: {
+      runtimeFiles: {
+        /**
+         * Upload runtime files for a specific flow step.
+         * @param {{id: string, stepId: string, file: File, signal?: AbortSignal}} params
+         * @throws {IntricError}
+         */
+        upload: async ({ id, stepId, file, signal }) => {
+          const formData = new FormData();
+          formData.append("upload_file", file);
+          return _fetch(`/api/v1/flows/${id}/steps/${stepId}/runtime-files/`, {
+            method: "post",
+            requestBody: { "multipart/form-data": formData },
+            signal
+          });
+        }
       }
     },
 
@@ -231,15 +301,29 @@ export function initFlows(client) {
     runs: {
       /**
        * Create a flow run
-       * @param {{flow: {id: string}, input_payload_json?: any, file_ids?: string[]}} params
+       * @param {{
+       *  flow: {id: string},
+       *  expected_flow_version?: number,
+       *  input_payload_json?: any,
+       *  step_inputs?: Record<string, {file_ids: string[]}>,
+       *  file_ids?: string[]
+       * }} params
        * @throws {IntricError}
        */
-      create: async ({ flow, input_payload_json, file_ids }) => {
+      create: async ({
+        flow,
+        expected_flow_version,
+        input_payload_json,
+        step_inputs,
+        file_ids
+      }) => {
         return _fetch(`/api/v1/flows/${flow.id}/runs/`, {
           method: "post",
           requestBody: {
             "application/json": {
-              input_payload_json,
+              ...(expected_flow_version != null ? { expected_flow_version } : {}),
+              ...(input_payload_json !== undefined ? { input_payload_json } : {}),
+              ...(step_inputs ? { step_inputs } : {}),
               ...(file_ids?.length ? { file_ids } : {})
             }
           }

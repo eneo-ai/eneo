@@ -7,6 +7,7 @@ export type FlowTemplatePlaceholder = {
 };
 
 export type FlowTemplateInspection = {
+  asset_id?: string | null;
   file_id: string;
   file_name: string;
   placeholders: FlowTemplatePlaceholder[];
@@ -61,11 +62,22 @@ export type TemplateFillReadiness = {
 };
 
 export type TemplateFillOutputConfig = {
+  template_asset_id?: string;
   template_file_id?: string;
   template_name?: string;
   template_checksum?: string;
   placeholders?: string[];
   bindings?: Record<string, string>;
+};
+
+export type FlowTemplateAssetOption = {
+  id: string;
+  file_id: string;
+  name: string;
+  status?: string | null;
+  last_updated_by_name?: string | null;
+  can_edit?: boolean;
+  can_download?: boolean;
 };
 
 export function isTemplateFillStep(
@@ -85,6 +97,32 @@ export function getTemplateFillOutputConfig(
     return {};
   }
   return step.output_config as TemplateFillOutputConfig;
+}
+
+export function resolveTemplateAssetSelection(
+  config: TemplateFillOutputConfig,
+  assets: FlowTemplateAssetOption[]
+): { asset: FlowTemplateAssetOption | null; assetId: string | null } {
+  const directMatch =
+    (config.template_asset_id
+      ? assets.find((asset) => asset.id === config.template_asset_id)
+      : undefined) ?? null;
+  if (directMatch) {
+    return { asset: directMatch, assetId: directMatch.id };
+  }
+
+  const legacyMatch =
+    !config.template_asset_id && config.template_file_id
+      ? assets.find((asset) => asset.file_id === config.template_file_id) ?? null
+      : null;
+  if (legacyMatch) {
+    return { asset: legacyMatch, assetId: legacyMatch.id };
+  }
+
+  return {
+    asset: null,
+    assetId: config.template_asset_id ?? null
+  };
 }
 
 export function createTemplateFillDraftConfig(
@@ -114,6 +152,7 @@ export function applyTemplateInspection(
   }
   return {
     ...currentConfig,
+    template_asset_id: inspection.asset_id ?? undefined,
     template_file_id: inspection.file_id,
     template_name: inspection.file_name,
     placeholders: inspection.placeholders.map((item) => item.name),

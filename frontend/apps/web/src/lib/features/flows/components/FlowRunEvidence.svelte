@@ -1,3 +1,5 @@
+<svelte:options runes={false} />
+
 <script lang="ts">
   import type { FlowRunDebugExport, Intric, FlowStepResult } from "@intric/intric-js";
   import { IconChevronDown } from "@intric/icons/chevron-down";
@@ -10,11 +12,18 @@
   import { onDestroy, onMount } from "svelte";
   import { slide } from "svelte/transition";
   import { toast } from "$lib/components/toast";
-  import { downloadJsonArtifact as triggerJsonDownload, serializeEvidencePayload } from "./flowRunEvidenceActions";
+  import {
+    downloadJsonArtifact as triggerJsonDownload,
+    serializeEvidencePayload
+  } from "./flowRunEvidenceActions";
   import { getFlowRunStatusLabel } from "./flowRunStatusLabel";
   import { m } from "$lib/paraglide/messages";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
-  import FlowRunKnowledgeTrace from "./FlowRunKnowledgeTrace.svelte";
+  import FlowRunKnowledgeTraceComponent from "./FlowRunKnowledgeTrace.svelte";
+  import {
+    getRuntimeInputSummary,
+    getTemplateProvenanceSummary
+  } from "$lib/features/flows/flowEvidenceProvenance";
 
   export let runId: string;
   export let flowId: string;
@@ -36,6 +45,7 @@
   let copiedTimer: ReturnType<typeof setTimeout> | null = null;
   const mode = getFlowUserMode();
   let stepAttemptsByOrder: Record<number, Record<string, unknown>[]> = {};
+  const FlowRunKnowledgeTrace = FlowRunKnowledgeTraceComponent as any;
   type FlowRunTranscriptionTelemetry = {
     transcript_bytes?: number;
     estimated_tokens?: number;
@@ -59,8 +69,12 @@
 
   let lastFetchedStatus: string | null = null;
 
-  $: if (runStatus && evidence && lastFetchedStatus !== runStatus &&
-      (runStatus === "completed" || runStatus === "failed" || runStatus === "cancelled")) {
+  $: if (
+    runStatus &&
+    evidence &&
+    lastFetchedStatus !== runStatus &&
+    (runStatus === "completed" || runStatus === "failed" || runStatus === "cancelled")
+  ) {
     lastFetchedStatus = runStatus;
     void refetchEvidence();
   }
@@ -73,7 +87,9 @@
   async function refetchEvidence() {
     try {
       evidence = await intric.flows.runs.evidence({ id: runId, flowId });
-    } catch { /* ignore — already have stale data */ }
+    } catch {
+      /* ignore — already have stale data */
+    }
   }
 
   onDestroy(() => {
@@ -91,21 +107,31 @@
 
   function getStatusColor(status: string): string {
     switch (status) {
-      case "completed": return "text-positive-stronger";
-      case "failed": return "text-negative-stronger";
-      case "running": return "text-accent-stronger";
-      case "pending": return "text-secondary";
-      default: return "text-secondary";
+      case "completed":
+        return "text-positive-stronger";
+      case "failed":
+        return "text-negative-stronger";
+      case "running":
+        return "text-accent-stronger";
+      case "pending":
+        return "text-secondary";
+      default:
+        return "text-secondary";
     }
   }
 
   function getStatusDotColor(status: string): string {
     switch (status) {
-      case "completed": return "bg-positive-default";
-      case "failed": return "bg-negative-default";
-      case "running": return "bg-accent-default animate-pulse";
-      case "pending": return "bg-secondary";
-      default: return "bg-secondary";
+      case "completed":
+        return "bg-positive-default";
+      case "failed":
+        return "bg-negative-default";
+      case "running":
+        return "bg-accent-default animate-pulse";
+      case "pending":
+        return "bg-secondary";
+      default:
+        return "bg-secondary";
     }
   }
 
@@ -115,7 +141,7 @@
       failed: m.flow_run_status_failed,
       queued: m.flow_run_status_queued,
       running: m.flow_run_status_running,
-      cancelled: m.flow_run_status_cancelled,
+      cancelled: m.flow_run_status_cancelled
     });
   }
 
@@ -167,7 +193,7 @@
     try {
       const { url } = await intric.files.generateSignedUrl({
         fileId,
-        contentDisposition: "attachment",
+        contentDisposition: "attachment"
       });
       window.open(url, "_blank");
     } catch (e) {
@@ -223,28 +249,30 @@
   function getCacheStatusLabel(
     usedCache: boolean | undefined,
     cachedFilesCount: number | undefined,
-    filesCount: number | undefined,
+    filesCount: number | undefined
   ): string {
     if (usedCache === true) return m.flow_run_transcription_cache_hit();
     if ((cachedFilesCount ?? 0) > 0 && (filesCount ?? 0) > 0) {
       return m.flow_run_transcription_cache_partial({
         cached: String(cachedFilesCount ?? 0),
-        total: String(filesCount ?? 0),
+        total: String(filesCount ?? 0)
       });
     }
     return m.flow_run_transcription_cache_miss();
   }
+
+  function getRuntimeInputSummaryLabel(fileCount: number): string {
+    return `${fileCount} ${fileCount === 1 ? "fil uppladdad" : "filer uppladdade"}`;
+  }
 </script>
 
-<svelte:options runes={false} />
-
 {#if loading}
-  <div class="flex items-center gap-2 text-sm text-secondary">
+  <div class="text-secondary flex items-center gap-2 text-sm">
     <IconLoadingSpinner class="size-4 animate-spin" />
     {m.flow_run_evidence_loading()}
   </div>
 {:else if loadError || evidence === null}
-  <p class="text-sm text-negative-default">{m.flow_run_evidence_error()}</p>
+  <p class="text-negative-default text-sm">{m.flow_run_evidence_error()}</p>
 {:else}
   <div class="flex flex-col gap-2">
     {#if $mode === "power_user"}
@@ -255,18 +283,20 @@
             <Button
               variant="outlined"
               size="small"
-              on:click={() => copyPayload("debug-export", debugExport, m.flow_run_copy_debug_export_failed())}
+              on:click={() =>
+                copyPayload("debug-export", debugExport, m.flow_run_copy_debug_export_failed())}
             >
               {copiedKey === "debug-export" ? m.copied() : m.flow_run_copy_debug_export()}
             </Button>
             <Button
               variant="outlined"
               size="small"
-              on:click={() => downloadJsonArtifact(
-                `flow-debug-export-${runId}.json`,
-                debugExport,
-                m.flow_run_download_debug_export_failed(),
-              )}
+              on:click={() =>
+                downloadJsonArtifact(
+                  `flow-debug-export-${runId}.json`,
+                  debugExport,
+                  m.flow_run_download_debug_export_failed()
+                )}
             >
               {m.flow_run_download_debug_export()}
             </Button>
@@ -288,29 +318,45 @@
       )}
       {@const duration = getStepDuration(result.step_order)}
       {@const transcription = getStepTranscription(result)}
-      <div class="bg-primary border-default overflow-hidden rounded-lg border shadow-sm transition-shadow hover:shadow-md">
+      {@const runtimeInput = getRuntimeInputSummary(result.input_payload_json)}
+      {@const templateProvenance = getTemplateProvenanceSummary(result.output_payload_json)}
+      {@const stepRag = getStepRag(result.step_order)}
+      <div
+        class="bg-primary border-default overflow-hidden rounded-lg border shadow-sm transition-shadow hover:shadow-md"
+      >
         <button
-          class="flex w-full items-center justify-between px-5 py-3.5 text-left hover:bg-hover-dimmer"
+          class="hover:bg-hover-dimmer flex w-full items-center justify-between px-5 py-3.5 text-left"
           aria-expanded={expandedSteps.includes(result.step_order)}
           aria-controls={getStepPanelId(result.step_order)}
           on:click={() => toggleStep(result.step_order)}
         >
           <div class="flex items-center gap-2.5">
-            <span class="bg-hover-dimmer flex size-6 items-center justify-center rounded-full text-xs font-semibold">
+            <span
+              class="bg-hover-dimmer flex size-6 items-center justify-center rounded-full text-xs font-semibold"
+            >
               {result.step_order}
             </span>
             <span class="text-sm font-medium">
-              {stepDef?.user_description ?? m.flow_step_fallback_label({ order: String(result.step_order) })}
+              {stepDef?.user_description ??
+                m.flow_step_fallback_label({ order: String(result.step_order) })}
             </span>
-            <span class="{getStatusColor(result.status)} inline-flex items-center gap-1.5 text-[11px] font-medium">
-              <span class="{getStatusDotColor(result.status)} size-1.5 shrink-0 rounded-full"></span>
+            <span
+              class="{getStatusColor(
+                result.status
+              )} inline-flex items-center gap-1.5 text-[11px] font-medium"
+            >
+              <span class="{getStatusDotColor(result.status)} size-1.5 shrink-0 rounded-full"
+              ></span>
               {getStatusLabel(result.status)}
             </span>
             {#if duration}
-              <span class="text-xs tabular-nums text-secondary">{duration}</span>
+              <span class="text-secondary text-xs tabular-nums">{duration}</span>
             {/if}
           </div>
-          <span class="transition-transform" class:rotate-180={expandedSteps.includes(result.step_order)}>
+          <span
+            class="transition-transform"
+            class:rotate-180={expandedSteps.includes(result.step_order)}
+          >
             <IconChevronDown class="size-4" />
           </span>
         </button>
@@ -321,107 +367,147 @@
               {#if result.effective_prompt}
                 <div>
                   <div class="flex items-center justify-between">
-                    <h4 class="text-xs font-semibold text-muted">{m.flow_run_effective_prompt()}</h4>
+                    <h4 class="text-muted text-xs font-semibold">
+                      {m.flow_run_effective_prompt()}
+                    </h4>
                     <button
-                      class="rounded-md p-1.5 text-muted transition-colors hover:bg-hover-default hover:text-secondary focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
+                      class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                       aria-label={m.copy()}
-                      on:click={() => copyPayload(
-                        `step-${result.step_order}-prompt`,
-                        result.effective_prompt,
-                        m.flow_run_copy_failed(),
-                      )}
+                      on:click={() =>
+                        copyPayload(
+                          `step-${result.step_order}-prompt`,
+                          result.effective_prompt,
+                          m.flow_run_copy_failed()
+                        )}
                     >
                       {#if copiedKey === `step-${result.step_order}-prompt`}
-                        <IconCheck class="size-3.5 text-positive-default" />
+                        <IconCheck class="text-positive-default size-3.5" />
                       {:else}
                         <IconCopy class="size-3.5" />
                       {/if}
                     </button>
                   </div>
-                  <pre class="bg-hover-dimmer mt-1.5 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg p-3 text-sm leading-relaxed">{result.effective_prompt}</pre>
+                  <pre
+                    class="bg-hover-dimmer mt-1.5 max-h-80 overflow-auto rounded-lg p-3 text-sm leading-relaxed break-words whitespace-pre-wrap">{result.effective_prompt}</pre>
                 </div>
               {/if}
 
               {#if result.input_payload_json}
                 <div>
                   <div class="flex items-center justify-between">
-                    <h4 class="text-xs font-semibold text-muted">{m.flow_run_input()}</h4>
+                    <h4 class="text-muted text-xs font-semibold">{m.flow_run_input()}</h4>
                     <button
-                      class="rounded-md p-1.5 text-muted transition-colors hover:bg-hover-default hover:text-secondary focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
+                      class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                       aria-label={m.copy()}
-                      on:click={() => copyPayload(
-                        `step-${result.step_order}-input`,
-                        result.input_payload_json,
-                        m.flow_run_copy_failed(),
-                      )}
+                      on:click={() =>
+                        copyPayload(
+                          `step-${result.step_order}-input`,
+                          result.input_payload_json,
+                          m.flow_run_copy_failed()
+                        )}
                     >
                       {#if copiedKey === `step-${result.step_order}-input`}
-                        <IconCheck class="size-3.5 text-positive-default" />
+                        <IconCheck class="text-positive-default size-3.5" />
                       {:else}
                         <IconCopy class="size-3.5" />
                       {/if}
                     </button>
                   </div>
-                  <pre class="json-hl bg-hover-dimmer mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg p-3 font-mono text-[13px] leading-relaxed">{@html highlightJson(JSON.stringify(result.input_payload_json, null, 2))}</pre>
+                  <pre
+                    class="json-hl bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{@html highlightJson(
+                      JSON.stringify(result.input_payload_json, null, 2)
+                    )}</pre>
+                </div>
+              {/if}
+
+              {#if runtimeInput}
+                <div class="border-default bg-hover-dimmer rounded-lg border p-3">
+                  <h4 class="text-muted text-xs font-semibold">Körningsindata</h4>
+                  <div class="text-secondary mt-2 flex flex-wrap gap-2 text-[11px]">
+                    <span class="border-default bg-primary rounded-md border px-2 py-1">
+                      {getRuntimeInputSummaryLabel(runtimeInput.fileCount)}
+                    </span>
+                    {#if runtimeInput.inputFormat}
+                      <span class="border-default bg-primary rounded-md border px-2 py-1">
+                        Format: {runtimeInput.inputFormat}
+                      </span>
+                    {/if}
+                    {#if runtimeInput.extractedTextLength != null}
+                      <span class="border-default bg-primary rounded-md border px-2 py-1">
+                        Extraherad text: {runtimeInput.extractedTextLength} tecken
+                      </span>
+                    {/if}
+                  </div>
                 </div>
               {/if}
 
               {#if transcription}
-                <div class="rounded-lg border border-default bg-hover-dimmer p-3">
-                  <h4 class="text-xs font-semibold text-muted">{m.flow_run_transcription_label()}</h4>
-                  <div class="mt-2 flex flex-wrap gap-2 text-[11px] text-secondary">
-                    <span class="rounded-md border border-default bg-primary px-2 py-1">
+                <div class="border-default bg-hover-dimmer rounded-lg border p-3">
+                  <h4 class="text-muted text-xs font-semibold">
+                    {m.flow_run_transcription_label()}
+                  </h4>
+                  <div class="text-secondary mt-2 flex flex-wrap gap-2 text-[11px]">
+                    <span class="border-default bg-primary rounded-md border px-2 py-1">
                       {m.flow_run_transcription_model({ model: transcription.model ?? "—" })}
                     </span>
-                    <span class="rounded-md border border-default bg-primary px-2 py-1">
-                      {m.flow_run_transcription_language({ language: transcription.language ?? "—" })}
+                    <span class="border-default bg-primary rounded-md border px-2 py-1">
+                      {m.flow_run_transcription_language({
+                        language: transcription.language ?? "—"
+                      })}
                     </span>
-                    <span class="rounded-md border border-default bg-primary px-2 py-1">
-                      {m.flow_run_transcription_files({ count: String(transcription.files_count ?? 0) })}
+                    <span class="border-default bg-primary rounded-md border px-2 py-1">
+                      {m.flow_run_transcription_files({
+                        count: String(transcription.files_count ?? 0)
+                      })}
                     </span>
-                    <span class="rounded-md border border-default bg-primary px-2 py-1">
-                      {m.flow_run_transcription_duration({ duration: formatElapsedMs(transcription.elapsed_ms) })}
+                    <span class="border-default bg-primary rounded-md border px-2 py-1">
+                      {m.flow_run_transcription_duration({
+                        duration: formatElapsedMs(transcription.elapsed_ms)
+                      })}
                     </span>
-                    <span class="rounded-md border border-default bg-primary px-2 py-1">
-                      {m.flow_run_transcription_size({ size: formatBytes(transcription.transcript_bytes) })}
+                    <span class="border-default bg-primary rounded-md border px-2 py-1">
+                      {m.flow_run_transcription_size({
+                        size: formatBytes(transcription.transcript_bytes)
+                      })}
                     </span>
-                    <span class="rounded-md border border-default bg-primary px-2 py-1">
-                      {m.flow_run_transcription_estimated_tokens({ tokens: String(transcription.estimated_tokens ?? 0) })}
+                    <span class="border-default bg-primary rounded-md border px-2 py-1">
+                      {m.flow_run_transcription_estimated_tokens({
+                        tokens: String(transcription.estimated_tokens ?? 0)
+                      })}
                     </span>
-                    <span class="rounded-md border border-default bg-primary px-2 py-1">
+                    <span class="border-default bg-primary rounded-md border px-2 py-1">
                       {m.flow_run_transcription_cache({
                         status: getCacheStatusLabel(
                           transcription.used_cache,
                           transcription.cached_files_count,
-                          transcription.files_count,
-                        ),
+                          transcription.files_count
+                        )
                       })}
                     </span>
                   </div>
                 </div>
               {/if}
 
-              <FlowRunKnowledgeTrace
-                rag={getStepRag(result.step_order)}
-                stepOrder={result.step_order}
-                {intric}
-              />
+              {#if stepRag}
+                <FlowRunKnowledgeTrace rag={stepRag} stepOrder={result.step_order} {intric} />
+              {/if}
 
               {#if result.output_payload_json}
                 <div>
                   <div class="flex items-center justify-between">
-                    <h4 class="text-xs font-semibold text-muted">{m.flow_run_output()}</h4>
+                    <h4 class="text-muted text-xs font-semibold">{m.flow_run_output()}</h4>
                     <button
-                      class="rounded-md p-1.5 text-muted transition-colors hover:bg-hover-default hover:text-secondary focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
+                      class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                       aria-label={m.copy()}
-                      on:click={() => copyPayload(
-                        `step-${result.step_order}-output`,
-                        result.output_payload_json,
-                        m.flow_run_copy_failed(),
-                      )}
+                      on:click={() =>
+                        copyPayload(
+                          `step-${result.step_order}-output`,
+                          result.output_payload_json,
+                          m.flow_run_copy_failed()
+                        )}
                     >
                       {#if copiedKey === `step-${result.step_order}-output`}
-                        <IconCheck class="size-3.5 text-positive-default" />
+                        <IconCheck class="text-positive-default size-3.5" />
                       {:else}
                         <IconCopy class="size-3.5" />
                       {/if}
@@ -430,25 +516,38 @@
 
                   {#if result.output_payload_json.structured}
                     <div class="mt-1">
-                      <span class="mb-1 inline-block rounded bg-accent-dimmer px-1.5 py-0.5 text-[10px] font-semibold uppercase text-accent-stronger">JSON</span>
-                      <pre class="json-hl border-accent-default bg-hover-dimmer max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border-l-2 p-3 font-mono text-[13px] leading-relaxed">{@html highlightJson(JSON.stringify(result.output_payload_json.structured, null, 2))}</pre>
+                      <span
+                        class="bg-accent-dimmer text-accent-stronger mb-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
+                        >JSON</span
+                      >
+                      <pre
+                        class="json-hl border-accent-default bg-hover-dimmer max-h-80 overflow-auto rounded-lg border-l-2 p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{@html highlightJson(
+                          JSON.stringify(result.output_payload_json.structured, null, 2)
+                        )}</pre>
                     </div>
                   {/if}
 
                   {#if result.output_payload_json.artifacts?.length}
                     <div class="mt-2">
-                      <h4 class="text-xs font-semibold text-muted">{m.flow_run_files()}</h4>
+                      <h4 class="text-muted text-xs font-semibold">{m.flow_run_files()}</h4>
                       <div class="mt-1.5 flex flex-wrap gap-2">
                         {#each result.output_payload_json.artifacts as artifact (artifact.file_id)}
-                          {@const ext = artifact.name?.includes('.') ? artifact.name.split('.').pop()?.toLowerCase() : ''}
+                          {@const ext = artifact.name?.includes(".")
+                            ? artifact.name.split(".").pop()?.toLowerCase()
+                            : ""}
                           <button
-                            class="group inline-flex items-center gap-2 rounded-lg border border-default bg-primary px-3 py-2 text-sm font-medium shadow-sm transition-all hover:-translate-y-px hover:shadow-md"
+                            class="group border-default bg-primary inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium shadow-sm transition-all hover:-translate-y-px hover:shadow-md"
                             on:click={() => downloadArtifact(artifact.file_id)}
                           >
-                            <IconArrowDownToLine class="size-4 text-muted group-hover:text-secondary" />
+                            <IconArrowDownToLine
+                              class="text-muted group-hover:text-secondary size-4"
+                            />
                             <span>{artifact.name}</span>
                             {#if ext}
-                              <span class="rounded bg-accent-dimmer px-1.5 py-0.5 text-[10px] font-semibold uppercase text-accent-stronger">{ext}</span>
+                              <span
+                                class="bg-accent-dimmer text-accent-stronger rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
+                                >{ext}</span
+                              >
                             {/if}
                           </button>
                         {/each}
@@ -457,41 +556,85 @@
                   {/if}
 
                   {#if result.output_payload_json.text && !result.output_payload_json.structured}
-                    <div class="mt-1 max-h-96 overflow-auto rounded-lg bg-hover-dimmer p-4">
+                    <div class="bg-hover-dimmer mt-1 max-h-96 overflow-auto rounded-lg p-4">
                       <Markdown source={result.output_payload_json.text} class="text-sm" />
                     </div>
                   {:else if !result.output_payload_json.structured && !result.output_payload_json.artifacts?.length}
-                    <pre class="json-hl border-accent-default bg-hover-dimmer mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border-l-2 p-3 font-mono text-[13px] leading-relaxed">{@html highlightJson(JSON.stringify(result.output_payload_json, null, 2))}</pre>
+                    <pre
+                      class="json-hl border-accent-default bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg border-l-2 p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{@html highlightJson(
+                        JSON.stringify(result.output_payload_json, null, 2)
+                      )}</pre>
                   {/if}
+                </div>
+              {/if}
+
+              {#if templateProvenance}
+                <div class="border-default bg-hover-dimmer rounded-lg border p-3">
+                  <h4 class="text-muted text-xs font-semibold">Mallproveniens</h4>
+                  <div class="text-secondary mt-2 flex flex-col gap-2 text-[11px]">
+                    <div class="flex flex-wrap gap-2">
+                      <span class="border-default bg-primary rounded-md border px-2 py-1">
+                        {templateProvenance.templateName}
+                      </span>
+                      {#if templateProvenance.publishedFlowVersion != null}
+                        <span class="border-default bg-primary rounded-md border px-2 py-1">
+                          v{templateProvenance.publishedFlowVersion}
+                        </span>
+                      {/if}
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                      {#if templateProvenance.templateAssetId}
+                        <span class="border-default bg-primary rounded-md border px-2 py-1">
+                          Asset: {templateProvenance.templateAssetId}
+                        </span>
+                      {/if}
+                      {#if templateProvenance.templateFileId}
+                        <span class="border-default bg-primary rounded-md border px-2 py-1">
+                          Fil: {templateProvenance.templateFileId}
+                        </span>
+                      {/if}
+                      {#if templateProvenance.checksum}
+                        <span class="border-default bg-primary rounded-md border px-2 py-1">
+                          {templateProvenance.checksum}
+                        </span>
+                      {/if}
+                    </div>
+                  </div>
                 </div>
               {/if}
 
               {#if $mode === "power_user" && getStepAttempts(result.step_order).length > 0}
                 <div>
                   <div class="flex items-center justify-between">
-                    <h4 class="text-xs font-semibold text-muted">{m.flow_run_attempts()}</h4>
+                    <h4 class="text-muted text-xs font-semibold">{m.flow_run_attempts()}</h4>
                     <button
-                      class="rounded-md p-1.5 text-muted transition-colors hover:bg-hover-default hover:text-secondary focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
+                      class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                       aria-label={m.copy()}
-                      on:click={() => copyPayload(
-                        `step-${result.step_order}-attempts`,
-                        getStepAttempts(result.step_order),
-                        m.flow_run_copy_failed(),
-                      )}
+                      on:click={() =>
+                        copyPayload(
+                          `step-${result.step_order}-attempts`,
+                          getStepAttempts(result.step_order),
+                          m.flow_run_copy_failed()
+                        )}
                     >
                       {#if copiedKey === `step-${result.step_order}-attempts`}
-                        <IconCheck class="size-3.5 text-positive-default" />
+                        <IconCheck class="text-positive-default size-3.5" />
                       {:else}
                         <IconCopy class="size-3.5" />
                       {/if}
                     </button>
                   </div>
-                  <pre class="json-hl border-accent-default bg-hover-dimmer mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border-l-2 p-3 font-mono text-[13px] leading-relaxed">{@html highlightJson(JSON.stringify(getStepAttempts(result.step_order), null, 2))}</pre>
+                  <pre
+                    class="json-hl border-accent-default bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg border-l-2 p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{@html highlightJson(
+                      JSON.stringify(getStepAttempts(result.step_order), null, 2)
+                    )}</pre>
                 </div>
               {/if}
 
               {#if result.num_tokens_input != null || result.num_tokens_output != null}
-                <div class="border-default flex items-center gap-2 border-t pt-3 text-xs text-muted">
+                <div
+                  class="border-default text-muted flex items-center gap-2 border-t pt-3 text-xs"
+                >
                   <span class="tabular-nums">{m.flow_run_tokens()}</span>
                   <span class="text-dimmer">&middot;</span>
                   <span class="tabular-nums">{result.num_tokens_input ?? 0} in</span>
@@ -502,8 +645,9 @@
 
               {#if result.error_message}
                 <div>
-                  <h4 class="text-xs font-semibold text-negative-stronger">{m.flow_run_error()}</h4>
-                  <pre class="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-md bg-negative-dimmer p-3 font-mono text-xs text-negative-stronger">{result.error_message}</pre>
+                  <h4 class="text-negative-stronger text-xs font-semibold">{m.flow_run_error()}</h4>
+                  <pre
+                    class="bg-negative-dimmer text-negative-stronger mt-1 max-h-60 overflow-auto rounded-md p-3 font-mono text-xs break-words whitespace-pre-wrap">{result.error_message}</pre>
                 </div>
               {/if}
             </div>

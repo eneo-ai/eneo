@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.files.file_models import FilePublic
+from intric.files.file_models import SignedURLRequest, SignedURLResponse
 from intric.flows.api import flow_router_common as common
 from intric.flows.api.flow_api_common import error_response
 from intric.flows.api.flow_assembler import FlowAssembler
@@ -15,9 +15,12 @@ from intric.flows.api.flow_models import (
     FlowCreateRequest,
     FlowPublic,
     FlowSparsePublic,
+    FlowTemplateAssetPublic,
     FlowTemplateInspectionPublic,
     FlowUpdateRequest,
 )
+from intric.authentication.signed_urls import generate_signed_token
+import time
 from intric.main.models import NOT_PROVIDED, PaginatedResponse
 from intric.main.exceptions import ErrorCodes
 from intric.server.dependencies.container import get_container
@@ -282,6 +285,26 @@ async def unpublish_flow(
 
 
 @router.get(
+    "/{id}/template-files/",
+    response_model=list[FlowTemplateAssetPublic],
+    status_code=status.HTTP_200_OK,
+    operation_id="list_flow_template_files",
+)
+async def list_flow_template_files(
+    id: UUID,
+    request: Request,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await common.enforce_flow_scope_for_request(request, container, flow_id=id)
+    assets = await container.flow_template_asset_service().list_assets(
+        flow_id=id,
+        can_edit=True,
+        can_download=True,
+    )
+    return [FlowTemplateAssetPublic.model_validate(item) for item in assets]
+
+
+@router.get(
     "/{id}/template-inspect/",
     response_model=FlowTemplateInspectionPublic,
     status_code=status.HTTP_200_OK,
@@ -317,12 +340,12 @@ async def inspect_flow_template(
     container: Container = Depends(get_container(with_user=True)),
 ):
     await common.enforce_flow_scope_for_request(request, container, flow_id=id)
-    return await container.flow_service().inspect_template_file(flow_id=id, file_id=file_id)
+    return await container.flow_template_asset_service().inspect_asset(flow_id=id, asset_id=file_id)
 
 
 @router.post(
     "/{id}/template-files/",
-    response_model=FilePublic,
+    response_model=FlowTemplateAssetPublic,
     status_code=status.HTTP_201_CREATED,
     operation_id="upload_flow_template_file",
     summary="Upload a DOCX template asset for a flow",
@@ -374,25 +397,56 @@ async def upload_flow_template_file(
         require_flow_lookup_without_scope=True,
     )
 
-    file = await container.file_service().save_docx_template(upload_file)
+    asset = await container.flow_template_asset_service().upload_asset(
+        flow_id=id,
+        upload_file=upload_file,
+    )
     user = container.user()
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
         action=ActionType.FILE_UPLOADED,
         entity_type=EntityType.FILE,
-        entity_id=common.required_uuid(file.id, field="file.id"),
-        description=f"Uploaded DOCX template '{file.name}' for flow authoring",
+        entity_id=common.required_uuid(asset.file_id, field="flow_template_asset.file_id"),
+        description=f"Uploaded DOCX template '{asset.name}' for flow authoring",
         metadata=AuditMetadata.standard(
             actor=user,
-            target=file,
+            target=asset,
             extra={
-                "size_bytes": file.size,
-                "mimetype": file.mimetype,
-                "file_type": file.file_type.value if file.file_type else None,
+                "template_asset_id": str(asset.id),
+                "mimetype": asset.mimetype,
                 "flow_id": str(id),
                 "upload_purpose": "flow_template",
             },
         ),
     )
-    return file
+    return FlowTemplateAssetPublic.model_validate(asset)
+
+
+@router.post(
+    "/{id}/template-files/{file_id}/signed-url/",
+    response_model=SignedURLResponse,
+    status_code=status.HTTP_200_OK,
+    operation_id="generate_flow_template_signed_url",
+)
+async def generate_flow_template_signed_url(
+    id: UUID,
+    file_id: UUID,
+    request: Request,
+    signed_url_req: SignedURLRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await common.enforce_flow_scope_for_request(request, container, flow_id=id)
+    asset, _ = await container.flow_template_asset_service().get_asset_with_file(
+        flow_id=id,
+        asset_id=file_id,
+    )
+    expires_at = int(time.time()) + signed_url_req.expires_in
+    token = generate_signed_token(
+        file_id=asset.file_id,
+        expires_at=expires_at,
+        content_disposition=signed_url_req.content_disposition,
+    )
+    base_url = str(request.base_url).rstrip("/")
+    url = f"{base_url}/api/v1/files/{asset.file_id}/download/?token={token}"
+    return SignedURLResponse(url=url, expires_at=expires_at)

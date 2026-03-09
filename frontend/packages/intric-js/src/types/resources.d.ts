@@ -184,10 +184,68 @@ export type FlowTemplatePlaceholder = {
 };
 
 export type FlowTemplateInspection = {
+  asset_id?: string | null;
   file_id: string;
   file_name: string;
   placeholders: FlowTemplatePlaceholder[];
   extracted_text_preview?: string | null;
+  status?: "ready" | "needs_action" | "read_only" | "unavailable" | string;
+};
+
+export type FlowTemplateAsset = {
+  id: string;
+  flow_id?: string;
+  file_id?: string;
+  name: string;
+  checksum?: string | null;
+  mimetype?: string | null;
+  placeholders?: string[];
+  status?: "ready" | "needs_action" | "read_only" | "unavailable" | string;
+  last_updated_by?: string | null;
+  last_updated_by_name?: string | null;
+  updated_at?: string | null;
+  can_edit?: boolean;
+  can_download?: boolean;
+  can_select?: boolean;
+  can_inspect?: boolean;
+  created_at?: string | null;
+};
+
+export type FlowRunContractStepInput = {
+  step_id: string;
+  step_order: number;
+  label?: string | null;
+  description?: string | null;
+  required: boolean;
+  input_format: "document" | "audio" | "file" | string;
+  max_files?: number | null;
+  max_file_size_bytes?: number | null;
+  accepted_mimetypes: string[];
+};
+
+export type FlowRunContractTemplateReadiness = {
+  step_id: string;
+  status?: "ready" | "needs_action" | "read_only" | "unavailable" | string;
+  reason_code?: string | null;
+  message_code?: string | null;
+  message?: string | null;
+  action_text?: string | null;
+  can_run?: boolean;
+  can_edit?: boolean;
+  can_download?: boolean;
+  template_name?: string | null;
+  template_asset_id?: string | null;
+  template_file_id?: string | null;
+  checksum?: string | null;
+  published_flow_version?: number | null;
+};
+
+export type FlowRunContract = {
+  published_flow_version: number;
+  form_fields?: FlowFormField[];
+  steps_requiring_input: FlowRunContractStepInput[];
+  aggregate_max_files?: number | null;
+  template_readiness?: FlowRunContractTemplateReadiness[] | null;
 };
 
 export type FlowRunArtifact = {
@@ -222,6 +280,8 @@ export type FlowRun = {
   created_at: string;
   updated_at: string;
 };
+
+export type FlowRunStepInputs = Record<string, { file_ids: string[] }>;
 
 export type FlowInputPolicy = {
   flow_id: string;

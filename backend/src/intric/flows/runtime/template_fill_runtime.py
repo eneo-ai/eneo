@@ -33,6 +33,7 @@ ApplyOutputCap = Callable[[str, FlowRun, RuntimeStep], Awaitable[tuple[str, list
 class TemplateFillRuntimeDeps:
     variable_resolver: FlowVariableResolver
     file_repo: FileRepository
+    template_asset_service: Any
     apply_output_cap: ApplyOutputCap
     user_id: UUID
     logger: logging.Logger
@@ -47,19 +48,29 @@ async def execute_template_fill_step(
 ) -> StepExecutionOutput:
     current_stage = "parsing template configuration"
     try:
-        template_file_id, template_checksum, placeholders, bindings = _parse_template_output_config(step)
+        (
+            template_asset_id,
+            template_file_id,
+            template_checksum,
+            template_name,
+            placeholders,
+            bindings,
+        ) = _parse_template_output_config(step)
         deps.logger.info(
-            "flow_executor.template_fill.start run_id=%s step_order=%d template_file_id=%s placeholders=%d",
+            "flow_executor.template_fill.start run_id=%s step_order=%d template_asset_id=%s template_file_id=%s placeholders=%d",
             run.id,
             step.step_order,
+            template_asset_id,
             template_file_id,
             len(bindings),
         )
 
         current_stage = "loading the published DOCX template"
         template_file = await _load_template_file(
+            template_asset_service=deps.template_asset_service,
             file_repo=deps.file_repo,
             tenant_id=run.tenant_id,
+            template_asset_id=template_asset_id,
             template_file_id=template_file_id,
             template_checksum=template_checksum,
         )
@@ -192,6 +203,7 @@ async def execute_template_fill_step(
         model_parameters_json={
             "mode": "template_fill",
             "template_file_id": str(template_file_id),
+            "template_asset_id": str(template_asset_id) if template_asset_id is not None else None,
             "template_checksum": template_checksum,
         },
         structured_output=None,
@@ -213,6 +225,13 @@ async def execute_template_fill_step(
             )
         ],
         output_payload_extensions={
+            "template_provenance": {
+                "template_name": template_name or template_file.name,
+                "template_asset_id": str(template_asset_id) if template_asset_id is not None else None,
+                "template_file_id": str(template_file_id),
+                "template_checksum": template_checksum,
+                "published_flow_version": run.flow_version,
+            },
             "template_fill_debug": {
                 "rendered_docx_text_raw": rendered_text,
                 "summary_mode": "resolved_bindings",
@@ -224,12 +243,23 @@ async def execute_template_fill_step(
 
 def _parse_template_output_config(
     step: RuntimeStep,
-) -> tuple[UUID, str | None, list[str], dict[str, str]]:
+) -> tuple[UUID | None, UUID, str | None, str | None, list[str], dict[str, str]]:
     if not isinstance(step.output_config, dict):
         raise TypedIOValidationException(
             "Template fill requires output_config.",
             code="typed_io_template_render_failed",
         )
+
+    template_asset_id_raw = step.output_config.get("template_asset_id")
+    template_asset_id: UUID | None = None
+    if template_asset_id_raw not in (None, ""):
+        try:
+            template_asset_id = UUID(str(template_asset_id_raw))
+        except Exception as exc:
+            raise TypedIOValidationException(
+                "Template fill requires a valid template_asset_id.",
+                code="typed_io_template_render_failed",
+            ) from exc
 
     template_file_id_raw = step.output_config.get("template_file_id")
     try:
@@ -270,8 +300,10 @@ def _parse_template_output_config(
             placeholders.append(placeholder)
 
     return (
+        template_asset_id,
         template_file_id,
         _optional_string(step.output_config.get("template_checksum")),
+        _optional_string(step.output_config.get("template_name")),
         placeholders,
         bindings,
     )
@@ -279,11 +311,32 @@ def _parse_template_output_config(
 
 async def _load_template_file(
     *,
+    template_asset_service: Any,
     file_repo: FileRepository,
     tenant_id: UUID,
+    template_asset_id: UUID | None,
     template_file_id: UUID,
     template_checksum: str | None,
 ):
+    if template_asset_id is not None:
+        try:
+            asset, template_file = await template_asset_service.get_published_template_file(
+                tenant_id=tenant_id,
+                asset_id=template_asset_id,
+                expected_checksum=template_checksum,
+            )
+        except Exception as exc:
+            raise TypedIOValidationException(
+                "The published DOCX template asset is no longer available. Re-publish the flow with a current template.",
+                code="flow_template_not_accessible",
+            ) from exc
+        if asset.file_id != template_file_id:
+            raise TypedIOValidationException(
+                "The published DOCX template asset no longer matches the pinned template file. Re-publish the flow.",
+                code="flow_template_not_accessible",
+            )
+        return template_file
+
     files = await file_repo.get_list_by_id_and_tenant(
         ids=[template_file_id],
         tenant_id=tenant_id,
@@ -414,6 +467,6 @@ def _failed_step_order_for_expression(
 
 def _template_fill_runtime_error(*, stage: str, exc: Exception) -> TypedIOValidationException:
     return TypedIOValidationException(
-        f"DOCX template assembly failed while {stage}: {exc}",
+        f"DOCX template assembly failed while {stage}. Check the published template asset and try again.",
         code="typed_io_template_render_failed",
     )

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.base_class import BaseCrossReference, BasePublic
+from intric.database.tables.files_table import Files
 from intric.database.tables.job_table import Jobs
 from intric.database.tables.mcp_server_table import MCPServerTools
 from intric.database.tables.spaces_table import Spaces
@@ -32,6 +33,7 @@ FLOW_STEP_RESULT_STATUS_VALUES = ("pending", "running", "completed", "failed", "
 FLOW_STEP_ATTEMPT_STATUS_VALUES = ("started", "retried", "failed", "completed", "cancelled")
 MODULE_HEALTH_STATUS_VALUES = ("healthy", "unhealthy", "unknown")
 MODULE_COMPAT_STATUS_VALUES = ("compatible", "incompatible", "unknown")
+FLOW_TEMPLATE_ASSET_STATUS_VALUES = ("ready", "needs_action", "read_only", "unavailable")
 
 
 class Flows(BasePublic):
@@ -233,6 +235,67 @@ class FlowVersions(BaseCrossReference):
             name="fk_flow_versions_flow_tenant",
         ),
         UniqueConstraint("flow_id", "version", name="uq_flow_versions_flow_version"),
+    )
+
+
+class FlowTemplateAssets(BasePublic):
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    space_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Spaces.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    file_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Files.id, ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(nullable=False)
+    checksum: Mapped[str] = mapped_column(nullable=False)
+    mimetype: Mapped[Optional[str]] = mapped_column(nullable=True)
+    placeholders: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default="[]")
+    created_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"),
+        nullable=True,
+    )
+    updated_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default="ready",
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("id", "tenant_id", name="uq_flow_template_assets_id_tenant_id"),
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_template_assets_flow_tenant",
+        ),
+        CheckConstraint(
+            "status IN ('ready','needs_action','read_only','unavailable')",
+            name="ck_flow_template_assets_status",
+        ),
+        Index(
+            "ix_flow_template_assets_flow_active",
+            "flow_id",
+            "updated_at",
+            postgresql_where=sa.text("deleted_at IS NULL"),
+        ),
     )
 
 

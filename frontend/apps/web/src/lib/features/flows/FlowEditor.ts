@@ -18,6 +18,7 @@ import { uid } from "uid";
 import { shouldSaveAssistantImmediately } from "./assistantSavePolicy";
 import { remapStepOrderTemplateTokens, replaceExactTemplateToken } from "./flowVariableTokens";
 import { getFlowStepValidationIssues, mapOutputToInputType } from "./flowStepTypes";
+import { getTemplateFillOutputConfig } from "./templateFillConfig";
 
 const [getFlowEditor, setFlowEditor] =
   createContext<ReturnType<typeof initFlowEditor>>("Edit a flow");
@@ -101,7 +102,7 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
   const assistantErrorPrefix = "assistant:";
   const flowErrorPrefix = "flow:";
   const typedIOValidationPrefix = `${flowErrorPrefix}typed-io:`;
-
+  const stepConfigValidationPrefix = `${flowErrorPrefix}step-config:`;
   function setAssistantValidationError(assistantId: string, message: string | null) {
     validationErrors.update((current) => {
       const next = new Map(current);
@@ -150,7 +151,71 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
       entries.set(`${typedIOValidationPrefix}${issue.code}:${issue.stepOrder}`, [issue.code]);
     }
     replaceFlowValidationErrors(typedIOValidationPrefix, entries);
+    syncStepConfigValidation(steps);
+    pruneOrphanedAssistantErrors(steps);
     return issues;
+  }
+
+  function syncStepConfigValidation(steps: FlowStep[]) {
+    const entries = new Map<string, string[]>();
+    for (const step of steps) {
+      if (step.output_mode === "template_fill") {
+        const config = getTemplateFillOutputConfig(step);
+        if (!config.template_asset_id && !config.template_file_id) {
+          entries.set(
+            `${stepConfigValidationPrefix}template_fill_no_template:${step.step_order}`,
+            ["template_fill_no_template"]
+          );
+        }
+      }
+    }
+    replaceFlowValidationErrors(stepConfigValidationPrefix, entries);
+  }
+
+  // Matches the exact synthetic token pattern: {{step_N_deleted...}}
+  const DELETED_STEP_TOKEN = /\{\{step_\d+_deleted/;
+
+  function revalidateDeletedStepReferences() {
+    const steps = get(editor.state.update).steps ?? [];
+    let hasDeletedReferences = false;
+    for (const step of steps) {
+      // Check input_bindings.question (step-level)
+      const bindings = step.input_bindings as { question?: string } | null | undefined;
+      if (typeof bindings?.question === "string" && DELETED_STEP_TOKEN.test(bindings.question)) {
+        hasDeletedReferences = true;
+        break;
+      }
+      // Check cached assistant prompt text
+      const cached = assistantCache.get(step.assistant_id);
+      if (!cached || typeof cached !== "object") continue;
+      const prompt = (cached as { prompt?: { text?: unknown } }).prompt;
+      const text = typeof prompt?.text === "string" ? prompt.text : "";
+      if (DELETED_STEP_TOKEN.test(text)) {
+        hasDeletedReferences = true;
+        break;
+      }
+    }
+    if (!hasDeletedReferences) {
+      setFlowValidationError("deleted-step-reference", null);
+    }
+  }
+
+  function pruneOrphanedAssistantErrors(steps: FlowStep[]) {
+    const activeAssistantIds = new Set(steps.map((s) => s.assistant_id).filter(Boolean));
+    validationErrors.update((current) => {
+      let changed = false;
+      const next = new Map(current);
+      for (const key of next.keys()) {
+        if (key.startsWith(assistantErrorPrefix)) {
+          const assistantId = key.slice(assistantErrorPrefix.length);
+          if (!activeAssistantIds.has(assistantId)) {
+            next.delete(key);
+            changed = true;
+          }
+        }
+      }
+      return changed ? next : current;
+    });
   }
 
   function getFlowId(): string {
@@ -191,6 +256,7 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
     changes: Record<string, unknown>
   ): Promise<void> {
     if (!assistantId || assistantId === "") return;
+    if (get(isPublished)) return;
     assistantSaveStatus.set("saving");
     setAssistantValidationError(assistantId, null);
     try {
@@ -207,7 +273,7 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
       const message =
         error instanceof IntricError
           ? error.getReadableMessage()
-          : "Failed to update flow step assistant";
+          : "assistant_save_failed";
       setAssistantValidationError(assistantId, message);
       throw error;
     }
@@ -307,12 +373,16 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
         });
         assistantCache.set(assistantId, updated);
         setAssistantValidationError(assistantId, null);
+        // If a prompt was saved, the user may have fixed deleted-step references
+        if ("prompt" in merged) {
+          revalidateDeletedStepReferences();
+        }
       } catch (e) {
         const queued = pendingAssistantChanges.get(assistantId) ?? {};
         pendingAssistantChanges.set(assistantId, { ...merged, ...queued });
         assistantSaveStatus.set("error");
         const msg =
-          e instanceof IntricError ? e.getReadableMessage() : "Failed to save step configuration";
+          e instanceof IntricError ? e.getReadableMessage() : "assistant_save_failed";
         setAssistantValidationError(assistantId, msg);
         throw e;
       } finally {
@@ -343,6 +413,7 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
 
   async function saveAssistant(assistantId: string, changes: Record<string, unknown>) {
     if (!assistantId || assistantId === "") return;
+    if (get(isPublished)) return;
     const current = pendingAssistantChanges.get(assistantId) ?? {};
     const merged = { ...current, ...changes };
     pendingAssistantChanges.set(assistantId, merged);

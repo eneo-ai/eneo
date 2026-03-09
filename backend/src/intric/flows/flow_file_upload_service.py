@@ -15,6 +15,8 @@ from intric.files.image import ImageMimeTypes
 from intric.files.text import TextMimeTypes
 from intric.flows.flow import Flow, FlowStep
 from intric.flows.flow_input_limits import FlowInputLimits, effective_flow_input_limit, effective_max_files_per_run
+from intric.flows.runtime.step_definition_parser import parse_runtime_steps
+from intric.flows.runtime_input import build_runtime_input_config, runtime_input_accept_mimetypes
 from intric.main.exceptions import BadRequestException, FileNotSupportedException, FileTooLargeException
 
 logger = logging.getLogger(__name__)
@@ -112,6 +114,14 @@ class _FlowServiceProtocol(Protocol):
 
 class _SettingsServiceProtocol(Protocol):
     async def get_flow_input_limits_resolved(self) -> FlowInputLimits: ...
+
+
+class _FlowVersionRepositoryProtocol(Protocol):
+    async def get(self, flow_id: UUID, version: int, tenant_id: UUID): ...
+
+
+class _FlowTemplateAssetRepositoryProtocol(Protocol):
+    async def get(self, *, asset_id: UUID, tenant_id: UUID): ...
 
 
 @dataclass(frozen=True)
@@ -221,10 +231,14 @@ class FlowFileUploadService:
         flow_service: _FlowServiceProtocol,
         file_service: FileService,
         settings_service: _SettingsServiceProtocol,
+        flow_version_repo: _FlowVersionRepositoryProtocol | None = None,
+        template_asset_repo: _FlowTemplateAssetRepositoryProtocol | None = None,
     ):
         self.flow_service = flow_service
         self.file_service = file_service
         self.settings_service = settings_service
+        self.flow_version_repo = flow_version_repo
+        self.template_asset_repo = template_asset_repo
 
     async def get_input_policy(self, *, flow_id: UUID) -> FlowFileInputPolicy:
         flow = await self.flow_service.get_flow(flow_id)
@@ -281,6 +295,264 @@ class FlowFileUploadService:
             raise FileNotSupportedException(
                 f"Unsupported file type '{received_type}' for flow input type '{policy.input_type}'. "
                 f"Allowed types: {allowed_types}.",
+                code="unsupported_media_type",
+                context={
+                    "flow_id": str(flow_id),
+                    "input_type": policy.input_type,
+                    "received_type": received_type,
+                },
+            )
+
+        max_size = policy.max_file_size_bytes
+        if max_size is None:
+            raise BadRequestException(
+                "Flow input policy is missing a max file size.",
+                code="flow_input_policy_missing_limit",
+                context={"flow_id": str(flow_id)},
+            )
+
+        try:
+            return await self.file_service.save_file(upload_file, max_size=max_size)
+        except FileTooLargeException as exc:
+            raise FileTooLargeException(
+                f"Uploaded file exceeds effective flow limit of {max_size} bytes.",
+                code="file_too_large",
+                context={
+                    "flow_id": str(flow_id),
+                    "max_file_size_bytes": max_size,
+                },
+            ) from exc
+
+    async def get_run_contract(self, *, flow_id: UUID) -> dict[str, object]:
+        if self.flow_version_repo is None or self.template_asset_repo is None:
+            raise BadRequestException(
+                "Published flow runtime contract dependencies are unavailable.",
+                code="flow_runtime_contract_unavailable",
+            )
+        flow = await self.flow_service.get_flow(flow_id)
+        if flow.published_version is None:
+            raise BadRequestException(
+                "Flow must be published before a run contract can be created.",
+                code="flow_not_published",
+            )
+
+        version = await self.flow_version_repo.get(
+            flow_id=flow.id,
+            version=flow.published_version,
+            tenant_id=flow.tenant_id,
+        )
+        limits = await self.settings_service.get_flow_input_limits_resolved()
+        steps = parse_runtime_steps(version.definition_json)
+        steps_requiring_input: list[dict[str, object]] = []
+        aggregate_max_files: int | None = 0
+
+        for step in steps:
+            runtime_input = build_runtime_input_config(step.input_config)
+            if not runtime_input.enabled:
+                continue
+
+            max_files = runtime_input.max_files
+            if aggregate_max_files is not None:
+                if max_files is None:
+                    aggregate_max_files = None
+                else:
+                    aggregate_max_files += max_files
+
+            steps_requiring_input.append(
+                {
+                    "step_id": step.step_id,
+                    "step_order": step.step_order,
+                    "label": runtime_input.label,
+                    "description": runtime_input.description,
+                    "required": runtime_input.required,
+                    "input_format": runtime_input.input_format,
+                    "max_files": runtime_input.max_files,
+                    "max_file_size_bytes": effective_flow_input_limit(
+                        input_type=runtime_input.input_format,
+                        limits=limits,
+                    ),
+                    "accepted_mimetypes": runtime_input_accept_mimetypes(runtime_input),
+                }
+            )
+
+        template_readiness = []
+        for step in steps:
+            if step.output_mode != "template_fill" or not isinstance(step.output_config, dict):
+                continue
+            asset_id_raw = step.output_config.get("template_asset_id")
+            asset_status = "unavailable"
+            template_name = step.output_config.get("template_name")
+            template_file_id = step.output_config.get("template_file_id")
+            checksum = step.output_config.get("template_checksum")
+            asset_id = None
+            if asset_id_raw is not None:
+                try:
+                    asset_id = UUID(str(asset_id_raw))
+                    asset = await self.template_asset_repo.get(
+                        asset_id=asset_id,
+                        tenant_id=flow.tenant_id,
+                    )
+                    asset_status = "ready"
+                    template_name = asset.name
+                    template_file_id = asset.file_id
+                    checksum = asset.checksum
+                except Exception:
+                    asset_status = "unavailable"
+            elif template_file_id is not None:
+                try:
+                    legacy_file_id = UUID(str(template_file_id))
+                    asset = await self.template_asset_repo.get_by_flow_file(
+                        flow_id=flow.id,
+                        file_id=legacy_file_id,
+                        tenant_id=flow.tenant_id,
+                    )
+                    asset_id = asset.id
+                    asset_status = "ready"
+                    template_name = asset.name
+                    template_file_id = asset.file_id
+                    checksum = asset.checksum
+                except Exception:
+                    asset_status = "unavailable"
+            template_readiness.append(
+                {
+                    "step_id": step.step_id,
+                    "template_asset_id": asset_id,
+                    "template_file_id": template_file_id,
+                    "template_name": template_name,
+                    "checksum": checksum,
+                    "published_flow_version": flow.published_version,
+                    "status": asset_status,
+                    "can_edit": False,
+                    "can_download": asset_id is not None,
+                    "message_code": None if asset_status == "ready" else "flow_template_not_accessible",
+                }
+            )
+
+        form_fields = []
+        form_schema = (flow.metadata_json or {}).get("form_schema") if isinstance(flow.metadata_json, dict) else None
+        if isinstance(form_schema, dict) and isinstance(form_schema.get("fields"), list):
+            form_fields = list(form_schema["fields"])
+
+        return {
+            "flow_id": flow.id,
+            "published_flow_version": flow.published_version,
+            "form_fields": form_fields,
+            "steps_requiring_input": steps_requiring_input,
+            "aggregate_max_files": aggregate_max_files,
+            "template_readiness": template_readiness,
+        }
+
+    async def upload_runtime_file_for_step(
+        self,
+        *,
+        flow_id: UUID,
+        step_id: UUID,
+        upload_file: UploadFile,
+    ) -> File:
+        if self.flow_version_repo is None:
+            raise BadRequestException(
+                "Published flow runtime upload dependencies are unavailable.",
+                code="flow_runtime_contract_unavailable",
+            )
+        flow = await self.flow_service.get_flow(flow_id)
+        if flow.published_version is None:
+            raise BadRequestException(
+                "Flow must be published before runtime files can be uploaded.",
+                code="flow_not_published",
+            )
+        version = await self.flow_version_repo.get(
+            flow_id=flow.id,
+            version=flow.published_version,
+            tenant_id=flow.tenant_id,
+        )
+        steps = parse_runtime_steps(version.definition_json)
+        runtime_step = next((step for step in steps if step.step_id == step_id), None)
+        if runtime_step is None:
+            raise BadRequestException("Unknown runtime step id.", code="flow_run_unknown_step_input")
+
+        runtime_input = build_runtime_input_config(runtime_step.input_config)
+        if not runtime_input.enabled:
+            raise BadRequestException(
+                "Runtime input is not enabled for this step.",
+                code="flow_run_runtime_input_disabled",
+            )
+
+        limits = await self.settings_service.get_flow_input_limits_resolved()
+        max_size = effective_flow_input_limit(
+            input_type=runtime_input.input_format,
+            limits=limits,
+        )
+        policy = FlowFileInputPolicy(
+            flow_id=flow.id,
+            input_type=runtime_input.input_format,
+            input_source=runtime_step.input_source,
+            accepts_file_upload=True,
+            accepted_mimetypes=runtime_input_accept_mimetypes(runtime_input),
+            max_file_size_bytes=max_size,
+            max_files_per_run=runtime_input.max_files
+            or effective_max_files_per_run(
+                input_type=runtime_input.input_format,
+                limits=limits,
+            ),
+            recommended_run_payload=None,
+        )
+        return await self._upload_with_policy(
+            flow_id=flow.id,
+            upload_file=upload_file,
+            policy=policy,
+        )
+
+    async def _upload_with_policy(
+        self,
+        *,
+        flow_id: UUID,
+        upload_file: UploadFile,
+        policy: FlowFileInputPolicy,
+    ) -> File:
+        if not policy.accepts_file_upload:
+            raise BadRequestException(
+                "Flow does not accept file uploads for flow_input. Use text/json payload for this flow.",
+                code="flow_input_upload_not_supported",
+                context={"flow_id": str(flow_id), "input_type": policy.input_type},
+            )
+
+        if _is_empty_upload_file(upload_file):
+            raise BadRequestException(
+                "Uploaded file is empty.",
+                code="flow_input_file_empty",
+                context={"flow_id": str(flow_id)},
+            )
+
+        declared_type = _normalize_mimetype(upload_file.content_type)
+        declared_canonical = _canonicalize_mimetype(declared_type)
+        allowed_canonical_types = {
+            _canonicalize_mimetype(mimetype) for mimetype in policy.accepted_mimetypes
+        }
+        sniffed_type = _sniff_mimetype(upload_file)
+        sniffed_canonical = _canonicalize_mimetype(sniffed_type) if sniffed_type else ""
+
+        if sniffed_type in _UNKNOWN_SNIFFED_TYPES:
+            sniffed_type = None
+            sniffed_canonical = ""
+
+        if sniffed_canonical and sniffed_canonical not in allowed_canonical_types:
+            allowed_types = ", ".join(policy.accepted_mimetypes)
+            raise FileNotSupportedException(
+                f"Detected file type '{sniffed_type}' is not allowed for flow input type '{policy.input_type}'. Allowed types: {allowed_types}.",
+                code="unsupported_media_type",
+                context={
+                    "flow_id": str(flow_id),
+                    "input_type": policy.input_type,
+                    "received_type": declared_type or "missing",
+                    "detected_type": sniffed_type,
+                },
+            )
+
+        if not declared_canonical or declared_canonical not in allowed_canonical_types:
+            received_type = upload_file.content_type or "missing"
+            allowed_types = ", ".join(policy.accepted_mimetypes)
+            raise FileNotSupportedException(
+                f"Unsupported file type '{received_type}' for flow input type '{policy.input_type}'. Allowed types: {allowed_types}.",
                 code="unsupported_media_type",
                 context={
                     "flow_id": str(flow_id),

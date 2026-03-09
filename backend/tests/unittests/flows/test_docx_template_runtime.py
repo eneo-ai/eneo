@@ -17,7 +17,7 @@ from intric.flows.runtime.docx_template_runtime import (
     inspect_docx_template_bytes,
     render_docx_template,
 )
-from intric.main.exceptions import BadRequestException, TypedIOValidationException
+from intric.main.exceptions import FileNotSupportedException, TypedIOValidationException
 
 
 def _build_template_bytes() -> bytes:
@@ -81,14 +81,53 @@ def test_render_docx_template_replaces_split_run_placeholders() -> None:
     assert "Version 3" in footer_text
 
 
+def test_render_docx_template_supports_flat_context_for_dotted_placeholder_names() -> None:
+    doc = Document()
+    doc.add_paragraph("{{step_1.output.text}}")
+    buffer = io.BytesIO()
+    doc.save(buffer)
+
+    blob, _, _ = render_docx_template(
+        template_bytes=buffer.getvalue(),
+        context={"step_1.output.text": "Dotted binding rendered"},
+        step_order=12,
+    )
+
+    rendered = Document(io.BytesIO(blob))
+    assert "Dotted binding rendered" in "\n".join(paragraph.text for paragraph in rendered.paragraphs)
+
+
+def test_render_docx_template_supports_placeholders_with_spaces() -> None:
+    doc = Document()
+    doc.add_paragraph("Rubrik: {{Planering och Hälsa}}")
+    buffer = io.BytesIO()
+    doc.save(buffer)
+
+    blob, _, _ = render_docx_template(
+        template_bytes=buffer.getvalue(),
+        context={"Planering och Hälsa": "Kort sammanfattning"},
+        step_order=13,
+    )
+
+    rendered = Document(io.BytesIO(blob))
+    assert "Rubrik: Kort sammanfattning" in "\n".join(
+        paragraph.text for paragraph in rendered.paragraphs
+    )
+
+
 def test_inspect_docx_template_bytes_rejects_macro_enabled_payloads() -> None:
     template_bytes = _build_template_bytes()
     mutated = io.BytesIO(template_bytes)
     with zipfile.ZipFile(mutated, mode="a") as archive:
         archive.writestr("word/vbaProject.bin", b"macro")
 
-    with pytest.raises(BadRequestException, match="(?i)macro-enabled"):
+    with pytest.raises(
+        FileNotSupportedException,
+        match="(?i)macro-enabled",
+    ) as exc_info:
         inspect_docx_template_bytes(mutated.getvalue(), filename="rapport.docm")
+
+    assert exc_info.value.code == "flow_template_macro_not_allowed"
 
 
 def test_render_docx_template_rejects_missing_context_placeholders() -> None:

@@ -9,8 +9,17 @@ from intric.files.file_models import FileBaseWithContent, FileType
 from intric.files.file_size_service import FileSizeService
 from intric.files.image import ImageExtractor, ImageMimeTypes
 from intric.files.text import TextExtractor, TextMimeTypes
+from intric.files.docx_template_validation import (
+    normalize_template_extraction_error,
+    validate_docx_template_archive,
+    validate_template_extension,
+)
 from intric.main.config import get_settings
-from intric.main.exceptions import FileNotSupportedException, FileTooLargeException
+from intric.main.exceptions import (
+    BadRequestException,
+    FileNotSupportedException,
+    FileTooLargeException,
+)
 
 
 def bytes_extractor(filepath: Path, _mimetype: str, _filename: str | None = None):
@@ -142,33 +151,25 @@ class FileProtocol:
             max_size = get_settings().upload_file_to_session_max_size
 
         sanitized_filename = sanitize_filename(upload_file.filename)
-        lower_name = sanitized_filename.lower()
-        if lower_name.endswith((".docm", ".dotm")):
-            raise FileNotSupportedException(
-                "DOCX templates must use the .docx format. Macro-enabled Word files are not allowed.",
-                code="unsupported_media_type",
-                context={"received_type": lower_name.rsplit(".", 1)[-1]},
-            )
-        if not lower_name.endswith(".docx"):
-            raise FileNotSupportedException(
-                "Only .docx files can be uploaded as Flow templates.",
-                code="unsupported_media_type",
-                context={
-                    "received_type": (
-                        lower_name.rsplit(".", 1)[-1] if "." in lower_name else "missing"
-                    )
-                },
-            )
+        validate_template_extension(filename=sanitized_filename)
 
         if self.file_size_service.is_too_large(upload_file.file, max_size=max_size):
-            raise FileTooLargeException()
+            raise FileTooLargeException(
+                "Uploaded flow template exceeds the allowed size limit.",
+                code="flow_template_too_large",
+            )
 
         filepath = await self.file_size_service.save_file_to_disk(upload_file.file)
         filepath = Path(filepath)
 
         try:
             blob = bytes_extractor(filepath, TextMimeTypes.DOCX.value, sanitized_filename)
-            text = self.text_extractor.extract_from_docx(filepath, sanitized_filename)
+            validate_docx_template_archive(blob, filename=sanitized_filename)
+            try:
+                text = self.text_extractor.extract_from_docx(filepath, sanitized_filename)
+            except Exception as exc:
+                normalized_exc = normalize_template_extraction_error(exc)
+                raise normalized_exc from exc
             checksum = self.file_size_service.get_file_checksum(filepath)
             return FileBaseWithContent(
                 name=sanitized_filename,
@@ -179,6 +180,8 @@ class FileProtocol:
                 text=text,
                 blob=blob,
             )
+        except (BadRequestException, FileNotSupportedException):
+            raise
         finally:
             os.remove(filepath)
 

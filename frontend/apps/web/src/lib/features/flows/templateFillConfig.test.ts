@@ -13,6 +13,7 @@ import {
   isTemplateFillStep,
   listTemplateBindingRows,
   listTemplatePlaceholders,
+  resolveTemplateAssetSelection,
   updateTemplateBinding
 } from "./templateFillConfig";
 
@@ -83,6 +84,23 @@ describe("templateFillConfig", () => {
         summary: "{{step_1.output.text}}",
         author: "{{författare}}"
       }
+    });
+  });
+
+  it("resolves a legacy template_file_id-only config to the matching flow asset", () => {
+    expect(
+      resolveTemplateAssetSelection(
+        {
+          template_file_id: "file-1"
+        },
+        [
+          { id: "asset-1", file_id: "file-1", name: "Mall 1" },
+          { id: "asset-2", file_id: "file-2", name: "Mall 2" }
+        ]
+      )
+    ).toEqual({
+      asset: { id: "asset-1", file_id: "file-1", name: "Mall 1" },
+      assetId: "asset-1"
     });
   });
 

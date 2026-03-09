@@ -7,10 +7,12 @@
   import { Button, Dialog } from "@intric/ui";
   import { createEventDispatcher } from "svelte";
   import { m } from "$lib/paraglide/messages";
+  import { parseValidationError } from "$lib/features/flows/flowStepValidationMessages";
 
   export let steps: FlowStep[];
   export let activeStepId: string | null;
   export let isPublished: boolean;
+  export let validationErrors: Map<string, string[]> = new Map();
 
   const dispatch = createEventDispatcher<{
     selectStep: string | null;
@@ -49,6 +51,21 @@
       m.flow_step_fallback_label({ order: String(targetStep?.step_order ?? index + 1) });
     $showRemoveConfirm = true;
   }
+
+  $: stepOrdersWithErrors = (() => {
+    const orders = new Set<number>();
+    for (const [key, values] of validationErrors.entries()) {
+      const parsed = parseValidationError(key, values);
+      if (!parsed) continue;
+      if (parsed.kind === "step") {
+        orders.add(parsed.stepOrder);
+      } else if (parsed.kind === "assistant") {
+        const step = steps.find((s) => s.assistant_id === parsed.assistantId);
+        if (step) orders.add(step.step_order);
+      }
+    }
+    return orders;
+  })();
 
   function confirmRemove() {
     if (pendingRemoveIndex === null) return;
@@ -104,6 +121,7 @@
           isPowerUser={$mode === "power_user"}
           canMoveUp={index > 0}
           canMoveDown={index < steps.length - 1}
+          hasValidationError={stepOrdersWithErrors.has(step.step_order)}
           on:click={() => dispatch("selectStep", step.id ?? null)}
           on:moveUp={() => moveStep(index, -1)}
           on:moveDown={() => moveStep(index, 1)}

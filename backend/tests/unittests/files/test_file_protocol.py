@@ -65,6 +65,8 @@ async def test_docx_template_to_domain_rejects_macro_enabled_extensions() -> Non
 
     with pytest.raises(
         FileNotSupportedException,
-        match="DOCX templates must use the .docx format",
-    ):
+        match="Macro-enabled Word files are not allowed as flow templates",
+    ) as exc_info:
         await protocol.docx_template_to_domain(upload)
+
+    assert exc_info.value.code == "flow_template_macro_not_allowed"

@@ -20,6 +20,7 @@ from intric.flows.flow import (
 from intric.flows.flow_repo import FlowRepository
 from intric.flows.flow_run_repo import FlowRunRepository
 from intric.flows.flow_version_repo import FlowVersionRepository
+from intric.flows.flow_template_asset_service import FlowTemplateAssetService
 from intric.flows.variable_resolver import FlowVariableResolver
 from intric.flows.runtime.http_runtime import FlowHttpRuntimeHelper, IPAddress
 from intric.flows.runtime.http_orchestration import (
@@ -110,6 +111,7 @@ class FlowRunExecutor:
         space_repo: SpaceRepository,
         completion_service: CompletionService,
         file_repo: FileRepository,
+        template_asset_service: FlowTemplateAssetService,
         encryption_service: EncryptionService,
         max_inline_text_bytes: int,
         audit_service: AuditService | None = None,
@@ -125,6 +127,7 @@ class FlowRunExecutor:
         self.space_repo = space_repo
         self.completion_service = completion_service
         self.file_repo = file_repo
+        self.template_asset_service = template_asset_service
         self.encryption_service = encryption_service
         self.max_inline_text_bytes = max_inline_text_bytes
         self.audit_service = audit_service
@@ -528,6 +531,7 @@ class FlowRunExecutor:
             template_fill_deps = TemplateFillRuntimeDeps(
                 variable_resolver=self.variable_resolver,
                 file_repo=self.file_repo,
+                template_asset_service=self.template_asset_service,
                 apply_output_cap=self._apply_output_cap,
                 user_id=self.user.id,
                 logger=logger,

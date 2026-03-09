@@ -4,15 +4,15 @@
   import { initFlowEditor } from "$lib/features/flows/FlowEditor";
   import { initFlowUserMode, getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import FlowStepList from "$lib/features/flows/components/FlowStepList.svelte";
-  import FlowStepEditPanel from "$lib/features/flows/components/FlowStepEditPanel.svelte";
+  import FlowStepEditPanelComponent from "$lib/features/flows/components/FlowStepEditPanel.svelte";
   import FlowGraphPanel from "$lib/features/flows/components/FlowGraphPanel.svelte";
   import FlowFormSchemaEditor from "$lib/features/flows/components/FlowFormSchemaEditor.svelte";
   import FlowUserModeToggle from "$lib/features/flows/components/FlowUserModeToggle.svelte";
   import FlowSaveStatus from "$lib/features/flows/components/FlowSaveStatus.svelte";
   import FlowVersionBadge from "$lib/features/flows/components/FlowVersionBadge.svelte";
   import FlowValidationBanner from "$lib/features/flows/components/FlowValidationBanner.svelte";
-  import FlowRunsTable from "$lib/features/flows/components/FlowRunsTable.svelte";
-  import FlowRunDialog from "$lib/features/flows/components/FlowRunDialog.svelte";
+  import FlowRunsTableComponent from "$lib/features/flows/components/FlowRunsTable.svelte";
+  import FlowRunDialogComponent from "$lib/features/flows/components/FlowRunDialog.svelte";
   import { Button, Input } from "@intric/ui";
   import { IntricError } from "@intric/intric-js";
   import { toast } from "$lib/components/toast";
@@ -25,6 +25,7 @@
 
   export let data;
   let publishLoading = false;
+  let validationBannerExpanded = false;
   let showRunDialog = false;
   let runsReloadTrigger = 0;
   let latestHistoryPayload: Record<string, unknown> | null = null;
@@ -50,6 +51,9 @@
     flow: data.flow,
     intric: data.intric
   });
+  const FlowStepEditPanel = FlowStepEditPanelComponent as any;
+  const FlowRunsTable = FlowRunsTableComponent as any;
+  const FlowRunDialog = FlowRunDialogComponent as any;
 
   const {
     state: { resource, update, activeStepId, isPublished, saveStatus, validationErrors }
@@ -59,7 +63,7 @@
     input_contract: () => m.flow_step_input_contract(),
     output_contract: () => m.flow_step_output_contract(),
     input_config: () => m.flow_step_input_config(),
-    output_config: () => m.flow_step_output_config(),
+    output_config: () => m.flow_step_output_config()
   };
 
   $: stepJsonValidationSummary = stepJsonValidationFields
@@ -92,10 +96,9 @@
     currentStageIndex >= 0 && currentStageIndex < FLOW_BUILDER_STAGES.length - 1
       ? FLOW_BUILDER_STAGES[currentStageIndex + 1]
       : null;
-  $: formSchemaFields = (
-    ($update.metadata_json as { form_schema?: { fields?: { required?: boolean }[] } } | undefined)?.form_schema
-      ?.fields ?? []
-  );
+  $: formSchemaFields =
+    ($update.metadata_json as { form_schema?: { fields?: { required?: boolean }[] } } | undefined)
+      ?.form_schema?.fields ?? [];
   let formSchemaDraftStats: { definedCount: number; requiredCount: number } | null = null;
   $: persistedFormSchemaStats = getFlowFormStats(formSchemaFields);
   $: displayedFormSchemaStats = formSchemaDraftStats ?? persistedFormSchemaStats;
@@ -103,21 +106,22 @@
     displayedFormSchemaStats.definedCount === 0
       ? m.flow_fields_defined_zero()
       : displayedFormSchemaStats.definedCount === 1
-      ? m.flow_fields_defined_singular({ count: displayedFormSchemaStats.definedCount })
-      : m.flow_fields_defined_plural({ count: displayedFormSchemaStats.definedCount });
+        ? m.flow_fields_defined_singular({ count: displayedFormSchemaStats.definedCount })
+        : m.flow_fields_defined_plural({ count: displayedFormSchemaStats.definedCount });
   $: formSchemaRequiredLabel =
     displayedFormSchemaStats.requiredCount === 0
       ? m.flow_fields_required_zero()
       : displayedFormSchemaStats.requiredCount === 1
-      ? m.flow_fields_required_singular({ count: displayedFormSchemaStats.requiredCount })
-      : m.flow_fields_required_plural({ count: displayedFormSchemaStats.requiredCount });
+        ? m.flow_fields_required_singular({ count: displayedFormSchemaStats.requiredCount })
+        : m.flow_fields_required_plural({ count: displayedFormSchemaStats.requiredCount });
   $: if (builderStage !== 3 && formSchemaDraftStats !== null) {
     formSchemaDraftStats = null;
   }
   $: hasAudioInputStep = ($update.steps ?? []).some((step) => step.input_type === "audio");
   $: wizardMetadata =
-    (((($update.metadata_json as FlowMetadataJson | null | undefined) ?? {})
-      .wizard as FlowWizardMetadata | undefined) ?? {});
+    ((($update.metadata_json as FlowMetadataJson | null | undefined) ?? {}).wizard as
+      | FlowWizardMetadata
+      | undefined) ?? {};
   $: transcriptionEnabled =
     typeof wizardMetadata.transcription_enabled === "boolean"
       ? wizardMetadata.transcription_enabled
@@ -129,7 +133,8 @@
       ? (wizardMetadata as FlowWizardMetadata).transcription_model?.id
       : null;
   $: transcriptionModel =
-    ($currentSpace.transcription_models ?? []).find((model) => model.id === transcriptionModelId) ?? null;
+    ($currentSpace.transcription_models ?? []).find((model) => model.id === transcriptionModelId) ??
+    null;
   $: selectedTranscriptionModelId =
     transcriptionModel && typeof transcriptionModel.id === "string" ? transcriptionModel.id : null;
   $: if (selectedTranscriptionModelId && selectedTranscriptionModelId !== transcriptionModelId) {
@@ -137,7 +142,8 @@
       transcription_model: { id: selectedTranscriptionModelId }
     });
   }
-  $: transcriptionModelMissingInSpace = transcriptionModelId !== null && transcriptionModel === null;
+  $: transcriptionModelMissingInSpace =
+    transcriptionModelId !== null && transcriptionModel === null;
   $: transcriptionLanguage = (wizardMetadata as FlowWizardMetadata).transcription_language ?? "sv";
   $: stepsCount = $update.steps?.length ?? 0;
   $: checklistHasName = ($update.name ?? "").trim().length > 0;
@@ -171,7 +177,10 @@
 
   function setWizardMeta(patch: Partial<FlowWizardMetadata>) {
     const metadata = { ...(($update.metadata_json as FlowMetadataJson | null | undefined) ?? {}) };
-    metadata.wizard = { ...((metadata.wizard as Record<string, unknown> | undefined) ?? {}), ...patch };
+    metadata.wizard = {
+      ...((metadata.wizard as Record<string, unknown> | undefined) ?? {}),
+      ...patch
+    };
     $update.metadata_json = metadata;
   }
 
@@ -189,7 +198,9 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – {$currentSpace.personal ? m.personal() : $currentSpace.name} – {$resource.name}</title>
+  <title
+    >Eneo.ai – {$currentSpace.personal ? m.personal() : $currentSpace.name} – {$resource.name}</title
+  >
 </svelte:head>
 
 <Page.Root>
@@ -198,8 +209,7 @@
       truncate={true}
       parent={{ href: `/spaces/${$currentSpace.routeId}/flows` }}
       title={$resource.name}
-    >
-    </Page.Title>
+    ></Page.Title>
 
     <Page.Tabbar>
       <div role="tablist" class="flex">
@@ -247,58 +257,94 @@
       {/if}
       <div class="flex shrink-0 items-center gap-2">
         {#if $isPublished}
-          <Button variant="primary" on:click={() => { showRunDialog = true; }}>
+          <Button
+            variant="primary"
+            on:click={() => {
+              showRunDialog = true;
+            }}
+          >
             {m.flow_run_trigger()}
           </Button>
-          <Button variant="destructive" disabled={publishLoading} on:click={async () => {
-            publishLoading = true;
-            try {
-              const updated = await data.intric.flows.unpublish({ id: $resource.id });
-              flowEditor.setResource(updated);
-            } catch (e) {
-              const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
-              console.error("Unpublish failed:", msg);
-              toast.error(msg);
-            } finally {
-              publishLoading = false;
-            }
-          }}>{m.flow_unpublish_to_edit()}</Button>
+          <Button
+            variant="destructive"
+            disabled={publishLoading}
+            on:click={async () => {
+              publishLoading = true;
+              try {
+                const updated = await data.intric.flows.unpublish({ id: $resource.id });
+                flowEditor.setResource(updated);
+              } catch (e) {
+                const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
+                console.error("Unpublish failed:", msg);
+                toast.error(msg);
+              } finally {
+                publishLoading = false;
+              }
+            }}>{m.flow_unpublish_to_edit()}</Button
+          >
         {:else}
-          <Button variant="primary" disabled={!canPublish || publishLoading} on:click={async () => {
-            publishLoading = true;
-            try {
-              await flowEditor.flushAssistantSaves();
-              const published = await data.intric.flows.publish({ id: $resource.id });
-              flowEditor.setResource(published);
-            } catch (e) {
-              const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
-              console.error("Publish failed:", msg);
-              toast.error(msg);
-            } finally {
-              publishLoading = false;
-            }
-          }}>{m.flow_publish()}</Button>
+          <Button
+            variant="primary"
+            disabled={!canPublish || publishLoading}
+            on:click={async () => {
+              publishLoading = true;
+              try {
+                await flowEditor.flushAssistantSaves();
+                const published = await data.intric.flows.publish({ id: $resource.id });
+                flowEditor.setResource(published);
+              } catch (e) {
+                const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
+                console.error("Publish failed:", msg);
+                toast.error(msg);
+                if ($validationErrors.size > 0) {
+                  validationBannerExpanded = true;
+                }
+              } finally {
+                publishLoading = false;
+              }
+            }}>{m.flow_publish()}</Button
+          >
         {/if}
       </div>
     </div>
   </Page.Header>
 
   <Page.Main>
-    <div id="panel-builder" role="tabpanel" class="flex flex-1 flex-col overflow-hidden" class:hidden={activeTab !== "builder"}>
+    <div
+      id="panel-builder"
+      role="tabpanel"
+      class="flex flex-1 flex-col overflow-hidden"
+      class:hidden={activeTab !== "builder"}
+    >
       {#if $isPublished}
-        <div class="border-b border-warning-default/40 bg-warning-dimmer px-4 py-2 text-sm text-warning-stronger">
+        <div
+          class="border-warning-default/40 bg-warning-dimmer text-warning-stronger border-b px-4 py-2 text-sm"
+        >
           {m.flow_published_readonly()}
         </div>
       {/if}
-      <FlowValidationBanner errors={$validationErrors} />
+      <FlowValidationBanner
+        errors={$validationErrors}
+        steps={$update.steps}
+        onNavigateToStep={(stepId) => {
+          builderStage = 4;
+          activeStepId.set(stepId);
+        }}
+        bind:isExpanded={validationBannerExpanded}
+      />
       {#if hasStepJsonValidationErrors}
-        <div class="border-b border-warning-default/40 bg-warning-dimmer px-4 py-2 text-sm text-warning-stronger" role="status">
+        <div
+          class="border-warning-default/40 bg-warning-dimmer text-warning-stronger border-b px-4 py-2 text-sm"
+          role="status"
+        >
           {m.flow_step_json_invalid({ fields: stepJsonValidationSummary })}
         </div>
       {/if}
 
       <!-- Wizard Stepper -->
-      <div class="sticky top-0 z-10 border-b border-default bg-primary/95 backdrop-blur-sm px-4 py-3.5 md:px-6">
+      <div
+        class="border-default bg-primary/95 sticky top-0 z-10 border-b px-4 py-3.5 backdrop-blur-sm md:px-6"
+      >
         <nav class="flex items-center justify-between" aria-label="Flow builder stages">
           <ol class="flex flex-1 items-center">
             {#each FLOW_BUILDER_STAGES as stage, i}
@@ -318,7 +364,7 @@
               <li class="flex flex-col items-center gap-1">
                 <button
                   type="button"
-                  class="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-all duration-200 hover:bg-hover-dimmer"
+                  class="hover:bg-hover-dimmer flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-all duration-200"
                   class:text-primary={isActive}
                   class:font-semibold={isActive}
                   aria-current={isActive ? "step" : undefined}
@@ -326,21 +372,35 @@
                 >
                   <!-- Number circle -->
                   {#if isCompleted}
-                    <span class="inline-flex size-8 items-center justify-center rounded-full bg-accent-default text-sm font-semibold text-on-fill transition-colors duration-200">
+                    <span
+                      class="bg-accent-default text-on-fill inline-flex size-8 items-center justify-center rounded-full text-sm font-semibold transition-colors duration-200"
+                    >
                       <svg class="size-4" viewBox="0 0 16 16" fill="none">
-                        <path d="M3.5 8.5L6.5 11.5L12.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path
+                          d="M3.5 8.5L6.5 11.5L12.5 4.5"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
                       </svg>
                     </span>
                   {:else if isActive}
-                    <span class="inline-flex size-8 items-center justify-center rounded-full bg-accent-default text-sm font-semibold text-on-fill ring-2 ring-accent-default/20 transition-all duration-200">
+                    <span
+                      class="bg-accent-default text-on-fill ring-accent-default/20 inline-flex size-8 items-center justify-center rounded-full text-sm font-semibold ring-2 transition-all duration-200"
+                    >
                       {stage.id}
                     </span>
                   {:else if isSkipped}
-                    <span class="inline-flex size-8 items-center justify-center rounded-full border-2 border-dashed border-default text-sm font-medium text-muted opacity-60 transition-colors duration-200">
+                    <span
+                      class="border-default text-muted inline-flex size-8 items-center justify-center rounded-full border-2 border-dashed text-sm font-medium opacity-60 transition-colors duration-200"
+                    >
                       {stage.id}
                     </span>
                   {:else}
-                    <span class="inline-flex size-8 items-center justify-center rounded-full border-2 border-default text-sm font-medium text-secondary transition-colors duration-200">
+                    <span
+                      class="border-default text-secondary inline-flex size-8 items-center justify-center rounded-full border-2 text-sm font-medium transition-colors duration-200"
+                    >
                       {stage.id}
                     </span>
                   {/if}
@@ -359,17 +419,33 @@
               </li>
             {/each}
           </ol>
-          <div class="flex shrink-0 items-center gap-2 border-l border-default pl-3 md:gap-2.5 md:pl-5">
-            <Button variant="simple" size="default" disabled={!previousStage || stageNavigating} on:click={goToPreviousStage}>
+          <div
+            class="border-default flex shrink-0 items-center gap-2 border-l pl-3 md:gap-2.5 md:pl-5"
+          >
+            <Button
+              variant="simple"
+              size="default"
+              disabled={!previousStage || stageNavigating}
+              on:click={goToPreviousStage}
+            >
               &larr; {m.flow_stage_previous()}
             </Button>
             {#if nextStage}
-              <Button variant="primary" size="default" disabled={stageNavigating} on:click={goToNextStage}>
+              <Button
+                variant="primary"
+                size="default"
+                disabled={stageNavigating}
+                on:click={goToNextStage}
+              >
                 {m.flow_stage_next()} &rarr;
               </Button>
             {:else}
-              <Button variant="primary" size="default" disabled={!canPublish}
-                title={canPublish ? "" : m.flow_publish_not_ready_tooltip()}>
+              <Button
+                variant="primary"
+                size="default"
+                disabled={!canPublish}
+                title={canPublish ? "" : m.flow_publish_not_ready_tooltip()}
+              >
                 {m.flow_stage_done()}
               </Button>
             {/if}
@@ -380,15 +456,17 @@
       <div class="flex flex-1 flex-col overflow-hidden p-4 pt-3">
         {#if builderStage === 1}
           <div class="border-default flex-1 overflow-y-auto rounded-xl border p-5 md:p-8">
-            <div class="mx-auto max-w-5xl w-full space-y-6">
+            <div class="mx-auto w-full max-w-5xl space-y-6">
               <div class="grid gap-6 lg:grid-cols-2">
-                <div class="border-default rounded-xl border bg-primary p-6">
+                <div class="border-default bg-primary rounded-xl border p-6">
                   <h3 class="text-base font-semibold">{m.flow_basic_settings_title()}</h3>
-                  <p class="mt-1.5 text-sm text-secondary">
+                  <p class="text-secondary mt-1.5 text-sm">
                     {m.flow_basic_settings_desc()}
                   </p>
                   <div class="mt-5 space-y-4">
-                    <label class="block text-sm font-medium text-secondary" for="flow-name-input">{m.flow_flow_name()}</label>
+                    <label class="text-secondary block text-sm font-medium" for="flow-name-input"
+                      >{m.flow_flow_name()}</label
+                    >
                     <input
                       id="flow-name-input"
                       type="text"
@@ -400,7 +478,10 @@
                       }}
                       placeholder="Exempel: Biståndshandläggning hemtjänst"
                     />
-                    <label class="block pt-1 text-sm font-medium text-secondary" for="flow-description-input">{m.flow_flow_description()}</label>
+                    <label
+                      class="text-secondary block pt-1 text-sm font-medium"
+                      for="flow-description-input">{m.flow_flow_description()}</label
+                    >
                     <textarea
                       id="flow-description-input"
                       class="border-default bg-primary ring-default min-h-[120px] w-full resize-none rounded-lg border px-3.5 py-2.5 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
@@ -412,90 +493,175 @@
                       placeholder={m.flow_description_placeholder()}
                     ></textarea>
                     {#if $userMode === "power_user"}
-                      <div class="mt-4 border-t border-default pt-4" transition:slide={{ duration: 200 }}>
-                        <label class="block text-sm font-medium text-secondary" for="flow-retention-input">
+                      <div
+                        class="border-default mt-4 border-t pt-4"
+                        transition:slide={{ duration: 200 }}
+                      >
+                        <label
+                          class="text-secondary block text-sm font-medium"
+                          for="flow-retention-input"
+                        >
                           {m.flow_data_retention_label()}
                         </label>
                         <div class="mt-1.5 flex items-center gap-2">
-                          <input id="flow-retention-input" type="number" min="1" max="365"
+                          <input
+                            id="flow-retention-input"
+                            type="number"
+                            min="1"
+                            max="365"
                             class="border-default bg-primary ring-default w-24 rounded-lg border px-3.5 py-2.5 text-sm shadow focus-within:ring-2"
                             value={$update.data_retention_days ?? ""}
                             disabled={$isPublished}
                             placeholder="—"
                             on:input={(e) => {
-                              const val = e.currentTarget.value ? parseInt(e.currentTarget.value, 10) : null;
+                              const val = e.currentTarget.value
+                                ? parseInt(e.currentTarget.value, 10)
+                                : null;
                               $update.data_retention_days = val;
-                            }} />
-                          <span class="text-sm text-secondary">{m.flow_data_retention_unit()}</span>
+                            }}
+                          />
+                          <span class="text-secondary text-sm">{m.flow_data_retention_unit()}</span>
                         </div>
-                        <p class="mt-1.5 text-xs text-muted">{m.flow_data_retention_desc()}</p>
+                        <p class="text-muted mt-1.5 text-xs">{m.flow_data_retention_desc()}</p>
                       </div>
                     {/if}
                   </div>
                 </div>
                 {#if isFlowConfigured}
-                  <div class="border-default rounded-xl border bg-primary p-6">
+                  <div class="border-default bg-primary rounded-xl border p-6">
                     <h3 class="text-base font-semibold">{m.flow_summary_title()}</h3>
-                    <p class="mt-1.5 text-sm text-secondary">{m.flow_summary_desc()}</p>
+                    <p class="text-secondary mt-1.5 text-sm">{m.flow_summary_desc()}</p>
                     <ul class="mt-5 space-y-4" style="font-variant-numeric: tabular-nums">
                       <li class="flex items-center justify-between">
-                        <span class="text-sm text-secondary">{m.flow_summary_steps()}</span>
+                        <span class="text-secondary text-sm">{m.flow_summary_steps()}</span>
                         <span class="text-base font-semibold">{stepsCount}</span>
                       </li>
                       <li class="flex items-center justify-between">
-                        <span class="text-sm text-secondary">{m.flow_summary_input_fields()}</span>
+                        <span class="text-secondary text-sm">{m.flow_summary_input_fields()}</span>
                         <span class="text-base font-semibold">{formSchemaFields.length}</span>
                       </li>
                       <li class="flex items-center justify-between">
-                        <span class="text-sm text-secondary">{m.flow_summary_transcription()}</span>
-                        <span class="text-sm font-medium">{transcriptionEnabled ? m.flow_transcription_on() : m.flow_transcription_off()}</span>
+                        <span class="text-secondary text-sm">{m.flow_summary_transcription()}</span>
+                        <span class="text-sm font-medium"
+                          >{transcriptionEnabled
+                            ? m.flow_transcription_on()
+                            : m.flow_transcription_off()}</span
+                        >
                       </li>
                       <li class="flex items-center justify-between">
-                        <span class="text-sm text-secondary">{m.flow_summary_validation()}</span>
+                        <span class="text-secondary text-sm">{m.flow_summary_validation()}</span>
                         {#if checklistHasNoErrors}
-                          <span class="flex items-center gap-1.5 text-positive-stronger">
-                            <svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5"/></svg>
+                          <span class="text-positive-stronger flex items-center gap-1.5">
+                            <svg
+                              class="size-4"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2.5"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" /></svg
+                            >
                           </span>
                         {:else}
-                          <span class="text-sm font-medium text-warning-stronger">{m.flow_validation_errors_count({ count: $validationErrors.size })}</span>
+                          <span class="text-warning-stronger text-sm font-medium"
+                            >{m.flow_validation_errors_count({
+                              count: $validationErrors.size
+                            })}</span
+                          >
                         {/if}
                       </li>
                     </ul>
-                    <p class="mt-5 text-sm text-secondary">
+                    <p class="text-secondary mt-5 text-sm">
                       {$isPublished ? m.flow_status_published_readonly() : m.flow_status_draft()}
                     </p>
                   </div>
                 {:else}
-                  <div class="border-default rounded-xl border bg-primary p-6">
+                  <div class="border-default bg-primary rounded-xl border p-6">
                     <h3 class="text-base font-semibold">{m.flow_checklist_title()}</h3>
-                    <p class="mt-1.5 text-sm text-secondary">{m.flow_checklist_desc()}</p>
+                    <p class="text-secondary mt-1.5 text-sm">{m.flow_checklist_desc()}</p>
                     <ul class="mt-5 space-y-3.5">
                       <li class="flex items-center gap-3 text-sm">
-                        <span class="flex size-6 shrink-0 items-center justify-center rounded-full {checklistHasName ? 'bg-positive-dimmer text-positive-stronger' : 'border border-default bg-hover-dimmer text-secondary'}">
-                          {#if checklistHasName}<svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5"/></svg>{/if}
+                        <span
+                          class="flex size-6 shrink-0 items-center justify-center rounded-full {checklistHasName
+                            ? 'bg-positive-dimmer text-positive-stronger'
+                            : 'border-default bg-hover-dimmer text-secondary border'}"
+                        >
+                          {#if checklistHasName}<svg
+                              class="size-3.5"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2.5"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" /></svg
+                            >{/if}
                         </span>
-                        <span class:text-secondary={!checklistHasName}>{m.flow_checklist_name()}</span>
+                        <span class:text-secondary={!checklistHasName}
+                          >{m.flow_checklist_name()}</span
+                        >
                       </li>
                       <li class="flex items-center gap-3 text-sm">
-                        <span class="flex size-6 shrink-0 items-center justify-center rounded-full {checklistHasSteps ? 'bg-positive-dimmer text-positive-stronger' : 'border border-default bg-hover-dimmer text-secondary'}">
-                          {#if checklistHasSteps}<svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5"/></svg>{/if}
+                        <span
+                          class="flex size-6 shrink-0 items-center justify-center rounded-full {checklistHasSteps
+                            ? 'bg-positive-dimmer text-positive-stronger'
+                            : 'border-default bg-hover-dimmer text-secondary border'}"
+                        >
+                          {#if checklistHasSteps}<svg
+                              class="size-3.5"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2.5"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" /></svg
+                            >{/if}
                         </span>
-                        <span class:text-secondary={!checklistHasSteps}>{m.flow_checklist_steps()}</span>
+                        <span class:text-secondary={!checklistHasSteps}
+                          >{m.flow_checklist_steps()}</span
+                        >
                       </li>
                       <li class="flex items-center gap-3 text-sm">
-                        <span class="flex size-6 shrink-0 items-center justify-center rounded-full {checklistHasSteps ? 'bg-positive-dimmer text-positive-stronger' : 'border border-default bg-hover-dimmer text-secondary'}">
-                          {#if checklistHasSteps}<svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5"/></svg>{/if}
+                        <span
+                          class="flex size-6 shrink-0 items-center justify-center rounded-full {checklistHasSteps
+                            ? 'bg-positive-dimmer text-positive-stronger'
+                            : 'border-default bg-hover-dimmer text-secondary border'}"
+                        >
+                          {#if checklistHasSteps}<svg
+                              class="size-3.5"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2.5"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" /></svg
+                            >{/if}
                         </span>
-                        <span class:text-secondary={!checklistHasSteps}>{m.flow_checklist_instructions()}</span>
+                        <span class:text-secondary={!checklistHasSteps}
+                          >{m.flow_checklist_instructions()}</span
+                        >
                       </li>
                       <li class="flex items-center gap-3 text-sm">
-                        <span class="flex size-6 shrink-0 items-center justify-center rounded-full {checklistHasNoErrors ? 'bg-positive-dimmer text-positive-stronger' : 'border border-default bg-hover-dimmer text-secondary'}">
-                          {#if checklistHasNoErrors}<svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5"/></svg>{/if}
+                        <span
+                          class="flex size-6 shrink-0 items-center justify-center rounded-full {checklistHasNoErrors
+                            ? 'bg-positive-dimmer text-positive-stronger'
+                            : 'border-default bg-hover-dimmer text-secondary border'}"
+                        >
+                          {#if checklistHasNoErrors}<svg
+                              class="size-3.5"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2.5"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" /></svg
+                            >{/if}
                         </span>
-                        <span class:text-secondary={!checklistHasNoErrors}>{m.flow_checklist_valid()}</span>
+                        <span class:text-secondary={!checklistHasNoErrors}
+                          >{m.flow_checklist_valid()}</span
+                        >
                       </li>
                     </ul>
-                    <p class="mt-5 text-sm text-secondary">
+                    <p class="text-secondary mt-5 text-sm">
                       {$isPublished ? m.flow_status_published_readonly() : m.flow_status_draft()}
                     </p>
                   </div>
@@ -505,86 +671,122 @@
           </div>
         {:else if builderStage === 2}
           <div class="border-default flex-1 overflow-y-auto rounded-xl border p-4 md:p-6">
-            <div class="mx-auto max-w-3xl w-full space-y-4 pt-4">
+            <div class="mx-auto w-full max-w-3xl space-y-4 pt-4">
               {#if isTranscriptionSkipped}
-                <div class="border-default rounded-xl border bg-secondary/30 p-6 text-center">
-                  <svg class="mx-auto mb-3 size-8 text-muted/40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                    <line x1="12" y1="19" x2="12" y2="23"/>
-                    <line x1="8" y1="23" x2="16" y2="23"/>
+                <div class="border-default bg-secondary/30 rounded-xl border p-6 text-center">
+                  <svg
+                    class="text-muted/40 mx-auto mb-3 size-8"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="23" />
+                    <line x1="8" y1="23" x2="16" y2="23" />
                   </svg>
                   <h3 class="text-sm font-semibold">{m.flow_transcription_disabled()}</h3>
-                  <p class="mx-auto mt-2 max-w-md text-sm text-secondary leading-relaxed">{m.flow_transcription_disabled_subtitle({ variable: "{{transkribering}}" })}</p>
+                  <p class="text-secondary mx-auto mt-2 max-w-md text-sm leading-relaxed">
+                    {m.flow_transcription_disabled_subtitle({ variable: "{{transkribering}}" })}
+                  </p>
                   <div class="mt-4">
-                    <Input.Switch value={transcriptionEnabled} disabled={$isPublished}
-                      sideEffect={({ next }) => setTranscriptionEnabled(next)}>
+                    <Input.Switch
+                      value={transcriptionEnabled}
+                      disabled={$isPublished}
+                      sideEffect={({ next }) => setTranscriptionEnabled(next)}
+                    >
                       {m.flow_transcription_enable()}
                     </Input.Switch>
                   </div>
-                  <p class="mt-3 text-xs text-muted">{m.flow_transcription_skip_hint()}</p>
+                  <p class="text-muted mt-3 text-xs">{m.flow_transcription_skip_hint()}</p>
                 </div>
                 {#if hasAudioInputStep}
-                  <div class="rounded-xl border border-warning-default/40 bg-warning-dimmer p-4 text-sm text-warning-stronger">
+                  <div
+                    class="border-warning-default/40 bg-warning-dimmer text-warning-stronger rounded-xl border p-4 text-sm"
+                  >
                     {m.flow_transcription_audio_nudge()}
                   </div>
                 {/if}
               {:else}
-                <div class="border-default rounded-xl border bg-primary p-5">
+                <div class="border-default bg-primary rounded-xl border p-5">
                   <div class="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h3 class="text-sm font-semibold">{m.flow_transcription_optional_title()}</h3>
-                      <p class="mt-1 text-xs text-secondary">
+                      <p class="text-secondary mt-1 text-xs">
                         {m.flow_transcription_optional_desc({ variable: "{{transkribering}}" })}
                       </p>
                     </div>
-                    <Input.Switch value={transcriptionEnabled} disabled={$isPublished}
-                      sideEffect={({ next }) => setTranscriptionEnabled(next)}>
+                    <Input.Switch
+                      value={transcriptionEnabled}
+                      disabled={$isPublished}
+                      sideEffect={({ next }) => setTranscriptionEnabled(next)}
+                    >
                       {m.flow_transcription_enable()}
                     </Input.Switch>
                   </div>
                 </div>
 
-                <div class="border-default rounded-xl border bg-primary p-5">
+                <div class="border-default bg-primary rounded-xl border p-5">
                   <h3 class="text-sm font-semibold">{m.flow_transcription_model_settings()}</h3>
                   <div class="mt-4 grid gap-4 sm:grid-cols-2">
                     <div class="flex flex-col gap-1.5">
-                      <span class="text-xs font-medium text-secondary">{m.flow_transcription_model_label()}</span>
+                      <span class="text-secondary text-xs font-medium"
+                        >{m.flow_transcription_model_label()}</span
+                      >
                       <SelectAIModelV2
                         bind:selectedModel={transcriptionModel}
                         availableModels={$currentSpace.transcription_models}
                       />
                     </div>
                     <div class="flex flex-col gap-1.5">
-                      <label for="flow-transcription-language" class="text-xs font-medium text-secondary">{m.flow_transcription_language_label()}</label>
-                      <select class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2"
+                      <label
+                        for="flow-transcription-language"
+                        class="text-secondary text-xs font-medium"
+                        >{m.flow_transcription_language_label()}</label
+                      >
+                      <select
+                        class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2"
                         id="flow-transcription-language"
-                        value={transcriptionLanguage} disabled={$isPublished}
-                        on:change={(e) => setWizardMeta({ transcription_language: e.currentTarget.value })}>
+                        value={transcriptionLanguage}
+                        disabled={$isPublished}
+                        on:change={(e) =>
+                          setWizardMeta({ transcription_language: e.currentTarget.value })}
+                      >
                         <option value="sv">Svenska</option>
                         <option value="en">English</option>
                         <option value="auto">{m.flow_transcription_language_auto()}</option>
                       </select>
                     </div>
                   </div>
-                  <div class="mt-4 flex items-center gap-3 opacity-60 pointer-events-none">
+                  <div class="pointer-events-none mt-4 flex items-center gap-3 opacity-60">
                     <Input.Switch value={false} disabled />
-                    <span class="text-sm text-secondary">{m.flow_transcription_diarization()}</span>
-                    <span class="rounded-full bg-secondary/40 px-2 py-0.5 text-[10px] text-muted">{m.flow_coming_soon()}</span>
+                    <span class="text-secondary text-sm">{m.flow_transcription_diarization()}</span>
+                    <span class="bg-secondary/40 text-muted rounded-full px-2 py-0.5 text-[10px]"
+                      >{m.flow_coming_soon()}</span
+                    >
                   </div>
                   {#if transcriptionModelMissingInSpace}
-                    <div class="mt-4 rounded-lg border border-warning-default/40 bg-warning-dimmer px-3 py-2 text-xs text-warning-stronger">
+                    <div
+                      class="border-warning-default/40 bg-warning-dimmer text-warning-stronger mt-4 rounded-lg border px-3 py-2 text-xs"
+                    >
                       {m.flow_transcription_model_unavailable_warning()}
                     </div>
                   {/if}
                 </div>
 
                 {#if hasAudioInputStep}
-                  <div class="rounded-xl border border-positive-default/40 bg-positive-dimmer p-4 text-sm text-positive-stronger">
+                  <div
+                    class="border-positive-default/40 bg-positive-dimmer text-positive-stronger rounded-xl border p-4 text-sm"
+                  >
                     {m.flow_transcription_audio_detected()}
                   </div>
                 {:else}
-                  <div class="rounded-xl border border-default bg-secondary/30 p-4 text-sm text-secondary">
+                  <div
+                    class="border-default bg-secondary/30 text-secondary rounded-xl border p-4 text-sm"
+                  >
                     {m.flow_transcription_no_audio()}
                   </div>
                 {/if}
@@ -593,7 +795,9 @@
           </div>
         {:else if builderStage === 3}
           <div class="border-default flex-1 overflow-y-auto rounded-xl border p-4 md:p-6">
-            <div class="border-default mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-primary px-3 py-2 text-sm text-secondary">
+            <div
+              class="border-default bg-primary text-secondary mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm"
+            >
               <span>{formSchemaDefinedLabel}</span>
               <span>{formSchemaRequiredLabel}</span>
             </div>
@@ -606,12 +810,15 @@
           </div>
         {:else if builderStage === 4}
           <!-- Side-by-side list-detail layout -->
-          <div class="flex flex-1 flex-col overflow-hidden gap-3 lg:flex-row">
-            <div class="border-default w-full max-h-[40vh] overflow-hidden rounded-xl border lg:max-h-none lg:w-80 xl:w-[340px] lg:shrink-0">
+          <div class="flex flex-1 flex-col gap-3 overflow-hidden lg:flex-row">
+            <div
+              class="border-default max-h-[40vh] w-full overflow-hidden rounded-xl border lg:max-h-none lg:w-80 lg:shrink-0 xl:w-[340px]"
+            >
               <FlowStepList
                 steps={$update.steps}
                 activeStepId={$activeStepId}
                 isPublished={$isPublished}
+                validationErrors={$validationErrors}
                 on:selectStep={async (e) => {
                   try {
                     await flowEditor.flushAssistantSaves();
@@ -644,10 +851,22 @@
                   steps={$update.steps}
                   activeStepId={$activeStepId}
                   isPublished={$isPublished}
-                  transcriptionEnabled={transcriptionEnabled}
+                  {transcriptionEnabled}
                   transcriptionModelConfigured={transcriptionModel !== null}
-                  transcriptionModelLabel={transcriptionModel?.nickname ?? transcriptionModel?.name ?? null}
-                  formSchema={$update.metadata_json?.form_schema as { fields: { name: string; type: string; required?: boolean; options?: string[]; order?: number }[] } | undefined}
+                  transcriptionModelLabel={transcriptionModel?.nickname ??
+                    transcriptionModel?.name ??
+                    null}
+                  formSchema={$update.metadata_json?.form_schema as
+                    | {
+                        fields: {
+                          name: string;
+                          type: string;
+                          required?: boolean;
+                          options?: string[];
+                          order?: number;
+                        }[];
+                      }
+                    | undefined}
                   on:openTranscriptionSettings={() => void navigateToStage(2)}
                   on:jsonValidationChanged={(e) => {
                     hasStepJsonValidationErrors = e.detail.hasErrors;
@@ -689,42 +908,57 @@
           />
         {:else}
           <div class="border-default flex-1 overflow-y-auto rounded-xl border p-5 md:p-8">
-            <div class="mx-auto max-w-5xl w-full space-y-6">
+            <div class="mx-auto w-full max-w-5xl space-y-6">
               <!-- Pipeline summary -->
-              <div class="border-default rounded-xl border bg-primary p-6">
+              <div class="border-default bg-primary rounded-xl border p-6">
                 <h3 class="text-base font-semibold">{m.flow_review_pipeline_title()}</h3>
                 <div class="mt-5 flex flex-wrap items-center gap-3">
-                  <div class="rounded-lg bg-accent-dimmer px-4 py-2 text-sm font-medium text-accent-stronger">
+                  <div
+                    class="bg-accent-dimmer text-accent-stronger rounded-lg px-4 py-2 text-sm font-medium"
+                  >
                     {m.flow_review_input_label()}
                   </div>
                   {#each $update.steps ?? [] as pipeStep}
                     <span class="text-secondary text-lg">&rarr;</span>
-                    <div class="flex flex-col items-center rounded-lg border border-default bg-primary px-4 py-2">
-                      <span class="text-sm font-medium">{pipeStep.user_description || m.flow_step_fallback_label({ order: String(pipeStep.step_order) })}</span>
+                    <div
+                      class="border-default bg-primary flex flex-col items-center rounded-lg border px-4 py-2"
+                    >
+                      <span class="text-sm font-medium"
+                        >{pipeStep.user_description ||
+                          m.flow_step_fallback_label({ order: String(pipeStep.step_order) })}</span
+                      >
                       {#if (pipeStep as any).completion_model?.name}
-                        <span class="text-xs text-muted">{(pipeStep as any).completion_model.name}</span>
+                        <span class="text-muted text-xs"
+                          >{(pipeStep as any).completion_model.name}</span
+                        >
                       {/if}
                     </div>
                   {/each}
                   <span class="text-secondary text-lg">&rarr;</span>
-                  <div class="rounded-lg bg-positive-dimmer px-4 py-2 text-sm font-medium text-positive-stronger">
+                  <div
+                    class="bg-positive-dimmer text-positive-stronger rounded-lg px-4 py-2 text-sm font-medium"
+                  >
                     {m.flow_review_output_label()}
                   </div>
                 </div>
               </div>
 
               <!-- Test section -->
-              <div class="border-default rounded-xl border bg-primary p-6">
+              <div class="border-default bg-primary rounded-xl border p-6">
                 <h4 class="text-base font-semibold">{m.flow_testing()}</h4>
                 {#if $isPublished && $userMode === "power_user"}
-                  <p class="mt-1.5 text-sm text-secondary">{m.flow_export_debug_desc()}</p>
+                  <p class="text-secondary mt-1.5 text-sm">{m.flow_export_debug_desc()}</p>
                 {:else if !$isPublished}
-                  <p class="mt-1.5 text-sm text-secondary">{m.flow_dry_run_desc()}</p>
+                  <p class="text-secondary mt-1.5 text-sm">{m.flow_dry_run_desc()}</p>
                 {/if}
                 <div class="mt-5 flex flex-col gap-4">
                   {#if $isPublished}
                     <div class="flex flex-wrap items-center gap-3">
-                      <Button variant="primary" size="default" on:click={() => (showRunDialog = true)}>
+                      <Button
+                        variant="primary"
+                        size="default"
+                        on:click={() => (showRunDialog = true)}
+                      >
                         {m.flow_run_trigger()}
                       </Button>
                       <Button variant="outlined" on:click={() => (activeTab = "history")}>
@@ -737,7 +971,7 @@
                       <Button variant="outlined" on:click={() => (activeTab = "history")}>
                         {m.flow_show_history()}
                       </Button>
-                      <span class="text-sm text-muted">
+                      <span class="text-muted text-sm">
                         {$validationErrors.size === 0
                           ? m.flow_publish_status_ready()
                           : m.flow_validation_errors_count({ count: $validationErrors.size })}
@@ -752,10 +986,20 @@
       </div>
     </div>
 
-    <div id="panel-history" role="tabpanel" class="flex-1 overflow-y-auto" class:hidden={activeTab !== "history"}>
-      <FlowRunsTable flow={$resource} intric={data.intric} visible={activeTab === "history"} reloadTrigger={runsReloadTrigger}
+    <div
+      id="panel-history"
+      role="tabpanel"
+      class="flex-1 overflow-y-auto"
+      class:hidden={activeTab !== "history"}
+    >
+      <FlowRunsTable
+        flow={$resource}
+        intric={data.intric}
+        visible={activeTab === "history"}
+        reloadTrigger={runsReloadTrigger}
         bind:latestRunPayload={latestHistoryPayload}
-        bind:pendingHighlightRunId={pendingRunHighlight} />
+        bind:pendingHighlightRunId={pendingRunHighlight}
+      />
     </div>
   </Page.Main>
 </Page.Root>

@@ -63,6 +63,36 @@ def _build_assistant(*, flow_id, space_id, user) -> Assistant:
     )
 
 
+def _stub_template_asset_lookup(
+    service: FlowService,
+    *,
+    flow_id,
+    file_id,
+    asset_id=None,
+    checksum: str = "abc123",
+    name: str = "rapport.docx",
+    blob: bytes | None = b"template-bytes",
+):
+    resolved_asset_id = asset_id or uuid4()
+    asset = SimpleNamespace(
+        id=resolved_asset_id,
+        flow_id=flow_id,
+        file_id=file_id,
+        name=name,
+        checksum=checksum,
+    )
+    service.template_asset_repo.get_by_flow_file.return_value = asset
+    service.template_asset_repo.get.return_value = asset
+    service.file_repo.get_by_id.return_value = SimpleNamespace(
+        id=file_id,
+        checksum=checksum,
+        name=name,
+        tenant_id=service.user.tenant_id,
+        blob=blob,
+    )
+    return asset
+
+
 def _service(*, user, flow_repo, version_repo, encryption_service=None) -> FlowService:
     service = FlowService(
         user=user,
@@ -70,6 +100,7 @@ def _service(*, user, flow_repo, version_repo, encryption_service=None) -> FlowS
         flow_version_repo=version_repo,
         assistant_service=AsyncMock(),
         file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
         encryption_service=encryption_service,
     )
     service._validate_assistant_scope_for_steps = AsyncMock()  # type: ignore[method-assign]
@@ -206,16 +237,10 @@ async def test_publish_flow_pins_template_metadata_for_template_fill(user):
     flow_repo.get.return_value = source_flow
     version_repo.get_latest.return_value = None
     flow_repo.update.return_value = source_flow.model_copy(update={"published_version": 1})
-    service._get_owned_docx_template_file = AsyncMock(  # type: ignore[attr-defined]
-        return_value=SimpleNamespace(
-            id=template_file_id,
-            checksum="abc123",
-            name="rapport.docx",
-            blob=b"template-bytes",
-            tenant_id=user.tenant_id,
-            user_id=user.id,
-            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
+    asset = _stub_template_asset_lookup(
+        service,
+        flow_id=flow_id,
+        file_id=template_file_id,
     )
     service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
         return_value=[{"name": "section", "location": "body", "preview": "{{section}}"}]
@@ -225,6 +250,7 @@ async def test_publish_flow_pins_template_metadata_for_template_fill(user):
 
     definition = version_repo.create.await_args.kwargs["definition_json"]
     output_config = definition["steps"][0]["output_config"]
+    assert output_config["template_asset_id"] == str(asset.id)
     assert output_config["template_file_id"] == str(template_file_id)
     assert output_config["template_checksum"] == "abc123"
     assert output_config["template_name"] == "rapport.docx"
@@ -275,16 +301,10 @@ async def test_publish_flow_preserves_template_placeholder_order(user):
     flow_repo.get.return_value = source_flow
     version_repo.get_latest.return_value = None
     flow_repo.update.return_value = source_flow.model_copy(update={"published_version": 1})
-    service._get_owned_docx_template_file = AsyncMock(  # type: ignore[attr-defined]
-        return_value=SimpleNamespace(
-            id=template_file_id,
-            checksum="abc123",
-            name="rapport.docx",
-            blob=b"template-bytes",
-            tenant_id=user.tenant_id,
-            user_id=user.id,
-            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
+    _stub_template_asset_lookup(
+        service,
+        flow_id=flow_id,
+        file_id=template_file_id,
     )
     service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
         return_value=[
@@ -307,19 +327,19 @@ async def test_get_owned_docx_template_file_reports_missing_blob_clearly(user):
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
     file_id = uuid4()
-    service.file_repo.get_by_id.return_value = SimpleNamespace(
-        id=file_id,
-        tenant_id=user.tenant_id,
-        user_id=user.id,
-        blob=None,
+    asset = _stub_template_asset_lookup(
+        service,
+        flow_id=uuid4(),
+        file_id=file_id,
         name="template.docx",
+        blob=None,
     )
 
     with pytest.raises(
         BadRequestException,
         match="could not be read because the file content is missing",
     ):
-        await service._get_owned_docx_template_file(file_id)
+        await service._get_template_asset_file(flow_id=asset.flow_id, asset_id=asset.id)
 
 
 @pytest.mark.asyncio
@@ -397,16 +417,10 @@ async def test_publish_flow_rejects_empty_template_bindings(user):
         ],
     )
 
-    service._get_owned_docx_template_file = AsyncMock(  # type: ignore[attr-defined]
-        return_value=SimpleNamespace(
-            id=template_file_id,
-            checksum="abc123",
-            name="rapport.docx",
-            blob=b"template-bytes",
-            tenant_id=user.tenant_id,
-            user_id=user.id,
-            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
+    _stub_template_asset_lookup(
+        service,
+        flow_id=flow_id,
+        file_id=template_file_id,
     )
     service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
         return_value=[{"name": "section", "location": "body", "preview": "{{section}}"}]
@@ -453,16 +467,10 @@ async def test_publish_flow_allows_explicit_empty_template_binding(user):
     flow_repo.get.return_value = source_flow
     version_repo.get_latest.return_value = None
     flow_repo.update.return_value = source_flow.model_copy(update={"published_version": 1})
-    service._get_owned_docx_template_file = AsyncMock(  # type: ignore[attr-defined]
-        return_value=SimpleNamespace(
-            id=template_file_id,
-            checksum="abc123",
-            name="rapport.docx",
-            blob=b"template-bytes",
-            tenant_id=user.tenant_id,
-            user_id=user.id,
-            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
+    _stub_template_asset_lookup(
+        service,
+        flow_id=flow_id,
+        file_id=template_file_id,
     )
     service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
         return_value=[{"name": "optional_section", "location": "body", "preview": "{{optional_section}}"}]
@@ -764,6 +772,7 @@ async def test_create_flow_rejects_assistants_outside_space_or_tenant(user):
         flow_version_repo=version_repo,
         assistant_service=AsyncMock(),
         file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
     )
 
     with pytest.raises(BadRequestException, match="outside the selected space or tenant"):
@@ -814,6 +823,7 @@ async def test_update_flow_assistant_rejects_when_flow_published(user):
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
         file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
     )
 
     flow_id = uuid4()
@@ -853,6 +863,7 @@ async def test_create_flow_assistant_sets_flow_managed_origin(user):
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
         file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
     )
 
     flow_id = uuid4()
@@ -898,6 +909,7 @@ async def test_get_flow_assistant_rejects_wrong_owner(user):
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
         file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
     )
 
     flow_id = uuid4()
@@ -940,6 +952,7 @@ async def test_get_flow_assistant_rejects_non_flow_managed(user):
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
         file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
     )
 
     flow_id = uuid4()
@@ -981,6 +994,7 @@ async def test_update_flow_assistant_passes_include_hidden(user):
         flow_version_repo=version_repo,
         assistant_service=assistant_service,
         file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
     )
 
     flow_id = uuid4()

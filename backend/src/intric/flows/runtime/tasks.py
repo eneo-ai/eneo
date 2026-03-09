@@ -87,6 +87,7 @@ async def _execute_flow_run_async(
             space_repo=container.space_repo(),
             completion_service=container.completion_service(),
             file_repo=container.file_repo(),
+            template_asset_service=container.flow_template_asset_service(),
             encryption_service=container.encryption_service(),
             max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
             audit_service=container.audit_service(),

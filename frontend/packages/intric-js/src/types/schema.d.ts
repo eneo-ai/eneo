@@ -1931,6 +1931,15 @@ export interface paths {
     /** Unpublish Flow */
     post: operations["unpublish_flow"];
   };
+  "/api/v1/flows/{id}/template-files/": {
+    /** List Flow Template Files */
+    get: operations["list_flow_template_files"];
+    /**
+     * Upload a DOCX template asset for a flow
+     * @description Upload a reusable DOCX template for Flow document assembly. This preserves the original DOCX file for placeholder inspection and deterministic template_fill steps. It is separate from flow input uploads and does not use the flow run input policy.
+     */
+    post: operations["upload_flow_template_file"];
+  };
   "/api/v1/flows/{id}/template-inspect/": {
     /**
      * Inspect DOCX template placeholders for a flow
@@ -1938,12 +1947,9 @@ export interface paths {
      */
     get: operations["inspect_flow_template"];
   };
-  "/api/v1/flows/{id}/template-files/": {
-    /**
-     * Upload a DOCX template asset for a flow
-     * @description Upload a reusable DOCX template for Flow document assembly. This preserves the original DOCX file for placeholder inspection and deterministic template_fill steps. It is separate from flow input uploads and does not use the flow run input policy.
-     */
-    post: operations["upload_flow_template_file"];
+  "/api/v1/flows/{id}/template-files/{file_id}/signed-url/": {
+    /** Generate Flow Template Signed Url */
+    post: operations["generate_flow_template_signed_url"];
   };
   "/api/v1/flows/{id}/assistants/": {
     /** Create Flow Assistant */
@@ -1976,6 +1982,20 @@ export interface paths {
      */
     post: operations["create_flow_run"];
   };
+  "/api/v1/flows/{id}/run-contract/": {
+    /**
+     * Get flow run contract
+     * @description Return the canonical run-time contract for a published flow.
+     *
+     * Use this endpoint before rendering a run form to discover:
+     * - published flow version for stale-submit protection
+     * - structured form fields
+     * - step-specific runtime input requirements
+     * - aggregate file limits
+     * - published template readiness and capability state
+     */
+    get: operations["get_flow_run_contract"];
+  };
   "/api/v1/flows/{id}/input-policy/": {
     /**
      * Get flow input policy
@@ -2003,6 +2023,16 @@ export interface paths {
      * - multipart form field name: `upload_file`
      */
     post: operations["upload_flow_file"];
+  };
+  "/api/v1/flows/{id}/steps/{step_id}/runtime-files/": {
+    /**
+     * Upload step runtime file
+     * @description Upload a file for a specific published runtime-input step.
+     *
+     * The backend validates the step id, runtime-input enablement, MIME policy, and
+     * effective size limits for the published flow version before storing the file.
+     */
+    post: operations["upload_flow_runtime_file"];
   };
   "/api/v1/flows/{id}/runs/{run_id}/": {
     /**
@@ -4994,6 +5024,14 @@ export interface components {
        */
       upload_file: string;
     };
+    /** Body_upload_flow_runtime_file */
+    Body_upload_flow_runtime_file: {
+      /**
+       * Upload File
+       * Format: binary
+       */
+      upload_file: string;
+    };
     /** Body_upload_flow_template_file */
     Body_upload_flow_template_file: {
       /**
@@ -7053,21 +7091,54 @@ export interface components {
       /** Steps */
       steps: components["schemas"]["FlowStepPublic"][];
     };
+    /** FlowRunContractPublic */
+    FlowRunContractPublic: {
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /** Published Flow Version */
+      published_flow_version: number;
+      /** Form Fields */
+      form_fields?: {
+        [key: string]: unknown;
+      }[];
+      /** Steps Requiring Input */
+      steps_requiring_input?: components["schemas"]["FlowRuntimeInputContractPublic"][];
+      /** Aggregate Max Files */
+      aggregate_max_files?: number | null;
+      /** Template Readiness */
+      template_readiness?: components["schemas"]["FlowTemplateReadinessPublic"][];
+    };
     /**
      * FlowRunCreateRequest
      * @example {
-     *   "file_ids": [
-     *     "00000000-0000-0000-0000-000000000003"
-     *   ],
+     *   "expected_flow_version": 7,
      *   "input_payload_json": {
      *     "text": "optional context for downstream prompt steps"
+     *   },
+     *   "step_inputs": {
+     *     "00000000-0000-0000-0000-000000000003": {
+     *       "file_ids": [
+     *         "00000000-0000-0000-0000-000000000004"
+     *       ]
+     *     }
      *   }
      * }
      */
     FlowRunCreateRequest: {
+      /** Expected Flow Version */
+      expected_flow_version?: number | null;
       /** Input Payload Json */
       input_payload_json?: {
         [key: string]: unknown;
+      } | null;
+      /** Step Inputs */
+      step_inputs?: {
+        [key: string]: {
+          [key: string]: string[];
+        };
       } | null;
       /** File Ids */
       file_ids?: string[] | null;
@@ -7378,6 +7449,34 @@ export interface components {
        */
       updated_at: string;
     };
+    /** FlowRuntimeInputContractPublic */
+    FlowRuntimeInputContractPublic: {
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /** Step Order */
+      step_order: number;
+      /** Label */
+      label?: string | null;
+      /** Description */
+      description?: string | null;
+      /** Required */
+      required: boolean;
+      input_format: components["schemas"]["FlowRuntimeInputFormat"];
+      /** Max Files */
+      max_files?: number | null;
+      /** Max File Size Bytes */
+      max_file_size_bytes?: number | null;
+      /** Accepted Mimetypes */
+      accepted_mimetypes?: string[];
+    };
+    /**
+     * FlowRuntimeInputFormat
+     * @enum {string}
+     */
+    FlowRuntimeInputFormat: "document" | "audio" | "file";
     /** FlowSparsePublic */
     FlowSparsePublic: {
       /**
@@ -7517,8 +7616,68 @@ export interface components {
      * @enum {string}
      */
     FlowStepResultStatus: "pending" | "running" | "completed" | "failed" | "cancelled";
+    /** FlowTemplateAssetPublic */
+    FlowTemplateAssetPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /**
+       * File Id
+       * Format: uuid
+       */
+      file_id: string;
+      /** Name */
+      name: string;
+      /** Checksum */
+      checksum: string;
+      /** Mimetype */
+      mimetype?: string | null;
+      /** Placeholders */
+      placeholders?: string[];
+      status: components["schemas"]["FlowTemplateAssetStatus"];
+      /** Last Updated By Name */
+      last_updated_by_name?: string | null;
+      /**
+       * Can Edit
+       * @default false
+       */
+      can_edit?: boolean;
+      /**
+       * Can Download
+       * @default false
+       */
+      can_download?: boolean;
+      /**
+       * Can Select
+       * @default false
+       */
+      can_select?: boolean;
+      /**
+       * Can Inspect
+       * @default false
+       */
+      can_inspect?: boolean;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+    };
+    /**
+     * FlowTemplateAssetStatus
+     * @enum {string}
+     */
+    FlowTemplateAssetStatus: "ready" | "needs_action" | "read_only" | "unavailable";
     /** FlowTemplateInspectionPublic */
     FlowTemplateInspectionPublic: {
+      /** Asset Id */
+      asset_id?: string | null;
       /**
        * File Id
        * Format: uuid
@@ -7530,6 +7689,7 @@ export interface components {
       placeholders: components["schemas"]["FlowTemplatePlaceholderPublic"][];
       /** Extracted Text Preview */
       extracted_text_preview?: string | null;
+      status?: components["schemas"]["FlowTemplateAssetStatus"] | null;
     };
     /** FlowTemplatePlaceholderPublic */
     FlowTemplatePlaceholderPublic: {
@@ -7539,6 +7699,37 @@ export interface components {
       location: string;
       /** Preview */
       preview?: string | null;
+    };
+    /** FlowTemplateReadinessPublic */
+    FlowTemplateReadinessPublic: {
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /** Template Asset Id */
+      template_asset_id?: string | null;
+      /** Template File Id */
+      template_file_id?: string | null;
+      /** Template Name */
+      template_name?: string | null;
+      /** Checksum */
+      checksum?: string | null;
+      /** Published Flow Version */
+      published_flow_version?: number | null;
+      status: components["schemas"]["FlowTemplateAssetStatus"];
+      /**
+       * Can Edit
+       * @default false
+       */
+      can_edit?: boolean;
+      /**
+       * Can Download
+       * @default false
+       */
+      can_download?: boolean;
+      /** Message Code */
+      message_code?: string | null;
     };
     /** FormatLimit */
     FormatLimit: {
@@ -24415,6 +24606,88 @@ export interface operations {
       };
     };
   };
+  /** List Flow Template Files */
+  list_flow_template_files: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowTemplateAssetPublic"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Upload a DOCX template asset for a flow
+   * @description Upload a reusable DOCX template for Flow document assembly. This preserves the original DOCX file for placeholder inspection and deterministic template_fill steps. It is separate from flow input uploads and does not use the flow run input policy.
+   */
+  upload_flow_template_file: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_flow_template_file"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["FlowTemplateAssetPublic"];
+        };
+      };
+      /** @description The uploaded file is not a valid DOCX template for Flow assembly. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The uploaded template exceeds the allowed file size. */
+      413: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The uploaded file is not a supported DOCX template. */
+      415: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /**
    * Inspect DOCX template placeholders for a flow
    * @description Scan an uploaded DOCX template and return placeholders discovered in the document body, tables, headers, and footers.
@@ -24461,56 +24734,24 @@ export interface operations {
       };
     };
   };
-  /**
-   * Upload a DOCX template asset for a flow
-   * @description Upload a reusable DOCX template for Flow document assembly. This preserves the original DOCX file for placeholder inspection and deterministic template_fill steps. It is separate from flow input uploads and does not use the flow run input policy.
-   */
-  upload_flow_template_file: {
+  /** Generate Flow Template Signed Url */
+  generate_flow_template_signed_url: {
     parameters: {
       path: {
         id: string;
+        file_id: string;
       };
     };
     requestBody: {
       content: {
-        "multipart/form-data": components["schemas"]["Body_upload_flow_template_file"];
+        "application/json": components["schemas"]["SignedURLRequest"];
       };
     };
     responses: {
       /** @description Successful Response */
-      201: {
+      200: {
         content: {
-          "application/json": components["schemas"]["FilePublic"];
-        };
-      };
-      /** @description The uploaded file is not a valid DOCX template for Flow assembly. */
-      400: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Forbidden: API key scope does not match flow space. */
-      403: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Flow not found in tenant scope. */
-      404: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description The uploaded template exceeds the allowed file size. */
-      413: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description The uploaded file is not a supported DOCX template. */
-      415: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["SignedURLResponse"];
         };
       };
       /** @description Validation Error */
@@ -24717,6 +24958,56 @@ export interface operations {
     };
   };
   /**
+   * Get flow run contract
+   * @description Return the canonical run-time contract for a published flow.
+   *
+   * Use this endpoint before rendering a run form to discover:
+   * - published flow version for stale-submit protection
+   * - structured form fields
+   * - step-specific runtime input requirements
+   * - aggregate file limits
+   * - published template readiness and capability state
+   */
+  get_flow_run_contract: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowRunContractPublic"];
+        };
+      };
+      /** @description Flow is not published or runtime contract could not be resolved. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Get flow input policy
    * @description Return effective runtime input policy for a flow's first `flow_input` step.
    *
@@ -24814,6 +25105,70 @@ export interface operations {
         };
       };
       /** @description Unsupported media type for this flow input policy. */
+      415: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Upload step runtime file
+   * @description Upload a file for a specific published runtime-input step.
+   *
+   * The backend validates the step id, runtime-input enablement, MIME policy, and
+   * effective size limits for the published flow version before storing the file.
+   */
+  upload_flow_runtime_file: {
+    parameters: {
+      path: {
+        id: string;
+        step_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_flow_runtime_file"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["FilePublic"];
+        };
+      };
+      /** @description Runtime step input is unknown, disabled, or invalid for upload. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Uploaded file exceeds the effective runtime-input limit. */
+      413: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unsupported media type for the selected runtime step. */
       415: {
         content: {
           "application/json": components["schemas"]["GeneralError"];

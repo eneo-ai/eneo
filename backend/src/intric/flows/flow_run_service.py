@@ -7,6 +7,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 
+from intric.files.file_repo import FileRepository
 from intric.database.tables.tenant_table import Tenants
 from intric.flows.flow import (
     FlowRun,
@@ -16,15 +17,25 @@ from intric.flows.flow import (
     JsonObject,
 )
 from intric.flows.execution_backend import FlowExecutionBackend
+from intric.flows.flow_input_limits import resolve_flow_input_limits
 from intric.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
+from intric.flows.flow_run_step_inputs import (
+    apply_legacy_step_one_adapter,
+    build_runtime_step_input_specs,
+    normalize_step_inputs_payload,
+    serialize_step_inputs_payload,
+    validate_submitted_step_inputs,
+)
 from intric.flows.flow_repo import FlowRepository
 from intric.flows.flow_run_repo import FlowRunRepository, PreseedStep
 from intric.flows.flow_version_repo import FlowVersionRepository
 from intric.flows.flow_run_evidence import build_debug_export
 from intric.flows.flow_run_redaction import redact_payload
+from intric.flows.runtime.step_definition_parser import parse_runtime_steps
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
+from intric.settings.setting_service import SettingService
 from intric.users.user import UserInDB
 
 logger = get_logger(__name__)
@@ -45,6 +56,8 @@ class FlowRunService:
         flow_repo: FlowRepository,
         flow_run_repo: FlowRunRepository,
         flow_version_repo: FlowVersionRepository,
+        file_repo: FileRepository | None = None,
+        settings_service: SettingService | None = None,
         execution_backend: FlowExecutionBackend | None = None,
         max_concurrent_runs: int | None = None,
         queued_redispatch_after_seconds: int | None = None,
@@ -53,6 +66,8 @@ class FlowRunService:
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
         self.flow_version_repo = flow_version_repo
+        self.file_repo = file_repo
+        self.settings_service = settings_service
         self.execution_backend = execution_backend
         self.max_concurrent_runs = (
             max_concurrent_runs
@@ -70,6 +85,8 @@ class FlowRunService:
         *,
         flow_id: UUID,
         input_payload_json: dict[str, Any] | None,
+        expected_flow_version: int | None = None,
+        step_inputs: dict[UUID, dict[str, list[UUID]]] | None = None,
         file_ids: list[UUID] | None = None,
     ) -> FlowRun:
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
@@ -80,15 +97,54 @@ class FlowRunService:
                 context={"flow_id": str(flow_id)},
             )
 
-        if file_ids:
-            effective_payload = dict(input_payload_json or {})
-            effective_payload["file_ids"] = [str(fid) for fid in file_ids]
-            input_payload_json = effective_payload
+        if expected_flow_version is not None and expected_flow_version != flow.published_version:
+            raise BadRequestException(
+                "The published flow version changed before this run request was submitted.",
+                code="flow_run_stale_version",
+                context={
+                    "expected_flow_version": expected_flow_version,
+                    "published_flow_version": flow.published_version,
+                },
+            )
 
-        input_payload_json = normalize_and_validate_flow_run_payload(
+        normalized_inline_payload = normalize_and_validate_flow_run_payload(
             metadata_json=flow.metadata_json if isinstance(flow.metadata_json, dict) else None,
             payload=input_payload_json,
         )
+        normalized_step_inputs: dict[UUID, list[UUID]] = {}
+        if step_inputs is not None or file_ids:
+            runtime_version = await self.flow_version_repo.get(
+                flow_id=flow.id,
+                version=flow.published_version,
+                tenant_id=self.user.tenant_id,
+            )
+            runtime_steps = parse_runtime_steps(runtime_version.definition_json)
+            limits = (
+                await self.settings_service.get_flow_input_limits_resolved()
+                if self.settings_service is not None
+                else resolve_flow_input_limits(None)
+            )
+            runtime_specs = build_runtime_step_input_specs(steps=runtime_steps, limits=limits)
+            normalized_step_inputs = apply_legacy_step_one_adapter(
+                steps=runtime_steps,
+                specs=runtime_specs,
+                normalized_step_inputs=normalize_step_inputs_payload(step_inputs),
+                file_ids=file_ids,
+            )
+            await validate_submitted_step_inputs(
+                steps=runtime_steps,
+                specs=runtime_specs,
+                normalized_step_inputs=normalized_step_inputs,
+                file_repo=self.file_repo,
+                user_id=self.user.id,
+            )
+        effective_payload = dict(normalized_inline_payload or {})
+        effective_payload["expected_flow_version"] = flow.published_version
+        if normalized_step_inputs:
+            effective_payload["step_inputs"] = serialize_step_inputs_payload(normalized_step_inputs)
+        if file_ids:
+            effective_payload["file_ids"] = [str(fid) for fid in file_ids]
+        input_payload_json = effective_payload or None
 
         if input_payload_json is not None:
             payload_size = len(

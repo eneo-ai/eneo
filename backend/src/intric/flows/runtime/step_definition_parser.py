@@ -9,6 +9,7 @@ from intric.database.tables.flow_tables import (
 )
 from intric.flows.output_modes import ALLOWED_OUTPUT_MODES, transcribe_only_violation
 from intric.flows.runtime.models import RuntimeStep
+from intric.flows.runtime_input import build_runtime_input_config
 from intric.flows.step_chain_rules import find_first_step_chain_violation
 from intric.main.exceptions import BadRequestException
 
@@ -37,6 +38,7 @@ def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
                 raise BadRequestException("HTTP input_config.headers must be an object.")
         elif raw_input_config is not None and not isinstance(raw_input_config, dict):
             raise BadRequestException("Step input_config must be an object.")
+        build_runtime_input_config(raw_input_config)
         output_mode = str(item.get("output_mode", "pass_through"))
         if output_mode not in ALLOWED_OUTPUT_MODES:
             raise BadRequestException(f"Unsupported output mode '{output_mode}'.")
@@ -54,9 +56,12 @@ def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
                 bindings = raw_output_config.get("bindings")
                 if not isinstance(bindings, dict):
                     raise BadRequestException("Template fill output_config.bindings must be an object.")
-                if "template_file_id" not in raw_output_config:
+                if (
+                    "template_asset_id" not in raw_output_config
+                    and "template_file_id" not in raw_output_config
+                ):
                     raise BadRequestException(
-                        "Template fill output_config.template_file_id is required."
+                        "Template fill output_config.template_asset_id or template_file_id is required."
                     )
                 if output_type != "docx":
                     raise BadRequestException(
@@ -80,6 +85,11 @@ def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
         )
         if transcribe_only_error is not None:
             raise BadRequestException(transcribe_only_error)
+        runtime_input = build_runtime_input_config(raw_input_config)
+        if output_mode == "transcribe_only" and runtime_input.enabled and runtime_input.input_format != "audio":
+            raise BadRequestException(
+                "Transcribe-only steps require runtime_input.input_format 'audio'."
+            )
         parsed.append(
             RuntimeStep(
                 step_id=step_id,

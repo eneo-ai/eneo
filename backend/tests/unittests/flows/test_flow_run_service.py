@@ -455,6 +455,244 @@ async def test_create_run_preserves_unknown_payload_fields_for_forward_compat(us
 
 
 @pytest.mark.asyncio
+async def test_create_run_rejects_stale_expected_flow_version(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=3)
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+    flow_repo.get.return_value = flow
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.create_run(
+            flow_id=flow.id,
+            expected_flow_version=2,
+            input_payload_json={"x": "y"},
+        )
+
+    assert exc_info.value.code == "flow_run_stale_version"
+    assert exc_info.value.context == {
+        "expected_flow_version": 2,
+        "published_flow_version": 3,
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_run_persists_expected_version_and_step_inputs(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    file_repo = AsyncMock()
+    flow = _flow(user=user, published_version=2)
+    runtime_step = flow.steps[0].model_copy(
+        update={
+            "input_config": {
+                "runtime_input": {
+                    "enabled": True,
+                    "required": True,
+                    "max_files": 2,
+                    "input_format": "document",
+                }
+            }
+        }
+    )
+    flow = flow.model_copy(update={"steps": [runtime_step, flow.steps[1]]})
+    created_run = _run(user=user, flow_id=flow.id)
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=file_repo,
+        max_concurrent_runs=5,
+    )
+    flow_repo.get.return_value = flow
+    flow_run_repo.count_active_runs.return_value = 0
+    flow_run_repo.create.return_value = created_run
+    file_id = uuid4()
+    file_repo.get_list_by_id_and_user.return_value = [
+        SimpleNamespace(id=file_id, mimetype="application/pdf")
+    ]
+    flow_version_repo.get.return_value = FlowVersion(
+        flow_id=flow.id,
+        version=2,
+        tenant_id=user.tenant_id,
+        definition_checksum="checksum",
+        definition_json={
+            "steps": [
+                {
+                    "step_id": str(runtime_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(runtime_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "input_config": runtime_step.input_config,
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "mcp_policy": "inherit",
+                },
+                {
+                    "step_id": str(flow.steps[1].id),
+                    "step_order": 2,
+                    "assistant_id": str(flow.steps[1].assistant_id),
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "mcp_policy": "inherit",
+                },
+            ]
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    await service.create_run(
+        flow_id=flow.id,
+        expected_flow_version=2,
+        input_payload_json={"x": "y"},
+        step_inputs={runtime_step.id: {"file_ids": [file_id]}},
+    )
+
+    payload = flow_run_repo.create.await_args.kwargs["input_payload_json"]
+    assert payload["expected_flow_version"] == 2
+    assert payload["step_inputs"] == {
+        str(runtime_step.id): {"file_ids": [str(file_id)]}
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_duplicate_legacy_and_canonical_step_one_input(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    runtime_step = flow.steps[0].model_copy(
+        update={"input_config": {"runtime_input": {"enabled": True, "max_files": 2}}}
+    )
+    flow = flow.model_copy(update={"steps": [runtime_step, flow.steps[1]]})
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+    flow_repo.get.return_value = flow
+    flow_version_repo.get.return_value = FlowVersion(
+        flow_id=flow.id,
+        version=1,
+        tenant_id=user.tenant_id,
+        definition_checksum="checksum",
+        definition_json={
+            "steps": [
+                {
+                    "step_id": str(runtime_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(runtime_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "input_config": runtime_step.input_config,
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "mcp_policy": "inherit",
+                }
+            ]
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.create_run(
+            flow_id=flow.id,
+            input_payload_json={"x": "y"},
+            file_ids=[uuid4()],
+            step_inputs={runtime_step.id: {"file_ids": [uuid4()]}},
+        )
+
+    assert exc_info.value.code == "flow_run_duplicate_step_input"
+
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_runtime_step_input_mimetype(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    file_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    runtime_step = flow.steps[0].model_copy(
+        update={
+            "input_config": {
+                "runtime_input": {
+                    "enabled": True,
+                    "required": True,
+                    "max_files": 1,
+                    "input_format": "audio",
+                }
+            }
+        }
+    )
+    flow = flow.model_copy(update={"steps": [runtime_step, flow.steps[1]]})
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=file_repo,
+        max_concurrent_runs=5,
+    )
+    flow_repo.get.return_value = flow
+    flow_version_repo.get.return_value = FlowVersion(
+        flow_id=flow.id,
+        version=1,
+        tenant_id=user.tenant_id,
+        definition_checksum="checksum",
+        definition_json={
+            "steps": [
+                {
+                    "step_id": str(runtime_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(runtime_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "input_config": runtime_step.input_config,
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "mcp_policy": "inherit",
+                }
+            ]
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    file_id = uuid4()
+    file_repo.get_list_by_id_and_user.return_value = [
+        SimpleNamespace(id=file_id, mimetype="application/pdf")
+    ]
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.create_run(
+            flow_id=flow.id,
+            input_payload_json={"x": "y"},
+            step_inputs={runtime_step.id: {"file_ids": [file_id]}},
+        )
+
+    assert exc_info.value.code == "flow_run_step_input_mimetype_rejected"
+    assert exc_info.value.context == {
+        "step_id": str(runtime_step.id),
+        "file_id": str(file_id),
+        "mimetype": "application/pdf",
+    }
+
+
+@pytest.mark.asyncio
 async def test_list_runs_delegates_to_repo(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()

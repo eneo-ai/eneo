@@ -45,6 +45,8 @@ def build_completed_step_input_payload(output: StepExecutionOutput) -> dict[str,
     }
     if output.transcription_metadata is not None:
         payload["transcription"] = output.transcription_metadata
+    if output.runtime_input_metadata is not None:
+        payload["runtime_input"] = output.runtime_input_metadata
     if output.rag_metadata is not None:
         payload["rag"] = output.rag_metadata
     if output.contract_validation is not None:

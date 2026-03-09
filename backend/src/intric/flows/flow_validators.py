@@ -15,6 +15,7 @@ from intric.database.tables.flow_tables import (
 from intric.flows.flow import FlowStep, JsonObject
 from intric.flows.output_modes import transcribe_only_violation
 from intric.flows.output_processing import validate_schema_syntax
+from intric.flows.runtime_input import build_runtime_input_config
 from intric.flows.step_chain_rules import find_first_step_chain_violation
 from intric.flows.transcription_config import (
     FlowTranscriptionConfigError,
@@ -42,6 +43,7 @@ _RESERVED_VARIABLE_ALIASES = {
     "indata_text",
     "indata_json",
     "indata_filer",
+    "step_input",
 }
 _RESERVED_VARIABLE_ALIASES_NORMALIZED = {
     alias.casefold() for alias in _RESERVED_VARIABLE_ALIASES
@@ -145,6 +147,7 @@ def validate_steps(
                 current_step_order=step.step_order,
                 available_orders=seen,
             )
+        _validate_runtime_input_publish_rules(step=step)
 
     _validate_audio_transcription_settings(
         steps=sorted_steps,
@@ -582,13 +585,21 @@ def _validate_template_fill_output_config(
             f"Step {step.step_order}: output_config must be an object for output_mode 'template_fill'."
         )
 
+    template_asset_id = step.output_config.get("template_asset_id")
     template_file_id = step.output_config.get("template_file_id")
-    if template_file_id in (None, ""):
+    if template_asset_id in (None, "") and template_file_id in (None, ""):
         if require_complete_config:
             raise BadRequestException(
-                f"Step {step.step_order}: output_config.template_file_id must be a UUID."
+                f"Step {step.step_order}: output_config.template_asset_id or template_file_id must be a UUID."
             )
-    else:
+    if template_asset_id not in (None, ""):
+        try:
+            UUID(str(template_asset_id))
+        except Exception as exc:
+            raise BadRequestException(
+                f"Step {step.step_order}: output_config.template_asset_id must be a UUID."
+            ) from exc
+    if template_file_id not in (None, ""):
         try:
             UUID(str(template_file_id))
         except Exception as exc:
@@ -653,3 +664,25 @@ def _validate_template_expression_reference(
         raise BadRequestException(
             f"Template binding references unknown step order: {referenced_order}."
         )
+
+
+def _validate_runtime_input_publish_rules(*, step: FlowStep) -> None:
+    runtime_input = build_runtime_input_config(step.input_config)
+    if not runtime_input.enabled:
+        return
+
+    if step.output_mode == "transcribe_only" and runtime_input.input_format != "audio":
+        raise BadRequestException(
+            f"Step {step.step_order}: transcribe_only steps require runtime_input.input_format 'audio'."
+        )
+
+    bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
+    if bindings is None:
+        return
+
+    question_binding = bindings.get("question")
+    if isinstance(question_binding, str) and question_binding.strip():
+        if "step_input." not in question_binding:
+            raise BadRequestException(
+                f"Step {step.step_order}: explicit question bindings must reference step_input.* when runtime input is enabled."
+            )

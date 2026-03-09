@@ -94,10 +94,12 @@ from intric.flows import (
     FlowFactory,
     FlowRepository,
     FlowRunRepository,
-    FlowRunService,
-    FlowService,
     FlowVersionRepository,
 )
+from intric.flows.flow_run_service import FlowRunService
+from intric.flows.flow_service import FlowService
+from intric.flows.flow_template_asset_repo import FlowTemplateAssetRepository
+from intric.flows.flow_template_asset_service import FlowTemplateAssetService
 from intric.flows.runtime.celery_app import celery_app as flow_celery_app
 from intric.flows.runtime.celery_execution_backend import CeleryFlowExecutionBackend
 from intric.group_chat.application.group_chat_service import GroupChatService
@@ -687,6 +689,10 @@ class Container(containers.DeclarativeContainer):
         session=session,
         factory=flow_factory,
     )
+    flow_template_asset_repo = providers.Factory(
+        FlowTemplateAssetRepository,
+        session=session,
+    )
     flow_run_repo = providers.Factory(
         FlowRunRepository,
         session=session,
@@ -939,16 +945,6 @@ class Container(containers.DeclarativeContainer):
         audit_service=audit_service,
     )
     storage_service = providers.Factory(StorageInfoService, repo=storage_repo)
-    flow_run_service = providers.Factory(
-        FlowRunService,
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=providers.Callable(
-            _flow_max_concurrent_runs_per_tenant
-        ),
-    )
     job_service = providers.Factory(
         JobService,
         user=user,
@@ -1012,6 +1008,18 @@ class Container(containers.DeclarativeContainer):
         feature_flag_service=feature_flag_service,
         tenant_repo=tenant_repo,
         audit_service=audit_service,
+    )
+    flow_run_service = providers.Factory(
+        FlowRunService,
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=file_repo,
+        settings_service=settings_service,
+        max_concurrent_runs=providers.Callable(
+            _flow_max_concurrent_runs_per_tenant
+        ),
     )
     crawl_service = providers.Factory(
         CrawlService,
@@ -1116,7 +1124,16 @@ class Container(containers.DeclarativeContainer):
         flow_version_repo=flow_version_repo,
         assistant_service=assistant_service,
         file_repo=file_repo,
+        template_asset_repo=flow_template_asset_repo,
         encryption_service=encryption_service,
+    )
+    flow_template_asset_service = providers.Factory(
+        FlowTemplateAssetService,
+        user=user,
+        flow_repo=flow_repo,
+        file_repo=file_repo,
+        file_service=file_service,
+        template_asset_repo=flow_template_asset_repo,
     )
     group_chat_service = providers.Factory(
         GroupChatService,

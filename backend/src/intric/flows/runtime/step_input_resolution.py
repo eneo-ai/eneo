@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from intric.flows.flow import FlowRun, FlowStepResult
+from intric.flows.runtime_input import build_runtime_input_config
 from intric.flows.runtime.input_files import (
     load_files_by_requested_ids,
     parse_requested_file_ids,
@@ -89,12 +90,89 @@ async def resolve_step_input(
     legacy_prompt_binding_used = False
     diagnostics: list[StepDiagnostic] = []
     transcription_metadata: dict[str, Any] | None = None
+    runtime_input_metadata: dict[str, Any] | None = None
+    files = None
+    runtime_input_config = build_runtime_input_config(step.input_config)
+    runtime_input_text = ""
+    requested_ids = _resolve_runtime_requested_ids(run=run, step=step)
+
+    if requested_ids and runtime_input_config.enabled:
+        file_cache = state.file_cache if state else None
+        files = await load_files_by_requested_ids(
+            file_repo=deps.file_repo,
+            requested_ids=requested_ids,
+            user_id=deps.user_id,
+            file_cache=file_cache,
+        )
+        returned_ids = {f.id for f in files}
+        missing = [fid for fid in requested_ids if fid not in returned_ids]
+        if missing:
+            raise TypedIOValidationException(
+                f"File(s) not found or not accessible: {missing}",
+                code="typed_io_file_not_found",
+            )
+
+        if runtime_input_config.input_format == "audio":
+            if deps.transcriber is None:
+                raise TypedIOValidationException(
+                    "Transcriber service is not available for audio input execution.",
+                    code="typed_io_transcription_failed",
+                )
+            audio_request = AudioRuntimeRequest(
+                run=run,
+                step=step,
+                context=context,
+                version_metadata=version_metadata,
+                files=files,
+                requested_ids=requested_ids,
+                max_audio_files=deps.max_audio_files,
+                max_inline_text_bytes=deps.max_inline_text_bytes,
+            )
+            audio_deps = AudioRuntimeDeps(
+                transcriber=deps.transcriber,
+                space_repo=deps.space_repo,
+                flow_run_repo=deps.flow_run_repo,
+                audit_service=deps.audit_service,
+                actor=deps.actor,
+            )
+            audio_resolution = await resolve_transcribe_and_attach_audio_input(
+                request=audio_request,
+                deps=audio_deps,
+            )
+            runtime_input_text = audio_resolution.text
+            transcription_metadata = audio_resolution.transcription_metadata
+        else:
+            extracted = [
+                str(f.text).strip()
+                for f in files
+                if isinstance(getattr(f, "text", None), str) and str(f.text).strip()
+            ]
+            if extracted:
+                runtime_input_text = "\n\n".join(extracted)
+                raw_extracted_text = runtime_input_text
+
+        runtime_input_metadata = {
+            "text": runtime_input_text,
+            "file_ids": [str(file_id) for file_id in requested_ids],
+            "extracted_text_length": len(runtime_input_text),
+            "input_format": runtime_input_config.input_format,
+        }
 
     bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
     if bindings is not None:
         question_template = bindings.get("question")
         if isinstance(question_template, str):
-            interpolated_question = deps.variable_resolver.interpolate(question_template, context)
+            interpolation_context = deps.variable_resolver.build_context(
+                run.input_payload_json,
+                prior_results,
+                current_step_order=step.step_order,
+                step_names_by_order=state.step_names_by_order if state else None,
+                current_step_input=runtime_input_metadata,
+            )
+            interpolated_question = deps.variable_resolver.interpolate(
+                question_template,
+                interpolation_context,
+            )
             if is_legacy_mirrored_question_binding(
                 question_template=question_template,
                 interpolated_question=interpolated_question,
@@ -104,13 +182,21 @@ async def resolve_step_input(
             else:
                 input_text = interpolated_question
                 used_question_binding = True
+                if runtime_input_metadata is not None and "step_input." not in question_template:
+                    raise TypedIOValidationException(
+                        f"Step {step.step_order}: explicit runtime-input bindings must reference step_input.*",
+                        code="flow_runtime_input_not_consumed",
+                    )
 
         legacy_text_template = bindings.get("text")
         if isinstance(legacy_text_template, str):
             legacy_prompt_binding_used = True
 
-    files = None
-    if step.input_source == "flow_input" and step.input_type in ("document", "image", "file", "audio"):
+    if (
+        files is None
+        and step.input_source == "flow_input"
+        and step.input_type in ("document", "image", "file", "audio")
+    ):
         raw_file_ids = (run.input_payload_json or {}).get("file_ids", [])
         deps.logger.info(
             "flow_executor.file_resolve run_id=%s step_order=%d input_type=%s file_ids=%s",
@@ -194,6 +280,18 @@ async def resolve_step_input(
                 input_text = "\n\n".join(extracted)
                 raw_extracted_text = input_text
 
+    if runtime_input_metadata is not None and not used_question_binding:
+        input_text = _compose_runtime_and_chained_input(
+            runtime_text=runtime_input_text,
+            chained_text=source_text,
+            replace_chain=(
+                runtime_input_config.input_format == "audio"
+                and step.output_mode == "transcribe_only"
+            ),
+        )
+        if runtime_input_text:
+            raw_extracted_text = runtime_input_text or raw_extracted_text
+
     if step.input_type == "json":
         if structured is not None:
             input_text = json.dumps(structured, ensure_ascii=False)
@@ -252,7 +350,32 @@ async def resolve_step_input(
         legacy_prompt_binding_used=legacy_prompt_binding_used,
         diagnostics=diagnostics,
         transcription_metadata=transcription_metadata,
+        runtime_input_metadata=runtime_input_metadata,
     )
+
+
+def _resolve_runtime_requested_ids(*, run: FlowRun, step: RuntimeStep) -> list[Any]:
+    payload = run.input_payload_json or {}
+    raw_step_inputs = payload.get("step_inputs")
+    if isinstance(raw_step_inputs, dict):
+        raw_step_input = raw_step_inputs.get(str(step.step_id)) or raw_step_inputs.get(step.step_id)
+        if isinstance(raw_step_input, dict):
+            return parse_requested_file_ids(raw_file_ids=raw_step_input.get("file_ids"))
+    if step.step_order == 1:
+        return parse_requested_file_ids(raw_file_ids=payload.get("file_ids"))
+    return []
+
+
+def _compose_runtime_and_chained_input(
+    *,
+    runtime_text: str,
+    chained_text: str,
+    replace_chain: bool,
+) -> str:
+    if replace_chain:
+        return runtime_text
+    segments = [segment.strip() for segment in (runtime_text, chained_text) if segment and segment.strip()]
+    return "\n\n".join(segments)
 
 
 def enforce_inline_input_cap(

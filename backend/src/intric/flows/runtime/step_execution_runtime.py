@@ -261,6 +261,8 @@ async def prepare_step_execution(
     )
     if step_input.transcription_metadata is not None:
         input_payload_for_result["transcription"] = step_input.transcription_metadata
+    if step_input.runtime_input_metadata is not None:
+        input_payload_for_result["runtime_input"] = step_input.runtime_input_metadata
 
     if deps.logger is not None:
         deps.logger.info(
@@ -287,7 +289,18 @@ async def prepare_step_execution(
             effective_prompt=effective_prompt,
         ) from exc
 
-    effective_prompt = deps.variable_resolver.interpolate(prompt_text, context) if prompt_text else ""
+    prompt_context = deps.variable_resolver.build_context(
+        run.input_payload_json,
+        context_results,
+        current_step_order=step.step_order,
+        step_names_by_order=state.step_names_by_order,
+        current_step_input=step_input.runtime_input_metadata,
+    )
+    effective_prompt = (
+        deps.variable_resolver.interpolate(prompt_text, prompt_context)
+        if prompt_text
+        else ""
+    )
     effective_prompt = augment_prompt_for_json_output(
         output_type=step.output_type,
         output_contract=step.output_contract,
@@ -405,6 +418,7 @@ async def complete_step_execution(
             diagnostics=diagnostics,
             rag_metadata=rag_metadata,
             transcription_metadata=prepared.step_input.transcription_metadata,
+            runtime_input_metadata=prepared.step_input.runtime_input_metadata,
         )
 
     info_blob_chunks, rag_metadata, rag_diagnostics = await deps.retrieve_rag_chunks(
@@ -537,4 +551,5 @@ async def complete_step_execution(
         diagnostics=diagnostics,
         rag_metadata=rag_metadata,
         transcription_metadata=prepared.step_input.transcription_metadata,
+        runtime_input_metadata=prepared.step_input.runtime_input_metadata,
     )

@@ -35,6 +35,7 @@ def _step(step_order: int = 1) -> FlowStep:
         output_mode="pass_through",
         output_type="json",
         mcp_policy="inherit",
+        input_config={"runtime_input": {"enabled": True, "max_files": 2}},
     )
 
 
@@ -68,6 +69,12 @@ def _version(user, flow: Flow) -> FlowVersion:
                     "step_id": str(step.id),
                     "step_order": step.step_order,
                     "assistant_id": str(step.assistant_id),
+                    "input_source": step.input_source,
+                    "input_type": step.input_type,
+                    "input_config": step.input_config,
+                    "output_mode": step.output_mode,
+                    "output_type": step.output_type,
+                    "mcp_policy": step.mcp_policy,
                 }
                 for step in flow.steps
             ]
@@ -127,6 +134,10 @@ async def test_create_run_stores_file_ids(user):
     create_kwargs = flow_run_repo.create.await_args.kwargs
     payload = create_kwargs["input_payload_json"]
     assert payload["file_ids"] == [str(file_id_1), str(file_id_2)]
+    assert payload["expected_flow_version"] == 1
+    assert payload["step_inputs"] == {
+        str(flow.steps[0].id): {"file_ids": [str(file_id_1), str(file_id_2)]}
+    }
     assert payload["text"] == "hello"
 
 
@@ -175,5 +186,5 @@ async def test_create_run_no_file_ids(user):
 
     create_kwargs = flow_run_repo.create.await_args.kwargs
     payload = create_kwargs["input_payload_json"]
-    assert payload == {"text": "hello"}
+    assert payload == {"text": "hello", "expected_flow_version": 1}
     assert "file_ids" not in payload

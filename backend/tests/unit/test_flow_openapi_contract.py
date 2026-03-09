@@ -53,6 +53,8 @@ def _extract_enum_values(openapi_spec: dict, schema: dict) -> set[str]:
 REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/flows/{id}/input-policy/": {"get"},
     "/api/v1/flows/{id}/files/": {"post"},
+    "/api/v1/flows/{id}/run-contract/": {"get"},
+    "/api/v1/flows/{id}/steps/{step_id}/runtime-files/": {"post"},
     "/api/v1/flows/{id}/template-files/": {"post"},
     "/api/v1/flows/{id}/template-inspect/": {"get"},
     "/api/v1/flows/{id}/runs/": {"get", "post"},
@@ -66,8 +68,12 @@ REQUIRED_PATHS: dict[str, set[str]] = {
 
 REQUIRED_SCHEMAS = {
     "FlowInputPolicyPublic",
+    "FlowRunContractPublic",
+    "FlowRuntimeInputContractPublic",
     "FlowRunStepPublic",
     "FlowInputLimitsPublic",
+    "FlowTemplateAssetPublic",
+    "FlowTemplateReadinessPublic",
     "FlowTemplateInspectionPublic",
 }
 
@@ -85,6 +91,8 @@ REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
     ("/api/v1/flows/{id}/assistants/{assistant_id}/", "delete"): "delete_flow_assistant",
     ("/api/v1/flows/{id}/template-files/", "post"): "upload_flow_template_file",
     ("/api/v1/flows/{id}/template-inspect/", "get"): "inspect_flow_template",
+    ("/api/v1/flows/{id}/run-contract/", "get"): "get_flow_run_contract",
+    ("/api/v1/flows/{id}/steps/{step_id}/runtime-files/", "post"): "upload_flow_runtime_file",
     ("/api/v1/flows/{id}/runs/", "post"): "create_flow_run",
     ("/api/v1/flows/{id}/runs/", "get"): "list_flow_runs_alias",
     ("/api/v1/flows/{id}/input-policy/", "get"): "get_flow_input_policy",
@@ -98,6 +106,14 @@ REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
 }
 
 REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
+    (
+        "/api/v1/flows/{id}/run-contract/",
+        "get",
+    ): {"400", "403", "404"},
+    (
+        "/api/v1/flows/{id}/steps/{step_id}/runtime-files/",
+        "post",
+    ): {"400", "403", "404", "413", "415", "422"},
     (
         "/api/v1/flows/{id}/template-files/",
         "post",
@@ -141,6 +157,14 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
 }
 
 REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
+    (
+        "/api/v1/flows/{id}/run-contract/",
+        "get",
+    ): {"400", "403", "404"},
+    (
+        "/api/v1/flows/{id}/steps/{step_id}/runtime-files/",
+        "post",
+    ): {"400", "403", "404", "413", "415"},
     (
         "/api/v1/flows/{id}/template-files/",
         "post",
@@ -319,7 +343,6 @@ def test_openapi_flow_run_create_schema_has_request_example(openapi_spec: dict) 
     )
     example = schema.get("example")
     assert isinstance(example, dict), "FlowRunCreateRequest schema must include an example"
-    assert "file_ids" in example
     assert "input_payload_json" in example
 
 
@@ -331,16 +354,22 @@ def test_openapi_flow_run_create_example_shape_is_consumer_valid(openapi_spec: d
     )
     example = schema.get("example", {})
     assert isinstance(example, dict), "FlowRunCreateRequest example must be a JSON object"
-    assert set(example.keys()) <= {"file_ids", "input_payload_json"}
+    assert set(example.keys()) <= {
+        "expected_flow_version",
+        "file_ids",
+        "input_payload_json",
+        "step_inputs",
+    }
 
-    file_ids = example.get("file_ids")
-    assert isinstance(file_ids, list), "FlowRunCreateRequest.example.file_ids must be a list"
-    assert all(isinstance(item, str) and item.strip() for item in file_ids)
+    assert isinstance(example.get("expected_flow_version"), int)
 
     input_payload_json = example.get("input_payload_json")
     assert isinstance(input_payload_json, dict), (
         "FlowRunCreateRequest.example.input_payload_json must be a JSON object"
     )
+    step_inputs = example.get("step_inputs")
+    assert isinstance(step_inputs, dict)
+    assert step_inputs, "FlowRunCreateRequest.example.step_inputs must include at least one step"
 
 
 def test_openapi_flow_step_create_schema_exposes_enum_constraints(openapi_spec: dict) -> None:

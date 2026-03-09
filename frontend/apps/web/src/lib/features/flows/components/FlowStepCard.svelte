@@ -16,6 +16,7 @@
   export let isPowerUser: boolean;
   export let canMoveUp: boolean;
   export let canMoveDown: boolean;
+  export let hasValidationError: boolean = false;
 
   const dispatch = createEventDispatcher();
 
@@ -136,13 +137,19 @@
   >
     <!-- Step order badge — filled circle -->
     <div
-      class="flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors duration-150"
+      class="relative flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors duration-150"
       class:bg-accent-default={isActive}
       class:text-on-fill={isActive}
       class:bg-hover-default={!isActive}
       class:text-secondary={!isActive}
     >
       <span>{step.step_order}</span>
+      {#if hasValidationError}
+        <span
+          class="bg-negative-stronger absolute -top-0.5 -right-0.5 size-2 rounded-full"
+          aria-label={m.flow_validation_step_has_error()}
+        ></span>
+      {/if}
     </div>
 
     <div class="flex min-w-0 flex-1 flex-col gap-0.5">

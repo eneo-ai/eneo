@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from io import BytesIO
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import UploadFile
@@ -614,3 +615,157 @@ async def test_policy_for_document_with_file_count_limit() -> None:
     policy = await service.get_input_policy(flow_id=flow.id)
 
     assert policy.max_files_per_run == 5
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_returns_runtime_steps_and_template_readiness() -> None:
+    flow_service = AsyncMock()
+    file_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    template_asset_repo = AsyncMock()
+
+    runtime_step = _step(step_order=1, input_type="text").model_copy(
+        update={
+            "input_config": {
+                "runtime_input": {
+                    "enabled": True,
+                    "required": True,
+                    "max_files": 2,
+                    "input_format": "document",
+                    "label": "Upload",
+                    "description": "Attach source files",
+                }
+            }
+        }
+    )
+    template_step = _step(step_order=2, input_type="text").model_copy(
+        update={
+            "output_mode": "template_fill",
+            "output_type": "docx",
+            "output_config": {
+                "template_asset_id": str(uuid4()),
+                "template_file_id": str(uuid4()),
+                "template_checksum": "published-checksum",
+                "template_name": "Published template",
+                "bindings": {"Body": "{{step_1.output.text}}"},
+            },
+        }
+    )
+    flow = _flow(step=runtime_step).model_copy(
+        update={"published_version": 4, "steps": [runtime_step, template_step]}
+    )
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+        file_max_size_bytes=12_000_000,
+        audio_max_size_bytes=25_000_000,
+        max_files_per_run=5,
+    )
+    asset_id = UUID(str(template_step.output_config["template_asset_id"]))
+    template_asset_repo.get.return_value = SimpleNamespace(
+        id=asset_id,
+        file_id=UUID(str(template_step.output_config["template_file_id"])),
+        name="Shared template",
+        checksum="published-checksum",
+    )
+    flow_version_repo.get.return_value = SimpleNamespace(
+        definition_json={
+            "steps": [
+                {
+                    "step_id": str(runtime_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(runtime_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "input_config": runtime_step.input_config,
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "mcp_policy": "inherit",
+                },
+                {
+                    "step_id": str(template_step.id),
+                    "step_order": 2,
+                    "assistant_id": str(template_step.assistant_id),
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_mode": "template_fill",
+                    "output_type": "docx",
+                    "output_config": template_step.output_config,
+                    "mcp_policy": "inherit",
+                },
+            ]
+        }
+    )
+
+    service = FlowFileUploadService(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+        template_asset_repo=template_asset_repo,
+    )
+
+    contract = await service.get_run_contract(flow_id=flow.id)
+
+    assert contract["published_flow_version"] == 4
+    assert contract["aggregate_max_files"] == 2
+    assert contract["steps_requiring_input"][0]["step_id"] == runtime_step.id
+    assert contract["steps_requiring_input"][0]["label"] == "Upload"
+    assert contract["steps_requiring_input"][0]["required"] is True
+    assert contract["steps_requiring_input"][0]["max_files"] == 2
+    assert contract["steps_requiring_input"][0]["max_file_size_bytes"] == 12_000_000
+    assert (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        in contract["steps_requiring_input"][0]["accepted_mimetypes"]
+    )
+    assert contract["template_readiness"][0]["status"] == "ready"
+    assert contract["template_readiness"][0]["template_asset_id"] == asset_id
+
+
+@pytest.mark.asyncio
+async def test_upload_runtime_file_for_step_rejects_unknown_step_id() -> None:
+    flow_service = AsyncMock()
+    file_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    template_asset_repo = AsyncMock()
+
+    runtime_step = _step(step_order=1, input_type="text").model_copy(
+        update={"input_config": {"runtime_input": {"enabled": True}}}
+    )
+    flow = _flow(step=runtime_step).model_copy(update={"published_version": 1, "steps": [runtime_step]})
+    flow_service.get_flow.return_value = flow
+    flow_version_repo.get.return_value = SimpleNamespace(
+        definition_json={
+            "steps": [
+                {
+                    "step_id": str(runtime_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(runtime_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "input_config": runtime_step.input_config,
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "mcp_policy": "inherit",
+                }
+            ]
+        }
+    )
+
+    service = FlowFileUploadService(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+        template_asset_repo=template_asset_repo,
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.upload_runtime_file_for_step(
+            flow_id=flow.id,
+            step_id=uuid4(),
+            upload_file=UploadFile(filename="x.txt", file=BytesIO(b"content")),
+        )
+
+    assert exc_info.value.code == "flow_run_unknown_step_input"

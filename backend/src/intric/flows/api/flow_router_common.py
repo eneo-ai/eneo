@@ -160,6 +160,8 @@ def flow_upload_service(container: Container) -> FlowFileUploadService:
         flow_service=container.flow_service(),
         file_service=container.file_service(),
         settings_service=container.settings_service(),
+        flow_version_repo=container.flow_version_repo(),
+        template_asset_repo=container.flow_template_asset_repo(),
     )
 
 
