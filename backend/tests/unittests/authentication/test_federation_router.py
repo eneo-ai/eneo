@@ -4,6 +4,7 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 import jwt
@@ -109,6 +110,15 @@ class TenantRepoStub:
         return None
 
 
+class AllowedOriginRepoStub:
+    def __init__(self, origins_by_tenant):
+        self._origins_by_tenant = origins_by_tenant
+
+    async def get_by_tenant(self, tenant_id):
+        origins = self._origins_by_tenant.get(tenant_id, [])
+        return [SimpleNamespace(url=origin) for origin in origins]
+
+
 class UserRepoStub:
     def __init__(self, user: UserInDB):
         self._user = user
@@ -139,12 +149,22 @@ class AuthServiceInvalidEmailStub:
 
 
 class MockContainer:
-    def __init__(self, *, tenant_repo, user_repo, auth_service, redis_client, encryption_service):
+    def __init__(
+        self,
+        *,
+        tenant_repo,
+        user_repo,
+        auth_service,
+        redis_client,
+        encryption_service,
+        allowed_origin_repo=None,
+    ):
         self._tenant_repo = tenant_repo
         self._user_repo = user_repo
         self._auth_service = auth_service
         self._redis_client = redis_client
         self._encryption_service = encryption_service
+        self._allowed_origin_repo = allowed_origin_repo
 
     def tenant_repo(self):
         return self._tenant_repo
@@ -160,6 +180,9 @@ class MockContainer:
 
     def user_repo(self):
         return self._user_repo
+
+    def allowed_origin_repo(self):
+        return self._allowed_origin_repo
 
 
 @pytest.mark.asyncio
@@ -191,6 +214,59 @@ async def test_initiate_auth_blocks_inactive_tenant(monkeypatch):
         await federation_router.initiate_auth(tenant="suspended", state=None, container=container)
 
     assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_initiate_auth_uses_allowed_request_origin_for_redirect_uri(monkeypatch):
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="AllowedOriginTenant",
+        display_name="AllowedOriginTenant",
+        quota_limit=1024**3,
+        slug="allowed-origin-tenant",
+        state=TenantState.ACTIVE,
+        modules=[],
+        api_credentials={},
+        federation_config={
+            "provider": "entra",
+            "client_id": "client",
+            "client_secret": "secret",
+            "authorization_endpoint": "https://idp.example.com/authorize",
+            "token_endpoint": "https://idp.example.com/token",
+            "jwks_uri": "https://idp.example.com/jwks",
+            "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
+            "canonical_public_origin": "https://canonical.example.com",
+            "redirect_path": "/auth/callback",
+            "allowed_domains": ["example.com"],
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    dummy_settings = DummySettings(federation_per_tenant_enabled=True)
+    monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
+
+    container = MockContainer(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=None,
+        auth_service=None,
+        redis_client=FakeRedis(),
+        encryption_service=EncryptionService(None),
+        allowed_origin_repo=AllowedOriginRepoStub(
+            {tenant.id: ["https://external.example.com"]}
+        ),
+    )
+
+    request = SimpleNamespace(headers={"origin": "https://external.example.com"})
+    response = await federation_router.initiate_auth(
+        tenant=tenant.slug,
+        state=None,
+        request=request,
+        container=container,
+    )
+
+    query = parse_qs(urlparse(response.authorization_url).query)
+    assert query["redirect_uri"] == ["https://external.example.com/auth/callback"]
 
 
 @pytest.mark.asyncio
@@ -294,6 +370,115 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
 
     callback = CallbackRequest(code="auth-code", state=signed_state)
 
+    result = await federation_router.auth_callback(callback, container=container)
+
+    assert result == {"access_token": "access-token"}
+    assert redis_client._store == {}
+
+
+@pytest.mark.asyncio
+async def test_auth_callback_accepts_redirect_uri_from_allowed_origin(monkeypatch):
+    dummy_settings = DummySettings(
+        federation_per_tenant_enabled=True,
+        oidc_redirect_grace_period_seconds=0,
+        strict_oidc_redirect_validation=True,
+    )
+    monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
+
+    redis_client = FakeRedis()
+    tenant_id = uuid4()
+    slug = "tenant-allowed-origin"
+
+    tenant = TenantInDB(
+        id=tenant_id,
+        name="Tenant Allowed Origin",
+        display_name="Tenant Allowed Origin",
+        slug=slug,
+        quota_limit=1024**3,
+        state=TenantState.ACTIVE,
+        modules=[],
+        api_credentials={},
+        federation_config={
+            "provider": "entra",
+            "client_id": "client",
+            "client_secret": "secret",
+            "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
+            "authorization_endpoint": "https://idp.example.com/authorize",
+            "token_endpoint": "https://idp.example.com/token",
+            "jwks_uri": "https://idp.example.com/jwks",
+            "canonical_public_origin": "https://canonical.tenant.example.com",
+            "redirect_path": "/auth/callback",
+            "allowed_domains": ["example.com"],
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    user = UserInDB(
+        id=uuid4(),
+        username="Tester",
+        email="user@Example.COM",
+        salt="salt",
+        password="hashed123",
+        used_tokens=0,
+        tenant_id=tenant_id,
+        tenant=tenant,
+        quota_limit=1024**3,
+        user_groups=[],
+        roles=[],
+        state="active",
+    )
+
+    container = MockContainer(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=UserRepoStub(user),
+        auth_service=AuthServiceStub(),
+        redis_client=redis_client,
+        encryption_service=EncryptionService(None),
+        allowed_origin_repo=AllowedOriginRepoStub(
+            {tenant_id: ["https://alt.tenant.example.com"]}
+        ),
+    )
+
+    issue_time = int(time.time())
+    config_version = datetime.now(timezone.utc).isoformat()
+    state_payload = {
+        "tenant_id": str(tenant_id),
+        "tenant_slug": slug,
+        "frontend_state": "",
+        "nonce": "nonce-allowed-origin",
+        "redirect_uri": "https://alt.tenant.example.com/auth/callback",
+        "correlation_id": "corr-allowed-origin",
+        "exp": issue_time + 600,
+        "iat": issue_time,
+        "config_version": config_version,
+    }
+
+    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+
+    cache_payload = {
+        "tenant_id": str(tenant_id),
+        "tenant_slug": slug,
+        "redirect_uri": state_payload["redirect_uri"],
+        "config_version": config_version,
+        "iat": state_payload["iat"],
+    }
+    await redis_client.setex(
+        f"oidc:state:{state_payload['nonce']}",
+        dummy_settings.oidc_state_ttl_seconds,
+        json.dumps(cache_payload),
+    )
+
+    fake_response = FakeResponse({"id_token": "id", "access_token": "token"})
+    monkeypatch.setattr(
+        federation_router,
+        "aiohttp_client",
+        lambda: FakeAioHttpClient(fake_response),
+    )
+    monkeypatch.setattr(federation_router, "PyJWKClient", FakeJWKClient)
+    monkeypatch.setattr(federation_router, "JWKClient", FakeJWKClient)
+
+    callback = CallbackRequest(code="auth-code", state=signed_state)
     result = await federation_router.auth_callback(callback, container=container)
 
     assert result == {"access_token": "access-token"}
@@ -475,6 +660,7 @@ class MockContainerForJIT:
         encryption_service,
         predefined_roles_repo=None,
         audit_service=None,
+        allowed_origin_repo=None,
     ):
         self._tenant_repo = tenant_repo
         self._user_repo = user_repo
@@ -483,6 +669,7 @@ class MockContainerForJIT:
         self._encryption_service = encryption_service
         self._predefined_roles_repo = predefined_roles_repo
         self._audit_service = audit_service
+        self._allowed_origin_repo = allowed_origin_repo
 
     def tenant_repo(self):
         return self._tenant_repo
@@ -504,6 +691,9 @@ class MockContainerForJIT:
 
     def audit_service(self):
         return self._audit_service
+
+    def allowed_origin_repo(self):
+        return self._allowed_origin_repo
 
 
 @pytest.mark.asyncio
