@@ -1,7 +1,7 @@
 # flake8: noqa
 
 _NOT_FOUND_DEFAULT = "politely respond that the answer cannot be found."
-_NOT_FOUND_WITH_TOOLS = "use your available tools to find the answer before responding that it cannot be found."
+_NOT_FOUND_WITH_TOOLS = "consider using your available tools to find the answer if applicable, otherwise respond that it cannot be found."
 
 SHOW_REFERENCES_PROMPT = """Use the provided sources delimited by triple quotes to answer questions.
 Only use the sources to answer questions. You MUST reference every source you use by adding an inline XML self-closing tag immediately after the information: <inref id="<source_id>"/>
@@ -23,7 +23,7 @@ def get_show_references_prompt(has_tools: bool = False) -> str:
 
 
 _HALLUCINATION_GUARD_DEFAULT = "respond that the answer could not be found."
-_HALLUCINATION_GUARD_WITH_TOOLS = "use your available tools to find the answer before responding that it could not be found."
+_HALLUCINATION_GUARD_WITH_TOOLS = "consider using your available tools to find the answer if applicable, otherwise respond that it could not be found."
 
 TOOL_USAGE_GUARD = "Avoid making duplicate or near-identical tool calls."
 
