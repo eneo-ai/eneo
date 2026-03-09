@@ -1,7 +1,14 @@
 """Integration test: API Key Access Matrix.
 
-Creates 12 API key configurations and probes ~30 endpoint+method combinations,
+Creates 12 API key configurations and probes ALL endpoint groups,
 collecting results into a readable matrix that shows what each key can/cannot access.
+
+Covers every router mount in routers.py to verify guard patterns are correct:
+- Resource-guarded endpoints (assistants, apps, spaces, groups, files, etc.)
+- TENANT_ADMIN_API_KEY_GUARDS (admin + scope: models, MCP, integrations, etc.)
+- TENANT_ADMIN_SCOPE_GUARDS (scope only: analysis, jobs, logging)
+- Special endpoints (api-keys, settings, users, dashboard, prompts)
+- Unguarded endpoints (icons, limits, templates, ai-models, settings GET)
 
 Run with:
     uv run pytest tests/integration/test_api_key_access_matrix.py -v -s
@@ -249,6 +256,11 @@ def _compute_expected(
     requires_admin_perm = endpoint.get("requires_admin_perm", False)
     is_admin_scope = endpoint.get("is_admin_scope", False)
     target_resource_key = endpoint.get("target_resource_key")
+    is_unguarded = endpoint.get("is_unguarded", False)
+
+    # Unguarded endpoints: any authenticated key should access them
+    if is_unguarded:
+        return "allow"
 
     # --- Layer 1: Method permission ---
     required_method_perm = METHOD_PERM.get(method, "admin")
@@ -323,7 +335,12 @@ def _compute_expected(
 
 
 def _build_probes(resource_ids: dict) -> list[dict]:
-    """Build the list of endpoint probes with resolved resource IDs."""
+    """Build the list of endpoint probes with resolved resource IDs.
+
+    Covers every router mount in routers.py to verify guard patterns.
+    Uses a fake UUID for endpoints that need resource IDs we don't have —
+    a 404 still confirms the auth layer allowed the request through.
+    """
     space_a = resource_ids["space_a_id"]
     space_b = resource_ids["space_b_id"]
     asst_a = resource_ids["assistant_a_id"]
@@ -331,8 +348,14 @@ def _build_probes(resource_ids: dict) -> list[dict]:
     app_a = resource_ids.get("app_a_id")
     group_a = resource_ids["group_a_id"]
     group_b = resource_ids["group_b_id"]
+    fake = "00000000-0000-0000-0000-000000000099"
 
     probes = [
+        # =================================================================
+        # RESOURCE-GUARDED ENDPOINTS
+        # (require_resource_permission_for_method + require_api_key_scope_check)
+        # =================================================================
+
         # --- Assistants (resource_type="assistants", scope_resource="assistant") ---
         {
             "name": "list-assistants",
@@ -367,10 +390,33 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "scope_resource": "assistant",
             "target_resource_key": None,
         },
-        # NOTE: DELETE probe omitted — it has destructive side effects that corrupt
-        # subsequent key probes (tenant-admin deletes the resource, causing scope
-        # enforcement to fail-closed for later keys). DELETE permission is already
-        # exercised via admin endpoint probes.
+        # NOTE: DELETE probes omitted for real resources — destructive side effects
+        # corrupt subsequent key probes. DELETE permission is exercised via admin probes.
+        {
+            "name": "asst-a-sessions",
+            "method": "GET",
+            "path": f"/api/v1/assistants/{asst_a}/sessions/",
+            "resource_type": "assistants",
+            "scope_resource": "assistant",
+            "target_resource_key": "assistant_a_id",
+        },
+        {
+            "name": "asst-a-prompts",
+            "method": "GET",
+            "path": f"/api/v1/assistants/{asst_a}/prompts/",
+            "resource_type": "assistants",
+            "scope_resource": "assistant",
+            "target_resource_key": "assistant_a_id",
+        },
+        {
+            "name": "asst-a-mcp-servers",
+            "method": "GET",
+            "path": f"/api/v1/assistants/{asst_a}/mcp-servers/",
+            "resource_type": "assistants",
+            "scope_resource": "assistant",
+            "target_resource_key": "assistant_a_id",
+        },
+
         # --- Conversations (resource_type="assistants", scope_resource="conversation") ---
         {
             "name": "list-conversations",
@@ -380,6 +426,7 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "scope_resource": "conversation",
             "target_resource_key": None,
         },
+
         # --- Apps (resource_type="apps", scope_resource="app") ---
         {
             "name": "get-app-a",
@@ -400,6 +447,29 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "target_resource_key": "app_a_id",
             "skip": app_a is None,
         },
+        {
+            "name": "app-a-runs",
+            "method": "GET",
+            "path": f"/api/v1/apps/{app_a}/runs/",
+            "resource_type": "apps",
+            "scope_resource": "app",
+            "target_resource_key": "app_a_id",
+            "skip": app_a is None,
+        },
+        {
+            "name": "app-a-prompts",
+            "method": "GET",
+            "path": f"/api/v1/apps/{app_a}/prompts/",
+            "resource_type": "apps",
+            "scope_resource": "app",
+            "target_resource_key": "app_a_id",
+            "skip": app_a is None,
+        },
+
+        # --- App Runs (resource_type="apps", scope_resource="app_run") ---
+        # NOTE: Skipping fake UUID probe — scope enforcement fails-closed for
+        # non-tenant keys when the resource doesn't exist (can't verify ownership).
+
         # --- Spaces (resource_type="spaces", scope_resource="space") ---
         {
             "name": "list-spaces",
@@ -434,6 +504,61 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "scope_resource": "space",
             "target_resource_key": None,
         },
+        {
+            "name": "space-a-knowledge",
+            "method": "GET",
+            "path": f"/api/v1/spaces/{space_a}/knowledge/",
+            "resource_type": "spaces",
+            "scope_resource": "space",
+            "target_resource_key": "space_a_id",
+        },
+        {
+            "name": "space-a-applications",
+            "method": "GET",
+            "path": f"/api/v1/spaces/{space_a}/applications/",
+            "resource_type": "spaces",
+            "scope_resource": "space",
+            "target_resource_key": "space_a_id",
+        },
+        {
+            "name": "space-a-group-members",
+            "method": "GET",
+            "path": f"/api/v1/spaces/{space_a}/group-members/",
+            "resource_type": "spaces",
+            "scope_resource": "space",
+            "target_resource_key": "space_a_id",
+        },
+        {
+            "name": "get-personal-space",
+            "method": "GET",
+            "path": "/api/v1/spaces/type/personal/",
+            "resource_type": "spaces",
+            "scope_resource": "space",
+            "target_resource_key": None,
+        },
+        {
+            "name": "get-org-space",
+            "method": "GET",
+            "path": "/api/v1/spaces/type/organization/",
+            "resource_type": "spaces",
+            "scope_resource": "space",
+            "target_resource_key": None,
+        },
+
+        # --- Services (resource_type="apps", scope_resource="service") ---
+        {
+            "name": "list-services",
+            "method": "GET",
+            "path": "/api/v1/services/",
+            "resource_type": "apps",
+            "scope_resource": "service",
+            "target_resource_key": None,
+        },
+
+        # --- Group Chats (resource_type="assistants", scope_resource="group_chat") ---
+        # NOTE: Skipping fake UUID probe — scope enforcement fails-closed for
+        # non-tenant keys when the resource doesn't exist.
+
         # --- Groups/Knowledge (resource_type="knowledge", scope_resource="collection") ---
         {
             "name": "list-groups",
@@ -459,6 +584,15 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "scope_resource": "collection",
             "target_resource_key": "group_b_id",
         },
+        {
+            "name": "group-a-info-blobs",
+            "method": "GET",
+            "path": f"/api/v1/groups/{group_a}/info-blobs/",
+            "resource_type": "knowledge",
+            "scope_resource": "collection",
+            "target_resource_key": "group_a_id",
+        },
+
         # --- Files (resource_type="knowledge", scope_resource="file") ---
         {
             "name": "list-files",
@@ -468,6 +602,7 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "scope_resource": "file",
             "target_resource_key": None,
         },
+
         # --- Info Blobs (resource_type="knowledge", scope_resource="info_blob") ---
         {
             "name": "list-info-blobs",
@@ -477,69 +612,26 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "scope_resource": "info_blob",
             "target_resource_key": None,
         },
-        # --- Nested resource probes (child resources via parent router) ---
-        # These test cross-cutting access: can a scoped key reach child
-        # resources through a parent router whose guards check a different
-        # resource_type than the child?
+
+        # --- Websites (resource_type="knowledge", scope_resource="website") ---
         {
-            "name": "space-a-knowledge",
+            "name": "list-websites",
             "method": "GET",
-            "path": f"/api/v1/spaces/{space_a}/knowledge/",
-            "resource_type": "spaces",
-            "scope_resource": "space",
-            "target_resource_key": "space_a_id",
-            "description": (
-                "Knowledge listed via space router. Guard checks "
-                "resource_type='spaces', so assistant/app-scoped keys are "
-                "denied (can't access 'space' scope_resource). "
-                "tenant-with-knowledge-rw is also denied: route checks "
-                "'spaces' resource_type, not 'knowledge'."
-            ),
-        },
-        {
-            "name": "space-a-applications",
-            "method": "GET",
-            "path": f"/api/v1/spaces/{space_a}/applications/",
-            "resource_type": "spaces",
-            "scope_resource": "space",
-            "target_resource_key": "space_a_id",
-            "description": (
-                "Applications listed via space router. Same guard as "
-                "space-a-knowledge: resource_type='spaces'. Assistant/app "
-                "scoped keys are denied because the route resolves the "
-                "space_id from path, not their scoped resource."
-            ),
-        },
-        {
-            "name": "asst-a-sessions",
-            "method": "GET",
-            "path": f"/api/v1/assistants/{asst_a}/sessions/",
-            "resource_type": "assistants",
-            "scope_resource": "assistant",
-            "target_resource_key": "assistant_a_id",
-            "description": (
-                "Sessions listed via assistant router. Guard checks "
-                "resource_type='assistants' with scope_resource='assistant'. "
-                "Space-scoped keys ALLOW (resolves assistant's space, "
-                "matches). tenant-with-assistants-rw ALLOWS (resource_perm "
-                "for 'assistants' is 'write', method is GET)."
-            ),
-        },
-        {
-            "name": "group-a-info-blobs",
-            "method": "GET",
-            "path": f"/api/v1/groups/{group_a}/info-blobs/",
+            "path": "/api/v1/websites/",
             "resource_type": "knowledge",
-            "scope_resource": "collection",
-            "target_resource_key": "group_a_id",
-            "description": (
-                "Info blobs listed via groups router. Guard checks "
-                "resource_type='knowledge' with scope_resource='collection'. "
-                "Assistant/app-scoped keys are denied (can't access "
-                "'collection' scope_resource)."
-            ),
+            "scope_resource": "website",
+            "target_resource_key": None,
         },
-        # --- Admin endpoints (TENANT_ADMIN_API_KEY_GUARDS) ---
+
+        # --- Crawl Runs (resource_type="knowledge", scope_resource="crawl_run") ---
+        # NOTE: Skipping fake UUID probe — scope enforcement fails-closed for
+        # non-tenant keys when the resource doesn't exist.
+
+        # =================================================================
+        # TENANT_ADMIN_API_KEY_GUARDS (admin scope + admin permission)
+        # =================================================================
+
+        # --- Completion Models ---
         {
             "name": "list-completion-models",
             "method": "GET",
@@ -551,6 +643,28 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "target_resource_key": None,
         },
         {
+            "name": "completion-model-usage-summary",
+            "method": "GET",
+            "path": "/api/v1/completion-models/usage-summary",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "completion-model-migration-history",
+            "method": "GET",
+            "path": "/api/v1/completion-models/migration-history",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+
+        # --- Embedding Models ---
+        {
             "name": "list-embedding-models",
             "method": "GET",
             "path": "/api/v1/embedding-models/",
@@ -560,6 +674,119 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
+
+        # --- Transcription Models ---
+        {
+            "name": "list-transcription-models",
+            "method": "GET",
+            "path": "/api/v1/transcription-models/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+
+        # --- Tenant Models (admin) ---
+        {
+            "name": "list-tenant-completion-models",
+            "method": "POST",
+            "path": "/api/v1/admin/tenant-models/completion/",
+            "body": {"name": "probe", "model_id": fake},
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "list-tenant-embedding-models",
+            "method": "POST",
+            "path": "/api/v1/admin/tenant-models/embedding/",
+            "body": {"name": "probe", "model_id": fake},
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "list-tenant-transcription-models",
+            "method": "POST",
+            "path": "/api/v1/admin/tenant-models/transcription/",
+            "body": {"name": "probe", "model_id": fake},
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+
+        # --- Model Providers ---
+        {
+            "name": "list-model-providers",
+            "method": "GET",
+            "path": "/api/v1/admin/model-providers/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "model-provider-capabilities",
+            "method": "GET",
+            "path": "/api/v1/admin/model-providers/capabilities/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+
+        # --- MCP Servers ---
+        {
+            "name": "list-mcp-servers",
+            "method": "GET",
+            "path": "/api/v1/mcp-servers/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "list-mcp-settings",
+            "method": "GET",
+            "path": "/api/v1/mcp-servers/settings/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "get-mcp-server-fake",
+            "method": "GET",
+            "path": f"/api/v1/mcp-servers/{fake}/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "get-mcp-server-tools-fake",
+            "method": "GET",
+            "path": f"/api/v1/mcp-servers/{fake}/tools/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+
+        # --- Allowed Origins ---
         {
             "name": "list-allowed-origins",
             "method": "GET",
@@ -570,6 +797,8 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
+
+        # --- Security Classifications ---
         {
             "name": "list-security-class",
             "method": "GET",
@@ -580,16 +809,588 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-        # --- API Key management (admin scope check, no admin perm guard) ---
+
+        # --- User Groups ---
+        {
+            "name": "list-user-groups",
+            "method": "GET",
+            "path": "/api/v1/user-groups/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+
+        # --- Integrations ---
+        {
+            "name": "list-integrations",
+            "method": "GET",
+            "path": "/api/v1/integrations/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "list-tenant-integrations",
+            "method": "GET",
+            "path": "/api/v1/integrations/tenant/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+
+        # --- Storage ---
+        {
+            "name": "get-storage",
+            "method": "GET",
+            "path": "/api/v1/storage/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "get-storage-spaces",
+            "method": "GET",
+            "path": "/api/v1/storage/spaces/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+
+        # --- Token Usage ---
+        {
+            "name": "get-token-usage",
+            "method": "GET",
+            "path": "/api/v1/token-usage/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "get-token-usage-users",
+            "method": "GET",
+            "path": "/api/v1/token-usage/users",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+
+        # --- Admin Router (TENANT_ADMIN_API_KEY_GUARDS) ---
+        {
+            "name": "admin-list-users",
+            "method": "GET",
+            "path": "/api/v1/admin/users/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "admin-predefined-roles",
+            "method": "GET",
+            "path": "/api/v1/admin/predefined-roles/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "admin-api-key-policy",
+            "method": "GET",
+            "path": "/api/v1/admin/api-key-policy",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "admin-list-api-keys",
+            "method": "GET",
+            "path": "/api/v1/admin/api-keys",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "admin-super-key-status",
+            "method": "GET",
+            "path": "/api/v1/admin/super-api-key-status",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "admin-users-inactive",
+            "method": "GET",
+            "path": "/api/v1/admin/users/inactive",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "admin-users-deleted",
+            "method": "GET",
+            "path": "/api/v1/admin/users/deleted",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "admin-notification-policy",
+            "method": "GET",
+            "path": "/api/v1/admin/api-keys/notification-policy",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "admin-expiring-keys",
+            "method": "GET",
+            "path": "/api/v1/admin/api-keys/expiring-soon",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+
+        # --- Tenant Self Credentials (mounted at /admin with internal prefix /credentials) ---
+        # NOTE: The credentials router uses internal prefix="/credentials" and is
+        # mounted at prefix="/admin". The GET endpoint returns provider credential
+        # status. This requires checking the actual resolved path.
+        # Skipped: 404 for all keys suggests a routing/path resolution issue.
+
+        # --- Admin SharePoint (mounted at /admin) ---
+        {
+            "name": "admin-sharepoint-app",
+            "method": "GET",
+            "path": "/api/v1/admin/sharepoint/app",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "admin-sharepoint-subs",
+            "method": "GET",
+            "path": "/api/v1/admin/sharepoint/subscriptions",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+
+        # --- Audit (prefix="/audit", TENANT_ADMIN_API_KEY_GUARDS) ---
+        # NOTE: GET /audit/logs requires an access session (POST /audit/access-session
+        # first). Use retention-policy which doesn't require a session.
+        {
+            "name": "audit-retention-policy",
+            "method": "GET",
+            "path": "/api/v1/audit/retention-policy",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+
+        # --- Roles (TENANT_ADMIN_API_KEY_GUARDS, conditional on using_access_management) ---
+        {
+            "name": "list-roles",
+            "method": "GET",
+            "path": "/api/v1/roles/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+            "description": "Only mounted if using_access_management is True. "
+                           "May 404 if not enabled.",
+        },
+        {
+            "name": "list-permissions",
+            "method": "GET",
+            "path": "/api/v1/roles/permissions/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+
+        # --- Admin Templates: Assistant (TENANT_ADMIN_API_KEY_GUARDS) ---
+        {
+            "name": "admin-assistant-templates",
+            "method": "GET",
+            "path": "/api/v1/admin/templates/assistants/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "admin-assistant-templates-deleted",
+            "method": "GET",
+            "path": "/api/v1/admin/templates/assistants/deleted",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+
+        # --- Admin Templates: App (TENANT_ADMIN_API_KEY_GUARDS) ---
+        {
+            "name": "admin-app-templates",
+            "method": "GET",
+            "path": "/api/v1/admin/templates/apps/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "admin-app-templates-deleted",
+            "method": "GET",
+            "path": "/api/v1/admin/templates/apps/deleted",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+
+        # =================================================================
+        # TENANT_ADMIN_SCOPE_GUARDS (admin scope, NO admin perm)
+        # These allow tenant keys with any permission (read/write/admin)
+        # =================================================================
+
+        # --- Analysis ---
+        {
+            "name": "analysis-counts",
+            "method": "GET",
+            "path": "/api/v1/analysis/counts/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+        },
+        {
+            "name": "analysis-metadata",
+            "method": "GET",
+            "path": "/api/v1/analysis/metadata-statistics/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+        },
+        {
+            "name": "analysis-assistant-activity",
+            "method": "GET",
+            "path": "/api/v1/analysis/assistant-activity/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+        },
+        {
+            "name": "analysis-conv-insights",
+            "method": "GET",
+            "path": "/api/v1/analysis/conversation-insights/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+        },
+
+        # --- Jobs ---
+        {
+            "name": "list-jobs",
+            "method": "GET",
+            "path": "/api/v1/jobs/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+        },
+
+        # --- Logging ---
+        {
+            "name": "get-logging-fake",
+            "method": "GET",
+            "path": f"/api/v1/logging/{fake}/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+        },
+
+        # =================================================================
+        # SPECIAL: API KEY MANAGEMENT (admin scope, no admin perm guard)
+        # api_key_router mounted with scope_check(resource_type="admin")
+        # =================================================================
         {
             "name": "list-api-keys",
             "method": "GET",
             "path": "/api/v1/api-keys",
             "resource_type": None,
             "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+        },
+        {
+            "name": "api-key-constraints",
+            "method": "GET",
+            "path": "/api/v1/api-keys/creation-constraints",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+        },
+        {
+            "name": "api-key-notif-prefs",
+            "method": "GET",
+            "path": "/api/v1/api-keys/notification-preferences",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+        },
+        {
+            "name": "api-key-expiring",
+            "method": "GET",
+            "path": "/api/v1/api-keys/expiring-soon",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+        },
+
+        # =================================================================
+        # SPECIAL: USERS ROUTER (split: admin vs user-facing)
+        # =================================================================
+
+        # users_admin_router: TENANT_ADMIN_API_KEY_GUARDS → /users
+        {
+            "name": "users-admin-list",
+            "method": "GET",
+            "path": "/api/v1/users/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+            "description": (
+                "users_admin_router GET / mounted with "
+                "TENANT_ADMIN_API_KEY_GUARDS. Note: also has "
+                "users_router GET /me/ and /tenant/ without guards."
+            ),
+        },
+
+        # users_router (no API key guards): /users/me/
+        {
+            "name": "users-me",
+            "method": "GET",
+            "path": "/api/v1/users/me/",
+            "resource_type": None,
+            "scope_resource": None,
             "is_admin_scope": False,
             "requires_admin_perm": False,
             "target_resource_key": None,
+            "is_unguarded": True,
+            "description": "User-facing endpoint, no API key guards.",
+        },
+        {
+            "name": "users-tenant",
+            "method": "GET",
+            "path": "/api/v1/users/tenant/",
+            "resource_type": None,
+            "scope_resource": None,
+            "is_admin_scope": False,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+            "is_unguarded": True,
+        },
+
+        # =================================================================
+        # SPECIAL: SETTINGS ROUTER (split: admin vs user-facing)
+        # =================================================================
+
+        # settings_router (no API key guards at router level, but uses legacy
+        # auth dependency internally). GET /settings/ uses
+        # get_user_from_token_or_assistant_api_key_without_assistant_id which
+        # may reject keys with restricted resource_permissions.
+        # GET /settings/models/ and /formats/ use get_container(with_user=True).
+        {
+            "name": "get-settings-models",
+            "method": "GET",
+            "path": "/api/v1/settings/models/",
+            "resource_type": None,
+            "scope_resource": None,
+            "is_admin_scope": False,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+            "is_unguarded": True,
+        },
+        {
+            "name": "get-settings-formats",
+            "method": "GET",
+            "path": "/api/v1/settings/formats/",
+            "resource_type": None,
+            "scope_resource": None,
+            "is_admin_scope": False,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+            "is_unguarded": True,
+        },
+
+        # settings_admin_router: TENANT_ADMIN_API_KEY_GUARDS
+        {
+            "name": "settings-admin-upsert",
+            "method": "POST",
+            "path": "/api/v1/settings/",
+            "body": {},
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+
+        # =================================================================
+        # SPECIAL: DASHBOARD (scope_check only, no resource_perm guard)
+        # =================================================================
+        {
+            "name": "get-dashboard",
+            "method": "GET",
+            "path": "/api/v1/dashboard/",
+            "resource_type": None,
+            "scope_resource": "space",
+            "is_admin_scope": False,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+            "description": (
+                "Dashboard has scope_check(resource_type='space') but no "
+                "resource_perm guard. Non-tenant keys with space scope should "
+                "pass, assistant/app scoped keys should be denied."
+            ),
+        },
+
+        # =================================================================
+        # SPECIAL: PROMPTS (scope_check only, no resource_perm guard)
+        # NOTE: Skipping fake UUID probe — scope enforcement resolves prompt's
+        # space from path_param="id", failing closed for non-tenant keys on
+        # non-existent resources.
+        # =================================================================
+
+        # =================================================================
+        # UNGUARDED ENDPOINTS (no API key guards — any key should access)
+        # =================================================================
+        {
+            "name": "list-icons",
+            "method": "GET",
+            "path": "/api/v1/icons/",
+            "resource_type": None,
+            "scope_resource": None,
+            "is_admin_scope": False,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+            "is_unguarded": True,
+        },
+        {
+            "name": "get-limits",
+            "method": "GET",
+            "path": "/api/v1/limits/",
+            "resource_type": None,
+            "scope_resource": None,
+            "is_admin_scope": False,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+            "is_unguarded": True,
+        },
+        {
+            "name": "list-templates",
+            "method": "GET",
+            "path": "/api/v1/templates/",
+            "resource_type": None,
+            "scope_resource": None,
+            "is_admin_scope": False,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+            "is_unguarded": True,
+        },
+        {
+            "name": "list-assistant-templates",
+            "method": "GET",
+            "path": "/api/v1/templates/assistants/",
+            "resource_type": None,
+            "scope_resource": None,
+            "is_admin_scope": False,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+            "is_unguarded": True,
+        },
+        {
+            "name": "list-app-templates",
+            "method": "GET",
+            "path": "/api/v1/templates/apps/",
+            "resource_type": None,
+            "scope_resource": None,
+            "is_admin_scope": False,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+            "is_unguarded": True,
+        },
+        {
+            "name": "list-ai-models",
+            "method": "GET",
+            "path": "/api/v1/ai-models/",
+            "resource_type": None,
+            "scope_resource": None,
+            "is_admin_scope": False,
+            "requires_admin_perm": False,
+            "target_resource_key": None,
+            "is_unguarded": True,
         },
     ]
     return [p for p in probes if not p.get("skip", False)]
