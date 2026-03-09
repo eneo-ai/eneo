@@ -184,9 +184,83 @@ async def _resolve_redirect_uri_for_initiate(
     tenant_id: UUID,
     redirect_uri: str,
     redirect_path: str,
+    requested_redirect_uri: str | None,
     request_origin: str | None,
     correlation_id: str,
 ) -> str:
+    parsed_base = urlparse(redirect_uri)
+    if not parsed_base.scheme or not parsed_base.hostname:
+        return redirect_uri
+
+    if requested_redirect_uri:
+        parsed_requested = urlparse(requested_redirect_uri.strip())
+        if not parsed_requested.scheme or not parsed_requested.hostname:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="redirect_uri must be an absolute URL",
+            )
+
+        if parsed_requested.query or parsed_requested.fragment:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="redirect_uri must not include query parameters or fragment",
+            )
+
+        requested_path = parsed_requested.path or "/"
+        if requested_path not in {"/", redirect_path}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "redirect_uri path mismatch. "
+                    f"Expected '{redirect_path}' or root path '/'."
+                ),
+            )
+
+        requested_default_port = 443 if parsed_requested.scheme == "https" else 80
+        requested_port = (
+            f":{parsed_requested.port}"
+            if parsed_requested.port and parsed_requested.port != requested_default_port
+            else ""
+        )
+        requested_origin = validate_public_origin(
+            f"{parsed_requested.scheme}://{parsed_requested.hostname}{requested_port}"
+        ).rstrip("/")
+        resolved_requested_redirect_uri = f"{requested_origin}{redirect_path}"
+
+        base_default_port = 443 if parsed_base.scheme == "https" else 80
+        base_port = (
+            f":{parsed_base.port}"
+            if parsed_base.port and parsed_base.port != base_default_port
+            else ""
+        )
+        base_origin = f"{parsed_base.scheme}://{parsed_base.hostname}{base_port}".rstrip(
+            "/"
+        )
+        if requested_origin == base_origin:
+            return resolved_requested_redirect_uri
+
+        allowed_origins = await _load_tenant_allowed_origins(
+            container=container,
+            tenant_id=tenant_id,
+            correlation_id=correlation_id,
+        )
+        if requested_origin not in allowed_origins:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="redirect_uri origin is not allowed for this tenant",
+            )
+
+        logger.info(
+            "Using client-provided redirect URI for OIDC initiation",
+            extra={
+                "tenant_id": str(tenant_id),
+                "correlation_id": correlation_id,
+                "redirect_uri": resolved_requested_redirect_uri,
+                "source": "query_param_redirect_uri",
+            },
+        )
+        return resolved_requested_redirect_uri
+
     if not request_origin:
         return redirect_uri
 
@@ -617,6 +691,13 @@ async def initiate_auth(
         None, description="Optional frontend-generated CSRF state"
     ),
     request: Request | None = None,
+    requested_redirect_uri: Optional[str] = Query(
+        None,
+        description=(
+            "Optional redirect URI override. Must be absolute URL and match tenant allowed origins. "
+            "Path must be '/' or tenant redirect_path."
+        ),
+    ),
     container: Container = Depends(get_container()),
 ) -> InitiateAuthResponse:
     """
@@ -784,6 +865,7 @@ async def initiate_auth(
         tenant_id=tenant_obj.id,
         redirect_uri=redirect_uri,
         redirect_path=redirect_path,
+        requested_redirect_uri=requested_redirect_uri,
         request_origin=request_origin,
         correlation_id=correlation_id,
     )
