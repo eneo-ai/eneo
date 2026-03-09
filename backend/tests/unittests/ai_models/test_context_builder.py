@@ -11,8 +11,9 @@ from intric.completion_models.infrastructure.context_builder import (
     count_tokens,
 )
 from intric.completion_models.infrastructure.static_prompts import (
-    HALLUCINATION_GUARD,
-    SHOW_REFERENCES_PROMPT,
+    TOOL_USAGE_GUARD,
+    get_hallucination_guard,
+    get_show_references_prompt,
 )
 from intric.files.file_models import File, FileType
 from intric.main.exceptions import QueryException
@@ -53,7 +54,7 @@ def test_context_with_info_blobs_version_2(context_builder: ContextBuilder):
         ),
     ]
 
-    expected_background_info = f"""{SHOW_REFERENCES_PROMPT}\n\n\"\"\"source_title: blob 1, source_id: 1\ninformation about blob number 1 - chunk 1, information about blob number 1 - chunk 2\"\"\"
+    expected_background_info = f"""{get_show_references_prompt()}\n\n\"\"\"source_title: blob 1, source_id: 1\ninformation about blob number 1 - chunk 1, information about blob number 1 - chunk 2\"\"\"
 \"\"\"source_title: blob 2, source_id: 2\ninformation about blob number 2\"\"\""""
 
     context = context_builder.build_context(
@@ -71,7 +72,7 @@ def test_context_with_info_blobs_version_1(context_builder: ContextBuilder):
         MagicMock(text=f"information about blob number {i}") for i in range(3)
     ]
 
-    expected_background_info = f"""{HALLUCINATION_GUARD}\n\n\"\"\"information about blob number 0\"\"\"
+    expected_background_info = f"""{get_hallucination_guard()}\n\n\"\"\"information about blob number 0\"\"\"
 \"\"\"information about blob number 1\"\"\"
 \"\"\"information about blob number 2\"\"\""""
 
@@ -243,3 +244,80 @@ def test_truncate_knowledge_if_too_many_chunks(context_builder: ContextBuilder):
 
     assert context.token_count < 10000
     assert count_tokens(context.prompt) + count_tokens(QUESTION) < 10000
+
+
+def test_context_with_mcp_tools_version_1_uses_tool_aware_prompt(
+    context_builder: ContextBuilder,
+):
+    info_blob_chunks = [
+        MagicMock(text=f"information about blob number {i}") for i in range(3)
+    ]
+
+    context = context_builder.build_context(
+        input_str=QUESTION,
+        info_blob_chunks=info_blob_chunks,
+        max_tokens=10000,
+        version=1,
+        has_mcp_tools=True,
+    )
+
+    assert get_hallucination_guard(has_tools=True) in context.prompt
+    assert get_hallucination_guard(has_tools=False) not in context.prompt
+
+
+def test_context_with_mcp_tools_version_2_uses_tool_aware_prompt(
+    context_builder: ContextBuilder,
+):
+    info_blob_chunks = [
+        MagicMock(
+            text="information about blob",
+            chunk_no=1,
+            info_blob_id=1,
+            info_blob_title="blob 1",
+        ),
+    ]
+
+    context = context_builder.build_context(
+        input_str=QUESTION,
+        info_blob_chunks=info_blob_chunks,
+        max_tokens=10000,
+        version=2,
+        has_mcp_tools=True,
+    )
+
+    assert get_show_references_prompt(has_tools=True) in context.prompt
+    assert get_show_references_prompt(has_tools=False) not in context.prompt
+
+
+def test_context_without_mcp_tools_uses_default_prompts(
+    context_builder: ContextBuilder,
+):
+    info_blob_chunks = [
+        MagicMock(text="information about blob") for _ in range(2)
+    ]
+
+    context_v1 = context_builder.build_context(
+        input_str=QUESTION,
+        info_blob_chunks=info_blob_chunks,
+        max_tokens=10000,
+        version=1,
+        has_mcp_tools=False,
+    )
+
+    assert get_hallucination_guard(has_tools=False) in context_v1.prompt
+    assert get_hallucination_guard(has_tools=True) not in context_v1.prompt
+    assert TOOL_USAGE_GUARD not in context_v1.prompt
+
+
+def test_tool_usage_guard_always_present_with_mcp_tools(
+    context_builder: ContextBuilder,
+):
+    """TOOL_USAGE_GUARD should be in the prompt whenever MCP tools are present,
+    even without knowledge."""
+    context = context_builder.build_context(
+        input_str=QUESTION,
+        max_tokens=10000,
+        has_mcp_tools=True,
+    )
+
+    assert TOOL_USAGE_GUARD in context.prompt

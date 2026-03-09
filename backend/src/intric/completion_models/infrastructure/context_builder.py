@@ -11,9 +11,10 @@ from intric.ai_models.completion_models.completion_model import (
     Message,
 )
 from intric.completion_models.infrastructure.static_prompts import (
-    HALLUCINATION_GUARD,
-    SHOW_REFERENCES_PROMPT,
+    TOOL_USAGE_GUARD,
     TRANSCRIPTION_PROMPT,
+    get_hallucination_guard,
+    get_show_references_prompt,
 )
 from intric.files.file_models import File, FileType
 from intric.main.exceptions import QueryException
@@ -75,13 +76,14 @@ class ChunkGrouping:
 
 
 class _Prompt:
-    def __init__(self, version: int = 1):
+    def __init__(self, version: int = 1, has_mcp_tools: bool = False):
         self.prompt = None
         self.knowledge = None
         self.web_search_result = None
         self.attachments = None
         self._knowledge_tokens = 0
         self.version = version
+        self.has_mcp_tools = has_mcp_tools
 
     def __str__(self):
         components = []
@@ -92,11 +94,11 @@ class _Prompt:
         # Add references prompt if either knowledge or web search results exist
         # but only for version 2
         if (self.knowledge or self.web_search_result) and self.version == 2:
-            components.append(SHOW_REFERENCES_PROMPT)
+            components.append(get_show_references_prompt(has_tools=self.has_mcp_tools))
 
         # Add hallucination guard for version 1 knowledge
         if self.knowledge and self.version == 1:
-            components.append(HALLUCINATION_GUARD)
+            components.append(get_hallucination_guard(has_tools=self.has_mcp_tools))
 
         if self.knowledge:
             components.append(self.knowledge)
@@ -106,6 +108,9 @@ class _Prompt:
 
         if self.attachments:
             components.append(self.attachments)
+
+        if self.has_mcp_tools:
+            components.append(TOOL_USAGE_GUARD)
 
         return "\n\n".join(components)
 
@@ -402,6 +407,7 @@ class ContextBuilder:
         use_image_generation: bool = False,
         web_search_results: list["WebSearchResult"] = [],
         mcp_tools: list[FunctionDefinition] = [],
+        has_mcp_tools: bool = False,
     ):
         tokens_used = 0
         max_tokens_usable = max_tokens - CONTEXT_SIZE_BUFFER  # Leave some room.
@@ -417,7 +423,7 @@ class ContextBuilder:
 
         # Create the necessary parts of the prompt.
         # Add the tokens used.
-        _prompt = _Prompt(version=version)
+        _prompt = _Prompt(version=version, has_mcp_tools=has_mcp_tools)
         _prompt.add_prompt(
             prompt=prompt,
             transcription=bool(transcription_inputs),

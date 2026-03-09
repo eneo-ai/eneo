@@ -237,6 +237,7 @@ class CompletionService:
             version=version,
             use_image_generation=use_image_generation,
             web_search_results=web_search_results,
+            has_mcp_tools=bool(mcp_servers),
         )
 
         if extended_logging:
