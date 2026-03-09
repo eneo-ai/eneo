@@ -4,6 +4,7 @@ import json
 import secrets
 import time
 import traceback
+from urllib.parse import urlparse
 
 import aiohttp
 import jwt
@@ -16,6 +17,7 @@ from starlette.exceptions import HTTPException
 from intric.authentication import auth_dependencies
 from intric.authentication.auth_models import AccessToken, ApiKey, OpenIdConnectLogin
 from intric.main import config
+from intric.main.config import validate_public_origin
 from intric.main.exceptions import AuthenticationException
 from intric.main.aiohttp_client import aiohttp_client
 from intric.main.container.container import Container
@@ -45,6 +47,142 @@ from intric.audit.domain.entity_types import EntityType
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+async def _load_single_tenant_allowed_origins(
+    *,
+    container: Container,
+    tenant_id: UUID,
+    correlation_id: str,
+) -> set[str]:
+    origins: set[str] = set()
+    get_allowed_origin_repo = getattr(container, "allowed_origin_repo", None)
+    if not callable(get_allowed_origin_repo):
+        return origins
+
+    try:
+        allowed_origin_repo = get_allowed_origin_repo()
+    except Exception as exc:
+        logger.warning(
+            "Failed to initialize allowed origin repository during single-tenant OIDC redirect validation",
+            extra={
+                "tenant_id": str(tenant_id),
+                "correlation_id": correlation_id,
+                "error": str(exc),
+            },
+        )
+        return origins
+
+    if allowed_origin_repo is None:
+        return origins
+
+    try:
+        allowed_origins = await allowed_origin_repo.get_by_tenant(tenant_id)
+    except Exception as exc:
+        logger.warning(
+            "Failed to load allowed origins during single-tenant OIDC redirect validation",
+            extra={
+                "tenant_id": str(tenant_id),
+                "correlation_id": correlation_id,
+                "error": str(exc),
+            },
+        )
+        return origins
+
+    for allowed_origin in allowed_origins:
+        raw_origin = getattr(allowed_origin, "url", None)
+        if not raw_origin:
+            continue
+
+        try:
+            normalized_origin = validate_public_origin(raw_origin)
+        except ValueError:
+            logger.warning(
+                "Skipping invalid allowed origin during single-tenant OIDC redirect validation",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "correlation_id": correlation_id,
+                    "origin": raw_origin,
+                },
+            )
+            continue
+
+        origins.add(normalized_origin.rstrip("/"))
+
+    return origins
+
+
+async def _resolve_single_tenant_redirect_uri(
+    *,
+    container: Container,
+    settings: config.Settings,
+    redirect_uri: str,
+    request_origin: str | None,
+    correlation_id: str,
+) -> str:
+    if not request_origin:
+        return redirect_uri
+
+    try:
+        normalized_request_origin = validate_public_origin(request_origin).rstrip("/")
+    except ValueError:
+        return redirect_uri
+
+    parsed_redirect = urlparse(redirect_uri)
+    if not parsed_redirect.scheme or not parsed_redirect.hostname:
+        return redirect_uri
+
+    default_port = 443 if parsed_redirect.scheme == "https" else 80
+    parsed_port = (
+        f":{parsed_redirect.port}"
+        if parsed_redirect.port and parsed_redirect.port != default_port
+        else ""
+    )
+    canonical_origin = (
+        f"{parsed_redirect.scheme}://{parsed_redirect.hostname}{parsed_port}".rstrip("/")
+    )
+    if normalized_request_origin == canonical_origin:
+        return redirect_uri
+
+    if not settings.oidc_tenant_id:
+        return redirect_uri
+
+    try:
+        oidc_tenant_id = UUID(settings.oidc_tenant_id)
+    except ValueError:
+        logger.warning(
+            "OIDC_TENANT_ID is invalid - skipping allowed origin override for single-tenant OIDC redirect",
+            extra={
+                "correlation_id": correlation_id,
+                "oidc_tenant_id": settings.oidc_tenant_id,
+            },
+        )
+        return redirect_uri
+
+    allowed_origins = await _load_single_tenant_allowed_origins(
+        container=container,
+        tenant_id=oidc_tenant_id,
+        correlation_id=correlation_id,
+    )
+    if normalized_request_origin not in allowed_origins:
+        return redirect_uri
+
+    redirect_path = parsed_redirect.path or "/login/callback"
+    if not redirect_path.startswith("/"):
+        redirect_path = "/login/callback"
+
+    resolved_redirect_uri = f"{normalized_request_origin}{redirect_path}"
+    logger.info(
+        "Using allowed request origin for single-tenant OIDC redirect URI",
+        extra={
+            "tenant_id": str(oidc_tenant_id),
+            "correlation_id": correlation_id,
+            "request_origin": normalized_request_origin,
+            "redirect_uri": resolved_redirect_uri,
+        },
+    )
+
+    return resolved_redirect_uri
 
 
 @router.post(
@@ -163,6 +301,7 @@ async def user_login_with_email_and_password(
 
 @router.post("/login/openid-connect/mobilityguard/", response_model=AccessToken)
 async def login_with_mobilityguard(
+    request: Request,
     openid_connect_login: OpenIdConnectLogin,
     container: Container = Depends(get_container()),
 ):
@@ -207,6 +346,14 @@ async def login_with_mobilityguard(
             500,
             "OIDC redirect_uri not configured. Set PUBLIC_ORIGIN environment variable.",
         )
+
+    redirect_uri = await _resolve_single_tenant_redirect_uri(
+        container=container,
+        settings=settings,
+        redirect_uri=redirect_uri,
+        request_origin=request.headers.get("origin"),
+        correlation_id=correlation_id,
+    )
 
     # Override frontend-provided redirect_uri with server-computed value (defense in depth)
     if openid_connect_login.redirect_uri != redirect_uri:
