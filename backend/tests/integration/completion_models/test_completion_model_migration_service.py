@@ -635,7 +635,7 @@ class TestCompletionModelMigration:
 
             # Assert: Should have warning about different families
             assert result.warnings is not None
-            family_warning = any("family" in w.lower() for w in result.warnings)
+            family_warning = any("families" in w.lower() for w in result.warnings)
             assert family_warning, "Should warn about different model families"
 
     async def test_warn_about_vision_capability_loss(
