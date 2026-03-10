@@ -70,9 +70,9 @@ class ToolSyncResult:
     """Result of tool sync with changeset for review."""
 
     connection: ConnectionResult
-    new_tools: list[ToolChange] = field(default_factory=list)
-    changed_tools: list[ToolChange] = field(default_factory=list)
-    removed_tools: list[ToolChange] = field(default_factory=list)
+    new_tools: list[ToolChange] = field(default_factory=lambda: [])
+    changed_tools: list[ToolChange] = field(default_factory=lambda: [])
+    removed_tools: list[ToolChange] = field(default_factory=lambda: [])
     unchanged_count: int = 0
 
     @property
