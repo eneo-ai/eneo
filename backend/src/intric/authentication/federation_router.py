@@ -683,6 +683,7 @@ async def list_tenants(
     },
 )
 async def initiate_auth(
+    request: Request,
     tenant: Optional[str] = Query(
         None,
         description="Tenant slug (required for multi-tenant, optional for single-tenant)",
@@ -690,7 +691,6 @@ async def initiate_auth(
     state: Optional[str] = Query(
         None, description="Optional frontend-generated CSRF state"
     ),
-    request: Request | None = None,
     requested_redirect_uri: Optional[str] = Query(
         None,
         description=(
