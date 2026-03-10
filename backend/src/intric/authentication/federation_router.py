@@ -207,12 +207,11 @@ async def _resolve_redirect_uri_for_initiate(
             )
 
         requested_path = parsed_requested.path or "/"
-        if requested_path not in {"/", redirect_path}:
+        if not requested_path.startswith("/"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    "redirect_uri path mismatch. "
-                    f"Expected '{redirect_path}' or root path '/'."
+                    "redirect_uri path must start with '/'."
                 ),
             )
 
@@ -225,7 +224,7 @@ async def _resolve_redirect_uri_for_initiate(
         requested_origin = validate_public_origin(
             f"{parsed_requested.scheme}://{parsed_requested.hostname}{requested_port}"
         ).rstrip("/")
-        resolved_requested_redirect_uri = f"{requested_origin}{redirect_path}"
+        resolved_requested_redirect_uri = f"{requested_origin}{requested_path}"
 
         base_default_port = 443 if parsed_base.scheme == "https" else 80
         base_port = (
@@ -695,7 +694,7 @@ async def initiate_auth(
         None,
         description=(
             "Optional redirect URI override. Must be absolute URL and match tenant allowed origins. "
-            "Path must be '/' or tenant redirect_path."
+            "If a path is provided, it is preserved as-is."
         ),
     ),
     container: Container = Depends(get_container()),
@@ -1363,6 +1362,41 @@ async def auth_callback(
                     ),
                     headers={"X-Correlation-ID": correlation_id},
                 )
+
+            redirect_default_port = (
+                443 if parsed_redirect_uri.scheme == "https" else 80
+            )
+            redirect_port = (
+                f":{parsed_redirect_uri.port}"
+                if parsed_redirect_uri.port
+                and parsed_redirect_uri.port != redirect_default_port
+                else ""
+            )
+            redirect_origin = validate_public_origin(
+                f"{parsed_redirect_uri.scheme}://{parsed_redirect_uri.hostname}{redirect_port}"
+            ).rstrip("/")
+
+            expected_parsed = urlparse(expected_redirect_uri)
+            expected_default_port = 443 if expected_parsed.scheme == "https" else 80
+            expected_port = (
+                f":{expected_parsed.port}"
+                if expected_parsed.port and expected_parsed.port != expected_default_port
+                else ""
+            )
+            expected_origin = validate_public_origin(
+                f"{expected_parsed.scheme}://{expected_parsed.hostname}{expected_port}"
+            ).rstrip("/")
+
+            if redirect_origin == expected_origin:
+                allowed_redirect_uris.add(redirect_uri)
+            else:
+                tenant_allowed_origins = await _load_tenant_allowed_origins(
+                    container=container,
+                    tenant_id=tenant_id,
+                    correlation_id=correlation_id,
+                )
+                if redirect_origin in tenant_allowed_origins:
+                    allowed_redirect_uris.add(redirect_uri)
 
             redirect_mismatch = redirect_uri not in allowed_redirect_uris
             allow_redirect_mismatch = False
