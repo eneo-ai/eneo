@@ -1,5 +1,12 @@
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from intric.security_classifications.domain.entities.security_classification import (
+        SecurityClassification,
+    )
 
 from fastapi import APIRouter, Depends, Query
 
@@ -8,7 +15,8 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.main.container.container import Container
 from intric.main.exceptions import BadRequestException
-from intric.main.models import NOT_PROVIDED, PaginatedResponse
+from intric.main.models import NOT_PROVIDED, NotProvided, PaginatedResponse
+from intric.mcp_servers.application.mcp_server_service import ToolChange
 from intric.mcp_servers.presentation.models import (
     MCPConnectionStatus,
     MCPServerCreate,
@@ -315,15 +323,16 @@ async def update_mcp_server(
     old_server = await service.get_mcp_server(id)
 
     # Resolve security classification if provided
-    security_classification = NOT_PROVIDED
-    if data.security_classification is not NOT_PROVIDED:
-        if data.security_classification is None:
-            security_classification = None
-        else:
-            sc_service = container.security_classification_service()
-            security_classification = await sc_service.get_security_classification(
-                data.security_classification.id
-            )
+    security_classification: SecurityClassification | NotProvided | None = NOT_PROVIDED
+    if isinstance(data.security_classification, NotProvided):
+        pass
+    elif data.security_classification is None:
+        security_classification = None
+    else:
+        sc_service = container.security_classification_service()
+        security_classification = await sc_service.get_security_classification(
+            data.security_classification.id
+        )
 
     result = await service.update_mcp_server(
         mcp_server_id=id,
@@ -459,7 +468,7 @@ async def sync_mcp_server_tools(
             sync_result.connection.error_message or "Failed to connect to MCP server"
         )
 
-    def _to_change_public(change):
+    def _to_change_public(change: ToolChange):
         return ToolChangePublic(
             tool=assembler.from_domain_to_model(change.tool),
             change_type=change.change_type,

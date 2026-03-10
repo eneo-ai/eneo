@@ -1,9 +1,9 @@
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from intric.main.models import NOT_PROVIDED
+from intric.main.models import NOT_PROVIDED, NotProvided
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from intric.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
@@ -70,18 +70,10 @@ class ToolSyncResult:
     """Result of tool sync with changeset for review."""
 
     connection: ConnectionResult
-    new_tools: list[ToolChange] = None
-    changed_tools: list[ToolChange] = None
-    removed_tools: list[ToolChange] = None
+    new_tools: list[ToolChange] = field(default_factory=list)
+    changed_tools: list[ToolChange] = field(default_factory=list)
+    removed_tools: list[ToolChange] = field(default_factory=list)
     unchanged_count: int = 0
-
-    def __post_init__(self):
-        if self.new_tools is None:
-            self.new_tools = []
-        if self.changed_tools is None:
-            self.changed_tools = []
-        if self.removed_tools is None:
-            self.removed_tools = []
 
     @property
     def has_pending_changes(self) -> bool:
@@ -239,7 +231,7 @@ class MCPServerService:
         tags: list[str] | None = None,
         icon_url: str | None = None,
         documentation_url: str | None = None,
-        security_classification: "SecurityClassification | None" = NOT_PROVIDED,
+        security_classification: "SecurityClassification | NotProvided | None" = NOT_PROVIDED,
     ) -> MCPServerUpdateResult:
         """Update an MCP server in global catalog (admin only, uses Streamable HTTP transport).
 
@@ -275,7 +267,7 @@ class MCPServerService:
             mcp_server.icon_url = str(icon_url)
         if documentation_url is not None:
             mcp_server.documentation_url = str(documentation_url)
-        if security_classification is not NOT_PROVIDED:
+        if not isinstance(security_classification, NotProvided):
             mcp_server.security_classification = security_classification
 
         # Validate connection before saving when connection config changes
