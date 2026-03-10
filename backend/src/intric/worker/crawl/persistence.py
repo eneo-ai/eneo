@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from dependency_injector import providers
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.database.tables.info_blob_chunk_table import InfoBlobChunks

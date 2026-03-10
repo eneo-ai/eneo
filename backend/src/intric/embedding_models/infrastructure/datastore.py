@@ -1,7 +1,7 @@
 import time
 from typing import TYPE_CHECKING, Optional
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic_settings import BaseSettings
 
 from intric.completion_models.infrastructure.context_builder import count_tokens
