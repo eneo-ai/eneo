@@ -17,6 +17,7 @@ if TYPE_CHECKING:
         EmbeddingModels,
         TranscriptionModels,
     )
+    from intric.database.tables.mcp_server_table import MCPServers
     from intric.database.tables.spaces_table import Spaces
 
 
@@ -52,4 +53,8 @@ class SecurityClassification(BasePublic):
     )
     spaces: Mapped[list["Spaces"]] = relationship(
         back_populates="security_classification", order_by="Spaces.created_at"
+    )
+    mcp_servers: Mapped[list["MCPServers"]] = relationship(
+        back_populates="security_classification",
+        order_by="MCPServers.created_at",
     )

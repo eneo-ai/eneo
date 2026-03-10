@@ -31,7 +31,7 @@
   const filteredServers = $derived(
     mcpServers.filter((server) => {
       if (!filterValue) return true;
-      const searchStr = `${server.name} ${server.description || ""} ${server.http_url}`.toLowerCase();
+      const searchStr = `${server.name} ${server.description || ""} ${server.http_url} ${server.security_classification?.name || ""}`.toLowerCase();
       return searchStr.includes(filterValue.toLowerCase());
     })
   );

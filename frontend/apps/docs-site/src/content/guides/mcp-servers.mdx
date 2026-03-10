@@ -1,0 +1,205 @@
+# MCP Servers
+
+Model Context Protocol (MCP) servers extend your assistants with external tools and data sources. This guide covers how to add MCP servers, manage tools, understand the sync and approval flow, and make tools available in spaces.
+
+import { Callout } from 'nextra/components'
+
+## Overview
+
+MCP is an open protocol that lets AI assistants call external tools — such as searching a database, creating tickets, or fetching live data. Eneo connects to MCP servers over **Streamable HTTP** transport and acts as a proxy between assistants and the remote server.
+
+**Key concepts:**
+
+| Concept | Description |
+|---------|-------------|
+| **MCP Server** | A remote service that exposes tools via the MCP protocol |
+| **Tool** | A single function the server provides (e.g. `search_tickets`, `create_issue`) |
+| **Tool Sync** | Discovering tools from the remote server and detecting changes |
+| **Approval** | Admin review step before new or changed tools become active |
+| **Space** | Where you enable MCP servers so assistants can use their tools |
+
+---
+
+## Adding an MCP Server
+
+MCP servers are managed in **Admin → MCP Servers**. Only admins can add, edit, or remove servers.
+
+### Steps
+
+1. Click **Add MCP Server**
+2. Fill in the required fields:
+   - **Name** — A display name for the server
+   - **Server URL** — The Streamable HTTP endpoint (e.g. `https://example.com/mcp`)
+3. Configure optional settings:
+   - **Description** — What the server does
+   - **Authentication** — Choose between `Public` (no auth) or `Bearer Token`
+   - **Documentation URL** — Link to the server's documentation
+   - **Security Classification** — Restrict which spaces can use this server
+4. Click **Add MCP Server**
+
+Eneo will **test the connection** before saving. If the URL is unreachable or returns an error, the server is not created and you get an error message.
+
+<Callout type="info">
+  On successful creation, Eneo automatically connects to the server and discovers all available tools. These initial tools are added as **enabled by default** without requiring approval, since the admin is explicitly adding a trusted server.
+</Callout>
+
+### Authentication
+
+If the MCP server requires authentication, select **Bearer Token** and enter the token. The token is encrypted at rest using Fernet encryption (AES-128-CBC + HMAC-SHA256) and is never shown in the UI after saving.
+
+When editing a server, leave the token field empty to keep the existing token.
+
+---
+
+## Tools and Tool Discovery
+
+Each MCP server exposes a set of tools. When you first add a server, its tools are discovered automatically. After that, you can re-discover tools by clicking **Sync Tools**.
+
+### Viewing Tools
+
+In the MCP servers table, click the **expand arrow** on a server row to see its tools. Each tool shows:
+
+- **Name** — The tool's function name (e.g. `search_documents`)
+- **Description** — What the tool does
+- **Enabled/Disabled toggle** — Whether the tool is available to assistants
+
+### Enabling and Disabling Tools
+
+Use the toggle switch on each tool to enable or disable it. You can also use the **All on / All off** buttons for bulk changes.
+
+The header shows the count of enabled tools, e.g. `2 / 5 enabled`.
+
+<Callout type="warning">
+  Disabling a tool in admin removes it globally for all spaces. To control tools per-space, manage them in the space settings instead.
+</Callout>
+
+---
+
+## Syncing Tools
+
+Over time, an MCP server may add new tools, change existing tool descriptions, or remove tools. To detect these changes, click **Sync Tools** in the tools panel.
+
+### What Happens During Sync
+
+Eneo connects to the remote server, fetches the current tool list, and compares it against what is stored locally:
+
+| Scenario | What happens |
+|----------|-------------|
+| **New tool** | Created with `pending` status — requires approval before it becomes active |
+| **Changed tool** (description or schema updated) | Change is stored as pending — the tool continues using its **previous version** until the change is approved |
+| **Removed tool** (no longer on remote server) | Marked as `removed from server` — requires approval to delete |
+| **Unchanged tool** | No action needed |
+
+<Callout type="info">
+  **Why approval?** The approval step is a security measure. It prevents a compromised or misbehaving MCP server from silently injecting or modifying tool definitions. An admin must review and explicitly approve every change before it takes effect.
+</Callout>
+
+### Pending Changes Banner
+
+When there are pending changes, a banner appears:
+
+> **1 pending update — Tool uses previous version until update is approved**
+
+This means the tool is still active and usable — it simply runs on the previous approved version. Nothing is blocked; the update just waits for your review.
+
+### Reviewing Changes
+
+For each pending tool, you can see:
+
+- **Description changes** — Side-by-side comparison of the current and proposed description
+- **Removed from server** — The tool no longer exists on the remote server
+
+Use the **approve** (checkmark) or **reject** (X) buttons on individual tools, or use **Approve all** / **Reject all** for bulk actions.
+
+#### What Approve and Reject Do
+
+| Action | New tool | Changed tool | Removed tool |
+|--------|----------|-------------|-------------|
+| **Approve** | Tool becomes active with the proposed description and schema | Pending values replace current values | Tool is deleted from the database |
+| **Reject** | Tool is deleted (never activated) | Pending values are discarded, current values remain | Removed flag is cleared, tool stays active |
+
+---
+
+## Adding MCP Servers to Spaces
+
+After configuring MCP servers in the admin panel, you make them available to assistants by enabling them in individual spaces.
+
+### Steps
+
+1. Go to **Space → Settings**
+2. In the **MCP Servers** section, toggle the servers you want to enable
+3. Optionally expand a server to enable/disable individual tools for that space
+
+When a server is added to a space, all its tools are enabled by default. You can then disable specific tools you don't need.
+
+### Security Classification
+
+If your organisation uses security classifications, an MCP server must meet the space's classification level to be selectable. Servers that don't meet the requirement are greyed out with a tooltip explaining why.
+
+For example, if a space is classified as "Confidential" (level 3), only MCP servers with a security classification at level 3 or higher can be enabled in that space.
+
+---
+
+## How It Works (Architecture)
+
+When an assistant uses a tool during a conversation, the following happens:
+
+```
+User message → Assistant (LLM) → Tool call decision
+                                       ↓
+                                  Eneo Proxy
+                                       ↓
+                              MCP Server (remote)
+                                       ↓
+                                 Tool result
+                                       ↓
+                              Assistant (LLM) → Response to user
+```
+
+1. The LLM decides to call a tool based on the conversation context
+2. Eneo proxies the tool call to the remote MCP server over Streamable HTTP
+3. The MCP server executes the tool and returns a result
+4. The result is fed back to the LLM, which formulates a response
+
+The proxy handles authentication, connection management, and error handling transparently.
+
+---
+
+## Troubleshooting
+
+### Connection Failed on Create
+
+**Symptoms:** Error message when adding a server
+
+**Solutions:**
+- Verify the URL is correct and the server is running
+- Check that the URL is reachable from the Eneo backend (firewall, DNS)
+- If using authentication, verify the token is correct
+- The server must support **Streamable HTTP** transport
+
+### Sync Shows No Tools
+
+**Symptoms:** After syncing, no tools appear
+
+**Solutions:**
+- Verify the MCP server actually exposes tools (check its documentation)
+- Check backend logs for connection errors
+- Try removing and re-adding the server
+
+### Tools Not Available in Space
+
+**Symptoms:** Assistants can't use tools even though the server is enabled
+
+**Solutions:**
+- Verify the server is enabled in the space settings (not just in admin)
+- Check that individual tools are toggled on in the space
+- If using security classifications, verify the server meets the space's classification level
+- Check that pending tool changes have been approved — new tools are inactive until approved
+
+### Pending Changes Won't Clear
+
+**Symptoms:** Tools stuck in pending state
+
+**Solutions:**
+- Approve or reject all pending changes
+- If the issue persists, try syncing again to refresh the state

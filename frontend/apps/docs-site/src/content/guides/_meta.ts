@@ -5,6 +5,7 @@ const meta: MetaRecord = {
   authentication: 'Authentication & OIDC',
   'audit-logging': 'Audit Logging',
   'ai-providers': 'AI Provider Configuration',
+  'mcp-servers': 'MCP Servers',
   deployment: 'Deployment',
   'document-processing': 'Document Processing',
   'sharepoint-integration': 'SharePoint Integration',

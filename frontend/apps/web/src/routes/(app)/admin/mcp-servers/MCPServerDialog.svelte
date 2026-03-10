@@ -7,6 +7,9 @@
 <script lang="ts">
   import { Dialog, Button, Select } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import type { SecurityClassification } from "@intric/intric-js";
+  import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
+  import { getSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
   import type { Writable } from "svelte/store";
 
   type Props = {
@@ -19,11 +22,14 @@
 
   const isEditMode = $derived(!!mcpServer);
 
+  const classifications = getSecurityContext().security_classifications;
+
   let name = $state("");
   let description = $state("");
   let http_url = $state("");
   let http_auth_type = $state<"none" | "bearer">("none");
   let documentation_url = $state("");
+  let security_classification = $state<SecurityClassification | null>(null);
 
   // Authentication credentials
   let bearer_token = $state("");
@@ -39,12 +45,14 @@
       http_url = mcpServer.http_url || "";
       http_auth_type = mcpServer.http_auth_type || "none";
       documentation_url = mcpServer.documentation_url || "";
+      security_classification = mcpServer.security_classification ?? null;
     } else {
       name = "";
       description = "";
       http_url = "";
       http_auth_type = "none";
       documentation_url = "";
+      security_classification = null;
     }
     // Always clear auth credentials (they're stored securely, not shown)
     bearer_token = "";
@@ -71,6 +79,9 @@
       if (description) data.description = description;
       if (documentation_url) data.documentation_url = documentation_url;
 
+      // Security classification — send id or null
+      data.security_classification = security_classification ? { id: security_classification.id } : null;
+
       // Add auth config if provided
       if (http_auth_type === "bearer" && bearer_token) {
         data.http_auth_config_schema = { token: bearer_token };
@@ -86,6 +97,7 @@
         http_auth_type = "none";
         documentation_url = "";
         bearer_token = "";
+        security_classification = null;
       }
 
       $openController = false;
@@ -260,6 +272,25 @@
             />
           </div>
         </fieldset>
+
+        <!-- Security Classification -->
+        {#if classifications.length > 0}
+          <fieldset class="space-y-4 rounded-xl border border-dimmer bg-secondary/20 p-4 pt-3">
+            <legend class="-ml-1 flex items-center gap-2 rounded-md bg-secondary px-2 py-1 text-[11px] font-medium uppercase tracking-wider text-muted">
+              <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+              </svg>
+              {m.security_classification()}
+            </legend>
+
+            <div class="classification-select w-full rounded-lg border border-default">
+              <SelectSecurityClassification
+                {classifications}
+                bind:value={security_classification}
+              />
+            </div>
+          </fieldset>
+        {/if}
       </form>
     </Dialog.Section>
 
@@ -286,3 +317,12 @@
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>
+
+<style>
+  .classification-select :global(button) {
+    width: 100%;
+    border-bottom: none;
+    border-radius: 0.5rem;
+    height: 2.75rem;
+  }
+</style>
