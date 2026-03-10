@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Union
 from uuid import UUID
 
@@ -50,11 +50,7 @@ class SpaceSecurityClassificationImpactAnalysis:
     affected_completion_models: list["CompletionModel"]
     affected_embedding_models: list["EmbeddingModel"]
     affected_transcription_models: list["TranscriptionModel"]
-    affected_mcp_servers: list = None  # list[MCPServer]
-
-    def __post_init__(self):
-        if self.affected_mcp_servers is None:
-            self.affected_mcp_servers = []
+    affected_mcp_servers: list = field(default_factory=list)
 
 TENANT_SPACE_NAME = "Organization space" 
 
