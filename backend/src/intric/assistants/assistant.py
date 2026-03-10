@@ -13,6 +13,7 @@ from intric.completion_models.infrastructure.completion_service import Completio
 from intric.files.file_models import File, FileInfo, FileType
 from intric.files.text import TextMimeTypes
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+from intric.services.service import DatastoreResult
 from intric.main.exceptions import (
     BadRequestException,
     NoModelSelectedException,
@@ -333,15 +334,20 @@ class Assistant(Entity):
         # Fill half the context
         num_chunks = self.completion_model.token_limit // 200 // 2 if version == 2 else 30
 
-        datastore_result = await references_service.get_references(
-            question=question,
-            session=session,
-            collections=self.collections,
-            websites=self.websites,
-            integration_knowledge_list=self.integration_knowledge_list,
-            num_chunks=num_chunks,
-            version=version,
-        )
+        if self.has_knowledge():
+            datastore_result = await references_service.get_references(
+                question=question,
+                session=session,
+                collections=self.collections,
+                websites=self.websites,
+                integration_knowledge_list=self.integration_knowledge_list,
+                num_chunks=num_chunks,
+                version=version,
+            )
+        else:
+            datastore_result = DatastoreResult(
+                chunks=[], no_duplicate_chunks=[], info_blobs=[]
+            )
 
         response = await completion_service.get_response(
             model=self.completion_model,
@@ -357,7 +363,7 @@ class Assistant(Entity):
             version=version,
             use_image_generation=self.is_default,
             web_search_results=web_search_results,
-            mcp_servers=self.mcp_servers,
+            mcp_servers=[] if self.has_knowledge() else self.mcp_servers,
             require_tool_approval=require_tool_approval,
         )
 

@@ -405,6 +405,7 @@
         {/if}
       </Settings.Group>
 
+      {@const hasKnowledge = ($update.groups?.length ?? 0) > 0 || ($update.websites?.length ?? 0) > 0 || ($update.integration_knowledge_list?.length ?? 0) > 0}
       <Settings.Group title={m.mcp_servers()}>
         <Settings.Row
           title={m.mcp_servers()}
@@ -415,7 +416,14 @@
             discardChanges("mcp_tools");
           }}
         >
-          <SelectMCPServers bind:selectedMCPServers={$update.mcp_servers} bind:selectedMCPTools={$update.mcp_tools} selectedModel={$update.completion_model} />
+          {#if hasKnowledge}
+            <p class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm">
+              <span class="font-bold">{m.warning()}:&nbsp;</span>{m.mcp_disabled_when_knowledge_active()}
+            </p>
+          {/if}
+          <div class={hasKnowledge ? 'opacity-50 pointer-events-none' : ''}>
+            <SelectMCPServers bind:selectedMCPServers={$update.mcp_servers} bind:selectedMCPTools={$update.mcp_tools} selectedModel={$update.completion_model} />
+          </div>
        </Settings.Row>
       </Settings.Group>
 
