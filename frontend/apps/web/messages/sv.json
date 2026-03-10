@@ -1840,6 +1840,7 @@
   "failed_create_mcp_server": "Kunde inte skapa MCP-server. Försök igen.",
   "failed_update_mcp_server": "Kunde inte uppdatera MCP-server. Försök igen.",
   "enable_mcp_in_space_settings": "Aktivera MCP-servrar i space-inställningarna först.",
+  "mcp_disabled_when_knowledge_active": "MCP-servrar är inte tillgängliga när kunskap (samlingar, webbplatser, integrationer) är bifogad. Ta bort kunskap för att aktivera MCP-servrar.",
   "add_model_provider": "Lägg till modelleverantör",
   "edit_provider": "Redigera leverantör",
   "delete_provider": "Ta bort leverantör",

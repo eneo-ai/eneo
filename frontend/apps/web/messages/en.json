@@ -1805,6 +1805,7 @@
   "failed_create_mcp_server": "Failed to create MCP server. Please try again.",
   "failed_update_mcp_server": "Failed to update MCP server. Please try again.",
   "enable_mcp_in_space_settings": "Enable MCP servers in space settings first.",
+  "mcp_disabled_when_knowledge_active": "MCP servers are not available when knowledge (collections, websites, integrations) is attached. Remove knowledge to enable MCP servers.",
   "add_model_provider": "Add Model Provider",
   "edit_provider": "Edit Provider",
   "delete_provider": "Delete Provider",
