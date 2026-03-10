@@ -133,9 +133,11 @@
     return `${(ms / 60000).toFixed(1)}m`;
   }
 
-  async function downloadArtifact(fileId: string) {
+  async function downloadArtifact(runId: string, fileId: string) {
     try {
-      const { url } = await intric.files.generateSignedUrl({
+      const { url } = await intric.flows.runs.artifactSignedUrl({
+        flowId: flow.id,
+        runId,
         fileId,
         contentDisposition: "attachment"
       });
@@ -383,7 +385,7 @@
                           {#each run.output_payload_json.artifacts as artifact}
                             <button
                               class="group border-default bg-primary inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium shadow-sm transition-all hover:shadow"
-                              on:click={() => downloadArtifact(artifact.file_id)}
+                              on:click={() => downloadArtifact(run.id, artifact.file_id)}
                             >
                               <IconArrowDownToLine
                                 class="text-muted group-hover:text-secondary size-3"

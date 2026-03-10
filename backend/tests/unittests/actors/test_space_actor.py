@@ -55,6 +55,7 @@ class MockPermission:
     COLLECTIONS = "collections"
     WEBSITES = "websites"
     SERVICES = "services"
+    FLOWS = "flows"
 
 
 @pytest.fixture()
@@ -480,3 +481,102 @@ def test_group_editor_cannot_manage_group_members(
         )
         is False
     )
+
+
+# ---------------------------------------------------------------------------
+# FLOW resource type permission tests
+# ---------------------------------------------------------------------------
+
+
+class MockFlowPublished:
+    """Mock flow with published=True."""
+    published = True
+
+
+class MockFlowUnpublished:
+    """Mock flow with published=False."""
+    published = False
+
+
+def test_viewer_can_read_published_flow(viewer_user, shared_space):
+    actor = SpaceActor(viewer_user, shared_space)
+    assert actor.can_read_flow(MockFlowPublished()) is True
+
+
+def test_viewer_cannot_read_unpublished_flow(viewer_user, shared_space):
+    actor = SpaceActor(viewer_user, shared_space)
+    assert actor.can_read_flow(MockFlowUnpublished()) is False
+
+
+def test_viewer_cannot_create_flows(viewer_user, shared_space):
+    actor = SpaceActor(viewer_user, shared_space)
+    assert actor.can_create_flows() is False
+
+
+def test_viewer_cannot_edit_flows(viewer_user, shared_space):
+    actor = SpaceActor(viewer_user, shared_space)
+    assert actor.can_edit_flows() is False
+
+
+def test_viewer_cannot_delete_flows(viewer_user, shared_space):
+    actor = SpaceActor(viewer_user, shared_space)
+    assert actor.can_delete_flows() is False
+
+
+def test_viewer_cannot_publish_flows(viewer_user, shared_space):
+    actor = SpaceActor(viewer_user, shared_space)
+    assert actor.can_publish_flows() is False
+
+
+def test_editor_can_crud_and_publish_flows(editor_user, shared_space):
+    actor = SpaceActor(editor_user, shared_space)
+    assert actor.can_read_flows() is True
+    assert actor.can_create_flows() is True
+    assert actor.can_edit_flows() is True
+    assert actor.can_delete_flows() is True
+    assert actor.can_publish_flows() is True
+
+
+def test_admin_can_crud_and_publish_flows(admin_user, shared_space):
+    actor = SpaceActor(admin_user, shared_space)
+    assert actor.can_read_flows() is True
+    assert actor.can_create_flows() is True
+    assert actor.can_edit_flows() is True
+    assert actor.can_delete_flows() is True
+    assert actor.can_publish_flows() is True
+
+
+def test_owner_can_publish_flows_in_personal_space(owner_user, personal_space):
+    """Flows require publishing before they can be run, so OWNER must have PUBLISH."""
+    owner_user.permissions = [MockPermission.FLOWS]
+    actor = SpaceActor(owner_user, personal_space)
+    assert actor.can_read_flows() is True
+    assert actor.can_create_flows() is True
+    assert actor.can_edit_flows() is True
+    assert actor.can_delete_flows() is True
+    assert actor.can_publish_flows() is True
+
+
+def test_owner_without_flows_permission_cannot_create_flows_in_personal_space(
+    owner_user, personal_space,
+):
+    """User without FLOWS permission cannot create flows in personal space."""
+    owner_user.permissions = [MockPermission.ASSISTANTS]  # no FLOWS
+    actor = SpaceActor(owner_user, personal_space)
+    assert actor.can_create_flows() is False
+    assert actor.can_edit_flows() is False
+    assert actor.can_delete_flows() is False
+    # READ is also gated by permission in personal space
+    assert actor.can_read_flows() is False
+
+
+def test_flow_is_in_publishable_resources():
+    """FLOW is in PUBLISHABLE_RESOURCES so viewer publish-gating applies."""
+    from intric.actors.actors.space_actor import PUBLISHABLE_RESOURCES
+    assert SpaceResourceType.FLOW in PUBLISHABLE_RESOURCES
+
+
+def test_flow_is_in_permission_resources():
+    """FLOW is in PERMISSION_RESOURCES so personal space permission gating applies."""
+    from intric.actors.actors.space_actor import PERMISSION_RESOURCES
+    assert SpaceResourceType.FLOW in PERMISSION_RESOURCES

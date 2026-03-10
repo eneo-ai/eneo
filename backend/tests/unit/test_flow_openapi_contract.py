@@ -63,6 +63,7 @@ REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/flows/{id}/runs/{run_id}/redispatch/": {"post"},
     "/api/v1/flows/{id}/runs/{run_id}/evidence/": {"get"},
     "/api/v1/flows/{id}/runs/{run_id}/steps/": {"get"},
+    "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/": {"post"},
     "/api/v1/settings/flow-input-limits": {"get", "patch"},
 }
 
@@ -102,6 +103,7 @@ REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
     ("/api/v1/flows/{id}/runs/{run_id}/redispatch/", "post"): "redispatch_flow_run_alias",
     ("/api/v1/flows/{id}/runs/{run_id}/evidence/", "get"): "get_flow_run_evidence_alias",
     ("/api/v1/flows/{id}/runs/{run_id}/steps/", "get"): "list_flow_run_steps",
+    ("/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/", "post"): "generate_flow_run_artifact_signed_url",
     ("/api/v1/flows/{id}/graph/", "get"): "get_flow_graph",
 }
 
@@ -149,6 +151,10 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
     (
         "/api/v1/flows/{id}/runs/{run_id}/evidence/",
         "get",
+    ): {"403", "404", "422"},
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/",
+        "post",
     ): {"403", "404", "422"},
     (
         "/api/v1/settings/flow-input-limits",
@@ -200,6 +206,10 @@ REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
     (
         "/api/v1/flows/{id}/runs/{run_id}/evidence/",
         "get",
+    ): {"403", "404"},
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/",
+        "post",
     ): {"403", "404"},
 }
 

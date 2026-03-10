@@ -63,6 +63,19 @@ describe("flows templates endpoint", () => {
     expect(fetch.mock.calls[0][1].method).toBe("post");
   });
 
+  it("generates artifact signed url from flow run route", async () => {
+    const fetch = vi.fn(async () => ({ url: "https://example.com/download", expires_at: 9999 }));
+    const flows = initFlows({ fetch });
+
+    await flows.runs.artifactSignedUrl({ flowId: "flow-1", runId: "run-1", fileId: "file-1" });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe(
+      "/api/v1/flows/flow-1/runs/run-1/artifacts/file-1/signed-url/"
+    );
+    expect(fetch.mock.calls[0][1].method).toBe("post");
+  });
+
   it("creates flow run with canonical step_inputs payload", async () => {
     const fetch = vi.fn(async () => ({ id: "run-1" }));
     const flows = initFlows({ fetch });

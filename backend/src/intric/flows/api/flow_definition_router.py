@@ -22,7 +22,7 @@ from intric.flows.api.flow_models import (
 from intric.authentication.signed_urls import generate_signed_token
 import time
 from intric.main.models import NOT_PROVIDED, PaginatedResponse
-from intric.main.exceptions import ErrorCodes
+from intric.main.exceptions import ErrorCodes, UnauthorizedException
 from intric.server.dependencies.container import get_container
 
 from intric.main.container.container import Container
@@ -53,6 +53,15 @@ async def create_flow(
                 ),
                 "context": {"auth_layer": "api_key_scope"},
             },
+        )
+
+    space = await container.space_service().get_space(flow_in.space_id)
+    actor = container.actor_manager().get_space_actor_from_space(space)
+    if not actor.can_create_flows():
+        raise UnauthorizedException(
+            "You do not have permission to create flows in this space.",
+            code="insufficient_space_permission",
+            context={"auth_layer": "space_membership"},
         )
 
     assembler = FlowAssembler()
@@ -121,6 +130,15 @@ async def list_flows(
             },
         )
 
+    space = await container.space_service().get_space(space_id)
+    actor = container.actor_manager().get_space_actor_from_space(space)
+    if not actor.can_read_flows():
+        raise UnauthorizedException(
+            "You do not have permission to access flows in this space.",
+            code="insufficient_space_permission",
+            context={"auth_layer": "space_membership"},
+        )
+
     assembler = FlowAssembler()
     flow_service = container.flow_service()
     flows = await flow_service.list_flows(
@@ -144,6 +162,16 @@ async def get_flow(
 ):
     assembler = FlowAssembler()
     flow = await container.flow_service().get_flow(id)
+
+    space = await container.space_service().get_space(flow.space_id)
+    actor = container.actor_manager().get_space_actor_from_space(space)
+    if not actor.can_read_flow(flow):
+        raise UnauthorizedException(
+            "You do not have permission to access this flow.",
+            code="insufficient_space_permission",
+            context={"auth_layer": "space_membership"},
+        )
+
     return assembler.to_public(flow)
 
 
@@ -158,6 +186,16 @@ async def update_flow(
     flow_in: FlowUpdateRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    flow = await container.flow_service().get_flow(id)
+    space = await container.space_service().get_space(flow.space_id)
+    actor = container.actor_manager().get_space_actor_from_space(space)
+    if not actor.can_edit_flows():
+        raise UnauthorizedException(
+            "You do not have permission to edit flows in this space.",
+            code="insufficient_space_permission",
+            context={"auth_layer": "space_membership"},
+        )
+
     assembler = FlowAssembler()
     flow_service = container.flow_service()
     user = container.user()
@@ -217,6 +255,16 @@ async def delete_flow(
     flow_service = container.flow_service()
     user = container.user()
     flow = await flow_service.get_flow(id)
+
+    space = await container.space_service().get_space(flow.space_id)
+    actor = container.actor_manager().get_space_actor_from_space(space)
+    if not actor.can_delete_flows():
+        raise UnauthorizedException(
+            "You do not have permission to delete flows in this space.",
+            code="insufficient_space_permission",
+            context={"auth_layer": "space_membership"},
+        )
+
     await flow_service.delete_flow(id)
 
     await container.audit_service().log_async(
@@ -240,6 +288,16 @@ async def publish_flow(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    flow = await container.flow_service().get_flow(id)
+    space = await container.space_service().get_space(flow.space_id)
+    actor = container.actor_manager().get_space_actor_from_space(space)
+    if not actor.can_publish_flows():
+        raise UnauthorizedException(
+            "You do not have permission to publish flows in this space.",
+            code="insufficient_space_permission",
+            context={"auth_layer": "space_membership"},
+        )
+
     assembler = FlowAssembler()
     flow_service = container.flow_service()
     user = container.user()
@@ -267,6 +325,16 @@ async def unpublish_flow(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    flow = await container.flow_service().get_flow(id)
+    space = await container.space_service().get_space(flow.space_id)
+    actor = container.actor_manager().get_space_actor_from_space(space)
+    if not actor.can_publish_flows():
+        raise UnauthorizedException(
+            "You do not have permission to unpublish flows in this space.",
+            code="insufficient_space_permission",
+            context={"auth_layer": "space_membership"},
+        )
+
     assembler = FlowAssembler()
     flow_service = container.flow_service()
     user = container.user()

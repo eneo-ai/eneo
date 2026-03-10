@@ -8,7 +8,7 @@ from fastapi import HTTPException, Request, status
 
 from intric.authentication.auth_dependencies import ScopeFilter, get_scope_filter
 from intric.main.container.container import Container
-from intric.main.exceptions import ErrorCodes
+from intric.main.exceptions import ErrorCodes, UnauthorizedException
 from intric.main.models import GeneralError
 
 
@@ -56,10 +56,25 @@ async def enforce_flow_scope(
 ) -> Any | None:
     getter = scope_filter_getter or get_scope_filter
     scope_filter = getter(request)
-    if scope_filter.space_id is None and not require_flow_lookup_without_scope:
-        return None
 
+    # Always load the flow — needed for space membership check
     flow = await container.flow_service().get_flow(flow_id)
+
+    # API key scope check
     if scope_filter.space_id is not None and scope_filter.space_id != flow.space_id:
         raise_scope_mismatch()
+
+    # Space membership check for bearer-token users only.
+    # Tenant-scoped API keys (scope_type != None, space_id == None) are already
+    # authorized by router-level guards and must NOT be forced through membership.
+    if scope_filter.space_id is None and scope_filter.scope_type is None:
+        space = await container.space_service().get_space(flow.space_id)
+        actor = container.actor_manager().get_space_actor_from_space(space)
+        if not actor.can_read_flows():
+            raise UnauthorizedException(
+                "You do not have permission to access flows in this space.",
+                code="insufficient_space_permission",
+                context={"auth_layer": "space_membership"},
+            )
+
     return flow

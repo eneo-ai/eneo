@@ -123,6 +123,10 @@ class FlowSparse(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
+    @property
+    def published(self) -> bool:
+        return self.published_version is not None
+
 
 def _default_flow_steps() -> list[FlowStep]:
     return []

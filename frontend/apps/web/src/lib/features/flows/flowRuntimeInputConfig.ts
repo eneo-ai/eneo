@@ -50,12 +50,29 @@ function sanitizeMaxFiles(value: unknown): number | null {
   return Math.floor(value);
 }
 
+export const FILE_BASED_INPUT_TYPES = new Set<string>(["document", "file", "audio"]);
+
+export function isDefaultRuntimeConfig(config: FlowRuntimeInputConfigValue): boolean {
+  return (
+    config.label.trim() === "" &&
+    config.description.trim() === "" &&
+    config.accepted_mimetypes_override.length === 0 &&
+    config.max_files === null
+  );
+}
+
 export function coerceRuntimeInputConfigForStep(
   step: Pick<FlowStep, "input_type" | "output_mode">,
   config: FlowRuntimeInputConfigValue
 ): FlowRuntimeInputConfigValue {
   if (step.output_mode === "transcribe_only" || step.input_type === "audio") {
     return { ...config, input_format: "audio" };
+  }
+  if (step.input_type === "file") {
+    return { ...config, input_format: "file" };
+  }
+  if (step.input_type === "document") {
+    return { ...config, input_format: "document" };
   }
   return config;
 }

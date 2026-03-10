@@ -74,7 +74,10 @@
   import {
     buildRuntimeInputStepPatch,
     getRuntimeInputConfig,
-    type FlowRuntimeInputConfigValue
+    isDefaultRuntimeConfig,
+    FILE_BASED_INPUT_TYPES,
+    type FlowRuntimeInputConfigValue,
+    type FlowRuntimeInputFormat
   } from "$lib/features/flows/flowRuntimeInputConfig";
   import { getFlowStepUxCopy } from "$lib/features/flows/flowStepUxCopy";
 
@@ -426,13 +429,36 @@
         inputType: getInputTypeLabel(nextInputType)
       });
     }
+    // Auto-enable/disable runtime_input when input_type changes as a side effect
+    let finalInputConfig = nextInputConfig;
+    let finalBindings = activeStep.input_bindings;
+    if (nextInputType !== activeStep.input_type) {
+      const wasFileBased = FILE_BASED_INPUT_TYPES.has(activeStep.input_type);
+      const nowFileBased = FILE_BASED_INPUT_TYPES.has(nextInputType);
+      if (nowFileBased && !runtimeInputConfig.enabled) {
+        const patch = buildRuntimeInputStepPatch(
+          { ...activeStep, input_config: nextInputConfig, input_type: nextInputType, output_mode: activeStep.output_mode },
+          { ...runtimeInputConfig, enabled: true, required: true, input_format: nextInputType as FlowRuntimeInputFormat }
+        );
+        finalInputConfig = patch.input_config;
+        finalBindings = patch.input_bindings;
+      } else if (!nowFileBased && wasFileBased && runtimeInputConfig.enabled && isDefaultRuntimeConfig(runtimeInputConfig)) {
+        const patch = buildRuntimeInputStepPatch(
+          { ...activeStep, input_config: nextInputConfig, input_type: nextInputType, output_mode: activeStep.output_mode },
+          { ...runtimeInputConfig, enabled: false }
+        );
+        finalInputConfig = patch.input_config;
+        finalBindings = patch.input_bindings;
+      }
+    }
+
     const updated = {
       ...activeStep,
       input_source: nextSource,
       input_type: nextInputType,
-      input_config: nextInputConfig,
+      input_config: finalInputConfig,
       input_bindings: sanitizeBindingsForSource(
-        activeStep.input_bindings as Record<string, unknown> | null | undefined
+        finalBindings as Record<string, unknown> | null | undefined
       )
     };
     dispatch("stepChanged", { index: activeIndex, step: updated });
@@ -459,8 +485,25 @@
         inputSource: getInputSourceLabel(nextInputSource)
       });
     }
+    // Auto-enable/disable runtime_input for file-based input types
+    const wasFileBased = FILE_BASED_INPUT_TYPES.has(activeStep.input_type);
+    const nowFileBased = FILE_BASED_INPUT_TYPES.has(nextType);
+    let runtimePatch: Partial<FlowStep> = {};
+    if (nowFileBased && !runtimeInputConfig.enabled) {
+      runtimePatch = buildRuntimeInputStepPatch(
+        { ...activeStep, input_type: nextType, output_mode: nextOutputMode },
+        { ...runtimeInputConfig, enabled: true, required: true, input_format: nextType as FlowRuntimeInputFormat }
+      );
+    } else if (!nowFileBased && wasFileBased && runtimeInputConfig.enabled && isDefaultRuntimeConfig(runtimeInputConfig)) {
+      runtimePatch = buildRuntimeInputStepPatch(
+        { ...activeStep, input_type: nextType, output_mode: nextOutputMode },
+        { ...runtimeInputConfig, enabled: false }
+      );
+    }
+
     const updated: FlowStep = {
       ...activeStep,
+      ...runtimePatch,
       input_type: nextType,
       input_source: nextInputSource,
       output_mode: nextOutputMode,
@@ -472,10 +515,17 @@
   function handleOutputModeChange(nextMode: FlowStep["output_mode"]) {
     if (activeStep === null || activeIndex < 0) return;
     if (nextMode === "transcribe_only") {
+      const audioPatch = !runtimeInputConfig.enabled
+        ? buildRuntimeInputStepPatch(
+            { ...activeStep, input_type: "audio", output_mode: "transcribe_only" },
+            { ...runtimeInputConfig, enabled: true, required: true, input_format: "audio" }
+          )
+        : {};
       dispatch("stepChanged", {
         index: activeIndex,
         step: {
           ...activeStep,
+          ...audioPatch,
           input_type: "audio",
           input_source: "flow_input",
           output_mode: "transcribe_only",
@@ -1692,7 +1742,7 @@
                         id="runtime-input-format"
                         class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
                         value={runtimeInputConfig.input_format}
-                        disabled={isPublished || activeStep.output_mode === "transcribe_only"}
+                        disabled={isPublished || activeStep.output_mode === "transcribe_only" || FILE_BASED_INPUT_TYPES.has(activeStep.input_type)}
                         on:change={(event) =>
                           updateRuntimeInputSettings({
                             input_format: event.currentTarget

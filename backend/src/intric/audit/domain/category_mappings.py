@@ -83,6 +83,7 @@ CATEGORY_MAPPINGS = {
     ActionType.FLOW_RUN_DOCUMENT_GENERATED.value: "user_actions",
     ActionType.FLOW_RUN_CONTRACT_REJECTED.value: "user_actions",
     ActionType.FLOW_HTTP_OUTBOUND_CALL.value: "user_actions",
+    ActionType.FLOW_RUN_ARTIFACT_DOWNLOADED.value: "file_operations",
     # Security Events (6 actions)
     ActionType.SECURITY_CLASSIFICATION_CREATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_UPDATED.value: "security_events",

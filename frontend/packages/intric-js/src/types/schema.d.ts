@@ -2090,6 +2090,19 @@ export interface paths {
      */
     get: operations["get_flow_graph"];
   };
+  "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/": {
+    /**
+     * Generate signed URL for a flow run artifact
+     * @description Generate a time-limited signed download URL for a file produced by a flow run.
+     *
+     * This endpoint uses tenant-scoped access so that any user with access to the flow
+     * can download artifacts from any run, regardless of who created the run.
+     *
+     * The file_id must reference an artifact that was actually produced by a step in the
+     * specified run.
+     */
+    post: operations["generate_flow_run_artifact_signed_url"];
+  };
   "/api/v1/prompts/{id}/": {
     /** Get Prompt */
     get: operations["get_prompt_api_v1_prompts__id___get"];
@@ -3358,6 +3371,7 @@ export interface components {
       | "flow_run_contract_rejected"
       | "flow_run_audio_transcribed"
       | "flow_http_outbound_call"
+      | "flow_run_artifact_downloaded"
       | "security_classification_created"
       | "security_classification_updated"
       | "security_classification_deleted"
@@ -10215,7 +10229,8 @@ export interface components {
       | "editor"
       | "admin"
       | "websites"
-      | "integrations";
+      | "integrations"
+      | "flows";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
@@ -25413,6 +25428,56 @@ export interface operations {
         };
       };
       /** @description Flow or run not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Generate signed URL for a flow run artifact
+   * @description Generate a time-limited signed download URL for a file produced by a flow run.
+   *
+   * This endpoint uses tenant-scoped access so that any user with access to the flow
+   * can download artifacts from any run, regardless of who created the run.
+   *
+   * The file_id must reference an artifact that was actually produced by a step in the
+   * specified run.
+   */
+  generate_flow_run_artifact_signed_url: {
+    parameters: {
+      path: {
+        id: string;
+        run_id: string;
+        file_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SignedURLRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SignedURLResponse"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow, run, or artifact not found. */
       404: {
         content: {
           "application/json": components["schemas"]["GeneralError"];

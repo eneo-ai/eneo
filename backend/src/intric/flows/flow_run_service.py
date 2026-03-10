@@ -33,7 +33,7 @@ from intric.flows.flow_run_evidence import build_debug_export
 from intric.flows.flow_run_redaction import redact_payload
 from intric.flows.runtime.step_definition_parser import parse_runtime_steps
 from intric.main.config import get_settings
-from intric.main.exceptions import BadRequestException
+from intric.main.exceptions import BadRequestException, NotFoundException, UnauthorizedException
 from intric.main.logging import get_logger
 from intric.settings.setting_service import SettingService
 from intric.users.user import UserInDB
@@ -341,6 +341,54 @@ class FlowRunService:
             status=FlowRunStatus.FAILED,
             error_message=error_message,
         )
+
+    async def get_run_artifact_file(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        file_id: UUID,
+    ):
+        """Resolve and return a File that is a downloadable artifact of the given run."""
+        from intric.files.file_models import File
+
+        if self.file_repo is None:
+            raise BadRequestException(
+                "Artifact download is not available in this context.",
+                code="file_repo_unavailable",
+            )
+
+        run = await self.get_run(run_id=run_id, flow_id=flow_id)
+        step_results = await self.flow_run_repo.list_step_results(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+        )
+
+        downloadable_file_ids: set[str] = set()
+        for result in step_results:
+            payload = result.output_payload_json
+            if not isinstance(payload, dict):
+                continue
+            for artifact in payload.get("artifacts", []):
+                if isinstance(artifact, dict) and "file_id" in artifact:
+                    downloadable_file_ids.add(str(artifact["file_id"]))
+            for gfid in payload.get("generated_file_ids", []):
+                downloadable_file_ids.add(str(gfid))
+
+        if str(file_id) not in downloadable_file_ids:
+            raise NotFoundException(
+                f"File {file_id} is not a downloadable artifact of run {run_id}.",
+                code="flow_run_artifact_not_found",
+            )
+
+        file: File = await self.file_repo.get_by_id(file_id=file_id)
+        if file.tenant_id != self.user.tenant_id:
+            raise UnauthorizedException(
+                "You do not have access to this artifact.",
+                code="forbidden_action",
+                context={"auth_layer": "domain_policy"},
+            )
+        return file
 
     async def get_evidence(self, *, run_id: UUID) -> dict[str, Any]:
         run = await self.get_run(run_id=run_id)

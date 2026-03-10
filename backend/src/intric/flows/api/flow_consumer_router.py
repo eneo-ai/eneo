@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 from uuid import UUID
 
@@ -8,7 +9,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, Request, U
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.files.file_models import FilePublic
+from intric.authentication.signed_urls import generate_signed_token
+from intric.files.file_models import FilePublic, SignedURLRequest, SignedURLResponse
 from intric.flows.api import flow_router_common as common
 from intric.flows.api.flow_api_common import error_response
 from intric.flows.api.flow_assembler import FlowAssembler
@@ -764,3 +766,82 @@ async def get_flow_graph(
     live_steps = [step.model_dump(mode="json") for step in flow.steps]
     nodes, edges = build_graph_from_steps(live_steps)
     return GraphResponse(nodes=nodes, edges=edges)
+
+
+@router.post(
+    "/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/",
+    response_model=SignedURLResponse,
+    status_code=status.HTTP_200_OK,
+    operation_id="generate_flow_run_artifact_signed_url",
+    summary="Generate signed URL for a flow run artifact",
+    description="""
+Generate a time-limited signed download URL for a file produced by a flow run.
+
+This endpoint uses tenant-scoped access so that any user with access to the flow
+can download artifacts from any run, regardless of who created the run.
+
+The file_id must reference an artifact that was actually produced by a step in the
+specified run.
+    """,
+    responses={
+        403: error_response(
+            description="Forbidden: API key scope does not match flow space.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow, run, or artifact not found.",
+            message="Artifact not found for this run.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
+)
+async def generate_flow_run_artifact_signed_url(
+    id: UUID,
+    run_id: UUID,
+    file_id: UUID,
+    request: Request,
+    signed_url_req: SignedURLRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await common.enforce_flow_scope_for_request(request, container, flow_id=id)
+    run_service = container.flow_run_service()
+    user = container.user()
+
+    file = await run_service.get_run_artifact_file(
+        run_id=run_id, flow_id=id, file_id=file_id,
+    )
+
+    expires_at = int(time.time()) + signed_url_req.expires_in
+    token = generate_signed_token(
+        file_id=file_id,
+        expires_at=expires_at,
+        content_disposition=signed_url_req.content_disposition,
+    )
+    base_url = str(request.base_url).rstrip("/")
+    url = f"{base_url}/api/v1/files/{file_id}/download/?token={token}"
+
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.FLOW_RUN_ARTIFACT_DOWNLOADED,
+        entity_type=EntityType.FILE,
+        entity_id=file_id,
+        description=f"Downloaded artifact '{file.name}' from flow run",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=file,
+            extra={
+                "flow_id": str(id),
+                "run_id": str(run_id),
+                "artifact_name": file.name,
+                "artifact_mimetype": getattr(file, "mimetype", None),
+                "artifact_size_bytes": getattr(file, "size", None),
+            },
+        ),
+    )
+
+    return SignedURLResponse(url=url, expires_at=expires_at)

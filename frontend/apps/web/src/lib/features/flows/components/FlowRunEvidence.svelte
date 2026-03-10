@@ -191,7 +191,9 @@
 
   async function downloadArtifact(fileId: string) {
     try {
-      const { url } = await intric.files.generateSignedUrl({
+      const { url } = await intric.flows.runs.artifactSignedUrl({
+        flowId,
+        runId,
         fileId,
         contentDisposition: "attachment"
       });

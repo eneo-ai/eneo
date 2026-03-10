@@ -14,4 +14,5 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.INTEGRATIONS: "Management of Integrations. Create, Update, and Delete Integration Knowledge.",
     Permission.AI: "More in-depth AI configuration.",
     Permission.ADMIN: "Organization owner. Management of Users, Roles, and Groups.",
+    Permission.FLOWS: "Management of Flows. Create, Update, and Delete Flows.",
 }

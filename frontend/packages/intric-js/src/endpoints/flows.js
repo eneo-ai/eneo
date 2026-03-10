@@ -400,6 +400,30 @@ export function initFlows(client) {
         return _fetch(`/api/v1/flows/${flowId}/runs/${run.id}/evidence/`, {
           method: "get"
         });
+      },
+
+      /**
+       * Generate signed URL for a flow run artifact download.
+       * Uses tenant-scoped access so any user with flow access can download artifacts.
+       * @param {{flowId: string, runId: string, fileId: string, expiresIn?: number, contentDisposition?: "attachment" | "inline"}} params
+       * @throws {IntricError}
+       */
+      artifactSignedUrl: async ({
+        flowId,
+        runId,
+        fileId,
+        expiresIn = 3600,
+        contentDisposition = "attachment"
+      }) => {
+        return _fetch(`/api/v1/flows/${flowId}/runs/${runId}/artifacts/${fileId}/signed-url/`, {
+          method: "post",
+          requestBody: {
+            "application/json": {
+              expires_in: expiresIn,
+              content_disposition: contentDisposition
+            }
+          }
+        });
       }
     }
   };

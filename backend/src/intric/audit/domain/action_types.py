@@ -86,6 +86,7 @@ class ActionType(str, Enum):
     FLOW_RUN_CONTRACT_REJECTED = "flow_run_contract_rejected"
     FLOW_RUN_AUDIO_TRANSCRIBED = "flow_run_audio_transcribed"
     FLOW_HTTP_OUTBOUND_CALL = "flow_http_outbound_call"
+    FLOW_RUN_ARTIFACT_DOWNLOADED = "flow_run_artifact_downloaded"
 
     # Security Classification Actions
     SECURITY_CLASSIFICATION_CREATED = "security_classification_created"
