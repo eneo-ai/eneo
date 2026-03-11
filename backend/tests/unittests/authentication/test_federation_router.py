@@ -287,6 +287,13 @@ async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
         public_origin="https://canonical.example.com",
     )
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
+    monkeypatch.setattr(
+        federation_router,
+        "aiohttp_client",
+        lambda: FakeAioHttpClient(
+            FakeResponse({"authorization_endpoint": "https://idp.example.com/authorize"})
+        ),
+    )
 
     container = MockContainer(
         tenant_repo=TenantRepoStub(tenant),

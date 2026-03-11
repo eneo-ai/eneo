@@ -56,12 +56,18 @@ async def _load_single_tenant_allowed_origins(
     correlation_id: str,
 ) -> set[str]:
     origins: set[str] = set()
+
+    class _AllowedOriginRepoProtocol:
+        async def get_by_tenant(self, tenant_id: UUID): ...
+
     get_allowed_origin_repo = getattr(container, "allowed_origin_repo", None)
     if not callable(get_allowed_origin_repo):
         return origins
 
     try:
-        allowed_origin_repo = get_allowed_origin_repo()
+        allowed_origin_repo = cast(
+            Optional[_AllowedOriginRepoProtocol], get_allowed_origin_repo()
+        )
     except Exception as exc:
         logger.warning(
             "Failed to initialize allowed origin repository during single-tenant OIDC redirect validation",
@@ -106,6 +112,8 @@ async def _load_single_tenant_allowed_origins(
                 },
             )
             continue
+        if normalized_origin is None:
+            continue
 
         origins.add(normalized_origin.rstrip("/"))
 
@@ -124,9 +132,12 @@ async def _resolve_single_tenant_redirect_uri(
         return redirect_uri
 
     try:
-        normalized_request_origin = validate_public_origin(request_origin).rstrip("/")
+        normalized_request_origin = validate_public_origin(request_origin)
     except ValueError:
         return redirect_uri
+    if normalized_request_origin is None:
+        return redirect_uri
+    normalized_request_origin = normalized_request_origin.rstrip("/")
 
     parsed_redirect = urlparse(redirect_uri)
     if not parsed_redirect.scheme or not parsed_redirect.hostname:

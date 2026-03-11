@@ -135,7 +135,8 @@ class SetFederationRequest(BaseModel):
     ) -> list[str] | None:
         if value is None:
             return None
-        return [validate_redirect_uri(uri) for uri in value]
+        validated = [validate_redirect_uri(uri) for uri in value]
+        return [uri for uri in validated if uri is not None]
 
 
 class SetFederationResponse(BaseModel):
@@ -180,7 +181,8 @@ class SetRedirectUrisRequest(BaseModel):
     @field_validator("additional_redirect_uris")
     @classmethod
     def validate_redirect_uris(cls, value: list[str]) -> list[str]:
-        return [validate_redirect_uri(uri) for uri in value]
+        validated = [validate_redirect_uri(uri) for uri in value]
+        return [uri for uri in validated if uri is not None]
 
 
 class RedirectUrisResponse(BaseModel):
