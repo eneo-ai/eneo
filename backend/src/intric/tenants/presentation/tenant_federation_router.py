@@ -8,7 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from intric.authentication import auth
-from intric.main.config import Settings, get_settings, validate_public_origin
+from intric.main.config import (
+    Settings,
+    get_settings,
+    validate_public_origin,
+    validate_redirect_uri,
+)
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.server.dependencies.container import get_container
@@ -73,6 +78,15 @@ class SetFederationRequest(BaseModel):
         description="Optional custom redirect path starting with /",
         examples=["/auth/callback"],
     )
+    additional_redirect_uris: list[str] | None = Field(
+        None,
+        description=(
+            "Additional fully-qualified redirect URIs for OIDC flows. "
+            "Use when the tenant is accessed through multiple origins. "
+            "Each URI must also be registered in the upstream Identity Provider."
+        ),
+        examples=[["https://qwerty.sundsvall.se/api/eneo/login/callback"]],
+    )
 
     @field_validator("client_secret")
     @classmethod
@@ -109,6 +123,15 @@ class SetFederationRequest(BaseModel):
             raise ValueError("redirect_path must start with /")
         return value
 
+    @field_validator("additional_redirect_uris")
+    @classmethod
+    def validate_additional_redirect_uris(
+        cls, value: list[str] | None
+    ) -> list[str] | None:
+        if value is None:
+            return None
+        return [validate_redirect_uri(uri) for uri in value]
+
 
 class SetFederationResponse(BaseModel):
     """Response model for setting federation config."""
@@ -134,6 +157,7 @@ class FederationInfo(BaseModel):
     masked_secret: str
     issuer: Optional[str] = None
     allowed_domains: list[str]
+    additional_redirect_uris: list[str]
     configured_at: datetime
     encryption_status: Literal["encrypted", "plaintext"]
 
@@ -317,6 +341,9 @@ async def set_tenant_federation(
     if request.redirect_path:
         federation_config["redirect_path"] = request.redirect_path
 
+    if request.additional_redirect_uris is not None:
+        federation_config["additional_redirect_uris"] = request.additional_redirect_uris
+
     # Save to database
     await tenant_repo.update_federation_config(
         tenant_id=tenant_id,
@@ -458,6 +485,7 @@ async def get_tenant_federation(
         masked_secret=metadata["masked_secret"],
         issuer=metadata.get("issuer"),
         allowed_domains=metadata.get("allowed_domains", []),
+        additional_redirect_uris=metadata.get("additional_redirect_uris", []),
         configured_at=datetime.fromisoformat(metadata["encrypted_at"])
         if metadata.get("encrypted_at")
         else tenant.updated_at,
