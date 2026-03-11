@@ -94,6 +94,7 @@ from intric.tenants.presentation.tenant_self_credentials_router import (
     router as tenant_self_credentials_router,
 )
 from intric.tenants.presentation.tenant_federation_router import (
+    redirect_uri_router as tenant_redirect_uri_router,
     router as tenant_federation_router,
 )
 from intric.authentication.federation_router import router as federation_router
@@ -206,6 +207,9 @@ router.include_router(sysadmin_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(tenant_credentials_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(
     tenant_crawler_settings_router, prefix="/sysadmin", tags=["sysadmin"]
+)
+router.include_router(
+    tenant_redirect_uri_router, prefix="/sysadmin", tags=["sysadmin"]
 )
 router.include_router(tenant_federation_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(module_router, prefix="/modules", tags=["modules"])

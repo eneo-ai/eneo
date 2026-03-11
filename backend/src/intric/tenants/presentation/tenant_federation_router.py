@@ -43,6 +43,11 @@ router = APIRouter(
     ],
 )
 
+redirect_uri_router = APIRouter(
+    prefix="/tenants",
+    dependencies=[Depends(auth.authenticate_super_api_key)],
+)
+
 
 class SetFederationRequest(BaseModel):
     """Request model for setting tenant federation config."""
@@ -160,6 +165,105 @@ class FederationInfo(BaseModel):
     additional_redirect_uris: list[str]
     configured_at: datetime
     encryption_status: Literal["encrypted", "plaintext"]
+
+
+class SetRedirectUrisRequest(BaseModel):
+    additional_redirect_uris: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Additional fully-qualified redirect URIs for OIDC flows. "
+            "Works for both single-tenant and federation-per-tenant deployments."
+        ),
+        examples=[["https://qwerty.sundsvall.se/api/eneo/login/callback"]],
+    )
+
+    @field_validator("additional_redirect_uris")
+    @classmethod
+    def validate_redirect_uris(cls, value: list[str]) -> list[str]:
+        return [validate_redirect_uri(uri) for uri in value]
+
+
+class RedirectUrisResponse(BaseModel):
+    tenant_id: UUID
+    additional_redirect_uris: list[str]
+    message: str
+
+
+@redirect_uri_router.put(
+    "/{tenant_id}/redirect-uris",
+    response_model=RedirectUrisResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Set tenant redirect URIs",
+    description=(
+        "Configure additional OIDC redirect URIs for a tenant. "
+        "Available in both single-tenant and federation-per-tenant deployments."
+    ),
+)
+async def set_tenant_redirect_uris(
+    tenant_id: UUID,
+    request: SetRedirectUrisRequest,
+    container: Container = Depends(get_container()),
+) -> RedirectUrisResponse:
+    tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
+
+    tenant = await tenant_service.get_tenant_by_id(tenant_id)
+    await tenant_repo.update_additional_redirect_uris(
+        tenant_id=tenant_id,
+        additional_redirect_uris=request.additional_redirect_uris,
+    )
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=tenant_id,
+        actor_id=None,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.FEDERATION_UPDATED,
+        entity_type=EntityType.FEDERATION_CONFIG,
+        entity_id=tenant_id,
+        description=f"Sysadmin updated redirect URIs for tenant {tenant.name}",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
+            "target": {
+                "tenant_id": str(tenant_id),
+                "tenant_name": tenant.name,
+                "additional_redirect_uris": request.additional_redirect_uris,
+            },
+        },
+    )
+
+    return RedirectUrisResponse(
+        tenant_id=tenant_id,
+        additional_redirect_uris=request.additional_redirect_uris,
+        message="Redirect URIs updated successfully",
+    )
+
+
+@redirect_uri_router.get(
+    "/{tenant_id}/redirect-uris",
+    response_model=RedirectUrisResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get tenant redirect URIs",
+    description=(
+        "Get additional OIDC redirect URIs configured for a tenant. "
+        "Available in both single-tenant and federation-per-tenant deployments."
+    ),
+)
+async def get_tenant_redirect_uris(
+    tenant_id: UUID,
+    container: Container = Depends(get_container()),
+) -> RedirectUrisResponse:
+    tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
+
+    await tenant_service.get_tenant_by_id(tenant_id)
+    redirect_uris = await tenant_repo.get_additional_redirect_uris(tenant_id)
+
+    return RedirectUrisResponse(
+        tenant_id=tenant_id,
+        additional_redirect_uris=redirect_uris,
+        message="Redirect URIs fetched successfully",
+    )
 
 
 @router.put(
