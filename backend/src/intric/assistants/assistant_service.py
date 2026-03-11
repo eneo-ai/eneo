@@ -359,6 +359,16 @@ class AssistantService:
             icon_id=icon_id,
         )
 
+        # Validate mutual exclusivity: knowledge and MCP servers cannot both be active
+        will_have_mcp = (
+            mcp_server_ids is not None and len(mcp_server_ids) > 0
+        ) or (mcp_server_ids is None and assistant.has_mcp())
+        if assistant.has_knowledge() and will_have_mcp:
+            raise BadRequestException(
+                "Knowledge and MCP servers cannot both be active on an assistant. "
+                "Remove one before enabling the other."
+            )
+
         self.validate_space_assistant(space=space, assistant=assistant)
 
         refreshed_space = await self.space_repo.update(space)
