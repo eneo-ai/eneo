@@ -216,6 +216,9 @@ class Assistant(Entity):
     def has_knowledge(self) -> bool:
         return self.collections or self.websites or self.integration_knowledge_list
 
+    def has_mcp(self) -> bool:
+        return bool(self.mcp_servers)
+
     def update(
         self,
         name: str | None = None,
