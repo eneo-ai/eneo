@@ -80,6 +80,9 @@ class FakeAioHttpClient:
     def __init__(self, response: FakeResponse):
         self._response = response
 
+    def get(self, *args, **kwargs):  # noqa: ARG002
+        return self._response
+
     def post(self, *args, **kwargs):  # noqa: ARG002
         return self._response
 
