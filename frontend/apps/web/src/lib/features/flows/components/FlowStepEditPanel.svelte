@@ -9,6 +9,7 @@
   import FlowPromptEditor from "./FlowPromptEditor.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
+  import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import SelectKnowledgeV2 from "$lib/features/knowledge/components/SelectKnowledgeV2.svelte";
   import { getIntric } from "$lib/core/Intric";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
@@ -437,14 +438,34 @@
       const nowFileBased = FILE_BASED_INPUT_TYPES.has(nextInputType);
       if (nowFileBased && !runtimeInputConfig.enabled) {
         const patch = buildRuntimeInputStepPatch(
-          { ...activeStep, input_config: nextInputConfig, input_type: nextInputType, output_mode: activeStep.output_mode },
-          { ...runtimeInputConfig, enabled: true, required: true, input_format: nextInputType as FlowRuntimeInputFormat }
+          {
+            ...activeStep,
+            input_config: nextInputConfig,
+            input_type: nextInputType,
+            output_mode: activeStep.output_mode
+          },
+          {
+            ...runtimeInputConfig,
+            enabled: true,
+            required: true,
+            input_format: nextInputType as FlowRuntimeInputFormat
+          }
         );
         finalInputConfig = patch.input_config;
         finalBindings = patch.input_bindings;
-      } else if (!nowFileBased && wasFileBased && runtimeInputConfig.enabled && isDefaultRuntimeConfig(runtimeInputConfig)) {
+      } else if (
+        !nowFileBased &&
+        wasFileBased &&
+        runtimeInputConfig.enabled &&
+        isDefaultRuntimeConfig(runtimeInputConfig)
+      ) {
         const patch = buildRuntimeInputStepPatch(
-          { ...activeStep, input_config: nextInputConfig, input_type: nextInputType, output_mode: activeStep.output_mode },
+          {
+            ...activeStep,
+            input_config: nextInputConfig,
+            input_type: nextInputType,
+            output_mode: activeStep.output_mode
+          },
           { ...runtimeInputConfig, enabled: false }
         );
         finalInputConfig = patch.input_config;
@@ -492,9 +513,19 @@
     if (nowFileBased && !runtimeInputConfig.enabled) {
       runtimePatch = buildRuntimeInputStepPatch(
         { ...activeStep, input_type: nextType, output_mode: nextOutputMode },
-        { ...runtimeInputConfig, enabled: true, required: true, input_format: nextType as FlowRuntimeInputFormat }
+        {
+          ...runtimeInputConfig,
+          enabled: true,
+          required: true,
+          input_format: nextType as FlowRuntimeInputFormat
+        }
       );
-    } else if (!nowFileBased && wasFileBased && runtimeInputConfig.enabled && isDefaultRuntimeConfig(runtimeInputConfig)) {
+    } else if (
+      !nowFileBased &&
+      wasFileBased &&
+      runtimeInputConfig.enabled &&
+      isDefaultRuntimeConfig(runtimeInputConfig)
+    ) {
       runtimePatch = buildRuntimeInputStepPatch(
         { ...activeStep, input_type: nextType, output_mode: nextOutputMode },
         { ...runtimeInputConfig, enabled: false }
@@ -1245,13 +1276,22 @@
 
   const MIME_PRESETS_DOCUMENT: MimePreset[] = [
     { mime: "application/pdf", label: "PDF" },
-    { mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", label: "Word (.docx)" },
-    { mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", label: "Excel (.xlsx)" },
+    {
+      mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      label: "Word (.docx)"
+    },
+    {
+      mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      label: "Excel (.xlsx)"
+    },
     { mime: "application/vnd.ms-excel", label: "Excel (.xls)" },
-    { mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation", label: "PowerPoint (.pptx)" },
+    {
+      mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      label: "PowerPoint (.pptx)"
+    },
     { mime: "text/csv", label: "CSV" },
     { mime: "text/plain", label: "Text" },
-    { mime: "text/markdown", label: "Markdown" },
+    { mime: "text/markdown", label: "Markdown" }
   ];
 
   const MIME_PRESETS_AUDIO: MimePreset[] = [
@@ -1260,7 +1300,7 @@
     { mime: "audio/ogg", label: "OGG" },
     { mime: "audio/x-m4a", label: "M4A" },
     { mime: "audio/webm", label: "WebM" },
-    { mime: "audio/mp4", label: "MP4 (ljud)" },
+    { mime: "audio/mp4", label: "MP4 (ljud)" }
   ];
 
   function getMimePresetsForFormat(format: string): MimePreset[] {
@@ -1270,9 +1310,7 @@
 
   function toggleMimePreset(mime: string) {
     const current = runtimeInputConfig.accepted_mimetypes_override;
-    const next = current.includes(mime)
-      ? current.filter((m) => m !== mime)
-      : [...current, mime];
+    const next = current.includes(mime) ? current.filter((m) => m !== mime) : [...current, mime];
     updateRuntimeInputSettings({ accepted_mimetypes_override: next });
   }
 
@@ -1695,11 +1733,13 @@
             >
               <div class="flex flex-col gap-3">
                 <label
-                  class="bg-primary flex items-start gap-3 rounded-lg border px-3 py-3 transition-colors {runtimeInputConfig.enabled ? 'border-accent-default/40' : 'border-default'}"
+                  class="bg-primary flex items-start gap-3 rounded-lg border px-3 py-3 transition-colors {runtimeInputConfig.enabled
+                    ? 'border-accent-default/40'
+                    : 'border-default'}"
                 >
                   <input
                     type="checkbox"
-                    class="mt-0.5 size-4 accent-accent-default"
+                    class="accent-accent-default mt-0.5 size-4"
                     checked={runtimeInputConfig.enabled}
                     disabled={isPublished}
                     aria-label={m.flow_runtime_input_accept_files()}
@@ -1737,12 +1777,16 @@
                     </label>
 
                     <div class="flex flex-col gap-1">
-                      <label class="text-sm font-medium" for="runtime-input-format">{m.flow_runtime_input_format_label()}</label>
+                      <label class="text-sm font-medium" for="runtime-input-format"
+                        >{m.flow_runtime_input_format_label()}</label
+                      >
                       <select
                         id="runtime-input-format"
                         class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
                         value={runtimeInputConfig.input_format}
-                        disabled={isPublished || activeStep.output_mode === "transcribe_only" || FILE_BASED_INPUT_TYPES.has(activeStep.input_type)}
+                        disabled={isPublished ||
+                          activeStep.output_mode === "transcribe_only" ||
+                          FILE_BASED_INPUT_TYPES.has(activeStep.input_type)}
                         on:change={(event) =>
                           updateRuntimeInputSettings({
                             input_format: event.currentTarget
@@ -1773,28 +1817,34 @@
                       </p>
                     </div>
 
-                    <div class="border-default/70 bg-secondary/10 overflow-hidden rounded-lg border">
+                    <div
+                      class="border-default/70 bg-secondary/10 overflow-hidden rounded-lg border"
+                    >
                       <button
                         type="button"
-                        class="flex w-full items-center gap-2 px-3 py-3 text-left text-sm font-medium transition-colors hover:bg-secondary/20"
+                        class="hover:bg-secondary/20 flex w-full items-center gap-2 px-3 py-3 text-left text-sm font-medium transition-colors"
                         aria-expanded={showRuntimeInputAdvanced}
                         aria-controls="runtime-input-advanced-panel"
                         on:click={() => (showRuntimeInputAdvanced = !showRuntimeInputAdvanced)}
                       >
                         <IconChevronRight
-                          class="size-3.5 shrink-0 transition-transform duration-200 {showRuntimeInputAdvanced ? 'rotate-90' : ''}"
+                          class="size-3.5 shrink-0 transition-transform duration-200 {showRuntimeInputAdvanced
+                            ? 'rotate-90'
+                            : ''}"
                         />
                         {m.flow_runtime_input_more_settings()}
                       </button>
                       {#if showRuntimeInputAdvanced}
                         <div
                           id="runtime-input-advanced-panel"
-                          class="border-default/70 border-t px-3 pb-3 pt-3"
+                          class="border-default/70 border-t px-3 pt-3 pb-3"
                           transition:slide={{ duration: 200 }}
                         >
                           <div class="grid gap-3 md:grid-cols-2">
                             <div class="flex flex-col gap-1">
-                              <label class="text-sm font-medium" for="runtime-input-label">{m.flow_runtime_input_heading_label()}</label>
+                              <label class="text-sm font-medium" for="runtime-input-label"
+                                >{m.flow_runtime_input_heading_label()}</label
+                              >
                               <input
                                 id="runtime-input-label"
                                 class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
@@ -1838,7 +1888,11 @@
                                 {#each getMimePresetsForFormat(runtimeInputConfig.input_format) as preset (preset.mime)}
                                   <button
                                     type="button"
-                                    class="rounded-md border px-2.5 py-1 text-xs font-medium transition-colors {runtimeInputConfig.accepted_mimetypes_override.includes(preset.mime) ? 'border-accent-default/60 bg-accent-dimmer/50 text-accent-stronger' : 'border-default bg-primary text-secondary hover:bg-secondary/10'}"
+                                    class="rounded-md border px-2.5 py-1 text-xs font-medium transition-colors {runtimeInputConfig.accepted_mimetypes_override.includes(
+                                      preset.mime
+                                    )
+                                      ? 'border-accent-default/60 bg-accent-dimmer/50 text-accent-stronger'
+                                      : 'border-default bg-primary text-secondary hover:bg-secondary/10'}"
                                     disabled={isPublished}
                                     on:click={() => toggleMimePreset(preset.mime)}
                                   >
@@ -1848,7 +1902,14 @@
                               </div>
                               {#if runtimeInputConfig.accepted_mimetypes_override.some((mt) => !getMimePresetsForFormat(runtimeInputConfig.input_format).some((p) => p.mime === mt))}
                                 <p class="text-muted text-xs">
-                                  + {runtimeInputConfig.accepted_mimetypes_override.filter((mt) => !getMimePresetsForFormat(runtimeInputConfig.input_format).some((p) => p.mime === mt)).join(", ")}
+                                  + {runtimeInputConfig.accepted_mimetypes_override
+                                    .filter(
+                                      (mt) =>
+                                        !getMimePresetsForFormat(
+                                          runtimeInputConfig.input_format
+                                        ).some((p) => p.mime === mt)
+                                    )
+                                    .join(", ")}
                                 </p>
                               {/if}
                               <input
@@ -1857,13 +1918,24 @@
                                 type="text"
                                 placeholder={m.flow_runtime_input_mimetypes_custom_placeholder()}
                                 value={runtimeInputConfig.accepted_mimetypes_override
-                                  .filter((mt) => !getMimePresetsForFormat(runtimeInputConfig.input_format).some((p) => p.mime === mt))
+                                  .filter(
+                                    (mt) =>
+                                      !getMimePresetsForFormat(
+                                        runtimeInputConfig.input_format
+                                      ).some((p) => p.mime === mt)
+                                  )
                                   .join(", ")}
                                 disabled={isPublished}
                                 on:input={(event) => {
-                                  const presetMimes = runtimeInputConfig.accepted_mimetypes_override
-                                    .filter((mt) => getMimePresetsForFormat(runtimeInputConfig.input_format).some((p) => p.mime === mt));
-                                  const customMimes = parseMimeOverrideDraft(event.currentTarget.value);
+                                  const presetMimes =
+                                    runtimeInputConfig.accepted_mimetypes_override.filter((mt) =>
+                                      getMimePresetsForFormat(runtimeInputConfig.input_format).some(
+                                        (p) => p.mime === mt
+                                      )
+                                    );
+                                  const customMimes = parseMimeOverrideDraft(
+                                    event.currentTarget.value
+                                  );
                                   updateRuntimeInputSettings({
                                     accepted_mimetypes_override: [...presetMimes, ...customMimes]
                                   });
@@ -1984,6 +2056,15 @@
                       currentAssistant.completion_model_kwargs
                     )}
                 />
+                <SelectModelSpecificSettings
+                  bind:kwArgs={currentAssistant.completion_model_kwargs}
+                  selectedModel={currentAssistant.completion_model}
+                  on:change={() =>
+                    updateAssistantField(
+                      "completion_model_kwargs",
+                      currentAssistant.completion_model_kwargs
+                    )}
+                />
               </Settings.Row>
 
               <Settings.Row
@@ -1991,13 +2072,29 @@
                 description={isAdvancedMode ? stepUxCopy.instructionsHelperTitle : ""}
                 fullWidth
               >
+                <svelte:fragment slot="title">
+                  <Tooltip text={m.flow_step_instructions_tooltip()}>
+                    <IconQuestionMark class="text-muted hover:text-primary ml-1.5" />
+                  </Tooltip>
+                </svelte:fragment>
                 <div class="flex flex-col gap-2">
-                  <div
-                    class="border-accent-default/20 bg-accent-dimmer/40 rounded-xl border px-3 py-2.5"
-                  >
-                    <p class="text-accent-stronger text-xs leading-relaxed">
-                      {stepUxCopy.instructionsContrast}
-                    </p>
+                  <div class="grid gap-3 md:grid-cols-2">
+                    <div class="bg-secondary/30 border-l-accent-default/40 rounded-lg border-l-[3px] px-3.5 py-3">
+                      <p class="text-primary text-sm font-semibold">
+                        {m.flow_step_instructions_compare_title()}
+                      </p>
+                      <p class="text-secondary mt-1 text-xs leading-relaxed">
+                        {m.flow_step_instructions_compare_body()}
+                      </p>
+                    </div>
+                    <div class="bg-secondary/30 border-l-stronger rounded-lg border-l-[3px] px-3.5 py-3">
+                      <p class="text-primary text-sm font-semibold">
+                        {m.flow_step_input_template_compare_title()}
+                      </p>
+                      <p class="text-secondary mt-1 text-xs leading-relaxed">
+                        {m.flow_step_input_template_compare_body()}
+                      </p>
+                    </div>
                   </div>
                   {#if !isAdvancedMode}
                     <div class="flex flex-col gap-3 px-0.5 pt-0.5 pb-1.5">
@@ -2251,9 +2348,14 @@
                   title={inputTemplateSectionTitle}
                   description={inputTemplateSectionDescription}
                 >
+                  <svelte:fragment slot="title">
+                    <Tooltip text={m.flow_step_input_template_tooltip()}>
+                      <IconQuestionMark class="text-muted hover:text-primary ml-1.5" />
+                    </Tooltip>
+                  </svelte:fragment>
                   <div class="flex flex-col gap-2">
-                    <div class="bg-secondary/10 rounded-lg px-3 py-2.5">
-                      <p class="text-muted text-xs leading-relaxed">
+                    <div class="bg-secondary/20 border-l-stronger rounded-lg border-l-[3px] px-3.5 py-2.5">
+                      <p class="text-secondary text-xs leading-relaxed">
                         {stepUxCopy.inputTemplateDefaultHint}
                       </p>
                     </div>
@@ -2894,6 +2996,19 @@
                     <IconQuestionMark class="text-muted hover:text-primary ml-1.5" />
                   </Tooltip>
                 </svelte:fragment>
+                {#if activeStep.input_type !== "json" && activeStep.input_type !== "text"}
+                  <div class="bg-warning-dimmer/50 border-l-warning-default/40 mb-2 rounded-lg border-l-[3px] px-3.5 py-2">
+                    <p class="text-warning-stronger text-xs leading-relaxed">
+                      {m.flow_step_input_contract_inactive()}
+                    </p>
+                  </div>
+                {:else}
+                  <div class="bg-positive-dimmer/50 border-l-positive-default/40 mb-2 rounded-lg border-l-[3px] px-3.5 py-2">
+                    <p class="text-positive-stronger text-xs leading-relaxed">
+                      {m.flow_step_input_contract_active()}
+                    </p>
+                  </div>
+                {/if}
                 <textarea
                   class="border-default bg-primary ring-default min-h-[80px] w-full rounded-lg border px-3 py-2 font-mono text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
                   value={advancedJsonDrafts.input_contract}
@@ -2917,6 +3032,19 @@
                     <IconQuestionMark class="text-muted hover:text-primary ml-1.5" />
                   </Tooltip>
                 </svelte:fragment>
+                {#if activeStep.output_type !== "json"}
+                  <div class="bg-warning-dimmer/50 border-l-warning-default/40 mb-2 rounded-lg border-l-[3px] px-3.5 py-2">
+                    <p class="text-warning-stronger text-xs leading-relaxed">
+                      {m.flow_step_output_contract_inactive()}
+                    </p>
+                  </div>
+                {:else}
+                  <div class="bg-positive-dimmer/50 border-l-positive-default/40 mb-2 rounded-lg border-l-[3px] px-3.5 py-2">
+                    <p class="text-positive-stronger text-xs leading-relaxed">
+                      {m.flow_step_output_contract_active()}
+                    </p>
+                  </div>
+                {/if}
                 <textarea
                   class="border-default bg-primary ring-default min-h-[80px] w-full rounded-lg border px-3 py-2 font-mono text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
                   value={advancedJsonDrafts.output_contract}

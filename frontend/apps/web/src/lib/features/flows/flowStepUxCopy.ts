@@ -13,7 +13,6 @@ export function getFlowStepUxCopy({
     instructionsTitle: copy.instructionsTitle,
     instructionsHelperTitle: copy.instructionsHelperTitle,
     instructionsHelperBody: copy.instructionsHelperBody,
-    instructionsContrast: copy.instructionsContrast,
     instructionsPlaceholder: copy.instructionsPlaceholder,
     inputTemplateTitle: copy.inputTemplateTitle,
     inputTemplateEditorLabel: copy.inputTemplateTitle,
@@ -44,12 +43,11 @@ const FLOW_STEP_COPY = {
     instructionsTitle: "Instruktioner till AI:n",
     instructionsHelperTitle: "Beskriv hur AI:n ska arbeta i det här steget.",
     instructionsHelperBody: "Exempel: Svara kort och tydligt. Använd punktlista.",
-    instructionsContrast:
-      "Instruktioner styr hur AI:n arbetar. Underlag styr vilken text steget får.",
     instructionsPlaceholder: "t.ex. Svara kort och tydligt. Använd punktlista.",
     inputTemplateTitle: "Underlag till steget",
-    inputTemplateDescription: "Här väljer du vilket underlag steget ska arbeta med.",
-    inputTemplatePlaceholder: "t.ex. Använd bara titeln från steg 1 och rubriken från steg 2.",
+    inputTemplateDescription:
+      "Här bygger du den text AI:n ska arbeta med. Lämna tomt om steget ska använda sitt vanliga underlag.",
+    inputTemplatePlaceholder: "t.ex. Rubrik: {{titel}}\nText: {{step_1.output.text}}",
     inputTemplateCtaTitle: "Anpassa underlaget (frivilligt)",
     inputTemplateCtaAction: "Anpassa underlaget",
     inputTemplateDefaultPreviousStep:
@@ -64,12 +62,11 @@ const FLOW_STEP_COPY = {
     instructionsTitle: "Instructions for the AI",
     instructionsHelperTitle: "Describe how the AI should work in this step.",
     instructionsHelperBody: "Example: Answer briefly and clearly. Use bullet points.",
-    instructionsContrast:
-      "Instructions control how the AI works. Material controls which text the step receives.",
     instructionsPlaceholder: "e.g. Answer briefly and clearly. Use bullet points.",
     inputTemplateTitle: "Material for the step",
-    inputTemplateDescription: "Choose which material the step should work with.",
-    inputTemplatePlaceholder: "e.g. Use only the title from step 1 and the heading from step 2.",
+    inputTemplateDescription:
+      "Here you build the text the AI should work with. Leave it empty if the step should use its normal material.",
+    inputTemplatePlaceholder: "e.g. Title: {{title}}\nText: {{step_1.output.text}}",
     inputTemplateCtaTitle: "Adjust the material (optional)",
     inputTemplateCtaAction: "Adjust the material",
     inputTemplateDefaultPreviousStep:

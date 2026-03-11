@@ -1,7 +1,10 @@
 <script lang="ts">
+  import { createEventDispatcher } from "svelte";
   import { IconQuestionMark } from "@intric/icons/question-mark";
   import { Input, Tooltip } from "@intric/ui";
   import type { ModelKwargs } from "@intric/intric-js";
+
+  const dispatch = createEventDispatcher<{ change: { kwArgs: ModelKwargs } }>();
 
   export let kwArgs: ModelKwargs;
   export let selectedModel: any = null; // CompletionModel from the parent
@@ -46,6 +49,7 @@
     }
 
     kwArgs = args;
+    dispatch("change", { kwArgs: args });
   }
 
   // Reactive updates for verbosity (since event handlers don't work reliably)
