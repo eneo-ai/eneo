@@ -628,6 +628,15 @@ class CredentialResolver:
         federation_config = self.get_federation_config()
         additional_redirect_uris = federation_config.get("additional_redirect_uris", [])
 
+        if self.tenant and self.tenant.federation_config:
+            tenant_redirect_uris = self.tenant.federation_config.get(
+                "additional_redirect_uris", []
+            )
+            if isinstance(tenant_redirect_uris, list):
+                additional_redirect_uris = list(additional_redirect_uris) + list(
+                    tenant_redirect_uris
+                )
+
         valid_redirect_uris = [canonical_redirect_uri]
         for redirect_uri in additional_redirect_uris:
             if isinstance(redirect_uri, str) and redirect_uri not in valid_redirect_uris:

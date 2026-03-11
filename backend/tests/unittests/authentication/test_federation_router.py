@@ -109,6 +109,11 @@ class TenantRepoStub:
             return self._tenant
         return None
 
+    async def get_all_active(self):
+        if self._tenant.state == TenantState.ACTIVE:
+            return [self._tenant]
+        return []
+
 
 class UserRepoStub:
     def __init__(self, user: UserInDB):
@@ -245,6 +250,54 @@ async def test_initiate_auth_uses_additional_redirect_uri_from_query_param(monke
 
     response = await federation_router.initiate_auth(
         tenant=tenant.slug,
+        state=None,
+        redirect_uri_param="https://external.example.com/auth/callback",
+        container=container,
+    )
+
+    query = parse_qs(urlparse(response.authorization_url).query)
+    assert query["redirect_uri"] == ["https://external.example.com/auth/callback"]
+
+
+@pytest.mark.asyncio
+async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="SingleTenant",
+        display_name="SingleTenant",
+        quota_limit=1024**3,
+        slug="single-tenant",
+        state=TenantState.ACTIVE,
+        modules=[],
+        api_credentials={},
+        federation_config={
+            "additional_redirect_uris": [
+                "https://external.example.com/auth/callback"
+            ]
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    dummy_settings = DummySettings(
+        federation_per_tenant_enabled=False,
+        oidc_discovery_endpoint="https://idp.example.com/.well-known/openid-configuration",
+        oidc_client_id="client",
+        oidc_client_secret="secret",
+        public_origin="https://canonical.example.com",
+    )
+    monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
+
+    container = MockContainer(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=None,
+        auth_service=None,
+        redis_client=FakeRedis(),
+        encryption_service=EncryptionService(None),
+    )
+
+    response = await federation_router.initiate_auth(
+        tenant=None,
         state=None,
         redirect_uri_param="https://external.example.com/auth/callback",
         container=container,

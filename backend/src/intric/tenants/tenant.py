@@ -127,16 +127,30 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         if not v:
             return {}
 
-        # Required fields for federation
         required = {
             "provider",
             "client_id",
             "client_secret",
             "discovery_endpoint",
         }
-        missing = required - set(v.keys())
-        if missing:
-            raise ValueError(f"Federation config missing required fields: {missing}")
+        redirect_only_fields = {
+            "canonical_public_origin",
+            "redirect_path",
+            "additional_redirect_uris",
+        }
+
+        has_full_federation_config = any(field in v for field in required)
+        if has_full_federation_config:
+            missing = required - set(v.keys())
+            if missing:
+                raise ValueError(f"Federation config missing required fields: {missing}")
+        else:
+            unexpected_fields = set(v.keys()) - redirect_only_fields
+            if unexpected_fields:
+                raise ValueError(
+                    "Federation config without provider credentials may only contain "
+                    f"{redirect_only_fields}. Unexpected fields: {unexpected_fields}"
+                )
 
         # Provider is just a label - any string is valid (no validation needed)
         # This allows any OIDC-compliant provider (Entra ID, Auth0, Okta, Keycloak, etc.)
