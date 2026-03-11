@@ -338,7 +338,24 @@ class TenantModelAdapter(CompletionModelAdapter):
 
             # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)
             # require it explicitly or return empty responses
-            if "max_tokens" not in model_kwargs_dict and "max_completion_tokens" not in model_kwargs_dict:
+            has_explicit_output_cap = (
+                "max_tokens" in model_kwargs_dict or "max_completion_tokens" in model_kwargs_dict
+            )
+            # For Anthropic with reasoning_effort, skip default max_tokens injection.
+            # LiteLLM's safety net will derive the correct value (budget_tokens + buffer)
+            # that satisfies Anthropic's requirement: max_tokens > budget_tokens.
+            should_defer_to_litellm = (
+                self.provider_type == "anthropic"
+                and "reasoning_effort" in model_kwargs_dict
+                and not has_explicit_output_cap
+            )
+
+            if should_defer_to_litellm:
+                logger.debug(
+                    "Deferring max_tokens to LiteLLM for Anthropic reasoning "
+                    f"(reasoning_effort={model_kwargs_dict['reasoning_effort']})"
+                )
+            elif not has_explicit_output_cap:
                 # Use 1/4 of model's token limit, capped at 4096
                 default_max = min(self.model.token_limit // 4, 4096) if self.model.token_limit else 4096
                 model_kwargs_dict["max_tokens"] = default_max
