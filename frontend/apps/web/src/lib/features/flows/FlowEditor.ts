@@ -643,6 +643,7 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
   }
 
   async function createTemplateFillStarter(): Promise<void> {
+    // Step 1: Extract key facts from input
     await addStep();
     let steps = [...(get(editor.state.update).steps ?? [])];
     const factStep = steps[steps.length - 1];
@@ -650,44 +651,53 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
       factStep.user_description = "Extrahera fakta";
       if (factStep.assistant_id) {
         await updateAssistantImmediately(factStep.assistant_id, {
-          name: factStep.user_description
+          name: factStep.user_description,
+          prompt: {
+            text: "Extrahera de viktigaste faktauppgifterna ur texten. Ta med namn, datum, siffror och konkreta omständigheter. Svara som en tydlig punktlista."
+          }
         });
       }
     }
     editor.state.update.update((resource) => ({ ...resource, steps }));
 
+    // Step 2: Assess implications based on facts
     await addStep();
     steps = [...(get(editor.state.update).steps ?? [])];
-    const sectionStep = steps[steps.length - 1];
-    if (sectionStep) {
-      sectionStep.user_description = "Bakgrund";
-      if (sectionStep.assistant_id) {
-        await updateAssistantImmediately(sectionStep.assistant_id, {
-          name: sectionStep.user_description
+    const assessStep = steps[steps.length - 1];
+    if (assessStep) {
+      assessStep.user_description = "Bedöm konsekvenser";
+      if (assessStep.assistant_id) {
+        await updateAssistantImmediately(assessStep.assistant_id, {
+          name: assessStep.user_description,
+          prompt: {
+            text: "Bedöm vad faktauppgifterna innebär. Beskriv konsekvenser, osäkerheter och rekommenderade nästa steg."
+          }
         });
       }
     }
     editor.state.update.update((resource) => ({ ...resource, steps }));
 
+    // Step 3: Write decision brief combining both previous outputs
     await addStep();
     steps = [...(get(editor.state.update).steps ?? [])];
-    const assemblyStep = steps[steps.length - 1];
-    if (assemblyStep) {
-      assemblyStep.user_description = "Sammanställ dokument";
-      assemblyStep.input_source = "previous_step";
-      assemblyStep.input_type = "text";
-      assemblyStep.output_type = "docx";
-      assemblyStep.output_mode = "template_fill";
-      assemblyStep.output_config = {
-        placeholders: [],
-        bindings: {}
+    const briefStep = steps[steps.length - 1];
+    if (briefStep) {
+      briefStep.user_description = "Skriv beslutsunderlag";
+      briefStep.input_source = "all_previous_steps";
+      briefStep.input_type = "text";
+      briefStep.output_type = "text";
+      briefStep.input_bindings = {
+        question: "Nyckelfakta:\n{{step_1.output.text}}\n\nBedömning:\n{{step_2.output.text}}"
       };
-      if (assemblyStep.assistant_id) {
-        await updateAssistantImmediately(assemblyStep.assistant_id, {
-          name: assemblyStep.user_description
+      if (briefStep.assistant_id) {
+        await updateAssistantImmediately(briefStep.assistant_id, {
+          name: briefStep.user_description,
+          prompt: {
+            text: "Skriv ett kort beslutsunderlag. Kombinera fakta och bedömning nedan. Använd rubrikerna: Nyckelfakta, Bedömning, Nästa steg. Håll det under 250 ord."
+          }
         });
       }
-      activeStepId.set(assemblyStep.id ?? null);
+      activeStepId.set(briefStep.id ?? null);
     }
     editor.state.update.update((resource) => ({ ...resource, steps }));
     scheduleAutoSave();
