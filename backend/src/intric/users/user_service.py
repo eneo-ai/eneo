@@ -77,6 +77,7 @@ if TYPE_CHECKING:
     from intric.users.user import UserInDB
     from intric.spaces.space_service import SpaceService
     from intric.feature_flag.feature_flag_service import FeatureFlagService
+    from intric.database.database import AsyncSession
 
 
 logger = get_logger(__name__)
@@ -210,6 +211,7 @@ class UserService:
         predefined_roles_repo: Optional[PredefinedRolesRepository] = None,
         api_key_rate_limiter: Optional[ApiKeyRateLimiter] = None,
         feature_flag_service: Optional["FeatureFlagService"] = None,
+        session: Optional["AsyncSession"] = None,
     ):
         self.repo = user_repo
         self.auth_service = auth_service
@@ -224,6 +226,7 @@ class UserService:
         self.info_blob_repo = info_blob_repo
         self.api_key_rate_limiter = api_key_rate_limiter
         self.feature_flag_service = feature_flag_service
+        self._session = session
 
     async def _validate_email(self, user: UserBase):
         if (
@@ -670,6 +673,34 @@ class UserService:
         )
         return await self.repo.get_user_by_username(username)
 
+    async def _resolve_space_id_for_scope(
+        self, scope_type: str, scope_id: UUID
+    ) -> UUID | None:
+        """Resolve a key's scope to its parent space_id (lightweight, no user context)."""
+        from intric.database.tables.assistant_table import Assistants  # noqa: F811
+        from intric.database.tables.app_table import Apps  # noqa: F811
+
+        if scope_type in (ApiKeyScopeType.SPACE, ApiKeyScopeType.SPACE.value):
+            return scope_id
+        if scope_type in (ApiKeyScopeType.ASSISTANT, ApiKeyScopeType.ASSISTANT.value):
+            query = sa.select(Assistants.space_id).where(Assistants.id == scope_id)
+        elif scope_type in (ApiKeyScopeType.APP, ApiKeyScopeType.APP.value):
+            query = sa.select(Apps.space_id).where(Apps.id == scope_id)
+        else:
+            return None
+        return await self._session.scalar(query)
+
+    async def _is_space_member(self, space_id: UUID, user_id: UUID) -> bool:
+        """Check if user is a member of space (index-only, no user context)."""
+        from intric.database.tables.spaces_table import SpacesUsers
+        query = (
+            sa.select(sa.literal(1))
+            .select_from(SpacesUsers)
+            .where(SpacesUsers.space_id == space_id, SpacesUsers.user_id == user_id)
+            .limit(1)
+        )
+        return await self._session.scalar(query) is not None
+
     async def _resolve_api_key(
         self,
         api_key: str,
@@ -693,6 +724,13 @@ class UserService:
                 message="API key tenant mismatch.",
             )
 
+        if user.state != UserState.ACTIVE:
+            raise ApiKeyValidationError(
+                status_code=403,
+                code="owner_inactive",
+                message=f"API key owner account is {user.state.value}.",
+            )
+
         # Verify the owner still has the permissions required for this key's scope.
         # Tenant-scoped keys require the owner to be a tenant admin.
         if resolved.key.scope_type in (
@@ -704,6 +742,24 @@ class UserService:
                 code="owner_permission_revoked",
                 message="API key owner no longer has admin permissions required for tenant-scoped keys.",
             )
+
+        # Scoped keys require the owner to still be a member of the target space.
+        if self._session is not None and resolved.key.scope_type not in (
+            ApiKeyScopeType.TENANT,
+            ApiKeyScopeType.TENANT.value,
+        ) and resolved.key.scope_id is not None:
+            space_id = await self._resolve_space_id_for_scope(
+                scope_type=resolved.key.scope_type,
+                scope_id=resolved.key.scope_id,
+            )
+            if space_id is not None and not await self._is_space_member(
+                space_id=space_id, user_id=user.id
+            ):
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="owner_membership_revoked",
+                    message="API key owner is no longer a member of the target space.",
+                )
 
         ip_address, request_id, user_agent = extract_audit_context(request)
 

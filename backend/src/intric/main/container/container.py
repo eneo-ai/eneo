@@ -1108,6 +1108,7 @@ class Container(containers.DeclarativeContainer):
         info_blob_repo=info_blob_repo,
         api_key_rate_limiter=api_key_rate_limiter,
         feature_flag_service=feature_flag_service,
+        session=session,
     )
     admin_service = providers.Factory(
         AdminService,
@@ -1115,6 +1116,7 @@ class Container(containers.DeclarativeContainer):
         user_repo=user_repo,
         tenant_service=tenant_service,
         user_service=user_service,
+        api_key_scope_revoker=api_key_scope_revoker,
     )
     service_service = providers.Factory(
         ServiceService,

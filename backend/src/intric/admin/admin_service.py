@@ -30,6 +30,8 @@ from intric.users.user import (
 )
 from intric.users.user_repo import UsersRepository
 from intric.users.user_service import UserService
+from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
+from intric.authentication.auth_models import ApiKeyStateReasonCode
 
 logger = get_logger(__name__)
 
@@ -41,11 +43,13 @@ class AdminService:
         user_repo: UsersRepository,
         tenant_service: TenantService,
         user_service: UserService,
+        api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
         self.user = user
         self.user_repo = user_repo
         self.tenant_service = tenant_service
         self.user_service = user_service
+        self.api_key_scope_revoker = api_key_scope_revoker
 
     @validate_permissions(Permission.ADMIN)
     async def get_tenant_users(self):
@@ -245,6 +249,19 @@ class AdminService:
             logger.warning(f"Attempt to delete already soft-deleted user {username}")
             raise NotFoundException(f"User '{username}' not found in your tenant")
 
+        # Revoke all API keys before deletion
+        if self.api_key_scope_revoker is not None:
+            revoked = await self.api_key_scope_revoker.revoke_by_owner(
+                tenant_id=self.user.tenant_id,
+                owner_user_id=user_in_db.id,
+                reason_code=ApiKeyStateReasonCode.USER_OFFBOARDING,
+                reason_text=f"User {username} deleted",
+            )
+            if revoked:
+                logger.info(
+                    f"Revoked {revoked} API keys for deleted user {username}"
+                )
+
         result = await self.user_service.delete_user(user_in_db.id)
         logger.info(
             f"Successfully soft-deleted user {username} in tenant {self.user.tenant_id}"
@@ -289,6 +306,19 @@ class AdminService:
         result = await self.user_service.update_user(
             user_in_db.id, UserUpdatePublic(state=UserState.INACTIVE)
         )
+
+        # Revoke all API keys owned by the deactivated user
+        if self.api_key_scope_revoker is not None:
+            revoked = await self.api_key_scope_revoker.revoke_by_owner(
+                tenant_id=self.user.tenant_id,
+                owner_user_id=user_in_db.id,
+                reason_code=ApiKeyStateReasonCode.USER_OFFBOARDING,
+                reason_text=f"User {username} deactivated",
+            )
+            if revoked:
+                logger.info(
+                    f"Revoked {revoked} API keys for deactivated user {username}"
+                )
 
         logger.info(
             f"Successfully deactivated user {username} in tenant {self.user.tenant_id}"

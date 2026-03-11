@@ -139,6 +139,49 @@ class SpaceRepository:
             ),
         ]
 
+    async def is_member(self, space_id: UUID, user_id: UUID) -> bool:
+        """Check if user is a member of space (index-only lookup)."""
+        query = (
+            sa.select(sa.literal(1))
+            .select_from(SpacesUsers)
+            .where(
+                SpacesUsers.space_id == space_id,
+                SpacesUsers.user_id == user_id,
+            )
+            .limit(1)
+        )
+        return await self.session.scalar(query) is not None
+
+    async def get_space_id_for_resource(
+        self, scope_type: str, resource_id: UUID
+    ) -> UUID | None:
+        """Single indexed lookup: assistant/app -> space_id."""
+        from intric.authentication.auth_models import ApiKeyScopeType
+
+        if scope_type in (ApiKeyScopeType.ASSISTANT, ApiKeyScopeType.ASSISTANT.value):
+            query = sa.select(Assistants.space_id).where(Assistants.id == resource_id)
+        elif scope_type in (ApiKeyScopeType.APP, ApiKeyScopeType.APP.value):
+            query = sa.select(Apps.space_id).where(Apps.id == resource_id)
+        else:
+            return None
+        return await self.session.scalar(query)
+
+    async def get_space_id_for_scope(
+        self, scope_type: str, scope_id: UUID
+    ) -> UUID | None:
+        """Resolve a key's scope to its parent space_id.
+
+        Returns scope_id directly for space-scoped keys,
+        looks up the parent space for assistant/app-scoped keys.
+        """
+        from intric.authentication.auth_models import ApiKeyScopeType
+
+        if scope_type in (ApiKeyScopeType.SPACE, ApiKeyScopeType.SPACE.value):
+            return scope_id
+        return await self.get_space_id_for_resource(
+            scope_type=scope_type, resource_id=scope_id
+        )
+
     async def _get_collections(self, space_ids: list[UUID]):
         c = CollectionsTable
         ib = InfoBlobs
