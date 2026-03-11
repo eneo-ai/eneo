@@ -511,6 +511,7 @@ class TenantRepository:
             "masked_secret": masked_secret,
             "issuer": config.get("issuer"),
             "allowed_domains": config.get("allowed_domains", []),
+            "additional_redirect_uris": config.get("additional_redirect_uris", []),
             "encrypted_at": config.get("encrypted_at"),
             "encryption_status": encryption_status,
         }

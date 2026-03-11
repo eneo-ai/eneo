@@ -7,16 +7,15 @@ import secrets
 import time
 from datetime import datetime, timezone
 from typing import Optional
-from urllib.parse import urlparse
 from uuid import UUID
 
 import jwt as pyjwt
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from jwt import PyJWKClient as _PyJWKClient
 from pydantic import BaseModel
 
 from intric.main.aiohttp_client import aiohttp_client
-from intric.main.config import get_settings, validate_public_origin
+from intric.main.config import get_settings, validate_redirect_uri
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.main.request_context import set_request_context
@@ -93,212 +92,6 @@ async def _log_oidc_debug(
             **sanitized,
         },
     )
-
-
-async def _load_tenant_allowed_origins(
-    *,
-    container: Container,
-    tenant_id: UUID,
-    correlation_id: str,
-) -> set[str]:
-    origins: set[str] = set()
-    get_allowed_origin_repo = getattr(container, "allowed_origin_repo", None)
-    if not callable(get_allowed_origin_repo):
-        return origins
-
-    try:
-        allowed_origin_repo = get_allowed_origin_repo()
-    except Exception as exc:
-        logger.warning(
-            "Failed to initialize allowed origin repository during OIDC redirect validation",
-            extra={
-                "tenant_id": str(tenant_id),
-                "correlation_id": correlation_id,
-                "error": str(exc),
-            },
-        )
-        return origins
-
-    if allowed_origin_repo is None:
-        return origins
-
-    try:
-        allowed_origins = await allowed_origin_repo.get_by_tenant(tenant_id)
-    except Exception as exc:
-        logger.warning(
-            "Failed to load tenant allowed origins during OIDC redirect validation",
-            extra={
-                "tenant_id": str(tenant_id),
-                "correlation_id": correlation_id,
-                "error": str(exc),
-            },
-        )
-        return origins
-
-    for allowed_origin in allowed_origins:
-        raw_origin = getattr(allowed_origin, "url", None)
-        if not raw_origin:
-            continue
-
-        try:
-            normalized_origin = validate_public_origin(raw_origin)
-        except ValueError:
-            logger.warning(
-                "Skipping invalid allowed origin during OIDC redirect validation",
-                extra={
-                    "tenant_id": str(tenant_id),
-                    "correlation_id": correlation_id,
-                    "origin": raw_origin,
-                },
-            )
-            continue
-
-        origins.add(normalized_origin.rstrip("/"))
-
-    return origins
-
-
-async def _resolve_allowed_redirect_uris(
-    *,
-    container: Container,
-    tenant_id: UUID,
-    expected_redirect_uri: str,
-    redirect_path: str,
-    correlation_id: str,
-) -> set[str]:
-    redirect_uris = {expected_redirect_uri}
-    allowed_origins = await _load_tenant_allowed_origins(
-        container=container,
-        tenant_id=tenant_id,
-        correlation_id=correlation_id,
-    )
-    for normalized_origin in allowed_origins:
-        redirect_uris.add(f"{normalized_origin.rstrip('/')}{redirect_path}")
-
-    return redirect_uris
-
-
-async def _resolve_redirect_uri_for_initiate(
-    *,
-    container: Container,
-    tenant_id: UUID,
-    redirect_uri: str,
-    redirect_path: str,
-    requested_redirect_uri: str | None,
-    request_origin: str | None,
-    correlation_id: str,
-) -> str:
-    parsed_base = urlparse(redirect_uri)
-    if not parsed_base.scheme or not parsed_base.hostname:
-        return redirect_uri
-
-    if requested_redirect_uri:
-        parsed_requested = urlparse(requested_redirect_uri.strip())
-        if not parsed_requested.scheme or not parsed_requested.hostname:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="redirect_uri must be an absolute URL",
-            )
-
-        if parsed_requested.query or parsed_requested.fragment:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="redirect_uri must not include query parameters or fragment",
-            )
-
-        requested_path = parsed_requested.path or "/"
-        if not requested_path.startswith("/"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "redirect_uri path must start with '/'."
-                ),
-            )
-
-        requested_default_port = 443 if parsed_requested.scheme == "https" else 80
-        requested_port = (
-            f":{parsed_requested.port}"
-            if parsed_requested.port and parsed_requested.port != requested_default_port
-            else ""
-        )
-        requested_origin = validate_public_origin(
-            f"{parsed_requested.scheme}://{parsed_requested.hostname}{requested_port}"
-        ).rstrip("/")
-        resolved_requested_redirect_uri = f"{requested_origin}{requested_path}"
-
-        base_default_port = 443 if parsed_base.scheme == "https" else 80
-        base_port = (
-            f":{parsed_base.port}"
-            if parsed_base.port and parsed_base.port != base_default_port
-            else ""
-        )
-        base_origin = f"{parsed_base.scheme}://{parsed_base.hostname}{base_port}".rstrip(
-            "/"
-        )
-        if requested_origin == base_origin:
-            return resolved_requested_redirect_uri
-
-        allowed_origins = await _load_tenant_allowed_origins(
-            container=container,
-            tenant_id=tenant_id,
-            correlation_id=correlation_id,
-        )
-        if requested_origin not in allowed_origins:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="redirect_uri origin is not allowed for this tenant",
-            )
-
-        logger.info(
-            "Using client-provided redirect URI for OIDC initiation",
-            extra={
-                "tenant_id": str(tenant_id),
-                "correlation_id": correlation_id,
-                "redirect_uri": resolved_requested_redirect_uri,
-                "source": "query_param_redirect_uri",
-            },
-        )
-        return resolved_requested_redirect_uri
-
-    if not request_origin:
-        return redirect_uri
-
-    try:
-        normalized_request_origin = validate_public_origin(request_origin).rstrip("/")
-    except ValueError:
-        return redirect_uri
-
-    parsed = urlparse(redirect_uri)
-    if not parsed.scheme or not parsed.hostname:
-        return redirect_uri
-
-    default_port = 443 if parsed.scheme == "https" else 80
-    parsed_port = (
-        f":{parsed.port}" if parsed.port and parsed.port != default_port else ""
-    )
-    canonical_origin = f"{parsed.scheme}://{parsed.hostname}{parsed_port}".rstrip("/")
-    if normalized_request_origin == canonical_origin:
-        return redirect_uri
-
-    allowed_origins = await _load_tenant_allowed_origins(
-        container=container,
-        tenant_id=tenant_id,
-        correlation_id=correlation_id,
-    )
-    if normalized_request_origin not in allowed_origins:
-        return redirect_uri
-
-    resolved_redirect_uri = f"{normalized_request_origin}{redirect_path}"
-    logger.info(
-        "Using allowed request origin for OIDC redirect URI",
-        extra={
-            "tenant_id": str(tenant_id),
-            "correlation_id": correlation_id,
-            "request_origin": normalized_request_origin,
-            "redirect_uri": resolved_redirect_uri,
-        },
-    )
-    return resolved_redirect_uri
 
 
 async def fetch_discovery(discovery_url: str) -> dict:
@@ -682,7 +475,6 @@ async def list_tenants(
     },
 )
 async def initiate_auth(
-    request: Request,
     tenant: Optional[str] = Query(
         None,
         description="Tenant slug (required for multi-tenant, optional for single-tenant)",
@@ -690,11 +482,12 @@ async def initiate_auth(
     state: Optional[str] = Query(
         None, description="Optional frontend-generated CSRF state"
     ),
-    requested_redirect_uri: Optional[str] = Query(
+    redirect_uri_param: Optional[str] = Query(
         None,
+        alias="redirect_uri",
         description=(
-            "Optional redirect URI override. Must be absolute URL and match tenant allowed origins. "
-            "If a path is provided, it is preserved as-is."
+            "Optional redirect URI override. Must exactly match a configured "
+            "redirect URI for the tenant."
         ),
     ),
     container: Container = Depends(get_container()),
@@ -713,7 +506,6 @@ async def initiate_auth(
     Args:
         tenant: Tenant slug (required for multi-tenant, optional for single-tenant mode)
         state: Optional frontend-generated state for CSRF protection
-        request: Optional HTTP request (used to resolve allowed external origins)
         container: Dependency injection container
 
     Returns:
@@ -837,7 +629,7 @@ async def initiate_auth(
 
     # Resolve redirect_uri server-side
     try:
-        redirect_uri = credential_resolver.get_redirect_uri()
+        canonical_redirect_uri = credential_resolver.get_redirect_uri()
     except ValueError as e:
         logger.error(
             "Failed to resolve redirect_uri for tenant",
@@ -854,20 +646,38 @@ async def initiate_auth(
             "Contact administrator to configure canonical_public_origin.",
         )
 
-    redirect_path = federation_config.get("redirect_path", "/login/callback")
-    if not isinstance(redirect_path, str) or not redirect_path.startswith("/"):
-        redirect_path = "/login/callback"
+    valid_redirect_uris = credential_resolver.get_valid_redirect_uris()
 
-    request_origin = request.headers.get("origin") if request else None
-    redirect_uri = await _resolve_redirect_uri_for_initiate(
-        container=container,
-        tenant_id=tenant_obj.id,
-        redirect_uri=redirect_uri,
-        redirect_path=redirect_path,
-        requested_redirect_uri=requested_redirect_uri,
-        request_origin=request_origin,
-        correlation_id=correlation_id,
-    )
+    if redirect_uri_param is not None:
+        try:
+            redirect_uri = validate_redirect_uri(redirect_uri_param)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            ) from e
+
+        if redirect_uri not in valid_redirect_uris:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "The provided redirect_uri is not registered for this tenant. "
+                    "Configure it via the tenant federation settings and register it with your IdP."
+                ),
+            )
+
+        if redirect_uri != canonical_redirect_uri:
+            logger.info(
+                "OIDC initiate using non-canonical redirect_uri",
+                extra={
+                    "tenant_id": str(tenant_obj.id),
+                    "chosen_redirect_uri": redirect_uri,
+                    "canonical_redirect_uri": canonical_redirect_uri,
+                    "correlation_id": correlation_id,
+                },
+            )
+    else:
+        redirect_uri = canonical_redirect_uri
 
     # Generate server-signed state (includes tenant context for callback validation)
     # State format: JWT with expiry (10 minutes)
@@ -1332,21 +1142,12 @@ async def auth_callback(
                     headers={"X-Correlation-ID": correlation_id},
                 )
 
-            redirect_path = federation_config.get("redirect_path", "/login/callback")
-            if not isinstance(redirect_path, str) or not redirect_path.startswith("/"):
-                redirect_path = "/login/callback"
-            allowed_redirect_uris = await _resolve_allowed_redirect_uris(
-                container=container,
-                tenant_id=tenant_id,
-                expected_redirect_uri=expected_redirect_uri,
-                redirect_path=redirect_path,
-                correlation_id=correlation_id,
-            )
-
-            parsed_redirect_uri = urlparse(redirect_uri)
-            if not parsed_redirect_uri.scheme or not parsed_redirect_uri.hostname:
+            valid_redirect_uris = set(credential_resolver.get_valid_redirect_uris())
+            try:
+                redirect_uri = validate_redirect_uri(redirect_uri)
+            except ValueError:
                 logger.error(
-                    "State redirect_uri is not an absolute URL",
+                    "State redirect_uri failed validation",
                     extra={
                         "tenant_id": str(tenant_id),
                         "tenant_slug": tenant_slug,
@@ -1363,42 +1164,7 @@ async def auth_callback(
                     headers={"X-Correlation-ID": correlation_id},
                 )
 
-            redirect_default_port = (
-                443 if parsed_redirect_uri.scheme == "https" else 80
-            )
-            redirect_port = (
-                f":{parsed_redirect_uri.port}"
-                if parsed_redirect_uri.port
-                and parsed_redirect_uri.port != redirect_default_port
-                else ""
-            )
-            redirect_origin = validate_public_origin(
-                f"{parsed_redirect_uri.scheme}://{parsed_redirect_uri.hostname}{redirect_port}"
-            ).rstrip("/")
-
-            expected_parsed = urlparse(expected_redirect_uri)
-            expected_default_port = 443 if expected_parsed.scheme == "https" else 80
-            expected_port = (
-                f":{expected_parsed.port}"
-                if expected_parsed.port and expected_parsed.port != expected_default_port
-                else ""
-            )
-            expected_origin = validate_public_origin(
-                f"{expected_parsed.scheme}://{expected_parsed.hostname}{expected_port}"
-            ).rstrip("/")
-
-            if redirect_origin == expected_origin:
-                allowed_redirect_uris.add(redirect_uri)
-            else:
-                tenant_allowed_origins = await _load_tenant_allowed_origins(
-                    container=container,
-                    tenant_id=tenant_id,
-                    correlation_id=correlation_id,
-                )
-                if redirect_origin in tenant_allowed_origins:
-                    allowed_redirect_uris.add(redirect_uri)
-
-            redirect_mismatch = redirect_uri not in allowed_redirect_uris
+            redirect_mismatch = redirect_uri not in valid_redirect_uris
             allow_redirect_mismatch = False
             current_config_version = (
                 tenant_obj.updated_at.isoformat() if tenant_obj.updated_at else None
@@ -1498,7 +1264,7 @@ async def auth_callback(
                             "tenant_slug": tenant_slug,
                             "state_redirect_uri": redirect_uri,
                             "expected_redirect_uri": expected_redirect_uri,
-                            "allowed_redirect_uri_count": len(allowed_redirect_uris),
+                            "allowed_redirect_uri_count": len(valid_redirect_uris),
                             "correlation_id": correlation_id,
                             "config_version_state": state_config_version,
                             "config_version_current": current_config_version,
@@ -1515,7 +1281,7 @@ async def auth_callback(
                     )
             elif redirect_uri != expected_redirect_uri:
                 logger.info(
-                    "Accepted redirect_uri from tenant allowed origins during callback",
+                    "Accepted non-canonical configured redirect_uri during callback",
                     extra={
                         "tenant_id": str(tenant_id),
                         "tenant_slug": tenant_slug,

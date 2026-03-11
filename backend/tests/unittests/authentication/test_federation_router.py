@@ -110,15 +110,6 @@ class TenantRepoStub:
         return None
 
 
-class AllowedOriginRepoStub:
-    def __init__(self, origins_by_tenant):
-        self._origins_by_tenant = origins_by_tenant
-
-    async def get_by_tenant(self, tenant_id):
-        origins = self._origins_by_tenant.get(tenant_id, [])
-        return [SimpleNamespace(url=origin) for origin in origins]
-
-
 class UserRepoStub:
     def __init__(self, user: UserInDB):
         self._user = user
@@ -157,14 +148,12 @@ class MockContainer:
         auth_service,
         redis_client,
         encryption_service,
-        allowed_origin_repo=None,
     ):
         self._tenant_repo = tenant_repo
         self._user_repo = user_repo
         self._auth_service = auth_service
         self._redis_client = redis_client
         self._encryption_service = encryption_service
-        self._allowed_origin_repo = allowed_origin_repo
 
     def tenant_repo(self):
         return self._tenant_repo
@@ -180,9 +169,6 @@ class MockContainer:
 
     def user_repo(self):
         return self._user_repo
-
-    def allowed_origin_repo(self):
-        return self._allowed_origin_repo
 
 
 @pytest.mark.asyncio
@@ -217,13 +203,13 @@ async def test_initiate_auth_blocks_inactive_tenant(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_initiate_auth_uses_allowed_request_origin_for_redirect_uri(monkeypatch):
+async def test_initiate_auth_uses_additional_redirect_uri_from_query_param(monkeypatch):
     tenant = TenantInDB(
         id=uuid4(),
-        name="AllowedOriginTenant",
-        display_name="AllowedOriginTenant",
+        name="AdditionalRedirectTenant",
+        display_name="AdditionalRedirectTenant",
         quota_limit=1024**3,
-        slug="allowed-origin-tenant",
+        slug="additional-redirect-tenant",
         state=TenantState.ACTIVE,
         modules=[],
         api_credentials={},
@@ -237,6 +223,9 @@ async def test_initiate_auth_uses_allowed_request_origin_for_redirect_uri(monkey
             "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
             "canonical_public_origin": "https://canonical.example.com",
             "redirect_path": "/auth/callback",
+            "additional_redirect_uris": [
+                "https://external.example.com/auth/callback"
+            ],
             "allowed_domains": ["example.com"],
         },
         created_at=datetime.now(timezone.utc),
@@ -252,16 +241,12 @@ async def test_initiate_auth_uses_allowed_request_origin_for_redirect_uri(monkey
         auth_service=None,
         redis_client=FakeRedis(),
         encryption_service=EncryptionService(None),
-        allowed_origin_repo=AllowedOriginRepoStub(
-            {tenant.id: ["https://external.example.com"]}
-        ),
     )
 
-    request = SimpleNamespace(headers={"origin": "https://external.example.com"})
     response = await federation_router.initiate_auth(
         tenant=tenant.slug,
         state=None,
-        request=request,
+        redirect_uri_param="https://external.example.com/auth/callback",
         container=container,
     )
 
@@ -377,7 +362,7 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_auth_callback_accepts_redirect_uri_from_allowed_origin(monkeypatch):
+async def test_auth_callback_accepts_additional_redirect_uri(monkeypatch):
     dummy_settings = DummySettings(
         federation_per_tenant_enabled=True,
         oidc_redirect_grace_period_seconds=0,
@@ -387,12 +372,12 @@ async def test_auth_callback_accepts_redirect_uri_from_allowed_origin(monkeypatc
 
     redis_client = FakeRedis()
     tenant_id = uuid4()
-    slug = "tenant-allowed-origin"
+    slug = "tenant-additional-redirect"
 
     tenant = TenantInDB(
         id=tenant_id,
-        name="Tenant Allowed Origin",
-        display_name="Tenant Allowed Origin",
+        name="Tenant Additional Redirect",
+        display_name="Tenant Additional Redirect",
         slug=slug,
         quota_limit=1024**3,
         state=TenantState.ACTIVE,
@@ -408,6 +393,9 @@ async def test_auth_callback_accepts_redirect_uri_from_allowed_origin(monkeypatc
             "jwks_uri": "https://idp.example.com/jwks",
             "canonical_public_origin": "https://canonical.tenant.example.com",
             "redirect_path": "/auth/callback",
+            "additional_redirect_uris": [
+                "https://alt.tenant.example.com/auth/callback"
+            ],
             "allowed_domains": ["example.com"],
         },
         created_at=datetime.now(timezone.utc),
@@ -435,9 +423,6 @@ async def test_auth_callback_accepts_redirect_uri_from_allowed_origin(monkeypatc
         auth_service=AuthServiceStub(),
         redis_client=redis_client,
         encryption_service=EncryptionService(None),
-        allowed_origin_repo=AllowedOriginRepoStub(
-            {tenant_id: ["https://alt.tenant.example.com"]}
-        ),
     )
 
     issue_time = int(time.time())
@@ -446,9 +431,9 @@ async def test_auth_callback_accepts_redirect_uri_from_allowed_origin(monkeypatc
         "tenant_id": str(tenant_id),
         "tenant_slug": slug,
         "frontend_state": "",
-        "nonce": "nonce-allowed-origin",
+        "nonce": "nonce-additional-redirect",
         "redirect_uri": "https://alt.tenant.example.com/auth/callback",
-        "correlation_id": "corr-allowed-origin",
+        "correlation_id": "corr-additional-redirect",
         "exp": issue_time + 600,
         "iat": issue_time,
         "config_version": config_version,

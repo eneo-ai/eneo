@@ -161,6 +161,30 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             if not redirect_path.startswith("/"):
                 raise ValueError("redirect_path must start with /")
 
+        if "additional_redirect_uris" in v:
+            from intric.main.config import validate_redirect_uri
+
+            additional_redirect_uris = v["additional_redirect_uris"]
+            if not isinstance(additional_redirect_uris, list):
+                raise ValueError("additional_redirect_uris must be a list")
+
+            normalized_redirect_uris: list[str] = []
+            for redirect_uri in additional_redirect_uris:
+                if not isinstance(redirect_uri, str):
+                    raise ValueError(
+                        "additional_redirect_uris must contain only strings"
+                    )
+                try:
+                    normalized_redirect_uris.append(
+                        validate_redirect_uri(redirect_uri)
+                    )
+                except ValueError as e:
+                    raise ValueError(
+                        f"Invalid redirect URI in additional_redirect_uris: {e}"
+                    )
+
+            v["additional_redirect_uris"] = normalized_redirect_uris
+
         # Validate allowed_domains (optional but recommended)
         if "allowed_domains" in v:
             if not isinstance(v["allowed_domains"], list):
