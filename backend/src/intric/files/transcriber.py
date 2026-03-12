@@ -1,5 +1,6 @@
 # MIT License
 
+import contextlib
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -57,8 +58,8 @@ class Transcriber:
 
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
-                temp_file.write(file.blob)
                 temp_file_path = Path(temp_file.name)
+                temp_file.write(file.blob)
 
             result = await self.transcribe_from_filepath(
                 filepath=temp_file_path, transcription_model=transcription_model
@@ -71,7 +72,8 @@ class Transcriber:
             if self.file_repo:
                 await self.file_repo.update(file)
         finally:
-            temp_file_path.unlink()  # Clean up the temporary file
+            with contextlib.suppress(FileNotFoundError):
+                temp_file_path.unlink()
 
         return result
 
