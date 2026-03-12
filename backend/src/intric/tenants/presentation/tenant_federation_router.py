@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 
 from intric.authentication import auth
@@ -168,21 +168,23 @@ class FederationInfo(BaseModel):
     encryption_status: Literal["encrypted", "plaintext"]
 
 
-class SetRedirectUrisRequest(BaseModel):
-    additional_redirect_uris: list[str] = Field(
-        default_factory=list,
+class RedirectUriRequest(BaseModel):
+    redirect_uri: str = Field(
+        ...,
         description=(
-            "Additional fully-qualified redirect URIs for OIDC flows. "
+            "A fully-qualified redirect URI for OIDC flows. "
             "Works for both single-tenant and federation-per-tenant deployments."
         ),
-        examples=[["https://qwerty.sundsvall.se/api/eneo/login/callback"]],
+        examples=["https://qwerty.sundsvall.se/api/eneo/login/callback"],
     )
 
-    @field_validator("additional_redirect_uris")
+    @field_validator("redirect_uri")
     @classmethod
-    def validate_redirect_uris(cls, value: list[str]) -> list[str]:
-        validated = [validate_redirect_uri(uri) for uri in value]
-        return [uri for uri in validated if uri is not None]
+    def validate_redirect_uri_value(cls, value: str) -> str:
+        validated = validate_redirect_uri(value)
+        if validated is None:
+            raise ValueError("redirect_uri is required")
+        return validated
 
 
 class RedirectUrisResponse(BaseModel):
@@ -191,28 +193,28 @@ class RedirectUrisResponse(BaseModel):
     message: str
 
 
-@redirect_uri_router.put(
+@redirect_uri_router.post(
     "/{tenant_id}/redirect-uris",
     response_model=RedirectUrisResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Set tenant redirect URIs",
+    status_code=status.HTTP_201_CREATED,
+    summary="Add tenant redirect URI",
     description=(
-        "Configure additional OIDC redirect URIs for a tenant. "
+        "Add an additional OIDC redirect URI for a tenant. "
         "Available in both single-tenant and federation-per-tenant deployments."
     ),
 )
-async def set_tenant_redirect_uris(
+async def add_tenant_redirect_uri(
     tenant_id: UUID,
-    request: SetRedirectUrisRequest,
+    request: RedirectUriRequest,
     container: Container = Depends(get_container()),
 ) -> RedirectUrisResponse:
     tenant_repo = container.tenant_repo()
     tenant_service = container.tenant_service()
 
     tenant = await tenant_service.get_tenant_by_id(tenant_id)
-    await tenant_repo.update_additional_redirect_uris(
+    redirect_uris = await tenant_repo.add_additional_redirect_uri(
         tenant_id=tenant_id,
-        additional_redirect_uris=request.additional_redirect_uris,
+        redirect_uri=request.redirect_uri,
     )
 
     audit_service = container.audit_service()
@@ -223,21 +225,83 @@ async def set_tenant_redirect_uris(
         action=ActionType.FEDERATION_UPDATED,
         entity_type=EntityType.FEDERATION_CONFIG,
         entity_id=tenant_id,
-        description=f"Sysadmin updated redirect URIs for tenant {tenant.name}",
+        description=f"Sysadmin added redirect URI for tenant {tenant.name}",
         metadata={
             "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
             "target": {
                 "tenant_id": str(tenant_id),
                 "tenant_name": tenant.name,
-                "additional_redirect_uris": request.additional_redirect_uris,
+                "redirect_uri": request.redirect_uri,
+                "additional_redirect_uris": redirect_uris,
             },
         },
     )
 
     return RedirectUrisResponse(
         tenant_id=tenant_id,
-        additional_redirect_uris=request.additional_redirect_uris,
-        message="Redirect URIs updated successfully",
+        additional_redirect_uris=redirect_uris,
+        message="Redirect URI added successfully",
+    )
+
+
+@redirect_uri_router.delete(
+    "/{tenant_id}/redirect-uris",
+    response_model=RedirectUrisResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Remove tenant redirect URI",
+    description=(
+        "Remove an additional OIDC redirect URI for a tenant. "
+        "Available in both single-tenant and federation-per-tenant deployments."
+    ),
+)
+async def delete_tenant_redirect_uri(
+    tenant_id: UUID,
+    redirect_uri: str = Query(
+        ...,
+        description="The fully-qualified redirect URI to remove.",
+    ),
+    container: Container = Depends(get_container()),
+) -> RedirectUrisResponse:
+    tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
+
+    tenant = await tenant_service.get_tenant_by_id(tenant_id)
+    validated_redirect_uri = validate_redirect_uri(redirect_uri)
+    if validated_redirect_uri is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="redirect_uri is required",
+        )
+
+    redirect_uris = await tenant_repo.remove_additional_redirect_uri(
+        tenant_id=tenant_id,
+        redirect_uri=validated_redirect_uri,
+    )
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=tenant_id,
+        actor_id=None,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.FEDERATION_UPDATED,
+        entity_type=EntityType.FEDERATION_CONFIG,
+        entity_id=tenant_id,
+        description=f"Sysadmin removed redirect URI for tenant {tenant.name}",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
+            "target": {
+                "tenant_id": str(tenant_id),
+                "tenant_name": tenant.name,
+                "redirect_uri": validated_redirect_uri,
+                "additional_redirect_uris": redirect_uris,
+            },
+        },
+    )
+
+    return RedirectUrisResponse(
+        tenant_id=tenant_id,
+        additional_redirect_uris=redirect_uris,
+        message="Redirect URI removed successfully",
     )
 
 
