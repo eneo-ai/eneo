@@ -2,6 +2,7 @@ import { derived, get, readable, writable, type Readable } from "svelte/store";
 import type { Intric, UploadedFile } from "@intric/intric-js";
 import { createContext } from "$lib/core/context";
 import { ATTACHMENTS } from "$lib/core/constants";
+import { toast } from "$lib/components/toast";
 
 export type Attachment = {
   id: string;
@@ -160,7 +161,7 @@ function createAttachmentManager(data: AttachmentManagerParams) {
         if (error instanceof Error && error.message.includes("Cancelled")) {
           console.warn(`Cancelled uppload for ${file.name}`);
         } else {
-          alert(`We encountered an error uploading the file ${file.name}\n${error}`);
+          toast.error(`We encountered an error uploading the file ${file.name}: ${error}`);
         }
         attachments.update(($attachments) => $attachments.filter((u) => u.id !== currentUpload));
       } finally {

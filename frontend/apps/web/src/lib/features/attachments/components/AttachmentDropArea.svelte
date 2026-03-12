@@ -11,6 +11,7 @@
   export let isDragging: boolean;
   export let label = m.drop_files_here_to_upload();
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   const { queueValidUploads } = getAttachmentManager();
 
@@ -36,7 +37,7 @@
     const errors = queueValidUploads([...selectedFiles]);
 
     if (errors) {
-      alert(errors.join("\n"));
+      toast.error(errors.join("\n"));
     }
   }
 </script>

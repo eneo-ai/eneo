@@ -8,6 +8,7 @@ import { createContext } from "$lib/core/context";
 import { writable, get } from "svelte/store";
 import type { Intric, Prompt, PromptSparse } from "@intric/intric-js";
 import { browser } from "$app/environment";
+import { toast } from "$lib/components/toast";
 
 const [getPromptManager, setPromptManager] =
   createContext<ReturnType<typeof createPromptManager>>("Prompt version history");
@@ -58,7 +59,7 @@ function createPromptManager(params: PromptManagerParams) {
         previewedPrompt.set(null);
       }
     } catch (e) {
-      alert(`Error deleting prompt with id: ${id}`);
+      toast.error(`Error deleting prompt with id: ${id}`);
     }
   }
 

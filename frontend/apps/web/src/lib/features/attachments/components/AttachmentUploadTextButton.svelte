@@ -9,6 +9,7 @@
     queueValidUploads
   } = getAttachmentManager();
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   let fileInput: HTMLInputElement;
 
@@ -18,7 +19,7 @@
     const errors = queueValidUploads([...fileInput.files]);
 
     if (errors) {
-      alert(errors.join("\n"));
+      toast.error(errors.join("\n"));
     }
 
     fileInput.value = "";

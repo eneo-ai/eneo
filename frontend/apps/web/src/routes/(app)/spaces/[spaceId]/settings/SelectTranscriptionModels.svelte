@@ -13,6 +13,7 @@
   import { Settings } from "$lib/components/layout";
   import { sortModels } from "$lib/features/ai-models/sortModels";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   export let selectableModels: (TranscriptionModel & {
     meets_security_classification?: boolean | null | undefined;
@@ -49,7 +50,7 @@
         await updateSpace({ transcription_models: newModels });
       }
     } catch (e) {
-      alert(e);
+      toast.error(e instanceof Error ? e.message : String(e));
     }
     loading.delete(model.id);
     loading = loading;

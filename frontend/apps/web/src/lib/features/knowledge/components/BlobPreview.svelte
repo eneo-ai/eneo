@@ -5,6 +5,7 @@
   import { Button, Dialog, Markdown } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
   import * as m from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   export let blob: InfoBlob;
   export let index: number | undefined = undefined;
   export let isTableView = false;
@@ -26,7 +27,7 @@
       } catch (e) {
         loadError = true;
         console.error("Error retrieving blob content:", e);
-        alert("Error retrieving reference, see console for details.");
+        toast.error("Error retrieving reference, see console for details.");
       }
       loadingBlob = false;
     }

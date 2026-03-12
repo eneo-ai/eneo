@@ -12,6 +12,7 @@
   import type { UserGroup } from "@intric/intric-js";
   import { createCombobox } from "@melt-ui/svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   // Array of all currently selected collections
   export let selectedGroups: UserGroup[];
@@ -37,7 +38,7 @@
         selectedGroups = selectedGroups.toSpliced(index, 1);
       }
     } catch (e) {
-      alert(e);
+      toast.error(e instanceof Error ? e.message : String(e));
       console.error(e);
     }
   }
@@ -58,7 +59,7 @@
           $selected = undefined;
         }
       } catch (e) {
-        alert(e);
+        toast.error(e instanceof Error ? e.message : String(e));
         console.error(e);
       }
     }

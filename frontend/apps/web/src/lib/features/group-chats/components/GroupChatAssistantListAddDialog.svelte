@@ -10,6 +10,7 @@
   import { Button, Dialog, Input, Select } from "@intric/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   type AssistantTool = GroupChat["tools"]["assistants"][number];
   type Props = {
@@ -60,7 +61,7 @@
         onclick={() => {
           if (selectedAssistant) {
             if (!user_description && selectedAssistant.default_description === null) {
-              alert(m.description_required_to_add_assistant());
+              toast.warning(m.description_required_to_add_assistant());
               return;
             }
             addAssistantToGroup({ ...selectedAssistant, user_description });

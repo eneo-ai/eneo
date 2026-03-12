@@ -1,5 +1,6 @@
 import { createContext } from "$lib/core/context";
 import { m } from "$lib/paraglide/messages";
+import { toast } from "$lib/components/toast";
 import { type GroupSparse, type TemplateAdditionalField } from "@intric/intric-js";
 import { derived, get, writable } from "svelte/store";
 import { type Attachment } from "../attachments/AttachmentManager";
@@ -89,7 +90,7 @@ function createTemplateController(data: TemplateControllerParams) {
         const res = await adapter.createNew({ name: $name });
         onResourceCreated(res);
       } catch (e) {
-        alert(`Error: Couldn't create ${$name}\n${e}`);
+        toast.error(`Couldn't create ${$name}: ${e}`);
       }
       return;
     }
@@ -115,7 +116,7 @@ function createTemplateController(data: TemplateControllerParams) {
             })
           });
         } else {
-          alert(
+          toast.warning(
             "This template can only create relevant responses if you supply the required knowledge. Please configure the knowledge below or choose a different template."
           );
           return;
@@ -126,7 +127,7 @@ function createTemplateController(data: TemplateControllerParams) {
         const isUploadRunning = $selectedAttachments.some((attachment) => !attachment.fileRef);
 
         if (isUploadRunning) {
-          alert(
+          toast.warning(
             "Please wait until all uploads are finished or cancel running uploads berfore proceeding."
           );
           return;
@@ -140,7 +141,7 @@ function createTemplateController(data: TemplateControllerParams) {
             })
           });
         } else {
-          alert(
+          toast.warning(
             "This template can only create relevant responses if you upload the required attachments. Please add relevant attachments or choose a different template."
           );
           return;
@@ -158,7 +159,7 @@ function createTemplateController(data: TemplateControllerParams) {
       selectedAttachments.set([]);
       onResourceCreated(res);
     } catch (e) {
-      alert(`Error: Couldn't create ${$name} from template ${$template.name}\n${e}`);
+      toast.error(`Couldn't create ${$name} from template ${$template.name}: ${e}`);
     }
   }
 

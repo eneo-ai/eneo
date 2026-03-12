@@ -5,6 +5,7 @@
   import { getExplicitAttachmentRules } from "$lib/features/attachments/getAttachmentRules";
   import AttachmentItem from "$lib/features/attachments/components/AttachmentItem.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   export let input: App["input_fields"][number];
   export let description: string | undefined = undefined;
@@ -27,7 +28,7 @@
     const errors = queueValidUploads([...fileInput.files], attachmentRules);
 
     if (errors) {
-      alert(errors.join("\n"));
+      toast.error(errors.join("\n"));
     }
 
     fileInput.value = "";

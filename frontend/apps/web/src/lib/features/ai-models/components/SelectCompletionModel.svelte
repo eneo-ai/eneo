@@ -4,6 +4,7 @@
   import { Select } from "@intric/ui";
   import { writable, type Writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   /** Id of currently selected Completion Model */
   export let value: { id: string } | null | undefined;
@@ -29,7 +30,7 @@
       unsupportedModelSelected = true;
       if (browser) {
         setTimeout(() => {
-          alert(m.model_no_longer_supported());
+          toast.warning(m.model_no_longer_supported());
         }, 400);
       }
     }

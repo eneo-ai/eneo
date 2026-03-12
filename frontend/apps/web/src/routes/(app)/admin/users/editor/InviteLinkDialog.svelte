@@ -3,6 +3,7 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { Button, Dialog } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   const { tenant } = getAppContext();
 
@@ -19,7 +20,7 @@
         copyButtonText = m.copy_invite_link();
       }, 2000);
     } catch (error) {
-      alert(m.could_not_copy_link());
+      toast.error(m.could_not_copy_link());
     }
   }
 

@@ -21,6 +21,7 @@
   import { getIntric } from "$lib/core/Intric.js";
   import { browser } from "$app/environment";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   import { localizeHref } from "$lib/paraglide/runtime";
   dayjs.extend(utc);
 
@@ -40,7 +41,7 @@
 
   async function downloadAsText(text?: string | null) {
     if (!text) {
-      alert(m.not_output_to_save());
+      toast.warning(m.not_output_to_save());
       return;
     }
     const file = new Blob([text], { type: "application/octet-stream;charset=utf-8" });
@@ -80,7 +81,7 @@
       navigator.clipboard.writeText(text);
       setTimeout(() => {}, 2000);
     } else {
-      alert(m.no_copyable_output());
+      toast.warning(m.no_copyable_output());
     }
   }
 

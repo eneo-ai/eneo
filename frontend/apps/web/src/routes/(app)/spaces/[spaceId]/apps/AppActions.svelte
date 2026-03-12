@@ -11,6 +11,7 @@
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   import { localizeHref } from "$lib/paraglide/runtime";
 
   export let app: AppSparse;
@@ -29,7 +30,7 @@
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
-      alert(m.could_not_delete_app());
+      toast.error(m.could_not_delete_app());
       console.error(e);
     }
     isProcessing = false;
