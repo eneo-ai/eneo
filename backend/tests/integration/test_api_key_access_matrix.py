@@ -16,6 +16,8 @@ Run with:
 
 from __future__ import annotations
 
+import csv
+import io
 from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import uuid4
@@ -162,7 +164,14 @@ class ProbeResult:
     description: str = ""
 
     @property
+    def is_error(self) -> bool:
+        """A 5xx on an expected-deny probe may mask a missing guard."""
+        return self.status_code >= 500 and self.expected == "deny"
+
+    @property
     def passed(self) -> bool:
+        if self.is_error:
+            return False
         return self.actual == self.expected
 
 
@@ -188,7 +197,12 @@ class MatrixCollector:
         )
 
         for r in self.results:
-            status = "PASS" if r.passed else "FAIL"
+            if r.is_error:
+                status = "ERROR"
+            elif r.passed:
+                status = "PASS"
+            else:
+                status = "FAIL"
             print(
                 f"{r.key_name:<35}│ {r.method:<7}│ {r.endpoint_name:<28}│ "
                 f"{r.path:<65}│ {r.status_code:<5}│ {r.expected:<7}│ {status}"
@@ -196,8 +210,9 @@ class MatrixCollector:
 
         print("=" * 175)
         passed = sum(1 for r in self.results if r.passed)
-        failed = sum(1 for r in self.results if not r.passed)
-        print(f"SUMMARY: {passed}/{len(self.results)} passed, {failed} failed")
+        errors = sum(1 for r in self.results if r.is_error)
+        failed = sum(1 for r in self.results if not r.passed) - errors
+        print(f"SUMMARY: {passed}/{len(self.results)} passed, {failed} failed, {errors} errors")
 
         if failed > 0:
             print()
@@ -231,14 +246,14 @@ class MatrixCollector:
         out_dir.mkdir(exist_ok=True)
         path = out_dir / filename
 
-        lines = ["key,method,endpoint,path,status_code,actual,expected,result"]
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["key", "method", "endpoint", "path", "status_code", "actual", "expected", "result"])
         for r in self.results:
             status = "PASS" if r.passed else "FAIL"
-            lines.append(
-                f"{r.key_name},{r.method},{r.endpoint_name},{r.path},"
-                f"{r.status_code},{r.actual},{r.expected},{status}"
-            )
-        path.write_text("\n".join(lines) + "\n")
+            writer.writerow([r.key_name, r.method, r.endpoint_name, r.path,
+                             r.status_code, r.actual, r.expected, status])
+        path.write_text(buf.getvalue())
         print(f"Matrix written to {path}")
 
 
@@ -709,7 +724,7 @@ def _build_probes(resource_ids: dict) -> list[dict]:
 
         # --- Tenant Models (admin) ---
         {
-            "name": "list-tenant-completion-models",
+            "name": "create-tenant-completion-model",
             "method": "POST",
             "path": "/api/v1/admin/tenant-models/completion/",
             "body": {"provider_id": fake, "name": "probe", "display_name": "Probe"},
@@ -720,7 +735,7 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "target_resource_key": None,
         },
         {
-            "name": "list-tenant-embedding-models",
+            "name": "create-tenant-embedding-model",
             "method": "POST",
             "path": "/api/v1/admin/tenant-models/embedding/",
             "body": {"provider_id": fake, "name": "probe", "display_name": "Probe"},
@@ -731,7 +746,7 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "target_resource_key": None,
         },
         {
-            "name": "list-tenant-transcription-models",
+            "name": "create-tenant-transcription-model",
             "method": "POST",
             "path": "/api/v1/admin/tenant-models/transcription/",
             "body": {"provider_id": fake, "name": "probe", "display_name": "Probe"},
@@ -1476,7 +1491,12 @@ async def test_collect_access_matrix(api_client, bearer_token):
     try:
         app_a = await _create_app(api_client, token=bearer_token, space_id=space_a)
     except AssertionError:
-        pass  # App creation may fail if prerequisites missing
+        import warnings
+        warnings.warn(
+            "App creation failed — all app-scoped probes and key configs will be skipped. "
+            "Ensure prerequisites (e.g. transcription model) are available for full coverage.",
+            stacklevel=1,
+        )
 
     group_a = await _create_group(api_client, token=bearer_token, space_id=space_a)
     group_b = await _create_group(api_client, token=bearer_token, space_id=space_b)
@@ -1565,7 +1585,7 @@ async def test_collect_access_matrix(api_client, bearer_token):
 
 @pytest.mark.api_key_matrix
 async def test_tenant_key_revoked_after_admin_role_removed(
-    api_client, bearer_token, db_container
+    api_client, bearer_token, db_container, default_user
 ):
     """A tenant API key should stop working when the owner's admin role is revoked.
 
@@ -1593,14 +1613,14 @@ async def test_tenant_key_revoked_after_admin_role_removed(
     assert resp.status_code == 200, f"Key should access admin endpoints before revocation: {resp.text}"
 
     # ---- 3. Revoke admin role (downgrade to "User") ----
-    # Look up the "User" predefined role
+    # Look up the "User" predefined role and the current user's username
     async with db_container() as container:
         predefined_roles_repo = container.predefined_roles_repo()
         user_role = await predefined_roles_repo.get_predefined_role_by_name("User")
 
     # Use the admin API to downgrade the user's role
     resp = await api_client.post(
-        "/api/v1/admin/users/test_user/",
+        f"/api/v1/admin/users/{default_user.username}/",
         json={"predefined_roles": [{"id": str(user_role.id)}]},
         headers={"Authorization": f"Bearer {bearer_token}"},
     )
@@ -1687,6 +1707,7 @@ STRICT_MODE_PROBES = [
 # List endpoints exempt from strict mode (self_filtering=True or resource_type="file")
 STRICT_MODE_EXEMPT_PROBES = [
     {"name": "list-files", "method": "GET", "path": "/api/v1/files/", "resource_type": "file"},
+    {"name": "list-conversations", "method": "GET", "path": "/api/v1/conversations/", "resource_type": "conversation"},
 ]
 
 
@@ -2186,4 +2207,251 @@ async def test_reactivated_user_needs_new_keys(
     resp = await api_client.get(f"/api/v1/spaces/{space_id}/", headers=key_headers)
     assert resp.status_code == 401, (
         f"Revoked key should stay revoked after reactivation, got {resp.status_code}: {resp.text}"
+    )
+
+
+@pytest.mark.api_key_matrix
+async def test_assistant_key_rejected_when_owner_removed_from_space(
+    api_client, bearer_token, db_container, patch_auth_service_jwt
+):
+    """Assistant-scoped key should be rejected when owner is removed from
+    the space containing that assistant.
+
+    Exercises the assistant->space_id resolution path in _resolve_space_id_for_scope,
+    which is different from the space->space_id shortcut tested elsewhere.
+    """
+
+    # 1. Create a second user
+    user_id, username, email = await _create_second_user(
+        api_client, token=bearer_token
+    )
+    user_token = await _get_bearer_token_for_user(db_container, email)
+
+    # 2. Create a space (as admin), add user2, create an assistant
+    space_id = await _create_space(api_client, token=bearer_token, name="asst-scope-space")
+    resp = await api_client.post(
+        f"/api/v1/spaces/{space_id}/members/",
+        json={"id": user_id, "role": "admin"},
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert resp.status_code == 200, f"Add member failed: {resp.text}"
+
+    asst_id = await _create_assistant(api_client, token=bearer_token, space_id=space_id)
+
+    # 3. User2 creates an assistant-scoped key
+    result = await _create_api_key(
+        api_client,
+        token=user_token,
+        scope_type="assistant",
+        scope_id=asst_id,
+        permission="read",
+    )
+    key_headers = {"x-api-key": result["secret"]}
+
+    # 4. Verify the key works
+    resp = await api_client.get(f"/api/v1/assistants/{asst_id}/", headers=key_headers)
+    assert resp.status_code == 200, f"Key should work before removal: {resp.text}"
+
+    # 5. Remove user2 from the space
+    resp = await api_client.delete(
+        f"/api/v1/spaces/{space_id}/members/{user_id}/",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert resp.status_code == 204, f"Member removal failed: {resp.text}"
+
+    # 6. Key should be denied (lifecycle hook revoked it + runtime check as safety net)
+    resp = await api_client.get(f"/api/v1/assistants/{asst_id}/", headers=key_headers)
+    assert resp.status_code in (401, 403), (
+        f"Assistant-scoped key should be denied after owner removed from space, "
+        f"got {resp.status_code}: {resp.text}"
+    )
+
+
+@pytest.mark.api_key_matrix
+async def test_app_key_rejected_when_owner_removed_from_space(
+    api_client, bearer_token, db_container, patch_auth_service_jwt
+):
+    """App-scoped key should be rejected when owner is removed from
+    the space containing that app.
+
+    Exercises the app->space_id resolution path in _resolve_space_id_for_scope.
+    """
+
+    # 1. Create a second user
+    user_id, username, email = await _create_second_user(
+        api_client, token=bearer_token
+    )
+    user_token = await _get_bearer_token_for_user(db_container, email)
+
+    # 2. Create a space (as admin), add user2, create an app
+    space_id = await _create_space(api_client, token=bearer_token, name="app-scope-space")
+    resp = await api_client.post(
+        f"/api/v1/spaces/{space_id}/members/",
+        json={"id": user_id, "role": "admin"},
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert resp.status_code == 200, f"Add member failed: {resp.text}"
+
+    try:
+        app_id = await _create_app(api_client, token=bearer_token, space_id=space_id)
+    except AssertionError:
+        pytest.skip("App creation requires transcription model — not available in test env")
+
+    # 3. User2 creates an app-scoped key
+    result = await _create_api_key(
+        api_client,
+        token=user_token,
+        scope_type="app",
+        scope_id=app_id,
+        permission="read",
+    )
+    key_headers = {"x-api-key": result["secret"]}
+
+    # 4. Verify the key works
+    resp = await api_client.get(
+        f"/api/v1/spaces/{space_id}/applications/apps/{app_id}/",
+        headers=key_headers,
+    )
+    assert resp.status_code == 200, f"Key should work before removal: {resp.text}"
+
+    # 5. Remove user2 from the space
+    resp = await api_client.delete(
+        f"/api/v1/spaces/{space_id}/members/{user_id}/",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert resp.status_code == 204, f"Member removal failed: {resp.text}"
+
+    # 6. Key should be denied
+    resp = await api_client.get(
+        f"/api/v1/spaces/{space_id}/applications/apps/{app_id}/",
+        headers=key_headers,
+    )
+    assert resp.status_code in (401, 403), (
+        f"App-scoped key should be denied after owner removed from space, "
+        f"got {resp.status_code}: {resp.text}"
+    )
+
+
+@pytest.mark.api_key_matrix
+async def test_assistant_key_revoked_on_member_removal(
+    api_client, bearer_token, db_container, patch_auth_service_jwt
+):
+    """Removing a member should revoke their assistant-scoped keys for that space,
+    but not their keys in other spaces."""
+
+    # 1. Create a second user
+    user_id, username, email = await _create_second_user(
+        api_client, token=bearer_token
+    )
+    user_token = await _get_bearer_token_for_user(db_container, email)
+
+    # 2. Create two spaces, add user2 to both, create assistants
+    space_a = await _create_space(api_client, token=bearer_token, name="asst-revoke-a")
+    space_b = await _create_space(api_client, token=bearer_token, name="asst-revoke-b")
+    for sid in [space_a, space_b]:
+        resp = await api_client.post(
+            f"/api/v1/spaces/{sid}/members/",
+            json={"id": user_id, "role": "admin"},
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        )
+        assert resp.status_code == 200, f"Add member failed: {resp.text}"
+
+    asst_a = await _create_assistant(api_client, token=bearer_token, space_id=space_a)
+    asst_b = await _create_assistant(api_client, token=bearer_token, space_id=space_b)
+
+    # 3. User2 creates assistant-scoped keys in both spaces
+    key_a = await _create_api_key(
+        api_client,
+        token=user_token,
+        scope_type="assistant",
+        scope_id=asst_a,
+        permission="read",
+    )
+    key_b = await _create_api_key(
+        api_client,
+        token=user_token,
+        scope_type="assistant",
+        scope_id=asst_b,
+        permission="read",
+    )
+
+    # 4. Remove user2 from space_a only
+    resp = await api_client.delete(
+        f"/api/v1/spaces/{space_a}/members/{user_id}/",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert resp.status_code == 204, f"Member removal failed: {resp.text}"
+
+    # 5. Verify: key_a revoked, key_b untouched
+    async with db_container() as container:
+        from intric.authentication.auth_models import ApiKeyState
+
+        api_key_repo = container.api_key_v2_repo()
+        user = await container.user_repo().get_user_by_email(email)
+
+        ka = await api_key_repo.get(key_id=key_a["id"], tenant_id=user.tenant_id)
+        assert ka.state == ApiKeyState.REVOKED.value, (
+            f"Assistant key in space_a should be revoked, got state={ka.state}"
+        )
+
+        kb = await api_key_repo.get(key_id=key_b["id"], tenant_id=user.tenant_id)
+        assert kb.state == ApiKeyState.ACTIVE.value, (
+            f"Assistant key in space_b should still be active, got state={kb.state}"
+        )
+
+
+@pytest.mark.api_key_matrix
+async def test_invited_user_key_rejected(
+    api_client, bearer_token, db_container, patch_auth_service_jwt
+):
+    """A key owned by an INVITED user (not yet ACTIVE) should be rejected.
+
+    INVITED users have state != ACTIVE, so the runtime check should catch this.
+    This verifies that the owner_inactive check covers non-obvious states like INVITED.
+
+    Strategy: create an ACTIVE user, create a working key, then change state to INVITED
+    via the DB. This simulates a user whose account was reverted to invited.
+    """
+
+    # 1. Create a second user (starts as ACTIVE) and get their bearer token
+    user_id, username, email = await _create_second_user(
+        api_client, token=bearer_token
+    )
+    user_token = await _get_bearer_token_for_user(db_container, email)
+
+    # 2. Create a space, add user2, create a key
+    space_id = await _create_space(api_client, token=bearer_token, name="invited-space")
+    resp = await api_client.post(
+        f"/api/v1/spaces/{space_id}/members/",
+        json={"id": user_id, "role": "admin"},
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert resp.status_code == 200, f"Add member failed: {resp.text}"
+
+    result = await _create_api_key(
+        api_client,
+        token=user_token,
+        scope_type="space",
+        scope_id=space_id,
+        permission="read",
+    )
+    key_headers = {"x-api-key": result["secret"]}
+
+    # 3. Verify key works while user is ACTIVE
+    resp = await api_client.get(f"/api/v1/spaces/{space_id}/", headers=key_headers)
+    assert resp.status_code == 200, f"Key should work while user is active: {resp.text}"
+
+    # 4. Set user state to INVITED via direct DB update
+    async with db_container() as container:
+        from intric.users.user import UserUpdatePublic, UserState
+
+        user_service = container.user_service()
+        await user_service.update_user(
+            user_id, UserUpdatePublic(state=UserState.INVITED)
+        )
+
+    # 5. Key should now be rejected because owner is not ACTIVE
+    resp = await api_client.get(f"/api/v1/spaces/{space_id}/", headers=key_headers)
+    assert resp.status_code in (401, 403), (
+        f"Key should be denied for INVITED user, got {resp.status_code}: {resp.text}"
     )
