@@ -22,7 +22,7 @@ AI models (completion, embedding, and transcription) are now managed through API
 
 ## API Endpoints
 
-All endpoints require the `X-API-Key` header with the value from `INTRIC_SUPER_API_KEY`.
+All endpoints require the `X-API-Key` header with the value from `ENEO_SUPER_API_KEY`.
 
 ### Completion Models
 
@@ -228,7 +228,7 @@ If you're upgrading from a version that auto-synced models:
 
 ### Tenant-Scoped vs System-Wide
 
-**System-Wide Operations** (require `INTRIC_SUPER_API_KEY`):
+**System-Wide Operations** (require `ENEO_SUPER_API_KEY`):
 - Create/update/delete model metadata
 - Available under `/sysadmin/` endpoints
 

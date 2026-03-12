@@ -123,6 +123,40 @@ class SpaceService:
 
         space.transcription_models = transcription_models
 
+        # Set all tenant-enabled MCP servers for new spaces
+        from intric.database.tables.mcp_server_table import MCPServers as MCPServersTable
+        from intric.mcp_servers.domain.entities.mcp_server import MCPServer
+        import sqlalchemy as sa
+
+        query = (
+            sa.select(MCPServersTable)
+            .where(MCPServersTable.tenant_id == self.user.tenant_id)
+            .where(MCPServersTable.is_enabled == True)  # noqa: E712
+        )
+        result = await self.repo.session.execute(query)
+        servers_db = result.scalars().all()
+
+        # Convert to domain entities
+        space.mcp_servers = [
+            MCPServer(
+                id=server.id,
+                tenant_id=server.tenant_id,
+                name=server.name,
+                description=server.description,
+                http_url=server.http_url,
+                http_auth_type=server.http_auth_type,
+                http_auth_config_schema=server.http_auth_config_schema,
+                is_enabled=server.is_enabled,
+                env_vars=server.env_vars,
+                tags=server.tags,
+                icon_url=server.icon_url,
+                documentation_url=server.documentation_url,
+                created_at=server.created_at,
+                updated_at=server.updated_at,
+            )
+            for server in servers_db
+        ]
+
         # Set admin
         admin = SpaceMember(
             id=self.user.id,
@@ -151,6 +185,8 @@ class SpaceService:
         embedding_model_ids: list[UUID] = None,
         completion_model_ids: list[UUID] = None,
         transcription_model_ids: list[UUID] = None,
+        mcp_server_ids: list[UUID] = None,
+        mcp_tools: list = None,  # List of MCPToolSetting objects from API
         security_classification: Union[ModelId, NotProvided, None] = NOT_PROVIDED,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
@@ -198,12 +234,58 @@ class SpaceService:
                 for model_id in transcription_model_ids
             ]
 
+        mcp_servers = None
+        if mcp_server_ids is not None:
+            # Query tenant MCP servers directly from database
+            from intric.database.tables.mcp_server_table import MCPServers as MCPServersTable
+            from intric.mcp_servers.domain.entities.mcp_server import MCPServer
+            import sqlalchemy as sa
+
+            query = (
+                sa.select(MCPServersTable)
+                .where(MCPServersTable.tenant_id == self.user.tenant_id)
+                .where(MCPServersTable.is_enabled == True)  # noqa: E712
+                .where(MCPServersTable.id.in_(mcp_server_ids))
+            )
+            result = await self.repo.session.execute(query)
+            servers_db = result.scalars().all()
+
+            # Validate that all requested servers exist and are enabled
+            found_ids = {server.id for server in servers_db}
+            for mcp_server_id in mcp_server_ids:
+                if mcp_server_id not in found_ids:
+                    raise BadRequestException(
+                        f"MCP server {mcp_server_id} is not enabled for this tenant"
+                    )
+
+            # Convert to domain entities
+            mcp_servers = [
+                MCPServer(
+                    id=server.id,
+                    tenant_id=server.tenant_id,
+                    name=server.name,
+                    description=server.description,
+                    http_url=server.http_url,
+                    http_auth_type=server.http_auth_type,
+                    http_auth_config_schema=server.http_auth_config_schema,
+                    is_enabled=server.is_enabled,
+                    env_vars=server.env_vars,
+                    tags=server.tags,
+                    icon_url=server.icon_url,
+                    documentation_url=server.documentation_url,
+                    created_at=server.created_at,
+                    updated_at=server.updated_at,
+                )
+                for server in servers_db
+            ]
+
         space.update(
             name=name,
             description=description,
             completion_models=completion_models,
             embedding_models=embedding_models,
             transcription_models=transcription_models,
+            mcp_servers=mcp_servers,
             security_classification=(
                 space_security_classification
                 if security_classification is not NOT_PROVIDED
@@ -213,7 +295,15 @@ class SpaceService:
             icon_id=icon_id,
         )
 
-        return await self.repo.update(space)
+        # Convert MCPToolSetting objects to tuples for repository
+        mcp_tool_settings = None
+        if mcp_tools is not None:
+            mcp_tool_settings = [
+                (tool.tool_id, tool.is_enabled)
+                for tool in mcp_tools
+            ]
+
+        return await self.repo.update(space, mcp_tool_settings=mcp_tool_settings)
 
     async def security_classification_impact_analysis(
         self, id: UUID, security_classification_id: UUID

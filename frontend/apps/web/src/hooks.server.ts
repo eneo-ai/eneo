@@ -5,8 +5,7 @@ import { getFeatureFlags } from "$lib/core/flags.server";
 import { authenticateUser, clearFrontendCookies } from "$lib/features/auth/auth.server";
 import { IntricError, type IntricErrorCode } from "@intric/intric-js";
 import { redirect, type Handle, type HandleFetch, type HandleServerError } from "@sveltejs/kit";
-import { env } from "$env/dynamic/private";
-import { getEnvironmentConfig } from "./lib/core/environment.server";
+import { getEnvironmentConfig, getBackendUrl, getBackendServerUrl } from "./lib/core/environment.server";
 import { sequence } from "@sveltejs/kit/hooks";
 import { paraglideMiddleware } from "$lib/paraglide/server";
 
@@ -99,13 +98,12 @@ export const handleError: HandleServerError = async ({ error, status, message, e
 };
 
 export const handleFetch: HandleFetch = async ({ request, fetch }) => {
-  if (
-    env.INTRIC_BACKEND_SERVER_URL &&
-    env.INTRIC_BACKEND_URL &&
-    request.url.startsWith(env.INTRIC_BACKEND_URL)
-  ) {
+  const serverUrl = getBackendServerUrl();
+  const backendUrl = getBackendUrl();
+
+  if (serverUrl && backendUrl && request.url.startsWith(backendUrl)) {
     request = new Request(
-      request.url.replace(env.INTRIC_BACKEND_URL, env.INTRIC_BACKEND_SERVER_URL),
+      request.url.replace(backendUrl, serverUrl),
       request
     );
   }

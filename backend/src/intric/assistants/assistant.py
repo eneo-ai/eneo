@@ -13,6 +13,7 @@ from intric.completion_models.infrastructure.completion_service import Completio
 from intric.files.file_models import File, FileInfo, FileType
 from intric.files.text import TextMimeTypes
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+from intric.services.service import DatastoreResult
 from intric.main.exceptions import (
     BadRequestException,
     NoModelSelectedException,
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
     from intric.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
+    from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.templates.assistant_template.assistant_template import AssistantTemplate
     from intric.websites.domain.website import Website
 
@@ -56,6 +58,7 @@ class Assistant(Entity):
         attachments: list[FileInfo],
         published: bool,
         integration_knowledge_list: list["IntegrationKnowledge"] = [],
+        mcp_servers: list["MCPServer"] = [],
         created_at: datetime = None,
         updated_at: datetime = None,
         source_template: Optional["AssistantTemplate"] = None,
@@ -79,6 +82,7 @@ class Assistant(Entity):
         self._websites = websites
         self._collections = collections
         self._integration_knowledge_list = integration_knowledge_list
+        self.mcp_servers = mcp_servers
         self.created_at = created_at
         self.updated_at = updated_at
         self._attachments = attachments
@@ -92,6 +96,10 @@ class Assistant(Entity):
         self.type = AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
         self._metadata_json = metadata_json
         self.icon_id = icon_id
+
+        # Temporary attributes for update flow - not persisted directly
+        self._mcp_server_ids: list[UUID] | None = None
+        self._mcp_tool_settings: list | None = None
 
     def _validate_embedding_model(self, items: _KnowledgeItemList):
         embedding_model_id_set = set([item.embedding_model.id for item in items])
@@ -208,6 +216,9 @@ class Assistant(Entity):
     def has_knowledge(self) -> bool:
         return self.collections or self.websites or self.integration_knowledge_list
 
+    def has_mcp(self) -> bool:
+        return bool(self.mcp_servers)
+
     def update(
         self,
         name: str | None = None,
@@ -219,6 +230,7 @@ class Assistant(Entity):
         collections: list["Collection"] | None = None,
         websites: list["Website"] | None = None,
         integration_knowledge_list: list["IntegrationKnowledge"] | None = None,
+        mcp_servers: list["MCPServer"] | None = None,
         published: bool | None = None,
         description: Union[str, None, NotProvided] = NOT_PROVIDED,
         insight_enabled: bool | None = None,
@@ -251,6 +263,9 @@ class Assistant(Entity):
 
         if integration_knowledge_list is not None:
             self.integration_knowledge_list = integration_knowledge_list
+
+        if mcp_servers is not None:
+            self.mcp_servers = mcp_servers
 
         if description is not NOT_PROVIDED:
             self.description = description
@@ -311,6 +326,7 @@ class Assistant(Entity):
         stream: bool = False,
         version: int = 1,
         web_search_results: list["WebSearchResult"] = [],
+        require_tool_approval: bool = False,
     ):
         if any([file.file_type == FileType.IMAGE for file in files]):
             if not self.completion_model.vision:
@@ -321,15 +337,20 @@ class Assistant(Entity):
         # Fill half the context
         num_chunks = self.completion_model.token_limit // 200 // 2 if version == 2 else 30
 
-        datastore_result = await references_service.get_references(
-            question=question,
-            session=session,
-            collections=self.collections,
-            websites=self.websites,
-            integration_knowledge_list=self.integration_knowledge_list,
-            num_chunks=num_chunks,
-            version=version,
-        )
+        if self.has_knowledge():
+            datastore_result = await references_service.get_references(
+                question=question,
+                session=session,
+                collections=self.collections,
+                websites=self.websites,
+                integration_knowledge_list=self.integration_knowledge_list,
+                num_chunks=num_chunks,
+                version=version,
+            )
+        else:
+            datastore_result = DatastoreResult(
+                chunks=[], no_duplicate_chunks=[], info_blobs=[]
+            )
 
         response = await completion_service.get_response(
             model=self.completion_model,
@@ -345,6 +366,8 @@ class Assistant(Entity):
             version=version,
             use_image_generation=self.is_default,
             web_search_results=web_search_results,
+            mcp_servers=[] if self.has_knowledge() else self.mcp_servers,
+            require_tool_approval=require_tool_approval,
         )
 
         return response, datastore_result

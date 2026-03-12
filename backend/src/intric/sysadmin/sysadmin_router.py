@@ -25,6 +25,11 @@ from intric.ai_models.embedding_models.embedding_model import (
 from intric.ai_models.embedding_models.embedding_models_repo import (
     AdminEmbeddingModelsService,
 )
+import sqlalchemy as sa
+from intric.database.tables.collections_table import CollectionsTable
+from intric.database.tables.integration_table import IntegrationKnowledge
+from intric.database.tables.websites_table import Websites
+from intric.main.exceptions import BadRequestException
 from intric.allowed_origins.allowed_origin_models import (
     AllowedOriginCreate,
     AllowedOriginInDB,
@@ -307,7 +312,7 @@ async def create_tenant(
         entity_id=created_tenant.id,
         description=f"Sysadmin created tenant '{created_tenant.name}'",
         metadata={
-            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
             "target": {
                 "tenant_id": str(created_tenant.id),
                 "name": created_tenant.name,
@@ -361,7 +366,7 @@ async def update_tenant(
         entity_id=updated_tenant.id,
         description=f"Sysadmin updated tenant '{updated_tenant.name}'",
         metadata={
-            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
             "target": {
                 "tenant_id": str(updated_tenant.id),
                 "name": updated_tenant.name,
@@ -401,7 +406,7 @@ async def delete_tenant_by_id(
         entity_id=deleted_tenant.id,
         description=f"Sysadmin deleted tenant '{tenant_to_delete.name}'",
         metadata={
-            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
             "target": {
                 "tenant_id": str(deleted_tenant.id),
                 "name": tenant_to_delete.name,
@@ -572,7 +577,7 @@ async def enable_completion_model(
         entity_id=id,
         description=f"Sysadmin enabled completion model '{model.name}' for tenant",
         metadata={
-            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
             "target": {
                 "tenant_id": str(id),
                 "model_id": str(completion_model_id),
@@ -620,7 +625,7 @@ async def enable_embedding_model(
         entity_id=id,
         description=f"Sysadmin enabled embedding model '{model.name}' for tenant",
         metadata={
-            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
             "target": {
                 "tenant_id": str(id),
                 "model_id": str(embedding_model_id),
@@ -1097,7 +1102,7 @@ async def migrate_completion_model_for_all_tenants(
 # AI Models CRUD Operations (System-Wide)
 # ============================================================================
 # These endpoints allow system administrators to create, update, and delete
-# AI model metadata. They require INTRIC_SUPER_API_KEY authentication.
+# AI model metadata. They require ENEO_SUPER_API_KEY authentication.
 # Note: These endpoints manage global model metadata only, not tenant-specific
 # settings. To enable/disable models for specific tenants, use the tenant-scoped
 # endpoints in the completion_models and embedding_models routers.
@@ -1119,7 +1124,7 @@ async def create_completion_model(
     """
     Create a new completion model (system-wide operation).
 
-    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+    Requires: X-API-Key header with ENEO_SUPER_API_KEY
 
     This creates the model metadata only. To enable it for a tenant,
     use POST /api/v1/completion-models/{id}/ with tenant credentials.
@@ -1145,7 +1150,7 @@ async def update_completion_model_metadata(
     """
     Update completion model metadata (system-wide operation).
 
-    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+    Requires: X-API-Key header with ENEO_SUPER_API_KEY
 
     Updates global model metadata. Does not affect tenant-specific settings.
     """
@@ -1179,7 +1184,7 @@ async def delete_completion_model(
     """
     Delete a completion model (system-wide operation).
 
-    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+    Requires: X-API-Key header with ENEO_SUPER_API_KEY
 
     WARNING: Deletion affects all tenants. Use with caution.
     Set force=true to delete even if model is in use (may break references).
@@ -1211,7 +1216,7 @@ async def create_embedding_model(
     """
     Create a new embedding model (system-wide operation).
 
-    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+    Requires: X-API-Key header with ENEO_SUPER_API_KEY
 
     This creates the model metadata only. To enable it for a tenant,
     use POST /api/v1/embedding-models/{id}/ with tenant credentials.
@@ -1237,7 +1242,7 @@ async def update_embedding_model_metadata(
     """
     Update embedding model metadata (system-wide operation).
 
-    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+    Requires: X-API-Key header with ENEO_SUPER_API_KEY
 
     Updates global model metadata. Does not affect tenant-specific settings.
     """
@@ -1271,15 +1276,25 @@ async def delete_embedding_model(
     """
     Delete an embedding model (system-wide operation).
 
-    Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+    Requires: X-API-Key header with ENEO_SUPER_API_KEY
 
     WARNING: Deletion affects all tenants. Use with caution.
     """
-    # TODO: Add cross-tenant usage check before deletion
-    # For now, we allow deletion with force parameter
-
     session = container.session()
+
     async with session.begin():
+        if not force:
+            usage_counts = await session.execute(
+                sa.select(
+                    sa.select(sa.func.count()).where(CollectionsTable.embedding_model_id == id).correlate(None).scalar_subquery().label("collections"),
+                    sa.select(sa.func.count()).where(Websites.embedding_model_id == id).correlate(None).scalar_subquery().label("websites"),
+                    sa.select(sa.func.count()).where(IntegrationKnowledge.embedding_model_id == id).correlate(None).scalar_subquery().label("integrations"),
+                )
+            )
+            row = usage_counts.one()
+            if row.collections > 0 or row.websites > 0 or row.integrations > 0:
+                raise BadRequestException("MODEL_IN_USE")
+
         repo = AdminEmbeddingModelsService(session=session)
         await repo.delete_model(id)
 

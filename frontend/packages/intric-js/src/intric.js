@@ -25,13 +25,13 @@ import { initGroupChats } from "./endpoints/group-chats";
 import { initIntegrations } from "./endpoints/integrations";
 import { initConversations } from "./endpoints/conversations";
 import { initSecurityClassifications } from "./endpoints/security-classifications";
+import { initMCPServers } from "./endpoints/mcp-servers";
 import { initSettings } from "./endpoints/settings";
 import { initCredentials } from "./endpoints/credentials";
 import { initAudit } from "./endpoints/audit";
 import { initIcons } from "./endpoints/icons";
 import { initModelProviders } from "./endpoints/model-providers";
 import { initTenantModels } from "./endpoints/tenant-models";
-
 
 /**
  * Create an Intric.js object to interact with the intric backend.
@@ -71,6 +71,7 @@ export function createIntric(args) {
     integrations: initIntegrations(client),
     conversations: initConversations(client),
     securityClassifications: initSecurityClassifications(client),
+    mcpServers: initMCPServers(client),
     settings: initSettings(client),
     credentials: initCredentials(client),
     audit: initAudit(client),

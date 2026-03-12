@@ -16,11 +16,8 @@ export const load = async (event) => {
     end: new Date().toISOString()
   };
 
-  const [assistants] = await Promise.all([intric.assistants.list()]);
-
   return {
-    assistants,
-    data: intric.analytics.get(timeframe),
+    data: intric.analytics.getAggregated(timeframe),
     timeframe
   };
 };

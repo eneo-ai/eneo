@@ -34,10 +34,12 @@ TEST_DEFAULT_ASSISTANT = DefaultAssistant(
     groups=[],
     websites=[],
     integration_knowledge_list=[],
+    mcp_servers=[],
     completion_model=TEST_MODEL_CHATGPT,
     user=TEST_USER,
     tools=UseTools(assistants=[]),
     type=AssistantType.DEFAULT_ASSISTANT,
+    insight_enabled=False,
 )
 
 

@@ -101,7 +101,7 @@
           content={[
             {
               label: model.hosting.toUpperCase(),
-              color: model.hosting === "usa" ? "orange" : "green"
+              color: ({ usa: "orange", chn: "red", eu: "green", swe: "green", fra: "green", deu: "green", gbr: "green" } as Record<string, Label.LabelColor>)[model.hosting] ?? "blue"
             }
           ]}
           capitalize={false}

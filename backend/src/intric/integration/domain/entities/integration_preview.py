@@ -5,8 +5,10 @@ class IntegrationPreview:
         url: str,
         type: str,
         key: str,
+        category: str | None = None,
     ):
         self.name = name
         self.url = url
         self.type = type
         self.key = key
+        self.category = category

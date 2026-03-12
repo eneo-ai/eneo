@@ -36,9 +36,9 @@
   <div
     {...$content}
     use:content
-    class="bg-overlay-stronger text-on-fill z-[100] line-clamp-1 rounded-lg"
+    class="bg-overlay-stronger text-on-fill z-[100] max-w-sm rounded-lg shadow-lg"
   >
-    <p class="px-4 py-1 whitespace-pre-line">{text}</p>
+    <p class="px-3 py-2 text-sm leading-relaxed">{text}</p>
   </div>
 {:else}
   <div {...$trigger} use:trigger class={cls} class:renderInline>
@@ -47,9 +47,9 @@
     <div
       {...$content}
       use:content
-      class="bg-overlay-stronger text-on-fill z-[100] line-clamp-1 rounded-lg"
+      class="bg-overlay-stronger text-on-fill z-[100] max-w-sm rounded-lg shadow-lg"
     >
-      <p class="px-4 py-1 whitespace-pre-line">{text}</p>
+      <p class="px-3 py-2 text-sm leading-relaxed">{text}</p>
     </div>
   </div>
 {/if}

@@ -18,6 +18,7 @@ from pydantic_core import core_schema
 from intric.main.exceptions import ErrorCodes
 
 T = TypeVar("T")
+_M = TypeVar("_M", bound=BaseModel)
 
 
 # Sentinel class to distinguish between "not provided" and "explicitly set to None"
@@ -43,6 +44,12 @@ class NotProvided:
 NOT_PROVIDED = NotProvided()
 
 
+class MCPToolSetting(BaseModel):
+    """MCP server tool enablement setting."""
+    tool_id: UUID
+    is_enabled: bool
+
+
 class ResourcePermission(Enum):
     READ = "read"
     CREATE = "create"
@@ -56,17 +63,18 @@ class ResourcePermission(Enum):
 
 
 # Taken from https://stackoverflow.com/questions/67699451/make-every-field-as-optional-with-pydantic
-def partial_model(model: Type[BaseModel]):
+def partial_model(model: Type[_M]) -> Type[_M]:
     def make_field_optional(
         field: FieldInfo, default: Any = None
     ) -> Tuple[Any, FieldInfo]:
         new = deepcopy(field)
         new.default = default
+        new.default_factory = None  # Clear default_factory to avoid conflict with default
         new.annotation = Optional[field.annotation]  # type: ignore
         return new.annotation, new
 
     return cast(
-        type[BaseModel],
+        Type[_M],
         cast(Any, create_model)(
             f"Partial{model.__name__}",
             __base__=model,

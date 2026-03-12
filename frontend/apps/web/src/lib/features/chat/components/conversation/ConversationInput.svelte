@@ -17,7 +17,7 @@
 	import { getAppContext } from '$lib/core/AppContext';
 	import { m } from '$lib/paraglide/messages';
 	import TokenUsageBar from '$lib/features/tokens/TokenUsageBar.svelte';
-	import { ChartPie } from 'lucide-svelte';
+	import { ChartPie, Wrench } from 'lucide-svelte';
 
 	const chat = getChatService();
 	const { featureFlags } = getAppContext();
@@ -44,12 +44,16 @@
 
 	let abortController: AbortController | undefined;
 	const TOKEN_USAGE_STORAGE_KEY = 'tokenUsageEnabled';
+	const AUTO_ACCEPT_TOOLS_STORAGE_KEY = 'autoAcceptToolsEnabled';
 	let tokenUsageEnabled = $state(false);
+	let autoAcceptTools = $state(true);
 	let hasHydratedTokenPreference = $state(false);
+	let hasHydratedToolApprovalPreference = $state(false);
 
 	onMount(() => {
 		if (!browser) {
 			hasHydratedTokenPreference = true;
+			hasHydratedToolApprovalPreference = true;
 			return;
 		}
 
@@ -69,6 +73,21 @@
 		} finally {
 			hasHydratedTokenPreference = true;
 		}
+
+		// Load auto-accept tools preference (default to true = auto-accept)
+		try {
+			const storedAutoAccept = window.localStorage.getItem(AUTO_ACCEPT_TOOLS_STORAGE_KEY);
+			if (storedAutoAccept === 'false') {
+				autoAcceptTools = false;
+			} else {
+				autoAcceptTools = true;
+				window.localStorage.setItem(AUTO_ACCEPT_TOOLS_STORAGE_KEY, 'true');
+			}
+		} catch (error) {
+			console.warn('Unable to read auto-accept tools preference', error);
+		} finally {
+			hasHydratedToolApprovalPreference = true;
+		}
 	});
 
 	$effect(() => {
@@ -81,6 +100,19 @@
 			);
 		} catch (error) {
 			console.warn('Unable to persist token usage preference', error);
+		}
+	});
+
+	$effect(() => {
+		if (!browser || !hasHydratedToolApprovalPreference) return;
+
+		try {
+			window.localStorage.setItem(
+				AUTO_ACCEPT_TOOLS_STORAGE_KEY,
+				autoAcceptTools ? 'true' : 'false'
+			);
+		} catch (error) {
+			console.warn('Unable to persist auto-accept tools preference', error);
 		}
 	});
 
@@ -102,7 +134,9 @@
 						})
 					}
 				: undefined;
-		chat.askQuestion($question, files, tools, webSearchEnabled, abortController);
+		// Require tool approval if auto-accept is OFF and the assistant has MCP tools
+		const toolApprovalEnabled = !autoAcceptTools && hasMcpTools;
+		chat.askQuestion($question, files, tools, webSearchEnabled, toolApprovalEnabled, abortController);
 		scrollToBottom();
 		resetMentionInput();
 		clearUploads();
@@ -130,6 +164,16 @@
 			chat.partner.type === 'default-assistant' ||
 			('allow_mentions' in chat.partner && chat.partner.allow_mentions);
 		return hasTools && isEnabled;
+	});
+
+	// Check if the assistant has MCP servers/tools
+	const hasMcpTools = $derived.by(() => {
+		if (!chat.partner) return false;
+		// Check for mcp_servers array on the partner
+		if ('mcp_servers' in chat.partner && Array.isArray(chat.partner.mcp_servers)) {
+			return chat.partner.mcp_servers.length > 0;
+		}
+		return false;
 	});
 
 	// --- Token Calculation and Coloring Logic ---
@@ -223,6 +267,18 @@
 						<span class="-mr-2 flex gap-1"><IconWeb></IconWeb>{m.search()}</span></Input.Switch
 					>
 				</div>
+			{/if}
+
+			{#if hasMcpTools}
+				<Tooltip text={autoAcceptTools ? m.auto_accept_tools_on() : m.auto_accept_tools_off()} placement="top">
+					<div
+						class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5 {autoAcceptTools ? 'bg-accent-dimmer text-accent-stronger border-accent-default' : ''}"
+					>
+						<Input.Switch bind:value={autoAcceptTools} class="*:!cursor-pointer">
+							<span class="-mr-2 flex items-center gap-1"><Wrench class="h-5 w-5" />{m.auto_accept_tools()}</span>
+						</Input.Switch>
+					</div>
+				</Tooltip>
 			{/if}
 		</div>
 

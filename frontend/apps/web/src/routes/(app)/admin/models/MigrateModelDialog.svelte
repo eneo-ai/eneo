@@ -56,11 +56,28 @@
         confirmMigration: confirmMigration || undefined
       });
 
-      toast.success(m.migration_success());
+      // Delete the source model after successful migration
+      let deleteSucceeded = true;
+      try {
+        await intric.tenantModels.deleteCompletion({ id: sourceModel.id });
+      } catch {
+        deleteSucceeded = false;
+      }
+
+      if (deleteSucceeded) {
+        toast.success(m.migration_success());
+      } else {
+        toast.warning(m.migration_success_delete_failed());
+      }
       await invalidate("admin:model-providers:load");
       openController.set(false);
     } catch (e: any) {
-      error = e.message || m.migration_failed();
+      const msg = e.message || "";
+      if (msg.includes("compatibility issues")) {
+        error = m.migration_compatibility_issues();
+      } else {
+        error = msg || m.migration_failed();
+      }
       toast.error(m.migration_failed());
     } finally {
       isSubmitting = false;

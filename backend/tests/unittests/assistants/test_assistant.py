@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -215,6 +215,16 @@ def test_has_knowledge(assistant: Assistant):
     assert assistant.has_knowledge()
 
 
+def test_has_mcp(assistant: Assistant):
+    # No MCP servers
+    assistant.mcp_servers = []
+    assert not assistant.has_mcp()
+
+    # With MCP servers
+    assistant.mcp_servers = [MagicMock()]
+    assert assistant.has_mcp()
+
+
 def test_update_metadata_json(assistant: Assistant):
     metadata_json = {"key": "value"}
     assistant.update(metadata_json=metadata_json)
@@ -228,3 +238,79 @@ def test_update_metadata_json(assistant: Assistant):
 
     assistant.update(metadata_json=NOT_PROVIDED)
     assert assistant.metadata_json is None
+
+
+@pytest.fixture
+def assistant_with_model():
+    completion_model = MagicMock()
+    completion_model.token_limit = 4000
+    completion_model.vision = False
+    return Assistant(
+        id=None,
+        user=MagicMock(),
+        name="test",
+        space_id=MagicMock(),
+        prompt=MagicMock(),
+        completion_model=completion_model,
+        completion_model_kwargs=ModelKwargs(),
+        logging_enabled=False,
+        websites=[],
+        collections=[],
+        attachments=[],
+        published=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_ask_skips_mcp_when_knowledge_present(assistant_with_model):
+    embedding_model = MagicMock(id=1)
+    assistant_with_model.mcp_servers = [MagicMock()]
+    assistant_with_model.collections = [MagicMock(embedding_model=embedding_model)]
+    assistant_with_model.websites = [MagicMock(embedding_model=embedding_model)]
+
+    references_service = MagicMock()
+    references_service.get_references = AsyncMock()
+
+    completion_service = MagicMock()
+    completion_service.get_response = AsyncMock(return_value=MagicMock())
+
+    await assistant_with_model.ask(
+        question="test",
+        references_service=references_service,
+        completion_service=completion_service,
+        version=2,
+    )
+
+    # Knowledge retrieval should be called
+    references_service.get_references.assert_called_once()
+    # MCP servers should be excluded from completion call
+    call_kwargs = completion_service.get_response.call_args.kwargs
+    assert call_kwargs["mcp_servers"] == []
+
+
+@pytest.mark.asyncio
+async def test_ask_uses_mcp_when_no_knowledge(assistant_with_model):
+    mcp_servers = [MagicMock()]
+    assistant_with_model.mcp_servers = mcp_servers
+    assistant_with_model.collections = []
+    assistant_with_model.websites = []
+
+    references_service = MagicMock()
+    references_service.get_references = AsyncMock()
+
+    completion_service = MagicMock()
+    completion_service.get_response = AsyncMock(return_value=MagicMock())
+
+    response, datastore_result = await assistant_with_model.ask(
+        question="test",
+        references_service=references_service,
+        completion_service=completion_service,
+        version=2,
+    )
+
+    # Knowledge retrieval should be skipped
+    references_service.get_references.assert_not_called()
+    assert datastore_result.chunks == []
+    # MCP servers should be passed to completion call
+    call_kwargs = completion_service.get_response.call_args.kwargs
+    assert call_kwargs["mcp_servers"] == mcp_servers

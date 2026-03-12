@@ -16,7 +16,7 @@ from intric.authentication import auth_dependencies
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.server import api_documentation
-from intric.server.dependencies.lifespan import lifespan
+from intric.server.dependencies.lifespan import lifespan as app_lifespan
 from intric.server.exception_handlers import add_exception_handlers
 from intric.server.middleware.cors import CORSMiddleware
 from intric.server.middleware.request_context import RequestContextMiddleware
@@ -145,7 +145,7 @@ def _remove_invalid_defaults(schema: dict) -> None:
 
 def get_application():
     app = FastAPI(
-        lifespan=lifespan,
+        lifespan=app_lifespan,
     )
 
     app.add_middleware(RequestContextMiddleware)
@@ -156,6 +156,7 @@ def get_application():
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"],  # Expose all headers including session-related ones
         callback=get_origin,
     )
 
@@ -204,15 +205,21 @@ def get_application():
         if "schemas" not in openapi_schema["components"]:
             openapi_schema["components"]["schemas"] = {}
 
-        # Import the actual IntricEventType enum
-        from intric.sessions.session import IntricEventType
+        # Import SSE models and enums
+        from intric.sessions.session import SSE_MODELS, IntricEventType
 
-        # Add the missing schema if it's not already there
+        # Add IntricEventType enum if not already there
         if "IntricEventType" not in openapi_schema["components"]["schemas"]:
             openapi_schema["components"]["schemas"]["IntricEventType"] = {
                 "type": "string",
                 "enum": [item.value for item in IntricEventType],
             }
+
+        # Add SSE model schemas
+        for model in SSE_MODELS:
+            model_name = model.__name__
+            if model_name not in openapi_schema["components"]["schemas"]:
+                openapi_schema["components"]["schemas"][model_name] = model.model_json_schema()
 
         app.openapi_schema = openapi_schema
         return app.openapi_schema
@@ -692,12 +699,11 @@ def get_application():
 
 app = get_application()
 
-
 def start():
     uvicorn.run(
         "intric.server.main:app",
         host="0.0.0.0",
         port=8123,
         reload=True,
-        reload_dirs="./src/",
+        reload_dirs="./src/"
     )

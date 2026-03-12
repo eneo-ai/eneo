@@ -22,7 +22,7 @@ class Permission(str, Enum):
     EDITOR = "editor"
     ADMIN = "admin"
     WEBSITES = "websites"
-    INTEGRATION_KNOWLEDGE_LIST = "integration_knowledge_list"
+    INTEGRATIONS = "integrations"
 
 
 def validate_permissions(permission: Permission):

@@ -3,6 +3,7 @@
     blue: "label-blue",
     green: "label-green",
     yellow: "label-yellow",
+    red: "label-red",
     orange: "label-yellow",
     gray: "label-grey",
     moss: "label-moss",

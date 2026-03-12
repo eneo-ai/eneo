@@ -10,6 +10,9 @@ from intric.integration.presentation.assemblers.integration_knowledge_assembler 
     IntegrationKnowledgeAssembler,
 )
 from intric.integration.presentation.models import IntegrationKnowledgePublic
+from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
+    MCPServerAssembler,
+)
 from intric.main.models import PaginatedPermissions, ResourcePermission
 from intric.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
@@ -78,7 +81,7 @@ class SpaceAssembler:
             website.permissions = actor.get_website_permissions()
 
         for knowledge in space.integration_knowledge_list:
-            knowledge.permissions = actor.get_integration_knowledge_list_permissions()
+            knowledge.permissions = actor.get_integrations_permissions()
 
     def _get_assistant_permissions(self, space: Space):
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -156,11 +159,11 @@ class SpaceAssembler:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
         permissions = []
 
-        if actor.can_read_integration_knowledge_list():
+        if actor.can_read_integrations():
             permissions.append(ResourcePermission.READ)
-        if actor.can_create_integration_knowledge_list():
+        if actor.can_create_integrations():
             permissions.append(ResourcePermission.CREATE)
-        if actor.can_delete_integration_knowledge_list():
+        if actor.can_delete_integrations():
             permissions.append(ResourcePermission.DELETE)
 
         return permissions
@@ -232,7 +235,11 @@ class SpaceAssembler:
         if not space.members:
             return []
 
-        return [space.members[self.user.id]] + [
+        current_user = space.members.get(self.user.id)
+        if current_user is None:
+            return list(space.members.values())
+
+        return [current_user] + [
             member for member in space.members.values() if member.id != self.user.id
         ]
 
@@ -392,6 +399,11 @@ class SpaceAssembler:
         if self.user.tenant.security_enabled:
             security_classification = self._get_security_classification_model(space)
 
+        mcp_servers = [
+            MCPServerAssembler.to_dict_with_tools(server)
+            for server in space.mcp_servers
+        ]
+
         return SpacePublic(
             created_at=space.created_at,
             updated_at=space.updated_at,
@@ -401,6 +413,7 @@ class SpaceAssembler:
             embedding_models=embedding_models,
             completion_models=completion_models,
             transcription_models=transcription_models,
+            mcp_servers=mcp_servers,
             default_assistant=default_assistant,
             applications=applications,
             knowledge=knowledge,

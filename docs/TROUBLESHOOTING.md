@@ -112,7 +112,7 @@ your public URL.
    These indicate whether `PUBLIC_ORIGIN` was read from the environment.
 
 2. **Verify environment configuration** – ensure `PUBLIC_ORIGIN` (or its
-   fallback `ORIGIN` / `INTRIC_BACKEND_URL`) is set in the backend `.env` file
+   fallback `ORIGIN` / `ENEO_BACKEND_URL`) is set in the backend `.env` file
    to the externally reachable URL (the one your users see in their browser).
 
 3. **Inspect the allowlist manually**:
@@ -621,8 +621,8 @@ your public URL.
 1. **Check backend URL configuration**:
    ```bash
    # In frontend/.env
-   INTRIC_BACKEND_URL=http://localhost:8000
-   INTRIC_BACKEND_SERVER_URL=http://localhost:8000
+   ENEO_BACKEND_URL=http://localhost:8000
+   ENEO_BACKEND_SERVER_URL=http://localhost:8000
    ```
 
 2. **Verify backend is running**:
