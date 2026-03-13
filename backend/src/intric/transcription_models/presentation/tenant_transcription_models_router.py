@@ -5,7 +5,6 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from intric.ai_models.model_enums import ModelStability
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.transcription_models.presentation.transcription_model_models import TranscriptionModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
@@ -85,7 +84,7 @@ async def create_tenant_transcription_model(
         family=model_create.family,
         hosting=model_create.hosting,
         org=None,
-        stability=ModelStability.STABLE.value,
+        stability="stable",
         open_source=False,
         description=None,
         hf_link=None,

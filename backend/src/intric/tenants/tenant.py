@@ -60,6 +60,18 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     api_credentials: dict[str, Any] = Field(default_factory=dict)
     federation_config: dict[str, Any] = Field(default_factory=dict)
     crawler_settings: dict[str, Any] = Field(default_factory=dict)
+    favorite_providers: list[str] = Field(default_factory=list)
+
+    @field_validator("favorite_providers")
+    @classmethod
+    def validate_favorite_providers(cls, v: list[str]) -> list[str]:
+        """Validate that favorite_providers is a list of strings."""
+        if not isinstance(v, list):
+            raise ValueError("favorite_providers must be a list")
+        for item in v:
+            if not isinstance(item, str):
+                raise ValueError("Each favorite provider must be a string")
+        return v
 
     @field_validator("slug")
     @classmethod
@@ -96,8 +108,6 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             "openai",
             "azure",
             "anthropic",
-            "berget",
-            "gdm",
             "mistral",
             "ovhcloud",
             "gemini",

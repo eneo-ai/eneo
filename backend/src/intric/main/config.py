@@ -128,8 +128,6 @@ class Settings(BaseSettings):
     flux_api_key: Optional[str] = None
     tavily_api_key: Optional[str] = None
     vllm_api_key: Optional[str] = None
-    berget_api_key: Optional[str] = None
-    gdm_api_key: Optional[str] = None
     eneo_super_api_key: Optional[str] = None
     eneo_super_duper_api_key: Optional[str] = None
 

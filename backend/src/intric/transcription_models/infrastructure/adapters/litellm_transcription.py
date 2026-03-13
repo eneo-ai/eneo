@@ -67,7 +67,7 @@ class LiteLLMTranscriptionAdapter:
         api_key = self.credential_resolver.get_api_key()
         kwargs["api_key"] = api_key
 
-        # Inject custom endpoint if present (for berget, hosted_vllm, etc.)
+        # Inject custom endpoint if present (for hosted_vllm, etc.)
         endpoint = self.credential_resolver.get_credential_field(field="endpoint")
         if endpoint:
             kwargs["api_base"] = endpoint

@@ -16,7 +16,6 @@ from intric.database.tables.app_table import Apps
 from intric.database.tables.service_table import Services
 from intric.database.tables.spaces_table import SpacesCompletionModels
 from intric.main.exceptions import ValidationException
-from intric.ai_models.model_enums import ModelFamily
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -523,13 +522,13 @@ class TestCompletionModelMigration:
                 session,
                 "gpt-4",
                 provider="openai",
-                family=ModelFamily.OPEN_AI
+                family="openai"
             )
             target_model = await completion_model_factory(
                 session,
                 "claude-3-sonnet",
                 provider="anthropic",
-                family=ModelFamily.CLAUDE
+                family="claude"
             )
 
             # Create assistant using source model
@@ -567,13 +566,13 @@ class TestCompletionModelMigration:
                 session,
                 "gpt-4",
                 provider="openai",
-                family=ModelFamily.OPEN_AI
+                family="openai"
             )
             target_model = await completion_model_factory(
                 session,
                 "claude-3-sonnet",
                 provider="anthropic",
-                family=ModelFamily.CLAUDE
+                family="claude"
             )
 
             # Create assistant using source model
@@ -615,13 +614,13 @@ class TestCompletionModelMigration:
                 session,
                 "gpt-4",
                 provider="openai",
-                family=ModelFamily.OPEN_AI
+                family="openai"
             )
             claude_model = await completion_model_factory(
                 session,
                 "claude-3",
                 provider="anthropic",
-                family=ModelFamily.CLAUDE
+                family="claude"
             )
 
             # Act: Migrate with confirmation
@@ -636,7 +635,7 @@ class TestCompletionModelMigration:
 
             # Assert: Should have warning about different families
             assert result.warnings is not None
-            family_warning = any("family" in w.lower() for w in result.warnings)
+            family_warning = any("families" in w.lower() for w in result.warnings)
             assert family_warning, "Should warn about different model families"
 
     async def test_warn_about_vision_capability_loss(

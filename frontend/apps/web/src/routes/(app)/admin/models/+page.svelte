@@ -48,18 +48,21 @@
       <CompletionModelsTable
         completionModels={data.models.completionModels}
         providers={data.providers}
+        favoriteProviders={data.favoriteProviders}
       />
     </Page.Tab>
     <Page.Tab id="embedding_models">
       <EmbeddingModelsTable
         embeddingModels={data.models.embeddingModels}
         providers={data.providers}
+        favoriteProviders={data.favoriteProviders}
       />
     </Page.Tab>
     <Page.Tab id="transcription_models">
       <TranscriptionModelsTable
         transcriptionModels={data.models.transcriptionModels}
         providers={data.providers}
+        favoriteProviders={data.favoriteProviders}
       />
     </Page.Tab>
   </Page.Main>

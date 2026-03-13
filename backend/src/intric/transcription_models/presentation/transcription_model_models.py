@@ -3,12 +3,6 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from intric.ai_models.model_enums import (
-    ModelFamily,
-    ModelHostingLocation,
-    ModelOrg,
-    ModelStability,
-)
 from intric.main.models import NOT_PROVIDED, ModelId, NotProvided
 from intric.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
@@ -20,14 +14,14 @@ class TranscriptionModelPublic(BaseModel):
     id: UUID
     name: str
     nickname: str
-    family: ModelFamily
+    family: Optional[str] = None
     is_deprecated: bool
-    stability: ModelStability
-    hosting: ModelHostingLocation
+    stability: Optional[str] = None
+    hosting: Optional[str] = None
     open_source: Optional[bool] = None
     description: Optional[str] = None
     hf_link: Optional[str] = None
-    org: Optional[ModelOrg] = None
+    org: Optional[str] = None
     can_access: bool = False
     is_locked: bool = True
     lock_reason: Optional[str] = None

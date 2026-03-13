@@ -125,7 +125,7 @@ Modern microservices architecture with clean separation of concerns:
 | **[Deployment](docs/DEPLOYMENT.md)** | Production deployment with Docker Compose |
 | **[Architecture](docs/ARCHITECTURE.md)** | Technical architecture and design patterns |
 | **[Multi-Tenant Setup](docs/MULTITENANT_OIDC_SETUP_GUIDE.md)** | Per-tenant identity provider configuration |
-| **[Tenant Credentials](docs/MULTI_TENANT_CREDENTIALS.md)** | Encrypted LLM credential management |
+| **[AI Providers](https://docs.eneo.ai/guides/ai-providers)** | Provider configuration & credential management |
 | **[Contributing](docs/CONTRIBUTING.md)** | Contribution guidelines |
 | **[Security](docs/SECURITY.md)** | Security practices and compliance |
 | **[Troubleshooting](docs/TROUBLESHOOTING.md)** | Common issues and solutions |

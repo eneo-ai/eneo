@@ -7,9 +7,6 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from intric.ai_models.model_enums import ModelFamily as CompletionModelFamily
-from intric.ai_models.model_enums import ModelHostingLocation, ModelStability
-from intric.ai_models.model_enums import ModelOrg as Orgs
 from intric.files.file_models import File
 from intric.logging.logging import LoggingDetails
 from intric.main.models import NOT_PROVIDED, InDB, ModelId, NotProvided, partial_model
@@ -76,18 +73,17 @@ class Completion:
 class CompletionModelBase(BaseModel):
     name: str
     nickname: str
-    # Allow both enum and string for tenant models with dynamic values
-    family: Union[CompletionModelFamily, str]
+    family: Optional[str] = None
     token_limit: int
     is_deprecated: bool
     nr_billion_parameters: Optional[int] = None
     hf_link: Optional[str] = None
-    stability: Union[ModelStability, str]
-    hosting: Union[ModelHostingLocation, str]
+    stability: Optional[str] = None
+    hosting: Optional[str] = None
     open_source: Optional[bool] = None
     description: Optional[str] = None
     deployment_name: Optional[str] = None
-    org: Optional[Union[Orgs, str]] = None
+    org: Optional[str] = None
     vision: bool
     reasoning: bool
     supports_tool_calling: bool = False

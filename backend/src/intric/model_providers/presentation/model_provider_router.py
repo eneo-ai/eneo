@@ -10,6 +10,7 @@ from intric.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
 from intric.model_providers.presentation.model_provider_models import (
+    FavoriteProvidersUpdate,
     ModelProviderCreate,
     ModelProviderPublic,
     ModelProviderUpdate,
@@ -17,6 +18,7 @@ from intric.model_providers.presentation.model_provider_models import (
 )
 from intric.server.protocol import responses
 from intric.settings.encryption_service import EncryptionService
+from intric.tenants.tenant_repo import TenantRepository
 from intric.users.user import UserInDB
 
 router = APIRouter()
@@ -51,9 +53,20 @@ async def list_providers(
 async def get_provider_capabilities(
     _user: UserInDB = Depends(get_current_active_user),
 ):
-    """Get supported model types and top models per provider type from LiteLLM."""
+    """Get supported model types and top models per provider type from LiteLLM.
+
+    Returns a structured response with:
+    - providers: dict of canonical provider types, each with modes, models, and fields
+    - default_fields: fallback field definitions for providers without custom fields
+    """
     import litellm
     from collections import defaultdict
+
+    from intric.tenants.provider_field_config import (
+        DEFAULT_FIELDS,
+        get_canonical_provider_type,
+        get_field_definitions,
+    )
 
     # Mode mapping: LiteLLM mode -> our model type
     mode_map = {
@@ -72,7 +85,7 @@ async def get_provider_capabilities(
     today = date.today().isoformat()
 
     for model_key, info in litellm.model_cost.items():
-        provider = info.get("litellm_provider", "")
+        raw_provider = info.get("litellm_provider", "")
         litellm_mode = info.get("mode", "")
         mode = mode_map.get(litellm_mode)
 
@@ -84,6 +97,13 @@ async def get_provider_capabilities(
         dep = info.get("deprecation_date")
         if dep and dep <= today:
             continue
+
+        # Skip *-latest aliases (the concrete dated versions are more useful)
+        if model_key.endswith("-latest"):
+            continue
+
+        # Map to canonical provider type (e.g. "vllm" -> "hosted_vllm")
+        provider = get_canonical_provider_type(raw_provider) if raw_provider else ""
 
         if provider and mode and model_key not in raw[provider][mode]:
             model_info: dict = {"name": model_key}
@@ -102,17 +122,66 @@ async def get_provider_capabilities(
                 model_info["output_vector_size"] = info.get("output_vector_size")
             raw[provider][mode][model_key] = model_info
 
-    # Build response sorted alphabetically
-    result = {}
+    # Serialize field definitions (convert in_ -> in for JSON)
+    def serialize_fields(fields: list) -> list[dict]:
+        return [
+            {"name": f["name"], "required": f["required"], "secret": f["secret"], "in": f["in_"]}
+            for f in fields
+        ]
+
+    # Build response sorted reverse-alphabetically (newest models first)
+    providers = {}
     for provider, modes in raw.items():
-        provider_data: dict = {"modes": sorted(modes.keys()), "models": {}}
+        provider_data: dict = {
+            "modes": sorted(modes.keys()),
+            "models": {},
+            "fields": serialize_fields(get_field_definitions(provider)),
+        }
         for mode, models_dict in modes.items():
             provider_data["models"][mode] = sorted(
-                models_dict.values(), key=lambda m: m["name"]
+                models_dict.values(), key=lambda m: m["name"], reverse=True
             )
-        result[provider] = provider_data
+        providers[provider] = provider_data
 
-    return result
+    # Ensure providers with custom field definitions are always present
+    # (e.g. hosted_vllm, which is self-hosted and has no static models in LiteLLM)
+    from intric.tenants.provider_field_config import PROVIDER_FIELD_DEFINITIONS
+
+    for provider_type in PROVIDER_FIELD_DEFINITIONS:
+        if provider_type not in providers:
+            providers[provider_type] = {
+                "modes": [],
+                "models": {},
+                "fields": serialize_fields(get_field_definitions(provider_type)),
+            }
+
+    return {
+        "providers": providers,
+        "default_fields": serialize_fields(DEFAULT_FIELDS),
+    }
+
+
+@router.get("/favorites/")
+async def get_favorite_providers(
+    user: UserInDB = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_session_with_transaction),
+):
+    """Get the tenant's favorite provider types."""
+    repo = TenantRepository(session)
+    tenant = await repo.get(user.tenant_id)
+    return {"providers": tenant.favorite_providers}
+
+
+@router.put("/favorites/")
+async def set_favorite_providers(
+    body: FavoriteProvidersUpdate,
+    user: UserInDB = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_session_with_transaction),
+):
+    """Set the tenant's favorite provider types."""
+    repo = TenantRepository(session)
+    await repo.update_favorite_providers(user.tenant_id, body.providers)
+    return {"providers": body.providers}
 
 
 @router.get(
@@ -165,7 +234,6 @@ async def update_provider(
     provider = await service.update(
         provider_id=provider_id,
         name=data.name,
-        provider_type=data.provider_type,
         credentials=data.credentials,
         config=data.config,
         is_active=data.is_active,

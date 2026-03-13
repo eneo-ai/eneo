@@ -10,6 +10,9 @@
 
   const intric = getIntric();
 
+  /** Capabilities loaded by parent (AddWizard) */
+  export let capabilities: { providers: Record<string, any>; default_fields: any[] } | null = null;
+
   // Hosting location options
   const hostingOptions = [
     { value: "swe", label: m.hosting_swe() },
@@ -46,7 +49,6 @@
 
   // Auto-focus first input on mount
   onMount(() => {
-    loadCapabilities();
     setTimeout(() => {
       const input = document.getElementById("model-name") as HTMLInputElement;
       input?.focus();
@@ -92,14 +94,16 @@
     output_vector_size?: number;
   }
 
-  // Dynamic capabilities from LiteLLM
-  let capabilities: Record<string, { modes: string[], models: Record<string, ModelInfo[]> }> = {};
-  async function loadCapabilities() {
-    try {
-      capabilities = await intric.modelProviders.getCapabilities();
-    } catch {
-      // Silently fail — fall back to no suggestions
+  // Extract provider map from capabilities for model lookups
+  $: capabilityProviders = (capabilities?.providers ?? {}) as Record<string, { modes: string[], models: Record<string, ModelInfo[]> }>;
+
+  function formatTokens(limit: number): string {
+    if (limit >= 1_000_000 || (limit >= 1_000 && Math.round(limit / 1_000) >= 1_000)) {
+      const val = limit / 1_000_000;
+      return `${val % 1 === 0 ? val.toFixed(0) : val.toFixed(1)}M`;
     }
+    if (limit >= 1_000) return `${Math.round(limit / 1_000)}K`;
+    return limit.toString();
   }
 
   // Providers that need live model listing from their API (not LiteLLM static data)
@@ -140,7 +144,7 @@
     ? []
     : liveListProviders.has(providerType)
       ? liveModels
-      : (capabilities[providerType]?.models?.[modeMap[modelType]] ?? []) as ModelInfo[];
+      : (capabilityProviders[providerType]?.models?.[modeMap[modelType]] ?? []) as ModelInfo[];
 
   // Top 4 as quick suggestions (leaving room for "Browse all" chip)
   $: suggestions = allModels.slice(0, 4);
@@ -148,9 +152,9 @@
   // Check if provider is known in LiteLLM but doesn't support this model type.
   // Unknown providers (e.g. vLLM, self-hosted) are not flagged — they can host any model type.
   $: providerHasNoSupport = providerType !== ""
-    && Object.keys(capabilities).length > 0
-    && providerType in capabilities
-    && !capabilities[providerType]?.modes?.includes(modeMap[modelType]);
+    && Object.keys(capabilityProviders).length > 0
+    && providerType in capabilityProviders
+    && !capabilityProviders[providerType]?.modes?.includes(modeMap[modelType]);
 
   // Browse all models
   let showAllModels = false;
@@ -362,7 +366,7 @@
                 <span class="font-medium">{model.name}</span>
                 <span class="flex gap-3 text-xs text-muted mt-0.5">
                   {#if model.max_input_tokens}
-                    <span>{(model.max_input_tokens / 1000).toFixed(0)}K context</span>
+                    <span>{formatTokens(model.max_input_tokens)} context</span>
                   {/if}
                   {#if model.supports_vision}
                     <span>Vision</span>

@@ -112,8 +112,38 @@ export function initModelProviders(client) {
     },
 
     /**
+     * Get the tenant's favorite provider types.
+     * @returns {Promise<{providers: string[]}>}
+     * @throws {IntricError}
+     * */
+    getFavorites: async () => {
+      const res = await client.fetch("/api/v1/admin/model-providers/favorites/", {
+        method: "get"
+      });
+
+      return res;
+    },
+
+    /**
+     * Set the tenant's favorite provider types.
+     * @param {string[]} providers Ordered list of provider type strings
+     * @returns {Promise<{providers: string[]}>}
+     * @throws {IntricError}
+     * */
+    setFavorites: async (providers) => {
+      const res = await client.fetch("/api/v1/admin/model-providers/favorites/", {
+        method: "put",
+        requestBody: {
+          "application/json": { providers }
+        }
+      });
+
+      return res;
+    },
+
+    /**
      * Get supported model types and top models per provider type from LiteLLM.
-     * @returns {Promise<Record<string, {modes: string[], models: Record<string, string[]>}>>}
+     * @returns {Promise<{providers: Record<string, {modes: string[], models: Record<string, object[]>, fields: object[]}>, default_fields: object[]}>}
      * @throws {IntricError}
      * */
     getCapabilities: async () => {

@@ -7,7 +7,6 @@ import pytest
 from intric.ai_models.completion_models.completion_model import (
     CompletionModel,
 )
-from intric.ai_models.model_enums import ModelFamily, ModelHostingLocation, ModelStability
 from intric.analysis.analysis import AnalysisProcessingMode
 from intric.analysis.analysis_service import (
     ASYNC_AUTO_QUESTION_THRESHOLD,
@@ -25,11 +24,11 @@ def _make_completion_model() -> CompletionModel:
         id=uuid4(),
         name="test-model",
         nickname="test",
-        family=ModelFamily.OPEN_AI,
+        family="openai",
         token_limit=4096,
         is_deprecated=False,
-        stability=ModelStability.STABLE,
-        hosting=ModelHostingLocation.USA,
+        stability="stable",
+        hosting="usa",
         vision=False,
         reasoning=False,
     )

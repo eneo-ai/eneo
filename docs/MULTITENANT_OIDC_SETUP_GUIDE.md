@@ -116,5 +116,5 @@ curl -X POST https://api.eneo.local/api/v1/sysadmin/observability/oidc-debug/ \
 
 ## 5. References
 - [`FEDERATION_PER_TENANT.md`](./FEDERATION_PER_TENANT.md) – architecture & migration notes
-- [`MULTI_TENANT_CREDENTIALS.md`](./MULTI_TENANT_CREDENTIALS.md) – per-tenant LLM API keys
+- [AI Providers](https://docs.eneo.ai/guides/ai-providers) – provider configuration & credential management
 - [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md) – incident catalogue

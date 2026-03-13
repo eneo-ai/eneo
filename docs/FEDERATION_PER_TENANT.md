@@ -80,5 +80,5 @@ Secrets (`client_secret`) are encrypted; responses only return masked tails.
 
 ## 6. Related Documents
 - [Multi-Tenant OIDC Setup Guide](./MULTITENANT_OIDC_SETUP_GUIDE.md) – step-by-step provisioning & support playbook
-- [Multi-Tenant Credentials](./MULTI_TENANT_CREDENTIALS.md) – per-tenant LLM API keys
+- [AI Providers](https://docs.eneo.ai/guides/ai-providers) – provider configuration & credential management
 - [Troubleshooting](./TROUBLESHOOTING.md) – incident catalogue

@@ -28,8 +28,6 @@
 	const PROVIDER_FIELDS = {
 		openai: [{ name: "api_key", type: "password", required: true }],
 		anthropic: [{ name: "api_key", type: "password", required: true }],
-		berget: [{ name: "api_key", type: "password", required: true }],
-		gdm: [{ name: "api_key", type: "password", required: true }],
 		mistral: [{ name: "api_key", type: "password", required: true }],
 		ovhcloud: [{ name: "api_key", type: "password", required: true }],
 		azure: [

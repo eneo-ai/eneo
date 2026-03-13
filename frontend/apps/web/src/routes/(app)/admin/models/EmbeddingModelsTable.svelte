@@ -27,6 +27,7 @@
 
   export let embeddingModels: EmbeddingModel[];
   export let providers: ModelProviderPublic[] = [];
+  export let favoriteProviders: string[] = [];
   export let addModelDialogOpen: Writable<boolean> | undefined = undefined;
   export let preSelectedProviderId: Writable<string | null> | undefined = undefined;
 
@@ -275,6 +276,7 @@
 <AddWizard
   openController={addWizardOpen}
   {providers}
+  {favoriteProviders}
   modelType="embedding"
   preSelectedProviderId={wizardPreSelectedProviderId}
 />

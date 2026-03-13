@@ -9,7 +9,6 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from intric.ai_models.model_enums import ModelFamily
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
 from intric.files.chunk_embedding_list import ChunkEmbeddingList
 from intric.main.config import get_settings
@@ -70,7 +69,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
         for chunked_chunks in self._chunk_chunks(chunks):
             # Add "passage:" prefix for E5 models, use text directly for others
-            if self.model.family == ModelFamily.E5:
+            if self.model.family == "e5":
                 texts_for_chunks = [f"passage: {chunk.text}" for chunk in chunked_chunks]
                 logger.debug("[LiteLLM] %s: Using 'passage:' prefix (family=%s)", self.model.name, self.model.family)
             else:
@@ -84,7 +83,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
     async def get_embedding_for_query(self, query: str):
         # Add "query:" prefix for E5 models, use query directly for others
-        if self.model.family == ModelFamily.E5:
+        if self.model.family == "e5":
             truncated_query = f"query: {query[: self.model.max_input]}"
             logger.debug("[LiteLLM] %s: Using 'query:' prefix (family=%s)", self.model.name, self.model.family)
         else:

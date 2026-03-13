@@ -1,7 +1,6 @@
 from typing import TYPE_CHECKING, Optional, Protocol
 from uuid import UUID
 
-from intric.ai_models.model_enums import ModelFamily
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
 from intric.embedding_models.infrastructure.adapters.litellm_embeddings import (
     LiteLLMEmbeddingAdapter,
@@ -31,7 +30,7 @@ class EmbeddingModelLike(Protocol):
     name: str
     provider_id: UUID | None
     litellm_model_name: str | None
-    family: ModelFamily | None
+    family: str | None
     max_input: int
     max_batch_size: int | None
     dimensions: int | None

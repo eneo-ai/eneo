@@ -89,7 +89,9 @@
           <Label.List
             content={[
               {
-                label: model.token_limit / 1000 + "K tokens",
+                label: (model.token_limit >= 1_000_000 || Math.round(model.token_limit / 1_000) >= 1_000
+                  ? ((model.token_limit / 1_000_000) % 1 === 0 ? (model.token_limit / 1_000_000).toFixed(0) : (model.token_limit / 1_000_000).toFixed(1)) + "M"
+                  : Math.round(model.token_limit / 1_000) + "K") + " tokens",
                 color: "blue"
               }
             ]}
