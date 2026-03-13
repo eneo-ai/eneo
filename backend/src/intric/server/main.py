@@ -156,7 +156,6 @@ def get_application():
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=["*"],  # Expose all headers including session-related ones
         callback=get_origin,
     )
 
@@ -288,15 +287,10 @@ def get_application():
             # https://github.com/encode/starlette/blob/master/starlette/middleware/cors.py#L152
 
             response.headers.update(cors.simple_headers)
-            has_cookie = "cookie" in request.headers
 
-            # If request includes any cookie headers, then we must respond
-            # with the specific origin instead of '*'.
-            if cors.allow_all_origins and has_cookie:
+            if cors.allow_all_origins and cors.allow_credentials:
                 response.headers["Access-Control-Allow-Origin"] = origin
-
-            # If we only allow specific origins, then we have to mirror back
-            # the Origin header in the response.
+                response.headers.add_vary_header("Origin")
             elif not cors.allow_all_origins and await cors.is_allowed_origin(
                 origin=origin
             ):
@@ -357,9 +351,10 @@ def get_application():
                 callback=get_origin,
             )
             response.headers.update(cors.simple_headers)
-            has_cookie = "cookie" in request.headers
-            if cors.allow_all_origins and has_cookie:
+
+            if cors.allow_all_origins and cors.allow_credentials:
                 response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers.add_vary_header("Origin")
             elif not cors.allow_all_origins and await cors.is_allowed_origin(
                 origin=origin
             ):
