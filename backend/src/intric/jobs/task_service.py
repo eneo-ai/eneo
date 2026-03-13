@@ -42,17 +42,25 @@ class TaskService:
     def get_max_size(task: Task):
         match task:
             case Task.UPLOAD_FILE:
-                return get_settings().upload_max_file_size
+                return get_settings().upload_max_file_size, "UPLOAD_MAX_FILE_SIZE"
             case Task.TRANSCRIPTION:
-                return get_settings().transcription_max_file_size
+                return (
+                    get_settings().transcription_max_file_size,
+                    "TRANSCRIPTION_MAX_FILE_SIZE",
+                )
             case _:
-                return 0
+                return 0, None
 
     async def validate_file_size(self, file: SpooledTemporaryFile, task: Task):
-        max_size = self.get_max_size(task)
+        max_size, setting_name = self.get_max_size(task)
+        file_size = await asyncio.to_thread(self.file_size_service.get_file_size, file)
 
-        if await asyncio.to_thread(self.file_size_service.is_too_large, file, max_size):
-            raise FileTooLargeException("File too large.")
+        if file_size > max_size:
+            raise FileTooLargeException(
+                file_size=file_size,
+                max_size=max_size,
+                setting_name=setting_name,
+            )
 
     async def ensure_quota(self, file: SpooledTemporaryFile, task: Task):
         if task not in (Task.UPLOAD_FILE, Task.TRANSCRIPTION):

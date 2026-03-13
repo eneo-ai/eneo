@@ -23,7 +23,8 @@
   let showProviderForm = false;
   let modelName = "";
   let displayName = "";
-  let tokenLimit = 128000;
+  let maxInputTokens = 128000;
+  let maxOutputTokens = 4096;
   let vision = false;
   let reasoning = false;
   let supportsToolCalling = false;
@@ -141,7 +142,8 @@
         provider_id: actualProviderId,
         name: modelName,
         display_name: displayName,
-        token_limit: tokenLimit,
+        max_input_tokens: maxInputTokens,
+        max_output_tokens: maxOutputTokens,
         vision: vision,
         reasoning: reasoning,
         supports_tool_calling: supportsToolCalling,
@@ -167,7 +169,8 @@
   function resetForm() {
     modelName = "";
     displayName = "";
-    tokenLimit = 128000;
+    maxInputTokens = 128000;
+    maxOutputTokens = 4096;
     vision = false;
     reasoning = false;
     supportsToolCalling = false;
@@ -186,6 +189,12 @@
     openController.set(false);
     resetForm();
     error = null;
+  }
+
+  function formatTokenLimit(limit: number): string {
+    if (limit >= 1_000_000) return `${(limit / 1_000_000).toFixed(limit % 1_000_000 === 0 ? 0 : 1)}M`;
+    if (limit >= 1_000) return `${Math.round(limit / 1_000)}K`;
+    return limit.toString();
   }
 
   $: requiresEndpoint = providerType === "azure";
@@ -319,20 +328,41 @@
               </p>
             </div>
 
-            <div class="flex flex-col gap-2">
-              <label for="token-limit" class="text-sm font-medium">{m.token_limit()}</label>
-              <Input.Text
-                id="token-limit"
-                type="number"
-                bind:value={tokenLimit}
-                min="1024"
-                max="1000000"
-                required
-              />
-              <p class="text-muted-foreground text-xs">
-                {m.token_limit_hint()}
-              </p>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="flex flex-col gap-2">
+                <label for="max-input-tokens" class="text-sm font-medium">{m.max_input_tokens()}</label>
+                <Input.Text
+                  id="max-input-tokens"
+                  type="number"
+                  bind:value={maxInputTokens}
+                  min="1024"
+                  max="10000000"
+                  required
+                />
+                <p class="text-muted-foreground text-xs">
+                  {m.max_input_tokens_help()}
+                </p>
+              </div>
+
+              <div class="flex flex-col gap-2">
+                <label for="max-output-tokens" class="text-sm font-medium">{m.max_output_tokens()}</label>
+                <Input.Text
+                  id="max-output-tokens"
+                  type="number"
+                  bind:value={maxOutputTokens}
+                  min="1"
+                  max="10000000"
+                  required
+                />
+                <p class="text-muted-foreground text-xs">
+                  {m.max_output_tokens_help()}
+                </p>
+              </div>
             </div>
+
+            <p class="text-xs text-muted">
+              {m.effective_context({ tokens: formatTokenLimit(Math.max(0, maxInputTokens - maxOutputTokens)) })}
+            </p>
 
             <div class="flex gap-4">
               <label class="flex items-center gap-2 text-sm">

@@ -24,7 +24,8 @@ class TenantCompletionModelCreate(BaseModel):
         description="Model identifier (e.g., 'gpt-4o', 'meta-llama/Meta-Llama-3-70B-Instruct')",
     )
     display_name: str = Field(..., description="User-friendly display name")
-    token_limit: int = Field(default=128000, description="Maximum context tokens")
+    max_input_tokens: int = Field(default=128000, description="Maximum input context tokens")
+    max_output_tokens: int = Field(default=4096, description="Maximum output tokens")
     vision: bool = Field(default=False, description="Supports vision/image inputs")
     reasoning: bool = Field(default=False, description="Supports extended reasoning")
     supports_tool_calling: bool = Field(default=False, description="Supports function/tool calling")
@@ -38,7 +39,8 @@ class TenantCompletionModelUpdate(BaseModel):
     name: str | None = Field(None, description="Model identifier (e.g., 'gpt-4o', 'claude-3-sonnet')")
     display_name: str | None = Field(None, description="User-friendly display name")
     description: str | None = Field(None, description="Model description")
-    token_limit: int | None = Field(None, description="Maximum context tokens")
+    max_input_tokens: int | None = Field(None, description="Maximum input context tokens")
+    max_output_tokens: int | None = Field(None, description="Maximum output tokens")
     vision: bool | None = Field(None, description="Supports vision/image inputs")
     reasoning: bool | None = Field(None, description="Supports extended reasoning")
     supports_tool_calling: bool | None = Field(None, description="Supports function/tool calling")
@@ -98,7 +100,8 @@ async def create_tenant_completion_model(
         name=model_create.name,  # Model identifier (may contain slashes)
         nickname=model_create.display_name,
         litellm_model_name=None,  # Constructed at runtime by TenantModelAdapter
-        token_limit=model_create.token_limit,
+        max_input_tokens=model_create.max_input_tokens,  # type: ignore[call-arg]
+        max_output_tokens=model_create.max_output_tokens,  # type: ignore[call-arg]
         vision=model_create.vision,
         reasoning=model_create.reasoning,
         supports_tool_calling=model_create.supports_tool_calling,  # type: ignore[call-arg]
@@ -175,8 +178,10 @@ async def update_tenant_completion_model(
         model.nickname = model_update.display_name
     if model_update.description is not None:
         model.description = model_update.description
-    if model_update.token_limit is not None:
-        model.token_limit = model_update.token_limit
+    if model_update.max_input_tokens is not None:
+        model.max_input_tokens = model_update.max_input_tokens
+    if model_update.max_output_tokens is not None:
+        model.max_output_tokens = model_update.max_output_tokens
     if model_update.vision is not None:
         model.vision = model_update.vision
     if model_update.reasoning is not None:

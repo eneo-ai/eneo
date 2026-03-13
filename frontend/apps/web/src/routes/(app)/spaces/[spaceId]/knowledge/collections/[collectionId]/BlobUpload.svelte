@@ -3,9 +3,10 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { getJobManager } from "$lib/features/jobs/JobManager";
   import { getIntric } from "$lib/core/Intric";
+  import type { AttachmentValidationError } from "$lib/features/attachments/AttachmentManager";
+  import FileSizeValidationPanel from "$lib/features/attachments/components/FileSizeValidationPanel.svelte";
   import { type Group, type InfoBlob } from "@intric/intric-js";
   import { Button, Dialog, Input } from "@intric/ui";
-  import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { m } from "$lib/paraglide/messages";
 
   const {
@@ -25,9 +26,9 @@
   export let disabled = false;
 
   let files: File[] = [];
-  let fileValidationErrors: string[] = [];
-  let quotaValidationError: string | null = null;
-  let validationErrors: string[] = [];
+  let fileValidationErrors: AttachmentValidationError[] = [];
+  let quotaValidationError: AttachmentValidationError | null = null;
+  let validationErrors: AttachmentValidationError[] = [];
   let quotaRemaining: number | null = null;
   let tenantQuotaLimit: number | null = null;
   let tenantQuotaUsed = 0;
@@ -46,17 +47,25 @@
   });
 
   $: {
-    const errors: string[] = [];
+    const errors: AttachmentValidationError[] = [];
     for (const file of files) {
+      if (!acceptedMimeTypes.includes(file.type)) {
+        errors.push({
+          kind: "unsupported_type",
+          fileName: file.name,
+          message: `${file.name}: File type "${file.type || "unknown"}" is not supported.`
+        });
+        continue;
+      }
       const limit = formatLimitByType.get(file.type);
       if (limit !== undefined && file.size > limit) {
-        errors.push(
-          m.file_too_large_detail({
-            fileName: file.name,
-            currentSize: formatBytes(file.size),
-            maxSize: formatBytes(limit)
-          })
-        );
+        errors.push({
+          kind: "file_size",
+          message: `${file.name}: file is too large.`,
+          fileName: file.name,
+          fileSizeBytes: file.size,
+          maxSizeBytes: limit
+        });
       }
     }
     fileValidationErrors = errors;
@@ -79,7 +88,12 @@
     if (quotaRemaining != null) {
       const totalUploadSize = files.reduce((total, file) => total + file.size, 0);
       quotaValidationError =
-        quotaRemaining <= 0 || totalUploadSize > quotaRemaining ? m.quota_limit_reached() : null;
+        quotaRemaining <= 0 || totalUploadSize > quotaRemaining
+          ? {
+              kind: "max_total_size",
+              message: m.quota_limit_reached()
+            }
+          : null;
     } else {
       quotaValidationError = null;
     }
@@ -145,13 +159,7 @@
     <Input.Files bind:files {acceptedMimeTypes}></Input.Files>
 
     {#if validationErrors.length > 0}
-      <div class="bg-negative-dimmer text-negative-default mt-3 rounded-md px-3 py-2 text-sm">
-        <ul class="list-disc space-y-1 pl-4">
-          {#each validationErrors as error}
-            <li>{error}</li>
-          {/each}
-        </ul>
-      </div>
+      <FileSizeValidationPanel errors={validationErrors} />
     {/if}
 
     <Dialog.Controls let:close>

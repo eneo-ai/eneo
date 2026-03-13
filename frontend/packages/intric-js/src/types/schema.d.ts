@@ -9072,11 +9072,17 @@ export interface components {
        */
       display_name: string;
       /**
-       * Token Limit
-       * @description Maximum context tokens
+       * Max Input Tokens
+       * @description Maximum tokens the model accepts as input (context window)
        * @default 128000
        */
-      token_limit?: number;
+      max_input_tokens?: number;
+      /**
+       * Max Output Tokens
+       * @description Maximum tokens the model can generate per response
+       * @default 4096
+       */
+      max_output_tokens?: number;
       /**
        * Vision
        * @description Supports vision/image inputs
@@ -9132,10 +9138,15 @@ export interface components {
        */
       description?: string | null;
       /**
-       * Token Limit
-       * @description Maximum context tokens
+       * Max Input Tokens
+       * @description Maximum tokens the model accepts as input (context window)
        */
-      token_limit?: number | null;
+      max_input_tokens?: number | null;
+      /**
+       * Max Output Tokens
+       * @description Maximum tokens the model can generate per response
+       */
+      max_output_tokens?: number | null;
       /**
        * Vision
        * @description Supports vision/image inputs

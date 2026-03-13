@@ -1,5 +1,6 @@
 import { browser } from "$app/environment";
 import { PAGINATION } from "$lib/core/constants";
+import { toast } from "$lib/components/toast";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import { waitFor } from "$lib/core/waitFor";
@@ -44,6 +45,9 @@ export class ChatService {
 
   // Track total tokens used in the current conversation
   historyTokens = $state<number>(0);
+
+  // Effective context limit returned by the token-estimate API (accounts for backend reserves)
+  effectiveTokenLimit = $state<number>(0);
 
   // Track assistant prompt tokens separately so we only count them once
   promptTokens = $state<number>(0);
@@ -452,6 +456,16 @@ export class ChatService {
           return;
         }
 
+        // If the error happened before any streamed content arrived (i.e. ref.answer
+        // is still empty), pop the failed message so the token counter resets and
+        // show the error as a toast instead of polluting the conversation.
+        if (error instanceof IntricError && !ref.answer) {
+          this.currentConversation.messages.pop();
+          toast.error(error.getReadableMessage());
+          console.error(error);
+          return;
+        }
+
         let message = "We encountered an error processing your request.";
         if (error instanceof IntricError) {
           message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
@@ -535,6 +549,10 @@ export class ChatService {
 
           this.promptTokens = promptTokens;
           this.historyTokens = historyTokens;
+
+          if (response.limit) {
+            this.effectiveTokenLimit = response.limit;
+          }
 
           console.log(
             `[ChatService] Token usage: ${(promptTokens + historyTokens).toLocaleString()} tokens ` +
@@ -673,6 +691,10 @@ export class ChatService {
         // Double-check staleness after API returns using CURRENT state
         if (this.#currentText !== requestText || this.#currentAttachmentIdString !== requestAttachmentIdString) {
           return; // Silently skip stale responses
+        }
+
+        if (response?.limit) {
+          this.effectiveTokenLimit = response.limit;
         }
 
         const breakdown = response?.breakdown;

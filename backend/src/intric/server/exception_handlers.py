@@ -16,11 +16,17 @@ def add_exception_handlers(app: FastAPI):
             error_code=error_code,
         ):
             message = error_message or str(exc)
+            details = getattr(exc, "details", None)
+            if not isinstance(details, dict) or len(details) == 0:
+                details = None
+
             return JSONResponse(
                 status_code=status_code,
                 content=GeneralError(
-                    message=message, intric_error_code=error_code
-                ).model_dump(),
+                    message=message,
+                    intric_error_code=error_code,
+                    details=details,
+                ).model_dump(exclude_none=True),
             )
 
         app.add_exception_handler(exception, handler)

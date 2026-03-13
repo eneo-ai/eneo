@@ -49,7 +49,8 @@
     models: Array<{
       name: string;
       displayName: string;
-      tokenLimit?: number;
+      maxInputTokens?: number;
+      maxOutputTokens?: number;
       vision?: boolean;
       reasoning?: boolean;
       supportsToolCalling?: boolean;
@@ -266,7 +267,8 @@
             name: model.name,
             display_name: model.displayName,
             family: model.family ?? "openai",
-            token_limit: model.tokenLimit ?? 128000,
+            max_input_tokens: model.maxInputTokens ?? 128000,
+            max_output_tokens: model.maxOutputTokens ?? 4096,
             vision: model.vision ?? false,
             reasoning: model.reasoning ?? false,
             supports_tool_calling: model.supportsToolCalling ?? false,

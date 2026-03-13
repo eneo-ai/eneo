@@ -1,8 +1,9 @@
 import { browser } from "$app/environment";
 import { invalidate } from "$app/navigation";
 import { createContext } from "$lib/core/context";
-import type { Intric, Job } from "@intric/intric-js";
+import { type Intric, type Job } from "@intric/intric-js";
 import { derived, writable } from "svelte/store";
+import { getUploadErrorMessage } from "$lib/features/attachments/getUploadErrorMessage";
 
 import { m } from "$lib/paraglide/messages";
 export { getJobManager, initJobManager, jobCompletionEvents };
@@ -227,10 +228,7 @@ function createJobManager(data: { intric: Intric }) {
           })
           .catch((error) => {
             const fallbackMessage = m.file_upload_error();
-            const message =
-              error instanceof Error && error.message
-                ? error.message
-                : fallbackMessage;
+            const message = getUploadErrorMessage(error, upload.file.name);
             alert(`${fallbackMessage}: ${upload.file.name}\n${message}`);
             runningUploads.delete(uploadId);
             upload.status = "failed";

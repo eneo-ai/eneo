@@ -7,6 +7,7 @@
   import { ArrowLeft, Plus, Trash2, Sparkles, Check, ListPlus, TriangleAlert, Search, Loader2, CircleCheck, CircleX, Zap } from "lucide-svelte";
   import HelpTooltip from "../components/HelpTooltip.svelte";
   import { getIntric } from "$lib/core/Intric";
+  import { toast } from "$lib/components/toast";
 
   const intric = getIntric();
 
@@ -59,7 +60,8 @@
   export let models: Array<{
     name: string;
     displayName: string;
-    tokenLimit?: number;
+    maxInputTokens?: number;
+    maxOutputTokens?: number;
     vision?: boolean;
     reasoning?: boolean;
     supportsToolCalling?: boolean;
@@ -163,7 +165,8 @@
     currentModel.name = info.name;
     currentModel.displayName = info.name;
     if (modelType === "completion") {
-      currentModel.tokenLimit = info.max_input_tokens ?? 128000;
+      currentModel.maxInputTokens = info.max_input_tokens ?? 128000;
+      currentModel.maxOutputTokens = info.max_output_tokens ?? 4096;
       currentModel.vision = info.supports_vision ?? false;
       currentModel.reasoning = info.supports_reasoning ?? false;
       currentModel.supportsToolCalling = info.supports_function_calling ?? false;
@@ -180,7 +183,8 @@
     return {
       name: "",
       displayName: "",
-      tokenLimit: 128000,
+      maxInputTokens: 128000,
+      maxOutputTokens: 4096,
       vision: false,
       reasoning: false,
       supportsToolCalling: false,
@@ -242,7 +246,8 @@
     currentModel = {
       name: suggestion.name,
       displayName: suggestion.displayName,
-      tokenLimit: suggestion.tokenLimit ?? 128000,
+      maxInputTokens: suggestion.maxInputTokens ?? 128000,
+      maxOutputTokens: suggestion.maxOutputTokens ?? 4096,
       vision: suggestion.vision ?? false,
       reasoning: suggestion.reasoning ?? false,
       supportsToolCalling: suggestion.supportsToolCalling ?? false,
@@ -261,7 +266,36 @@
     dispatch("back");
   }
 
+  let isLookingUpDefaults = false;
+  async function lookupDefaults() {
+    if (!currentModel.name.trim()) return;
+    isLookingUpDefaults = true;
+    try {
+      const result = await intric.modelProviders.getModelDefaults(currentModel.name.trim());
+      if (result.found) {
+        if (result.max_input_tokens != null) currentModel.maxInputTokens = result.max_input_tokens;
+        if (result.max_output_tokens != null) currentModel.maxOutputTokens = result.max_output_tokens;
+        currentModel.vision = result.supports_vision ?? false;
+        currentModel.reasoning = result.supports_reasoning ?? false;
+        currentModel.supportsToolCalling = result.supports_function_calling ?? false;
+        toast.success(m.reset_to_defaults_success());
+      } else {
+        toast.info(m.reset_to_defaults_not_found({ model: currentModel.name.trim() }));
+      }
+    } catch {
+      toast.info(m.reset_to_defaults_not_found({ model: currentModel.name.trim() }));
+    } finally {
+      isLookingUpDefaults = false;
+    }
+  }
+
   $: canAddModel = currentModel.name.trim() !== "" && currentModel.displayName.trim() !== "";
+
+  function formatTokenLimit(limit: number): string {
+    if (limit >= 1_000_000) return `${(limit / 1_000_000).toFixed(limit % 1_000_000 === 0 ? 0 : 1)}M`;
+    if (limit >= 1_000) return `${Math.round(limit / 1_000)}K`;
+    return limit.toString();
+  }
 
   // Export for parent to bind and track
   export let canFinish = false;
@@ -403,6 +437,19 @@
               ? m.model_identifier_placeholder_embedding()
               : m.model_identifier_placeholder_transcription()}
         />
+        {#if modelType === "completion" && currentModel.name.trim()}
+          <button
+            type="button"
+            class="text-xs text-accent-default hover:text-accent-stronger transition-colors underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 self-start"
+            disabled={isLookingUpDefaults}
+            on:click={lookupDefaults}
+          >
+            {#if isLookingUpDefaults}
+              <Loader2 class="w-3 h-3 animate-spin" />
+            {/if}
+            {m.lookup_defaults()}
+          </button>
+        {/if}
       </div>
 
       <!-- Display Name -->
@@ -418,22 +465,42 @@
 
     <!-- Completion-specific fields -->
     {#if modelType === "completion"}
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div class="flex flex-col gap-2">
-          <label for="token-limit" class="text-sm font-medium flex items-center gap-1.5">
-            {m.token_limit()}
-            <HelpTooltip text={m.token_limit_help()} />
+          <label for="max-input-tokens" class="text-sm font-medium flex items-center gap-1.5">
+            {m.max_input_tokens()}
+            <HelpTooltip text={m.max_input_tokens_help()} />
           </label>
           <Input.Text
-            id="token-limit"
+            id="max-input-tokens"
             type="number"
-            bind:value={currentModel.tokenLimit}
+            bind:value={currentModel.maxInputTokens}
             min="1024"
             max="10000000"
           />
         </div>
 
-        <div class="flex items-center gap-6 col-span-2">
+        <div class="flex flex-col gap-2">
+          <label for="max-output-tokens" class="text-sm font-medium flex items-center gap-1.5">
+            {m.max_output_tokens()}
+            <HelpTooltip text={m.max_output_tokens_help()} />
+          </label>
+          <Input.Text
+            id="max-output-tokens"
+            type="number"
+            bind:value={currentModel.maxOutputTokens}
+            min="1"
+            max="10000000"
+          />
+        </div>
+      </div>
+
+      <p class="text-xs text-muted">
+        {m.effective_context({ tokens: formatTokenLimit(Math.max(0, (currentModel.maxInputTokens ?? 128000) - (currentModel.maxOutputTokens ?? 4096))) })}
+      </p>
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="flex items-center gap-6 col-span-3">
           <label class="flex items-center gap-2 text-sm cursor-pointer">
             <input
               type="checkbox"
