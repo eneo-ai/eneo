@@ -42,6 +42,7 @@
     moonshot: "chn",
     baidu: "chn",
     volcengine: "chn",
+    berget: "swe",
   };
 
   // Auto-focus first input on mount
@@ -103,7 +104,7 @@
   }
 
   // Providers that need live model listing from their API (not LiteLLM static data)
-  const liveListProviders = new Set(["vllm"]);
+  const liveListProviders = new Set(["vllm", "berget"]);
 
   // Providers where LiteLLM names don't match user input (e.g. Azure uses deployment names)
   const noSuggestionsProviders = new Set(["azure"]);

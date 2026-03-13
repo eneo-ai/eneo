@@ -29,7 +29,8 @@
     { type: "gemini", label: "Google Gemini", description: "Gemini Pro, Gemini Flash" },
     { type: "cohere", label: "Cohere", description: "Command, Embed models" },
     { type: "mistral", label: "Mistral AI", description: "Mistral, Mixtral models" },
-    { type: "hosted_vllm", label: "vLLM", description: "Self-hosted vLLM inference server" }
+    { type: "hosted_vllm", label: "vLLM", description: "Self-hosted vLLM inference server" },
+    { type: "berget", label: "Berget AI", description: "Swedish-hosted AI models" }
   ] as const;
 
   const featuredTypes = new Set(providerTypes.map((p) => p.type));

@@ -54,8 +54,9 @@
   // Validation
   $: isAzure = providerType === "azure";
   $: isVllm = providerType === "hosted_vllm";
-  $: isKnownProvider = ["openai", "azure", "anthropic", "gemini", "cohere", "mistral", "hosted_vllm"].includes(providerType);
-  $: requiresEndpoint = isAzure || isVllm;
+  $: isBerget = providerType === "berget";
+  $: isKnownProvider = ["openai", "azure", "anthropic", "gemini", "cohere", "mistral", "hosted_vllm", "berget"].includes(providerType);
+  $: requiresEndpoint = isAzure || isVllm || isBerget;
   $: isValid =
     providerName.trim() !== "" &&
     apiKey.trim() !== "" &&

@@ -82,12 +82,20 @@ class TenantModelAdapter(CompletionModelAdapter):
         super().__init__(model)
         self.credential_resolver = credential_resolver
 
+        # Map provider types to LiteLLM provider names
+        # Berget is OpenAI-compatible, so use "openai" provider type
+        provider_mapping = {
+            "berget": "openai",
+            "gdm": "openai",
+        }
+        litellm_provider_type = provider_mapping.get(provider_type, provider_type)
+
         # Construct LiteLLM model name with provider prefix
         # LiteLLM requires the provider prefix to know which client to use
         # When using custom api_base, LiteLLM strips one prefix level and sends the rest to the API
         # Example: "openai/openai/gpt-4" -> sends "openai/gpt-4" to custom endpoint
-        self.litellm_model = f"{provider_type}/{model.name}"
-        self.provider_type = provider_type
+        self.litellm_model = f"{litellm_provider_type}/{model.name}"
+        self.provider_type = litellm_provider_type
 
     def _mask_sensitive_params(self, params: dict) -> dict:
         """Return copy of params with masked API key for safe logging."""

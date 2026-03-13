@@ -46,6 +46,7 @@
     { value: "cohere", label: "Cohere" },
     { value: "mistral", label: "Mistral AI" },
     { value: "hosted_vllm", label: "vLLM" },
+    { value: "berget", label: "Berget AI" },
   ];
 
   // Create options for provider select - add "Create New" option
