@@ -89,6 +89,54 @@ def validate_public_origin(origin: str | None) -> str | None:
     return f"{scheme}://{host}{port}"
 
 
+def validate_redirect_uri(uri: str | None) -> str | None:
+    """
+    Validate and normalize a full redirect URI for OIDC flows.
+
+    Rules:
+    - Must be HTTPS (or http://localhost for development)
+    - Must include a hostname and a path
+    - Must not include query parameters or fragment
+    - Must not include wildcard hostnames
+    - Normalize: lowercase scheme + host, strip trailing slash from path
+    """
+    if uri is None:
+        return None
+
+    uri = uri.strip()
+    if not uri:
+        raise ValueError("redirect_uri cannot be an empty string")
+
+    parsed = urlparse(uri)
+    if "*" in (parsed.hostname or ""):
+        raise ValueError(f"redirect_uri must not include wildcards: {uri}")
+
+    is_localhost = parsed.hostname in ("localhost", "127.0.0.1")
+    if parsed.scheme != "https" and not (parsed.scheme == "http" and is_localhost):
+        raise ValueError(
+            "redirect_uri must use https:// "
+            f"(or http://localhost for development), got: {uri}"
+        )
+
+    if not parsed.hostname:
+        raise ValueError(f"redirect_uri missing hostname: {uri}")
+
+    path = parsed.path or ""
+    if not path or not path.startswith("/"):
+        raise ValueError(f"redirect_uri must include an absolute path: {uri}")
+
+    if parsed.query or parsed.fragment:
+        raise ValueError(f"redirect_uri must not include query or fragment: {uri}")
+
+    host = parsed.hostname.lower()
+    scheme = parsed.scheme if is_localhost else "https"
+    default_port = 443 if scheme == "https" else 80
+    port = f":{parsed.port}" if parsed.port and parsed.port != default_port else ""
+    normalized_path = path.rstrip("/") or "/"
+
+    return f"{scheme}://{host}{port}{normalized_path}"
+
+
 def _set_app_version():
     # Try Docker path first, then local dev path
     manifest_path = _DOCKER_MANIFEST if _DOCKER_MANIFEST.exists() else _LOCAL_MANIFEST

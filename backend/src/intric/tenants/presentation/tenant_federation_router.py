@@ -4,11 +4,16 @@ from datetime import datetime, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 
 from intric.authentication import auth
-from intric.main.config import Settings, get_settings, validate_public_origin
+from intric.main.config import (
+    Settings,
+    get_settings,
+    validate_public_origin,
+    validate_redirect_uri,
+)
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.server.dependencies.container import get_container
@@ -36,6 +41,11 @@ router = APIRouter(
         Depends(auth.authenticate_super_api_key),
         Depends(check_feature_enabled),
     ],
+)
+
+redirect_uri_router = APIRouter(
+    prefix="/tenants",
+    dependencies=[Depends(auth.authenticate_super_api_key)],
 )
 
 
@@ -73,6 +83,15 @@ class SetFederationRequest(BaseModel):
         description="Optional custom redirect path starting with /",
         examples=["/auth/callback"],
     )
+    additional_redirect_uris: list[str] | None = Field(
+        None,
+        description=(
+            "Additional fully-qualified redirect URIs for OIDC flows. "
+            "Use when the tenant is accessed through multiple origins. "
+            "Each URI must also be registered in the upstream Identity Provider."
+        ),
+        examples=[["https://qwerty.sundsvall.se/api/eneo/login/callback"]],
+    )
 
     @field_validator("client_secret")
     @classmethod
@@ -109,6 +128,16 @@ class SetFederationRequest(BaseModel):
             raise ValueError("redirect_path must start with /")
         return value
 
+    @field_validator("additional_redirect_uris")
+    @classmethod
+    def validate_additional_redirect_uris(
+        cls, value: list[str] | None
+    ) -> list[str] | None:
+        if value is None:
+            return None
+        validated = [validate_redirect_uri(uri) for uri in value]
+        return [uri for uri in validated if uri is not None]
+
 
 class SetFederationResponse(BaseModel):
     """Response model for setting federation config."""
@@ -134,8 +163,173 @@ class FederationInfo(BaseModel):
     masked_secret: str
     issuer: Optional[str] = None
     allowed_domains: list[str]
+    additional_redirect_uris: list[str]
     configured_at: datetime
     encryption_status: Literal["encrypted", "plaintext"]
+
+
+class RedirectUriRequest(BaseModel):
+    redirect_uri: str = Field(
+        ...,
+        description=(
+            "A fully-qualified redirect URI for OIDC flows. "
+            "Works for both single-tenant and federation-per-tenant deployments."
+        ),
+        examples=["https://qwerty.sundsvall.se/api/eneo/login/callback"],
+    )
+
+    @field_validator("redirect_uri")
+    @classmethod
+    def validate_redirect_uri_value(cls, value: str) -> str:
+        validated = validate_redirect_uri(value)
+        if validated is None:
+            raise ValueError("redirect_uri is required")
+        return validated
+
+
+class RedirectUrisResponse(BaseModel):
+    tenant_id: UUID
+    additional_redirect_uris: list[str]
+    message: str
+
+
+@redirect_uri_router.post(
+    "/{tenant_id}/redirect-uris",
+    response_model=RedirectUrisResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add tenant redirect URI",
+    description=(
+        "Add an additional OIDC redirect URI for a tenant. "
+        "Available in both single-tenant and federation-per-tenant deployments."
+    ),
+)
+async def add_tenant_redirect_uri(
+    tenant_id: UUID,
+    request: RedirectUriRequest,
+    container: Container = Depends(get_container()),
+) -> RedirectUrisResponse:
+    tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
+
+    tenant = await tenant_service.get_tenant_by_id(tenant_id)
+    redirect_uris = await tenant_repo.add_additional_redirect_uri(
+        tenant_id=tenant_id,
+        redirect_uri=request.redirect_uri,
+    )
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=tenant_id,
+        actor_id=None,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.FEDERATION_UPDATED,
+        entity_type=EntityType.FEDERATION_CONFIG,
+        entity_id=tenant_id,
+        description=f"Sysadmin added redirect URI for tenant {tenant.name}",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
+            "target": {
+                "tenant_id": str(tenant_id),
+                "tenant_name": tenant.name,
+                "redirect_uri": request.redirect_uri,
+                "additional_redirect_uris": redirect_uris,
+            },
+        },
+    )
+
+    return RedirectUrisResponse(
+        tenant_id=tenant_id,
+        additional_redirect_uris=redirect_uris,
+        message="Redirect URI added successfully",
+    )
+
+
+@redirect_uri_router.delete(
+    "/{tenant_id}/redirect-uris",
+    response_model=RedirectUrisResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Remove tenant redirect URI",
+    description=(
+        "Remove an additional OIDC redirect URI for a tenant. "
+        "Available in both single-tenant and federation-per-tenant deployments."
+    ),
+)
+async def delete_tenant_redirect_uri(
+    tenant_id: UUID,
+    redirect_uri: str = Query(
+        ...,
+        description="The fully-qualified redirect URI to remove.",
+    ),
+    container: Container = Depends(get_container()),
+) -> RedirectUrisResponse:
+    tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
+
+    tenant = await tenant_service.get_tenant_by_id(tenant_id)
+    validated_redirect_uri = validate_redirect_uri(redirect_uri)
+    if validated_redirect_uri is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="redirect_uri is required",
+        )
+
+    redirect_uris = await tenant_repo.remove_additional_redirect_uri(
+        tenant_id=tenant_id,
+        redirect_uri=validated_redirect_uri,
+    )
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=tenant_id,
+        actor_id=None,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.FEDERATION_UPDATED,
+        entity_type=EntityType.FEDERATION_CONFIG,
+        entity_id=tenant_id,
+        description=f"Sysadmin removed redirect URI for tenant {tenant.name}",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
+            "target": {
+                "tenant_id": str(tenant_id),
+                "tenant_name": tenant.name,
+                "redirect_uri": validated_redirect_uri,
+                "additional_redirect_uris": redirect_uris,
+            },
+        },
+    )
+
+    return RedirectUrisResponse(
+        tenant_id=tenant_id,
+        additional_redirect_uris=redirect_uris,
+        message="Redirect URI removed successfully",
+    )
+
+
+@redirect_uri_router.get(
+    "/{tenant_id}/redirect-uris",
+    response_model=RedirectUrisResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get tenant redirect URIs",
+    description=(
+        "Get additional OIDC redirect URIs configured for a tenant. "
+        "Available in both single-tenant and federation-per-tenant deployments."
+    ),
+)
+async def get_tenant_redirect_uris(
+    tenant_id: UUID,
+    container: Container = Depends(get_container()),
+) -> RedirectUrisResponse:
+    tenant_repo = container.tenant_repo()
+    tenant_service = container.tenant_service()
+
+    await tenant_service.get_tenant_by_id(tenant_id)
+    redirect_uris = await tenant_repo.get_additional_redirect_uris(tenant_id)
+
+    return RedirectUrisResponse(
+        tenant_id=tenant_id,
+        additional_redirect_uris=redirect_uris,
+        message="Redirect URIs fetched successfully",
+    )
 
 
 @router.put(
@@ -317,6 +511,9 @@ async def set_tenant_federation(
     if request.redirect_path:
         federation_config["redirect_path"] = request.redirect_path
 
+    if request.additional_redirect_uris is not None:
+        federation_config["additional_redirect_uris"] = request.additional_redirect_uris
+
     # Save to database
     await tenant_repo.update_federation_config(
         tenant_id=tenant_id,
@@ -458,6 +655,7 @@ async def get_tenant_federation(
         masked_secret=metadata["masked_secret"],
         issuer=metadata.get("issuer"),
         allowed_domains=metadata.get("allowed_domains", []),
+        additional_redirect_uris=metadata.get("additional_redirect_uris", []),
         configured_at=datetime.fromisoformat(metadata["encrypted_at"])
         if metadata.get("encrypted_at")
         else tenant.updated_at,

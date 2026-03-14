@@ -15,7 +15,7 @@ from jwt import PyJWKClient as _PyJWKClient
 from pydantic import BaseModel
 
 from intric.main.aiohttp_client import aiohttp_client
-from intric.main.config import get_settings
+from intric.main.config import get_settings, validate_redirect_uri
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.main.request_context import set_request_context
@@ -482,6 +482,14 @@ async def initiate_auth(
     state: Optional[str] = Query(
         None, description="Optional frontend-generated CSRF state"
     ),
+    redirect_uri_param: Optional[str] = Query(
+        None,
+        alias="redirect_uri",
+        description=(
+            "Optional redirect URI override. Must exactly match a configured "
+            "redirect URI for the tenant."
+        ),
+    ),
     container: Container = Depends(get_container()),
 ) -> InitiateAuthResponse:
     """
@@ -616,9 +624,12 @@ async def initiate_auth(
             detail=f"No identity provider configured for tenant '{tenant}'",
         )
 
+    correlation_id = secrets.token_hex(8)  # Generate correlation ID for request tracing
+    set_request_context(correlation_id=correlation_id)
+
     # Resolve redirect_uri server-side
     try:
-        redirect_uri = credential_resolver.get_redirect_uri()
+        canonical_redirect_uri = credential_resolver.get_redirect_uri()
     except ValueError as e:
         logger.error(
             "Failed to resolve redirect_uri for tenant",
@@ -626,6 +637,7 @@ async def initiate_auth(
                 "tenant_id": str(tenant_obj.id),
                 "tenant_slug": tenant,
                 "error": str(e),
+                "correlation_id": correlation_id,
             },
         )
         raise HTTPException(
@@ -634,11 +646,41 @@ async def initiate_auth(
             "Contact administrator to configure canonical_public_origin.",
         )
 
+    valid_redirect_uris = credential_resolver.get_valid_redirect_uris()
+
+    if redirect_uri_param is not None:
+        try:
+            redirect_uri = validate_redirect_uri(redirect_uri_param)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            ) from e
+
+        if redirect_uri not in valid_redirect_uris:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "The provided redirect_uri is not registered for this tenant. "
+                    "Configure it via the tenant federation settings and register it with your IdP."
+                ),
+            )
+
+        if redirect_uri != canonical_redirect_uri:
+            logger.info(
+                "OIDC initiate using non-canonical redirect_uri",
+                extra={
+                    "tenant_id": str(tenant_obj.id),
+                    "chosen_redirect_uri": redirect_uri,
+                    "canonical_redirect_uri": canonical_redirect_uri,
+                    "correlation_id": correlation_id,
+                },
+            )
+    else:
+        redirect_uri = canonical_redirect_uri
+
     # Generate server-signed state (includes tenant context for callback validation)
     # State format: JWT with expiry (10 minutes)
-    correlation_id = secrets.token_hex(8)  # Generate correlation ID for request tracing
-    set_request_context(correlation_id=correlation_id)
-
     effective_updated_at = tenant_obj.updated_at or tenant_obj.created_at
     tenant_config_version = (
         effective_updated_at.isoformat() if effective_updated_at else None
@@ -1100,7 +1142,29 @@ async def auth_callback(
                     headers={"X-Correlation-ID": correlation_id},
                 )
 
-            redirect_mismatch = redirect_uri != expected_redirect_uri
+            valid_redirect_uris = set(credential_resolver.get_valid_redirect_uris())
+            try:
+                redirect_uri = validate_redirect_uri(redirect_uri)
+            except ValueError:
+                logger.error(
+                    "State redirect_uri failed validation",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "tenant_slug": tenant_slug,
+                        "state_redirect_uri": redirect_uri,
+                        "correlation_id": correlation_id,
+                    },
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "Redirect URI mismatch - authentication flow invalid. "
+                        "Please try logging in again."
+                    ),
+                    headers={"X-Correlation-ID": correlation_id},
+                )
+
+            redirect_mismatch = redirect_uri not in valid_redirect_uris
             allow_redirect_mismatch = False
             current_config_version = (
                 tenant_obj.updated_at.isoformat() if tenant_obj.updated_at else None
@@ -1200,6 +1264,7 @@ async def auth_callback(
                             "tenant_slug": tenant_slug,
                             "state_redirect_uri": redirect_uri,
                             "expected_redirect_uri": expected_redirect_uri,
+                            "allowed_redirect_uri_count": len(valid_redirect_uris),
                             "correlation_id": correlation_id,
                             "config_version_state": state_config_version,
                             "config_version_current": current_config_version,
@@ -1214,6 +1279,17 @@ async def auth_callback(
                         ),
                         headers={"X-Correlation-ID": correlation_id},
                     )
+            elif redirect_uri != expected_redirect_uri:
+                logger.info(
+                    "Accepted non-canonical configured redirect_uri during callback",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "tenant_slug": tenant_slug,
+                        "state_redirect_uri": redirect_uri,
+                        "expected_redirect_uri": expected_redirect_uri,
+                        "correlation_id": correlation_id,
+                    },
+                )
 
             logger.debug(
                 "Redirect URI validated successfully",

@@ -438,6 +438,114 @@ class TenantRepository:
         await self.session.execute(stmt)
         await self.session.commit()
 
+    async def update_additional_redirect_uris(
+        self,
+        tenant_id: UUID,
+        additional_redirect_uris: list[str],
+    ) -> None:
+        stmt = sa.select(Tenants.federation_config).where(Tenants.id == tenant_id)
+        result = await self.session.execute(stmt)
+        current_config = result.scalar_one_or_none() or {}
+
+        updated_config = dict(current_config)
+        if additional_redirect_uris:
+            updated_config["additional_redirect_uris"] = list(additional_redirect_uris)
+        else:
+            updated_config.pop("additional_redirect_uris", None)
+
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(
+                federation_config=updated_config,
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+
+    async def add_additional_redirect_uri(
+        self,
+        tenant_id: UUID,
+        redirect_uri: str,
+    ) -> list[str]:
+        stmt = sa.select(Tenants.federation_config).where(Tenants.id == tenant_id)
+        result = await self.session.execute(stmt)
+        current_config = result.scalar_one_or_none() or {}
+
+        updated_config = dict(current_config)
+        current_redirect_uris = updated_config.get("additional_redirect_uris", [])
+        if not isinstance(current_redirect_uris, list):
+            current_redirect_uris = []
+
+        normalized_redirect_uris = [
+            uri for uri in current_redirect_uris if isinstance(uri, str)
+        ]
+        if redirect_uri not in normalized_redirect_uris:
+            normalized_redirect_uris.append(redirect_uri)
+
+        updated_config["additional_redirect_uris"] = normalized_redirect_uris
+
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(
+                federation_config=updated_config,
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+
+        return normalized_redirect_uris
+
+    async def remove_additional_redirect_uri(
+        self,
+        tenant_id: UUID,
+        redirect_uri: str,
+    ) -> list[str]:
+        stmt = sa.select(Tenants.federation_config).where(Tenants.id == tenant_id)
+        result = await self.session.execute(stmt)
+        current_config = result.scalar_one_or_none() or {}
+
+        updated_config = dict(current_config)
+        current_redirect_uris = updated_config.get("additional_redirect_uris", [])
+        if not isinstance(current_redirect_uris, list):
+            current_redirect_uris = []
+
+        normalized_redirect_uris = [
+            uri
+            for uri in current_redirect_uris
+            if isinstance(uri, str) and uri != redirect_uri
+        ]
+
+        if normalized_redirect_uris:
+            updated_config["additional_redirect_uris"] = normalized_redirect_uris
+        else:
+            updated_config.pop("additional_redirect_uris", None)
+
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(
+                federation_config=updated_config,
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+
+        return normalized_redirect_uris
+
+    async def get_additional_redirect_uris(self, tenant_id: UUID) -> list[str]:
+        stmt = sa.select(Tenants.federation_config).where(Tenants.id == tenant_id)
+        result = await self.session.execute(stmt)
+        config = result.scalar_one_or_none() or {}
+        redirect_uris = config.get("additional_redirect_uris", [])
+        if not isinstance(redirect_uris, list):
+            return []
+        return [uri for uri in redirect_uris if isinstance(uri, str)]
+
     async def delete_federation_config(self, tenant_id: UUID) -> None:
         """Remove federation config for tenant.
 
@@ -511,6 +619,7 @@ class TenantRepository:
             "masked_secret": masked_secret,
             "issuer": config.get("issuer"),
             "allowed_domains": config.get("allowed_domains", []),
+            "additional_redirect_uris": config.get("additional_redirect_uris", []),
             "encrypted_at": config.get("encrypted_at"),
             "encryption_status": encryption_status,
         }
