@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 from sqlalchemy import ForeignKey, String, Text, Boolean, UniqueConstraint
@@ -7,6 +7,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.base_class import BasePublic, BaseCrossReference
 from intric.database.tables.tenant_table import Tenants
+
+if TYPE_CHECKING:
+    from intric.database.tables.security_classifications_table import SecurityClassification
 
 
 class MCPServers(BasePublic):
@@ -36,6 +39,12 @@ class MCPServers(BasePublic):
     icon_url: Mapped[Optional[str]] = mapped_column(String)
     documentation_url: Mapped[Optional[str]] = mapped_column(String)
 
+    # Security classification
+    security_classification_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("security_classifications.id", ondelete="SET NULL"), nullable=True
+    )
+    security_classification: Mapped[Optional["SecurityClassification"]] = relationship()
+
     # Relationships
     tools: Mapped[list["MCPServerTools"]] = relationship(
         back_populates="mcp_server",
@@ -57,6 +66,12 @@ class MCPServerTools(BasePublic):
     description: Mapped[Optional[str]] = mapped_column(Text)
     input_schema: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
     is_enabled_by_default: Mapped[bool] = mapped_column(Boolean, server_default="True", nullable=False)
+
+    # Pending changes for tool sync approval
+    pending_description: Mapped[Optional[str]] = mapped_column(Text)
+    pending_input_schema: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    requires_approval: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
+    removed_from_remote: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
 
     # Relationships
     mcp_server: Mapped[MCPServers] = relationship(back_populates="tools")

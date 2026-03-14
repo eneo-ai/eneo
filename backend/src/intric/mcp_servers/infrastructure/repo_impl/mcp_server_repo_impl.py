@@ -6,6 +6,9 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
 from intric.database.tables.mcp_server_table import MCPServers as MCPServersTable
+from intric.database.tables.security_classifications_table import (
+    SecurityClassification as SecurityClassificationDBModel,
+)
 from intric.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 from intric.mcp_servers.domain.repositories.mcp_server_repo import MCPServerRepository
@@ -58,7 +61,12 @@ class MCPServerRepoImpl(
         query = (
             select(self._db_model)
             .where(self._db_model.tenant_id == tenant_id)
-            .options(selectinload(self._db_model.tools))
+            .options(
+                selectinload(self._db_model.tools),
+                selectinload(self._db_model.security_classification).selectinload(
+                    SecurityClassificationDBModel.tenant
+                ),
+            )
         )
         result = await self.session.scalars(query)
         records = result.all()

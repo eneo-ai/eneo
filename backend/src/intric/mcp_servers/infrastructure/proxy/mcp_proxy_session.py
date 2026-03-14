@@ -87,6 +87,9 @@ class MCPProxySession:
                 # Only include enabled tools
                 if not tool.is_enabled_by_default:
                     continue
+                # Skip new tools that have no active values yet
+                if tool.requires_approval and tool.description is None and tool.input_schema is None:
+                    continue
 
                 # Create prefixed tool name: server_name__tool_name
                 tool_name_sanitized = self._sanitize_name(tool.name)

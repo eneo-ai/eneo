@@ -24,7 +24,9 @@ export const load = async (event) => {
     transport_type: server.transport_type,
     http_auth_type: server.http_auth_type,
     tags: server.tags,
-    icon_url: server.icon_url
+    icon_url: server.icon_url,
+    security_classification: server.security_classification ?? null,
+    tools: server.tools ?? []
   }));
 
   return {

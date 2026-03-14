@@ -1,8 +1,13 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 from intric.base.base_entity import Entity
+
+if TYPE_CHECKING:
+    from intric.security_classifications.domain.entities.security_classification import (
+        SecurityClassification,
+    )
 
 
 class MCPServerTool(Entity):
@@ -15,6 +20,10 @@ class MCPServerTool(Entity):
         description: Optional[str] = None,
         input_schema: Optional[dict[str, Any]] = None,
         is_enabled_by_default: bool = True,
+        pending_description: Optional[str] = None,
+        pending_input_schema: Optional[dict[str, Any]] = None,
+        requires_approval: bool = False,
+        removed_from_remote: bool = False,
         id: Optional[UUID] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
@@ -25,6 +34,10 @@ class MCPServerTool(Entity):
         self.description = description
         self.input_schema = input_schema
         self.is_enabled_by_default = is_enabled_by_default
+        self.pending_description = pending_description
+        self.pending_input_schema = pending_input_schema
+        self.requires_approval = requires_approval
+        self.removed_from_remote = removed_from_remote
 
 
 class MCPServer(Entity):
@@ -44,6 +57,7 @@ class MCPServer(Entity):
         icon_url: Optional[str] = None,
         documentation_url: Optional[str] = None,
         tools: Optional[list[MCPServerTool]] = None,
+        security_classification: Optional["SecurityClassification"] = None,
         id: Optional[UUID] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
@@ -61,6 +75,7 @@ class MCPServer(Entity):
         self.icon_url = icon_url
         self.documentation_url = documentation_url
         self.tools = tools or []
+        self.security_classification = security_classification
 
 
 class MCPServerSettings(Entity):

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Union
 from uuid import UUID
 
@@ -50,6 +50,7 @@ class SpaceSecurityClassificationImpactAnalysis:
     affected_completion_models: list["CompletionModel"]
     affected_embedding_models: list["EmbeddingModel"]
     affected_transcription_models: list["TranscriptionModel"]
+    affected_mcp_servers: list = field(default_factory=list)
 
 TENANT_SPACE_NAME = "Organization space" 
 
@@ -238,14 +239,26 @@ class SpaceService:
         if mcp_server_ids is not None:
             # Query tenant MCP servers directly from database
             from intric.database.tables.mcp_server_table import MCPServers as MCPServersTable
+            from intric.database.tables.security_classifications_table import (
+                SecurityClassification as SecurityClassificationDBModel,
+            )
             from intric.mcp_servers.domain.entities.mcp_server import MCPServer
+            from intric.security_classifications.domain.entities.security_classification import (
+                SecurityClassification,
+            )
             import sqlalchemy as sa
+            from sqlalchemy.orm import selectinload as _selectinload
 
             query = (
                 sa.select(MCPServersTable)
                 .where(MCPServersTable.tenant_id == self.user.tenant_id)
                 .where(MCPServersTable.is_enabled == True)  # noqa: E712
                 .where(MCPServersTable.id.in_(mcp_server_ids))
+                .options(
+                    _selectinload(MCPServersTable.security_classification).selectinload(
+                        SecurityClassificationDBModel.tenant
+                    ),
+                )
             )
             result = await self.repo.session.execute(query)
             servers_db = result.scalars().all()
@@ -273,6 +286,9 @@ class SpaceService:
                     tags=server.tags,
                     icon_url=server.icon_url,
                     documentation_url=server.documentation_url,
+                    security_classification=SecurityClassification.to_domain(
+                        server.security_classification
+                    ),
                     created_at=server.created_at,
                     updated_at=server.updated_at,
                 )
@@ -325,6 +341,7 @@ class SpaceService:
         current_completion_models = space.completion_models
         current_embedding_models = space.embedding_models
         current_transcription_models = space.transcription_models
+        current_mcp_servers = space.mcp_servers
 
         space.update(
             security_classification=security_classification,
@@ -333,6 +350,7 @@ class SpaceService:
         remaining_completion_model_ids = [cm.id for cm in space.completion_models]
         remaining_embedding_model_ids = [em.id for em in space.embedding_models]
         remaining_transcription_model_ids = [tm.id for tm in space.transcription_models]
+        remaining_mcp_server_ids = [s.id for s in space.mcp_servers]
 
         affected_completion_models = [
             cm for cm in current_completion_models if cm.id not in remaining_completion_model_ids
@@ -344,6 +362,9 @@ class SpaceService:
             tm
             for tm in current_transcription_models
             if tm.id not in remaining_transcription_model_ids
+        ]
+        affected_mcp_servers = [
+            s for s in current_mcp_servers if s.id not in remaining_mcp_server_ids
         ]
 
         affected_assistants = []
@@ -391,6 +412,7 @@ class SpaceService:
             affected_completion_models=affected_completion_models,
             affected_embedding_models=affected_embedding_models,
             affected_transcription_models=affected_transcription_models,
+            affected_mcp_servers=affected_mcp_servers,
         )
 
     async def delete_personal_space(self, user: UserInDB):
