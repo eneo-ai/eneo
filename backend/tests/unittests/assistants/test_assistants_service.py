@@ -282,3 +282,18 @@ async def test_error_when_assistant_cannot_be_used_in_space(setup: Setup):
 
     with pytest.raises(UnauthorizedException):
         await setup.service.ask(question="hello", assistant_id=MagicMock())
+
+
+async def test_publish_assistant_unauthorized_has_actionable_message(setup: Setup):
+    space = MagicMock()
+    space.get_assistant.return_value = MagicMock()
+    setup.service.space_repo.get_space_by_assistant.return_value = space
+
+    actor = MagicMock()
+    actor.can_publish_assistants.return_value = False
+    setup.service.actor_manager.get_space_actor_from_space.return_value = actor
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await setup.service.publish_assistant(TEST_UUID, True)
+
+    assert "Publishing assistants" in str(exc_info.value)

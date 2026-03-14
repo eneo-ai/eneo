@@ -192,7 +192,7 @@ class TestAuditConfigService:
                 assert len(category_config.example_actions) > 0
                 assert len(category_config.example_actions) <= 3
 
-    async def test_get_config_admin_actions_has_13_actions(
+    async def test_get_config_admin_actions_has_23_actions(
         self, db_session, seeded_tenant
     ):
         """Verify admin_actions category has correct action count."""
@@ -204,7 +204,7 @@ class TestAuditConfigService:
             admin_config = next(
                 c for c in response.categories if c.category == 'admin_actions'
             )
-            assert admin_config.action_count == 13
+            assert admin_config.action_count == 23
 
     async def test_update_config_single_category(
         self, db_session, seeded_tenant

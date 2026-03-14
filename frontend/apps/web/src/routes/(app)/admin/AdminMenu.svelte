@@ -63,7 +63,13 @@
     label={m.security()}
   />
   <Navigation.Link
-    href="/admin/mcp-servers"
+    href={localizeHref("/admin/api-keys")}
+    isActive={isSelected("/admin/api-keys", currentRoute)}
+    icon={IconKey}
+    label={m.api_keys()}
+  />
+  <Navigation.Link
+    href={localizeHref("/admin/mcp-servers")}
     isActive={isSelected("/admin/mcp-servers", currentRoute)}
     icon={Plug}
     label={m.mcp()}

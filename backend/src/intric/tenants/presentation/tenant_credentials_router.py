@@ -48,7 +48,17 @@ router = APIRouter(
 )
 
 # Provider enum - supported LLM providers
-Provider = Literal["openai", "anthropic", "azure", "berget", "gdm", "mistral", "ovhcloud", "gemini", "cohere"]
+Provider = Literal[
+    "openai",
+    "anthropic",
+    "azure",
+    "berget",
+    "gdm",
+    "mistral",
+    "ovhcloud",
+    "gemini",
+    "cohere",
+]
 
 
 class SetCredentialRequest(BaseModel):
@@ -286,7 +296,11 @@ async def set_tenant_credential(
         # Parse validation errors from service
         error_message = str(e)
         if "Credential validation failed" in error_message:
-            errors = error_message.split(": ", 1)[1].split("; ") if ": " in error_message else [error_message]
+            errors = (
+                error_message.split(": ", 1)[1].split("; ")
+                if ": " in error_message
+                else [error_message]
+            )
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={

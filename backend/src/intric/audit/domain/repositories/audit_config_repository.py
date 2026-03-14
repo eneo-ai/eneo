@@ -37,9 +37,7 @@ class AuditConfigRepository(ABC):
         pass
 
     @abstractmethod
-    async def find_all_by_tenant(
-        self, tenant_id: UUID
-    ) -> list[tuple[str, bool, dict]]:
+    async def find_all_by_tenant(self, tenant_id: UUID) -> list[tuple[str, bool, dict]]:
         """
         Get all category configurations for a tenant in a single batch query.
 

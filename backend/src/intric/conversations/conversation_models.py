@@ -37,13 +37,16 @@ class ConversationRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_ids(self) -> "ConversationRequest":
-        """Validate that at least one of session_id, assistant_id, or group_chat_id is provided"""
-        if (
-            self.session_id is None
-            and self.assistant_id is None
-            and self.group_chat_id is None
-        ):
+        """Validate that exactly one of session_id, assistant_id, or group_chat_id is provided."""
+        ids = [
+            value
+            for value in (self.session_id, self.assistant_id, self.group_chat_id)
+            if value is not None
+        ]
+        if len(ids) == 0:
+            raise ValueError("Provide exactly one of session_id, assistant_id, or group_chat_id.")
+        if len(ids) > 1:
             raise ValueError(
-                "Either session_id, assistant_id, or group_chat_id must be provided"
+                "Provide exactly one of session_id, assistant_id, or group_chat_id, not multiple."
             )
         return self

@@ -56,3 +56,20 @@ async def test_delete_raise_unauthorized_if_can_not_delete(
 
     with pytest.raises(UnauthorizedException):
         await service.delete_app(MagicMock())
+
+
+async def test_publish_raise_unauthorized_has_actionable_message(
+    service: AppService,
+):
+    space = MagicMock()
+    space.get_app.return_value = MagicMock()
+    service.space_repo.get_space_by_app.return_value = space
+
+    actor = MagicMock()
+    actor.can_publish_apps.return_value = False
+    service.actor_manager.get_space_actor_from_space.return_value = actor
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await service.publish_app(MagicMock(), True)
+
+    assert "Publishing apps" in str(exc_info.value)

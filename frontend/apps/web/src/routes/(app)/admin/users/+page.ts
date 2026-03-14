@@ -4,8 +4,12 @@ export const load = async (event) => {
   // Stable dependency key for manual invalidation after mutations
   event.depends("admin:users");
 
-  // Read search and tab parameters from URL for server-side filtering
-  const search_email = event.url.searchParams.get('search') || undefined;
+  // Read search and tab parameters from URL for server-side filtering.
+  // Support both canonical `search` and legacy `search_email` links.
+  const search_email =
+    event.url.searchParams.get('search') ||
+    event.url.searchParams.get('search_email') ||
+    undefined;
   const tab = event.url.searchParams.get('tab') || 'active';  // Default to 'active' tab
 
   // Convert tab to state_filter for backend

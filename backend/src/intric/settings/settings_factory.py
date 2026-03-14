@@ -24,4 +24,5 @@ def get_settings_service_allowing_read_only_key(
         ai_models_service=container.ai_models_service(),
         feature_flag_service=container.feature_flag_service(),
         tenant_repo=container.tenant_repo(),
+        audit_service=container.audit_service(),
     )

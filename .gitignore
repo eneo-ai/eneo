@@ -25,6 +25,9 @@
 exports/
 backend/exports/
 
+# test results
+backend/test-results/
+
 # claude
 .claude/*.local.json
 backend/openapi.json

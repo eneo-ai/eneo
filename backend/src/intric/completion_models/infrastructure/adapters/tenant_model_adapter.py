@@ -3,7 +3,7 @@ import base64
 import json
 import re
 import uuid
-from typing import TYPE_CHECKING, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator
 
 import litellm
 from litellm import (
@@ -702,6 +702,8 @@ class TenantModelAdapter(CompletionModelAdapter):
         model_kwargs: dict = None,
         require_tool_approval: bool = False,
         approval_manager: "ToolApprovalManager | None" = None,
+        approval_context: dict | None = None,
+        pending_approval_ids: set[str] | None = None,
     ) -> AsyncIterator[Completion]:
         """
         Iterate streaming response from tenant model.
@@ -716,6 +718,8 @@ class TenantModelAdapter(CompletionModelAdapter):
             model_kwargs: Optional model parameters (for logging)
             require_tool_approval: Whether MCP tool calls need user approval
             approval_manager: Manager for tool approval flow
+            approval_context: Context map with tenant_id, user_id, session_id, assistant_id
+            pending_approval_ids: Mutable set to track approvals for disconnect cleanup
 
         Yields:
             Completion: Chunks of completion (yields error events for mid-stream failures)
@@ -859,12 +863,32 @@ class TenantModelAdapter(CompletionModelAdapter):
                             server_name=sname, tool_name=tname,
                             arguments=args, tool_call_id=tc['id'],
                         ))
+                    tool_args_by_call_id = {
+                        tm.tool_call_id: tm.arguments
+                        for tm in tool_metadata
+                        if tm.tool_call_id is not None
+                    }
 
                     # Approval flow
+                    decision_map: dict[str, tuple[bool, str | None]] = {}
+                    timed_out = False
                     if require_tool_approval and approval_manager:
+                        if approval_context is None:
+                            raise OpenAIException("Missing approval context for tool approval flow")
+
                         approval_id = str(uuid.uuid4())
-                        tool_call_ids = [tc['id'] for tc in tool_calls]
-                        approval_manager.request_approval(approval_id, tool_call_ids)
+                        tool_call_ids = [tc["id"] for tc in tool_calls if tc.get("id")]
+                        if pending_approval_ids is not None:
+                            pending_approval_ids.add(approval_id)
+
+                        await approval_manager.request_approval(
+                            approval_id=approval_id,
+                            tool_call_ids=tool_call_ids,
+                            tenant_id=approval_context["tenant_id"],
+                            user_id=approval_context["user_id"],
+                            session_id=approval_context["session_id"],
+                            assistant_id=approval_context.get("assistant_id"),
+                        )
 
                         yield Completion(
                             response_type=ResponseType.TOOL_APPROVAL_REQUIRED,
@@ -872,26 +896,70 @@ class TenantModelAdapter(CompletionModelAdapter):
                             approval_id=approval_id,
                         )
 
-                        decisions = await approval_manager.wait_for_approval(approval_id)
-                        approval_map = {d.tool_call_id: d.approved for d in decisions}
+                        wait_result = await approval_manager.wait_for_approval(approval_id)
+                        if pending_approval_ids is not None:
+                            pending_approval_ids.discard(approval_id)
+                        timed_out = wait_result.timed_out
+                        decision_map = {
+                            d.tool_call_id: (d.approved, d.reason) for d in wait_result.decisions
+                        }
+
+                        if timed_out:
+                            yield Completion(
+                                response_type=ResponseType.TOOL_APPROVAL_TIMEOUT,
+                                approval_id=approval_id,
+                                tool_calls_metadata=[
+                                    ToolCallMetadata(
+                                        server_name=tm.server_name,
+                                        tool_name=tm.tool_name,
+                                        arguments=tm.arguments,
+                                        tool_call_id=tm.tool_call_id,
+                                        approved=False,
+                                        result_status="timeout_denied",
+                                    )
+                                    for tm in tool_metadata
+                                ],
+                            )
 
                         yield Completion(
                             response_type=ResponseType.TOOL_CALL,
                             tool_calls_metadata=[
                                 ToolCallMetadata(
-                                    server_name=tm.server_name, tool_name=tm.tool_name,
-                                    arguments=tm.arguments, tool_call_id=tm.tool_call_id,
-                                    approved=approval_map.get(tm.tool_call_id, False),
-                                ) for tm in tool_metadata
+                                    server_name=tm.server_name,
+                                    tool_name=tm.tool_name,
+                                    arguments=tm.arguments,
+                                    tool_call_id=tm.tool_call_id,
+                                    approved=decision_map.get(tm.tool_call_id, (False, None))[0],
+                                    result_status=(
+                                        "approved"
+                                        if decision_map.get(tm.tool_call_id, (False, None))[0]
+                                        else ("timeout_denied" if timed_out else "denied")
+                                    ),
+                                )
+                                for tm in tool_metadata
                             ],
                         )
 
-                        approved_tcs = [tc for tc in tool_calls if approval_map.get(tc['id'], False)]
-                        denied_tcs = [tc for tc in tool_calls if not approval_map.get(tc['id'], False)]
+                        approved_tcs = [
+                            tc for tc in tool_calls if decision_map.get(tc["id"], (False, None))[0]
+                        ]
+                        denied_tcs = [
+                            tc for tc in tool_calls if not decision_map.get(tc["id"], (False, None))[0]
+                        ]
                     else:
                         yield Completion(
                             response_type=ResponseType.TOOL_CALL,
-                            tool_calls_metadata=tool_metadata,
+                            tool_calls_metadata=[
+                                ToolCallMetadata(
+                                    server_name=tm.server_name,
+                                    tool_name=tm.tool_name,
+                                    arguments=tm.arguments,
+                                    tool_call_id=tm.tool_call_id,
+                                    approved=tm.approved,
+                                    result_status="approved",
+                                )
+                                for tm in tool_metadata
+                            ],
                         )
                         approved_tcs = tool_calls
                         denied_tcs = []
@@ -925,27 +993,81 @@ class TenantModelAdapter(CompletionModelAdapter):
                             for tc in approved_tcs
                         ]
                         results = await mcp_proxy.call_tools_parallel(proxy_calls)
+                        execution_metadata: list[ToolCallMetadata] = []
                         for tc, res in zip(approved_tcs, results):
                             text = ""
                             if res.get("content"):
                                 for ci in res["content"]:
                                     if ci.get("type") == "text":
                                         text += ci.get("text", "")
+                            result_status = "succeeded"
                             if res.get("is_error"):
                                 text = json.dumps({"error": text or "Tool execution failed"})
+                                result_status = "failed"
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tc['id'],
                                 "content": text,
                             })
+                            tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
+                            if tool_info:
+                                server_name, tool_name = tool_info
+                            elif "__" in tc["function"]["name"]:
+                                server_name, tool_name = tc["function"]["name"].split("__", 1)
+                            else:
+                                server_name, tool_name = "", tc["function"]["name"]
+                            execution_metadata.append(
+                                ToolCallMetadata(
+                                    server_name=server_name,
+                                    tool_name=tool_name,
+                                    arguments=tool_args_by_call_id.get(tc["id"]),
+                                    tool_call_id=tc["id"],
+                                    approved=True,
+                                    result_status=result_status,
+                                )
+                            )
+
+                        if execution_metadata:
+                            yield Completion(
+                                response_type=ResponseType.TOOL_CALL,
+                                tool_calls_metadata=execution_metadata,
+                            )
 
                     # Add denied tool results
+                    denied_metadata: list[ToolCallMetadata] = []
                     for tc in denied_tcs:
+                        denial_reason = decision_map.get(tc["id"], (False, None))[1]
+                        denial_payload: dict[str, Any] = {"denied": True}
+                        if denial_reason:
+                            denial_payload["user_reason"] = denial_reason
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc['id'],
-                            "content": "Tool execution was denied by user.",
+                            "content": json.dumps(denial_payload),
                         })
+                        tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
+                        if tool_info:
+                            server_name, tool_name = tool_info
+                        elif "__" in tc["function"]["name"]:
+                            server_name, tool_name = tc["function"]["name"].split("__", 1)
+                        else:
+                            server_name, tool_name = "", tc["function"]["name"]
+                        denied_metadata.append(
+                            ToolCallMetadata(
+                                server_name=server_name,
+                                tool_name=tool_name,
+                                arguments=tool_args_by_call_id.get(tc["id"]),
+                                tool_call_id=tc["id"],
+                                approved=False,
+                                result_status="timeout_denied" if timed_out else "denied",
+                            )
+                        )
+
+                    if denied_metadata:
+                        yield Completion(
+                            response_type=ResponseType.TOOL_CALL,
+                            tool_calls_metadata=denied_metadata,
+                        )
 
                     # Follow-up streaming request (keep tools for next round)
                     follow_up = await litellm.acompletion(

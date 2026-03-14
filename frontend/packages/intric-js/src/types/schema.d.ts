@@ -3,15 +3,6 @@
  * Do not make direct changes to the file.
  */
 
-/** OneOf type helpers */
-type Without<T, U> = { [P in Exclude<keyof T, keyof U>]?: never };
-type XOR<T, U> = T | U extends object ? (Without<T, U> & U) | (Without<U, T> & T) : T | U;
-type OneOf<T extends any[]> = T extends [infer Only]
-  ? Only
-  : T extends [infer A, infer B, ...infer Rest]
-    ? OneOf<[XOR<A, B>, ...Rest]>
-    : never;
-
 export interface paths {
   "/api/v1/crawl-runs/{id}/": {
     /** Get Crawl Run */
@@ -45,6 +36,145 @@ export interface paths {
     /** Delete App Run */
     delete: operations["delete_app_run_api_v1_app_runs__id___delete"];
   };
+  "/api/v1/api-keys/creation-constraints": {
+    /**
+     * Get API key creation constraints
+     * @description Returns tenant policy limits relevant to key creation UX (expiration, rate limit).
+     */
+    get: operations["get_creation_constraints_api_v1_api_keys_creation_constraints_get"];
+  };
+  "/api/v1/api-keys/notification-preferences": {
+    /**
+     * Get API key notification preferences
+     * @description Get the caller's API key expiry notification preferences.
+     */
+    get: operations["get_notification_preferences_api_v1_api_keys_notification_preferences_get"];
+    /**
+     * Update API key notification preferences
+     * @description Update the caller's API key expiry notification preferences.
+     */
+    put: operations["update_notification_preferences_api_v1_api_keys_notification_preferences_put"];
+  };
+  "/api/v1/api-keys/notification-subscriptions": {
+    /**
+     * List API key notification subscriptions
+     * @description List followed targets used for subscribed expiry notification mode.
+     */
+    get: operations["list_notification_subscriptions_api_v1_api_keys_notification_subscriptions_get"];
+  };
+  "/api/v1/api-keys/notification-subscriptions/{target_type}/{target_id}": {
+    /**
+     * Follow target for API key expiry notifications
+     * @description Follow an API key, assistant, app, or space for subscribed expiry notifications.
+     */
+    put: operations["upsert_notification_subscription_api_v1_api_keys_notification_subscriptions__target_type___target_id__put"];
+    /**
+     * Unfollow target for API key expiry notifications
+     * @description Remove a followed API key/assistant/app/space target from subscribed notifications.
+     */
+    delete: operations["delete_notification_subscription_api_v1_api_keys_notification_subscriptions__target_type___target_id__delete"];
+  };
+  "/api/v1/api-keys/expiring-soon": {
+    /**
+     * Get expiring API key summary
+     * @description Returns keys expiring within the specified window, filtered by user visibility.
+     */
+    get: operations["get_expiring_keys_api_v1_api_keys_expiring_soon_get"];
+  };
+  "/api/v1/api-keys/{id}/usage": {
+    /**
+     * Get API key usage
+     * @description Returns usage and auth-failure audit events for a single API key you manage.
+     */
+    get: operations["get_api_key_usage_api_v1_api_keys__id__usage_get"];
+  };
+  "/api/v1/api-keys": {
+    /**
+     * List API keys
+     * @description List manageable API keys in the current tenant with cursor pagination and filters.
+     */
+    get: operations["list_api_keys_api_v1_api_keys_get"];
+    /**
+     * Create API key
+     * @description Create a v2 API key with scoped permission, guardrails, and optional rate limits.
+     */
+    post: operations["create_api_key_api_v1_api_keys_post"];
+  };
+  "/api/v1/api-keys/{id}": {
+    /**
+     * Get API key
+     * @description Get a single API key by ID if the current user is authorized to manage it.
+     */
+    get: operations["get_api_key_api_v1_api_keys__id__get"];
+    /**
+     * Revoke API key (deprecated alias)
+     * @deprecated
+     * @description Deprecated. Use POST /api/v1/api-keys/{id}/revoke with reason body.
+     */
+    delete: operations["revoke_api_key_deprecated_api_v1_api_keys__id__delete"];
+    /**
+     * Update API key
+     * @description Update API key metadata and guardrail fields supported by policy.
+     */
+    patch: operations["update_api_key_api_v1_api_keys__id__patch"];
+  };
+  "/api/v1/api-keys/{id}/revoke": {
+    /**
+     * Revoke API key
+     * @description Revoke an API key and optionally include reason metadata for audit logs.
+     */
+    post: operations["revoke_api_key_api_v1_api_keys__id__revoke_post"];
+  };
+  "/api/v1/api-keys/{id}/rotate": {
+    /**
+     * Rotate API key
+     * @description Rotate an API key, issuing a new secret and starting the grace overlap window.
+     */
+    post: operations["rotate_api_key_api_v1_api_keys__id__rotate_post"];
+  };
+  "/api/v1/api-keys/{id}/suspend": {
+    /**
+     * Suspend API key
+     * @description Suspend an API key temporarily. Suspended keys cannot authenticate.
+     */
+    post: operations["suspend_api_key_api_v1_api_keys__id__suspend_post"];
+  };
+  "/api/v1/api-keys/{id}/reactivate": {
+    /**
+     * Reactivate API key
+     * @description Reactivate a previously suspended API key.
+     */
+    post: operations["reactivate_api_key_api_v1_api_keys__id__reactivate_post"];
+  };
+  "/api/v1/users/": {
+    /** Get Tenant Users */
+    get: operations["get_tenant_users_api_v1_users__get"];
+  };
+  "/api/v1/users/api-keys/": {
+    /**
+     * Generate legacy user API key
+     * @deprecated
+     * @description Legacy API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This endpoint rotates the old legacy key immediately.
+     */
+    post: operations["generate_api_key_api_v1_users_api_keys__post"];
+  };
+  "/api/v1/users/api-keys/legacy": {
+    /**
+     * Revoke legacy user API key
+     * @description Permanently revokes the caller's legacy (v1) API key.
+     */
+    delete: operations["revoke_legacy_api_key_api_v1_users_api_keys_legacy_delete"];
+  };
+  "/api/v1/users/admin/invite/": {
+    /** Invite User */
+    post: operations["invite_user_api_v1_users_admin_invite__post"];
+  };
+  "/api/v1/users/admin/{id}/": {
+    /** Delete User */
+    delete: operations["delete_user_api_v1_users_admin__id___delete"];
+    /** Update User */
+    patch: operations["update_user_api_v1_users_admin__id___patch"];
+  };
   "/api/v1/users/login/token/": {
     /**
      * Login
@@ -59,36 +189,13 @@ export interface paths {
      */
     post: operations["login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post"];
   };
-  "/api/v1/users/": {
-    /** Get Tenant Users */
-    get: operations["get_tenant_users_api_v1_users__get"];
-  };
   "/api/v1/users/me/": {
     /** Get Current User */
     get: operations["Get_current_user_api_v1_users_me__get"];
   };
-  "/api/v1/users/api-keys/": {
-    /**
-     * Generate Api Key
-     * @description Generating a new api key will delete the old key.
-     * Make sure to copy the key since it will only be showed once,
-     * after which only the truncated key will be shown.
-     */
-    get: operations["generate_api_key_api_v1_users_api_keys__get"];
-  };
   "/api/v1/users/tenant/": {
     /** Get Current User Tenant */
     get: operations["Get_current_user_tenant_api_v1_users_tenant__get"];
-  };
-  "/api/v1/users/admin/invite/": {
-    /** Invite User */
-    post: operations["invite_user_api_v1_users_admin_invite__post"];
-  };
-  "/api/v1/users/admin/{id}/": {
-    /** Delete User */
-    delete: operations["delete_user_api_v1_users_admin__id___delete"];
-    /** Update User */
-    patch: operations["update_user_api_v1_users_admin__id___patch"];
   };
   "/api/v1/users/provision/": {
     /** Provision User */
@@ -125,13 +232,13 @@ export interface paths {
     /**
      * Get Groups
      * @deprecated
+     * @description Legacy groups endpoint. Use collections/spaces instead for new integrations.
      */
     get: operations["get_groups_api_v1_groups__get"];
     /**
      * Create Group
      * @deprecated
-     * @description Valid values for `embedding_model` are the provided by `GET /api/v1/settings/models/`.
-     * Use the `name` field of the response from this endpoint.
+     * @description Legacy groups endpoint. Use collections/spaces instead for new integrations.
      */
     post: operations["create_group_api_v1_groups__post"];
   };
@@ -287,16 +394,60 @@ export interface paths {
      */
     patch: operations["update_provisioning_setting_api_v1_settings_provisioning_patch"];
   };
+  "/api/v1/settings/scope-enforcement": {
+    /**
+     * Toggle API key scope enforcement
+     * @description Toggle API key scope enforcement for your tenant.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Behavior:**
+     * - Updates the `api_key_scope_enforcement` feature flag for your tenant
+     * - When enabled: API keys are restricted to resources within their configured scope
+     * - When disabled: All API keys can access resources beyond their configured scope
+     * - Disabling scope enforcement also disables strict mode for consistency
+     * - Change takes effect immediately for all API key requests
+     */
+    patch: operations["update_scope_enforcement_setting_api_v1_settings_scope_enforcement_patch"];
+  };
+  "/api/v1/settings/strict-mode": {
+    /**
+     * Toggle API key strict mode
+     * @description Toggle API key strict mode for your tenant.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Behavior:**
+     * - Updates the `api_key_strict_mode` feature flag for your tenant
+     * - When enabled: scoped API keys are enforced with strict fail-closed semantics
+     * - When disabled: default scope enforcement behavior applies
+     * - Enabling strict mode requires `api_key_scope_enforcement` to be enabled
+     * - Change takes effect immediately for API key requests
+     */
+    patch: operations["update_strict_mode_setting_api_v1_settings_strict_mode_patch"];
+  };
+  "/api/v1/settings/api-key-expiry-notifications": {
+    /**
+     * Toggle API key expiry notifications
+     * @description Toggle API key expiry notifications for your tenant.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * **Behavior:**
+     * - Updates the `api_key_expiry_notifications` feature flag for your tenant
+     * - When enabled: API key expiry notification surfaces are active
+     * - When disabled: API key expiry notifications are suppressed
+     * - Change takes effect immediately
+     */
+    patch: operations["update_api_key_expiry_notifications_setting_api_v1_settings_api_key_expiry_notifications_patch"];
+  };
   "/api/v1/assistants/": {
     /**
      * Get Assistants
      * @description Requires Admin permission if `for_tenant` is `true`.
      */
     get: operations["get_assistants_api_v1_assistants__get"];
-    /**
-     * Create Assistant
-     * @deprecated
-     */
+    /** Create Assistant */
     post: operations["create_assistant_api_v1_assistants__post"];
   };
   "/api/v1/assistants/{id}/": {
@@ -336,11 +487,9 @@ export interface paths {
   };
   "/api/v1/assistants/{id}/api-keys/": {
     /**
-     * Generate Read Only Assistant Key
-     * @description Generates a read-only api key for this assistant.
-     *
-     * This api key can only be used on `POST /api/v1/assistants/{id}/sessions/`
-     * and `POST /api/v1/assistants/{id}/sessions/{session_id}/`.
+     * Generate legacy assistant API key
+     * @deprecated
+     * @description Legacy assistant API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This returns a legacy assistant-scoped key.
      */
     get: operations["generate_read_only_assistant_key_api_v1_assistants__id__api_keys__get"];
   };
@@ -362,6 +511,25 @@ export interface paths {
      * responsive while supporting large-context models.
      */
     post: operations["estimate_tokens_api_v1_assistants__id__token_estimate_post"];
+  };
+  "/api/v1/assistants/{id}/mcp-servers/": {
+    /**
+     * Get Assistant Mcp Servers
+     * @description Get all MCP servers associated with an assistant.
+     */
+    get: operations["get_assistant_mcp_servers_api_v1_assistants__id__mcp_servers__get"];
+  };
+  "/api/v1/assistants/{id}/mcp-servers/{mcp_server_id}/": {
+    /**
+     * Add Mcp To Assistant
+     * @description Add an MCP server to an assistant.
+     */
+    post: operations["add_mcp_to_assistant_api_v1_assistants__id__mcp_servers__mcp_server_id___post"];
+    /**
+     * Remove Mcp From Assistant
+     * @description Remove an MCP server from an assistant.
+     */
+    delete: operations["remove_mcp_from_assistant_api_v1_assistants__id__mcp_servers__mcp_server_id___delete"];
   };
   "/api/v1/group-chats/{id}/": {
     /**
@@ -449,12 +617,25 @@ export interface paths {
      */
     post: operations["set_title_of_conversation_api_v1_conversations__session_id__title__post"];
   };
+  "/api/v1/conversations/approve-tools/": {
+    /**
+     * Approve Tools
+     * @description Submit approval decisions for pending tool calls.
+     *
+     * When a chat request is made with require_tool_approval=true, the stream will emit
+     * a tool_approval_required event with an approval_id and list of pending tools.
+     * Use this endpoint to approve or reject each tool call.
+     *
+     * The decisions list should contain one entry per tool_call_id from the event.
+     * If a tool_call_id is omitted, it will be treated as rejected.
+     */
+    post: operations["approve_tools_api_v1_conversations_approve_tools__post"];
+  };
   "/api/v1/services/": {
     /** Get Services */
     get: operations["get_services_api_v1_services__get"];
     /**
      * Create Service
-     * @deprecated
      * @description Create a service.
      *
      * `json_schema` is required if `output_validation` is 'json'.
@@ -792,6 +973,111 @@ export interface paths {
   "/api/v1/admin/privacy-policy/": {
     /** Update Privacy Policy */
     post: operations["update_privacy_policy_api_v1_admin_privacy_policy__post"];
+  };
+  "/api/v1/admin/api-key-policy": {
+    /**
+     * Get tenant API key policy
+     * @description Get API key policy settings for the current tenant.
+     */
+    get: operations["get_api_key_policy_api_v1_admin_api_key_policy_get"];
+    /**
+     * Update tenant API key policy
+     * @description Update tenant policy guardrails used for API key creation and validation.
+     */
+    patch: operations["update_api_key_policy_api_v1_admin_api_key_policy_patch"];
+  };
+  "/api/v1/admin/api-keys/notification-policy": {
+    /**
+     * Get API key notification policy
+     * @description Get tenant API key notification policy settings.
+     */
+    get: operations["get_api_key_notification_policy_api_v1_admin_api_keys_notification_policy_get"];
+    /**
+     * Update API key notification policy
+     * @description Update tenant API key notification policy under api_key_policy.notification_policy.
+     */
+    put: operations["update_api_key_notification_policy_api_v1_admin_api_keys_notification_policy_put"];
+  };
+  "/api/v1/admin/super-api-key-status": {
+    /**
+     * Get super API key status
+     * @description Return whether super and super-duper API keys are configured in environment settings.
+     */
+    get: operations["get_super_api_key_status_api_v1_admin_super_api_key_status_get"];
+  };
+  "/api/v1/admin/api-keys": {
+    /**
+     * List tenant API keys
+     * @description List API keys across the tenant with filters and cursor pagination.
+     */
+    get: operations["list_api_keys_admin_api_v1_admin_api_keys_get"];
+  };
+  "/api/v1/admin/api-keys/expiring-soon": {
+    /**
+     * Get expiring API key summary (tenant-wide)
+     * @description Returns all expiring keys in the tenant within the specified window.
+     */
+    get: operations["get_expiring_keys_admin_api_v1_admin_api_keys_expiring_soon_get"];
+  };
+  "/api/v1/admin/api-keys/lookup": {
+    /**
+     * Find API key by exact secret
+     * @description Resolve a full API key secret within the current tenant and return the matching key metadata.
+     */
+    post: operations["lookup_api_key_admin_api_v1_admin_api_keys_lookup_post"];
+  };
+  "/api/v1/admin/api-keys/{id}/usage": {
+    /**
+     * Get API key usage timeline
+     * @description Returns key-centric usage and auth-failure audit events for a single API key.
+     */
+    get: operations["get_api_key_usage_admin_api_v1_admin_api_keys__id__usage_get"];
+  };
+  "/api/v1/admin/api-keys/{id}": {
+    /**
+     * Get tenant API key
+     * @description Get a single API key by ID within the tenant.
+     */
+    get: operations["get_api_key_admin_api_v1_admin_api_keys__id__get"];
+    /**
+     * Revoke API key (deprecated alias)
+     * @deprecated
+     * @description Deprecated. Use POST /api/v1/admin/api-keys/{id}/revoke with reason body.
+     */
+    delete: operations["revoke_api_key_admin_deprecated_api_v1_admin_api_keys__id__delete"];
+    /**
+     * Update tenant API key
+     * @description Update API key metadata and guardrails as tenant admin.
+     */
+    patch: operations["update_api_key_admin_api_v1_admin_api_keys__id__patch"];
+  };
+  "/api/v1/admin/api-keys/{id}/revoke": {
+    /**
+     * Revoke tenant API key
+     * @description Revoke an API key as tenant admin with optional reason metadata.
+     */
+    post: operations["revoke_api_key_admin_api_v1_admin_api_keys__id__revoke_post"];
+  };
+  "/api/v1/admin/api-keys/{id}/suspend": {
+    /**
+     * Suspend tenant API key
+     * @description Suspend an API key so it cannot authenticate until reactivated.
+     */
+    post: operations["suspend_api_key_admin_api_v1_admin_api_keys__id__suspend_post"];
+  };
+  "/api/v1/admin/api-keys/{id}/reactivate": {
+    /**
+     * Reactivate tenant API key
+     * @description Reactivate a suspended API key.
+     */
+    post: operations["reactivate_api_key_admin_api_v1_admin_api_keys__id__reactivate_post"];
+  };
+  "/api/v1/admin/api-keys/{id}/rotate": {
+    /**
+     * Rotate tenant API key
+     * @description Rotate an API key and return the new one-time secret.
+     */
+    post: operations["rotate_api_key_admin_api_v1_admin_api_keys__id__rotate_post"];
   };
   "/api/v1/admin/credentials/{provider}": {
     /**
@@ -1166,6 +1452,13 @@ export interface paths {
      */
     post: operations["create_provider_api_v1_admin_model_providers__post"];
   };
+  "/api/v1/admin/model-providers/capabilities/": {
+    /**
+     * Get Provider Capabilities
+     * @description Get supported model types and top models per provider type from LiteLLM.
+     */
+    get: operations["get_provider_capabilities_api_v1_admin_model_providers_capabilities__get"];
+  };
   "/api/v1/admin/model-providers/{provider_id}/": {
     /**
      * Get Provider
@@ -1184,6 +1477,27 @@ export interface paths {
      * Will fail if the provider has models attached to it.
      */
     delete: operations["delete_provider_api_v1_admin_model_providers__provider_id___delete"];
+  };
+  "/api/v1/admin/model-providers/{provider_id}/models/": {
+    /**
+     * List Provider Models
+     * @description List available models/deployments from the provider's API using its credentials.
+     */
+    get: operations["list_provider_models_api_v1_admin_model_providers__provider_id__models__get"];
+  };
+  "/api/v1/admin/model-providers/{provider_id}/test/": {
+    /**
+     * Test Provider
+     * @description Test connectivity to a model provider.
+     */
+    post: operations["test_provider_api_v1_admin_model_providers__provider_id__test__post"];
+  };
+  "/api/v1/admin/model-providers/{provider_id}/validate-model/": {
+    /**
+     * Validate Model
+     * @description Validate that a model works with this provider by making a minimal API call.
+     */
+    post: operations["validate_model_api_v1_admin_model_providers__provider_id__validate_model__post"];
   };
   "/api/v1/admin/tenant-models/completion/": {
     /**
@@ -1381,19 +1695,23 @@ export interface paths {
     /** Create Space Integration Knowledge Batch */
     post: operations["create_space_integration_knowledge_batch_api_v1_spaces__id__knowledge_integrations_add__user_integration_id__batch__post"];
   };
-  "/api/v1/spaces/{id}/knowledge/integrations/wrappers/{wrapper_id}/": {
-    /** Update Integration Knowledge Wrapper */
-    patch: operations["update_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___patch"];
-    /** Delete Integration Knowledge Wrapper */
-    delete: operations["delete_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___delete"];
-  };
   "/api/v1/spaces/{id}/knowledge/integrations/remove/{integration_knowledge_id}/": {
     /** Delete Space Integration Knowledge */
     delete: operations["delete_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_remove__integration_knowledge_id___delete"];
   };
+  "/api/v1/spaces/{id}/knowledge/integrations/wrappers/{wrapper_id}/": {
+    /** Delete Integration Knowledge Wrapper */
+    delete: operations["delete_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___delete"];
+    /** Update Integration Knowledge Wrapper */
+    patch: operations["update_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___patch"];
+  };
   "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/": {
     /** Update Integration Knowledge */
     patch: operations["update_integration_knowledge_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id___patch"];
+  };
+  "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/sync/": {
+    /** Trigger Integration Full Sync */
+    post: operations["trigger_integration_full_sync_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__sync__post"];
   };
   "/api/v1/spaces/{id}/members/": {
     /** Add Space Member */
@@ -1458,6 +1776,25 @@ export interface paths {
      * @deprecated
      */
     post: operations["create_website_api_v1_websites__post"];
+  };
+  "/api/v1/websites/check-url/": {
+    /**
+     * Check if URL exists on Organization space
+     * @description Check if a website URL already exists on the user's Organization space.
+     *
+     *     **Use case:**
+     *     When creating a new website on a Personal or Shared space, call this endpoint
+     *     to check if the URL is already being crawled on the Organization space.
+     *     This helps avoid duplicate crawls and informs users that the knowledge
+     *     might already be available for import.
+     *
+     *     **Returns:**
+     *     - Website info if URL exists on Organization space
+     *     - `null` if URL not found or user has no Organization space
+     *
+     *     **Note:** This does not block website creation - it's informational only.
+     */
+    get: operations["check_existing_website_url_api_v1_websites_check_url__get"];
   };
   "/api/v1/websites/bulk/run/": {
     /**
@@ -2011,6 +2348,91 @@ export interface paths {
     /** Get Integration By Id */
     get: operations["get_integration_by_id_api_v1_integrations__integration_id___get"];
   };
+  "/api/v1/mcp-servers/": {
+    /**
+     * Get Mcp Servers
+     * @description Get all MCP servers from global catalog with optional tag filtering.
+     */
+    get: operations["get_mcp_servers_api_v1_mcp_servers__get"];
+    /**
+     * Create Mcp Server
+     * @description Create a new MCP server in global catalog (admin only).
+     *
+     * Validates connection before saving. Returns 400 if connection fails.
+     */
+    post: operations["create_mcp_server_api_v1_mcp_servers__post"];
+  };
+  "/api/v1/mcp-servers/settings/": {
+    /**
+     * Get Tenant Mcp Settings
+     * @description Get all available MCP servers with tenant enablement status.
+     */
+    get: operations["get_tenant_mcp_settings_api_v1_mcp_servers_settings__get"];
+  };
+  "/api/v1/mcp-servers/settings/{mcp_server_id}/": {
+    /**
+     * Update Mcp Settings
+     * @description Update MCP server settings for the current tenant.
+     */
+    put: operations["update_mcp_settings_api_v1_mcp_servers_settings__mcp_server_id___put"];
+    /**
+     * Enable Mcp For Tenant
+     * @description Enable an MCP server for the current tenant with optional credentials.
+     */
+    post: operations["enable_mcp_for_tenant_api_v1_mcp_servers_settings__mcp_server_id___post"];
+    /**
+     * Disable Mcp For Tenant
+     * @description Disable an MCP server for the current tenant.
+     */
+    delete: operations["disable_mcp_for_tenant_api_v1_mcp_servers_settings__mcp_server_id___delete"];
+  };
+  "/api/v1/mcp-servers/settings/tools/{tool_id}/": {
+    /**
+     * Update Tenant Tool Enabled
+     * @description Update tenant-level enablement for a tool (admin only).
+     */
+    put: operations["update_tenant_tool_enabled_api_v1_mcp_servers_settings_tools__tool_id___put"];
+  };
+  "/api/v1/mcp-servers/{id}/": {
+    /**
+     * Get Mcp Server
+     * @description Get a single MCP server by ID.
+     */
+    get: operations["get_mcp_server_api_v1_mcp_servers__id___get"];
+    /**
+     * Update Mcp Server
+     * @description Update an MCP server in global catalog (admin only).
+     */
+    post: operations["update_mcp_server_api_v1_mcp_servers__id___post"];
+    /**
+     * Delete Mcp Server
+     * @description Delete an MCP server from global catalog (admin only).
+     */
+    delete: operations["delete_mcp_server_api_v1_mcp_servers__id___delete"];
+  };
+  "/api/v1/mcp-servers/{id}/tools/": {
+    /**
+     * Get Mcp Server Tools
+     * @description Get all tools for an MCP server with tenant-level settings applied.
+     */
+    get: operations["get_mcp_server_tools_api_v1_mcp_servers__id__tools__get"];
+  };
+  "/api/v1/mcp-servers/{id}/tools/sync/": {
+    /**
+     * Sync Mcp Server Tools
+     * @description Manually refresh/sync tools for an MCP server (admin only).
+     *
+     * Returns 400 if connection to the MCP server fails.
+     */
+    post: operations["sync_mcp_server_tools_api_v1_mcp_servers__id__tools_sync__post"];
+  };
+  "/api/v1/mcp-servers/{id}/tools/{tool_id}/": {
+    /**
+     * Update Tool Default Enabled
+     * @description Update global default enabled status for a tool (admin only).
+     */
+    put: operations["update_tool_default_enabled_api_v1_mcp_servers__id__tools__tool_id___put"];
+  };
   "/api/v1/integrations/sharepoint/webhook/": {
     /** Sharepoint Webhook Validation */
     get: operations["sharepoint_webhook_validation_api_v1_integrations_sharepoint_webhook__get"];
@@ -2025,7 +2447,7 @@ export interface paths {
     get: operations["get_sharepoint_app_api_v1_admin_sharepoint_app_get"];
     /**
      * Configure tenant SharePoint app
-     * @description Configure Azure AD application credentials for organization-wide SharePoint access. This eliminates person-dependency for shared and organization spaces by using application permissions instead of delegated user permissions. Requires admin role.
+     * @description Configure Microsoft Entra ID application credentials for organization-wide SharePoint access. This eliminates person-dependency for shared and organization spaces by using application permissions instead of delegated user permissions. Requires admin role.
      */
     post: operations["configure_sharepoint_app_api_v1_admin_sharepoint_app_post"];
     /**
@@ -2248,7 +2670,7 @@ export interface paths {
      * Create Completion Model
      * @description Create a new completion model (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * This creates the model metadata only. To enable it for a tenant,
      * use POST /api/v1/completion-models/{id}/ with tenant credentials.
@@ -2260,7 +2682,7 @@ export interface paths {
      * Update Completion Model Metadata
      * @description Update completion model metadata (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * Updates global model metadata. Does not affect tenant-specific settings.
      */
@@ -2271,7 +2693,7 @@ export interface paths {
      * Delete Completion Model
      * @description Delete a completion model (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * WARNING: Deletion affects all tenants. Use with caution.
      * Set force=true to delete even if model is in use (may break references).
@@ -2283,7 +2705,7 @@ export interface paths {
      * Create Embedding Model
      * @description Create a new embedding model (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * This creates the model metadata only. To enable it for a tenant,
      * use POST /api/v1/embedding-models/{id}/ with tenant credentials.
@@ -2295,7 +2717,7 @@ export interface paths {
      * Update Embedding Model Metadata
      * @description Update embedding model metadata (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * Updates global model metadata. Does not affect tenant-specific settings.
      */
@@ -2306,7 +2728,7 @@ export interface paths {
      * Delete Embedding Model
      * @description Delete an embedding model (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * WARNING: Deletion affects all tenants. Use with caution.
      */
@@ -2655,6 +3077,16 @@ export interface components {
       | "credentials_updated"
       | "federation_updated"
       | "api_key_generated"
+      | "api_key_created"
+      | "api_key_updated"
+      | "api_key_revoked"
+      | "api_key_suspended"
+      | "api_key_reactivated"
+      | "api_key_rotated"
+      | "api_key_expired"
+      | "api_key_used"
+      | "api_key_auth_failed"
+      | "tenant_policy_updated"
       | "module_added"
       | "module_added_to_tenant"
       | "assistant_created"
@@ -2675,6 +3107,7 @@ export interface components {
       | "app_run_deleted"
       | "session_started"
       | "session_ended"
+      | "tool_approval_submitted"
       | "file_uploaded"
       | "file_deleted"
       | "website_created"
@@ -2692,6 +3125,7 @@ export interface components {
       | "integration_disconnected"
       | "integration_knowledge_created"
       | "integration_knowledge_deleted"
+      | "integration_knowledge_synced"
       | "completion_model_updated"
       | "embedding_model_updated"
       | "transcription_model_updated"
@@ -2845,6 +3279,67 @@ export interface components {
       /** Key */
       key: string;
     };
+    /** ApiKeyCreateRequest */
+    ApiKeyCreateRequest: {
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      key_type: components["schemas"]["ApiKeyType"];
+      /** @default read */
+      permission?: components["schemas"]["ApiKeyPermission"];
+      scope_type: components["schemas"]["ApiKeyScopeType"];
+      /** Scope Id */
+      scope_id?: string | null;
+      /** Allowed Origins */
+      allowed_origins?: string[] | null;
+      /** Allowed Ips */
+      allowed_ips?: string[] | null;
+      /** Expires At */
+      expires_at?: string | null;
+      /** Rate Limit */
+      rate_limit?: number | null;
+      resource_permissions?: components["schemas"]["ResourcePermissions"] | null;
+    };
+    /** ApiKeyCreatedResponse */
+    ApiKeyCreatedResponse: {
+      api_key: components["schemas"]["ApiKeyV2"];
+      /** Secret */
+      secret: string;
+    };
+    /**
+     * ApiKeyCreationConstraints
+     * @description Fields relevant to key creation UX, from tenant policy.
+     */
+    ApiKeyCreationConstraints: {
+      /**
+       * Require Expiration
+       * @default false
+       */
+      require_expiration?: boolean;
+      /** Max Expiration Days */
+      max_expiration_days?: number | null;
+      /** Max Rate Limit */
+      max_rate_limit?: number | null;
+    };
+    /** ApiKeyErrorResponse */
+    ApiKeyErrorResponse: {
+      /** Code */
+      code: string;
+      /** Message */
+      message: string;
+    };
+    /** ApiKeyExactLookupRequest */
+    ApiKeyExactLookupRequest: {
+      /** Secret */
+      secret: string;
+    };
+    /** ApiKeyExactLookupResponse */
+    ApiKeyExactLookupResponse: {
+      api_key: components["schemas"]["ApiKeyV2"];
+      /** @default exact_secret */
+      match_reason?: components["schemas"]["ApiKeySearchMatchReason"];
+    };
     /** ApiKeyInDB */
     ApiKeyInDB: {
       /** Truncated Key */
@@ -2855,6 +3350,349 @@ export interface components {
       user_id: string | null;
       /** Assistant Id */
       assistant_id: string | null;
+    };
+    /**
+     * ApiKeyListResponse
+     * @description Response model for the API key list endpoint. Uses Optional total_count
+     * so non-admin users get null instead of an expensive COUNT query.
+     */
+    ApiKeyListResponse: {
+      /** Items */
+      items: components["schemas"]["ApiKeyV2"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count?: number | null;
+    };
+    /** ApiKeyNotificationPolicyResponse */
+    ApiKeyNotificationPolicyResponse: {
+      /**
+       * Enabled
+       * @default true
+       */
+      enabled?: boolean;
+      /** Default Days Before Expiry */
+      default_days_before_expiry?: number[];
+      /**
+       * Max Days Before Expiry
+       * @default 365
+       */
+      max_days_before_expiry?: number | null;
+      /**
+       * Allow Auto Follow Published Assistants
+       * @default false
+       */
+      allow_auto_follow_published_assistants?: boolean;
+      /**
+       * Allow Auto Follow Published Apps
+       * @default false
+       */
+      allow_auto_follow_published_apps?: boolean;
+    };
+    /** ApiKeyNotificationPolicyUpdate */
+    ApiKeyNotificationPolicyUpdate: {
+      /** Enabled */
+      enabled?: boolean | null;
+      /** Default Days Before Expiry */
+      default_days_before_expiry?: number[] | null;
+      /** Max Days Before Expiry */
+      max_days_before_expiry?: number | null;
+      /** Allow Auto Follow Published Assistants */
+      allow_auto_follow_published_assistants?: boolean | null;
+      /** Allow Auto Follow Published Apps */
+      allow_auto_follow_published_apps?: boolean | null;
+    };
+    /** ApiKeyNotificationPreferencesResponse */
+    ApiKeyNotificationPreferencesResponse: {
+      /**
+       * Enabled
+       * @default false
+       */
+      enabled?: boolean;
+      /** Days Before Expiry */
+      days_before_expiry?: number[];
+      /**
+       * Auto Follow Published Assistants
+       * @default false
+       */
+      auto_follow_published_assistants?: boolean;
+      /**
+       * Auto Follow Published Apps
+       * @default false
+       */
+      auto_follow_published_apps?: boolean;
+    };
+    /** ApiKeyNotificationPreferencesUpdate */
+    ApiKeyNotificationPreferencesUpdate: {
+      /** Enabled */
+      enabled?: boolean | null;
+      /** Days Before Expiry */
+      days_before_expiry?: number[] | null;
+      /** Auto Follow Published Assistants */
+      auto_follow_published_assistants?: boolean | null;
+      /** Auto Follow Published Apps */
+      auto_follow_published_apps?: boolean | null;
+    };
+    /** ApiKeyNotificationSubscription */
+    ApiKeyNotificationSubscription: {
+      target_type: components["schemas"]["ApiKeyNotificationTargetType"];
+      /**
+       * Target Id
+       * Format: uuid
+       */
+      target_id: string;
+    };
+    /** ApiKeyNotificationSubscriptionListResponse */
+    ApiKeyNotificationSubscriptionListResponse: {
+      /** Items */
+      items: components["schemas"]["ApiKeyNotificationSubscription"][];
+    };
+    /**
+     * ApiKeyNotificationTargetType
+     * @enum {string}
+     */
+    ApiKeyNotificationTargetType: "key" | "assistant" | "app" | "space";
+    /**
+     * ApiKeyPermission
+     * @enum {string}
+     */
+    ApiKeyPermission: "read" | "write" | "admin";
+    /** ApiKeyPolicyResponse */
+    ApiKeyPolicyResponse: {
+      /** Max Delegation Depth */
+      max_delegation_depth?: number | null;
+      /** Revocation Cascade Enabled */
+      revocation_cascade_enabled?: boolean | null;
+      /** Require Expiration */
+      require_expiration?: boolean | null;
+      /** Max Expiration Days */
+      max_expiration_days?: number | null;
+      /** Auto Expire Unused Days */
+      auto_expire_unused_days?: number | null;
+      /** Max Rate Limit Override */
+      max_rate_limit_override?: number | null;
+    };
+    /** ApiKeyPolicyUpdate */
+    ApiKeyPolicyUpdate: {
+      /** Max Delegation Depth */
+      max_delegation_depth?: number | null;
+      /** Revocation Cascade Enabled */
+      revocation_cascade_enabled?: boolean | null;
+      /** Require Expiration */
+      require_expiration?: boolean | null;
+      /** Max Expiration Days */
+      max_expiration_days?: number | null;
+      /** Auto Expire Unused Days */
+      auto_expire_unused_days?: number | null;
+      /** Max Rate Limit Override */
+      max_rate_limit_override?: number | null;
+    };
+    /**
+     * ApiKeyScopeType
+     * @enum {string}
+     */
+    ApiKeyScopeType: "tenant" | "space" | "assistant" | "app";
+    /**
+     * ApiKeySearchMatchReason
+     * @enum {string}
+     */
+    ApiKeySearchMatchReason:
+      | "exact_secret"
+      | "key_suffix"
+      | "name_or_description"
+      | "owner"
+      | "creator";
+    /**
+     * ApiKeyState
+     * @enum {string}
+     */
+    ApiKeyState: "active" | "suspended" | "revoked" | "expired";
+    /** ApiKeyStateChangeRequest */
+    ApiKeyStateChangeRequest: {
+      reason_code?: components["schemas"]["ApiKeyStateReasonCode"] | null;
+      /** Reason Text */
+      reason_text?: string | null;
+    };
+    /**
+     * ApiKeyStateReasonCode
+     * @enum {string}
+     */
+    ApiKeyStateReasonCode:
+      | "security_concern"
+      | "abuse_detected"
+      | "user_request"
+      | "admin_action"
+      | "policy_violation"
+      | "key_compromised"
+      | "user_offboarding"
+      | "rotation_completed"
+      | "scope_removed"
+      | "other";
+    /**
+     * ApiKeyType
+     * @enum {string}
+     */
+    ApiKeyType: "pk_" | "sk_";
+    /** ApiKeyUpdateRequest */
+    ApiKeyUpdateRequest: {
+      /** Name */
+      name?: string | null;
+      /** Description */
+      description?: string | null;
+      permission?: components["schemas"]["ApiKeyPermission"] | null;
+      /** Allowed Origins */
+      allowed_origins?: string[] | null;
+      /** Allowed Ips */
+      allowed_ips?: string[] | null;
+      /** Expires At */
+      expires_at?: string | null;
+      /** Rate Limit */
+      rate_limit?: number | null;
+      resource_permissions?: components["schemas"]["ResourcePermissions"] | null;
+    };
+    /** ApiKeyUsageEvent */
+    ApiKeyUsageEvent: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Timestamp
+       * Format: date-time
+       */
+      timestamp: string;
+      /** Action */
+      action: string;
+      /** Outcome */
+      outcome: string;
+      /** Ip Address */
+      ip_address?: string | null;
+      /** User Agent */
+      user_agent?: string | null;
+      /** Request Id */
+      request_id?: string | null;
+      /** Request Path */
+      request_path?: string | null;
+      /** Method */
+      method?: string | null;
+      /** Origin */
+      origin?: string | null;
+      /** Error Message */
+      error_message?: string | null;
+    };
+    /** ApiKeyUsageResponse */
+    ApiKeyUsageResponse: {
+      summary: components["schemas"]["ApiKeyUsageSummary"];
+      /** Items */
+      items: components["schemas"]["ApiKeyUsageEvent"][];
+      /** Limit */
+      limit: number;
+      /** Next Cursor */
+      next_cursor?: string | null;
+    };
+    /** ApiKeyUsageSummary */
+    ApiKeyUsageSummary: {
+      /** Total Events */
+      total_events: number;
+      /** Used Events */
+      used_events: number;
+      /** Auth Failed Events */
+      auth_failed_events: number;
+      /** Last Seen At */
+      last_seen_at?: string | null;
+      /** Last Success At */
+      last_success_at?: string | null;
+      /** Last Failure At */
+      last_failure_at?: string | null;
+      /**
+       * Sampled Used Events
+       * @default false
+       */
+      sampled_used_events?: boolean;
+    };
+    /**
+     * ApiKeyUserRelation
+     * @enum {string}
+     */
+    ApiKeyUserRelation: "owner" | "creator";
+    /** ApiKeyUserSnapshot */
+    ApiKeyUserSnapshot: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Email */
+      email?: string | null;
+      /** Username */
+      username?: string | null;
+    };
+    /** ApiKeyV2 */
+    ApiKeyV2: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Owner User Id
+       * Format: uuid
+       */
+      owner_user_id: string;
+      /** Key Prefix */
+      key_prefix: string;
+      /** Key Suffix */
+      key_suffix: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      key_type: components["schemas"]["ApiKeyType"];
+      permission: components["schemas"]["ApiKeyPermission"];
+      scope_type: components["schemas"]["ApiKeyScopeType"];
+      /** Scope Id */
+      scope_id?: string | null;
+      /** Allowed Origins */
+      allowed_origins?: string[] | null;
+      /** Allowed Ips */
+      allowed_ips?: string[] | null;
+      resource_permissions?: components["schemas"]["ResourcePermissions"] | null;
+      state: components["schemas"]["ApiKeyState"];
+      /** Expires At */
+      expires_at?: string | null;
+      /** Last Used At */
+      last_used_at?: string | null;
+      /** Revoked At */
+      revoked_at?: string | null;
+      revoked_reason_code?: components["schemas"]["ApiKeyStateReasonCode"] | null;
+      /** Revoked Reason Text */
+      revoked_reason_text?: string | null;
+      /** Suspended At */
+      suspended_at?: string | null;
+      suspended_reason_code?: components["schemas"]["ApiKeyStateReasonCode"] | null;
+      /** Suspended Reason Text */
+      suspended_reason_text?: string | null;
+      /** Rotation Grace Until */
+      rotation_grace_until?: string | null;
+      /** Rate Limit */
+      rate_limit?: number | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /** Rotated From Key Id */
+      rotated_from_key_id?: string | null;
+      /** Created By User Id */
+      created_by_user_id?: string | null;
+      owner_user?: components["schemas"]["ApiKeyUserSnapshot"] | null;
+      created_by_user?: components["schemas"]["ApiKeyUserSnapshot"] | null;
+      /** Search Match Reasons */
+      search_match_reasons?: components["schemas"]["ApiKeySearchMatchReason"][] | null;
     };
     /** AppInTemplatePublic */
     AppInTemplatePublic: {
@@ -3002,7 +3840,7 @@ export interface components {
       /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
-      } | null;
+      };
       wizard?: components["schemas"]["AppTemplateWizard"] | null;
       /** Input Type */
       input_type: string;
@@ -3042,7 +3880,7 @@ export interface components {
       /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
-      } | null;
+      };
       /** Completion Model Id */
       completion_model_id?: string | null;
       /** Completion Model Name */
@@ -3330,6 +4168,13 @@ export interface components {
        */
       integration_knowledge_list?: components["schemas"]["ModelId"][];
       /**
+       * Mcp Servers
+       * @deprecated
+       * @description This field is deprecated and will be ignored
+       * @default []
+       */
+      mcp_servers?: components["schemas"]["ModelId"][];
+      /**
        * @deprecated
        * @description This field is deprecated and will be ignored
        */
@@ -3418,6 +4263,12 @@ export interface components {
       websites: components["schemas"]["WebsitePublic"][];
       /** Integration Knowledge List */
       integration_knowledge_list: components["schemas"]["IntegrationKnowledgePublic"][];
+      /** Mcp Servers */
+      mcp_servers: {
+        [key: string]: unknown;
+      }[];
+      /** Mcp Tools */
+      mcp_tools?: components["schemas"]["MCPToolSetting"][];
       completion_model?: components["schemas"]["CompletionModelSparse"] | null;
       /**
        * Published
@@ -3528,7 +4379,7 @@ export interface components {
       /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
-      } | null;
+      };
       wizard?: components["schemas"]["AssistantTemplateWizard"] | null;
       /** Icon Name */
       icon_name?: string | null;
@@ -3564,7 +4415,7 @@ export interface components {
       /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
-      } | null;
+      };
       /** Completion Model Id */
       completion_model_id?: string | null;
       /** Completion Model Name */
@@ -4090,6 +4941,11 @@ export interface components {
       vision: boolean;
       /** Reasoning */
       reasoning: boolean;
+      /**
+       * Supports Tool Calling
+       * @default false
+       */
+      supports_tool_calling?: boolean;
       /** Base Url */
       base_url?: string | null;
       /** Litellm Model Name */
@@ -4141,6 +4997,11 @@ export interface components {
       vision: boolean;
       /** Reasoning */
       reasoning: boolean;
+      /**
+       * Supports Tool Calling
+       * @default false
+       */
+      supports_tool_calling?: boolean;
       /** Base Url */
       base_url?: string | null;
       /** Litellm Model Name */
@@ -4225,6 +5086,10 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
     };
     /** CompletionModelPublicAppTemplate */
     CompletionModelPublicAppTemplate: {
@@ -4283,6 +5148,11 @@ export interface components {
       vision: boolean;
       /** Reasoning */
       reasoning: boolean;
+      /**
+       * Supports Tool Calling
+       * @default false
+       */
+      supports_tool_calling?: boolean;
       /** Base Url */
       base_url?: string | null;
       /** Litellm Model Name */
@@ -4316,6 +5186,10 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -4360,6 +5234,11 @@ export interface components {
       vision: boolean;
       /** Reasoning */
       reasoning: boolean;
+      /**
+       * Supports Tool Calling
+       * @default false
+       */
+      supports_tool_calling?: boolean;
       /** Base Url */
       base_url?: string | null;
       /** Litellm Model Name */
@@ -4423,6 +5302,11 @@ export interface components {
        * @default false
        */
       use_web_search?: boolean;
+      /**
+       * Require Tool Approval
+       * @default false
+       */
+      require_tool_approval?: boolean;
     };
     /** Counts */
     Counts: {
@@ -4768,6 +5652,15 @@ export interface components {
       /** Items */
       items: components["schemas"]["CreateSpaceIntegrationKnowledgeBatchItem"][];
     };
+    /** CreateSpaceIntegrationKnowledgeBatchResponse */
+    CreateSpaceIntegrationKnowledgeBatchResponse: {
+      /** Items */
+      items: components["schemas"]["CreateSpaceIntegrationKnowledgeBatchResult"][];
+      /** Created Count */
+      created_count: number;
+      /** Failed Count */
+      failed_count: number;
+    };
     /** CreateSpaceIntegrationKnowledgeBatchResult */
     CreateSpaceIntegrationKnowledgeBatchResult: {
       /** Index */
@@ -4779,28 +5672,11 @@ export interface components {
        * @enum {string}
        */
       status: "created" | "failed";
-      /**
-       * Integration Knowledge Id
-       * Format: uuid
-       */
+      /** Integration Knowledge Id */
       integration_knowledge_id?: string | null;
       job?: components["schemas"]["JobPublic"] | null;
       /** Error */
       error?: string | null;
-    };
-    /** CreateSpaceIntegrationKnowledgeBatchResponse */
-    CreateSpaceIntegrationKnowledgeBatchResponse: {
-      /** Items */
-      items: components["schemas"]["CreateSpaceIntegrationKnowledgeBatchResult"][];
-      /** Created Count */
-      created_count: number;
-      /** Failed Count */
-      failed_count: number;
-    };
-    /** UpdateIntegrationKnowledgeWrapperRequest */
-    UpdateIntegrationKnowledgeWrapperRequest: {
-      /** Name */
-      name: string;
     };
     /** CreateSpaceRequest */
     CreateSpaceRequest: {
@@ -4848,6 +5724,27 @@ export interface components {
        */
       published?: boolean;
       user: components["schemas"]["UserSparse"];
+    };
+    /** CursorPaginatedResponse[ApiKeyV2] */
+    CursorPaginatedResponse_ApiKeyV2_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["ApiKeyV2"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
     };
     /** CursorPaginatedResponse[SessionMetadataPublic] */
     CursorPaginatedResponse_SessionMetadataPublic_: {
@@ -4953,6 +5850,12 @@ export interface components {
       websites: components["schemas"]["WebsitePublic"][];
       /** Integration Knowledge List */
       integration_knowledge_list: components["schemas"]["IntegrationKnowledgePublic"][];
+      /** Mcp Servers */
+      mcp_servers: {
+        [key: string]: unknown;
+      }[];
+      /** Mcp Tools */
+      mcp_tools?: components["schemas"]["MCPToolSetting"][];
       completion_model?: components["schemas"]["CompletionModelSparse"] | null;
       /**
        * Published
@@ -5185,6 +6088,10 @@ export interface components {
       tenant_id?: string | null;
       /** Provider Id */
       provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
     };
     /** EmbeddingModelPublicLegacy */
     EmbeddingModelPublicLegacy: {
@@ -5292,6 +6199,10 @@ export interface components {
       tenant_id?: string | null;
       /** Provider Id */
       provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -5372,7 +6283,8 @@ export interface components {
       | "completion_model"
       | "embedding_model"
       | "transcription_model"
-      | "audit_log";
+      | "audit_log"
+      | "session";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -5408,7 +6320,64 @@ export interface components {
       | 9027
       | 9028
       | 9029
-      | 9030;
+      | 9030
+      | 9031
+      | 9032
+      | 9033
+      | 9034;
+    /**
+     * ExpiringKeySummaryItem
+     * @description Lightweight summary of a single expiring API key.
+     */
+    ExpiringKeySummaryItem: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Key Suffix */
+      key_suffix?: string | null;
+      scope_type: components["schemas"]["ApiKeyScopeType"];
+      /** Scope Id */
+      scope_id?: string | null;
+      /**
+       * Expires At
+       * Format: date-time
+       */
+      expires_at: string;
+      /** Suspended At */
+      suspended_at?: string | null;
+      /**
+       * Severity
+       * @enum {string}
+       */
+      severity: "notice" | "warning" | "urgent" | "expired";
+    };
+    /**
+     * ExpiringKeysSummary
+     * @description Aggregated expiring-key data for banners and the notification bell.
+     */
+    ExpiringKeysSummary: {
+      /** Total Count */
+      total_count: number;
+      /** Counts By Severity */
+      counts_by_severity: {
+        [key: string]: number;
+      };
+      /** Earliest Expiration */
+      earliest_expiration?: string | null;
+      /** Items */
+      items: components["schemas"]["ExpiringKeySummaryItem"][];
+      /** Truncated */
+      truncated: boolean;
+      /**
+       * Generated At
+       * Format: date-time
+       */
+      generated_at: string;
+    };
     /**
      * ExportJobRequest
      * @description Schema for requesting async audit log export.
@@ -5639,6 +6608,14 @@ export interface components {
       /** Message */
       message: string;
       intric_error_code: components["schemas"]["ErrorCodes"];
+      /** Code */
+      code?: string | null;
+      /** Context */
+      context?: {
+        [key: string]: unknown;
+      } | null;
+      /** Request Id */
+      request_id?: string | null;
     };
     /** GetModelsResponse */
     GetModelsResponse: {
@@ -6067,7 +7044,7 @@ export interface components {
       size: number;
       /** Last Sync Summary */
       last_sync_summary?: {
-        [key: string]: number;
+        [key: string]: unknown;
       } | null;
       /** Last Synced At */
       last_synced_at?: string | null;
@@ -6120,10 +7097,7 @@ export interface components {
       folder_path?: string | null;
       /** Selected Item Type */
       selected_item_type?: string | null;
-      /**
-       * Wrapper Id
-       * Format: uuid
-       */
+      /** Wrapper Id */
       wrapper_id?: string | null;
       /** Wrapper Name */
       wrapper_name?: string | null;
@@ -6197,6 +7171,8 @@ export interface components {
       name: string;
       /** Url */
       url: string;
+      /** Category */
+      category?: string | null;
     };
     /** IntegrationPreviewDataList */
     IntegrationPreviewDataList: {
@@ -6259,6 +7235,259 @@ export interface components {
       /** Json Body */
       json_body: unknown;
     };
+    /**
+     * MCPConnectionStatus
+     * @description Status of MCP server connection attempt.
+     */
+    MCPConnectionStatus: {
+      /** Success */
+      success: boolean;
+      /**
+       * Tools Discovered
+       * @default 0
+       */
+      tools_discovered?: number;
+      /** Error Message */
+      error_message?: string | null;
+    };
+    /**
+     * MCPServerCreate
+     * @description DTO for creating an MCP server (admin only, uses Streamable HTTP transport).
+     */
+    MCPServerCreate: {
+      /** Name */
+      name: string;
+      /**
+       * Http Url
+       * Format: uri
+       */
+      http_url: string;
+      /**
+       * Http Auth Type
+       * @default none
+       * @enum {string}
+       */
+      http_auth_type?: "none" | "bearer" | "api_key" | "custom_headers";
+      /** Description */
+      description?: string | null;
+      /** Http Auth Config Schema */
+      http_auth_config_schema?: {
+        [key: string]: unknown;
+      } | null;
+      /** Tags */
+      tags?: string[] | null;
+      /** Icon Url */
+      icon_url?: string | null;
+      /** Documentation Url */
+      documentation_url?: string | null;
+    };
+    /**
+     * MCPServerCreateResponse
+     * @description Response for MCP server creation including connection status.
+     */
+    MCPServerCreateResponse: {
+      server: components["schemas"]["MCPServerPublic"];
+      connection: components["schemas"]["MCPConnectionStatus"];
+    };
+    /**
+     * MCPServerPublic
+     * @description Public DTO for MCP server (HTTP-only, uses Streamable HTTP transport).
+     */
+    MCPServerPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Http Url */
+      http_url: string;
+      /** Http Auth Type */
+      http_auth_type: string;
+      /** Http Auth Config Schema */
+      http_auth_config_schema: {
+        [key: string]: unknown;
+      } | null;
+      /** Tags */
+      tags: string[] | null;
+      /** Icon Url */
+      icon_url: string | null;
+      /** Documentation Url */
+      documentation_url: string | null;
+    };
+    /**
+     * MCPServerSettingsCreate
+     * @description DTO for enabling an MCP server for tenant.
+     */
+    MCPServerSettingsCreate: {
+      /** Env Vars */
+      env_vars?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /**
+     * MCPServerSettingsPublic
+     * @description DTO for MCP server with tenant settings.
+     */
+    MCPServerSettingsPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Http Url */
+      http_url: string;
+      /** Http Auth Type */
+      http_auth_type: string;
+      /** Http Auth Config Schema */
+      http_auth_config_schema: {
+        [key: string]: unknown;
+      } | null;
+      /** Tags */
+      tags: string[] | null;
+      /** Icon Url */
+      icon_url: string | null;
+      /** Documentation Url */
+      documentation_url: string | null;
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       */
+      mcp_server_id: string;
+      /** Is Org Enabled */
+      is_org_enabled: boolean;
+      /** Has Credentials */
+      has_credentials: boolean;
+      /**
+       * Credential Status
+       * @default missing
+       * @enum {string}
+       */
+      credential_status?: "ok" | "missing" | "decryption_failed";
+      /**
+       * Tools
+       * @default []
+       */
+      tools?: components["schemas"]["MCPServerToolPublic"][];
+      /**
+       * Tools Count
+       * @description Number of tools available on this server.
+       */
+      tools_count: number;
+      /**
+       * Is Available
+       * @description Whether this MCP is enabled and available for use.
+       */
+      is_available: boolean;
+    };
+    /**
+     * MCPServerSettingsUpdate
+     * @description DTO for updating MCP server settings.
+     */
+    MCPServerSettingsUpdate: {
+      /** Is Org Enabled */
+      is_org_enabled?: boolean | null;
+      /** Env Vars */
+      env_vars?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /** MCPServerToolList */
+    MCPServerToolList: {
+      /** Items */
+      items: components["schemas"]["MCPServerToolPublic"][];
+      /** Count */
+      count: number;
+    };
+    /**
+     * MCPServerToolPublic
+     * @description DTO for MCP server tool.
+     */
+    MCPServerToolPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       */
+      mcp_server_id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Input Schema */
+      input_schema: {
+        [key: string]: unknown;
+      } | null;
+      /** Is Enabled By Default */
+      is_enabled_by_default: boolean;
+    };
+    /**
+     * MCPServerToolSyncResponse
+     * @description Response for tool sync operation including connection status.
+     */
+    MCPServerToolSyncResponse: {
+      /** Tools */
+      tools: components["schemas"]["MCPServerToolPublic"][];
+      connection: components["schemas"]["MCPConnectionStatus"];
+      /** Count */
+      count: number;
+    };
+    /**
+     * MCPServerToolUpdate
+     * @description DTO for updating tenant-level tool settings.
+     */
+    MCPServerToolUpdate: {
+      /** Is Enabled */
+      is_enabled: boolean;
+    };
+    /**
+     * MCPServerUpdate
+     * @description DTO for updating an MCP server (admin only, uses Streamable HTTP transport).
+     */
+    MCPServerUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Http Url */
+      http_url?: string | null;
+      /** Http Auth Type */
+      http_auth_type?: ("none" | "bearer" | "api_key" | "custom_headers") | null;
+      /** Description */
+      description?: string | null;
+      /** Http Auth Config Schema */
+      http_auth_config_schema?: {
+        [key: string]: unknown;
+      } | null;
+      /** Tags */
+      tags?: string[] | null;
+      /** Icon Url */
+      icon_url?: string | null;
+      /** Documentation Url */
+      documentation_url?: string | null;
+    };
+    /**
+     * MCPToolSetting
+     * @description MCP server tool enablement setting.
+     */
+    MCPToolSetting: {
+      /**
+       * Tool Id
+       * Format: uuid
+       */
+      tool_id: string;
+      /** Is Enabled */
+      is_enabled: boolean;
+    };
     /** Message */
     Message: {
       /** Created At */
@@ -6281,6 +7510,11 @@ export interface components {
       generated_files: components["schemas"]["FilePublic"][];
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
+      /**
+       * Tool Calls
+       * @default []
+       */
+      tool_calls?: components["schemas"]["ToolCallInfo"][];
     };
     /** MessageLogging */
     MessageLogging: {
@@ -6304,6 +7538,11 @@ export interface components {
       generated_files: components["schemas"]["FilePublic"][];
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
+      /**
+       * Tool Calls
+       * @default []
+       */
+      tool_calls?: components["schemas"]["ToolCallInfo"][];
       logging_details: components["schemas"]["LoggingDetailsPublic"];
     };
     /** MetadataCount */
@@ -6381,7 +7620,18 @@ export interface components {
      * ModelHostingLocation
      * @enum {string}
      */
-    ModelHostingLocation: "usa" | "eu" | "swe";
+    ModelHostingLocation:
+      | "usa"
+      | "eu"
+      | "swe"
+      | "chn"
+      | "can"
+      | "gbr"
+      | "isr"
+      | "kor"
+      | "deu"
+      | "fra"
+      | "jpn";
     /** ModelId */
     ModelId: {
       /**
@@ -7193,6 +8443,32 @@ export interface components {
        */
       count: number;
     };
+    /** PaginatedResponse[MCPServerPublic] */
+    PaginatedResponse_MCPServerPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["MCPServerPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
+    /** PaginatedResponse[MCPServerSettingsPublic] */
+    PaginatedResponse_MCPServerSettingsPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["MCPServerSettingsPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
     /** PaginatedResponse[Message] */
     PaginatedResponse_Message_: {
       /**
@@ -7543,6 +8819,12 @@ export interface components {
        */
       integration_knowledge_list?: components["schemas"]["ModelId"][] | null;
       /**
+       * Mcp Servers
+       * @deprecated
+       * @description This field is deprecated and will be ignored
+       */
+      mcp_servers?: components["schemas"]["ModelId"][] | null;
+      /**
        * @deprecated
        * @description This field is deprecated and will be ignored
        */
@@ -7554,6 +8836,8 @@ export interface components {
       completion_model?: components["schemas"]["ModelId"] | null;
       /** Attachments */
       attachments?: components["schemas"]["ModelId"][] | null;
+      /** Mcp Tools */
+      mcp_tools?: components["schemas"]["MCPToolSetting"][] | null;
       /**
        * Description
        * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic
@@ -7612,6 +8896,8 @@ export interface components {
       vision?: boolean | null;
       /** Reasoning */
       reasoning?: boolean | null;
+      /** Supports Tool Calling */
+      supports_tool_calling?: boolean | null;
       /** Base Url */
       base_url?: string | null;
       /** Litellm Model Name */
@@ -7680,6 +8966,10 @@ export interface components {
       completion_models?: components["schemas"]["ModelId"][] | null;
       /** Transcription Models */
       transcription_models?: components["schemas"]["ModelId"][] | null;
+      /** Mcp Servers */
+      mcp_servers?: components["schemas"]["ModelId"][] | null;
+      /** Mcp Tools */
+      mcp_tools?: components["schemas"]["MCPToolSetting"][] | null;
       /**
        * Security Classification
        * @description ID of the security classification to apply to this space. Set to null to remove the security classification. Omit to keep the current security classification unchanged.
@@ -7734,7 +9024,7 @@ export interface components {
       | "editor"
       | "admin"
       | "websites"
-      | "integration_knowledge_list";
+      | "integrations";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
@@ -7890,6 +9180,25 @@ export interface components {
       | "publish"
       | "insight_view"
       | "insight_toggle";
+    /**
+     * ResourcePermissionLevel
+     * @enum {string}
+     */
+    ResourcePermissionLevel: "none" | "read" | "write" | "admin";
+    /**
+     * ResourcePermissions
+     * @description Per-resource-type permission overrides. Each level must not exceed the key's simple permission.
+     */
+    ResourcePermissions: {
+      /** @default none */
+      assistants?: components["schemas"]["ResourcePermissionLevel"];
+      /** @default none */
+      apps?: components["schemas"]["ResourcePermissionLevel"];
+      /** @default none */
+      spaces?: components["schemas"]["ResourcePermissionLevel"];
+      /** @default none */
+      knowledge?: components["schemas"]["ResourcePermissionLevel"];
+    };
     /**
      * RetentionPolicyResponse
      * @description Schema for audit log retention policy response.
@@ -8174,21 +9483,6 @@ export interface components {
        * @description OAuth state parameter for verification
        */
       state: string;
-      /**
-       * Client Id
-       * @description Azure AD Application (Client) ID (must match auth/start)
-       */
-      client_id: string;
-      /**
-       * Client Secret
-       * @description Azure AD Application Client Secret (must match auth/start)
-       */
-      client_secret: string;
-      /**
-       * Tenant Domain
-       * @description Azure AD Tenant Domain (must match auth/start)
-       */
-      tenant_domain: string;
     };
     /**
      * ServiceAccountAuthStart
@@ -8197,19 +9491,19 @@ export interface components {
     ServiceAccountAuthStart: {
       /**
        * Client Id
-       * @description Azure AD Application (Client) ID
+       * @description Microsoft Entra ID Application (Client) ID
        * @example 12345678-1234-1234-1234-123456789012
        */
       client_id: string;
       /**
        * Client Secret
-       * @description Azure AD Application Client Secret
+       * @description Microsoft Entra ID Application Client Secret
        * @example abc123~xyz789
        */
       client_secret: string;
       /**
        * Tenant Domain
-       * @description Azure AD Tenant Domain (e.g., contoso.onmicrosoft.com)
+       * @description Microsoft Entra ID Tenant Domain (e.g., contoso.onmicrosoft.com)
        * @example contoso.onmicrosoft.com
        */
       tenant_domain: string;
@@ -8242,7 +9536,7 @@ export interface components {
       name: string;
       /** Prompt */
       prompt: string;
-      completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
+      completion_model_kwargs?: components["schemas"]["ModelKwargs"];
       /**
        * Groups
        * @default []
@@ -8335,7 +9629,7 @@ export interface components {
       name: string;
       /** Prompt */
       prompt: string;
-      completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
+      completion_model_kwargs?: components["schemas"]["ModelKwargs"];
       /**
        * Permissions
        * @default []
@@ -8492,6 +9786,21 @@ export interface components {
        * @default false
        */
       provisioning?: boolean;
+      /**
+       * Api Key Scope Enforcement
+       * @default true
+       */
+      api_key_scope_enforcement?: boolean;
+      /**
+       * Api Key Strict Mode
+       * @default false
+       */
+      api_key_strict_mode?: boolean;
+      /**
+       * Api Key Expiry Notifications
+       * @default true
+       */
+      api_key_expiry_notifications?: boolean;
     };
     /**
      * SharePointSubscriptionPublic
@@ -8722,6 +10031,10 @@ export interface components {
       completion_models: components["schemas"]["CompletionModelPublic"][];
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelPublic"][];
+      /** Mcp Servers */
+      mcp_servers: {
+        [key: string]: unknown;
+      }[];
       knowledge: components["schemas"]["Knowledge"];
       members: components["schemas"]["PaginatedPermissions_SpaceMember_"];
       group_members: components["schemas"]["PaginatedPermissions_SpaceGroupMember_"];
@@ -8882,6 +10195,23 @@ export interface components {
        */
       errors?: string[];
     };
+    /** SuperApiKeyStatus */
+    SuperApiKeyStatus: {
+      /** Super Api Key Configured */
+      super_api_key_configured: boolean;
+      /** Super Duper Api Key Configured */
+      super_duper_api_key_configured: boolean;
+      /**
+       * Super Api Key Using Legacy
+       * @default false
+       */
+      super_api_key_using_legacy?: boolean;
+      /**
+       * Super Duper Api Key Using Legacy
+       * @default false
+       */
+      super_duper_api_key_using_legacy?: boolean;
+    };
     /**
      * SyncLog
      * @description Detailed sync operation log.
@@ -8945,6 +10275,13 @@ export interface components {
        */
       skipped_items: number;
       /**
+       * Skipped Details
+       * @description Get skipped file details from metadata.
+       */
+      skipped_details: readonly {
+        [key: string]: unknown;
+      }[];
+      /**
        * Duration Seconds
        * @description Calculate sync duration in seconds.
        */
@@ -8990,11 +10327,6 @@ export interface components {
       )[];
       /** Count */
       count: number;
-    };
-    /** TemplateSettingUpdate */
-    TemplateSettingUpdate: {
-      /** Enabled */
-      enabled: boolean;
     };
     /** TemplateWizard */
     TemplateWizard: {
@@ -9101,6 +10433,18 @@ export interface components {
        * @default false
        */
       supports_tool_calling?: boolean;
+      /**
+       * Hosting
+       * @description Hosting location (swe, eu, usa)
+       * @default swe
+       */
+      hosting?: string;
+      /**
+       * Family
+       * @description Model family (e.g., 'openai', 'anthropic', 'deepseek')
+       * @default openai
+       */
+      family?: string;
       /**
        * Is Active
        * @description Enable in organization
@@ -9317,6 +10661,10 @@ export interface components {
       crawler_settings?: {
         [key: string]: unknown;
       };
+      /** Api Key Policy */
+      api_key_policy?: {
+        [key: string]: unknown;
+      };
     };
     /**
      * TenantInfo
@@ -9425,19 +10773,19 @@ export interface components {
     TenantSharePointAppCreate: {
       /**
        * Client Id
-       * @description Azure AD Application (Client) ID
+       * @description Microsoft Entra ID Application (Client) ID
        * @example 12345678-1234-1234-1234-123456789012
        */
       client_id: string;
       /**
        * Client Secret
-       * @description Azure AD Application Client Secret
+       * @description Microsoft Entra ID Application Client Secret
        * @example abc123~xyz789
        */
       client_secret: string;
       /**
        * Tenant Domain
-       * @description Azure AD Tenant Domain (e.g., contoso.onmicrosoft.com)
+       * @description Microsoft Entra ID Tenant Domain (e.g., contoso.onmicrosoft.com)
        * @example contoso.onmicrosoft.com
        */
       tenant_domain: string;
@@ -9529,6 +10877,12 @@ export interface components {
        * @default swe
        */
       hosting?: string;
+      /**
+       * Family
+       * @description Model family (e.g., 'openai', 'anthropic', 'deepseek')
+       * @default openai
+       */
+      family?: string;
       /**
        * Is Active
        * @description Enable in organization
@@ -9651,6 +11005,15 @@ export interface components {
       crawler_settings?: {
         [key: string]: unknown;
       };
+      /** Api Key Policy */
+      api_key_policy?: {
+        [key: string]: unknown;
+      };
+    };
+    /** ToggleSettingUpdate */
+    ToggleSettingUpdate: {
+      /** Enabled */
+      enabled: boolean;
     };
     /**
      * TokenEstimateBreakdown
@@ -9750,6 +11113,34 @@ export interface components {
        */
       total_token_usage: number;
     };
+    /**
+     * ToolApprovalDecision
+     * @description Decision for a single tool call.
+     */
+    ToolApprovalDecision: {
+      /** Tool Call Id */
+      tool_call_id: string;
+      /** Approved */
+      approved: boolean;
+      /** Reason */
+      reason?: string | null;
+    };
+    /** ToolApprovalResponse */
+    ToolApprovalResponse: {
+      /** Status */
+      status: string;
+      /** Approval Id */
+      approval_id: string;
+      /** Decisions Received */
+      decisions_received: number;
+      /** Decisions Remaining */
+      decisions_remaining: number;
+      /**
+       * Unrecognized Tool Call Ids
+       * @default []
+       */
+      unrecognized_tool_call_ids?: string[];
+    };
     /** ToolAssistant */
     ToolAssistant: {
       /**
@@ -9759,6 +11150,26 @@ export interface components {
       id: string;
       /** Handle */
       handle: string;
+    };
+    /**
+     * ToolCallInfo
+     * @description Info about a single tool being called.
+     */
+    ToolCallInfo: {
+      /** Server Name */
+      server_name: string;
+      /** Tool Name */
+      tool_name: string;
+      /** Arguments */
+      arguments?: {
+        [key: string]: unknown;
+      } | null;
+      /** Tool Call Id */
+      tool_call_id?: string | null;
+      /** Approved */
+      approved?: boolean | null;
+      /** Result Status */
+      result_status?: string | null;
     };
     /** TranscriptionModelPublic */
     TranscriptionModelPublic: {
@@ -9812,6 +11223,10 @@ export interface components {
       tenant_id?: string | null;
       /** Provider Id */
       provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
     };
     /** TranscriptionModelSecurityStatus */
     TranscriptionModelSecurityStatus: {
@@ -9865,6 +11280,10 @@ export interface components {
       tenant_id?: string | null;
       /** Provider Id */
       provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -9900,6 +11319,11 @@ export interface components {
     };
     /** UpdateIntegrationKnowledgeRequest */
     UpdateIntegrationKnowledgeRequest: {
+      /** Name */
+      name: string;
+    };
+    /** UpdateIntegrationKnowledgeWrapperRequest */
+    UpdateIntegrationKnowledgeWrapperRequest: {
       /** Name */
       name: string;
     };
@@ -10431,6 +11855,8 @@ export interface components {
       quota_used?: number;
       /** Truncated Api Key */
       truncated_api_key?: string | null;
+      /** Legacy Api Key Suffix */
+      legacy_api_key_suffix?: string | null;
       /** Quota Limit */
       quota_limit?: number | null;
       /** Roles */
@@ -10647,6 +12073,23 @@ export interface components {
       /** @description User state (invited/active/inactive) */
       state?: components["schemas"]["UserState"] | null;
     };
+    /**
+     * ValidateModelRequest
+     * @description Request model for validating a model against a provider.
+     */
+    ValidateModelRequest: {
+      /**
+       * Model Name
+       * @description Model name to validate
+       */
+      model_name: string;
+      /**
+       * Model Type
+       * @description Model type: completion, embedding, or transcription
+       * @default completion
+       */
+      model_type?: string;
+    };
     /** ValidationError */
     ValidationError: {
       /** Location */
@@ -10754,6 +12197,41 @@ export interface components {
       /** @default never */
       update_interval?: components["schemas"]["UpdateInterval"];
       embedding_model: components["schemas"]["ModelId"];
+    };
+    /**
+     * WebsiteExistsResponse
+     * @description Response model for checking if a website URL exists on the Organization space.
+     */
+    WebsiteExistsResponse: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Space Name */
+      space_name: string;
+      /** Url */
+      url: string;
+      /** Name */
+      name: string | null;
+      update_interval: components["schemas"]["UpdateInterval"];
+      /** Last Crawled At */
+      last_crawled_at: string | null;
+      /** Pages Crawled */
+      pages_crawled?: number | null;
+      /** Pages Failed */
+      pages_failed?: number | null;
+      /** Files Downloaded */
+      files_downloaded?: number | null;
+      /** Files Failed */
+      files_failed?: number | null;
+      /** Crawl Status */
+      crawl_status?: string | null;
     };
     /** WebsiteMetadata */
     WebsiteMetadata: {
@@ -11098,6 +12576,10 @@ export interface components {
       pages_failed?: number | null;
       /** Files Failed */
       files_failed?: number | null;
+      /** Failure Summary */
+      failure_summary?: {
+        [key: string]: number;
+      } | null;
       /** @default queued */
       status?: components["schemas"]["Status"] | null;
       /** Result Location */
@@ -11124,6 +12606,10 @@ export interface components {
       pages_failed: number | null;
       /** Files Failed */
       files_failed: number | null;
+      /** Failure Summary */
+      failure_summary?: {
+        [key: string]: number;
+      } | null;
       status: components["schemas"]["Status"];
       /** Result Location */
       result_location: string | null;
@@ -11131,7 +12617,470 @@ export interface components {
       finished_at: string | null;
     };
     /** @enum {string} */
-    IntricEventType: "generating_image";
+    IntricEventType:
+      | "generating_image"
+      | "tool_call"
+      | "tool_approval_required"
+      | "tool_approval_timeout";
+    /** SSEText */
+    SSEText: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Answer */
+      answer: string;
+      /** References */
+      references: $defs["InfoBlobAskAssistantPublic"][];
+      $defs: {
+        /** InfoBlobAskAssistantPublic */
+        InfoBlobAskAssistantPublic: {
+          /**
+           * Created At
+           * @default null
+           */
+          created_at?: string | null;
+          /**
+           * Updated At
+           * @default null
+           */
+          updated_at?: string | null;
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          metadata: $defs["InfoBlobMetadata"];
+          /**
+           * Group Id
+           * @default null
+           */
+          group_id?: string | null;
+          /**
+           * Website Id
+           * @default null
+           */
+          website_id?: string | null;
+          /** Score */
+          score: number;
+        };
+        /** InfoBlobMetadata */
+        InfoBlobMetadata: {
+          /**
+           * Url
+           * @default null
+           */
+          url?: string | null;
+          /**
+           * Title
+           * @default null
+           */
+          title?: string | null;
+          /**
+           * Embedding Model Id
+           * Format: uuid
+           */
+          embedding_model_id: string;
+          /** Size */
+          size: number;
+        };
+      };
+    };
+    /** SSEIntricEvent */
+    SSEIntricEvent: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      intric_event_type: $defs["IntricEventType"];
+      $defs: {
+        /**
+         * IntricEventType
+         * @enum {string}
+         */
+        IntricEventType:
+          | "generating_image"
+          | "tool_call"
+          | "tool_approval_required"
+          | "tool_approval_timeout";
+      };
+    };
+    /**
+     * SSEToolCall
+     * @description Event emitted when MCP tools are being executed.
+     */
+    SSEToolCall: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** @default tool_call */
+      intric_event_type?: $defs["IntricEventType"];
+      /** Tools */
+      tools: $defs["ToolCallInfo"][];
+      $defs: {
+        /**
+         * IntricEventType
+         * @enum {string}
+         */
+        IntricEventType:
+          | "generating_image"
+          | "tool_call"
+          | "tool_approval_required"
+          | "tool_approval_timeout";
+        /**
+         * ToolCallInfo
+         * @description Info about a single tool being called.
+         */
+        ToolCallInfo: {
+          /** Server Name */
+          server_name: string;
+          /** Tool Name */
+          tool_name: string;
+          /**
+           * Arguments
+           * @default null
+           */
+          arguments?: {
+            [key: string]: unknown;
+          } | null;
+          /**
+           * Tool Call Id
+           * @default null
+           */
+          tool_call_id?: string | null;
+          /**
+           * Approved
+           * @default null
+           */
+          approved?: boolean | null;
+          /**
+           * Result Status
+           * @default null
+           */
+          result_status?: string | null;
+        };
+      };
+    };
+    /**
+     * SSEToolApprovalRequired
+     * @description Event emitted when MCP tools require user approval before execution.
+     */
+    SSEToolApprovalRequired: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** @default tool_approval_required */
+      intric_event_type?: $defs["IntricEventType"];
+      /** Approval Id */
+      approval_id: string;
+      /** Tools */
+      tools: $defs["ToolCallInfo"][];
+      $defs: {
+        /**
+         * IntricEventType
+         * @enum {string}
+         */
+        IntricEventType:
+          | "generating_image"
+          | "tool_call"
+          | "tool_approval_required"
+          | "tool_approval_timeout";
+        /**
+         * ToolCallInfo
+         * @description Info about a single tool being called.
+         */
+        ToolCallInfo: {
+          /** Server Name */
+          server_name: string;
+          /** Tool Name */
+          tool_name: string;
+          /**
+           * Arguments
+           * @default null
+           */
+          arguments?: {
+            [key: string]: unknown;
+          } | null;
+          /**
+           * Tool Call Id
+           * @default null
+           */
+          tool_call_id?: string | null;
+          /**
+           * Approved
+           * @default null
+           */
+          approved?: boolean | null;
+          /**
+           * Result Status
+           * @default null
+           */
+          result_status?: string | null;
+        };
+      };
+    };
+    /**
+     * SSEToolApprovalTimeout
+     * @description Event emitted when tool approval timed out.
+     */
+    SSEToolApprovalTimeout: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** @default tool_approval_timeout */
+      intric_event_type?: $defs["IntricEventType"];
+      /** Approval Id */
+      approval_id: string;
+      /** Tools */
+      tools: $defs["ToolCallInfo"][];
+      $defs: {
+        /**
+         * IntricEventType
+         * @enum {string}
+         */
+        IntricEventType:
+          | "generating_image"
+          | "tool_call"
+          | "tool_approval_required"
+          | "tool_approval_timeout";
+        /**
+         * ToolCallInfo
+         * @description Info about a single tool being called.
+         */
+        ToolCallInfo: {
+          /** Server Name */
+          server_name: string;
+          /** Tool Name */
+          tool_name: string;
+          /**
+           * Arguments
+           * @default null
+           */
+          arguments?: {
+            [key: string]: unknown;
+          } | null;
+          /**
+           * Tool Call Id
+           * @default null
+           */
+          tool_call_id?: string | null;
+          /**
+           * Approved
+           * @default null
+           */
+          approved?: boolean | null;
+          /**
+           * Result Status
+           * @default null
+           */
+          result_status?: string | null;
+        };
+      };
+    };
+    /** SSEFiles */
+    SSEFiles: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Generated Files */
+      generated_files: $defs["FilePublic"][];
+      $defs: {
+        /** FilePublic */
+        FilePublic: {
+          /**
+           * Created At
+           * @default null
+           */
+          created_at?: string | null;
+          /**
+           * Updated At
+           * @default null
+           */
+          updated_at?: string | null;
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          /** Name */
+          name: string;
+          /** Mimetype */
+          mimetype: string;
+          /** Size */
+          size: number;
+          /**
+           * Transcription
+           * @default null
+           */
+          transcription?: string | null;
+          /**
+           * Token Count
+           * @default null
+           */
+          token_count?: number | null;
+        };
+      };
+    };
+    /** SSEFirstChunk */
+    SSEFirstChunk: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Question */
+      question: string;
+      /** Answer */
+      answer: string;
+      /** Files */
+      files: $defs["FilePublic"][];
+      /** Generated Files */
+      generated_files: $defs["FilePublic"][];
+      /** References */
+      references: $defs["InfoBlobAskAssistantPublic"][];
+      tools: $defs["UseTools"];
+      /** Web Search References */
+      web_search_references: $defs["WebSearchResultPublic"][];
+      $defs: {
+        /** FilePublic */
+        FilePublic: {
+          /**
+           * Created At
+           * @default null
+           */
+          created_at?: string | null;
+          /**
+           * Updated At
+           * @default null
+           */
+          updated_at?: string | null;
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          /** Name */
+          name: string;
+          /** Mimetype */
+          mimetype: string;
+          /** Size */
+          size: number;
+          /**
+           * Transcription
+           * @default null
+           */
+          transcription?: string | null;
+          /**
+           * Token Count
+           * @default null
+           */
+          token_count?: number | null;
+        };
+        /** InfoBlobAskAssistantPublic */
+        InfoBlobAskAssistantPublic: {
+          /**
+           * Created At
+           * @default null
+           */
+          created_at?: string | null;
+          /**
+           * Updated At
+           * @default null
+           */
+          updated_at?: string | null;
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          metadata: $defs["InfoBlobMetadata"];
+          /**
+           * Group Id
+           * @default null
+           */
+          group_id?: string | null;
+          /**
+           * Website Id
+           * @default null
+           */
+          website_id?: string | null;
+          /** Score */
+          score: number;
+        };
+        /** InfoBlobMetadata */
+        InfoBlobMetadata: {
+          /**
+           * Url
+           * @default null
+           */
+          url?: string | null;
+          /**
+           * Title
+           * @default null
+           */
+          title?: string | null;
+          /**
+           * Embedding Model Id
+           * Format: uuid
+           */
+          embedding_model_id: string;
+          /** Size */
+          size: number;
+        };
+        /** ToolAssistant */
+        ToolAssistant: {
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          /** Handle */
+          handle: string;
+        };
+        /** UseTools */
+        UseTools: {
+          /** Assistants */
+          assistants: $defs["ToolAssistant"][];
+        };
+        /** WebSearchResultPublic */
+        WebSearchResultPublic: {
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          /** Title */
+          title: string;
+          /** Url */
+          url: string;
+        };
+      };
+    };
+    /** SSEError */
+    SSEError: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Error */
+      error: string;
+      /**
+       * Error Code
+       * @default null
+       */
+      error_code?: number | null;
+    };
   };
   responses: never;
   parameters: never;
@@ -11502,57 +13451,795 @@ export interface operations {
     };
   };
   /**
-   * Login
-   * @description OAuth2 Login with comprehensive error handling and logging
+   * Get API key creation constraints
+   * @description Returns tenant policy limits relevant to key creation UX (expiration, rate limit).
    */
-  Login_api_v1_users_login_token__post: {
-    requestBody: {
-      content: {
-        "application/x-www-form-urlencoded": components["schemas"]["Body_Login_api_v1_users_login_token__post"];
-      };
-    };
+  get_creation_constraints_api_v1_api_keys_creation_constraints_get: {
     responses: {
-      /** @description Successful Response */
+      /** @description Creation constraints from tenant policy. */
       200: {
         content: {
-          "application/json": components["schemas"]["AccessToken"];
+          "application/json": components["schemas"]["ApiKeyCreationConstraints"];
         };
       };
       /** @description Unauthorized */
       401: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
-      /** @description Validation Error */
-      422: {
+      /** @description Too Many Requests */
+      429: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
   };
   /**
-   * Login With Mobilityguard
-   * @description OpenID Connect Login (generic OIDC provider).
+   * Get API key notification preferences
+   * @description Get the caller's API key expiry notification preferences.
    */
-  login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post: {
+  get_notification_preferences_api_v1_api_keys_notification_preferences_get: {
+    responses: {
+      /** @description Notification preferences. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyNotificationPreferencesResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Update API key notification preferences
+   * @description Update the caller's API key expiry notification preferences.
+   */
+  update_notification_preferences_api_v1_api_keys_notification_preferences_put: {
     requestBody: {
       content: {
-        "application/json": components["schemas"]["OpenIdConnectLogin"];
+        "application/json": components["schemas"]["ApiKeyNotificationPreferencesUpdate"];
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Updated notification preferences. */
       200: {
         content: {
-          "application/json": components["schemas"]["AccessToken"];
+          "application/json": components["schemas"]["ApiKeyNotificationPreferencesResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Validation Error */
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * List API key notification subscriptions
+   * @description List followed targets used for subscribed expiry notification mode.
+   */
+  list_notification_subscriptions_api_v1_api_keys_notification_subscriptions_get: {
+    responses: {
+      /** @description Notification subscriptions. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyNotificationSubscriptionListResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Follow target for API key expiry notifications
+   * @description Follow an API key, assistant, app, or space for subscribed expiry notifications.
+   */
+  upsert_notification_subscription_api_v1_api_keys_notification_subscriptions__target_type___target_id__put: {
+    parameters: {
+      path: {
+        target_type: components["schemas"]["ApiKeyNotificationTargetType"];
+        target_id: string;
+      };
+    };
+    responses: {
+      /** @description Updated notification subscriptions. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyNotificationSubscriptionListResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Unfollow target for API key expiry notifications
+   * @description Remove a followed API key/assistant/app/space target from subscribed notifications.
+   */
+  delete_notification_subscription_api_v1_api_keys_notification_subscriptions__target_type___target_id__delete: {
+    parameters: {
+      path: {
+        target_type: components["schemas"]["ApiKeyNotificationTargetType"];
+        target_id: string;
+      };
+    };
+    responses: {
+      /** @description Updated notification subscriptions. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyNotificationSubscriptionListResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Get expiring API key summary
+   * @description Returns keys expiring within the specified window, filtered by user visibility.
+   */
+  get_expiring_keys_api_v1_api_keys_expiring_soon_get: {
+    parameters: {
+      query?: {
+        /** @description Look-ahead window in days */
+        days?: number;
+        /** @description all: tenant-visible expiring keys, subscribed: only followed targets. */
+        mode?: "all" | "subscribed";
+      };
+    };
+    responses: {
+      /** @description Expiring key summary. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ExpiringKeysSummary"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Get API key usage
+   * @description Returns usage and auth-failure audit events for a single API key you manage.
+   */
+  get_api_key_usage_api_v1_api_keys__id__usage_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description API key usage response. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyUsageResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * List API keys
+   * @description List manageable API keys in the current tenant with cursor pagination and filters.
+   */
+  list_api_keys_api_v1_api_keys_get: {
+    parameters: {
+      query?: {
+        /** @description Keys per page */
+        limit?: number | null;
+        /** @description Current cursor */
+        cursor?: string | null;
+        /** @description Show previous page */
+        previous?: boolean;
+        /** @description Scope type filter */
+        scope_type?: components["schemas"]["ApiKeyScopeType"] | null;
+        /** @description Scope id filter */
+        scope_id?: string | null;
+        /** @description State filter */
+        state?: components["schemas"]["ApiKeyState"] | null;
+        /** @description Key type filter */
+        key_type?: components["schemas"]["ApiKeyType"] | null;
+      };
+    };
+    responses: {
+      /** @description Paginated API key list. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyListResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Create API key
+   * @description Create a v2 API key with scoped permission, guardrails, and optional rate limits.
+   */
+  create_api_key_api_v1_api_keys_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description API key created successfully. Secret is shown once. */
+      201: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyCreatedResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Get API key
+   * @description Get a single API key by ID if the current user is authorized to manage it.
+   */
+  get_api_key_api_v1_api_keys__id__get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description API key details. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Revoke API key (deprecated alias)
+   * @deprecated
+   * @description Deprecated. Use POST /api/v1/api-keys/{id}/revoke with reason body.
+   */
+  revoke_api_key_deprecated_api_v1_api_keys__id__delete: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description API key revoked. No response body. */
+      204: {
+        content: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Update API key
+   * @description Update API key metadata and guardrail fields supported by policy.
+   */
+  update_api_key_api_v1_api_keys__id__patch: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated API key. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Revoke API key
+   * @description Revoke an API key and optionally include reason metadata for audit logs.
+   */
+  revoke_api_key_api_v1_api_keys__id__revoke_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyStateChangeRequest"] | null;
+      };
+    };
+    responses: {
+      /** @description Revoked API key. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Rotate API key
+   * @description Rotate an API key, issuing a new secret and starting the grace overlap window.
+   */
+  rotate_api_key_api_v1_api_keys__id__rotate_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Rotated API key and one-time secret. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyCreatedResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Suspend API key
+   * @description Suspend an API key temporarily. Suspended keys cannot authenticate.
+   */
+  suspend_api_key_api_v1_api_keys__id__suspend_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyStateChangeRequest"] | null;
+      };
+    };
+    responses: {
+      /** @description Suspended API key. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Reactivate API key
+   * @description Reactivate a previously suspended API key.
+   */
+  reactivate_api_key_api_v1_api_keys__id__reactivate_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Reactivated API key. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
@@ -11586,53 +14273,58 @@ export interface operations {
       };
     };
   };
-  /** Get Current User */
-  Get_current_user_api_v1_users_me__get: {
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["UserPublic"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
   /**
-   * Generate Api Key
-   * @description Generating a new api key will delete the old key.
-   * Make sure to copy the key since it will only be showed once,
-   * after which only the truncated key will be shown.
+   * Generate legacy user API key
+   * @deprecated
+   * @description Legacy API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This endpoint rotates the old legacy key immediately.
    */
-  generate_api_key_api_v1_users_api_keys__get: {
+  generate_api_key_api_v1_users_api_keys__post: {
     responses: {
-      /** @description Successful Response */
+      /** @description Legacy API key created and returned once. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKey"];
         };
       };
-    };
-  };
-  /** Get Current User Tenant */
-  Get_current_user_tenant_api_v1_users_tenant__get: {
-    responses: {
-      /** @description Successful Response */
-      200: {
+      /** @description Unauthorized */
+      401: {
         content: {
-          "application/json": components["schemas"]["TenantPublic"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
-      /** @description Not Found */
-      404: {
+      /** @description Forbidden */
+      403: {
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
+      };
+      /** @description Legacy endpoint disabled. Migrate to v2 endpoint. */
+      410: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  /**
+   * Revoke legacy user API key
+   * @description Permanently revokes the caller's legacy (v1) API key.
+   */
+  revoke_legacy_api_key_api_v1_users_api_keys_legacy_delete: {
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description No legacy API key found. */
+      404: {
+        content: never;
       };
     };
   };
@@ -11701,6 +14393,96 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Login
+   * @description OAuth2 Login with comprehensive error handling and logging
+   */
+  Login_api_v1_users_login_token__post: {
+    requestBody: {
+      content: {
+        "application/x-www-form-urlencoded": components["schemas"]["Body_Login_api_v1_users_login_token__post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessToken"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Login With Mobilityguard
+   * @description OpenID Connect Login (generic OIDC provider).
+   */
+  login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OpenIdConnectLogin"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessToken"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Current User */
+  Get_current_user_api_v1_users_me__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UserPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /** Get Current User Tenant */
+  Get_current_user_tenant_api_v1_users_tenant__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -11869,6 +14651,7 @@ export interface operations {
   /**
    * Get Groups
    * @deprecated
+   * @description Legacy groups endpoint. Use collections/spaces instead for new integrations.
    */
   get_groups_api_v1_groups__get: {
     responses: {
@@ -11883,8 +14666,7 @@ export interface operations {
   /**
    * Create Group
    * @deprecated
-   * @description Valid values for `embedding_model` are the provided by `GET /api/v1/settings/models/`.
-   * Use the `name` field of the response from this endpoint.
+   * @description Legacy groups endpoint. Use collections/spaces instead for new integrations.
    */
   create_group_api_v1_groups__post: {
     requestBody: {
@@ -12263,7 +15045,7 @@ export interface operations {
   update_template_setting_api_v1_settings_templates_patch: {
     requestBody: {
       content: {
-        "application/json": components["schemas"]["TemplateSettingUpdate"];
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
       };
     };
     responses: {
@@ -12313,7 +15095,158 @@ export interface operations {
   update_audit_logging_setting_api_v1_settings_audit_logging_patch: {
     requestBody: {
       content: {
-        "application/json": components["schemas"]["TemplateSettingUpdate"];
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Toggle JIT user provisioning
+   * @description Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Behavior:**
+   * - When enabled: Users are automatically created on first SSO login
+   * - When disabled: Only pre-existing users can log in via SSO
+   * - New users get the "User" role by default
+   * - Change takes effect immediately for all SSO logins
+   *
+   * **Example Request:**
+   * ```json
+   * {
+   *   "enabled": true
+   * }
+   * ```
+   *
+   * **Example Response:**
+   * ```json
+   * {
+   *   "chatbot_widget": {},
+   *   "using_templates": true,
+   *   "audit_logging_enabled": true,
+   *   "provisioning": true
+   * }
+   * ```
+   */
+  update_provisioning_setting_api_v1_settings_provisioning_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Toggle API key scope enforcement
+   * @description Toggle API key scope enforcement for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Behavior:**
+   * - Updates the `api_key_scope_enforcement` feature flag for your tenant
+   * - When enabled: API keys are restricted to resources within their configured scope
+   * - When disabled: All API keys can access resources beyond their configured scope
+   * - Disabling scope enforcement also disables strict mode for consistency
+   * - Change takes effect immediately for all API key requests
+   */
+  update_scope_enforcement_setting_api_v1_settings_scope_enforcement_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Toggle API key strict mode
+   * @description Toggle API key strict mode for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Behavior:**
+   * - Updates the `api_key_strict_mode` feature flag for your tenant
+   * - When enabled: scoped API keys are enforced with strict fail-closed semantics
+   * - When disabled: default scope enforcement behavior applies
+   * - Enabling strict mode requires `api_key_scope_enforcement` to be enabled
+   * - Change takes effect immediately for API key requests
+   */
+  update_strict_mode_setting_api_v1_settings_strict_mode_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Toggle API key expiry notifications
+   * @description Toggle API key expiry notifications for your tenant.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * **Behavior:**
+   * - Updates the `api_key_expiry_notifications` feature flag for your tenant
+   * - When enabled: API key expiry notification surfaces are active
+   * - When disabled: API key expiry notifications are suppressed
+   * - Change takes effect immediately
+   */
+  update_api_key_expiry_notifications_setting_api_v1_settings_api_key_expiry_notifications_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
       };
     };
     responses: {
@@ -12407,10 +15340,7 @@ export interface operations {
       };
     };
   };
-  /**
-   * Create Assistant
-   * @deprecated
-   */
+  /** Create Assistant */
   create_assistant_api_v1_assistants__post: {
     requestBody: {
       content: {
@@ -12710,6 +15640,10 @@ export interface operations {
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
+                /** Provider Name */
+                provider_name?: string | null;
+                /** Provider Type */
+                provider_type?: string | null;
               };
               /** FilePublic */
               FilePublic: {
@@ -12775,7 +15709,18 @@ export interface operations {
                * ModelHostingLocation
                * @enum {string}
                */
-              ModelHostingLocation: "usa" | "eu" | "swe";
+              ModelHostingLocation:
+                | "usa"
+                | "eu"
+                | "swe"
+                | "chn"
+                | "can"
+                | "gbr"
+                | "isr"
+                | "kor"
+                | "deu"
+                | "fra"
+                | "jpn";
               /**
                * ModelOrg
                * @enum {string}
@@ -13028,6 +15973,10 @@ export interface operations {
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
+                /** Provider Name */
+                provider_name?: string | null;
+                /** Provider Type */
+                provider_type?: string | null;
               };
               /** FilePublic */
               FilePublic: {
@@ -13093,7 +16042,18 @@ export interface operations {
                * ModelHostingLocation
                * @enum {string}
                */
-              ModelHostingLocation: "usa" | "eu" | "swe";
+              ModelHostingLocation:
+                | "usa"
+                | "eu"
+                | "swe"
+                | "chn"
+                | "can"
+                | "gbr"
+                | "isr"
+                | "kor"
+                | "deu"
+                | "fra"
+                | "jpn";
               /**
                * ModelOrg
                * @enum {string}
@@ -13261,11 +16221,9 @@ export interface operations {
     };
   };
   /**
-   * Generate Read Only Assistant Key
-   * @description Generates a read-only api key for this assistant.
-   *
-   * This api key can only be used on `POST /api/v1/assistants/{id}/sessions/`
-   * and `POST /api/v1/assistants/{id}/sessions/{session_id}/`.
+   * Generate legacy assistant API key
+   * @deprecated
+   * @description Legacy assistant API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This returns a legacy assistant-scoped key.
    */
   generate_read_only_assistant_key_api_v1_assistants__id__api_keys__get: {
     parameters: {
@@ -13274,10 +16232,28 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Legacy assistant API key created and returned once. */
       200: {
         content: {
           "application/json": components["schemas"]["ApiKey"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Legacy endpoint disabled. Migrate to v2 endpoint. */
+      410: {
+        content: {
+          "application/json": unknown;
         };
       };
       /** @description Validation Error */
@@ -13381,6 +16357,105 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Assistant Mcp Servers
+   * @description Get all MCP servers associated with an assistant.
+   */
+  get_assistant_mcp_servers_api_v1_assistants__id__mcp_servers__get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Add Mcp To Assistant
+   * @description Add an MCP server to an assistant.
+   */
+  add_mcp_to_assistant_api_v1_assistants__id__mcp_servers__mcp_server_id___post: {
+    parameters: {
+      path: {
+        id: string;
+        mcp_server_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Remove Mcp From Assistant
+   * @description Remove an MCP server from an assistant.
+   */
+  remove_mcp_from_assistant_api_v1_assistants__id__mcp_servers__mcp_server_id___delete: {
+    parameters: {
+      path: {
+        id: string;
+        mcp_server_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
       };
       /** @description Not Found */
       404: {
@@ -13637,9 +16712,8 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
-          "text/event-stream": OneOf<
-            [
-              {
+          "text/event-stream":
+            | {
                 /**
                  * Session Id
                  * Format: uuid
@@ -13684,8 +16758,8 @@ export interface operations {
                     size: number;
                   };
                 };
-              },
-              {
+              }
+            | {
                 /**
                  * Session Id
                  * Format: uuid
@@ -13697,10 +16771,144 @@ export interface operations {
                    * IntricEventType
                    * @enum {string}
                    */
-                  IntricEventType: "generating_image";
+                  IntricEventType:
+                    | "generating_image"
+                    | "tool_call"
+                    | "tool_approval_required"
+                    | "tool_approval_timeout";
                 };
-              },
-              {
+              }
+            | {
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** @default tool_call */
+                intric_event_type?: components["schemas"]["IntricEventType"];
+                /** Tools */
+                tools: components["schemas"]["ToolCallInfo"][];
+                $defs: {
+                  /**
+                   * IntricEventType
+                   * @enum {string}
+                   */
+                  IntricEventType:
+                    | "generating_image"
+                    | "tool_call"
+                    | "tool_approval_required"
+                    | "tool_approval_timeout";
+                  /**
+                   * ToolCallInfo
+                   * @description Info about a single tool being called.
+                   */
+                  ToolCallInfo: {
+                    /** Server Name */
+                    server_name: string;
+                    /** Tool Name */
+                    tool_name: string;
+                    /** Arguments */
+                    arguments?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** Tool Call Id */
+                    tool_call_id?: string | null;
+                    /** Approved */
+                    approved?: boolean | null;
+                    /** Result Status */
+                    result_status?: string | null;
+                  };
+                };
+              }
+            | {
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** @default tool_approval_required */
+                intric_event_type?: components["schemas"]["IntricEventType"];
+                /** Approval Id */
+                approval_id: string;
+                /** Tools */
+                tools: components["schemas"]["ToolCallInfo"][];
+                $defs: {
+                  /**
+                   * IntricEventType
+                   * @enum {string}
+                   */
+                  IntricEventType:
+                    | "generating_image"
+                    | "tool_call"
+                    | "tool_approval_required"
+                    | "tool_approval_timeout";
+                  /**
+                   * ToolCallInfo
+                   * @description Info about a single tool being called.
+                   */
+                  ToolCallInfo: {
+                    /** Server Name */
+                    server_name: string;
+                    /** Tool Name */
+                    tool_name: string;
+                    /** Arguments */
+                    arguments?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** Tool Call Id */
+                    tool_call_id?: string | null;
+                    /** Approved */
+                    approved?: boolean | null;
+                    /** Result Status */
+                    result_status?: string | null;
+                  };
+                };
+              }
+            | {
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** @default tool_approval_timeout */
+                intric_event_type?: components["schemas"]["IntricEventType"];
+                /** Approval Id */
+                approval_id: string;
+                /** Tools */
+                tools: components["schemas"]["ToolCallInfo"][];
+                $defs: {
+                  /**
+                   * IntricEventType
+                   * @enum {string}
+                   */
+                  IntricEventType:
+                    | "generating_image"
+                    | "tool_call"
+                    | "tool_approval_required"
+                    | "tool_approval_timeout";
+                  /**
+                   * ToolCallInfo
+                   * @description Info about a single tool being called.
+                   */
+                  ToolCallInfo: {
+                    /** Server Name */
+                    server_name: string;
+                    /** Tool Name */
+                    tool_name: string;
+                    /** Arguments */
+                    arguments?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** Tool Call Id */
+                    tool_call_id?: string | null;
+                    /** Approved */
+                    approved?: boolean | null;
+                    /** Result Status */
+                    result_status?: string | null;
+                  };
+                };
+              }
+            | {
                 /**
                  * Session Id
                  * Format: uuid
@@ -13732,8 +16940,8 @@ export interface operations {
                     token_count?: number | null;
                   };
                 };
-              },
-              {
+              }
+            | {
                 /**
                  * Session Id
                  * Format: uuid
@@ -13836,8 +17044,8 @@ export interface operations {
                     url: string;
                   };
                 };
-              },
-              {
+              }
+            | {
                 /**
                  * Session Id
                  * Format: uuid
@@ -13847,9 +17055,7 @@ export interface operations {
                 error: string;
                 /** Error Code */
                 error_code?: number | null;
-              }
-            ]
-          >;
+              };
         };
       };
       /** @description Bad Request */
@@ -14026,6 +17232,74 @@ export interface operations {
       };
     };
   };
+  /**
+   * Approve Tools
+   * @description Submit approval decisions for pending tool calls.
+   *
+   * When a chat request is made with require_tool_approval=true, the stream will emit
+   * a tool_approval_required event with an approval_id and list of pending tools.
+   * Use this endpoint to approve or reject each tool call.
+   *
+   * The decisions list should contain one entry per tool_call_id from the event.
+   * If a tool_call_id is omitted, it will be treated as rejected.
+   */
+  approve_tools_api_v1_conversations_approve_tools__post: {
+    parameters: {
+      query: {
+        /** @description The approval ID from the tool_approval_required event */
+        approval_id: string;
+      };
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ToolApprovalDecision"][];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ToolApprovalResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   /** Get Services */
   get_services_api_v1_services__get: {
     parameters: {
@@ -14050,7 +17324,6 @@ export interface operations {
   };
   /**
    * Create Service
-   * @deprecated
    * @description Create a service.
    *
    * `json_schema` is required if `output_validation` is 'json'.
@@ -15174,6 +18447,807 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get tenant API key policy
+   * @description Get API key policy settings for the current tenant.
+   */
+  get_api_key_policy_api_v1_admin_api_key_policy_get: {
+    responses: {
+      /** @description Current tenant API key policy. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyPolicyResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Update tenant API key policy
+   * @description Update tenant policy guardrails used for API key creation and validation.
+   */
+  update_api_key_policy_api_v1_admin_api_key_policy_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyPolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Updated tenant API key policy. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyPolicyResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Get API key notification policy
+   * @description Get tenant API key notification policy settings.
+   */
+  get_api_key_notification_policy_api_v1_admin_api_keys_notification_policy_get: {
+    responses: {
+      /** @description Current notification policy. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyNotificationPolicyResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Update API key notification policy
+   * @description Update tenant API key notification policy under api_key_policy.notification_policy.
+   */
+  update_api_key_notification_policy_api_v1_admin_api_keys_notification_policy_put: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyNotificationPolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Updated notification policy. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyNotificationPolicyResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Get super API key status
+   * @description Return whether super and super-duper API keys are configured in environment settings.
+   */
+  get_super_api_key_status_api_v1_admin_super_api_key_status_get: {
+    responses: {
+      /** @description Super key configuration status. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SuperApiKeyStatus"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * List tenant API keys
+   * @description List API keys across the tenant with filters and cursor pagination.
+   */
+  list_api_keys_admin_api_v1_admin_api_keys_get: {
+    parameters: {
+      query?: {
+        /** @description Keys per page */
+        limit?: number | null;
+        /** @description Current cursor */
+        cursor?: string | null;
+        /** @description Show previous page */
+        previous?: boolean;
+        /** @description Scope type filter */
+        scope_type?: components["schemas"]["ApiKeyScopeType"] | null;
+        /** @description Scope id filter */
+        scope_id?: string | null;
+        /** @description State filter */
+        state?: components["schemas"]["ApiKeyState"] | null;
+        /** @description Key type filter */
+        key_type?: components["schemas"]["ApiKeyType"] | null;
+        /** @description Owner user id filter */
+        owner_user_id?: string | null;
+        /** @description Creator user id filter */
+        created_by_user_id?: string | null;
+        /** @description How UI user filter should be interpreted when a single user filter is provided. */
+        user_relation?: components["schemas"]["ApiKeyUserRelation"];
+        /** @description Case-insensitive search over key name, suffix, description, owner, and creator identity. */
+        search?: string | null;
+        /** @description Filter to keys with expires_at within this many days. */
+        expires_within_days?: number | null;
+      };
+    };
+    responses: {
+      /** @description Paginated tenant API key list. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_ApiKeyV2_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Get expiring API key summary (tenant-wide)
+   * @description Returns all expiring keys in the tenant within the specified window.
+   */
+  get_expiring_keys_admin_api_v1_admin_api_keys_expiring_soon_get: {
+    parameters: {
+      query?: {
+        /** @description Look-ahead window in days */
+        days?: number;
+      };
+    };
+    responses: {
+      /** @description Tenant-wide expiring key summary. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ExpiringKeysSummary"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Find API key by exact secret
+   * @description Resolve a full API key secret within the current tenant and return the matching key metadata.
+   */
+  lookup_api_key_admin_api_v1_admin_api_keys_lookup_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyExactLookupRequest"];
+      };
+    };
+    responses: {
+      /** @description Matching API key found. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyExactLookupResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Get API key usage timeline
+   * @description Returns key-centric usage and auth-failure audit events for a single API key.
+   */
+  get_api_key_usage_admin_api_v1_admin_api_keys__id__usage_get: {
+    parameters: {
+      query?: {
+        /** @description Usage events per page. */
+        limit?: number;
+        /** @description Usage pagination cursor. */
+        cursor?: string | null;
+      };
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description API key usage response. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyUsageResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Get tenant API key
+   * @description Get a single API key by ID within the tenant.
+   */
+  get_api_key_admin_api_v1_admin_api_keys__id__get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Tenant API key details. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Revoke API key (deprecated alias)
+   * @deprecated
+   * @description Deprecated. Use POST /api/v1/admin/api-keys/{id}/revoke with reason body.
+   */
+  revoke_api_key_admin_deprecated_api_v1_admin_api_keys__id__delete: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description API key revoked. No response body. */
+      204: {
+        content: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Update tenant API key
+   * @description Update API key metadata and guardrails as tenant admin.
+   */
+  update_api_key_admin_api_v1_admin_api_keys__id__patch: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated tenant API key. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Revoke tenant API key
+   * @description Revoke an API key as tenant admin with optional reason metadata.
+   */
+  revoke_api_key_admin_api_v1_admin_api_keys__id__revoke_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyStateChangeRequest"] | null;
+      };
+    };
+    responses: {
+      /** @description Revoked tenant API key. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Suspend tenant API key
+   * @description Suspend an API key so it cannot authenticate until reactivated.
+   */
+  suspend_api_key_admin_api_v1_admin_api_keys__id__suspend_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ApiKeyStateChangeRequest"] | null;
+      };
+    };
+    responses: {
+      /** @description Suspended tenant API key. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Reactivate tenant API key
+   * @description Reactivate a suspended API key.
+   */
+  reactivate_api_key_admin_api_v1_admin_api_keys__id__reactivate_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Reactivated tenant API key. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyV2"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Rotate tenant API key
+   * @description Rotate an API key and return the new one-time secret.
+   */
+  rotate_api_key_admin_api_v1_admin_api_keys__id__rotate_post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Rotated tenant API key and one-time secret. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyCreatedResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
     };
@@ -16837,6 +20911,20 @@ export interface operations {
     };
   };
   /**
+   * Get Provider Capabilities
+   * @description Get supported model types and top models per provider type from LiteLLM.
+   */
+  get_provider_capabilities_api_v1_admin_model_providers_capabilities__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  /**
    * Get Provider
    * @description Get a specific model provider.
    */
@@ -16919,6 +21007,104 @@ export interface operations {
     parameters: {
       path: {
         provider_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List Provider Models
+   * @description List available models/deployments from the provider's API using its credentials.
+   */
+  list_provider_models_api_v1_admin_model_providers__provider_id__models__get: {
+    parameters: {
+      path: {
+        provider_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Test Provider
+   * @description Test connectivity to a model provider.
+   */
+  test_provider_api_v1_admin_model_providers__provider_id__test__post: {
+    parameters: {
+      path: {
+        provider_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Validate Model
+   * @description Validate that a model works with this provider by making a minimal API call.
+   */
+  validate_model_api_v1_admin_model_providers__provider_id__validate_model__post: {
+    parameters: {
+      path: {
+        provider_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ValidateModelRequest"];
       };
     };
     responses: {
@@ -18128,6 +22314,34 @@ export interface operations {
       };
     };
   };
+  /** Create Space Integration Knowledge Batch */
+  create_space_integration_knowledge_batch_api_v1_spaces__id__knowledge_integrations_add__user_integration_id__batch__post: {
+    parameters: {
+      path: {
+        id: string;
+        user_integration_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateSpaceIntegrationKnowledgeBatchRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        content: {
+          "application/json": components["schemas"]["CreateSpaceIntegrationKnowledgeBatchResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Delete Space Integration Knowledge */
   delete_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_remove__integration_knowledge_id___delete: {
     parameters: {
@@ -18149,53 +22363,18 @@ export interface operations {
       };
     };
   };
-  /** Update Integration Knowledge */
-  update_integration_knowledge_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id___patch: {
+  /** Delete Integration Knowledge Wrapper */
+  delete_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___delete: {
     parameters: {
       path: {
         id: string;
-        integration_knowledge_id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["UpdateIntegrationKnowledgeRequest"];
+        wrapper_id: string;
       };
     };
     responses: {
       /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["IntegrationKnowledgePublic"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /** Create Space Integration Knowledge Batch */
-  create_space_integration_knowledge_batch_api_v1_spaces__id__knowledge_integrations_add__user_integration_id__batch__post: {
-    parameters: {
-      path: {
-        id: string;
-        user_integration_id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["CreateSpaceIntegrationKnowledgeBatchRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      202: {
-        content: {
-          "application/json": components["schemas"]["CreateSpaceIntegrationKnowledgeBatchResponse"];
-        };
+      204: {
+        content: never;
       };
       /** @description Validation Error */
       422: {
@@ -18233,18 +22412,48 @@ export interface operations {
       };
     };
   };
-  /** Delete Integration Knowledge Wrapper */
-  delete_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___delete: {
+  /** Update Integration Knowledge */
+  update_integration_knowledge_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id___patch: {
     parameters: {
       path: {
         id: string;
-        wrapper_id: string;
+        integration_knowledge_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateIntegrationKnowledgeRequest"];
       };
     };
     responses: {
       /** @description Successful Response */
-      204: {
-        content: never;
+      200: {
+        content: {
+          "application/json": components["schemas"]["IntegrationKnowledgePublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Trigger Integration Full Sync */
+  trigger_integration_full_sync_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__sync__post: {
+    parameters: {
+      path: {
+        id: string;
+        integration_knowledge_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        content: {
+          "application/json": components["schemas"]["JobPublic"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -18645,6 +22854,44 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["WebsitePublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Check if URL exists on Organization space
+   * @description Check if a website URL already exists on the user's Organization space.
+   *
+   *     **Use case:**
+   *     When creating a new website on a Personal or Shared space, call this endpoint
+   *     to check if the URL is already being crawled on the Organization space.
+   *     This helps avoid duplicate crawls and informs users that the knowledge
+   *     might already be available for import.
+   *
+   *     **Returns:**
+   *     - Website info if URL exists on Organization space
+   *     - `null` if URL not found or user has no Organization space
+   *
+   *     **Note:** This does not block website creation - it's informational only.
+   */
+  check_existing_website_url_api_v1_websites_check_url__get: {
+    parameters: {
+      query: {
+        /** @description The website URL to check */
+        url: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WebsiteExistsResponse"] | null;
         };
       };
       /** @description Validation Error */
@@ -20350,6 +24597,496 @@ export interface operations {
       };
     };
   };
+  /**
+   * Get Mcp Servers
+   * @description Get all MCP servers from global catalog with optional tag filtering.
+   */
+  get_mcp_servers_api_v1_mcp_servers__get: {
+    parameters: {
+      query?: {
+        tags?: string[] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_MCPServerPublic_"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Mcp Server
+   * @description Create a new MCP server in global catalog (admin only).
+   *
+   * Validates connection before saving. Returns 400 if connection fails.
+   */
+  create_mcp_server_api_v1_mcp_servers__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerCreateResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Tenant Mcp Settings
+   * @description Get all available MCP servers with tenant enablement status.
+   */
+  get_tenant_mcp_settings_api_v1_mcp_servers_settings__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_MCPServerSettingsPublic_"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Mcp Settings
+   * @description Update MCP server settings for the current tenant.
+   */
+  update_mcp_settings_api_v1_mcp_servers_settings__mcp_server_id___put: {
+    parameters: {
+      path: {
+        mcp_server_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerSettingsUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerSettingsPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Enable Mcp For Tenant
+   * @description Enable an MCP server for the current tenant with optional credentials.
+   */
+  enable_mcp_for_tenant_api_v1_mcp_servers_settings__mcp_server_id___post: {
+    parameters: {
+      path: {
+        mcp_server_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerSettingsCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerSettingsPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Disable Mcp For Tenant
+   * @description Disable an MCP server for the current tenant.
+   */
+  disable_mcp_for_tenant_api_v1_mcp_servers_settings__mcp_server_id___delete: {
+    parameters: {
+      path: {
+        mcp_server_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Tenant Tool Enabled
+   * @description Update tenant-level enablement for a tool (admin only).
+   */
+  update_tenant_tool_enabled_api_v1_mcp_servers_settings_tools__tool_id___put: {
+    parameters: {
+      path: {
+        tool_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerToolUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerToolPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Mcp Server
+   * @description Get a single MCP server by ID.
+   */
+  get_mcp_server_api_v1_mcp_servers__id___get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Mcp Server
+   * @description Update an MCP server in global catalog (admin only).
+   */
+  update_mcp_server_api_v1_mcp_servers__id___post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Mcp Server
+   * @description Delete an MCP server from global catalog (admin only).
+   */
+  delete_mcp_server_api_v1_mcp_servers__id___delete: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Mcp Server Tools
+   * @description Get all tools for an MCP server with tenant-level settings applied.
+   */
+  get_mcp_server_tools_api_v1_mcp_servers__id__tools__get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerToolList"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Sync Mcp Server Tools
+   * @description Manually refresh/sync tools for an MCP server (admin only).
+   *
+   * Returns 400 if connection to the MCP server fails.
+   */
+  sync_mcp_server_tools_api_v1_mcp_servers__id__tools_sync__post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerToolSyncResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Tool Default Enabled
+   * @description Update global default enabled status for a tool (admin only).
+   */
+  update_tool_default_enabled_api_v1_mcp_servers__id__tools__tool_id___put: {
+    parameters: {
+      path: {
+        id: string;
+        tool_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerToolUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerToolPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Sharepoint Webhook Validation */
   sharepoint_webhook_validation_api_v1_integrations_sharepoint_webhook__get: {
     parameters: {
@@ -20418,7 +25155,7 @@ export interface operations {
   };
   /**
    * Configure tenant SharePoint app
-   * @description Configure Azure AD application credentials for organization-wide SharePoint access. This eliminates person-dependency for shared and organization spaces by using application permissions instead of delegated user permissions. Requires admin role.
+   * @description Configure Microsoft Entra ID application credentials for organization-wide SharePoint access. This eliminates person-dependency for shared and organization spaces by using application permissions instead of delegated user permissions. Requires admin role.
    */
   configure_sharepoint_app_api_v1_admin_sharepoint_app_post: {
     requestBody: {
@@ -21430,7 +26167,7 @@ export interface operations {
    * Create Completion Model
    * @description Create a new completion model (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * This creates the model metadata only. To enable it for a tenant,
    * use POST /api/v1/completion-models/{id}/ with tenant credentials.
@@ -21472,7 +26209,7 @@ export interface operations {
    * Update Completion Model Metadata
    * @description Update completion model metadata (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * Updates global model metadata. Does not affect tenant-specific settings.
    */
@@ -21518,7 +26255,7 @@ export interface operations {
    * Delete Completion Model
    * @description Delete a completion model (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * WARNING: Deletion affects all tenants. Use with caution.
    * Set force=true to delete even if model is in use (may break references).
@@ -21570,7 +26307,7 @@ export interface operations {
    * Create Embedding Model
    * @description Create a new embedding model (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * This creates the model metadata only. To enable it for a tenant,
    * use POST /api/v1/embedding-models/{id}/ with tenant credentials.
@@ -21612,7 +26349,7 @@ export interface operations {
    * Update Embedding Model Metadata
    * @description Update embedding model metadata (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * Updates global model metadata. Does not affect tenant-specific settings.
    */
@@ -21658,7 +26395,7 @@ export interface operations {
    * Delete Embedding Model
    * @description Delete an embedding model (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * WARNING: Deletion affects all tenants. Use with caution.
    */

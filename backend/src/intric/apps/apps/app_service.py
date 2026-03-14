@@ -9,17 +9,20 @@ from intric.apps.apps.app_repo import AppRepository
 from intric.files.file_service import FileService
 from intric.files.transcriber import Transcriber
 from intric.icons.icon_repo import IconRepository
+from intric.main.logging import get_logger
 from intric.main.exceptions import BadRequestException, UnauthorizedException
-from intric.main.models import NOT_PROVIDED, ModelId, NotProvided
+from intric.main.models import NOT_PROVIDED, ModelId, NotProvided, ResourcePermission
 from intric.prompts.prompt_service import PromptService
 from intric.spaces.api.space_models import WizardType
 from intric.spaces.space import Space
 from intric.users.user import UserInDB
+from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
+from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 
 if TYPE_CHECKING:
     from intric.actors import ActorManager
-    from intric.ai_models.completion_models.completion_model import CompletionModel
     from intric.completion_models.application import CompletionModelCRUDService
+    from intric.completion_models.domain.completion_model import CompletionModel
     from intric.completion_models.infrastructure.completion_service import (
         CompletionService,
     )
@@ -51,6 +54,7 @@ class AppService:
         transcription_model_crud_service: "TranscriptionModelCRUDService",
         completion_service: "CompletionService",
         icon_repo: IconRepository,
+        api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
         self.user = user
         self.repo = repo
@@ -65,14 +69,24 @@ class AppService:
         self.transcription_model_crud_service = transcription_model_crud_service
         self.completion_service = completion_service
         self.icon_repo = icon_repo
+        self.api_key_scope_revoker = api_key_scope_revoker
+        self._logger = get_logger(__name__)
 
     async def create_app(
         self, name: str, space: Space, template_data: Optional["TemplateCreate"] = None
-    ) -> App:
+    ) -> tuple[App, list[ResourcePermission]]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_create_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to create apps in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "create",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         completion_model = await self.get_completion_model(space=space)
         transcription_model = await self.get_transcription_model(space=space)
@@ -154,14 +168,14 @@ class AppService:
 
         return completion_model
 
-    async def get_transcription_model(self, space: Space) -> Optional["TranscriptionModel"]:
+    async def get_transcription_model(
+        self, space: Space
+    ) -> Optional["TranscriptionModel"]:
         """Get a transcription model for the space. Returns None if no model is available."""
         transcription_model = space.get_latest_transcription_model()
         if not transcription_model:
             # Get default from tenant (for both personal and non-personal spaces)
-            transcription_model = (
-                await self.transcription_model_crud_service.get_default_transcription_model()
-            )
+            transcription_model = await self.transcription_model_crud_service.get_default_transcription_model()
 
         if transcription_model is None:
             raise BadRequestException(
@@ -170,13 +184,21 @@ class AppService:
 
         return transcription_model
 
-    async def get_app(self, app_id: UUID) -> tuple[App, list[str]]:
+    async def get_app(self, app_id: UUID) -> tuple[App, list[ResourcePermission]]:
         space = await self.space_repo.get_space_by_app(app_id=app_id)
         app = space.get_app(app_id=app_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_read_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read apps in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_app_permissions()
@@ -197,22 +219,36 @@ class AppService:
         transcription_model_id: UUID | None = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
-    ) -> App:
+    ) -> tuple[App, list[ResourcePermission]]:
         space = await self.space_repo.get_space_by_app(app_id=app_id)
         app = space.get_app(app_id=app_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_edit_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to edit apps in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "update",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         completion_model = None
         if completion_model_id is not None:
-            if not space.is_completion_model_in_space(completion_model_id=completion_model_id):
-                raise BadRequestException("The completion model is not enabled in the space.")
+            if not space.is_completion_model_in_space(
+                completion_model_id=completion_model_id
+            ):
+                raise BadRequestException(
+                    "The completion model is not enabled in the space."
+                )
 
             else:
-                completion_model = await self.completion_model_crud_service.get_completion_model(
-                    completion_model_id
+                completion_model = (
+                    await self.completion_model_crud_service.get_completion_model(
+                        completion_model_id
+                    )
                 )
 
         transcription_model = None
@@ -220,7 +256,9 @@ class AppService:
             if not space.is_transcription_model_in_space(
                 transcription_model_id=transcription_model_id
             ):
-                raise BadRequestException("The transcription model is not enabled in the space.")
+                raise BadRequestException(
+                    "The transcription model is not enabled in the space."
+                )
             else:
                 transcription_model = (
                     await self.transcription_model_crud_service.get_transcription_model(
@@ -265,10 +303,32 @@ class AppService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_delete_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to delete apps in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "delete",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         app = space.get_app(app_id=app_id)
         icon_id = app.icon_id
+
+        if self.api_key_scope_revoker is not None:
+            try:
+                await self.api_key_scope_revoker.revoke_scope(
+                    scope_type=ApiKeyScopeType.APP,
+                    scope_id=app_id,
+                    reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
+                    reason_text="App deleted",
+                )
+            except Exception:
+                self._logger.exception(
+                    "Failed to revoke API keys for deleted app",
+                    extra={"app_id": str(app_id)},
+                )
 
         await self.repo.delete(app_id)
 
@@ -281,10 +341,26 @@ class AppService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_read_app(app=app):
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to run this app.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "run",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         if not space.can_run_app(app=app):
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "This app cannot be run in the current space configuration.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "run",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         files = await self.file_service.get_files_by_ids(
             file_ids=file_ids, include_transcription=True
@@ -302,7 +378,15 @@ class AppService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_read_prompts_of_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read prompts for this app.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "prompt",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return await self.prompt_service.get_prompts_by_app(app_id=app_id)
 
@@ -312,7 +396,15 @@ class AppService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_publish_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "Publishing apps is not allowed for your current space role.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "publish",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         app.update(published=publish)
 

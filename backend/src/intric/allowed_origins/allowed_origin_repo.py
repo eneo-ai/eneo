@@ -1,3 +1,4 @@
+from typing import cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -30,19 +31,46 @@ class AllowedOriginRepository:
             .returning(AllowedOrigins)
         )
 
-        return await self.delegate.get_model_from_query(stmt)
+        return cast(
+            AllowedOriginInDB | None, await self.delegate.get_model_from_query(stmt)
+        )
 
-    async def get_origin(self, origin: str):
-        stmt = sa.select(AllowedOrigins).where(AllowedOrigins.url == origin)
+    async def get_origin(self, origin: str) -> AllowedOriginInDB | None:
+        stmt = sa.select(AllowedOrigins).where(AllowedOrigins.url == origin).limit(1)
 
-        return await self.delegate.get_model_from_query(stmt)
+        return cast(
+            AllowedOriginInDB | None, await self.delegate.get_model_from_query(stmt)
+        )
 
-    async def get_all(self):
-        return await self.delegate.get_all()
+    async def get_by_id(self, origin_id: UUID) -> AllowedOriginInDB | None:
+        stmt = sa.select(AllowedOrigins).where(AllowedOrigins.id == origin_id).limit(1)
 
-    async def get_by_tenant(self, tenant_id: UUID):
-        return await self.delegate.filter_by(
-            conditions={AllowedOrigins.tenant_id: tenant_id}
+        return cast(
+            AllowedOriginInDB | None, await self.delegate.get_model_from_query(stmt)
+        )
+
+    async def get_origin_for_tenant(
+        self, origin: str, tenant_id: UUID
+    ) -> AllowedOriginInDB | None:
+        stmt = (
+            sa.select(AllowedOrigins)
+            .where(AllowedOrigins.url == origin)
+            .where(AllowedOrigins.tenant_id == tenant_id)
+        )
+
+        return cast(
+            AllowedOriginInDB | None, await self.delegate.get_model_from_query(stmt)
+        )
+
+    async def get_all(self) -> list[AllowedOriginInDB]:
+        return cast(list[AllowedOriginInDB], await self.delegate.get_all())
+
+    async def get_by_tenant(self, tenant_id: UUID) -> list[AllowedOriginInDB]:
+        return cast(
+            list[AllowedOriginInDB],
+            await self.delegate.filter_by(
+                conditions={AllowedOrigins.tenant_id: tenant_id}
+            ),
         )
 
     async def delete(self, id: UUID):

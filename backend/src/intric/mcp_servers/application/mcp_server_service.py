@@ -98,12 +98,17 @@ class MCPServerService:
     async def get_mcp_servers(self, tags: list[str] | None = None) -> list[MCPServer]:
         """Get all MCP servers from global catalog with optional tag filtering."""
         if tags:
-            return await self.repo.query(tags=tags)
-        return await self.repo.all()
+            return await self.repo.query(tags=tags, tenant_id=self.user.tenant_id)
+        return await self.repo.query(tenant_id=self.user.tenant_id)
 
     async def get_mcp_server(self, mcp_server_id: UUID) -> MCPServer:
         """Get a single MCP server by ID."""
-        return await self.repo.one(id=mcp_server_id)
+        server = await self.repo.one(id=mcp_server_id)
+        if server.tenant_id != self.user.tenant_id:
+            from intric.main.exceptions import UnauthorizedException
+
+            raise UnauthorizedException("MCP server not accessible")
+        return server
 
     @validate_permissions(Permission.ADMIN)
     async def create_mcp_server(
@@ -198,7 +203,10 @@ class MCPServerService:
         Returns MCPServerUpdateResult with connection info when validation occurs.
         """
         mcp_server = await self.repo.one(id=mcp_server_id)
+        if mcp_server.tenant_id != self.user.tenant_id:
+            from intric.main.exceptions import UnauthorizedException
 
+            raise UnauthorizedException("MCP server not accessible")
         # Track whether connection-affecting fields are actually changing
         url_changed = http_url is not None and str(http_url) != mcp_server.http_url
         auth_type_changed = (
@@ -259,6 +267,11 @@ class MCPServerService:
     @validate_permissions(Permission.ADMIN)
     async def delete_mcp_server(self, mcp_server_id: UUID) -> None:
         """Delete an MCP server from global catalog (admin only)."""
+        server = await self.repo.one(id=mcp_server_id)
+        if server.tenant_id != self.user.tenant_id:
+            from intric.main.exceptions import UnauthorizedException
+
+            raise UnauthorizedException("MCP server not accessible")
         await self.repo.delete(id=mcp_server_id)
 
     async def _test_connection_and_discover_tools(
@@ -388,6 +401,10 @@ class MCPServerService:
             Tuple of (list of refreshed tools, connection result)
         """
         mcp_server = await self.repo.one(id=mcp_server_id)
+        if mcp_server.tenant_id != self.user.tenant_id:
+            from intric.main.exceptions import UnauthorizedException
+
+            raise UnauthorizedException("MCP server not accessible")
 
         # If no explicit credentials provided, decrypt stored ones
         if auth_credentials is None:
@@ -412,6 +429,11 @@ class MCPServerService:
             Updated tool
         """
         tool = await self.tool_repo.one(id=tool_id)
+        server = await self.repo.one(id=tool.mcp_server_id)
+        if server.tenant_id != self.user.tenant_id:
+            from intric.main.exceptions import UnauthorizedException
+
+            raise UnauthorizedException("MCP server tool not accessible")
         tool.is_enabled_by_default = is_enabled
         return await self.tool_repo.update(tool)
 
@@ -434,6 +456,11 @@ class MCPServerService:
 
         # Verify tool exists
         tool = await self.tool_repo.one(id=tool_id)
+        server = await self.repo.one(id=tool.mcp_server_id)
+        if server.tenant_id != self.user.tenant_id:
+            from intric.main.exceptions import UnauthorizedException
+
+            raise UnauthorizedException("MCP server tool not accessible")
 
         # Upsert tenant tool setting
         from datetime import datetime, timezone

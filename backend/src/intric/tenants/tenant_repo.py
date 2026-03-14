@@ -1,10 +1,10 @@
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 from uuid import UUID
 
 import sqlalchemy as sa
 from pydantic import HttpUrl
-from sqlalchemy import cast, func
+from sqlalchemy import cast as sa_cast, func
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
@@ -78,13 +78,16 @@ class TenantRepository:
             raise exceptions.UniqueException("Tenant name already exists.") from e
 
     async def get(self, id: UUID) -> TenantInDB:
-        return await self.delegate.get(id)
+        return cast(TenantInDB, await self.delegate.get(id))
 
-    async def get_all_tenants(self, domain: str | None = None):
+    async def get_all_tenants(self, domain: str | None = None) -> list[TenantInDB]:
         if domain is not None:
-            return await self.delegate.filter_by(conditions={Tenants.domain: domain})
+            return cast(
+                list[TenantInDB],
+                await self.delegate.filter_by(conditions={Tenants.domain: domain}),
+            )
 
-        return await self.delegate.get_all()
+        return cast(list[TenantInDB], await self.delegate.get_all())
 
     async def add_modules(self, list_of_module_ids: list[ModelId], tenant_id: UUID):
         module_ids = [module.id for module in list_of_module_ids]
@@ -97,34 +100,61 @@ class TenantRepository:
             .options(selectinload(Tenants.modules))
         )
         tenant = await self.session.scalar(tenant_stmt)
+        if tenant is None:
+            raise exceptions.NotFoundException("Tenant not found.")
 
-        tenant.modules = modules.all()
+        tenant.modules = list(modules.all())
 
         return TenantInDB.model_validate(tenant)
 
     async def update_tenant(self, tenant: TenantUpdate) -> TenantInDB:
-        return await self.delegate.update(tenant)
+        return cast(TenantInDB, await self.delegate.update(tenant))
+
+    async def update_api_key_policy(
+        self,
+        tenant_id: UUID,
+        policy_updates: dict[str, Any],
+    ) -> TenantInDB:
+        tenant = await self.get(tenant_id)
+        policy = dict(tenant.api_key_policy or {})
+        policy.update(policy_updates)
+
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(api_key_policy=policy, updated_at=datetime.now(timezone.utc))
+            .returning(Tenants)
+            .options(selectinload(Tenants.modules))
+        )
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)
 
     async def delete_tenant_by_id(self, id: UUID) -> TenantInDB:
-        return await self.delegate.delete(id)
+        return cast(TenantInDB, await self.delegate.delete(id))
 
     async def set_privacy_policy(
         self, privacy_policy: Optional[HttpUrl], tenant_id: UUID
     ) -> TenantInDB:
-        privacy_policy = str(privacy_policy) if privacy_policy is not None else None
+        privacy_policy_value = (
+            str(privacy_policy) if privacy_policy is not None else None
+        )
         stmt = (
             sa.update(Tenants)
             .where(Tenants.id == tenant_id)
-            .values(privacy_policy=privacy_policy)
+            .values(privacy_policy=privacy_policy_value)
             .returning(Tenants)
             .options(selectinload(Tenants.modules))
         )
 
-        return await self.delegate.get_model_from_query(stmt)
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)
 
     async def get_tenant_from_zitadel_org_id(self, zitadel_org_id: str) -> TenantInDB:
-        return await self.delegate.get_by(
-            conditions={Tenants.zitadel_org_id: zitadel_org_id}
+        return cast(
+            TenantInDB,
+            await self.delegate.get_by(
+                conditions={Tenants.zitadel_org_id: zitadel_org_id}
+            ),
         )
 
     async def update_api_credential(
@@ -179,14 +209,15 @@ class TenantRepository:
                 api_credentials=func.jsonb_set(
                     Tenants.api_credentials,
                     [provider.lower()],
-                    cast(credential_to_store, JSONB),
+                    sa_cast(credential_to_store, JSONB),
                     True,  # create_if_missing
                 )
             )
             .returning(Tenants)
             .options(selectinload(Tenants.modules))
         )
-        return await self.delegate.get_model_from_query(stmt)
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)
 
     async def delete_api_credential(
         self,
@@ -210,13 +241,14 @@ class TenantRepository:
             .where(Tenants.id == tenant_id)
             .values(
                 api_credentials=Tenants.api_credentials.op("#-")(
-                    cast([provider.lower()], postgresql.ARRAY(sa.Text))
+                    sa_cast([provider.lower()], postgresql.ARRAY(sa.Text))
                 )
             )
             .returning(Tenants)
             .options(selectinload(Tenants.modules))
         )
-        return await self.delegate.get_model_from_query(stmt)
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)
 
     async def get_api_credentials_masked(
         self,
@@ -410,7 +442,9 @@ class TenantRepository:
                     .values(slug=check_slug, updated_at=datetime.now(timezone.utc))
                 )
                 await self.session.execute(stmt)
-                logger.info(f"Generated and saved slug '{check_slug}' for tenant {tenant.name}")
+                logger.info(
+                    f"Generated and saved slug '{check_slug}' for tenant {tenant.name}"
+                )
                 return check_slug
             counter += 1
 
@@ -556,14 +590,15 @@ class TenantRepository:
             .where(Tenants.id == tenant_id)
             .values(
                 crawler_settings=func.coalesce(
-                    Tenants.crawler_settings, cast({}, JSONB)
-                ).op("||")(cast(crawler_settings, JSONB)),
+                    Tenants.crawler_settings, sa_cast({}, JSONB)
+                ).op("||")(sa_cast(crawler_settings, JSONB)),
                 updated_at=datetime.now(timezone.utc),
             )
             .returning(Tenants)
             .options(selectinload(Tenants.modules))
         )
-        return await self.delegate.get_model_from_query(stmt)
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)
 
     async def clear_crawler_settings(
         self,
@@ -587,4 +622,5 @@ class TenantRepository:
             .returning(Tenants)
             .options(selectinload(Tenants.modules))
         )
-        return await self.delegate.get_model_from_query(stmt)
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)

@@ -22,6 +22,7 @@
   import EditRetentionPolicy from "./EditRetentionPolicy.svelte";
   import { m } from "$lib/paraglide/messages";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
+  import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
   import { fade } from "svelte/transition";
 
   const intric = getIntric();
@@ -227,6 +228,22 @@
 
         <SelectMCPServers selectableServers={data.mcpServers}></SelectMCPServers>
       </Settings.Group>
+
+      {#if !isOrgSpace && $currentSpace.permissions?.includes("edit")}
+        <Settings.Group title={m.api_access()}>
+          <Settings.Row
+            title={m.api_keys()}
+            description={m.api_keys_space_settings_desc()}
+            fullWidth
+          >
+            <ApiKeysSettingsSection
+              scopeType="space"
+              scopeId={$currentSpace.id}
+              scopeName={$currentSpace.name}
+            />
+          </Settings.Row>
+        </Settings.Group>
+      {/if}
 
       {#if !isOrgSpace && $currentSpace.permissions?.includes("delete")}
         <Settings.Group title={m.danger_zone()}>

@@ -303,6 +303,7 @@ class UserPublicBase(InDB, UserBase):
 
 class UserPublic(UserPublicBase):
     truncated_api_key: Optional[str] = None
+    legacy_api_key_suffix: Optional[str] = None
     quota_limit: Optional[int] = None
     roles: list[RolePublic]
     predefined_roles: list[PredefinedRolePublic]

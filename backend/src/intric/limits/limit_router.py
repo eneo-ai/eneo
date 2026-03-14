@@ -8,6 +8,6 @@ router = APIRouter()
 
 
 @router.get("/", response_model=Limits)
-def get_limits(container: Container = Depends(get_container())):
+def get_limits(container: Container = Depends(get_container(with_user=True))):
     service = container.limit_service()
     return service.get_limits()

@@ -9,6 +9,7 @@ import sqlalchemy as sa
 
 from intric.ai_models.model_enums import ModelStability
 from intric.authentication.auth_dependencies import get_current_active_user
+from intric.roles.permissions import Permission, validate_permission
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.database.tables.ai_models_table import EmbeddingModels
 from intric.database.tables.collections_table import CollectionsTable
@@ -64,6 +65,8 @@ async def create_tenant_embedding_model(
     session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Create a new tenant-specific embedding model."""
+    validate_permission(user, Permission.ADMIN)
+
     # Verify provider exists and belongs to user's tenant
     stmt = sa.select(ModelProviders).where(
         ModelProviders.id == model_create.provider_id,
@@ -136,6 +139,8 @@ async def update_tenant_embedding_model(
     session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Update a tenant-specific embedding model."""
+    validate_permission(user, Permission.ADMIN)
+
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(EmbeddingModels).where(
         EmbeddingModels.id == model_id,
@@ -190,6 +195,8 @@ async def delete_tenant_embedding_model(
     session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Delete a tenant-specific embedding model."""
+    validate_permission(user, Permission.ADMIN)
+
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(EmbeddingModels).where(
         EmbeddingModels.id == model_id,

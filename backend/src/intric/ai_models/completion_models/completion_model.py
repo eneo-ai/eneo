@@ -29,6 +29,7 @@ class ResponseType(str, Enum):
     INTRIC_EVENT = "intric_event"
     TOOL_CALL = "tool_call"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
+    TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
     FILES = "image"
     FIRST_CHUNK = "first_chunk"
     ERROR = "error"
@@ -55,6 +56,8 @@ class ToolCallMetadata:
     arguments: Optional[dict] = None  # The input values provided to the tool
     tool_call_id: Optional[str] = None  # The tool call ID for approval flow
     approved: Optional[bool] = None  # True=approved, False=denied, None=pending/auto
+    # Additive state field for richer clients; legacy `approved` remains authoritative.
+    result_status: Optional[str] = None
 
 
 @dataclass
