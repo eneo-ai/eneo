@@ -1,4 +1,6 @@
 import asyncio
+import contextlib
+import os
 from tempfile import SpooledTemporaryFile
 from uuid import UUID
 
@@ -76,27 +78,32 @@ class TaskService:
 
         filepath = await self.file_size_service.save_file_to_disk(file)
 
-        if task_type == Task.UPLOAD_FILE:
-            params = UploadInfoBlob(
-                filepath=filepath,
-                filename=filename,
-                user_id=self.user.id,
-                group_id=group_id,
-                space_id=space_id,
-                mimetype=mimetype,
-            )
-        elif task_type == Task.TRANSCRIPTION:
-            params = Transcription(
-                filepath=filepath,
-                filename=filename,
-                user_id=self.user.id,
-                group_id=group_id,
-                space_id=space_id,
-                mimetype=mimetype,
-            )
+        try:
+            if task_type == Task.UPLOAD_FILE:
+                params = UploadInfoBlob(
+                    filepath=filepath,
+                    filename=filename,
+                    user_id=self.user.id,
+                    group_id=group_id,
+                    space_id=space_id,
+                    mimetype=mimetype,
+                )
+            elif task_type == Task.TRANSCRIPTION:
+                params = Transcription(
+                    filepath=filepath,
+                    filename=filename,
+                    user_id=self.user.id,
+                    group_id=group_id,
+                    space_id=space_id,
+                    mimetype=mimetype,
+                )
 
-        # Set name of the job to the filename being processed
-        job = await self.job_service.queue_job(task_type, name=filename, task_params=params)
+            # Set name of the job to the filename being processed
+            job = await self.job_service.queue_job(task_type, name=filename, task_params=params)
+        except BaseException:
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(filepath)
+            raise
 
         return job
 

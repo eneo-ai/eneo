@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -52,3 +53,17 @@ async def test_save_file_to_disk_writes_file_content(mock_settings, tmp_path):
 
     # cleanup
     Path(destination).unlink()
+
+
+async def test_save_file_to_disk_cleans_up_on_write_failure(mock_settings, tmp_path):
+    file = SpooledTemporaryFile()
+    file.write(b"hello")
+    file.seek(0)
+
+    with patch("intric.files.file_size_service.shutil.copyfileobj", side_effect=IOError("disk full")):
+        with pytest.raises(IOError, match="disk full"):
+            await FileSizeService.save_file_to_disk(file)
+
+    # No leftover files in the tmp directory
+    remaining = list(tmp_path.iterdir())
+    assert remaining == []
