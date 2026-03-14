@@ -13,6 +13,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { invalidate } from "$app/navigation";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   export let userGroup: UserGroup;
 
@@ -27,7 +28,7 @@
       invalidate("admin:user-groups:load");
       $showDeleteDialog = false;
     } catch (e) {
-      alert(m.could_not_delete_user_group());
+      toast.error(m.could_not_delete_user_group());
       console.error(e);
     }
     isDeleting = false;

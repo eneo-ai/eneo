@@ -11,6 +11,7 @@
   import AudioRecorder from "./AudioRecorder.svelte";
   import AttachmentItem from "$lib/features/attachments/components/AttachmentItem.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   import { fade } from "svelte/transition";
 
   export let description = m.record_audio_device();
@@ -57,7 +58,7 @@
 
   async function saveAudioFile() {
     if (!audioFile) {
-      alert(m.recording_not_found());
+      toast.error(m.recording_not_found());
       return;
     }
     const suggestedName = audioFile.name;
@@ -72,7 +73,7 @@
           return;
         }
         console.error("Failed to save recording:", error);
-        alert(m.recording_save_failed());
+        toast.error(m.recording_save_failed());
       }
     } else {
       const a = document.createElement("a");
@@ -122,12 +123,12 @@
         variant="primary"
         on:click={() => {
           if (!audioFile) {
-            alert(m.recording_not_found());
+            toast.error(m.recording_not_found());
             return;
           }
           const errors = queueValidUploads([audioFile]);
           if (errors) {
-            alert(errors);
+            toast.error(Array.isArray(errors) ? errors.join("\n") : String(errors));
           } else {
             showSuccess = true;
             setTimeout(() => (showSuccess = false), 1500);

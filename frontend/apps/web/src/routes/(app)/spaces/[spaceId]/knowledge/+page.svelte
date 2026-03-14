@@ -14,6 +14,7 @@
   import SyncHistoryDialog from "./integrations/SyncHistoryDialog.svelte";
   import ImportKnowledgeDialog from "$lib/features/integrations/components/import/ImportKnowledgeDialog.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   import type { IntegrationKnowledge } from "@intric/intric-js";
   import { jobCompletionEvents } from "$lib/features/jobs/JobManager";
 
@@ -69,9 +70,8 @@
 
       // Only show alert if there were errors
       if (response.failed > 0) {
-        alert(
-          `${response.queued} website${response.queued > 1 ? 's' : ''} queued, ${response.failed} failed.\n` +
-          `Check console for error details.`
+        toast.error(
+          `${response.queued} website${response.queued > 1 ? 's' : ''} queued, ${response.failed} failed. Check console for error details.`
         );
         console.error("Bulk recrawl errors:", response.errors);
       }
@@ -80,7 +80,7 @@
       $selectedWebsiteIds = new Set();
       refreshCurrentSpace();
     } catch (e) {
-      alert("Failed to trigger bulk recrawl: " + e);
+      toast.error("Failed to trigger bulk recrawl: " + (e instanceof Error ? e.message : String(e)));
       console.error(e);
     }
     isBulkRecrawling = false;

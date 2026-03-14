@@ -6,6 +6,7 @@
 
   import dayjs from "dayjs";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   type RecordingStopReason = "manual" | "limit" | "stall" | "error";
 
@@ -528,7 +529,7 @@
             class="cursor-pointer text-xs font-medium underline underline-offset-2 transition-colors text-negative-default hover:text-negative-stronger text-left"
             on:click={() => {
               console.warn("Recording diagnostics:", recordingStats);
-              alert(m.diagnostics_logged_console());
+              toast.info(m.diagnostics_logged_console());
             }}
           >
             {m.view_diagnostics()}

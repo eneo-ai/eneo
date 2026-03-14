@@ -5,6 +5,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { Button, Dialog } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   const {
     user,
@@ -45,7 +46,7 @@
         <Button
           on:click={() => {
             if (!apiKey) {
-              alert(m.no_api_key_found_generate());
+              toast.warning(m.no_api_key_found_generate());
               return;
             }
             navigator.clipboard.writeText(apiKey);

@@ -16,6 +16,7 @@
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   type Member = Space["members"]["items"][number];
   type RoleOption = { label: string; value: SpaceRole["value"] };
@@ -59,7 +60,7 @@
       // Will cause an update in the parent page and remove this component instance form the tree
       refreshCurrentSpace();
     } catch (e) {
-      alert(m.couldnt_remove_user());
+      toast.error(m.couldnt_remove_user());
       console.error(e);
     }
   });
@@ -73,7 +74,7 @@
       // Await refreshing as that will update the actual label
       await refreshCurrentSpace();
     } catch (e) {
-      alert(m.couldnt_change_role());
+      toast.error(m.couldnt_change_role());
       console.error(e);
       // Reset selected
       $selected = { value: member.role };

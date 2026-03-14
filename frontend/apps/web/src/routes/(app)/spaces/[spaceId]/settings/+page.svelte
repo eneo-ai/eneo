@@ -21,6 +21,7 @@
   import ChangeSecurityClassification from "./ChangeSecurityClassification.svelte";
   import EditRetentionPolicy from "./EditRetentionPolicy.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
   import { fade } from "svelte/transition";
 
@@ -131,7 +132,7 @@
   async function deleteSpace() {
     if (deleteConfirmation === "") return;
     if (deleteConfirmation !== $currentSpace.name) {
-      alert(m.wrong_space_name());
+      toast.warning(m.wrong_space_name());
       return;
     }
     isDeleting = true;
@@ -141,7 +142,7 @@
     try {
       await spaces.deleteSpace($currentSpace);
     } catch (e) {
-      alert(m.error_deleting_space());
+      toast.error(m.error_deleting_space());
       console.error(e);
     }
     clearTimeout(deletionMessageTimeout);

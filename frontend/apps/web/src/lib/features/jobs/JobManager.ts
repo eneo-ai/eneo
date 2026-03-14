@@ -5,6 +5,7 @@ import type { Intric, Job } from "@intric/intric-js";
 import { derived, writable } from "svelte/store";
 
 import { m } from "$lib/paraglide/messages";
+import { toast } from "$lib/components/toast";
 export { getJobManager, initJobManager, jobCompletionEvents };
 
 // Global store for job completion events (can be subscribed to from any component)
@@ -231,7 +232,7 @@ function createJobManager(data: { intric: Intric }) {
               error instanceof Error && error.message
                 ? error.message
                 : fallbackMessage;
-            alert(`${fallbackMessage}: ${upload.file.name}\n${message}`);
+            toast.error(`${fallbackMessage}: ${upload.file.name}: ${message}`);
             runningUploads.delete(uploadId);
             upload.status = "failed";
             upload.errorMessage = message;

@@ -5,6 +5,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Dialog, Button, Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   const intric = getIntric();
   const {
@@ -30,7 +31,7 @@
       refreshCurrentSpace();
       $showDialog = false;
     } catch (error) {
-      alert(error);
+      toast.error(error instanceof Error ? error.message : String(error));
       console.error(error);
     }
     isProcessing = false;
@@ -52,7 +53,7 @@
       $showDialog = false;
       await goto(`/spaces/${routeId}/knowledge/collections/${newCollection.id}`);
     } catch (error) {
-      alert(error);
+      toast.error(error instanceof Error ? error.message : String(error));
       console.error(error);
     }
     isProcessing = false;

@@ -8,6 +8,7 @@ import { goto } from "$app/navigation";
 import { createContext } from "$lib/core/context";
 import type { Intric, ResourcePermission, Space, SpaceSparse } from "@intric/intric-js";
 import { derived, get, writable, type Readable } from "svelte/store";
+import { toast } from "$lib/components/toast";
 
 const [getSpacesManager, setSpacesManager] = createContext<ReturnType<typeof SpacesManager>>(
   "Manages spaces / projects"
@@ -101,7 +102,7 @@ function SpacesManager(data: SpacesManagerParams) {
       refreshSpaces();
       return newSpace;
     } catch (e) {
-      alert(`Error creating new space ${space.name}`);
+      toast.error(`Error creating new space ${space.name}`);
       console.error(e);
     }
     return null;
@@ -128,7 +129,7 @@ function SpacesManager(data: SpacesManagerParams) {
       }
       return updatedSpace;
     } catch (e) {
-      alert(`Error updating space ${id}`);
+      toast.error(`Error updating space ${id}`);
       console.error(e);
     }
   }
@@ -142,7 +143,7 @@ function SpacesManager(data: SpacesManagerParams) {
         goto("/spaces/list");
       }
     } catch (e) {
-      alert(`Error deleting space ${space.id}`);
+      toast.error(`Error deleting space ${space.id}`);
       console.error(e);
     }
   }
@@ -159,7 +160,7 @@ function SpacesManager(data: SpacesManagerParams) {
         return $currentSpace;
       });
     } catch (e) {
-      alert("Error updating default assistant.");
+      toast.error("Error updating default assistant.");
       console.error(e);
     }
   }

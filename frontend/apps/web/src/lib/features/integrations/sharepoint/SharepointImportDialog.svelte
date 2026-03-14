@@ -13,6 +13,7 @@
   import { createCombobox } from "@melt-ui/svelte";
   import type { IntegrationImportDialogProps } from "../IntegrationData";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   import SharePointFolderTree from "./SharePointFolderTree.svelte";
   import { buildSharePointSelectionKey, normalizeSharePointPath } from "./selectionKey";
 
@@ -135,7 +136,7 @@
     const { id } = integration;
 
     if (!id) {
-      alert(m.you_need_to_configure_this_integration_before_using_it());
+      toast.warning(m.you_need_to_configure_this_integration_before_using_it());
       goBack();
       return;
     }
@@ -324,7 +325,7 @@
       startFastUpdatePolling();
 
       if (createdItems.length === 0) {
-        alert(m.sharepoint_batch_import_all_failed({ failed: failedItems.length }));
+        toast.error(m.sharepoint_batch_import_all_failed({ failed: failedItems.length }));
         return;
       }
 
@@ -344,7 +345,7 @@
     } catch (error) {
       const errorMessage =
         error instanceof IntricError ? error.getReadableMessage() : String(error);
-      alert(errorMessage);
+      toast.error(errorMessage);
     }
   });
 
