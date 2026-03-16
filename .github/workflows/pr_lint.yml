@@ -3,8 +3,8 @@ name: Pull Request Checks
 on:
   pull_request:
     branches:
-      - main
       - develop
+      - 'release/**'
     types:
       - opened
       - edited
@@ -24,8 +24,8 @@ jobs:
           BRANCH_NAME="${{ github.head_ref }}"
 
           # Skip branch naming check for long-lived branches
-          if [[ "$BRANCH_NAME" == "develop" ]]; then
-            echo "✅ Branch 'develop' is a long-lived branch - skipping naming convention check"
+          if [[ "$BRANCH_NAME" == "develop" || "$BRANCH_NAME" == release/* ]]; then
+            echo "✅ Long-lived branch - skipping naming convention check"
             exit 0
           fi
 

@@ -5,22 +5,19 @@ name: Build and Push Docker Images
 #
 # Workflow Summary:
 # - develop branch → :develop image tag → external system deploys to dev (automatic)
-# - main branch → :main image tag → external system deploys to testing (automatic)
 # - v* tags → version image tags → external system handles production deployment (automatic)
 # - Any other branch → manually triggered via Actions tab (workflow_dispatch)
 # - v*-rc/beta/etc tags → pre-release version image tags (no :latest)
 #
 # Image Tags Created:
 # - Push to develop: ghcr.io/org/repo:develop, ghcr.io/org/repo:develop-abc1234
-# - Push to main: ghcr.io/org/repo:main, ghcr.io/org/repo:main-def5678
 # - Manual trigger on any branch: ghcr.io/org/repo:branch-name, ghcr.io/org/repo:branch-name-abc1234
-# - Tag v1.0.0: ghcr.io/org/repo:v1.0.0, ghcr.io/org/repo:latest
+# - Tag v1.0.0: ghcr.io/org/repo:v1.0.0, ghcr.io/org/repo:latest (only if highest version)
 # - Tag v1.0.0-rc: ghcr.io/org/repo:v1.0.0-rc (no :latest)
 
 on:
   push:
     branches:
-      - main
       - develop
     tags:
       - 'v*'  # Triggered when version tags are pushed
@@ -64,6 +61,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Validate tag is on correct release branch
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          # Extract major.minor from tag (e.g., v1.8.0-rc.1 → v1.8)
+          EXPECTED_BRANCH="release/$(echo "$TAG" | grep -oE '^v[0-9]+\.[0-9]+')"
+
+          # Check which branches contain this tag's commit
+          BRANCHES=$(git branch -r --contains HEAD | sed 's|origin/||' | xargs)
+
+          if [[ ! " $BRANCHES " =~ " $EXPECTED_BRANCH " ]]; then
+            echo "::error::Tag $TAG must be on branch $EXPECTED_BRANCH, but it was found on: $BRANCHES"
+            echo "Tags should only be created via GitHub Releases UI targeting the correct release branch."
+            exit 1
+          fi
+
+          echo "✅ Tag $TAG is correctly on $EXPECTED_BRANCH"
+
       - name: Determine build context
         id: build-context
         run: |
@@ -79,9 +94,6 @@ jobs:
               echo "is-release=true" >> $GITHUB_OUTPUT
               echo "is-prerelease=false" >> $GITHUB_OUTPUT
             fi
-          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "Building main branch for testing environment"
-            echo "is-release=false" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
             echo "Building develop branch for dev environment"
             echo "is-release=false" >> $GITHUB_OUTPUT
@@ -89,6 +101,18 @@ jobs:
             BRANCH_NAME="${GITHUB_REF#refs/heads/}"
             echo "Building branch: $BRANCH_NAME"
             echo "is-release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if tag is latest
+        id: check-latest
+        if: steps.build-context.outputs.is-release == 'true' && steps.build-context.outputs.is-prerelease == 'false'
+        run: |
+          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+          LATEST_TAG=$(git tag --list 'v*' --sort=-v:refname | grep -v '-' | head -1)
+          if [[ "$CURRENT_TAG" == "$LATEST_TAG" ]]; then
+            echo "is-latest=true" >> $GITHUB_OUTPUT
+          else
+            echo "is-latest=false" >> $GITHUB_OUTPUT
           fi
 
       # Backend build and push
@@ -100,13 +124,12 @@ jobs:
           tags: |
             # Branch-based tags
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
-            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=ref,event=branch,enable=${{ github.ref != 'refs/heads/develop' && github.ref != 'refs/heads/main' }}
+            type=ref,event=branch,enable=${{ github.ref != 'refs/heads/develop' }}
 
             # Version tags (only for releases)
             type=semver,pattern={{version}},enable=${{ steps.build-context.outputs.is-release == 'true' }}
 
-            type=raw,value=latest,enable=${{ steps.build-context.outputs.is-release == 'true' && steps.build-context.outputs.is-prerelease == 'false' }}
+            type=raw,value=latest,enable=${{ steps.check-latest.outputs.is-latest == 'true' }}
 
             # Git SHA for traceability (always included)
             type=sha,prefix={{branch}}-,format=short,enable=${{ github.ref_type == 'branch' }}
@@ -142,13 +165,12 @@ jobs:
           tags: |
             # Branch-based tags
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
-            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=ref,event=branch,enable=${{ github.ref != 'refs/heads/develop' && github.ref != 'refs/heads/main' }}
+            type=ref,event=branch,enable=${{ github.ref != 'refs/heads/develop' }}
 
             # Version tags (only for releases)
             type=semver,pattern={{version}},enable=${{ steps.build-context.outputs.is-release == 'true' }}
 
-            type=raw,value=latest,enable=${{ steps.build-context.outputs.is-release == 'true' && steps.build-context.outputs.is-prerelease == 'false' }}
+            type=raw,value=latest,enable=${{ steps.check-latest.outputs.is-latest == 'true' }}
 
             # Git SHA for traceability (always included)
             type=sha,prefix={{branch}}-,format=short,enable=${{ github.ref_type == 'branch' }}
@@ -206,20 +228,13 @@ jobs:
               echo "" >> $GITHUB_STEP_SUMMARY
               echo "✅ Ready for production deployment" >> $GITHUB_STEP_SUMMARY
             fi
-          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "### Testing Environment Build" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Backend:** \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:main\`" >> $GITHUB_STEP_SUMMARY
-            echo "**Frontend:** \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:main\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "🧪 Images will be deployed to testing environment by ArgoCD/deployment system" >> $GITHUB_STEP_SUMMARY
           elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
             echo "### Development Environment Build" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Backend:** \`${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:develop\`" >> $GITHUB_STEP_SUMMARY
             echo "**Frontend:** \`${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:develop\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "🔧 Images will be deployed to dev environment by ArgoCD/deployment system" >> $GITHUB_STEP_SUMMARY
+            echo "🔧 Images will be deployed to dev environment" >> $GITHUB_STEP_SUMMARY
           else
             BRANCH_NAME="${GITHUB_REF#refs/heads/}"
             BRANCH_TAG="${BRANCH_NAME//\//-}"

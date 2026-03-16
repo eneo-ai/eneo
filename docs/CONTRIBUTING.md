@@ -384,7 +384,7 @@ bun run lint
 
 ```mermaid
 gitgraph
-    commit id: "main"
+    commit id: "develop"
     branch feature/new-assistant-type
     checkout feature/new-assistant-type
     commit id: "feat: add domain entity"
