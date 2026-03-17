@@ -4,7 +4,6 @@ import { toast } from "$lib/components/toast";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import { waitFor } from "$lib/core/waitFor";
-import { toast } from "$lib/components/toast";
 import {
   type ConversationSparse,
   type Assistant,
