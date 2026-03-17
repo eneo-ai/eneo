@@ -59,8 +59,11 @@ async def get_provider_capabilities(
     - providers: dict of canonical provider types, each with modes, models, and fields
     - default_fields: fallback field definitions for providers without custom fields
     """
+    import re
+
     import litellm
     from collections import defaultdict
+    from datetime import date
 
     from intric.tenants.provider_field_config import (
         DEFAULT_FIELDS,
@@ -76,11 +79,18 @@ async def get_provider_capabilities(
         "audio_transcription": "transcription",
     }
 
+    # Extract YYYY-MM-DD date from model name for sorting by recency
+    _date_pattern = re.compile(r"(\d{4}-\d{2}-\d{2})")
+
+    def _extract_model_date(name: str) -> str:
+        """Extract date from model name, returns '0000-00-00' if none found."""
+        m = _date_pattern.search(name)
+        return m.group(1) if m else "0000-00-00"
+
     # Collect all models per provider per mode with metadata
     raw: dict[str, dict[str, dict[str, dict]]] = defaultdict(
         lambda: defaultdict(dict)
     )
-    from datetime import date
 
     today = date.today().isoformat()
 
@@ -100,6 +110,16 @@ async def get_provider_capabilities(
 
         # Skip *-latest aliases (the concrete dated versions are more useful)
         if model_key.endswith("-latest"):
+            continue
+
+        # Skip non-standard model types that aren't useful for text chat/embedding
+        model_lower = model_key.lower()
+        if model_lower.endswith("/container"):
+            continue
+        if any(
+            kw in model_lower
+            for kw in ("realtime", "-audio-", "gpt-audio", "search-preview", "search-api", "-diarize")
+        ):
             continue
 
         # Map to canonical provider type (e.g. "vllm" -> "hosted_vllm")
@@ -129,7 +149,7 @@ async def get_provider_capabilities(
             for f in fields
         ]
 
-    # Build response sorted reverse-alphabetically (newest models first)
+    # Build response sorted by release date (newest models first)
     providers = {}
     for provider, modes in raw.items():
         provider_data: dict = {
@@ -139,7 +159,9 @@ async def get_provider_capabilities(
         }
         for mode, models_dict in modes.items():
             provider_data["models"][mode] = sorted(
-                models_dict.values(), key=lambda m: m["name"], reverse=True
+                models_dict.values(),
+                key=lambda m: _extract_model_date(m["name"]),
+                reverse=True,
             )
         providers[provider] = provider_data
 
