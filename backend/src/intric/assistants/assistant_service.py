@@ -7,6 +7,7 @@ from intric.ai_models.completion_models.completion_model import (
     ModelKwargs,
     ResponseType,
 )
+from intric.main.logging import get_logger
 from intric.assistants.api.assistant_models import AssistantResponse
 from intric.assistants.assistant import Assistant
 from intric.assistants.assistant_factory import AssistantFactory
@@ -61,6 +62,8 @@ if TYPE_CHECKING:
     from intric.spaces.api.space_models import TemplateCreate
     from intric.spaces.space import Space
     from intric.spaces.space_repo import SpaceRepository
+
+logger = get_logger(__name__)
 
 AT_TAG_PATTERN = r"<intric-at-tag: @[^>]+>"
 REFERENCE_PATTERN = r'<inref id="([0-9a-f]{8})"/>'  # noqa
@@ -476,9 +479,12 @@ class AssistantService:
                 response_string = ""
                 generated_files = []
                 tool_calls = []
+                stream_usage = None
 
                 async for chunk in response.completion:
                     reasoning_token_count = chunk.reasoning_token_count
+                    if chunk.usage:
+                        stream_usage = chunk.usage
 
                     if chunk.response_type == ResponseType.TEXT:
                         response_string = f"{response_string}{chunk.text}"
@@ -545,12 +551,32 @@ class AssistantService:
                     version=version,
                     get_id_func=lambda chunk: chunk.info_blob_id,
                 )
-                total_response_tokens = count_tokens(response_string) + reasoning_token_count
+                # Prefer actual provider token counts, fall back to tiktoken estimates
+                if stream_usage and stream_usage.prompt_tokens is not None:
+                    num_tokens_question = stream_usage.prompt_tokens + assistant_selector_tokens
+                    input_source = "provider"
+                else:
+                    num_tokens_question = response.total_token_count + assistant_selector_tokens
+                    input_source = "tiktoken"
+
+                if stream_usage and stream_usage.completion_tokens is not None:
+                    num_tokens_answer = stream_usage.completion_tokens
+                    output_source = "provider"
+                else:
+                    num_tokens_answer = count_tokens(response_string) + reasoning_token_count
+                    output_source = "tiktoken"
+
+                logger.info(
+                    f"[TokenUsage] assistant={assistant_id} streaming — "
+                    f"input={num_tokens_question} ({input_source}), "
+                    f"output={num_tokens_answer} ({output_source})"
+                )
+
                 await self.session_service.add_question_to_session(
                     question=question,
                     answer=response_string,
-                    num_tokens_question=response.total_token_count + assistant_selector_tokens,
-                    num_tokens_answer=total_response_tokens,
+                    num_tokens_question=num_tokens_question,
+                    num_tokens_answer=num_tokens_answer,
                     session=session,
                     completion_model=completion_model,
                     info_blob_chunks=reference_chunks,
@@ -579,12 +605,32 @@ class AssistantService:
                 version=version,
                 get_id_func=lambda chunk: chunk.info_blob_id,
             )
-            total_response_tokens = count_tokens(final_answer) + reasoning_token_count
+            # Prefer actual provider token counts, fall back to tiktoken estimates
+            if response.usage and response.usage.prompt_tokens is not None:
+                num_tokens_question = response.usage.prompt_tokens + assistant_selector_tokens
+                input_source = "provider"
+            else:
+                num_tokens_question = response.total_token_count + assistant_selector_tokens
+                input_source = "tiktoken"
+
+            if response.usage and response.usage.completion_tokens is not None:
+                num_tokens_answer = response.usage.completion_tokens
+                output_source = "provider"
+            else:
+                num_tokens_answer = count_tokens(final_answer) + reasoning_token_count
+                output_source = "tiktoken"
+
+            logger.info(
+                f"[TokenUsage] assistant={assistant_id} non-streaming — "
+                f"input={num_tokens_question} ({input_source}), "
+                f"output={num_tokens_answer} ({output_source})"
+            )
+
             await self.session_service.add_question_to_session(
                 question=question,
                 answer=final_answer,
-                num_tokens_question=response.total_token_count + assistant_selector_tokens,
-                num_tokens_answer=total_response_tokens,
+                num_tokens_question=num_tokens_question,
+                num_tokens_answer=num_tokens_answer,
                 files=files,
                 generated_files=generated_files,
                 completion_model=completion_model,

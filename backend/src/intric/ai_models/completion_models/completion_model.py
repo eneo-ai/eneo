@@ -5,7 +5,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, ConfigDict, computed_field
 
 from intric.files.file_models import File
 from intric.logging.logging import LoggingDetails
@@ -19,6 +19,14 @@ if TYPE_CHECKING:
         CompletionModel as CompletionModelDomain,
     )
     from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+
+
+class TokenUsage(BaseModel):
+    """Actual token usage as reported by the LLM provider."""
+
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    reasoning_tokens: Optional[int] = None
 
 
 class ResponseType(str, Enum):
@@ -68,6 +76,7 @@ class Completion:
     stop: bool = False
     error: Optional[str] = None
     error_code: Optional[int] = None
+    usage: Optional[TokenUsage] = None
 
 
 class CompletionModelBase(BaseModel):
@@ -179,10 +188,13 @@ class CompletionModelSecurityStatus(CompletionModelPublic):
 
 
 class CompletionModelResponse(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     completion: Union[str, Any]  # Pydantic doesn't support AsyncIterable
     model: CompletionModel
     extended_logging: Optional[LoggingDetails] = None
     total_token_count: int
+    usage: Optional[TokenUsage] = None
 
 
 class Message(BaseModel):

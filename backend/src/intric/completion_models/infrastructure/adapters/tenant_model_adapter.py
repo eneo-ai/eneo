@@ -17,6 +17,7 @@ from litellm import (
 from intric.ai_models.completion_models.completion_model import (
     Completion,
     ResponseType,
+    TokenUsage,
     ToolCallMetadata,
 )
 from intric.completion_models.infrastructure.adapters.base_adapter import (
@@ -144,6 +145,45 @@ class TenantModelAdapter(CompletionModelAdapter):
         if not text:
             return text
         return THINKING_BLOCK_PATTERN.sub("", text).strip()
+
+    def _extract_usage(self, response) -> TokenUsage | None:
+        """Extract token usage from a LiteLLM response."""
+        usage = getattr(response, "usage", None)
+        if not usage:
+            return None
+
+        reasoning_tokens = None
+        # Check for reasoning tokens in completion_tokens_details (OpenAI/Anthropic)
+        details = getattr(usage, "completion_tokens_details", None)
+        if details:
+            reasoning_tokens = getattr(details, "reasoning_tokens", None)
+
+        return TokenUsage(
+            prompt_tokens=getattr(usage, "prompt_tokens", None),
+            completion_tokens=getattr(usage, "completion_tokens", None),
+            reasoning_tokens=reasoning_tokens,
+        )
+
+    def _accumulate_usage(
+        self, existing: TokenUsage | None, response
+    ) -> TokenUsage:
+        """Accumulate token usage from a follow-up LiteLLM response."""
+        new = self._extract_usage(response)
+        if not existing:
+            return new or TokenUsage()
+        if not new:
+            return existing
+
+        def _add(a: int | None, b: int | None) -> int | None:
+            if a is None and b is None:
+                return None
+            return (a or 0) + (b or 0)
+
+        return TokenUsage(
+            prompt_tokens=_add(existing.prompt_tokens, new.prompt_tokens),
+            completion_tokens=_add(existing.completion_tokens, new.completion_tokens),
+            reasoning_tokens=_add(existing.reasoning_tokens, new.reasoning_tokens),
+        )
 
     def _build_image(self, file: File) -> dict:
         """
@@ -405,6 +445,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                 **litellm_kwargs,
             )
 
+            # Extract token usage from provider response
+            usage = self._extract_usage(response)
+
             # Parse response
             completion = Completion()
             if response.choices and len(response.choices) > 0:
@@ -482,12 +525,14 @@ class TenantModelAdapter(CompletionModelAdapter):
                         drop_params=True,
                         **follow_up_kwargs,
                     )
+                    usage = self._accumulate_usage(usage, response)
                     msg = response.choices[0].message
 
                 if hasattr(msg, "content") and msg.content:
                     completion.text = self._strip_thinking_content(msg.content)
                 completion.stop = choice.finish_reason == "stop"
 
+            completion.usage = usage
             logger.info(f"[TenantModelAdapter] {self.litellm_model}: Completion successful")
             return completion
 
@@ -604,11 +649,14 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         try:
             # Create stream with drop_params=True to handle unsupported params gracefully
+            # Request usage info on the final chunk (providers that don't support it
+            # will silently ignore this thanks to drop_params=True)
             stream = await litellm.acompletion(
                 model=self.litellm_model,
                 messages=messages,
                 stream=True,
                 drop_params=True,
+                stream_options={"include_usage": True},
                 **litellm_kwargs,
             )
 
@@ -724,10 +772,11 @@ class TenantModelAdapter(CompletionModelAdapter):
             eneo_ctx = getattr(stream, '_eneo_context', None)
             mcp_proxy = eneo_ctx.get('mcp_proxy') if eneo_ctx else None
 
-            # Shared state for tool call accumulation across stream draining
+            # Shared state for tool call accumulation and usage across stream draining
             class _StreamResult:
                 has_tool_calls = False
                 tool_calls_acc: dict = {}
+                usage: TokenUsage | None = None
 
             result = _StreamResult()
 
@@ -741,6 +790,12 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                 async for chunk in s:
                     logger.debug(f"[DEBUG] Raw chunk: {chunk}")
+
+                    # Capture usage from final chunk (when stream_options include_usage is set)
+                    if hasattr(chunk, "usage") and chunk.usage:
+                        chunk_usage = self._extract_usage(chunk)
+                        if chunk_usage:
+                            res.usage = self._accumulate_usage(res.usage, chunk) if res.usage else chunk_usage
 
                     if not (chunk.choices and len(chunk.choices) > 0):
                         continue
@@ -950,6 +1005,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         messages=messages,
                         stream=True,
                         drop_params=True,
+                        stream_options={"include_usage": True},
                         **litellm_kwargs,
                     )
 
@@ -960,8 +1016,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                 if tool_round >= max_rounds:
                     logger.warning(f"[MCP] Reached max tool rounds ({max_rounds})")
 
-            # Final stop
-            yield Completion(text="", stop=True)
+            # Final stop — attach accumulated usage
+            yield Completion(text="", stop=True, usage=result.usage)
 
             logger.info(f"[TenantModelAdapter] {self.litellm_model}: Stream iteration completed")
 
