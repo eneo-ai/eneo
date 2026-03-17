@@ -10,7 +10,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "mcp_security_classification"
-down_revision = "9d2a6c01f3e7"
+down_revision = "20260303_split_token_limit"
 branch_labels = None
 depends_on = None
 
