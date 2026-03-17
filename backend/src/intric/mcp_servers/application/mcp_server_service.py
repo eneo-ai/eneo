@@ -1,13 +1,15 @@
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from intric.main.models import NOT_PROVIDED, NotProvided
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from intric.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
 )
+from intric.main.exceptions import UnauthorizedException
 from intric.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
@@ -16,6 +18,9 @@ if TYPE_CHECKING:
     )
     from intric.mcp_servers.domain.repositories.mcp_server_tool_repo import (
         MCPServerToolRepository,
+    )
+    from intric.security_classifications.domain.entities.security_classification import (
+        SecurityClassification,
     )
     from intric.settings.encryption_service import EncryptionService
     from intric.users.user import UserInDB
@@ -48,6 +53,33 @@ class MCPServerUpdateResult:
     connection: ConnectionResult | None = None
 
 
+@dataclass
+class ToolChange:
+    """Represents a change detected during tool sync."""
+
+    tool: MCPServerTool
+    change_type: str  # "new", "changed", "removed", "unchanged"
+    current_description: str | None = None
+    current_input_schema: dict[str, Any] | None = None
+    pending_description: str | None = None
+    pending_input_schema: dict[str, Any] | None = None
+
+
+@dataclass
+class ToolSyncResult:
+    """Result of tool sync with changeset for review."""
+
+    connection: ConnectionResult
+    new_tools: list[ToolChange] = field(default_factory=lambda: [])
+    changed_tools: list[ToolChange] = field(default_factory=lambda: [])
+    removed_tools: list[ToolChange] = field(default_factory=lambda: [])
+    unchanged_count: int = 0
+
+    @property
+    def has_pending_changes(self) -> bool:
+        return bool(self.new_tools or self.changed_tools or self.removed_tools)
+
+
 class MCPServerService:
     """Service for managing global MCP server catalog (admin only)."""
 
@@ -65,6 +97,13 @@ class MCPServerService:
 
     # Keys in http_auth_config_schema that contain secrets
     _SECRET_KEYS = ("token",)
+
+    async def _get_server_for_tenant(self, mcp_server_id: UUID) -> MCPServer:
+        """Fetch an MCP server and verify it belongs to the current user's tenant."""
+        server = await self.repo.one(id=mcp_server_id)
+        if server.tenant_id != self.user.tenant_id:
+            raise UnauthorizedException("MCP server not accessible")
+        return server
 
     def _encrypt_auth_config(
         self, config: dict[str, Any] | None
@@ -116,6 +155,7 @@ class MCPServerService:
         tags: list[str] | None = None,
         icon_url: str | None = None,
         documentation_url: str | None = None,
+        security_classification: "SecurityClassification | None" = None,
     ) -> MCPServerCreateResult:
         """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport).
 
@@ -138,6 +178,7 @@ class MCPServerService:
             tags=tags,
             icon_url=icon_url,
             documentation_url=documentation_url,
+            security_classification=security_classification,
         )
 
         # Test connection FIRST with plaintext credentials before saving to database
@@ -190,6 +231,7 @@ class MCPServerService:
         tags: list[str] | None = None,
         icon_url: str | None = None,
         documentation_url: str | None = None,
+        security_classification: "SecurityClassification | NotProvided | None" = NOT_PROVIDED,
     ) -> MCPServerUpdateResult:
         """Update an MCP server in global catalog (admin only, uses Streamable HTTP transport).
 
@@ -197,7 +239,7 @@ class MCPServerService:
         (http_url, http_auth_type, http_auth_config_schema) change.
         Returns MCPServerUpdateResult with connection info when validation occurs.
         """
-        mcp_server = await self.repo.one(id=mcp_server_id)
+        mcp_server = await self._get_server_for_tenant(mcp_server_id)
 
         # Track whether connection-affecting fields are actually changing
         url_changed = http_url is not None and str(http_url) != mcp_server.http_url
@@ -225,6 +267,8 @@ class MCPServerService:
             mcp_server.icon_url = str(icon_url)
         if documentation_url is not None:
             mcp_server.documentation_url = str(documentation_url)
+        if not isinstance(security_classification, NotProvided):
+            mcp_server.security_classification = security_classification
 
         # Validate connection before saving when connection config changes
         if url_changed or auth_type_changed or credentials_changed:
@@ -259,6 +303,7 @@ class MCPServerService:
     @validate_permissions(Permission.ADMIN)
     async def delete_mcp_server(self, mcp_server_id: UUID) -> None:
         """Delete an MCP server from global catalog (admin only)."""
+        await self._get_server_for_tenant(mcp_server_id)
         await self.repo.delete(id=mcp_server_id)
 
     async def _test_connection_and_discover_tools(
@@ -317,16 +362,16 @@ class MCPServerService:
 
     async def discover_and_sync_tools(
         self, mcp_server: MCPServer, auth_credentials: dict[str, str] | None = None
-    ) -> tuple[list[MCPServerTool], ConnectionResult]:
+    ) -> ToolSyncResult:
         """
-        Connect to MCP server, discover tools, and sync them to database.
+        Connect to MCP server, discover tools, and detect changes.
 
-        Args:
-            mcp_server: MCP server to discover tools from
-            auth_credentials: Optional authentication credentials
+        New tools and changes are stored as pending and require admin approval
+        before becoming active. This prevents a compromised MCP server from
+        silently injecting malicious tool definitions.
 
         Returns:
-            Tuple of (list of discovered and synced tools, connection result)
+            ToolSyncResult with categorized changes for review
         """
         try:
             logger.info(f"Discovering tools for MCP server: {mcp_server.name}")
@@ -337,57 +382,124 @@ class MCPServerService:
 
             logger.info(f"Discovered {len(tool_defs)} tools from {mcp_server.name}")
 
-            # Convert to domain entities and upsert
-            synced_tools: list[MCPServerTool] = []
-            for tool_def in tool_defs:
-                tool = MCPServerTool(
-                    mcp_server_id=mcp_server.id,
-                    name=tool_def["name"],
-                    description=tool_def.get("description"),
-                    input_schema=tool_def.get("input_schema"),
-                    is_enabled_by_default=True,
+            # Get existing tools from database
+            existing_tools = await self.tool_repo.by_server(mcp_server.id)
+            existing_by_name = {t.name: t for t in existing_tools}
+            remote_names = {td["name"] for td in tool_defs}
+
+            result = ToolSyncResult(
+                connection=ConnectionResult(
+                    success=True, tools_discovered=len(tool_defs)
                 )
-
-                # Upsert tool (update if exists, insert if new)
-                synced_tool = await self.tool_repo.upsert_by_server_and_name(tool)
-                synced_tools.append(synced_tool)
-
-            logger.info(f"Synced {len(synced_tools)} tools for {mcp_server.name}")
-            return synced_tools, ConnectionResult(
-                success=True, tools_discovered=len(synced_tools)
             )
 
+            for tool_def in tool_defs:
+                name = tool_def["name"]
+                remote_desc = tool_def.get("description")
+                remote_schema = tool_def.get("input_schema")
+
+                if name not in existing_by_name:
+                    # New tool — create with pending state, not yet active
+                    tool = MCPServerTool(
+                        mcp_server_id=mcp_server.id,
+                        name=name,
+                        description=None,  # No active description yet
+                        input_schema=None,  # No active schema yet
+                        is_enabled_by_default=True,
+                        pending_description=remote_desc,
+                        pending_input_schema=remote_schema,
+                        requires_approval=True,
+                    )
+                    synced = await self.tool_repo.upsert_by_server_and_name(tool)
+                    result.new_tools.append(
+                        ToolChange(
+                            tool=synced,
+                            change_type="new",
+                            pending_description=remote_desc,
+                            pending_input_schema=remote_schema,
+                        )
+                    )
+                else:
+                    existing = existing_by_name[name]
+                    desc_changed = existing.description != remote_desc
+                    schema_changed = existing.input_schema != remote_schema
+
+                    if desc_changed or schema_changed:
+                        # Changed tool — store pending values, keep active values
+                        existing.pending_description = remote_desc
+                        existing.pending_input_schema = remote_schema
+                        existing.requires_approval = True
+                        existing.removed_from_remote = False
+                        await self.tool_repo.update(existing)
+                        result.changed_tools.append(
+                            ToolChange(
+                                tool=existing,
+                                change_type="changed",
+                                current_description=existing.description,
+                                current_input_schema=existing.input_schema,
+                                pending_description=remote_desc,
+                                pending_input_schema=remote_schema,
+                            )
+                        )
+                    else:
+                        # Unchanged — clear any stale removed flag
+                        if existing.removed_from_remote:
+                            existing.removed_from_remote = False
+                            await self.tool_repo.update(existing)
+                        result.unchanged_count += 1
+
+            # Detect tools removed from remote
+            for name, existing in existing_by_name.items():
+                if name not in remote_names and not existing.removed_from_remote:
+                    existing.removed_from_remote = True
+                    existing.requires_approval = True
+                    await self.tool_repo.update(existing)
+                    result.removed_tools.append(
+                        ToolChange(
+                            tool=existing,
+                            change_type="removed",
+                            current_description=existing.description,
+                            current_input_schema=existing.input_schema,
+                        )
+                    )
+
+            logger.info(
+                f"Sync for {mcp_server.name}: "
+                f"{len(result.new_tools)} new, {len(result.changed_tools)} changed, "
+                f"{len(result.removed_tools)} removed, {result.unchanged_count} unchanged"
+            )
+            return result
+
         except MCPClientError as e:
-            # Connection/protocol error - provide user-friendly message
             error_msg = str(e)
             if "Connection refused" in error_msg:
                 error_msg = f"Could not connect to {mcp_server.http_url}. Please verify the URL and that the server is running."
             elif "timed out" in error_msg.lower():
                 error_msg = f"Connection to {mcp_server.http_url} timed out. The server may be slow or unreachable."
             logger.warning(f"Failed to discover tools for {mcp_server.name}: {e}")
-            return [], ConnectionResult(success=False, error_message=error_msg)
+            return ToolSyncResult(
+                connection=ConnectionResult(success=False, error_message=error_msg)
+            )
 
         except Exception as e:
             logger.error(f"Failed to discover tools for {mcp_server.name}: {e}")
-            return [], ConnectionResult(
-                success=False, error_message=f"Failed to connect: {e}"
+            return ToolSyncResult(
+                connection=ConnectionResult(
+                    success=False, error_message=f"Failed to connect: {e}"
+                )
             )
 
     @validate_permissions(Permission.ADMIN)
     async def refresh_tools(
         self, mcp_server_id: UUID, auth_credentials: dict[str, str] | None = None
-    ) -> tuple[list[MCPServerTool], ConnectionResult]:
+    ) -> ToolSyncResult:
         """
         Manually refresh tools for an MCP server (admin only).
 
-        Args:
-            mcp_server_id: ID of MCP server to refresh
-            auth_credentials: Optional authentication credentials
-
-        Returns:
-            Tuple of (list of refreshed tools, connection result)
+        Detects changes and stores them as pending for review.
+        Returns a ToolSyncResult with categorized changes.
         """
-        mcp_server = await self.repo.one(id=mcp_server_id)
+        mcp_server = await self._get_server_for_tenant(mcp_server_id)
 
         # If no explicit credentials provided, decrypt stored ones
         if auth_credentials is None:
@@ -396,6 +508,93 @@ class MCPServerService:
             )
 
         return await self.discover_and_sync_tools(mcp_server, auth_credentials)
+
+    @validate_permissions(Permission.ADMIN)
+    async def approve_tool_changes(
+        self, mcp_server_id: UUID, tool_ids: list[UUID]
+    ) -> list[MCPServerTool]:
+        """
+        Approve pending tool changes (admin only).
+
+        For new/changed tools: pending values become active values.
+        For removed tools: tool is deleted from database.
+        """
+        await self._get_server_for_tenant(mcp_server_id)
+        approved_tools: list[MCPServerTool] = []
+
+        for tool_id in tool_ids:
+            tool = await self.tool_repo.one(id=tool_id)
+            if tool.mcp_server_id != mcp_server_id:
+                continue
+
+            if tool.removed_from_remote:
+                # Tool was removed from remote — delete it
+                await self.tool_repo.delete(id=tool_id)
+                continue
+
+            if tool.requires_approval:
+                # Promote pending values to active
+                if tool.pending_description is not None:
+                    tool.description = tool.pending_description
+                if tool.pending_input_schema is not None:
+                    tool.input_schema = tool.pending_input_schema
+
+                # Clear pending state
+                tool.pending_description = None
+                tool.pending_input_schema = None
+                tool.requires_approval = False
+
+                tool = await self.tool_repo.update(tool)
+                approved_tools.append(tool)
+
+        return approved_tools
+
+    @validate_permissions(Permission.ADMIN)
+    async def reject_tool_changes(
+        self, mcp_server_id: UUID, tool_ids: list[UUID]
+    ) -> list[MCPServerTool]:
+        """
+        Reject pending tool changes (admin only).
+
+        For new tools: tool is deleted (never activated).
+        For changed tools: pending values are cleared, active values kept.
+        For removed tools: removed flag is cleared, tool stays active.
+        """
+        await self._get_server_for_tenant(mcp_server_id)
+        rejected_tools: list[MCPServerTool] = []
+
+        for tool_id in tool_ids:
+            tool = await self.tool_repo.one(id=tool_id)
+            if tool.mcp_server_id != mcp_server_id:
+                continue
+
+            if tool.requires_approval and tool.description is None and tool.input_schema is None:
+                # New tool that was never active — delete it
+                await self.tool_repo.delete(id=tool_id)
+                continue
+
+            # Changed or removed tool — clear pending state
+            tool.pending_description = None
+            tool.pending_input_schema = None
+            tool.requires_approval = False
+            tool.removed_from_remote = False
+
+            tool = await self.tool_repo.update(tool)
+            rejected_tools.append(tool)
+
+        return rejected_tools
+
+    @validate_permissions(Permission.ADMIN)
+    async def approve_all_tool_changes(
+        self, mcp_server_id: UUID
+    ) -> list[MCPServerTool]:
+        """Approve all pending tool changes for an MCP server."""
+        await self._get_server_for_tenant(mcp_server_id)
+        tools = await self.tool_repo.by_server(mcp_server_id)
+        pending_ids = [t.id for t in tools if t.requires_approval]
+        if not pending_ids:
+            return []
+        return await self.approve_tool_changes(mcp_server_id, pending_ids)
 
     @validate_permissions(Permission.ADMIN)
     async def update_tool_default_enabled(
@@ -412,6 +611,7 @@ class MCPServerService:
             Updated tool
         """
         tool = await self.tool_repo.one(id=tool_id)
+        await self._get_server_for_tenant(tool.mcp_server_id)
         tool.is_enabled_by_default = is_enabled
         return await self.tool_repo.update(tool)
 
@@ -432,8 +632,9 @@ class MCPServerService:
         """
         from intric.database.tables.mcp_server_table import MCPServerToolSettings
 
-        # Verify tool exists
+        # Verify tool exists and belongs to current tenant
         tool = await self.tool_repo.one(id=tool_id)
+        await self._get_server_for_tenant(tool.mcp_server_id)
 
         # Upsert tenant tool setting
         from datetime import datetime, timezone
@@ -475,12 +676,8 @@ class MCPServerService:
             NotFoundException: If server doesn't exist
             UnauthorizedException: If server belongs to a different tenant
         """
-        from intric.main.exceptions import UnauthorizedException
-
         # Verify server exists and belongs to current tenant
-        server = await self.repo.one(id=mcp_server_id)
-        if server.tenant_id != self.user.tenant_id:
-            raise UnauthorizedException("MCP server not accessible")
+        await self._get_server_for_tenant(mcp_server_id)
 
         import sqlalchemy as sa
         from intric.database.tables.mcp_server_table import MCPServerToolSettings

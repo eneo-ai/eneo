@@ -48,6 +48,7 @@ export function initMCPServers(client) {
      * @param {string[]} [params.tags] Tags for categorization
      * @param {string} [params.icon_url] URL to icon image
      * @param {string} [params.documentation_url] URL to documentation
+     * @param {{id: string} | null} [params.security_classification] Security classification
      * @throws {IntricError}
      * */
     create: async ({
@@ -60,7 +61,8 @@ export function initMCPServers(client) {
       config_schema,
       tags,
       icon_url,
-      documentation_url
+      documentation_url,
+      security_classification
     }) => {
       const res = await client.fetch("/api/v1/mcp-servers/", {
         method: "post",
@@ -75,7 +77,8 @@ export function initMCPServers(client) {
             config_schema,
             tags,
             icon_url,
-            documentation_url
+            documentation_url,
+            security_classification
           }
         }
       });
@@ -96,6 +99,7 @@ export function initMCPServers(client) {
      * @param {string[]} [params.tags] Tags for categorization
      * @param {string} [params.icon_url] URL to icon image
      * @param {string} [params.documentation_url] URL to documentation
+     * @param {{id: string} | null} [params.security_classification] Security classification
      * @throws {IntricError}
      * */
     update: async ({
@@ -109,7 +113,8 @@ export function initMCPServers(client) {
       config_schema,
       tags,
       icon_url,
-      documentation_url
+      documentation_url,
+      security_classification
     }) => {
       const res = await client.fetch("/api/v1/mcp-servers/{id}/", {
         method: "post",
@@ -127,7 +132,8 @@ export function initMCPServers(client) {
             config_schema,
             tags,
             icon_url,
-            documentation_url
+            documentation_url,
+            security_classification
           }
         }
       });
@@ -274,6 +280,61 @@ export function initMCPServers(client) {
           }
         }
       });
+      return res;
+    },
+
+    /**
+     * Approve pending tool changes (admin only).
+     * @param {Object} params
+     * @param {string} params.mcp_server_id The MCP server ID
+     * @param {string[]} params.tool_ids Tool IDs to approve
+     * @throws {IntricError}
+     * */
+    approveToolChanges: async ({ mcp_server_id, tool_ids }) => {
+      const res = await client.fetch(
+        "/api/v1/mcp-servers/{mcp_server_id}/tools/review/approve/",
+        {
+          method: "post",
+          params: { path: { mcp_server_id } },
+          requestBody: { "application/json": { tool_ids } }
+        }
+      );
+      return res;
+    },
+
+    /**
+     * Reject pending tool changes (admin only).
+     * @param {Object} params
+     * @param {string} params.mcp_server_id The MCP server ID
+     * @param {string[]} params.tool_ids Tool IDs to reject
+     * @throws {IntricError}
+     * */
+    rejectToolChanges: async ({ mcp_server_id, tool_ids }) => {
+      const res = await client.fetch(
+        "/api/v1/mcp-servers/{mcp_server_id}/tools/review/reject/",
+        {
+          method: "post",
+          params: { path: { mcp_server_id } },
+          requestBody: { "application/json": { tool_ids } }
+        }
+      );
+      return res;
+    },
+
+    /**
+     * Approve all pending tool changes (admin only).
+     * @param {Object} params
+     * @param {string} params.mcp_server_id The MCP server ID
+     * @throws {IntricError}
+     * */
+    approveAllToolChanges: async ({ mcp_server_id }) => {
+      const res = await client.fetch(
+        "/api/v1/mcp-servers/{mcp_server_id}/tools/review/approve-all/",
+        {
+          method: "post",
+          params: { path: { mcp_server_id } }
+        }
+      );
       return res;
     },
 

@@ -1,5 +1,12 @@
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from intric.security_classifications.domain.entities.security_classification import (
+        SecurityClassification,
+    )
 
 from fastapi import APIRouter, Depends, Query
 
@@ -8,7 +15,8 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.main.container.container import Container
 from intric.main.exceptions import BadRequestException
-from intric.main.models import PaginatedResponse
+from intric.main.models import NOT_PROVIDED, NotProvided, PaginatedResponse
+from intric.mcp_servers.application.mcp_server_service import ToolChange
 from intric.mcp_servers.presentation.models import (
     MCPConnectionStatus,
     MCPServerCreate,
@@ -22,6 +30,9 @@ from intric.mcp_servers.presentation.models import (
     MCPServerToolSyncResponse,
     MCPServerToolUpdate,
     MCPServerUpdate,
+    ToolChangePublic,
+    ToolReviewRequest,
+    ToolReviewResponse,
 )
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
@@ -245,6 +256,14 @@ async def create_mcp_server(
     service = container.mcp_server_service()
     assembler = container.mcp_server_assembler()
 
+    # Resolve security classification if provided
+    security_classification = None
+    if data.security_classification is not None:
+        sc_service = container.security_classification_service()
+        security_classification = await sc_service.get_security_classification(
+            data.security_classification.id
+        )
+
     result = await service.create_mcp_server(
         name=data.name,
         http_url=str(data.http_url),
@@ -254,6 +273,7 @@ async def create_mcp_server(
         tags=data.tags,
         icon_url=str(data.icon_url) if data.icon_url else None,
         documentation_url=str(data.documentation_url) if data.documentation_url else None,
+        security_classification=security_classification,
     )
 
     # If connection failed, return 400 error with message
@@ -302,6 +322,18 @@ async def update_mcp_server(
     # Get old state for change tracking
     old_server = await service.get_mcp_server(id)
 
+    # Resolve security classification if provided
+    security_classification: SecurityClassification | NotProvided | None = NOT_PROVIDED
+    if isinstance(data.security_classification, NotProvided):
+        pass
+    elif data.security_classification is None:
+        security_classification = None
+    else:
+        sc_service = container.security_classification_service()
+        security_classification = await sc_service.get_security_classification(
+            data.security_classification.id
+        )
+
     result = await service.update_mcp_server(
         mcp_server_id=id,
         name=data.name,
@@ -312,6 +344,7 @@ async def update_mcp_server(
         tags=data.tags,
         icon_url=str(data.icon_url) if data.icon_url else None,
         documentation_url=str(data.documentation_url) if data.documentation_url else None,
+        security_classification=security_classification,
     )
 
     # If connection validation failed, return 400 error with message
@@ -416,29 +449,168 @@ async def sync_mcp_server_tools(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    """Manually refresh/sync tools for an MCP server (admin only).
+    """Sync tools from remote MCP server (admin only).
+
+    Detects new, changed, and removed tools. Changes are stored as pending
+    and require explicit approval before becoming active. This prevents a
+    compromised MCP server from injecting malicious tool definitions.
 
     Returns 400 if connection to the MCP server fails.
     """
     service = container.mcp_server_service()
     assembler = container.mcp_server_tool_assembler()
 
-    # Refresh tools from MCP server
-    tools, connection_result = await service.refresh_tools(id)
+    sync_result = await service.refresh_tools(id)
 
     # If connection failed, return 400 error with message
-    if not connection_result.success:
+    if not sync_result.connection.success:
         raise BadRequestException(
-            connection_result.error_message or "Failed to connect to MCP server"
+            sync_result.connection.error_message or "Failed to connect to MCP server"
+        )
+
+    def _to_change_public(change: ToolChange):
+        return ToolChangePublic(
+            tool=assembler.from_domain_to_model(change.tool),
+            change_type=change.change_type,
+            current_description=change.current_description,
+            current_input_schema=change.current_input_schema,
+            pending_description=change.pending_description,
+            pending_input_schema=change.pending_input_schema,
         )
 
     return MCPServerToolSyncResponse(
-        tools=[assembler.from_domain_to_model(t) for t in tools],
         connection=MCPConnectionStatus(
-            success=connection_result.success,
-            tools_discovered=connection_result.tools_discovered,
-            error_message=connection_result.error_message,
+            success=sync_result.connection.success,
+            tools_discovered=sync_result.connection.tools_discovered,
+            error_message=sync_result.connection.error_message,
         ),
+        new_tools=[_to_change_public(c) for c in sync_result.new_tools],
+        changed_tools=[_to_change_public(c) for c in sync_result.changed_tools],
+        removed_tools=[_to_change_public(c) for c in sync_result.removed_tools],
+        unchanged_count=sync_result.unchanged_count,
+    )
+
+
+@router.post(
+    "/{id}/tools/review/approve/",
+    response_model=ToolReviewResponse,
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def approve_tool_changes(
+    id: UUID,
+    data: ToolReviewRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Approve pending tool changes (admin only).
+
+    For new/changed tools: pending values become active.
+    For removed tools: tool is deleted from database.
+    """
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_tool_assembler()
+
+    approved = await service.approve_tool_changes(id, data.tool_ids)
+
+    # Audit logging
+    user = container.user()
+    audit_service = container.audit_service()
+    mcp_server = await service.get_mcp_server(id)
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.MCP_SERVER_UPDATED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=id,
+        description=f"Approved {len(data.tool_ids)} tool change(s) on MCP server '{mcp_server.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=mcp_server,
+            extra={"approved_tool_ids": [str(tid) for tid in data.tool_ids]},
+        ),
+    )
+
+    return ToolReviewResponse(
+        approved_tools=[assembler.from_domain_to_model(t) for t in approved],
+        deleted_count=len(data.tool_ids) - len(approved),
+    )
+
+
+@router.post(
+    "/{id}/tools/review/reject/",
+    response_model=ToolReviewResponse,
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def reject_tool_changes(
+    id: UUID,
+    data: ToolReviewRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Reject pending tool changes (admin only).
+
+    For new tools: tool is deleted (never activated).
+    For changed tools: pending values are cleared, active values kept.
+    For removed tools: removed flag is cleared, tool stays active.
+    """
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_tool_assembler()
+
+    rejected = await service.reject_tool_changes(id, data.tool_ids)
+
+    # Audit logging
+    user = container.user()
+    audit_service = container.audit_service()
+    mcp_server = await service.get_mcp_server(id)
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.MCP_SERVER_UPDATED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=id,
+        description=f"Rejected {len(data.tool_ids)} tool change(s) on MCP server '{mcp_server.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=mcp_server,
+            extra={"rejected_tool_ids": [str(tid) for tid in data.tool_ids]},
+        ),
+    )
+
+    return ToolReviewResponse(
+        rejected_tools=[assembler.from_domain_to_model(t) for t in rejected],
+        deleted_count=len(data.tool_ids) - len(rejected),
+    )
+
+
+@router.post(
+    "/{id}/tools/review/approve-all/",
+    response_model=ToolReviewResponse,
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def approve_all_tool_changes(
+    id: UUID,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Approve all pending tool changes for an MCP server (admin only)."""
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_tool_assembler()
+
+    approved = await service.approve_all_tool_changes(id)
+
+    # Audit logging
+    user = container.user()
+    audit_service = container.audit_service()
+    mcp_server = await service.get_mcp_server(id)
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.MCP_SERVER_UPDATED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=id,
+        description=f"Approved all tool changes on MCP server '{mcp_server.name}'",
+        metadata=AuditMetadata.standard(actor=user, target=mcp_server),
+    )
+
+    return ToolReviewResponse(
+        approved_tools=[assembler.from_domain_to_model(t) for t in approved],
     )
 
 

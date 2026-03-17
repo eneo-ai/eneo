@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { Button, Input, Tooltip } from "@intric/ui";
-  import { RefreshCw } from "lucide-svelte";
+  import { RefreshCw, AlertTriangle, Trash2, Check, X, ShieldAlert } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { invalidate } from "$app/navigation";
 
@@ -22,6 +22,11 @@
   let tools = $state(initialTools);
   let syncing = $state(false);
   let bulkUpdating = $state(false);
+  let reviewingToolId = $state<string | null>(null);
+
+  // Derived: tools needing review
+  let pendingTools = $derived(tools.filter((t) => t.requires_approval));
+  let hasPendingChanges = $derived(pendingTools.length > 0);
 
   async function syncTools() {
     syncing = true;
@@ -97,6 +102,74 @@
       bulkUpdating = false;
     }
   }
+
+  async function approveTool(toolId: string) {
+    reviewingToolId = toolId;
+    try {
+      await intricClient.mcpServers.approveToolChanges({
+        mcp_server_id: mcpServerId,
+        tool_ids: [toolId]
+      });
+      const response = await intricClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
+      tools = response.items || [];
+      await invalidate("spaces:data");
+    } catch (error) {
+      console.error("Failed to approve tool:", error);
+    } finally {
+      reviewingToolId = null;
+    }
+  }
+
+  async function rejectTool(toolId: string) {
+    reviewingToolId = toolId;
+    try {
+      await intricClient.mcpServers.rejectToolChanges({
+        mcp_server_id: mcpServerId,
+        tool_ids: [toolId]
+      });
+      const response = await intricClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
+      tools = response.items || [];
+      await invalidate("spaces:data");
+    } catch (error) {
+      console.error("Failed to reject tool:", error);
+    } finally {
+      reviewingToolId = null;
+    }
+  }
+
+  async function approveAll() {
+    bulkUpdating = true;
+    try {
+      await intricClient.mcpServers.approveAllToolChanges({
+        mcp_server_id: mcpServerId
+      });
+      const response = await intricClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
+      tools = response.items || [];
+      await invalidate("spaces:data");
+    } catch (error) {
+      console.error("Failed to approve all:", error);
+    } finally {
+      bulkUpdating = false;
+    }
+  }
+
+  async function rejectAll() {
+    bulkUpdating = true;
+    try {
+      const ids = pendingTools.map((t: any) => t.id);
+      await intricClient.mcpServers.rejectToolChanges({
+        mcp_server_id: mcpServerId,
+        tool_ids: ids
+      });
+      const response = await intricClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
+      tools = response.items || [];
+      await invalidate("spaces:data");
+    } catch (error) {
+      console.error("Failed to reject all:", error);
+    } finally {
+      bulkUpdating = false;
+    }
+  }
 </script>
 
 <div class="py-2">
@@ -113,6 +186,11 @@
         <span class="ml-2 inline-flex items-center justify-center rounded-full bg-secondary px-2 py-0.5 text-xs font-medium tabular-nums text-muted">
           {tools.length}
         </span>
+        {#if hasPendingChanges}
+          <span class="ml-1 inline-flex items-center justify-center rounded-full bg-amber-500/15 text-amber-600 px-2 py-0.5 text-xs font-medium tabular-nums">
+            {pendingTools.length} {pendingTools.length === 1 ? m.pending_update_singular() : m.pending_update_plural()}
+          </span>
+        {/if}
       </div>
     </div>
     <Button variant="secondary" size="sm" onclick={syncTools} disabled={syncing} class="gap-1.5">
@@ -120,6 +198,30 @@
       <span>{syncing ? m.syncing() : m.sync_tools()}</span>
     </Button>
   </div>
+
+  <!-- Pending changes banner -->
+  {#if hasPendingChanges}
+    <div class="ml-10 mr-4 mb-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <ShieldAlert class="h-4 w-4 text-amber-600 shrink-0" />
+          <span class="text-sm font-medium text-amber-600">
+            {pendingTools.length} {pendingTools.length === 1 ? m.pending_update_singular() : m.pending_update_plural()} — {m.tool_uses_previous_until_approved()}
+          </span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <Button variant="secondary" size="sm" onclick={approveAll} disabled={bulkUpdating} class="gap-1 text-xs">
+            <Check class="h-3 w-3" />
+            {m.approve_all()}
+          </Button>
+          <Button variant="secondary" size="sm" onclick={rejectAll} disabled={bulkUpdating} class="gap-1 text-xs">
+            <X class="h-3 w-3" />
+            {m.reject_all()}
+          </Button>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <!-- Tools list -->
   <div class="ml-10 mr-4" role="list" aria-label="Tillgängliga verktyg">
@@ -160,27 +262,99 @@
           </div>
         </div>
         <!-- Scrollable tools list -->
-        <div class="max-h-[280px] overflow-y-auto">
+        <div class="max-h-[400px] overflow-y-auto">
           <div class="divide-y divide-dimmer">
             {#each tools as tool (tool.id)}
-              <div
-                class="flex items-center gap-3 px-3 py-2.5 transition-all hover:bg-hover-dimmer {tool.is_enabled_by_default ? '' : 'opacity-40 grayscale-[30%]'}"
-                role="listitem"
-              >
-                <div class="flex-1 min-w-0">
-                  <span class="text-xs font-medium text-default font-mono block truncate">{tool.name}</span>
-                  {#if tool.description}
-                    <Tooltip text={tool.description} placement="bottom">
-                      <p class="text-xs text-muted leading-snug truncate cursor-help">{tool.description}</p>
-                    </Tooltip>
-                  {/if}
+              {#if tool.requires_approval}
+                <!-- Tool requiring approval -->
+                <div
+                  class="px-3 py-2.5 border-l-2 border-l-amber-500 bg-amber-500/5"
+                  role="listitem"
+                >
+                  <div class="flex items-center gap-3">
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center gap-2">
+                        <span class="text-xs font-medium text-default font-mono block truncate">{tool.name}</span>
+                        {#if tool.removed_from_remote}
+                          <span class="shrink-0 inline-flex items-center gap-1 rounded-full bg-red-500/10 text-red-600 px-1.5 py-0.5 text-[10px] font-medium">
+                            <Trash2 class="h-2.5 w-2.5" />
+                            {m.removed_from_server()}
+                          </span>
+                        {:else if tool.pending_description || tool.pending_input_schema}
+                          <span class="shrink-0 inline-flex items-center gap-1 rounded-full bg-amber-500/10 text-amber-600 px-1.5 py-0.5 text-[10px] font-medium">
+                            <AlertTriangle class="h-2.5 w-2.5" />
+                            {m.pending_description_change()}
+                          </span>
+                        {/if}
+                      </div>
+
+                      <!-- Show diff for description changes -->
+                      {#if tool.pending_description && !tool.removed_from_remote}
+                        <div class="mt-2 space-y-1.5">
+                          {#if tool.description}
+                            <div class="rounded bg-secondary/50 px-2.5 py-1.5">
+                              <span class="text-[10px] font-medium uppercase tracking-wider text-muted block mb-0.5">{m.current_description()}</span>
+                              <p class="text-xs text-muted leading-snug">{tool.description}</p>
+                            </div>
+                          {/if}
+                          <div class="rounded bg-amber-500/10 px-2.5 py-1.5 border border-amber-500/20">
+                            <span class="text-[10px] font-medium uppercase tracking-wider text-amber-600 block mb-0.5">{m.new_description()}</span>
+                            <p class="text-xs text-amber-700 leading-snug">{tool.pending_description}</p>
+                          </div>
+                        </div>
+                      {:else if tool.removed_from_remote && tool.description}
+                        <p class="text-xs text-muted leading-snug mt-1 line-through">{tool.description}</p>
+                      {/if}
+                    </div>
+
+                    <!-- Approve/Reject buttons -->
+                    <div class="flex items-center gap-1 shrink-0">
+                      <Tooltip text={m.approve()} placement="top">
+                        <button
+                          type="button"
+                          class="flex items-center justify-center h-7 w-7 rounded-md text-green-600 hover:bg-green-500/10 transition-colors disabled:opacity-50"
+                          onclick={() => approveTool(tool.id)}
+                          disabled={reviewingToolId === tool.id}
+                          aria-label="{m.approve()} {tool.name}"
+                        >
+                          <Check class="h-4 w-4" />
+                        </button>
+                      </Tooltip>
+                      <Tooltip text={m.reject()} placement="top">
+                        <button
+                          type="button"
+                          class="flex items-center justify-center h-7 w-7 rounded-md text-red-500 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                          onclick={() => rejectTool(tool.id)}
+                          disabled={reviewingToolId === tool.id}
+                          aria-label="{m.reject()} {tool.name}"
+                        >
+                          <X class="h-4 w-4" />
+                        </button>
+                      </Tooltip>
+                    </div>
+                  </div>
                 </div>
-                <Input.Switch
-                  value={tool.is_enabled_by_default}
-                  sideEffect={() => toggleToolEnabled(tool)}
-                  aria-label="Aktivera {tool.name}"
-                />
-              </div>
+              {:else}
+                <!-- Normal tool -->
+                <div
+                  class="flex items-center gap-3 px-3 py-2.5 transition-all hover:bg-hover-dimmer {tool.is_enabled_by_default ? '' : 'opacity-40 grayscale-[30%]'}"
+                  role="listitem"
+                >
+                  <div class="flex-1 min-w-0">
+                    <span class="text-xs font-medium text-default font-mono block truncate">{tool.name}</span>
+                    {#if tool.description}
+                      <Tooltip text={tool.description} placement="bottom">
+                        <p class="text-xs text-muted leading-snug truncate cursor-help">{tool.description}</p>
+                      </Tooltip>
+                    {/if}
+                  </div>
+                  <Input.Switch
+                    value={tool.is_enabled_by_default}
+                    sideEffect={() => toggleToolEnabled(tool)}
+                    aria-label="Aktivera {tool.name}"
+                  />
+                </div>
+              {/if}
             {/each}
           </div>
         </div>

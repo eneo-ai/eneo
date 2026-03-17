@@ -496,6 +496,10 @@ class SpaceAssembler:
     ) -> UpdateSpaceDryRunResponse:
         space = self.from_space_to_model(result.space)
 
+        from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
+            MCPServerAssembler,
+        )
+
         return UpdateSpaceDryRunResponse(
             assistants=space.applications.assistants.items,
             group_chats=space.applications.group_chats.items,
@@ -511,5 +515,9 @@ class SpaceAssembler:
             transcription_models=[
                 TranscriptionModelPublic.from_domain(tm)
                 for tm in result.affected_transcription_models
+            ],
+            mcp_servers=[
+                MCPServerAssembler.to_dict_with_tools(s)
+                for s in result.affected_mcp_servers
             ],
         )

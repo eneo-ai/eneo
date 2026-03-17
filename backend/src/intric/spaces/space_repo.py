@@ -1103,16 +1103,28 @@ class SpaceRepository:
         transcription_models = await self.transcription_model_repo.all(with_deprecated=True)
 
         # Get tenant-enabled MCP servers directly
+        from sqlalchemy.orm import selectinload as _selectinload
+        from intric.database.tables.security_classifications_table import (
+            SecurityClassification as SecurityClassificationDBModel,
+        )
         mcp_servers_query = (
             sa.select(MCPServersTable)
             .where(MCPServersTable.tenant_id == self.user.tenant_id)
             .where(MCPServersTable.is_enabled == True)  # noqa: E712
+            .options(
+                _selectinload(MCPServersTable.security_classification).selectinload(
+                    SecurityClassificationDBModel.tenant
+                ),
+            )
         )
         mcp_servers_result = await self.session.execute(mcp_servers_query)
         mcp_servers_db = mcp_servers_result.scalars().all()
 
         # Convert to domain entities
         from intric.mcp_servers.domain.entities.mcp_server import MCPServer
+        from intric.security_classifications.domain.entities.security_classification import (
+            SecurityClassification,
+        )
         mcp_servers = [
             MCPServer(
                 id=server.id,
@@ -1127,6 +1139,9 @@ class SpaceRepository:
                 tags=server.tags,
                 icon_url=server.icon_url,
                 documentation_url=server.documentation_url,
+                security_classification=SecurityClassification.to_domain(
+                    server.security_classification
+                ),
                 created_at=server.created_at,
                 updated_at=server.updated_at,
             )

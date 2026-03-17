@@ -298,8 +298,8 @@ class Space:
 
     @mcp_servers.setter
     def mcp_servers(self, mcp_servers: list["MCPServer"]):
-        # For MCP servers, we may want to add similar validation
-        # For now, just set them directly
+        for server in mcp_servers:
+            self.validate_mcp_server_security_compatibility(server)
         self._mcp_servers = mcp_servers
 
     def update(
@@ -356,6 +356,13 @@ class Space:
                     for model in self.transcription_models
                     if not self.security_classification.is_greater_than(
                         model.security_classification
+                    )
+                ]
+                self._mcp_servers = [
+                    server
+                    for server in self._mcp_servers
+                    if not self.security_classification.is_greater_than(
+                        server.security_classification
                     )
                 ]
 
@@ -621,6 +628,16 @@ class Space:
         if not self.security_classification:
             return
         if self.security_classification.is_greater_than(model.security_classification):
+            raise BadRequestException(SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE)
+
+    def validate_mcp_server_security_compatibility(
+        self, mcp_server: "MCPServer"
+    ) -> None:
+        if not self.security_classification:
+            return
+        if self.security_classification.is_greater_than(
+            mcp_server.security_classification
+        ):
             raise BadRequestException(SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE)
 
     def add_completion_model(self, model: "CompletionModel"):

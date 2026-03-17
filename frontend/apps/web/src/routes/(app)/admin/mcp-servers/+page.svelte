@@ -10,11 +10,14 @@
   import { invalidate } from "$app/navigation";
   import { Plus } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
+  import { setSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
   import MCPServerDialog from "./MCPServerDialog.svelte";
   import MCPServersTable from "./MCPServersTable.svelte";
   import { writable } from "svelte/store";
 
   const { data } = $props();
+
+  setSecurityContext(data.securityClassifications);
 
   let showAddDialog = writable(false);
 
