@@ -14,6 +14,8 @@ services:
       - REDIS_HOST=redis
     volumes:
       - ../:/workspace
+      # Isolate .venv from host to prevent host-side uv/python from corrupting it
+      - backend_venv:/workspace/backend/.venv
       # Mount Docker socket for testcontainers support
       - /var/run/docker.sock:/var/run/docker.sock
     # Docker group is created dynamically in post-create.sh with the correct GID
@@ -40,6 +42,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  backend_venv:
 
 networks:
   eneo:
