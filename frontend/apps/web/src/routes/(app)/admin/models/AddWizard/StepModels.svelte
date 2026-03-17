@@ -486,7 +486,7 @@
             id="max-input-tokens"
             type="number"
             bind:value={currentModel.maxInputTokens}
-            placeholder="128000"
+            placeholder={m.max_input_tokens()}
             min="1024"
             max="10000000"
           />
@@ -502,7 +502,7 @@
             id="max-output-tokens"
             type="number"
             bind:value={currentModel.maxOutputTokens}
-            placeholder="4096"
+            placeholder={m.max_output_tokens()}
             min="1"
             max="10000000"
           />
