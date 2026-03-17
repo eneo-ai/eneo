@@ -275,10 +275,7 @@
             </div>
           </div>
 
-          <div class="flex items-center justify-between">
-            <p class="text-xs text-muted">
-              {m.effective_context({ tokens: formatTokenLimit(Math.max(0, parseInt(maxInputTokensStr, 10) - parseInt(maxOutputTokensStr, 10))) })}
-            </p>
+          <div class="flex items-center justify-end">
             <button
               type="button"
               class="text-xs text-accent-default hover:text-accent-stronger transition-colors underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"

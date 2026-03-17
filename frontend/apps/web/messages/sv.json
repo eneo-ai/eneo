@@ -1944,7 +1944,6 @@
   "max_output_tokens": "Max utdatatokens",
   "max_input_tokens_help": "Maximalt antal tokens modellen accepterar som indata (kontextfönster).",
   "max_output_tokens_help": "Maximalt antal tokens modellen kan generera per svar.",
-  "effective_context": "Effektivt kontextutrymme: {tokens}",
   "vision_support": "Bildstöd",
   "reasoning_support": "Resonemangsstöd",
   "tool_calling_support": "Verktygsstöd",

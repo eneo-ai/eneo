@@ -499,10 +499,6 @@
         </div>
       </div>
 
-      <p class="text-xs text-muted">
-        {m.effective_context({ tokens: formatTokenLimit(Math.max(0, (currentModel.maxInputTokens ?? 128000) - (currentModel.maxOutputTokens ?? 4096))) })}
-      </p>
-
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div class="flex items-center gap-6 col-span-3">
           <label class="flex items-center gap-2 text-sm cursor-pointer">

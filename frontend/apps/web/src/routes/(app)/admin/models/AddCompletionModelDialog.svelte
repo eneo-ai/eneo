@@ -360,10 +360,6 @@
               </div>
             </div>
 
-            <p class="text-xs text-muted">
-              {m.effective_context({ tokens: formatTokenLimit(Math.max(0, maxInputTokens - maxOutputTokens)) })}
-            </p>
-
             <div class="flex gap-4">
               <label class="flex items-center gap-2 text-sm">
                 <input type="checkbox" bind:checked={vision} />
