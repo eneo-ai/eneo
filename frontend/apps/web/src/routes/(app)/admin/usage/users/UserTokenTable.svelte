@@ -19,12 +19,14 @@
     perPage: number;
     sortBy: UserSortBy;
     sortOrder: "asc" | "desc";
+    highThreshold: number;
+    mediumThreshold: number;
     onUserClick: (user: UserTokenUsage) => void;
     onPageChange: (page: number) => void;
     onSortChange: (sortBy: UserSortBy, sortOrder: "asc" | "desc") => void;
   }
 
-  const { users, totalUsers, page, perPage, onUserClick, onPageChange }: Props = $props();
+  const { users, totalUsers, page, perPage, highThreshold, mediumThreshold, onUserClick, onPageChange }: Props = $props();
 
   const table = Table.createWithResource<UserTokenUsage>([]);
 
@@ -44,11 +46,13 @@
 
     table.column({
       header: m.usage_level(),
-      accessor: (item) => item.total_requests,
+      accessor: (item) => item.total_tokens,
       id: "usage_level",
       cell: (item) => {
         return createRender(UsageBadgeWrapper, {
-          requests: item.value
+          tokens: item.value,
+          highThreshold,
+          mediumThreshold
         });
       }
     }),

@@ -8,7 +8,6 @@
   import { Page } from "$lib/components/layout";
   import StorageSummary from "./storage/StorageSummary.svelte";
   import TokenSummary from "./tokens/TokenSummary.svelte";
-  import UserTokenSummary from "./users/UserTokenSummary.svelte";
   import { m } from "$lib/paraglide/messages";
 
   const { data } = $props();
@@ -24,7 +23,6 @@
     <Page.Tabbar>
       <Page.TabTrigger tab="storage">{m.storage()}</Page.TabTrigger>
       <Page.TabTrigger tab="tokens">{m.tokens()}</Page.TabTrigger>
-      <Page.TabTrigger tab="users">Users</Page.TabTrigger>
     </Page.Tabbar>
   </Page.Header>
   <Page.Main>
@@ -33,9 +31,6 @@
     </Page.Tab>
     <Page.Tab id="tokens">
       <TokenSummary tokenStats={data.tokenStats}></TokenSummary>
-    </Page.Tab>
-    <Page.Tab id="users">
-      <UserTokenSummary></UserTokenSummary>
     </Page.Tab>
   </Page.Main>
 </Page.Root>

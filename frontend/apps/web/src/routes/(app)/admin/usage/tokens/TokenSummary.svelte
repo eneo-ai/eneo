@@ -9,6 +9,7 @@
   import type { TokenUsageSummary } from "@intric/intric-js";
   import TokenOverviewBar from "./TokenOverviewBar.svelte";
   import TokenOverviewTable from "./TokenOverviewTable.svelte";
+  import UserTokenSummary from "../users/UserTokenSummary.svelte";
   import { CalendarDate } from "@internationalized/date";
   import { getIntric } from "$lib/core/Intric";
   import { Input } from "@intric/ui";
@@ -57,4 +58,5 @@
       <TokenOverviewTable tokenStats={detailedStats}></TokenOverviewTable>
     </Settings.Row>
   </Settings.Group>
+  <UserTokenSummary />
 </Settings.Page>
