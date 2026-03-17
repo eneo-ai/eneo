@@ -41,7 +41,7 @@ export function initMCPServers(client) {
      * @param {string} params.name Name of the MCP server
      * @param {string} params.http_url HTTP URL to the MCP server
      * @param {"sse" | "streamable_http"} [params.transport_type] Transport type (default: sse)
-     * @param {"none" | "bearer" | "api_key" | "custom_headers"} [params.http_auth_type] Authentication type (default: none)
+     * @param {"none" | "bearer"} [params.http_auth_type] Authentication type (default: none)
      * @param {string} [params.description] Description
      * @param {Object} [params.http_auth_config_schema] Authentication configuration
      * @param {Object} [params.config_schema] JSON schema for configuration
@@ -89,7 +89,7 @@ export function initMCPServers(client) {
      * @param {string} [params.name] Name of the MCP server
      * @param {string} [params.http_url] HTTP URL to the MCP server
      * @param {"sse" | "streamable_http"} [params.transport_type] Transport type
-     * @param {"none" | "bearer" | "api_key" | "custom_headers"} [params.http_auth_type] Authentication type
+     * @param {"none" | "bearer"} [params.http_auth_type] Authentication type
      * @param {string} [params.description] Description
      * @param {Object} [params.http_auth_config_schema] Authentication configuration
      * @param {Object} [params.config_schema] JSON schema for configuration

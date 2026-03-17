@@ -1,4 +1,4 @@
-import { env } from "$env/dynamic/private";
+import { getBackendUrl, getBackendServerUrl } from "$lib/core/environment.server";
 import { fail } from "@sveltejs/kit";
 import type { Actions } from "./$types";
 
@@ -13,7 +13,7 @@ export const actions: Actions = {
     }
 
     // Use internal Docker URL if available, otherwise fall back to external URL
-    const backendUrl = env.INTRIC_BACKEND_SERVER_URL || env.INTRIC_BACKEND_URL;
+    const backendUrl = getBackendServerUrl() || getBackendUrl();
     if (!backendUrl) {
       return fail(500, { error_key: "integration_callback_backend_url_not_configured" });
     }

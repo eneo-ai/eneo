@@ -118,8 +118,8 @@ Edit `env_backend.env` with your values:
 
 Edit `env_frontend.env`:
 - `JWT_SECRET` - **MUST match backend value**
-- `INTRIC_BACKEND_URL` - backend URL for SSR (e.g., `http://backend:8000`)
-- `PUBLIC_INTRIC_BACKEND_URL` - external API URL (e.g., `https://eneo.example.com/api`)
+- `ENEO_BACKEND_URL` - backend URL for SSR (e.g., `http://backend:8000`)
+- `PUBLIC_ENEO_BACKEND_URL` - external API URL (e.g., `https://eneo.example.com/api`)
 - `PUBLIC_ORIGIN` - your external URL (e.g., `https://eneo.example.com`)
 - `ORIGIN` - same as PUBLIC_ORIGIN
 
@@ -198,7 +198,7 @@ Navigate to `https://your-domain.com`
     |----------|---------|-------------|
     | `FEDERATION_PER_TENANT_ENABLED` | `false` | Enable per-tenant IdP configuration via API |
     | `ENCRYPTION_KEY` | - | 44-char base64 Fernet key (required for credentials & federation) |
-    | `INTRIC_SUPER_API_KEY` | - | Super admin API access |
+    | `ENEO_SUPER_API_KEY` | - | Super admin API access |
 
     **Generating ENCRYPTION_KEY:**
 
@@ -271,15 +271,15 @@ Navigate to `https://your-domain.com`
     ### Frontend Environment Variables
 
     <Callout type="warning">
-      **Important:** Eneo frontend uses **SvelteKit**, NOT Next.js. Use `INTRIC_*` variables, not `NEXT_PUBLIC_*`.
+      **Important:** Eneo frontend uses **SvelteKit**, NOT Next.js. Use `ENEO_*` variables, not `NEXT_PUBLIC_*`.
     </Callout>
 
     **Required:**
 
     | Variable | Description | Example |
     |----------|-------------|---------|
-    | `INTRIC_BACKEND_URL` | Backend URL for server-side rendering | `http://backend:8000` |
-    | `PUBLIC_INTRIC_BACKEND_URL` | Backend URL for client-side (browser) | `https://eneo.example.com/api` |
+    | `ENEO_BACKEND_URL` | Backend URL for server-side rendering | `http://backend:8000` |
+    | `PUBLIC_ENEO_BACKEND_URL` | Backend URL for client-side (browser) | `https://eneo.example.com/api` |
     | `PUBLIC_ORIGIN` | External URL | `https://eneo.example.com` |
     | `ORIGIN` | Cookie/CORS origin (same as PUBLIC_ORIGIN) | `https://eneo.example.com` |
     | `JWT_SECRET` | **MUST match backend JWT_SECRET** | `a1b2c3d4...` |
@@ -288,7 +288,7 @@ Navigate to `https://your-domain.com`
 
     | Variable | Default | Description |
     |----------|---------|-------------|
-    | `INTRIC_BACKEND_SERVER_URL` | - | Docker internal URL override (e.g., `http://backend:8000`) |
+    | `ENEO_BACKEND_SERVER_URL` | - | Docker internal URL override (e.g., `http://backend:8000`) |
     | `FEDERATION_PER_TENANT_ENABLED` | `false` | Enable multi-tenant IdP |
 
     **Single-Tenant OIDC (if not using federation):**
@@ -301,8 +301,8 @@ Navigate to `https://your-domain.com`
 
     <Callout type="info">
       **Docker networking tip:** In Docker, `localhost` means "this container" - not your host machine. Use the Docker service name `backend` for container-to-container communication:
-      - `INTRIC_BACKEND_SERVER_URL=http://backend:8000` (correct - uses service name)
-      - `INTRIC_BACKEND_SERVER_URL=http://localhost:8000` (wrong - will fail)
+      - `ENEO_BACKEND_SERVER_URL=http://backend:8000` (correct - uses service name)
+      - `ENEO_BACKEND_SERVER_URL=http://localhost:8000` (wrong - will fail)
     </Callout>
 
   </Tabs.Tab>
@@ -414,8 +414,8 @@ Eneo uses a three-tier API key system for different administrative tasks.
 
 | Key | Environment Variable | Purpose |
 |-----|---------------------|---------|
-| **Super API Key** | `INTRIC_SUPER_API_KEY` | Sysadmin operations: tenants, users, credentials, crawler settings |
-| **Super Duper API Key** | `INTRIC_SUPER_DUPER_API_KEY` | Module management: assigning modules to tenants |
+| **Super API Key** | `ENEO_SUPER_API_KEY` | Sysadmin operations: tenants, users, credentials, crawler settings |
+| **Super Duper API Key** | `ENEO_SUPER_DUPER_API_KEY` | Module management: assigning modules to tenants |
 | **User API Key** | Generated per user | Admin operations within a tenant via `/api/v1/admin/` |
 
 <Callout type="info">
@@ -515,7 +515,7 @@ After deployment, some features require additional configuration in the Admin pa
 To use system administration endpoints (tenants, credentials, crawler settings), set the API key in `env_backend.env`:
 
 ```bash
-INTRIC_SUPER_API_KEY=your-secure-api-key
+ENEO_SUPER_API_KEY=your-secure-api-key
 ```
 
 ### Modules API Access
@@ -523,7 +523,7 @@ INTRIC_SUPER_API_KEY=your-secure-api-key
 To manage module assignments to tenants, set a separate higher-privileged API key:
 
 ```bash
-INTRIC_SUPER_DUPER_API_KEY=your-other-secure-api-key
+ENEO_SUPER_DUPER_API_KEY=your-other-secure-api-key
 ```
 
 ---
@@ -536,7 +536,7 @@ INTRIC_SUPER_DUPER_API_KEY=your-other-secure-api-key
 |---------|--------------|-----|
 | Can't login with default credentials | `DEFAULT_*` vars commented or db-init didn't run | Uncomment vars in env_backend.env, check `docker logs eneo_db_init` |
 | Can't see Users page in Admin | `USING_ACCESS_MANAGEMENT=false` | Set to `true`, restart backend |
-| Frontend shows wrong API URL | `PUBLIC_INTRIC_BACKEND_URL` incorrect | Set to external URL (not localhost in prod) |
+| Frontend shows wrong API URL | `PUBLIC_ENEO_BACKEND_URL` incorrect | Set to external URL (not localhost in prod) |
 | Can't upload multiple files | `MAX_IN_QUESTION=1` | Increase value in backend env |
 | Large file uploads fail | `UPLOAD_MAX_FILE_SIZE` too low | Increase value (default 10MB = 10485760 bytes) |
 | "Failed to decrypt credential" | `ENCRYPTION_KEY` missing or changed | Set correct key or re-enter credentials |
@@ -547,7 +547,7 @@ INTRIC_SUPER_DUPER_API_KEY=your-other-secure-api-key
 | Can't create Apps | No transcription model enabled | Admin → Models → Transcription tab, enable Whisper |
 | JWT token invalid | `JWT_SECRET` mismatch | Must be identical in backend AND frontend |
 | Worker jobs stuck or slow | Worker overloaded | Reduce `WORKER_MAX_JOBS` or increase resources |
-| `ECONNREFUSED 127.0.0.1:8000` | Frontend using localhost instead of Docker service | Set `INTRIC_BACKEND_SERVER_URL=http://backend:8000` (use service name, not localhost) |
+| `ECONNREFUSED 127.0.0.1:8000` | Frontend using localhost instead of Docker service | Set `ENEO_BACKEND_SERVER_URL=http://backend:8000` (use service name, not localhost) |
 | HTTP to HTTPS redirect broken | Missing Traefik label | Ensure `traefik.enable=true` label on traefik service |
 | 502 Bad Gateway | Domain not replaced in docker-compose.yml | Replace `your-domain.com` in all 4 locations |
 
@@ -714,6 +714,30 @@ docker image prune -a
 # Scale backend instances (with load balancer)
 docker compose up -d --scale backend=3 --scale worker=2
 ```
+
+---
+
+## Migration: INTRIC_ to ENEO_ Environment Variables
+
+All `INTRIC_`-prefixed environment variables have been renamed to `ENEO_`. The old names are still accepted but deprecated and will be removed in v3.0.
+
+<Callout type="info">
+  **No immediate action required.** Existing installations using `INTRIC_*` variables will continue to work. A deprecation warning will appear in the logs on startup. Update at your convenience before v3.0.
+</Callout>
+
+| Old variable | New variable |
+|---|---|
+| `INTRIC_SUPER_API_KEY` | `ENEO_SUPER_API_KEY` |
+| `INTRIC_SUPER_DUPER_API_KEY` | `ENEO_SUPER_DUPER_API_KEY` |
+| `INTRIC_BACKEND_URL` | `ENEO_BACKEND_URL` |
+| `INTRIC_BACKEND_SERVER_URL` | `ENEO_BACKEND_SERVER_URL` |
+| `PUBLIC_INTRIC_BACKEND_URL` | `PUBLIC_ENEO_BACKEND_URL` |
+
+**Removed (no replacement needed):**
+- `INTRIC_MARKETPLACE_API_KEY` — was unused
+- `INTRIC_MARKETPLACE_URL` — was unused
+
+To migrate, update your `env_backend.env` and `env_frontend.env` files and restart all services.
 
 ---
 

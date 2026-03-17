@@ -12,22 +12,23 @@
 # IMPORTANT: Replace "your-domain.com" with your actual domain!
 #
 # Example for domain "eneo.example.com":
-#   INTRIC_BACKEND_URL=https://eneo.example.com
-#   INTRIC_BACKEND_SERVER_URL=http://backend:8000
-#   PUBLIC_INTRIC_BACKEND_URL=https://eneo.example.com
+#   ENEO_BACKEND_URL=https://eneo.example.com
+#   ENEO_BACKEND_SERVER_URL=http://backend:8000
+#   PUBLIC_ENEO_BACKEND_URL=https://eneo.example.com
 #   ORIGIN=https://eneo.example.com
+# NOTE: INTRIC_* versions are still accepted but deprecated (removed in v3.0)
 # ----------------------------------------------------------------------------
 
 # Server-side backend URL (used by frontend SSR for API calls)
-INTRIC_BACKEND_URL=https://your-domain.com
+ENEO_BACKEND_URL=https://your-domain.com
 
 # Internal backend URL (server-to-server within Docker network)
 # This connects directly to the backend container, skipping Traefik (faster for SSR)
-INTRIC_BACKEND_SERVER_URL=http://backend:8000
+ENEO_BACKEND_SERVER_URL=http://backend:8000
 
 # Client-side backend URL (used by browser for API calls)
 # The PUBLIC_ prefix exposes this to the browser (SvelteKit convention)
-PUBLIC_INTRIC_BACKEND_URL=https://your-domain.com
+PUBLIC_ENEO_BACKEND_URL=https://your-domain.com
 
 # Public origin (used for cookies and CORS)
 ORIGIN=https://your-domain.com

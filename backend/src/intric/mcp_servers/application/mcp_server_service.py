@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from intric.mcp_servers.domain.repositories.mcp_server_tool_repo import (
         MCPServerToolRepository,
     )
+    from intric.settings.encryption_service import EncryptionService
     from intric.users.user import UserInDB
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,14 @@ class MCPServerCreateResult:
     connection: ConnectionResult
 
 
+@dataclass
+class MCPServerUpdateResult:
+    """Result of MCP server update including optional connection status."""
+
+    server: MCPServer
+    connection: ConnectionResult | None = None
+
+
 class MCPServerService:
     """Service for managing global MCP server catalog (admin only)."""
 
@@ -47,10 +56,44 @@ class MCPServerService:
         mcp_server_repo: "MCPServerRepository",
         mcp_server_tool_repo: "MCPServerToolRepository",
         user: "UserInDB",
+        encryption_service: "EncryptionService | None" = None,
     ):
         self.repo = mcp_server_repo
         self.tool_repo = mcp_server_tool_repo
         self.user = user
+        self.encryption_service = encryption_service
+
+    # Keys in http_auth_config_schema that contain secrets
+    _SECRET_KEYS = ("token",)
+
+    def _encrypt_auth_config(
+        self, config: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Encrypt sensitive values in auth config before storing."""
+        if not config or not self.encryption_service or not self.encryption_service.is_active():
+            return config
+
+        encrypted = dict(config)
+        for key in self._SECRET_KEYS:
+            if key in encrypted and encrypted[key]:
+                encrypted[key] = self.encryption_service.encrypt(encrypted[key])
+        return encrypted
+
+    def _decrypt_auth_config(
+        self, config: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Decrypt sensitive values in auth config for use."""
+        if not config:
+            return config
+
+        decrypted = dict(config)
+        for key in self._SECRET_KEYS:
+            if key in decrypted and decrypted[key]:
+                if self.encryption_service and self.encryption_service.is_encrypted(
+                    decrypted[key]
+                ):
+                    decrypted[key] = self.encryption_service.decrypt(decrypted[key])
+        return decrypted
 
     async def get_mcp_servers(self, tags: list[str] | None = None) -> list[MCPServer]:
         """Get all MCP servers from global catalog with optional tag filtering."""
@@ -97,7 +140,7 @@ class MCPServerService:
             documentation_url=documentation_url,
         )
 
-        # Test connection FIRST before saving to database
+        # Test connection FIRST with plaintext credentials before saving to database
         auth_credentials = http_auth_config_schema if http_auth_config_schema else None
         tools, connection_result = await self._test_connection_and_discover_tools(
             mcp_server, auth_credentials
@@ -109,6 +152,14 @@ class MCPServerService:
             return MCPServerCreateResult(
                 server=mcp_server, connection=connection_result
             )
+
+        # Encrypt credentials before saving to database (skip if auth type is "none")
+        if http_auth_type != "none" and http_auth_config_schema:
+            mcp_server.http_auth_config_schema = self._encrypt_auth_config(
+                http_auth_config_schema
+            )
+        else:
+            mcp_server.http_auth_config_schema = None
 
         # Connection succeeded - save to database
         mcp_server = await self.repo.add(mcp_server)
@@ -139,20 +190,35 @@ class MCPServerService:
         tags: list[str] | None = None,
         icon_url: str | None = None,
         documentation_url: str | None = None,
-    ) -> MCPServer:
-        """Update an MCP server in global catalog (admin only, uses Streamable HTTP transport)."""
+    ) -> MCPServerUpdateResult:
+        """Update an MCP server in global catalog (admin only, uses Streamable HTTP transport).
+
+        Validates connection before saving when connection-affecting fields
+        (http_url, http_auth_type, http_auth_config_schema) change.
+        Returns MCPServerUpdateResult with connection info when validation occurs.
+        """
         mcp_server = await self.repo.one(id=mcp_server_id)
 
+        # Track whether connection-affecting fields are actually changing
+        url_changed = http_url is not None and str(http_url) != mcp_server.http_url
+        auth_type_changed = (
+            http_auth_type is not None
+            and http_auth_type != mcp_server.http_auth_type
+        )
+        credentials_changed = http_auth_config_schema is not None
+
+        # Apply changes to domain object
         if name is not None:
             mcp_server.name = name
         if http_url is not None:
             mcp_server.http_url = str(http_url)
         if http_auth_type is not None:
             mcp_server.http_auth_type = http_auth_type
+            # If switching to "none", clear credentials
+            if http_auth_type == "none":
+                mcp_server.http_auth_config_schema = None
         if description is not None:
             mcp_server.description = description
-        if http_auth_config_schema is not None:
-            mcp_server.http_auth_config_schema = http_auth_config_schema
         if tags is not None:
             mcp_server.tags = tags
         if icon_url is not None:
@@ -160,7 +226,35 @@ class MCPServerService:
         if documentation_url is not None:
             mcp_server.documentation_url = str(documentation_url)
 
-        return await self.repo.update(mcp_server)
+        # Validate connection before saving when connection config changes
+        if url_changed or auth_type_changed or credentials_changed:
+            if mcp_server.http_auth_type == "none":
+                test_credentials = None
+            elif http_auth_config_schema is not None:
+                # New credentials provided — use plaintext for test
+                test_credentials = http_auth_config_schema
+            else:
+                # URL or auth type changed but credentials unchanged — decrypt existing
+                test_credentials = self._decrypt_auth_config(
+                    mcp_server.http_auth_config_schema
+                )
+
+            _, connection_result = await self._test_connection_and_discover_tools(
+                mcp_server, test_credentials
+            )
+            if not connection_result.success:
+                return MCPServerUpdateResult(
+                    server=mcp_server, connection=connection_result
+                )
+
+        # Encrypt and apply new credentials after validation passes
+        if http_auth_config_schema is not None and mcp_server.http_auth_type != "none":
+            mcp_server.http_auth_config_schema = self._encrypt_auth_config(
+                http_auth_config_schema
+            )
+
+        mcp_server = await self.repo.update(mcp_server)
+        return MCPServerUpdateResult(server=mcp_server)
 
     @validate_permissions(Permission.ADMIN)
     async def delete_mcp_server(self, mcp_server_id: UUID) -> None:
@@ -294,6 +388,13 @@ class MCPServerService:
             Tuple of (list of refreshed tools, connection result)
         """
         mcp_server = await self.repo.one(id=mcp_server_id)
+
+        # If no explicit credentials provided, decrypt stored ones
+        if auth_credentials is None:
+            auth_credentials = self._decrypt_auth_config(
+                mcp_server.http_auth_config_schema
+            )
+
         return await self.discover_and_sync_tools(mcp_server, auth_credentials)
 
     @validate_permissions(Permission.ADMIN)

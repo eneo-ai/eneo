@@ -1,4 +1,5 @@
 import { env } from "$env/dynamic/private";
+import { getBackendUrl } from "$lib/core/environment.server";
 import { DEFAULT_LANDING_PAGE } from "$lib/core/constants";
 import { loginWithIntric } from "$lib/features/auth/intric.server";
 import { getMobilityguardLink } from "$lib/features/auth/mobilityguard.server";
@@ -76,7 +77,7 @@ export const load = async (event) => {
     federationStatus.has_global_oidc_config;
 
   if (hasSingleTenantOidc) {
-    singleTenantOidcLink = await getSingleTenantOidcLink(env.INTRIC_BACKEND_URL, event.fetch);
+    singleTenantOidcLink = await getSingleTenantOidcLink(getBackendUrl(), event.fetch);
   }
 
   return {

@@ -254,6 +254,35 @@ ACTION_METADATA = {
         "name_sv": "Säkerhetsklassificering inaktiverad",
         "description_sv": "Loggar när säkerhetsklassificering inaktiveras",
     },
+    # MCP Server Actions (7)
+    ActionType.MCP_SERVER_CREATED.value: {
+        "name_sv": "MCP-server skapad",
+        "description_sv": "Loggar när en ny MCP-server skapas",
+    },
+    ActionType.MCP_SERVER_UPDATED.value: {
+        "name_sv": "MCP-server uppdaterad",
+        "description_sv": "Loggar ändringar av MCP-serverinställningar",
+    },
+    ActionType.MCP_SERVER_DELETED.value: {
+        "name_sv": "MCP-server raderad",
+        "description_sv": "Loggar när en MCP-server tas bort",
+    },
+    ActionType.MCP_SERVER_ENABLED.value: {
+        "name_sv": "MCP-server aktiverad",
+        "description_sv": "Loggar när en MCP-server aktiveras för organisationen",
+    },
+    ActionType.MCP_SERVER_DISABLED.value: {
+        "name_sv": "MCP-server inaktiverad",
+        "description_sv": "Loggar när en MCP-server inaktiveras för organisationen",
+    },
+    ActionType.MCP_SERVER_TOOL_ENABLED.value: {
+        "name_sv": "MCP-verktyg aktiverat",
+        "description_sv": "Loggar när ett MCP-verktyg aktiveras",
+    },
+    ActionType.MCP_SERVER_TOOL_DISABLED.value: {
+        "name_sv": "MCP-verktyg inaktiverat",
+        "description_sv": "Loggar när ett MCP-verktyg inaktiveras",
+    },
     # System Actions (3)
     ActionType.RETENTION_POLICY_APPLIED.value: {
         "name_sv": "Retentionspolicy tillämpades",

@@ -1,4 +1,5 @@
 import { env } from "$env/dynamic/private";
+import { getBackendUrl } from "$lib/core/environment.server";
 
 /**
  * Gets a boolean flag value from environment variables with fallback support.
@@ -143,7 +144,7 @@ export async function getFeatureFlags(fetchFn: typeof fetch = fetch) {
   };
 
   try {
-    const backendUrl = env.INTRIC_BACKEND_URL || "http://localhost:8123";
+    const backendUrl = getBackendUrl() || "http://localhost:8123";
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
 

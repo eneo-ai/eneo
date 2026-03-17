@@ -6,5 +6,5 @@ import { env } from "$env/dynamic/public";
  * Used in login flows before user authentication.
  */
 export const intric = createIntric({
-  baseUrl: env.PUBLIC_INTRIC_BACKEND_URL || "",
+  baseUrl: env.PUBLIC_ENEO_BACKEND_URL || env.PUBLIC_INTRIC_BACKEND_URL || "",
 });

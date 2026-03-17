@@ -129,13 +129,13 @@ The frontend needs three URLs configured and must share the exact same `JWT_SECR
 ```bash
 # 1. Set the URLs (replace eneo.your-company.com with your actual domain)
 # Server-side URL - used by frontend SSR
-echo "INTRIC_BACKEND_URL=https://eneo.your-company.com" >> env_frontend.env
+echo "ENEO_BACKEND_URL=https://eneo.your-company.com" >> env_frontend.env
 
 # Internal URL - server-to-server within Docker (skips Traefik, faster)
-echo "INTRIC_BACKEND_SERVER_URL=http://backend:8000" >> env_frontend.env
+echo "ENEO_BACKEND_SERVER_URL=http://backend:8000" >> env_frontend.env
 
 # Client-side URL - used by browser for API calls (PUBLIC_ exposes to browser)
-echo "PUBLIC_INTRIC_BACKEND_URL=https://eneo.your-company.com" >> env_frontend.env
+echo "PUBLIC_ENEO_BACKEND_URL=https://eneo.your-company.com" >> env_frontend.env
 
 # Origin - used for cookies and CORS
 echo "ORIGIN=https://eneo.your-company.com" >> env_frontend.env
@@ -150,8 +150,8 @@ echo "JWT_SECRET=$JWT_SECRET_VALUE" >> env_frontend.env
 
 > **Important**:
 > - The `JWT_SECRET` must be identical in both `env_backend.env` and `env_frontend.env` for authentication to work correctly.
-> - `INTRIC_BACKEND_SERVER_URL` must be `http://backend:8000` (using Docker service name, not `localhost`).
-> - `PUBLIC_INTRIC_BACKEND_URL` is the URL the browser uses - must be your public domain.
+> - `ENEO_BACKEND_SERVER_URL` must be `http://backend:8000` (using Docker service name, not `localhost`).
+> - `PUBLIC_ENEO_BACKEND_URL` is the URL the browser uses - must be your public domain.
 > - `PUBLIC_ORIGIN` is required for OIDC authentication.
 
 ### Step 3: Launch the Application
@@ -360,13 +360,13 @@ Enable optional features by setting variables in `env_backend.env`.
 **Access Sysadmin Endpoints:**
 To get access to system administration endpoints, set an API key:
 ```bash
-INTRIC_SUPER_API_KEY=your-secure-api-key
+ENEO_SUPER_API_KEY=your-secure-api-key
 ```
 
 **Access Modules Endpoint:**
 To get access to the modules endpoint, set a separate, higher-privileged API key:
 ```bash
-INTRIC_SUPER_DUPER_API_KEY=your-other-secure-api-key
+ENEO_SUPER_DUPER_API_KEY=your-other-secure-api-key
 ```
 
 ### Multi-Tenant Features
@@ -388,7 +388,7 @@ TENANT_CREDENTIALS_ENABLED=true
 
 # 3. Configure per-tenant credentials via API
 curl -X PUT https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/credentials/openai \
-  -H "X-API-Key: ${INTRIC_SUPER_API_KEY}" \
+  -H "X-API-Key: ${ENEO_SUPER_API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"api_key": "sk-proj-tenant-specific-key"}'
 ```
@@ -404,7 +404,7 @@ ENCRYPTION_KEY=<same-key-as-above>
 
 # 2. Configure per-tenant IdP via API
 curl -X PUT https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation \
-  -H "X-API-Key: ${INTRIC_SUPER_API_KEY}" \
+  -H "X-API-Key: ${ENEO_SUPER_API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "entra_id",
@@ -464,8 +464,8 @@ If the database tables exist but you can't login with `user@example.com` / `Pass
 This means the frontend is trying to connect to `localhost` instead of the backend container:
 - Check `env_frontend.env` has the correct URLs:
   ```bash
-  INTRIC_BACKEND_URL=https://your-domain.com        # Public URL (your actual domain)
-  INTRIC_BACKEND_SERVER_URL=http://backend:8000     # Must be "backend", NOT "localhost"
+  ENEO_BACKEND_URL=https://your-domain.com        # Public URL (your actual domain)
+  ENEO_BACKEND_SERVER_URL=http://backend:8000     # Must be "backend", NOT "localhost"
   ORIGIN=https://your-domain.com
   ```
 - In Docker, `localhost` means "this container" - use `backend` (the Docker service name) instead

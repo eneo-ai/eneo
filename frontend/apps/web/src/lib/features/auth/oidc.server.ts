@@ -3,17 +3,18 @@
     Uses backend federation router endpoints (/api/v1/auth/initiate and /api/v1/auth/callback).
 */
 
-import { env } from "$env/dynamic/private";
+import { getBackendUrl } from "$lib/core/environment.server";
 import { setFrontendAuthCookie } from "./auth.server";
 import { LoginError } from "./LoginError";
 
 export async function loginWithOidc(code: string, state: string, fetchFn: typeof fetch = fetch): Promise<boolean> {
-  if (!env.INTRIC_BACKEND_URL) {
-    console.error("[OIDC] Missing INTRIC_BACKEND_URL configuration");
+  const resolvedBackendUrl = getBackendUrl();
+  if (!resolvedBackendUrl) {
+    console.error("[OIDC] Missing ENEO_BACKEND_URL configuration");
     return false;
   }
 
-  const backendUrl = `${env.INTRIC_BACKEND_URL}/api/v1/auth/callback`;
+  const backendUrl = `${resolvedBackendUrl}/api/v1/auth/callback`;
 
   console.debug("[OIDC] Starting backend callback", {
     hasCode: !!code,

@@ -131,10 +131,10 @@ Add these to `backend/.env` for full admin capabilities:
 USING_ACCESS_MANAGEMENT=True
 
 # Access to system admin endpoints
-INTRIC_SUPER_API_KEY=your-secure-api-key
+ENEO_SUPER_API_KEY=your-secure-api-key
 
 # Access to modules endpoint (higher privilege)
-INTRIC_SUPER_DUPER_API_KEY=your-other-secure-api-key
+ENEO_SUPER_DUPER_API_KEY=your-other-secure-api-key
 
 # Increase file upload limits (in bytes, 10MB example)
 UPLOAD_MAX_FILE_SIZE=10485760

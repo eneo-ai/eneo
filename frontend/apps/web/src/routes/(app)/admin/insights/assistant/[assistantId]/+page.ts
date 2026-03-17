@@ -5,7 +5,8 @@
 */
 
 import { CalendarDate } from "@internationalized/date";
-import type { Assistant, AssistantResponse } from "@intric/intric-js";
+import { parseDate } from "@internationalized/date";
+import type { Assistant } from "@intric/intric-js";
 
 export const load = async (event) => {
   const { intric } = await event.parent();
@@ -13,28 +14,47 @@ export const load = async (event) => {
   event.depends("insights:assistant");
 
   const id = event.params.assistantId;
+  const searchParams = event.url.searchParams;
   const now = new Date();
-  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getUTCDate());
-  const includeFollowups = false;
+  const today = new CalendarDate(
+    now.getFullYear(),
+    now.getMonth() + 1,
+    now.getUTCDate()
+  );
+  const defaultStart = today.subtract({ days: 30 });
 
-  const [questions, assistant]: [AssistantResponse[], Assistant] = await Promise.all([
-    intric.analytics.listQuestions({
-      assistant: { id },
-      options: {
-        start: today.subtract({ days: 30 }).toString(),
-        end: today.toString(),
-        includeFollowups
-      }
-    }),
-    intric.assistants.get({ id })
-  ]);
+  const fromQuery = searchParams.get("from");
+  const toQuery = searchParams.get("to");
+  const followupsQuery = searchParams.get("followups");
+
+  const includeFollowups =
+    followupsQuery === null ? true : followupsQuery === "true";
+
+  const start = (() => {
+    if (!fromQuery) return defaultStart;
+    try {
+      return parseDate(fromQuery);
+    } catch {
+      return defaultStart;
+    }
+  })();
+
+  const end = (() => {
+    if (!toQuery) return today;
+    try {
+      return parseDate(toQuery);
+    } catch {
+      return today;
+    }
+  })();
+
+  const assistant: Assistant = await intric.assistants.get({ id });
 
   return {
-    questions,
     assistant,
     timeframe: {
-      start: today.subtract({ days: 30 }),
-      end: today
+      start,
+      end
     },
     includeFollowups
   };

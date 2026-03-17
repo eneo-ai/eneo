@@ -524,8 +524,12 @@ class Container(containers.DeclarativeContainer):
     user_integration_assembler = providers.Factory(UserIntegrationAssembler)
 
     # MCP assemblers
-    mcp_server_assembler = providers.Factory(MCPServerAssembler)
-    mcp_server_settings_assembler = providers.Factory(MCPServerSettingsAssembler)
+    mcp_server_assembler = providers.Factory(
+        MCPServerAssembler, encryption_service=encryption_service
+    )
+    mcp_server_settings_assembler = providers.Factory(
+        MCPServerSettingsAssembler, encryption_service=encryption_service
+    )
     mcp_server_tool_assembler = providers.Factory(MCPServerToolAssembler)
 
     # Mappers for integration domain
@@ -1080,6 +1084,7 @@ class Container(containers.DeclarativeContainer):
         mcp_server_repo=mcp_server_repo,
         mcp_server_tool_repo=mcp_server_tool_repo,
         user=user,
+        encryption_service=encryption_service,
     )
     mcp_server_settings_service = providers.Factory(
         MCPServerSettingsService,

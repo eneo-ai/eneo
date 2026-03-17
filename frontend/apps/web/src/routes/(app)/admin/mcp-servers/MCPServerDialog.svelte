@@ -22,14 +22,11 @@
   let name = $state("");
   let description = $state("");
   let http_url = $state("");
-  let http_auth_type = $state<"none" | "bearer" | "api_key" | "custom_headers">("none");
+  let http_auth_type = $state<"none" | "bearer">("none");
   let documentation_url = $state("");
 
   // Authentication credentials
   let bearer_token = $state("");
-  let api_key = $state("");
-  let api_key_header = $state("X-API-Key");
-  let custom_headers = $state("");
 
   let submitting = $state(false);
   let errorMessage = $state("");
@@ -51,9 +48,6 @@
     }
     // Always clear auth credentials (they're stored securely, not shown)
     bearer_token = "";
-    api_key = "";
-    api_key_header = "X-API-Key";
-    custom_headers = "";
     errorMessage = "";
   });
 
@@ -62,11 +56,16 @@
     errorMessage = "";
 
     try {
-      const data: any = {
-        name,
-        http_url,
-        http_auth_type,
-      };
+      const data: any = { name };
+
+      // Only send connection-affecting fields when actually changed to avoid
+      // unnecessary connection validation on the backend for simple edits
+      if (!isEditMode || http_url !== mcpServer?.http_url) {
+        data.http_url = http_url;
+      }
+      if (!isEditMode || http_auth_type !== mcpServer?.http_auth_type) {
+        data.http_auth_type = http_auth_type;
+      }
 
       // Add optional fields with actual values
       if (description) data.description = description;
@@ -75,19 +74,6 @@
       // Add auth config if provided
       if (http_auth_type === "bearer" && bearer_token) {
         data.http_auth_config_schema = { token: bearer_token };
-      } else if (http_auth_type === "api_key" && api_key) {
-        data.http_auth_config_schema = {
-          api_key: api_key,
-          header_name: api_key_header
-        };
-      } else if (http_auth_type === "custom_headers" && custom_headers) {
-        try {
-          data.http_auth_config_schema = JSON.parse(custom_headers);
-        } catch (e) {
-          errorMessage = m.invalid_json_custom_headers();
-          submitting = false;
-          return;
-        }
       }
 
       await onSubmit(data, mcpServer?.mcp_server_id);
@@ -100,9 +86,6 @@
         http_auth_type = "none";
         documentation_url = "";
         bearer_token = "";
-        api_key = "";
-        api_key_header = "X-API-Key";
-        custom_headers = "";
       }
 
       $openController = false;
@@ -113,7 +96,14 @@
     }
   }
 
-  const authPlaceholder = $derived(isEditMode ? m.leave_empty_keep_existing() : "");
+  const credentialPreview = $derived(mcpServer?.credential_preview ?? "");
+  const authPlaceholder = $derived(
+    isEditMode && credentialPreview
+      ? credentialPreview
+      : isEditMode
+        ? m.leave_empty_keep_existing()
+        : ""
+  );
 </script>
 
 <Dialog.Root {openController}>
@@ -223,10 +213,10 @@
             Autentisering
           </legend>
 
-          <!-- TODO: Add more auth options when OAuth support is implemented -->
           <Select.Simple
             options={[
               { value: "none", label: "Publik (ingen autentisering)" },
+              { value: "bearer", label: "Bearer Token" },
             ]}
             bind:value={http_auth_type}
           >
@@ -245,58 +235,12 @@
                 class="border-default bg-primary ring-accent-default w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:border-accent-default focus:outline-none hover:border-stronger"
               />
               <p class="mt-1.5 text-xs text-muted">
-                {#if isEditMode}<span class="text-warning-default">{m.leave_empty_keep_existing()}.</span>{/if}
+                {#if isEditMode}<span class="text-warning-default">{m.leave_empty_keep_existing()}. </span>{/if}
                 {m.will_be_sent_as_bearer()}
               </p>
             </div>
           {/if}
 
-          {#if http_auth_type === "api_key"}
-            <div class="space-y-4">
-              <div>
-                <label for="mcp-api_key" class="mb-1.5 block text-sm font-medium text-default">{m.api_key()}</label>
-                <input
-                  id="mcp-api_key"
-                  type="password"
-                  bind:value={api_key}
-                  placeholder={authPlaceholder || "Ange din API-nyckel..."}
-                  autocomplete="off"
-                  class="border-default bg-primary ring-accent-default w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:border-accent-default focus:outline-none hover:border-stronger"
-                />
-                {#if isEditMode}
-                  <p class="mt-1.5 text-xs text-warning-default">{m.leave_empty_keep_existing()}</p>
-                {/if}
-              </div>
-              <div>
-                <label for="mcp-api_key_header" class="mb-1.5 block text-sm font-medium text-default">{m.header_name()}</label>
-                <input
-                  id="mcp-api_key_header"
-                  type="text"
-                  bind:value={api_key_header}
-                  placeholder="X-API-Key"
-                  class="border-default bg-primary ring-accent-default w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:border-accent-default focus:outline-none hover:border-stronger"
-                />
-                <p class="mt-1.5 text-xs text-muted">{m.default_header_x_api_key()}</p>
-              </div>
-            </div>
-          {/if}
-
-          {#if http_auth_type === "custom_headers"}
-            <div>
-              <label for="mcp-custom_headers" class="mb-1.5 block text-sm font-medium text-default">{m.custom_headers_json()}</label>
-              <textarea
-                id="mcp-custom_headers"
-                bind:value={custom_headers}
-                rows="4"
-                placeholder={isEditMode ? m.leave_empty_keep_existing() : '{\n  "X-Custom-Header": "värde",\n  "Authorization": "Basic abc123"\n}'}
-                class="border-default bg-primary ring-accent-default w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:border-accent-default focus:outline-none hover:border-stronger resize-none"
-              ></textarea>
-              <p class="mt-1.5 text-xs text-muted">
-                {#if isEditMode}<span class="text-warning-default">{m.leave_empty_keep_existing()}.</span>{/if}
-                {m.provide_headers_json()}
-              </p>
-            </div>
-          {/if}
         </fieldset>
 
         <!-- Optional Section -->

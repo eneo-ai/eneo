@@ -130,10 +130,8 @@ class Settings(BaseSettings):
     vllm_api_key: Optional[str] = None
     berget_api_key: Optional[str] = None
     gdm_api_key: Optional[str] = None
-    intric_marketplace_api_key: Optional[str] = None
-    intric_marketplace_url: Optional[str] = None
-    intric_super_api_key: Optional[str] = None
-    intric_super_duper_api_key: Optional[str] = None
+    eneo_super_api_key: Optional[str] = None
+    eneo_super_duper_api_key: Optional[str] = None
 
     # Infrastructure dependencies
     postgres_user: str
@@ -247,6 +245,10 @@ class Settings(BaseSettings):
     mobilityguard_client_id: Optional[str] = None
     mobilityguard_client_secret: Optional[str] = None
     mobilityguard_tenant_id: Optional[str] = None
+
+    # DEPRECATED: INTRIC_* (use ENEO_* instead - will be removed in v3.0)
+    intric_super_api_key: Optional[str] = None
+    intric_super_duper_api_key: Optional[str] = None
 
     # Max sizes
     upload_file_to_session_max_size: int
@@ -413,12 +415,18 @@ class Settings(BaseSettings):
     @model_validator(mode="before")
     @classmethod
     def migrate_legacy_vars(cls, values):
-        """Auto-migrate MOBILITYGUARD_* to OIDC_* with deprecation warnings."""
+        """Auto-migrate legacy env vars with deprecation warnings.
+
+        MOBILITYGUARD_* → OIDC_*
+        INTRIC_* → ENEO_*
+        """
         migrations = [
             ("oidc_discovery_endpoint", "mobilityguard_discovery_endpoint"),
             ("oidc_client_id", "mobilityguard_client_id"),
             ("oidc_client_secret", "mobilityguard_client_secret"),
             ("oidc_tenant_id", "mobilityguard_tenant_id"),
+            ("eneo_super_api_key", "intric_super_api_key"),
+            ("eneo_super_duper_api_key", "intric_super_duper_api_key"),
         ]
 
         for new_name, old_name in migrations:

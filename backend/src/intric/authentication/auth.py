@@ -33,7 +33,7 @@ def authenticate_super_api_key(
     the header name is resolved at request time, not at module import time.
     This is crucial for tests that override settings.
     """
-    super_api_key = get_settings().intric_super_api_key
+    super_api_key = get_settings().eneo_super_api_key
 
     resolved_key = _resolve_api_key(request, api_key_header)
 
@@ -54,7 +54,7 @@ def authenticate_super_duper_api_key(
     the header name is resolved at request time, not at module import time.
     This is crucial for tests that override settings.
     """
-    super_duper_api_key = get_settings().intric_super_duper_api_key
+    super_duper_api_key = get_settings().eneo_super_duper_api_key
 
     resolved_key = _resolve_api_key(request, api_key_header)
 

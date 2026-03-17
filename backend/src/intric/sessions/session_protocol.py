@@ -91,3 +91,46 @@ def to_sessions_paginated_response(
             next_cursor=cursor,
             limit=limit,
         )
+
+
+def to_session_metadata_paginated_response(
+    sessions: list[SessionMetadataPublic],
+    total_count: int,
+    limit: int | None = None,
+    cursor: datetime = None,
+    previous: bool = False,
+):
+    if limit is None:
+        return CursorPaginatedResponse(items=sessions, total_count=total_count)
+
+    if not previous:
+        if len(sessions) > limit:
+            return CursorPaginatedResponse(
+                items=sessions[:-1],
+                total_count=total_count,
+                previous_cursor=cursor,
+                next_cursor=sessions[limit].created_at,
+                limit=limit,
+            )
+        return CursorPaginatedResponse(
+            items=sessions,
+            total_count=total_count,
+            previous_cursor=cursor,
+            limit=limit,
+        )
+    else:
+        if len(sessions) > limit:
+            return CursorPaginatedResponse(
+                items=sessions[1:],
+                total_count=total_count,
+                next_cursor=cursor,
+                previous_cursor=sessions[1].created_at,
+                limit=limit,
+            )
+
+        return CursorPaginatedResponse(
+            items=sessions,
+            total_count=total_count,
+            next_cursor=cursor,
+            limit=limit,
+        )

@@ -357,7 +357,7 @@ async def set_tenant_federation(
         entity_id=tenant_id,
         description=f"Sysadmin configured {request.provider} federation for tenant {tenant.name}",
         metadata={
-            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
             "target": {
                 "tenant_id": str(tenant_id),
                 "tenant_name": tenant.name,
@@ -409,7 +409,7 @@ async def delete_tenant_federation(
         entity_id=tenant_id,
         description=f"Sysadmin deleted federation config for tenant {tenant.name}",
         metadata={
-            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
             "target": {
                 "tenant_id": str(tenant_id),
                 "tenant_name": tenant.name,

@@ -4,111 +4,261 @@
     Licensed under the MIT License.
 */
 
-import type { AnalyticsData } from "@intric/intric-js";
+import type { AnalyticsAggregatedData } from "@intric/intric-js";
 import type { Chart } from "@intric/ui";
-import { fromAbsolute, getDayOfWeek, parseAbsolute, toCalendarDate } from "@internationalized/date";
+import { fromAbsolute, getDayOfWeek, parseAbsolute, parseZonedDateTime, toCalendarDate } from "@internationalized/date";
 import { m } from "$lib/paraglide/messages";
 
 // {sessions: { "Monday": {count: 12, total: 12}}}
-type UsageData = Record<string, Record<string, Record<string, number>>>;
+type UsageData = Record<string, Record<string, { count: number; total: number }>>;
 
-type CountFn = <T extends keyof UsageData>(
-  obj: UsageData,
-  type: T,
-  field: string,
-  date: string | number
-) => void;
-
-const count: CountFn = (obj, type, field, date) => {
-  if (Object.hasOwn(obj[type], date)) {
-    obj[type][date][field] += 1;
+// Optimized count: avoids repeated hasOwn checks by using nullish coalescing assignment
+const count = (
+  typeData: Record<string, { count: number; total: number }>,
+  key: string | number,
+  increment = 1
+): void => {
+  const k = String(key);
+  const entry = typeData[k];
+  if (entry) {
+    entry.count += increment;
   } else {
-    obj[type][date] = {};
-    obj[type][date][field] = 1;
+    typeData[k] = { count: increment, total: 0 };
   }
 };
 
-const total = (objs: UsageData[]) => {
-  for (const obj of objs) {
-    for (const [resource, row] of Object.entries(obj)) {
-      let total = 0;
-      for (const [date, data] of Object.entries(row)) {
-        total += data.count;
-        obj[resource][date].total = total;
-      }
+// Optimized total: direct property access, no Object.entries allocation
+const computeTotals = (obj: UsageData): void => {
+  const keys = Object.keys(obj);
+  for (let i = 0; i < keys.length; i++) {
+    const resource = keys[i];
+    const row = obj[resource];
+    const dateKeys = Object.keys(row).sort();
+    let runningTotal = 0;
+    for (let j = 0; j < dateKeys.length; j++) {
+      const entry = row[dateKeys[j]];
+      runningTotal += entry.count;
+      entry.total = runningTotal;
     }
   }
 };
 
+// Optimized flatten: pre-allocate array, avoid intermediate allocations
 const flatten = (obj: UsageData) => {
-  const rows = Object.entries(obj)
-    .flatMap(([type, rows]) => {
-      return Object.entries(rows).map(([created_at, data]) => {
-        return { created_at, type, ...data };
-      });
-    })
-    .toSorted(
-      (a, b) =>
-        parseInt(a.created_at.replaceAll("-", "")) - parseInt(b.created_at.replaceAll("-", ""))
-    );
+  const types = Object.keys(obj);
+  // Count total entries first
+  let totalEntries = 0;
+  for (let i = 0; i < types.length; i++) {
+    totalEntries += Object.keys(obj[types[i]]).length;
+  }
+
+  const rows: Array<{ created_at: string; type: string; count: number; total: number }> =
+    new Array(totalEntries);
+  let idx = 0;
+
+  for (let i = 0; i < types.length; i++) {
+    const type = types[i];
+    const typeData = obj[type];
+    const dateKeys = Object.keys(typeData);
+    for (let j = 0; j < dateKeys.length; j++) {
+      const created_at = dateKeys[j];
+      const data = typeData[created_at];
+      rows[idx++] = { created_at, type, count: data.count, total: data.total };
+    }
+  }
+
+  // Sort by created_at: use numeric comparison for hours/weekdays, string for dates
+  rows.sort((a, b) => {
+    const aVal = a.created_at;
+    const bVal = b.created_at;
+    // If both are numeric (hours 0-23 or weekdays 0-6), compare as numbers
+    const aNum = Number(aVal);
+    const bNum = Number(bVal);
+    if (!isNaN(aNum) && !isNaN(bNum)) {
+      return aNum - bNum;
+    }
+    // Otherwise compare as strings (dates in YYYY-MM-DD format)
+    return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+  });
   return rows;
 };
 
-const getMaxCount = (obj: UsageData) => {
-  const counts = Object.values(obj.questions).map((item) => item.count);
-  return Math.ceil(Math.max(...counts) / 5) * 5;
+// Get "nice" Y-axis max with explicit split count for consistent intervals
+const getNiceMaxWithSplits = (maxValue: number): { max: number; splits: number } => {
+  if (maxValue <= 0) return { max: 10, splits: 2 };
+  if (maxValue <= 10) return { max: 10, splits: 2 };
+  if (maxValue <= 25) return { max: 25, splits: 5 };
+  if (maxValue <= 50) return { max: 50, splits: 5 };
+  if (maxValue <= 100) return { max: 100, splits: 4 };
+  if (maxValue <= 250) return { max: 250, splits: 5 };
+  if (maxValue <= 500) return { max: 500, splits: 5 };
+  if (maxValue <= 1000) return { max: 1000, splits: 4 };
+  if (maxValue <= 2500) return { max: 2500, splits: 5 };
+  if (maxValue <= 5000) return { max: 5000, splits: 5 };
+  // For larger values, round up to nearest 1000
+  const max = Math.ceil(maxValue / 1000) * 1000;
+  return { max, splits: 4 };
 };
 
-const days = [
-  m.monday(),
-  m.tuesday(),
-  m.wednesday(),
-  m.thursday(),
-  m.friday(),
-  m.saturday(),
-  m.sunday()
-];
+// Optimized getMaxCount: single pass, no intermediate array
+const getMaxCount = (obj: UsageData): { max: number; splits: number } => {
+  const questions = obj.questions;
+  if (!questions) return { max: 10, splits: 2 };
+
+  let maxCount = 0;
+  const keys = Object.keys(questions);
+  for (let i = 0; i < keys.length; i++) {
+    const c = questions[keys[i]].count;
+    if (c > maxCount) maxCount = c;
+  }
+  return getNiceMaxWithSplits(maxCount);
+};
+
+// Lazy-initialized days array
+let _days: string[] | null = null;
+const getDays = (): string[] => {
+  if (!_days) {
+    _days = [
+      m.monday(),
+      m.tuesday(),
+      m.wednesday(),
+      m.thursday(),
+      m.friday(),
+      m.saturday(),
+      m.sunday()
+    ];
+  }
+  return _days;
+};
 
 type PreparedData = Chart.Config["options"] & { dataset: Record<string, unknown>[] };
 
-export function prepareData(data: AnalyticsData, timeframe: { start: string; end: string }) {
+// Optimized: Find earliest and latest dates in single pass without array allocations
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+function getDataDateBounds(usageByDate: UsageData): { earliest: string | null; latest: string | null } {
+  let earliest: string | null = null;
+  let latest: string | null = null;
+
+  const sources = [usageByDate.sessions, usageByDate.questions];
+  for (let i = 0; i < sources.length; i++) {
+    const source = sources[i];
+    if (!source) continue;
+    const keys = Object.keys(source);
+    for (let j = 0; j < keys.length; j++) {
+      const d = keys[j];
+      if (!DATE_REGEX.test(d)) continue;
+      if (earliest === null || d < earliest) earliest = d;
+      if (latest === null || d > latest) latest = d;
+    }
+  }
+
+  return { earliest, latest };
+}
+
+export function prepareData(
+  data: AnalyticsAggregatedData,
+  timeframe: { start: string; end: string }
+) {
   const usageByDate: UsageData = { sessions: {}, assistants: {}, questions: {} };
   const usageByWeekday: UsageData = { sessions: {}, assistants: {}, questions: {} };
   const usageByHour: UsageData = { sessions: {}, assistants: {}, questions: {} };
 
-  for (const [resource, rows] of Object.entries(data)) {
-    rows.forEach((row) => {
-      if (!row.created_at) return;
+  // Process each resource type with optimized loop
+  const resourceTypes = ["sessions", "assistants", "questions"] as const;
+  for (let r = 0; r < resourceTypes.length; r++) {
+    const resource = resourceTypes[r];
+    const rows = data[resource];
+    if (!rows) continue;
+
+    const dateData = usageByDate[resource];
+    const weekdayData = usageByWeekday[resource];
+    const hourData = usageByHour[resource];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row.created_at) continue;
+
+      const increment = typeof row.count === "number" ? row.count : 1;
+
+      // Parse once, extract all values
       const timestamp = parseAbsolute(row.created_at, "Europe/Stockholm");
       const date = toCalendarDate(timestamp).toString();
       const day = getDayOfWeek(timestamp, "sv-SE");
       const hours = timestamp.hour;
 
-      count(usageByDate, resource, "count", date);
-      count(usageByWeekday, resource, "count", day);
-      count(usageByHour, resource, "count", hours);
-    });
+      // Direct reference to type-specific objects avoids repeated property lookups
+      count(dateData, date, increment);
+      count(weekdayData, day, increment);
+      count(hourData, hours, increment);
+    }
   }
 
-  total([usageByDate]);
+  computeTotals(usageByDate);
+
+  // Calculate actual data bounds
+  const dataBounds = getDataDateBounds(usageByDate);
+
+  // Extract date-only from timeframe (strip time component)
+  const requestedStartDate = timeframe.start.split("T")[0];
+
+  // Determine effective x-axis start: use actual data start if later than requested
+  const effectiveStartDate = dataBounds.earliest && dataBounds.earliest > requestedStartDate
+    ? dataBounds.earliest
+    : requestedStartDate;
+
+  // Swedish month abbreviations for date formatting
+  const monthNames = ["jan", "feb", "mar", "apr", "maj", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
+
+  // Count unique dates to determine label density
+  const dateDataPointCount = Object.keys(usageByDate.sessions || {}).length;
 
   const byDate: PreparedData = {
     xAxis: {
       animation: false,
       type: "time",
-      min: parseAbsolute(timeframe.start, "Europe/Stockholm").subtract({ days: 1 }).toDate(),
+      // Use effective start (bounded by actual data) instead of requested timeframe
+      min: parseZonedDateTime(`${effectiveStartDate}T00:00:00[Europe/Stockholm]`)
+        .subtract({ days: 1 })
+        .toDate(),
       max: timeframe.end,
       axisLabel: {
+        // Swedish date format with smart density based on data count
         formatter: (value: number) => {
-          return toCalendarDate(fromAbsolute(value, "Europe/Stockholm")).toString();
+          const date = toCalendarDate(fromAbsolute(value, "Europe/Stockholm"));
+          const day = date.day;
+          const month = monthNames[date.month - 1];
+
+          // For dense datasets (>45 days): only show month markers
+          if (dateDataPointCount > 45) {
+            return day === 1 ? `{month|${month.toUpperCase()}}` : "";
+          }
+
+          // For medium datasets (>20 days): show 1st and 15th
+          if (dateDataPointCount > 20) {
+            if (day === 1) return `{month|${month.toUpperCase()}}`;
+            if (day === 15) return `${day}`;
+            return "";
+          }
+
+          // For small datasets: show all with month on 1st
+          if (day === 1) {
+            return `{month|${month.toUpperCase()}}`;
+          }
+          return `${day} ${month}`;
+        },
+        rich: {
+          month: {
+            color: "#6B7280",
+            fontWeight: 600,
+            fontSize: 11
+          }
         }
       }
     },
-    yAxis: {
-      type: "value",
-      min: 0,
-      max: getMaxCount(usageByDate)
-    },
+    yAxis: (() => {
+      const { max, splits } = getMaxCount(usageByDate);
+      return { type: "value" as const, min: 0, max, splitNumber: splits };
+    })(),
     dataset: [
       {
         dimensions: ["created_at", "type", "count", "total"],
@@ -121,19 +271,20 @@ export function prepareData(data: AnalyticsData, timeframe: { start: string; end
     xAxis: {
       animation: false,
       type: "category",
-      data: Array.from(new Array(7), (x, i) => i),
+      data: [0, 1, 2, 3, 4, 5, 6], // Pre-allocated array instead of Array.from
       axisLabel: {
         // @ts-expect-error ignore any type
         formatter: (value) => {
-          if (typeof value === "string" && Object.hasOwn(days, value)) {
-            // @ts-expect-error type doesnt narrow properly
-            return days[value];
-          }
-          return "?";
+          const days = getDays();
+          const idx = typeof value === "string" ? parseInt(value, 10) : value;
+          return days[idx] ?? "?";
         }
       }
     },
-    yAxis: { type: "value", min: 0, max: getMaxCount(usageByWeekday) },
+    yAxis: (() => {
+      const { max, splits } = getMaxCount(usageByWeekday);
+      return { type: "value" as const, min: 0, max, splitNumber: splits };
+    })(),
     dataset: [
       {
         dimensions: ["created_at", "type", "count", "total"],
@@ -146,14 +297,16 @@ export function prepareData(data: AnalyticsData, timeframe: { start: string; end
     xAxis: {
       animation: false,
       type: "category",
-      data: Array.from(new Array(24), (x, i) => i),
+      // Pre-allocated static array
+      data: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
       axisLabel: {
-        formatter: (value: string) => {
-          return `${value}:00`;
-        }
+        formatter: (value: string) => `${value}:00`
       }
     },
-    yAxis: { type: "value", min: 0, max: getMaxCount(usageByHour) },
+    yAxis: (() => {
+      const { max, splits } = getMaxCount(usageByHour);
+      return { type: "value" as const, min: 0, max, splitNumber: splits };
+    })(),
     dataset: [
       {
         dimensions: ["created_at", "type", "count", "total"],
@@ -165,19 +318,145 @@ export function prepareData(data: AnalyticsData, timeframe: { start: string; end
   return { byDate, byWeekday, byHour };
 }
 
+// Get adaptive animation config based on data count
+const getAnimationConfig = (dataPointCount: number) => {
+  const MAX_ANIMATION_TIME = 600; // Cap total animation at 600ms
+
+  if (dataPointCount > 60) {
+    // Large dataset: disable stagger, use single fade-in
+    return {
+      animationDuration: 250,
+      animationDelay: 0
+    };
+  } else if (dataPointCount > 30) {
+    // Medium dataset: fast stagger
+    const delayPerBar = Math.floor(MAX_ANIMATION_TIME / dataPointCount);
+    return {
+      animationDuration: 200,
+      animationDelay: (idx: number) => idx * delayPerBar
+    };
+  } else {
+    // Small dataset: full stagger effect
+    return {
+      animationDuration: 400,
+      animationDelay: (idx: number) => idx * 25
+    };
+  }
+};
+
+// Get adaptive bar styling based on data count
+const getBarConfig = (dataPointCount: number) => {
+  if (dataPointCount > 60) {
+    // Dense view with panning - comfortable bar width since we show ~40 at a time
+    return {
+      barMaxWidth: 16,
+      barMinWidth: 6,
+      barCategoryGap: "15%",
+      barGap: "5%"
+    };
+  } else if (dataPointCount > 30) {
+    // Medium density
+    return {
+      barMaxWidth: 28,
+      barMinWidth: 6,
+      barCategoryGap: "15%",
+      barGap: "5%"
+    };
+  } else {
+    // Comfortable spacing
+    return {
+      barMaxWidth: 40,
+      barMinWidth: 8,
+      barCategoryGap: "20%",
+      barGap: "10%"
+    };
+  }
+};
+
 export function getConfig(data: PreparedData, filter: "sessions" | "questions"): Chart.Config {
   const label = filter === "sessions" ? m.conversations() : filter;
 
+  // Get data point count for adaptive config
+  // @ts-expect-error dataset structure
+  const dataPointCount = data.dataset[0]?.source?.filter((d) => d.type === filter).length || 0;
+  const animConfig = getAnimationConfig(dataPointCount);
+  const barConfig = getBarConfig(dataPointCount);
+
   return {
     options: {
-      xAxis: data.xAxis,
-      yAxis: data.yAxis,
+      grid: {
+        left: 48,
+        right: 24,
+        top: 24,
+        bottom: 48,
+        containLabel: true
+      },
+      xAxis: {
+        ...data.xAxis,
+        // Subtle baseline at y=0 for grounding
+        axisLine: {
+          show: true,
+          lineStyle: {
+            color: "rgba(156, 163, 175, 0.25)",
+            width: 1
+          }
+        },
+        axisTick: { show: false },
+        axisLabel: {
+          ...data.xAxis?.axisLabel,
+          // Use actual color value - ECharts canvas doesn't support CSS variables
+          // #9CA3AF (gray-400) is visible on both light and dark backgrounds
+          color: "#9CA3AF",
+          fontSize: 10,
+          margin: 16,
+          hideOverlap: true
+        }
+      },
+      yAxis: {
+        ...data.yAxis,
+        // Remove Y-axis left line for cleaner minimal look
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: {
+          // Hide "0" label - baseline is visually implied
+          formatter: (value: number) => (value === 0 ? "" : value.toString()),
+          // Use actual color value for canvas rendering
+          color: "#9CA3AF",
+          fontSize: 10,
+          margin: 12 // Increased for breathing room
+        },
+        splitLine: {
+          lineStyle: {
+            color: "rgba(156, 163, 175, 0.15)", // Slightly fainter
+            type: "dashed"
+          }
+        }
+      },
       tooltip: {
         trigger: "axis",
+        backgroundColor: "rgba(30, 30, 30, 0.95)", // Dark background for tooltip
+        borderColor: "rgba(156, 163, 175, 0.3)",
+        borderWidth: 1,
+        borderRadius: 8,
+        padding: [12, 16],
+        textStyle: {
+          color: "#F3F4F6", // gray-100 for readability
+          fontSize: 13
+        },
+        extraCssText: "box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25); backdrop-filter: blur(8px);",
+        // @ts-expect-error formatter typing
+        formatter: (params: { name: string; value: number; data: { count?: number } }[]) => {
+          const item = Array.isArray(params) ? params[0] : params;
+          const value = item.data?.count ?? item.value;
+          return `<div style="font-size: 11px; color: #9CA3AF; margin-bottom: 4px;">${item.name}</div><div style="font-size: 18px; font-weight: 600; color: #F3F4F6;">${value}</div>`;
+        },
         axisPointer: {
-          type: "line",
+          type: "shadow",
+          shadowStyle: {
+            color: "rgba(14, 165, 233, 0.06)"
+          },
           label: {
-            // @ts-expect-errorignore any type
+            // @ts-expect-error ignore any type
             formatter: (params) => {
               // @ts-expect-error axisLabel is not properly typed?
               return data.xAxis?.axisLabel?.formatter(params.value) ?? params.value.toString();
@@ -185,6 +464,22 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
           }
         }
       },
+      // Add dataZoom for large datasets to enable panning
+      ...(dataPointCount > 45
+        ? {
+            dataZoom: [
+              {
+                type: "inside", // Drag/scroll to pan
+                xAxisIndex: 0,
+                start: Math.max(0, 100 - (40 / dataPointCount) * 100), // Show last ~40 data points for comfortable bar width
+                end: 100,
+                zoomLock: true, // Prevent zoom, only pan
+                moveOnMouseMove: true,
+                moveOnMouseWheel: true
+              }
+            ]
+          }
+        : {}),
       dataset: [
         ...data.dataset,
         {
@@ -200,7 +495,37 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
           type: "bar",
           dimensions: ["created_at", "count"],
           name: `${m.new()} ${label}`,
-          datasetId: "filtered"
+          datasetId: "filtered",
+          ...barConfig,
+          itemStyle: {
+            borderRadius: [4, 4, 0, 0],
+            shadowColor: "rgba(59, 130, 246, 0.15)",
+            shadowBlur: 4,
+            shadowOffsetY: 1,
+            color: {
+              type: "linear",
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: "#60A5FA" },  // blue-400
+                { offset: 1, color: "#2563EB" }   // blue-600
+              ]
+            }
+          },
+          emphasis: {
+            itemStyle: {
+              // Shadow-only hover for Nordic minimalism - no color change
+              shadowBlur: 12,
+              shadowColor: "rgba(59, 130, 246, 0.3)",
+              shadowOffsetY: 3
+            }
+          },
+          animationEasing: "cubicOut",
+          animationDurationUpdate: 150,
+          animationEasingUpdate: "cubicOut",
+          ...animConfig
         }
       ]
     }

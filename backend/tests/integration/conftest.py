@@ -229,7 +229,7 @@ def test_settings(
 
         # Security
         url_signing_key="test_url_signing_key",
-        intric_super_api_key="test-super-admin-key-for-integration-tests",
+        eneo_super_api_key="test-super-admin-key-for-integration-tests",
 
         # LLM API Keys - CRITICAL: Set to None to prevent reading from environment
         # Integration tests should NEVER use real API keys
@@ -712,9 +712,9 @@ async def super_admin_token(test_settings):
     Get the super admin API key for sysadmin endpoints.
 
     Sysadmin endpoints use authenticate_super_api_key which checks against
-    settings.intric_super_api_key.
+    settings.eneo_super_api_key.
     """
-    return test_settings.intric_super_api_key
+    return test_settings.eneo_super_api_key
 
 
 @pytest.fixture
@@ -1221,8 +1221,8 @@ async def debug_auth_config(test_settings):
     runtime_settings = get_settings()
 
     print("\n=== AUTH DEBUG ===")
-    print(f"Test settings intric_super_api_key: {test_settings.intric_super_api_key}")
-    print(f"Runtime settings intric_super_api_key: {runtime_settings.intric_super_api_key}")
+    print(f"Test settings eneo_super_api_key: {test_settings.eneo_super_api_key}")
+    print(f"Runtime settings eneo_super_api_key: {runtime_settings.eneo_super_api_key}")
     print(f"Test settings api_key_header_name: {test_settings.api_key_header_name}")
     print(f"Runtime settings api_key_header_name: {runtime_settings.api_key_header_name}")
     print(f"API_KEY_HEADER name: {API_KEY_HEADER.model.name}")
