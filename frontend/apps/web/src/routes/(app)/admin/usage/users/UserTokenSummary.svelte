@@ -137,10 +137,7 @@
 </script>
 
 <Settings.Group title={m.usage_by_user()}>
-  {#if userStats}
-    <UserOverviewBar {userStats} highThreshold={thresholds.high} mediumThreshold={thresholds.medium}></UserOverviewBar>
-  {/if}
-  <Settings.Row title={m.usage_by_user()} description={m.usage_by_user_description()} fullWidth>
+  <Settings.Row title={m.usage_by_user_description()} description="" fullWidth>
     <div slot="toolbar" class="mb-4">
       <Input.DateRange bind:value={dateRange}></Input.DateRange>
     </div>
@@ -153,8 +150,9 @@
       <div class="flex justify-center p-8">
         <div class="text-red-500">{error}</div>
       </div>
-    {:else if userStats}
-      <div class="space-y-4">
+    {:else if userStats && userStats.users.length > 0}
+      <UserOverviewBar {userStats} highThreshold={thresholds.high} mediumThreshold={thresholds.medium}></UserOverviewBar>
+      <div class="mt-4">
         <UserTokenTable
           users={userStats.users}
           totalUsers={userStats.total_users}
