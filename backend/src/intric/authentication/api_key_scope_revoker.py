@@ -162,11 +162,12 @@ class ApiKeyScopeRevoker:
         reason_code: ApiKeyStateReasonCode,
         reason_text: str | None = None,
     ) -> int:
-        """Revoke all active keys owned by a specific user."""
+        """Revoke all active user-owned keys by a specific user (skip service keys)."""
         keys = await self.api_key_repo.list_filtered(
             tenant_id=tenant_id,
             owner_user_id=owner_user_id,
             state=ApiKeyState.ACTIVE,
+            ownership="user",
         )
         if not keys:
             return 0
@@ -188,13 +189,14 @@ class ApiKeyScopeRevoker:
         """Revoke all keys a user owns that are scoped to a space or its resources."""
         all_keys: list = []
 
-        # Space-scoped keys
+        # Space-scoped keys (user-owned only — service keys survive member removal)
         space_keys = await self.api_key_repo.list_filtered(
             tenant_id=tenant_id,
             scope_type=ApiKeyScopeType.SPACE,
             scope_id=space_id,
             owner_user_id=owner_user_id,
             state=ApiKeyState.ACTIVE,
+            ownership="user",
         )
         all_keys.extend(space_keys)
 
@@ -206,6 +208,7 @@ class ApiKeyScopeRevoker:
                 scope_id=asst_id,
                 owner_user_id=owner_user_id,
                 state=ApiKeyState.ACTIVE,
+                ownership="user",
             )
             all_keys.extend(asst_keys)
 
@@ -217,6 +220,7 @@ class ApiKeyScopeRevoker:
                 scope_id=app_id,
                 owner_user_id=owner_user_id,
                 state=ApiKeyState.ACTIVE,
+                ownership="user",
             )
             all_keys.extend(app_keys)
 

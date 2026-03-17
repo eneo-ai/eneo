@@ -3291,6 +3291,8 @@ export interface components {
       scope_type: components["schemas"]["ApiKeyScopeType"];
       /** Scope Id */
       scope_id?: string | null;
+      /** @default user */
+      ownership?: components["schemas"]["ApiKeyOwnership"];
       /** Allowed Origins */
       allowed_origins?: string[] | null;
       /** Allowed Ips */
@@ -3537,6 +3539,11 @@ export interface components {
      * @enum {string}
      */
     ApiKeyType: "pk_" | "sk_";
+    /**
+     * ApiKeyOwnership
+     * @enum {string}
+     */
+    ApiKeyOwnership: "user" | "service";
     /** ApiKeyUpdateRequest */
     ApiKeyUpdateRequest: {
       /** Name */
@@ -3639,11 +3646,13 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      /** @default user */
+      ownership?: components["schemas"]["ApiKeyOwnership"];
       /**
        * Owner User Id
        * Format: uuid
        */
-      owner_user_id: string;
+      owner_user_id?: string | null;
       /** Key Prefix */
       key_prefix: string;
       /** Key Suffix */

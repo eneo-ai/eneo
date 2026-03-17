@@ -32,6 +32,7 @@ from intric.authentication.auth_models import (
     ApiKeyNotificationSubscription,
     ApiKeyNotificationSubscriptionListResponse,
     ApiKeyNotificationTargetType,
+    ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
@@ -368,6 +369,7 @@ async def _collect_manageable_keys_for_page(
     scope_id: UUID | None,
     state: ApiKeyState | None,
     key_type: ApiKeyType | None,
+    ownership: str | None = None,
 ) -> list[ApiKeyV2InDB]:
     """Collect enough manageable keys to produce one filtered page.
 
@@ -390,6 +392,7 @@ async def _collect_manageable_keys_for_page(
             scope_id=scope_id,
             state=state,
             key_type=key_type.value if key_type else None,
+            ownership=ownership,
         )
         if not raw_keys:
             break
@@ -892,12 +895,14 @@ async def list_api_keys(
     scope_id: UUID | None = Query(None, description="Scope id filter"),
     state: ApiKeyState | None = Query(None, description="State filter"),
     key_type: ApiKeyType | None = Query(None, description="Key type filter"),
+    ownership: ApiKeyOwnership | None = Query(None, description="Ownership filter"),
     container: Container = Depends(get_container(with_user=True)),
 ):
     user: UserInDB = container.user()
     repo: ApiKeysV2Repository = container.api_key_v2_repo()
     policy: ApiKeyPolicyService = container.api_key_policy_service()
 
+    ownership_value = ownership.value if ownership else None
     if limit is not None and not previous:
         filtered_keys = await _collect_manageable_keys_for_page(
             repo=repo,
@@ -909,6 +914,7 @@ async def list_api_keys(
             scope_id=scope_id,
             state=state,
             key_type=key_type,
+            ownership=ownership_value,
         )
     else:
         raw_keys = await repo.list_paginated(
@@ -920,6 +926,7 @@ async def list_api_keys(
             scope_id=scope_id,
             state=state,
             key_type=key_type.value if key_type else None,
+            ownership=ownership_value,
         )
 
         filtered_keys, _auth_cache = await _filter_manageable_keys(
@@ -935,6 +942,7 @@ async def list_api_keys(
             scope_id=scope_id,
             state=state,
             key_type=key_type.value if key_type else None,
+            ownership=ownership_value,
         )
 
     return paginate_keys(

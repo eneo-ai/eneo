@@ -20,7 +20,7 @@ export function initApiKeys(client) {
   return {
     /**
      * List API keys for the current user (scoped by permissions).
-     * @param {{limit?: number, cursor?: string, previous?: boolean, scope_type?: ApiKeyScopeType | null, scope_id?: string, state?: ApiKeyState | null, key_type?: ApiKeyType | null}} [params]
+     * @param {{limit?: number, cursor?: string, previous?: boolean, scope_type?: ApiKeyScopeType | null, scope_id?: string, state?: ApiKeyState | null, key_type?: ApiKeyType | null, ownership?: string | null}} [params]
      * @returns {Promise<ApiKeyPage>}
      * @throws {IntricError}
      * */

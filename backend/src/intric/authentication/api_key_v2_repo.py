@@ -92,6 +92,7 @@ class ApiKeysV2Repository:
         created_by_user_id: UUID | None = None,
         search: str | None = None,
         expires_within_days: int | None = None,
+        ownership: str | None = None,
     ) -> list[ApiKeyV2InDB]:
         query = cast(
             Select[Any],
@@ -107,6 +108,7 @@ class ApiKeysV2Repository:
             created_by_user_id=created_by_user_id,
             search=search,
             expires_within_days=expires_within_days,
+            ownership=ownership,
         )
         if cursor is not None:
             if previous:
@@ -137,6 +139,7 @@ class ApiKeysV2Repository:
         created_by_user_id: UUID | None = None,
         search: str | None = None,
         expires_within_days: int | None = None,
+        ownership: str | None = None,
     ) -> list[ApiKeyV2InDB]:
         query = cast(
             Select[Any],
@@ -152,6 +155,7 @@ class ApiKeysV2Repository:
             created_by_user_id=created_by_user_id,
             search=search,
             expires_within_days=expires_within_days,
+            ownership=ownership,
         )
         query = query.order_by(self.table.created_at.desc())
         records = await self.session.scalars(query)
@@ -169,6 +173,7 @@ class ApiKeysV2Repository:
         created_by_user_id: UUID | None = None,
         search: str | None = None,
         expires_within_days: int | None = None,
+        ownership: str | None = None,
     ) -> int:
         query = cast(
             Select[Any],
@@ -186,6 +191,7 @@ class ApiKeysV2Repository:
             created_by_user_id=created_by_user_id,
             search=search,
             expires_within_days=expires_within_days,
+            ownership=ownership,
         )
         result = await self.session.scalar(query)
         return int(result or 0)
@@ -202,7 +208,10 @@ class ApiKeysV2Repository:
         created_by_user_id: UUID | None,
         search: str | None,
         expires_within_days: int | None,
+        ownership: str | None = None,
     ) -> Select[Any]:
+        if ownership is not None:
+            query = query.where(self.table.ownership == ownership)
         if scope_type is not None:
             query = query.where(self.table.scope_type == scope_type.value)
         if scope_id is not None:

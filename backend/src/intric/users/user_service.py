@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import random
 from typing import TYPE_CHECKING, Optional, cast
-from uuid import UUID
+from uuid import UUID, uuid5, NAMESPACE_URL
 
 import jwt
 import sqlalchemy as sa
@@ -11,6 +11,7 @@ from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.outcome import Outcome
 from intric.allowed_origins.allowed_origin_repo import AllowedOriginRepository
 from intric.authentication.api_key_rate_limiter import ApiKeyRateLimiter
@@ -24,6 +25,7 @@ from intric.authentication.api_key_resolver import (
 )
 from intric.authentication.auth_models import (
     AccessToken,
+    ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyV2InDB,
@@ -701,6 +703,33 @@ class UserService:
         )
         return await self._session.scalar(query) is not None
 
+    async def _build_service_user(self, key: ApiKeyV2InDB) -> "UserInDB":
+        """Build a synthetic UserInDB for service keys — no DB user lookup.
+
+        Stores the API key on `service_api_key` so that SpaceActor can derive
+        the correct role without a real membership row.
+        """
+        from intric.users.user import UserInDB as UserInDBModel
+
+        tenant = await self.tenant_repo.get(key.tenant_id)
+        synthetic_id = uuid5(NAMESPACE_URL, f"service-key:{key.tenant_id}")
+
+        key_suffix = key.key_suffix or key.id.hex[:8]
+        return UserInDBModel(
+            id=synthetic_id,
+            email=f"sk-{key_suffix}@service.key",
+            username=f"Service Key ({key.name})",
+            state=UserState.ACTIVE,
+            tenant_id=key.tenant_id,
+            tenant=tenant,
+            active_api_key=key,
+            roles=[],
+            predefined_roles=[],
+            used_tokens=0,
+            email_verified=True,
+            is_active=True,
+        )
+
     async def _resolve_api_key(
         self,
         api_key: str,
@@ -710,56 +739,68 @@ class UserService:
         resolved = await self.api_key_auth_resolver.resolve(
             api_key, expected_tenant_id=expected_tenant_id
         )
-        user = await self.repo.get_user_by_id(resolved.key.owner_user_id)
-        if user is None:
-            raise ApiKeyValidationError(
-                status_code=401,
-                code="invalid_api_key",
-                message="API key owner not found.",
-            )
-        if user.tenant_id != resolved.key.tenant_id:
-            raise ApiKeyValidationError(
-                status_code=401,
-                code="invalid_api_key",
-                message="API key tenant mismatch.",
-            )
 
-        if user.state != UserState.ACTIVE:
-            raise ApiKeyValidationError(
-                status_code=403,
-                code="owner_inactive",
-                message=f"API key owner account is {user.state.value}.",
-            )
+        ownership = getattr(resolved.key, "ownership", ApiKeyOwnership.USER)
+        if isinstance(ownership, str):
+            ownership = ApiKeyOwnership(ownership)
 
-        # Verify the owner still has the permissions required for this key's scope.
-        # Tenant-scoped keys require the owner to be a tenant admin.
-        if resolved.key.scope_type in (
-            ApiKeyScopeType.TENANT,
-            ApiKeyScopeType.TENANT.value,
-        ) and Permission.ADMIN not in user.permissions:
-            raise ApiKeyValidationError(
-                status_code=403,
-                code="owner_permission_revoked",
-                message="API key owner no longer has admin permissions required for tenant-scoped keys.",
-            )
+        if ownership == ApiKeyOwnership.SERVICE:
+            user = await self._build_service_user(resolved.key)
+        else:
+            user = await self.repo.get_user_by_id(resolved.key.owner_user_id)
+            if user is None:
+                raise ApiKeyValidationError(
+                    status_code=401,
+                    code="invalid_api_key",
+                    message="API key owner not found.",
+                )
+            if user.tenant_id != resolved.key.tenant_id:
+                raise ApiKeyValidationError(
+                    status_code=401,
+                    code="invalid_api_key",
+                    message="API key tenant mismatch.",
+                )
 
-        # Scoped keys require the owner to still be a member of the target space.
-        if self._session is not None and resolved.key.scope_type not in (
-            ApiKeyScopeType.TENANT,
-            ApiKeyScopeType.TENANT.value,
-        ) and resolved.key.scope_id is not None:
-            space_id = await self._resolve_space_id_for_scope(
-                scope_type=resolved.key.scope_type,
-                scope_id=resolved.key.scope_id,
-            )
-            if space_id is not None and not await self._is_space_member(
-                space_id=space_id, user_id=user.id
-            ):
+            if user.state != UserState.ACTIVE:
                 raise ApiKeyValidationError(
                     status_code=403,
-                    code="owner_membership_revoked",
-                    message="API key owner is no longer a member of the target space.",
+                    code="owner_inactive",
+                    message=f"API key owner account is {user.state.value}.",
                 )
+
+            # Verify the owner still has the permissions required for this key's scope.
+            # Tenant-scoped keys require the owner to be a tenant admin.
+            if resolved.key.scope_type in (
+                ApiKeyScopeType.TENANT,
+                ApiKeyScopeType.TENANT.value,
+            ) and Permission.ADMIN not in user.permissions:
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="owner_permission_revoked",
+                    message="API key owner no longer has admin permissions required for tenant-scoped keys.",
+                )
+
+            # Scoped keys require the owner to still be a member of the target space.
+            if self._session is not None and resolved.key.scope_type not in (
+                ApiKeyScopeType.TENANT,
+                ApiKeyScopeType.TENANT.value,
+            ) and resolved.key.scope_id is not None:
+                space_id = await self._resolve_space_id_for_scope(
+                    scope_type=resolved.key.scope_type,
+                    scope_id=resolved.key.scope_id,
+                )
+                if space_id is not None and not await self._is_space_member(
+                    space_id=space_id, user_id=user.id
+                ):
+                    raise ApiKeyValidationError(
+                        status_code=403,
+                        code="owner_membership_revoked",
+                        message="API key owner is no longer a member of the target space.",
+                    )
+
+        # Store the authenticating API key on the user so downstream layers
+        # (e.g. SpaceAssembler) can reflect effective permissions accurately.
+        user.active_api_key = resolved.key
 
         ip_address, request_id, user_agent = extract_audit_context(request)
 
@@ -1450,12 +1491,17 @@ class UserService:
         if sample_rate <= 0 or random.random() > sample_rate:
             return
 
+        ownership = getattr(key, "ownership", "user")
+        if hasattr(ownership, "value"):
+            ownership = ownership.value
+
         extra: dict[str, object] = {
             "scope_type": key.scope_type,
             "scope_id": str(key.scope_id) if key.scope_id else None,
             "permission": key.permission,
             "key_type": key.key_type,
             "key_prefix": key.key_prefix,
+            "ownership": ownership,
         }
         if request is not None:
             route = request.scope.get("route")
@@ -1465,14 +1511,26 @@ class UserService:
             if origin:
                 extra["origin"] = origin
 
+        is_service = ownership == "service"
+
+        if is_service:
+            metadata = AuditMetadata.system_action(
+                description="Service API key used",
+                target=key,
+                extra=extra,
+            )
+        else:
+            metadata = AuditMetadata.standard(actor=user, target=key, extra=extra)
+
         await self.audit_service.log_async(
             tenant_id=user.tenant_id,
-            actor_id=user.id,
+            actor_id=None if is_service else user.id,
+            actor_type=ActorType.SYSTEM if is_service else ActorType.USER,
             action=ActionType.API_KEY_USED,
             entity_type=EntityType.API_KEY,
             entity_id=key.id,
-            description="API key used",
-            metadata=AuditMetadata.standard(actor=user, target=key, extra=extra),
+            description="Service API key used" if is_service else "API key used",
+            metadata=metadata,
             ip_address=ip_address,
             request_id=request_id,
             user_agent=user_agent,
@@ -1511,14 +1569,29 @@ class UserService:
             if origin:
                 extra["origin"] = origin
 
+        ownership = getattr(key, "ownership", "user")
+        if hasattr(ownership, "value"):
+            ownership = ownership.value
+        is_service = ownership == "service"
+
+        if is_service:
+            metadata = AuditMetadata.system_action(
+                description="Service API key auth failed",
+                target=key,
+                extra=extra,
+            )
+        else:
+            metadata = AuditMetadata.standard(actor=user, target=key, extra=extra)
+
         await self.audit_service.log_async(
             tenant_id=user.tenant_id,
-            actor_id=user.id,
+            actor_id=None if is_service else user.id,
+            actor_type=ActorType.SYSTEM if is_service else ActorType.USER,
             action=ActionType.API_KEY_AUTH_FAILED,
             entity_type=EntityType.API_KEY,
             entity_id=key.id,
-            description="API key authentication failed",
-            metadata=AuditMetadata.standard(actor=user, target=key, extra=extra),
+            description="Service API key auth failed" if is_service else "API key authentication failed",
+            metadata=metadata,
             outcome=Outcome.FAILURE,
             error_message=exc.message,
             ip_address=ip_address,

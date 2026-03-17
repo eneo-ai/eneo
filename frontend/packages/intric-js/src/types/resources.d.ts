@@ -67,6 +67,7 @@ export type Prompt = components["schemas"]["PromptPublic"];
 export type PromptSparse = components["schemas"]["PromptSparse"];
 export type IntricErrorCode = components["schemas"]["ErrorCodes"] | 0;
 export type ApiKeyType = components["schemas"]["ApiKeyType"];
+export type ApiKeyOwnership = components["schemas"]["ApiKeyOwnership"];
 export type ApiKeyPermission = components["schemas"]["ApiKeyPermission"];
 export type ApiKeyScopeType = components["schemas"]["ApiKeyScopeType"];
 export type ApiKeyState = components["schemas"]["ApiKeyState"];

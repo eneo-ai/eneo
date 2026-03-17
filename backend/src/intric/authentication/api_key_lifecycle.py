@@ -13,6 +13,7 @@ from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_models import (
     ApiKeyCreatedResponse,
     ApiKeyCreateRequest,
+    ApiKeyOwnership,
     ApiKeyUpdateRequest,
     ApiKeyHashVersion,
     ApiKeyPermission,
@@ -71,9 +72,12 @@ class ApiKeyLifecycleService:
             else None
         )
 
+        owner_user_id = None if request.ownership == ApiKeyOwnership.SERVICE else user.id
+
         record = await self.api_key_repo.create(
             tenant_id=user.tenant_id,
-            owner_user_id=user.id,
+            ownership=request.ownership.value,
+            owner_user_id=owner_user_id,
             created_by_user_id=user.id,
             scope_type=request.scope_type.value,
             scope_id=request.scope_id,

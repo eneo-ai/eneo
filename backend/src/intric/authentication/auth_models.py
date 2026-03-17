@@ -44,6 +44,11 @@ class AccessToken(BaseModel):
     token_type: str
 
 
+class ApiKeyOwnership(str, Enum):
+    USER = "user"
+    SERVICE = "service"
+
+
 class ApiKeyType(str, Enum):
     PK = "pk_"
     SK = "sk_"
@@ -179,6 +184,7 @@ class ApiKeyCreateRequest(BaseModel):
     permission: ApiKeyPermission = ApiKeyPermission.READ
     scope_type: ApiKeyScopeType
     scope_id: Optional[UUID] = None
+    ownership: ApiKeyOwnership = ApiKeyOwnership.USER
     allowed_origins: Optional[list[str]] = None
     allowed_ips: Optional[list[str]] = None
     expires_at: Optional[datetime] = None
@@ -211,7 +217,8 @@ class ApiKeyUserSnapshot(BaseModel):
 
 class ApiKeyV2(BaseModel):
     id: UUID
-    owner_user_id: UUID
+    ownership: ApiKeyOwnership = ApiKeyOwnership.USER
+    owner_user_id: Optional[UUID] = None
     key_prefix: str
     key_suffix: str
     name: str

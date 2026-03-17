@@ -12,6 +12,7 @@
   } from "@intric/intric-js";
   import { Button, Dialog, Input } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
+  import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import {
     Key,
@@ -32,7 +33,9 @@
     ShieldCheck,
     Sparkles,
     Copy,
-    CheckCircle2
+    CheckCircle2,
+    Ban,
+    Link2
   } from "lucide-svelte";
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
@@ -41,6 +44,8 @@
   import ExpirationPicker from "./ExpirationPicker.svelte";
 
   const intric = getIntric();
+  const { user } = getAppContext();
+  const isAdmin = user.hasPermission("admin");
 
   let {
     onCreated,
@@ -76,6 +81,7 @@
   let keyType = $state<ApiKeyType>("sk_");
 
   // Step 2: Scope & permissions
+  let ownership = $state<"user" | "service">("user");
   let permission = $state<ApiKeyPermission>("read");
   let scopeType = $state<ApiKeyScopeType>(lockedScopeType ?? "tenant");
   let scopeId = $state<string | null>(lockedScopeId ?? null);
@@ -371,6 +377,7 @@
       permission,
       scope_type: scopeType,
       scope_id: scopeType === "tenant" ? null : scopeId || manualScopeId.trim() || null,
+      ownership: ownership,
       allowed_origins: keyType === "pk_" && allowedOrigins.length > 0 ? allowedOrigins : null,
       allowed_ips: keyType === "sk_" && allowedIps.length > 0 ? allowedIps : null,
       expires_at: expiresAt,
@@ -425,6 +432,7 @@
     name = "";
     description = "";
     keyType = "sk_";
+    ownership = "user";
     permission = "read";
     permissionMode = "simple";
     assistantsPermission = "none";
@@ -886,6 +894,60 @@
                   </div>
                 </div>
 
+                <!-- Key Ownership Toggle (admin only) -->
+                {#if isAdmin}
+                  <div class="border-default flex items-center justify-between border-b pb-4">
+                    <div>
+                      <span
+                        id="ownership-label"
+                        class="text-default text-sm font-semibold tracking-wide"
+                        >{m.api_keys_ownership_label()}</span
+                      >
+                      <p class="text-muted mt-0.5 text-xs">
+                        {ownership === "service"
+                          ? m.api_keys_ownership_service_desc()
+                          : m.api_keys_ownership_user_desc()}
+                      </p>
+                    </div>
+                    <div
+                      role="group"
+                      aria-labelledby="ownership-label"
+                      class="border-default bg-subtle flex items-center gap-1 rounded-lg border p-1"
+                    >
+                      <button
+                        type="button"
+                        onclick={() => (ownership = "user")}
+                        class="rounded-md px-4 py-2 text-sm font-medium transition-all
+                               {ownership === 'user'
+                          ? 'bg-primary text-default shadow-sm'
+                          : 'text-muted hover:text-secondary'}"
+                      >
+                        {m.api_keys_ownership_user()}
+                      </button>
+                      <button
+                        type="button"
+                        onclick={() => (ownership = "service")}
+                        class="rounded-md px-4 py-2 text-sm font-medium transition-all
+                               {ownership === 'service'
+                          ? 'bg-primary text-default shadow-sm'
+                          : 'text-muted hover:text-secondary'}"
+                      >
+                        {m.api_keys_ownership_service()}
+                      </button>
+                    </div>
+                  </div>
+                  {#if ownership === "service" && scopeType === "tenant" && (permission === "write" || permission === "admin")}
+                    <div
+                      class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-900/20 dark:text-amber-300"
+                    >
+                      <span class="inline-flex items-center gap-1.5">
+                        <AlertCircle class="h-3.5 w-3.5" />
+                        {m.api_keys_ownership_service_guardrail_hint()}
+                      </span>
+                    </div>
+                  {/if}
+                {/if}
+
                 {#if permissionMode === "simple"}
                   <!-- Simple Mode -->
                   <div class="space-y-6">
@@ -1087,6 +1149,84 @@
                         {/each}
                       </div>
                     </fieldset>
+
+                    <!-- Contextual capability summary -->
+                    <div class="rounded-xl border border-default bg-subtle/50 p-4">
+                      <p class="text-xs font-semibold text-muted uppercase tracking-wider mb-3">{m.api_keys_capability_summary_title()}</p>
+                      <div class="space-y-2">
+                        {#if permission === "read"}
+                          <div class="flex items-center gap-2.5">
+                            <div class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15">
+                              <Check class="h-3 w-3 text-emerald-600 dark:text-emerald-400" strokeWidth={3} />
+                            </div>
+                            <span class="text-sm text-default">{m.api_keys_capability_read_resources()}</span>
+                          </div>
+                          <div class="flex items-center gap-2.5">
+                            <div class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/10">
+                              <Ban class="h-3 w-3 text-red-400 dark:text-red-500" strokeWidth={2.5} />
+                            </div>
+                            <span class="text-sm text-muted">{m.api_keys_capability_no_create()}</span>
+                          </div>
+                          <div class="flex items-center gap-2.5">
+                            <div class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/10">
+                              <Ban class="h-3 w-3 text-red-400 dark:text-red-500" strokeWidth={2.5} />
+                            </div>
+                            <span class="text-sm text-muted">{m.api_keys_capability_no_space_settings()}</span>
+                          </div>
+                        {:else if permission === "write"}
+                          <div class="flex items-center gap-2.5">
+                            <div class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15">
+                              <Check class="h-3 w-3 text-emerald-600 dark:text-emerald-400" strokeWidth={3} />
+                            </div>
+                            <span class="text-sm text-default">{m.api_keys_capability_read_resources()}</span>
+                          </div>
+                          <div class="flex items-center gap-2.5">
+                            <div class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15">
+                              <Check class="h-3 w-3 text-emerald-600 dark:text-emerald-400" strokeWidth={3} />
+                            </div>
+                            <span class="text-sm text-default">{m.api_keys_capability_write_resources()}</span>
+                          </div>
+                          <div class="flex items-center gap-2.5">
+                            <div class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/10">
+                              <Ban class="h-3 w-3 text-red-400 dark:text-red-500" strokeWidth={2.5} />
+                            </div>
+                            <span class="text-sm text-muted">{m.api_keys_capability_no_space_settings()}</span>
+                          </div>
+                        {:else if permission === "admin"}
+                          <div class="flex items-center gap-2.5">
+                            <div class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15">
+                              <Check class="h-3 w-3 text-emerald-600 dark:text-emerald-400" strokeWidth={3} />
+                            </div>
+                            <span class="text-sm text-default">{m.api_keys_capability_read_resources()}</span>
+                          </div>
+                          <div class="flex items-center gap-2.5">
+                            <div class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15">
+                              <Check class="h-3 w-3 text-emerald-600 dark:text-emerald-400" strokeWidth={3} />
+                            </div>
+                            <span class="text-sm text-default">{m.api_keys_capability_write_resources()}</span>
+                          </div>
+                          <div class="flex items-center gap-2.5">
+                            <div class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15">
+                              <Check class="h-3 w-3 text-emerald-600 dark:text-emerald-400" strokeWidth={3} />
+                            </div>
+                            <span class="text-sm text-default">{m.api_keys_capability_admin_space()}</span>
+                          </div>
+                        {/if}
+
+                        <div class="border-t border-default pt-2 mt-2">
+                          <div class="flex items-center gap-2.5">
+                            <div class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full {ownership === 'service' ? 'bg-cyan-500/15' : 'bg-amber-500/15'}">
+                              <Link2 class="h-3 w-3 {ownership === 'service' ? 'text-cyan-600 dark:text-cyan-400' : 'text-amber-600 dark:text-amber-400'}" strokeWidth={2.5} />
+                            </div>
+                            <span class="text-sm {ownership === 'service' ? 'text-default' : 'text-muted'}">
+                              {ownership === "service"
+                                ? m.api_keys_capability_service_lifecycle()
+                                : m.api_keys_capability_user_lifecycle()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 {:else}
                   <!-- Fine-grained Mode (HuggingFace style) -->

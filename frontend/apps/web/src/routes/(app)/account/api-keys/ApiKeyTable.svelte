@@ -408,6 +408,16 @@
                 >
                   {permission.label}
                 </span>
+
+                <!-- Service key badge -->
+                {#if key.ownership === "service"}
+                  <span
+                    class="inline-flex items-center gap-1 rounded-md bg-cyan-600 dark:bg-cyan-500 px-2.5 py-1 text-xs font-semibold text-white ring-1 ring-inset ring-white/20"
+                  >
+                    <Server class="h-3 w-3" />
+                    {m.api_keys_ownership_service_badge()}
+                  </span>
+                {/if}
               </div>
             </div>
 

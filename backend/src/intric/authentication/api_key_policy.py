@@ -12,6 +12,7 @@ from intric.allowed_origins.origin_matching import origin_matches_pattern
 from intric.authentication.api_key_request_context import resolve_client_ip
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.auth_models import (
+    ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyCreateRequest,
     ApiKeyScopeType,
@@ -84,6 +85,29 @@ class ApiKeyPolicyService:
                 code="invalid_request",
                 message="scope_id must be null for tenant-scoped keys.",
             )
+
+        # Service key guardrails
+        if request.ownership == ApiKeyOwnership.SERVICE:
+            user = self._require_user()
+            if Permission.ADMIN not in user.permissions:
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="insufficient_permission",
+                    message="Only tenant admins can create service keys.",
+                )
+            # Extra guardrail: service tenant write/admin keys need IP allowlist or expiration
+            if (
+                request.scope_type == ApiKeyScopeType.TENANT
+                and request.permission in (ApiKeyPermission.WRITE, ApiKeyPermission.ADMIN)
+            ):
+                has_ip = request.allowed_ips is not None and len(request.allowed_ips) > 0
+                has_expiry = request.expires_at is not None
+                if not has_ip and not has_expiry:
+                    raise ApiKeyValidationError(
+                        status_code=400,
+                        code="invalid_request",
+                        message="Service keys with tenant write/admin scope require an IP allowlist or expiration.",
+                    )
 
         if request.key_type == ApiKeyType.PK:
             if request.permission == ApiKeyPermission.ADMIN:

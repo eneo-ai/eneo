@@ -16,8 +16,9 @@ class ApiKeysV2(BasePublic):
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False
     )
-    owner_user_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Users.id, ondelete="CASCADE"), nullable=False
+    ownership: Mapped[str] = mapped_column(nullable=False, server_default="user")
+    owner_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
     )
     scope_type: Mapped[str] = mapped_column(nullable=False)
     scope_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
