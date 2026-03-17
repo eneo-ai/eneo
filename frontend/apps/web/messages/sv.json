@@ -2040,7 +2040,7 @@
   "models_ready_one": "{count} modell klar",
   "models_ready_other": "{count} modeller klara",
   "dimensions": "Dimensioner",
-  "max_input_tokens": "Max antal tokens",
+  "max_input_tokens": "Max indatatokens",
   "no_provider_selected": "Ingen leverantör vald",
   "finish": "Slutför",
   "model_in_use_error": "Kan inte ta bort denna modell eftersom den fortfarande används av en eller flera assistenter eller utrymmen. Ta bort modellen från all användning först.",

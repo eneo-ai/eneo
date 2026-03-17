@@ -275,19 +275,21 @@
             </div>
           </div>
 
-          <div class="flex items-center justify-end">
-            <button
-              type="button"
-              class="text-xs text-accent-default hover:text-accent-stronger transition-colors underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-              disabled={isLoadingDefaults || !modelIdentifier.trim()}
-              on:click={handleResetToDefaults}
-            >
-              {#if isLoadingDefaults}
-                <Loader2 class="w-3 h-3 animate-spin" />
-              {/if}
-              {m.reset_to_defaults()}
-            </button>
-          </div>
+          {#if !("provider_type" in model && model.provider_type?.startsWith("hosted_"))}
+            <div class="flex items-center justify-end">
+              <button
+                type="button"
+                class="text-xs text-accent-default hover:text-accent-stronger transition-colors underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                disabled={isLoadingDefaults || !modelIdentifier.trim()}
+                on:click={handleResetToDefaults}
+              >
+                {#if isLoadingDefaults}
+                  <Loader2 class="w-3 h-3 animate-spin" />
+                {/if}
+                {m.reset_to_defaults()}
+              </button>
+            </div>
+          {/if}
 
           <div class="flex gap-6">
             <label class="flex items-center gap-2 text-sm cursor-pointer group">

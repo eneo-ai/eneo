@@ -151,6 +151,11 @@
   // Top 4 as quick suggestions (leaving room for "Browse all" chip)
   $: suggestions = allModels.slice(0, 4);
 
+  // Self-hosted providers have no static model list — LiteLLM can't provide defaults
+  $: isSelfHostedProvider = providerType !== ""
+    && providerType in capabilityProviders
+    && Object.keys(capabilityProviders[providerType]?.models ?? {}).length === 0;
+
   // Check if provider is known in LiteLLM but doesn't support this model type.
   // Unknown providers (e.g. vLLM, self-hosted) are not flagged — they can host any model type.
   $: providerHasNoSupport = providerType !== ""
@@ -441,7 +446,7 @@
               ? m.model_identifier_placeholder_embedding()
               : m.model_identifier_placeholder_transcription()}
         />
-        {#if modelType === "completion" && currentModel.name.trim()}
+        {#if modelType === "completion" && currentModel.name.trim() && !isSelfHostedProvider}
           <button
             type="button"
             class="text-xs text-accent-default hover:text-accent-stronger transition-colors underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 self-start"
