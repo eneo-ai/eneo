@@ -172,7 +172,8 @@ async def get_provider_capabilities(
     for provider_type in PROVIDER_FIELD_DEFINITIONS:
         if provider_type not in providers:
             providers[provider_type] = {
-                "modes": [],
+                # Self-hosted providers can host any model type
+                "modes": sorted(set(mode_map.values())),
                 "models": {},
                 "fields": serialize_fields(get_field_definitions(provider_type)),
             }
