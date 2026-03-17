@@ -1909,6 +1909,8 @@
   "max_output_tokens": "Max Output Tokens",
   "max_input_tokens_help": "Maximum tokens the model accepts as input (context window).",
   "max_output_tokens_help": "Maximum tokens the model can generate per response.",
+  "token_reference_input": "Reference: e.g. 128,000 (GPT-4o) or 200,000 (Claude).",
+  "token_reference_output": "Reference: e.g. 4,096 (GPT-4o) or 128,000 (GPT-5).",
   "vision_support": "Vision Support",
   "reasoning_support": "Reasoning Support",
   "tool_calling_support": "Tool Calling",

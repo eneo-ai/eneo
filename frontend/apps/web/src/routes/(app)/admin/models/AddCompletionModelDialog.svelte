@@ -23,8 +23,8 @@
   let showProviderForm = false;
   let modelName = "";
   let displayName = "";
-  let maxInputTokens = 128000;
-  let maxOutputTokens = 4096;
+  let maxInputTokens: number | undefined = undefined;
+  let maxOutputTokens: number | undefined = undefined;
   let vision = false;
   let reasoning = false;
   let supportsToolCalling = false;
@@ -169,8 +169,8 @@
   function resetForm() {
     modelName = "";
     displayName = "";
-    maxInputTokens = 128000;
-    maxOutputTokens = 4096;
+    maxInputTokens = undefined;
+    maxOutputTokens = undefined;
     vision = false;
     reasoning = false;
     supportsToolCalling = false;
@@ -335,6 +335,7 @@
                   id="max-input-tokens"
                   type="number"
                   bind:value={maxInputTokens}
+                  placeholder="128000"
                   min="1024"
                   max="10000000"
                   required
@@ -342,6 +343,7 @@
                 <p class="text-muted-foreground text-xs">
                   {m.max_input_tokens_help()}
                 </p>
+                <p class="text-xs text-muted">{m.token_reference_input()}</p>
               </div>
 
               <div class="flex flex-col gap-2">
@@ -350,6 +352,7 @@
                   id="max-output-tokens"
                   type="number"
                   bind:value={maxOutputTokens}
+                  placeholder="4096"
                   min="1"
                   max="10000000"
                   required
@@ -357,6 +360,7 @@
                 <p class="text-muted-foreground text-xs">
                   {m.max_output_tokens_help()}
                 </p>
+                <p class="text-xs text-muted">{m.token_reference_output()}</p>
               </div>
             </div>
 

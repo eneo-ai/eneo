@@ -23,8 +23,8 @@ class TenantCompletionModelCreate(BaseModel):
         description="Model identifier (e.g., 'gpt-4o', 'meta-llama/Meta-Llama-3-70B-Instruct')",
     )
     display_name: str = Field(..., description="User-friendly display name")
-    max_input_tokens: int = Field(default=128000, description="Maximum input context tokens")
-    max_output_tokens: int = Field(default=4096, description="Maximum output tokens")
+    max_input_tokens: int = Field(..., description="Maximum input context tokens")
+    max_output_tokens: int = Field(..., description="Maximum output tokens")
     vision: bool = Field(default=False, description="Supports vision/image inputs")
     reasoning: bool = Field(default=False, description="Supports extended reasoning")
     supports_tool_calling: bool = Field(default=False, description="Supports function/tool calling")

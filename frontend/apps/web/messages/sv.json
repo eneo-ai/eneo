@@ -1944,6 +1944,8 @@
   "max_output_tokens": "Max utdatatokens",
   "max_input_tokens_help": "Maximalt antal tokens modellen accepterar som indata (kontextfönster).",
   "max_output_tokens_help": "Maximalt antal tokens modellen kan generera per svar.",
+  "token_reference_input": "Referens: t.ex. 128 000 (GPT-4o) eller 200 000 (Claude).",
+  "token_reference_output": "Referens: t.ex. 4 096 (GPT-4o) eller 128 000 (GPT-5).",
   "vision_support": "Bildstöd",
   "reasoning_support": "Resonemangsstöd",
   "tool_calling_support": "Verktygsstöd",

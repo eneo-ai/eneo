@@ -174,8 +174,8 @@
     currentModel.name = info.name;
     currentModel.displayName = info.name;
     if (modelType === "completion") {
-      currentModel.maxInputTokens = info.max_input_tokens ?? 128000;
-      currentModel.maxOutputTokens = info.max_output_tokens ?? 4096;
+      currentModel.maxInputTokens = info.max_input_tokens;
+      currentModel.maxOutputTokens = info.max_output_tokens;
       currentModel.vision = info.supports_vision ?? false;
       currentModel.reasoning = info.supports_reasoning ?? false;
       currentModel.supportsToolCalling = info.supports_function_calling ?? false;
@@ -192,8 +192,8 @@
     return {
       name: "",
       displayName: "",
-      maxInputTokens: 128000,
-      maxOutputTokens: 4096,
+      maxInputTokens: undefined as number | undefined,
+      maxOutputTokens: undefined as number | undefined,
       vision: false,
       reasoning: false,
       supportsToolCalling: false,
@@ -255,8 +255,8 @@
     currentModel = {
       name: suggestion.name,
       displayName: suggestion.displayName,
-      maxInputTokens: suggestion.maxInputTokens ?? 128000,
-      maxOutputTokens: suggestion.maxOutputTokens ?? 4096,
+      maxInputTokens: suggestion.maxInputTokens,
+      maxOutputTokens: suggestion.maxOutputTokens,
       vision: suggestion.vision ?? false,
       reasoning: suggestion.reasoning ?? false,
       supportsToolCalling: suggestion.supportsToolCalling ?? false,
@@ -298,7 +298,9 @@
     }
   }
 
-  $: canAddModel = currentModel.name.trim() !== "" && currentModel.displayName.trim() !== "";
+  $: canAddModel = currentModel.name.trim() !== ""
+    && currentModel.displayName.trim() !== ""
+    && (modelType !== "completion" || (currentModel.maxInputTokens != null && currentModel.maxInputTokens > 0 && currentModel.maxOutputTokens != null && currentModel.maxOutputTokens > 0));
 
   function formatTokenLimit(limit: number): string {
     if (limit >= 1_000_000) return `${(limit / 1_000_000).toFixed(limit % 1_000_000 === 0 ? 0 : 1)}M`;
@@ -484,9 +486,11 @@
             id="max-input-tokens"
             type="number"
             bind:value={currentModel.maxInputTokens}
+            placeholder="128000"
             min="1024"
             max="10000000"
           />
+          <p class="text-xs text-muted">{m.token_reference_input()}</p>
         </div>
 
         <div class="flex flex-col gap-2">
@@ -498,9 +502,11 @@
             id="max-output-tokens"
             type="number"
             bind:value={currentModel.maxOutputTokens}
+            placeholder="4096"
             min="1"
             max="10000000"
           />
+          <p class="text-xs text-muted">{m.token_reference_output()}</p>
         </div>
       </div>
 
