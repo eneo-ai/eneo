@@ -10,7 +10,7 @@ export const load = async (event) => {
   const { intric } = await event.parent();
 
   const now = new Date();
-  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getUTCDate());
+  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
   const dateRange = {
     startDate: today.subtract({ days: 30 }).toString(),
     // We add one day so the end day includes the whole day. otherwise this would be interpreted as 00:00

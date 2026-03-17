@@ -14,7 +14,7 @@
   } from "@intric/intric-js";
   import UserOverviewBar from "./UserOverviewBar.svelte";
   import UserTokenTable from "./UserTokenTable.svelte";
-  import { CalendarDate } from "@internationalized/date";
+  import { CalendarDate, type DateValue } from "@internationalized/date";
   import { getIntric } from "$lib/core/Intric";
   import { Input } from "@intric/ui";
   import { goto } from "$app/navigation";
@@ -39,7 +39,7 @@
   const intric = getIntric();
 
   const now = new Date();
-  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getUTCDate());
+  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
   const BASE_DAYS = 30;
   const BASE_HIGH_THRESHOLD = 500_000;
   const BASE_MEDIUM_THRESHOLD = 50_000;
@@ -91,15 +91,23 @@
     }
   }
 
+  function handleDateChange(range: { start: DateValue; end: DateValue }) {
+    dateRange = range as { start: CalendarDate; end: CalendarDate };
+    updateUserStats(
+      dateRange,
+      paginationState.page,
+      paginationState.perPage,
+      paginationState.sortBy,
+      paginationState.sortOrder
+    );
+  }
+
+  // Re-fetch when pagination/sort changes (driven by URL params)
   $effect(() => {
+    // Access pagination properties to set up tracking
+    const { page, perPage, sortBy, sortOrder } = paginationState;
     if (dateRange.start && dateRange.end) {
-      updateUserStats(
-        dateRange,
-        paginationState.page,
-        paginationState.perPage,
-        paginationState.sortBy,
-        paginationState.sortOrder
-      );
+      updateUserStats(dateRange, page, perPage, sortBy, sortOrder);
     }
   });
 
@@ -139,7 +147,7 @@
 <Settings.Group title={m.usage_by_user()}>
   <Settings.Row title={m.usage_by_user_description()} description="" fullWidth>
     <div slot="toolbar" class="mb-4">
-      <Input.DateRange bind:value={dateRange}></Input.DateRange>
+      <Input.DateRange bind:value={dateRange} onValueCommit={handleDateChange}></Input.DateRange>
     </div>
 
     {#if isLoading}
