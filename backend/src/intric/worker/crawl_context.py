@@ -12,8 +12,6 @@ from typing import Any
 from enum import Enum
 from uuid import UUID
 
-from intric.ai_models.model_enums import ModelFamily
-
 
 class FailureReason(str, Enum):
     """Categorized failure reasons for crawl page persistence.
@@ -53,7 +51,7 @@ class EmbeddingModelSpec:
     Fields match what adapters actually access on the model object:
     - name: Model display name (used in API calls for OpenAI/E5)
     - litellm_model_name: LiteLLM router model identifier
-    - family: ModelFamily enum for adapter selection and E5 prefix logic
+    - family: Model family string for adapter selection and E5 prefix logic
     - max_input: Per-item character limit for truncation
     - max_batch_size: Items per batch for embedding API calls
     - dimensions: Optional embedding vector dimensions
@@ -69,7 +67,7 @@ class EmbeddingModelSpec:
     id: UUID
     name: str
     litellm_model_name: str | None
-    family: ModelFamily | None
+    family: str | None
     max_input: int
     max_batch_size: int | None  # Adapters default to 32 if None
     dimensions: int | None

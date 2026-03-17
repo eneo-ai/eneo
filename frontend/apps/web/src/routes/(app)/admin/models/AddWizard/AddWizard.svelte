@@ -17,12 +17,60 @@
 
   export let openController: Writable<boolean>;
   export let providers: ModelProviderPublic[] = [];
+  export let favoriteProviders: string[] = [];
   /** Pre-selected provider ID when opening wizard from a provider's "Add Model" button */
   export let preSelectedProviderId: string | null = null;
   /** Model type to add (for when starting from "Add Model" on a specific table) */
   export let modelType: "completion" | "embedding" | "transcription" = "completion";
 
   const intric = getIntric();
+
+  // --- Capabilities (loaded once, shared across steps) ---
+
+  interface FieldDef {
+    name: string;
+    required: boolean;
+    secret: boolean;
+    in: "credentials" | "config";
+  }
+
+  interface ProviderCapability {
+    modes: string[];
+    models: Record<string, any[]>;
+    fields: FieldDef[];
+  }
+
+  interface Capabilities {
+    providers: Record<string, ProviderCapability>;
+    default_fields: FieldDef[];
+  }
+
+  let capabilities: Capabilities | null = null;
+  let capabilitiesLoading = false;
+
+  async function loadCapabilities() {
+    if (capabilities || capabilitiesLoading) return;
+    capabilitiesLoading = true;
+    try {
+      capabilities = await intric.modelProviders.getCapabilities() as Capabilities;
+    } catch {
+      // Silently fail — steps will fall back gracefully
+    } finally {
+      capabilitiesLoading = false;
+    }
+  }
+
+  // Load capabilities when dialog opens
+  $: if ($openController && !capabilities) {
+    loadCapabilities();
+  }
+
+  // Derive provider fields for StepCredentials based on selected provider type
+  $: providerFields = (() => {
+    if (!capabilities) return null;
+    const providerCap = capabilities.providers[$wizardData.selectedProviderType];
+    return providerCap?.fields ?? capabilities.default_fields;
+  })();
 
   // Wizard state
   type WizardStep = 1 | 2 | 3;
@@ -37,13 +85,6 @@
     selectedProviderId: string | null;
     isCreatingNewProvider: boolean;
     selectedProviderType: string;
-
-    // Step 2: New provider credentials
-    providerName: string;
-    apiKey: string;
-    endpoint: string;
-    apiVersion: string;
-    deploymentName: string;
 
     // Step 3: Model(s) to add
     models: Array<{
@@ -65,11 +106,6 @@
     selectedProviderId: preSelectedProviderId,
     isCreatingNewProvider: false,
     selectedProviderType: "openai",
-    providerName: "",
-    apiKey: "",
-    endpoint: "",
-    apiVersion: "",
-    deploymentName: "",
     models: []
   });
 
@@ -316,11 +352,6 @@
       selectedProviderId: null,
       isCreatingNewProvider: false,
       selectedProviderType: "openai",
-      providerName: "",
-      apiKey: "",
-      endpoint: "",
-      apiVersion: "",
-      deploymentName: "",
       models: []
     };
     error = null;
@@ -426,17 +457,15 @@
             {#if $currentStep === 1}
               <StepProvider
                 {providers}
+                {favoriteProviders}
+                {capabilities}
                 selectedProviderId={$wizardData.selectedProviderId}
                 on:select={handleProviderSelected}
               />
             {:else if $currentStep === 2}
               <StepCredentials
                 providerType={$wizardData.selectedProviderType}
-                bind:providerName={$wizardData.providerName}
-                bind:apiKey={$wizardData.apiKey}
-                bind:endpoint={$wizardData.endpoint}
-                bind:apiVersion={$wizardData.apiVersion}
-                bind:deploymentName={$wizardData.deploymentName}
+                {providerFields}
                 on:complete={handleCredentialsCompleted}
                 on:back={previousStep}
               />
@@ -444,6 +473,7 @@
               <StepModels
                 bind:this={stepModelsRef}
                 {modelType}
+                {capabilities}
                 providerType={$wizardData.selectedProviderType}
                 providerId={$wizardData.selectedProviderId}
                 bind:models={$wizardData.models}

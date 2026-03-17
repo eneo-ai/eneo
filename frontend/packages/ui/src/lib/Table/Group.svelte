@@ -221,6 +221,6 @@
       >→</Button
     >
   </div>
-{:else if $filteredRows.length > 0}
+{:else if title}
   <svelte:element this={$displayType === "list" ? "tbody" : "div"} class="!h-6" />
 {/if}

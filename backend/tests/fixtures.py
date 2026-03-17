@@ -2,12 +2,8 @@ from uuid import uuid4
 
 from intric.ai_models.completion_models.completion_model import (
     CompletionModel,
-    CompletionModelFamily,
-    ModelHostingLocation,
-    ModelStability,
 )
 from intric.ai_models.embedding_models.embedding_model import (
-    EmbeddingModelFamily,
     EmbeddingModelLegacy,
 )
 from intric.assistants.assistant import Assistant
@@ -23,23 +19,23 @@ TEST_UUID = uuid4()
 TEST_EMBEDDING_MODEL = EmbeddingModelLegacy(
     id=uuid4(),
     name="text-embedding-3-small-test",
-    family=EmbeddingModelFamily.OPEN_AI,
+    family="openai",
     open_source=False,
     dimensions=512,
     max_input=8191,
-    stability=ModelStability.STABLE,
-    hosting=ModelHostingLocation.USA,
+    stability="stable",
+    hosting="usa",
     is_deprecated=False,
 )
 
 TEST_EMBEDDING_MODEL_ADA = EmbeddingModelLegacy(
     id=uuid4(),
     name="text-embedding-ada-002-test",
-    family=EmbeddingModelFamily.OPEN_AI,
+    family="openai",
     open_source=False,
     max_input=8191,
-    stability=ModelStability.STABLE,
-    hosting=ModelHostingLocation.USA,
+    stability="stable",
+    hosting="usa",
     is_deprecated=False,
 )
 
@@ -92,12 +88,12 @@ TEST_MODEL_GPT4 = CompletionModel(
     id=uuid4(),
     name="gpt-4-turbo",
     nickname="GPT-4",
-    family=CompletionModelFamily.OPEN_AI,
+    family="openai",
     max_input_tokens=4000,
     max_output_tokens=1000,
     is_deprecated=False,
-    stability=ModelStability.STABLE,
-    hosting=ModelHostingLocation.USA,
+    stability="stable",
+    hosting="usa",
     vision=True,
     reasoning=False,
 )
@@ -106,12 +102,12 @@ TEST_MODEL_CHATGPT = CompletionModel(
     id=uuid4(),
     name="gpt-3.5-turbo",
     nickname="ChatGPT",
-    family=CompletionModelFamily.OPEN_AI,
+    family="openai",
     max_input_tokens=16385,
     max_output_tokens=4096,
     is_deprecated=False,
-    stability=ModelStability.STABLE,
-    hosting=ModelHostingLocation.USA,
+    stability="stable",
+    hosting="usa",
     vision=False,
     reasoning=False,
 )
@@ -121,12 +117,12 @@ TEST_MODEL_MIXTRAL = CompletionModel(
     id=uuid4(),
     name="Mixtral",
     nickname="Mixtral",
-    family=CompletionModelFamily.MISTRAL,
+    family="mistral",
     max_input_tokens=16384,
     max_output_tokens=4096,
     is_deprecated=True,
-    stability=ModelStability.EXPERIMENTAL,
-    hosting=ModelHostingLocation.EU,
+    stability="experimental",
+    hosting="eu",
     vision=False,
     reasoning=False,
 )
@@ -135,12 +131,12 @@ TEST_MODEL_EU = CompletionModel(
     id=uuid4(),
     name="Mixtral",
     nickname="Mixtral",
-    family=CompletionModelFamily.MISTRAL,
+    family="mistral",
     max_input_tokens=16384,
     max_output_tokens=4096,
     is_deprecated=False,
-    stability=ModelStability.EXPERIMENTAL,
-    hosting=ModelHostingLocation.EU,
+    stability="experimental",
+    hosting="eu",
     vision=False,
     reasoning=False,
 )
@@ -149,12 +145,12 @@ TEST_MODEL_AZURE = CompletionModel(
     id=uuid4(),
     name="azure model",
     nickname="azure model",
-    family=CompletionModelFamily.AZURE,
+    family="azure",
     max_input_tokens=128000,
     max_output_tokens=4096,
     is_deprecated=False,
-    stability=ModelStability.STABLE,
-    hosting=ModelHostingLocation.USA,
+    stability="stable",
+    hosting="usa",
     vision=True,
     reasoning=False,
 )

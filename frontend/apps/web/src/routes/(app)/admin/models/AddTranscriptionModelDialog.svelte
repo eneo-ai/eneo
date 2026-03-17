@@ -295,7 +295,7 @@
               <Input.Text
                 id="provider-name"
                 bind:value={providerName}
-                placeholder="e.g., My Azure Instance, GDM"
+                placeholder="e.g., My Azure Instance"
                 required
               />
               <p class="text-muted-foreground text-xs">

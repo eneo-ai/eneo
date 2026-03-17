@@ -120,8 +120,6 @@ class CredentialResolver:
             "openai": self.settings.openai_api_key,
             "anthropic": self.settings.anthropic_api_key,
             "azure": self.settings.azure_api_key,
-            "berget": self.settings.berget_api_key,
-            "gdm": self.settings.gdm_api_key,
             "mistral": self.settings.mistral_api_key,
             "ovhcloud": self.settings.ovhcloud_api_key,
             "vllm": self.settings.vllm_api_key,
