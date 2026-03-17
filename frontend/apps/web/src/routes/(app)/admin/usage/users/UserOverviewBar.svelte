@@ -13,33 +13,35 @@
 
   type Props = {
     userStats: UserTokenUsageSummary;
+    highThreshold: number;
+    mediumThreshold: number;
   };
 
-  let { userStats }: Props = $props();
+  let { userStats, highThreshold, mediumThreshold }: Props = $props();
 
   const items = $derived.by(() => {
-    // Group users by usage level (High, Medium, Low) for the visual bar
-    const high = userStats.users.filter((user) => user.total_requests > 100);
+    // Group users by usage level (High, Medium, Low) based on total token consumption
+    const high = userStats.users.filter((user) => user.total_tokens > highThreshold);
     const medium = userStats.users.filter(
-      (user) => user.total_requests > 20 && user.total_requests <= 100
+      (user) => user.total_tokens > mediumThreshold && user.total_tokens <= highThreshold
     );
-    const low = userStats.users.filter((user) => user.total_requests <= 20);
+    const low = userStats.users.filter((user) => user.total_tokens <= mediumThreshold);
 
     return [
       {
-        label: m.high_usage_users(),
+        label: `${m.high_usage_users()} (>${formatNumber(highThreshold, "compact")} ${m.tokens()})`,
         userCount: high.length,
         tokenCount: high.reduce((sum, user) => sum + user.total_tokens, 0),
         colour: "chart-red"
       },
       {
-        label: m.medium_usage_users(),
+        label: `${m.medium_usage_users()} (>${formatNumber(mediumThreshold, "compact")} ${m.tokens()})`,
         userCount: medium.length,
         tokenCount: medium.reduce((sum, user) => sum + user.total_tokens, 0),
         colour: "chart-yellow"
       },
       {
-        label: m.low_usage_users(),
+        label: `${m.low_usage_users()} (≤${formatNumber(mediumThreshold, "compact")} ${m.tokens()})`,
         userCount: low.length,
         tokenCount: low.reduce((sum, user) => sum + user.total_tokens, 0),
         colour: "chart-green"
