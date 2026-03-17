@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "20260303_split_token_limit"
-down_revision = "9d2a6c01f3e7"
+down_revision = "b05f080c2656"
 branch_labels = None
 depends_on = None
 
