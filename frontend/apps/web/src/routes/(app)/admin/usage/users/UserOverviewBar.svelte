@@ -29,19 +29,19 @@
 
     return [
       {
-        label: `${m.high_usage_users()} (>${formatNumber(highThreshold, "compact")} tokens)`,
+        label: `${m.high_usage_users()} (>${formatNumber(highThreshold, "compact")} ${m.tokens()})`,
         userCount: high.length,
         tokenCount: high.reduce((sum, user) => sum + user.total_tokens, 0),
         colour: "chart-red"
       },
       {
-        label: `${m.medium_usage_users()} (>${formatNumber(mediumThreshold, "compact")} tokens)`,
+        label: `${m.medium_usage_users()} (>${formatNumber(mediumThreshold, "compact")} ${m.tokens()})`,
         userCount: medium.length,
         tokenCount: medium.reduce((sum, user) => sum + user.total_tokens, 0),
         colour: "chart-yellow"
       },
       {
-        label: `${m.low_usage_users()} (≤${formatNumber(mediumThreshold, "compact")} tokens)`,
+        label: `${m.low_usage_users()} (≤${formatNumber(mediumThreshold, "compact")} ${m.tokens()})`,
         userCount: low.length,
         tokenCount: low.reduce((sum, user) => sum + user.total_tokens, 0),
         colour: "chart-green"

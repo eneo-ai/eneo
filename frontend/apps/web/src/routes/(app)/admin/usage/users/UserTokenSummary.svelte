@@ -24,6 +24,7 @@
   let userStats = $state<UserTokenUsageSummary | null>(null);
   let isLoading = $state(false);
   let error = $state<string | null>(null);
+  let fetchId = 0;
 
   // Reactive pagination state derived from URL search parameters
   const paginationState = $derived.by(() => {
@@ -71,10 +72,11 @@
     sortBy: UserSortBy,
     sortOrder: string
   ) {
+    const id = ++fetchId;
     isLoading = true;
     error = null;
     try {
-      userStats = await intric.usage.tokens.getUsersSummary({
+      const result = await intric.usage.tokens.getUsersSummary({
         startDate: timeframe.start.toString(),
         // We add one day so the end day includes the whole day. otherwise this would be interpreted as 00:00
         endDate: timeframe.end.add({ days: 1 }).toString(),
@@ -83,28 +85,31 @@
         sortBy: sortBy,
         sortOrder: sortOrder
       });
+      if (id !== fetchId) return; // Stale response, discard
+      userStats = result;
     } catch (err: unknown) {
+      if (id !== fetchId) return;
       error = err instanceof IntricError ? err.message : "unknown error";
       console.error("Failed to load user token usage:", err);
     } finally {
-      isLoading = false;
+      if (id === fetchId) {
+        isLoading = false;
+      }
     }
   }
 
   function handleDateChange(range: { start: DateValue; end: DateValue }) {
     dateRange = range as { start: CalendarDate; end: CalendarDate };
-    updateUserStats(
-      dateRange,
-      paginationState.page,
-      paginationState.perPage,
-      paginationState.sortBy,
-      paginationState.sortOrder
-    );
+    // Reset to page 1 when date range changes to avoid empty pages
+    const url = new URL($page.url);
+    if (url.searchParams.has("page")) {
+      url.searchParams.set("page", "1");
+      goto(url, { replaceState: true });
+    }
   }
 
-  // Re-fetch when pagination/sort changes (driven by URL params)
+  // Single effect handles all data fetching — triggered by dateRange or pagination changes
   $effect(() => {
-    // Access pagination properties to set up tracking
     const { page, perPage, sortBy, sortOrder } = paginationState;
     if (dateRange.start && dateRange.end) {
       updateUserStats(dateRange, page, perPage, sortBy, sortOrder);

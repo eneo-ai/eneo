@@ -17,6 +17,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { createRender } from "svelte-headless-table";
   import { CalendarDate } from "@internationalized/date";
+  import { m } from "$lib/paraglide/messages";
   import {
     IntricError,
     type ModelUsage,
@@ -185,11 +186,13 @@
     }
   });
 
-  // Get usage intensity based on requests - using semantic classes
-  function getUsageIntensity(requests: number) {
-    if (requests > 100) return { label: "High Usage", class: "bg-secondary text-error" };
-    if (requests > 20) return { label: "Medium Usage", class: "bg-secondary text-warning" };
-    return { label: "Low Usage", class: "bg-secondary text-success" };
+  // Get usage intensity based on total tokens - using semantic classes
+  const HIGH_THRESHOLD = 500_000;
+  const MEDIUM_THRESHOLD = 50_000;
+  function getUsageIntensity(tokens: number) {
+    if (tokens > HIGH_THRESHOLD) return { label: m.usage_level_high(), class: "bg-secondary text-error" };
+    if (tokens > MEDIUM_THRESHOLD) return { label: m.usage_level_medium(), class: "bg-secondary text-warning" };
+    return { label: m.usage_level_low(), class: "bg-secondary text-success" };
   }
 
   // Get top 5 models by token usage
@@ -255,7 +258,7 @@
                 <div class="mt-2">
                   <span
                     class="inline-flex items-center rounded-full px-3 py-1.5 text-sm font-medium {getUsageIntensity(
-                      user.total_requests
+                      user.total_tokens
                     ).class}"
                   >
                     {getUsageIntensity(user.total_requests).label}
