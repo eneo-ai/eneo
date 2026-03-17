@@ -39,20 +39,35 @@ class DatabaseSessionManager:
         self._engine: AsyncEngine | None = None
         self._sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
-    def init(self, host: str):
+    def init(
+        self,
+        host: str,
+        pool_size: int = 20,
+        max_overflow: int = 10,
+        pool_timeout: int = 30,
+        pool_pre_ping: bool = True,
+        pool_recycle: int = -1,
+    ):
         # If already initialized, don't reinitialize (important for tests)
         if self._engine is not None:
             logger.debug("Database already initialized, skipping reinitialization")
             return
 
-        self._engine = create_async_engine(host, pool_size=20, max_overflow=10)
+        self._engine = create_async_engine(
+            host,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_timeout=pool_timeout,
+            pool_pre_ping=pool_pre_ping,
+            pool_recycle=pool_recycle,
+        )
         self._sessionmaker = async_sessionmaker(
             autocommit=False,
             bind=self._engine,
             autobegin=False,
             class_=SafeAsyncSession,
         )
-        logger.debug(f"Database connected to {host}")
+        logger.debug(f"Database connected to {host} (pool_size={pool_size}, max_overflow={max_overflow})")
 
     async def close(self):
         if self._engine is None:
