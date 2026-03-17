@@ -19,6 +19,7 @@
   import { invalidate } from "$app/navigation";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   type Props = {
     model: CompletionModel | EmbeddingModel | TranscriptionModel;
@@ -45,7 +46,7 @@
       invalidate("admin:models:load");
       $openController = false;
     } catch (error) {
-      alert(error instanceof IntricError ? error.getReadableMessage() : String(error));
+      toast.error(error instanceof IntricError ? error.getReadableMessage() : String(error));
     }
   });
 </script>

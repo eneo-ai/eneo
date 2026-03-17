@@ -16,6 +16,7 @@
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   type Props = {
     classification: SecurityClassification;
@@ -47,7 +48,7 @@
       await security.deleteClassification(classification);
       $showDeleteDialog = false;
     } catch (error) {
-      alert(error instanceof IntricError ? error.getReadableMessage() : String(error));
+      toast.error(error instanceof IntricError ? error.getReadableMessage() : String(error));
     }
   });
 
@@ -61,7 +62,7 @@
       });
       $showEditDialog = false;
     } catch (error) {
-      alert(error instanceof IntricError ? error.getReadableMessage() : String(error));
+      toast.error(error instanceof IntricError ? error.getReadableMessage() : String(error));
     }
   });
 </script>

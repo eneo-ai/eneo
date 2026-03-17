@@ -3,6 +3,7 @@ import { getIntric } from "$lib/core/Intric";
 import type { Intric, UserIntegration } from "@intric/intric-js";
 import { onMount } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
+import { toast } from "$lib/components/toast";
 
 /**
  * Service for handling OAuth authentication flows for external integrations.
@@ -131,14 +132,14 @@ export class IntegrationAuthService {
       const missing = [];
       if (!code) missing.push("code");
       if (!integrationId) missing.push("state");
-      alert(`Missing required fields: ${missing.join(", ")}`);
+      toast.warning(`Missing required fields: ${missing.join(", ")}`);
       return;
     }
 
     // Find and validate request
     const request = this.#authRequests.get(integrationId);
     if (!request) {
-      alert(`No auth request found for state ${integrationId}`);
+      toast.error(`No auth request found for state ${integrationId}`);
       return;
     }
 

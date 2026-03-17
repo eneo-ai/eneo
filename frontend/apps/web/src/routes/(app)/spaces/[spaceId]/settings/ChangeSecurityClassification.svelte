@@ -10,6 +10,7 @@
   import { Button, Dialog } from "@intric/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   type Props = { classifications: SecurityClassification[]; onUpdateDone: () => void };
 
@@ -63,7 +64,7 @@
       onUpdateDone?.();
       $showDryRunDialog = false;
     } catch (error) {
-      alert(error instanceof IntricError ? error.getReadableMessage() : String(error));
+      toast.error(error instanceof IntricError ? error.getReadableMessage() : String(error));
     }
   });
 </script>

@@ -4,6 +4,7 @@
   import { Button, Input } from "@intric/ui";
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   import { localizeHref } from "$lib/paraglide/runtime";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
@@ -81,12 +82,12 @@
 
   async function handleCreateTemplate() {
     if (!name || !category) {
-      alert(m.category_required());
+      toast.warning(m.category_required());
       return;
     }
 
     if (!inputType) {
-      alert(m.input_type_required());
+      toast.warning(m.input_type_required());
       return;
     }
 
@@ -120,7 +121,7 @@
       goto("/admin/templates?success=template_created");
     } catch (error) {
       console.error("Failed to create template:", error);
-      alert(m.failed_to_create_template());
+      toast.error(m.failed_to_create_template());
     } finally {
       isSaving = false;
     }

@@ -8,6 +8,7 @@
   import { type Group, type InfoBlob } from "@intric/intric-js";
   import { Button, Dialog, Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   const {
     limits,
@@ -135,7 +136,7 @@
       files = [];
       return;
     } catch (e) {
-      alert(e);
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -156,7 +157,7 @@
     <Dialog.Title>{m.upload_files()}</Dialog.Title>
     <Dialog.Description hidden></Dialog.Description>
 
-    <Input.Files bind:files {acceptedMimeTypes}></Input.Files>
+    <Input.Files bind:files {acceptedMimeTypes} on:showsupportedtypes={(e) => toast.info(e.detail.message)}></Input.Files>
 
     {#if validationErrors.length > 0}
       <FileSizeValidationPanel errors={validationErrors} />

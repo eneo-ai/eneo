@@ -5,6 +5,7 @@
   import { type Group } from "@intric/intric-js";
   import { Button, Dialog, Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   export let disabled = false;
   export let collection: Group;
@@ -30,7 +31,7 @@
       text = title = "";
       return;
     } catch (e) {
-      alert(e);
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   }
 

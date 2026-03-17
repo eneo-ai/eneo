@@ -11,6 +11,7 @@
   import { Button, Dialog, Dropdown, Input } from "@intric/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   let { data }: { data: { settings: Settings } } = $props();
 
@@ -44,7 +45,7 @@
       $showCreateGroupChatDialog = false;
     } catch (error) {
       const message = error instanceof IntricError ? error.getReadableMessage() : String(error);
-      alert(message);
+      toast.error(message);
     }
   }
 </script>

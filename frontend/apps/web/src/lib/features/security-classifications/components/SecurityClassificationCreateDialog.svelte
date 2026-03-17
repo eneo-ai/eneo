@@ -11,6 +11,7 @@
   import { IntricError } from "@intric/intric-js";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   let name = $state("");
   let description = $state("");
@@ -25,7 +26,7 @@
       name = "";
       description = "";
     } catch (error) {
-      alert(error instanceof IntricError ? error.getReadableMessage() : String(error));
+      toast.error(error instanceof IntricError ? error.getReadableMessage() : String(error));
     }
   });
 </script>

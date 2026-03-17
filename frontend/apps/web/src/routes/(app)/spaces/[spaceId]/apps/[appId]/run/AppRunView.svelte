@@ -14,6 +14,7 @@
   import AppInput from "./AppInput.svelte";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   const intric = getIntric();
   const {
@@ -49,7 +50,7 @@
   let isSubmitting = false;
   async function createRun() {
     if (inputs.files.length === 0 && !inputs.text) {
-      alert(m.input_required_to_run_app());
+      toast.warning(m.input_required_to_run_app());
       return;
     }
 
@@ -73,7 +74,7 @@
     } catch (err) {
       const msg = err instanceof IntricError ? err.getReadableMessage() : err;
       console.error(err);
-      alert(m.error_running_app({ msg }));
+      toast.error(m.error_running_app({ msg }));
       isSubmitting = false;
     }
   }

@@ -6,6 +6,7 @@ import { derived, writable } from "svelte/store";
 import { getUploadErrorMessage } from "$lib/features/attachments/getUploadErrorMessage";
 
 import { m } from "$lib/paraglide/messages";
+import { toast } from "$lib/components/toast";
 export { getJobManager, initJobManager, jobCompletionEvents };
 
 // Global store for job completion events (can be subscribed to from any component)
@@ -229,7 +230,7 @@ function createJobManager(data: { intric: Intric }) {
           .catch((error) => {
             const fallbackMessage = m.file_upload_error();
             const message = getUploadErrorMessage(error, upload.file.name);
-            alert(`${fallbackMessage}: ${upload.file.name}\n${message}`);
+            toast.error(`${fallbackMessage}: ${upload.file.name}: ${message}`);
             runningUploads.delete(uploadId);
             upload.status = "failed";
             upload.errorMessage = message;

@@ -7,6 +7,7 @@
   import { IconEllipsis } from "@intric/icons/ellipsis";
   import { IconEdit } from "@intric/icons/edit";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   const intric = getIntric();
   export let blob: InfoBlob;
@@ -22,7 +23,7 @@
       invalidate("blobs:list");
       return true;
     } catch (e) {
-      alert(m.could_not_change_title_to({ title: updatableTitle }));
+      toast.error(m.could_not_change_title_to({ title: updatableTitle }));
       console.error(e);
       return false;
     }
@@ -34,7 +35,7 @@
       invalidate("blobs:list");
       return true;
     } catch (e) {
-      alert(m.could_not_delete_file({ fileName: blob.metadata.title ?? m.this_file() }));
+      toast.error(m.could_not_delete_file({ fileName: blob.metadata.title ?? m.this_file() }));
       console.error(e);
       return false;
     }

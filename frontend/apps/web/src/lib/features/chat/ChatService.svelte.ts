@@ -4,6 +4,7 @@ import { toast } from "$lib/components/toast";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import { waitFor } from "$lib/core/waitFor";
+import { toast } from "$lib/components/toast";
 import {
   type ConversationSparse,
   type Assistant,
@@ -243,7 +244,7 @@ export class ChatService {
         this.newConversation();
       }
     } catch (e) {
-      if (browser) alert(`Error while deleting conversation with id ${conversation.id}`);
+      if (browser) toast.error(`Error while deleting conversation with id ${conversation.id}`);
       console.error(e);
     }
   }
@@ -263,7 +264,7 @@ export class ChatService {
       }
       return loaded;
     } catch (e) {
-      if (browser) alert(`Error while loading conversation with id ${conversation.id}`);
+      if (browser) toast.error(`Error while loading conversation with id ${conversation.id}`);
       console.error(e);
     }
   }

@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import hashlib
 import os
 import shutil
@@ -19,6 +20,10 @@ class FileSizeService:
         try:
             with destination_path.open("wb") as buffer:
                 await asyncio.to_thread(shutil.copyfileobj, file, buffer)
+        except BaseException:
+            with contextlib.suppress(FileNotFoundError):
+                destination_path.unlink()
+            raise
         finally:
             file.close()
 

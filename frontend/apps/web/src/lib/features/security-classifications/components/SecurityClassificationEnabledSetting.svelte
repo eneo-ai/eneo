@@ -12,6 +12,7 @@
   import { Settings } from "$lib/components/layout";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   const security = getSecurityClassificationService();
 
@@ -31,7 +32,7 @@
       await security.enable();
       $showEnableDialog = false;
     } catch (e) {
-      alert(e instanceof IntricError ? e.getReadableMessage() : String(e));
+      toast.error(e instanceof IntricError ? e.getReadableMessage() : String(e));
     }
   });
 
@@ -40,7 +41,7 @@
       await security.disable();
       $showDisableDialog = false;
     } catch (e) {
-      alert(e instanceof IntricError ? e.getReadableMessage() : String(e));
+      toast.error(e instanceof IntricError ? e.getReadableMessage() : String(e));
     }
   });
 </script>

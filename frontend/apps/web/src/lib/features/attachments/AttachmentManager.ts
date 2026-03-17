@@ -4,6 +4,7 @@ import { createContext } from "$lib/core/context";
 import { ATTACHMENTS } from "$lib/core/constants";
 import { formatBytes } from "$lib/core/formatting/formatBytes";
 import { getUploadErrorMessage } from "$lib/features/attachments/getUploadErrorMessage";
+import { toast } from "$lib/components/toast";
 
 export type Attachment = {
   id: string;
@@ -171,7 +172,7 @@ function createAttachmentManager(data: AttachmentManagerParams) {
           console.warn(`Cancelled upload for ${file.name}`);
         } else {
           const message = getUploadErrorMessage(error, file.name);
-          alert(`We encountered an error uploading the file ${file.name}\n${message}`);
+          toast.error(`We encountered an error uploading the file ${file.name}: ${message}`);
         }
         attachments.update(($attachments) => $attachments.filter((u) => u.id !== currentUpload));
       } finally {

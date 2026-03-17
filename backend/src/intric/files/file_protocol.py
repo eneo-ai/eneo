@@ -1,3 +1,4 @@
+import contextlib
 import os
 from pathlib import Path
 from typing import Callable
@@ -74,7 +75,8 @@ class FileProtocol:
                 upload_file, file_type, content, checksum, size
             )
         finally:
-            os.remove(filepath)
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(filepath)
 
     def _create_file_base(
         self,
