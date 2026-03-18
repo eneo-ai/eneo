@@ -1029,6 +1029,7 @@ class Container(containers.DeclarativeContainer):
         assistant_service=assistant_service,
         session_service=session_service,
         completion_service=completion_service,
+        icon_repo=icon_repo,
     )
     app_template_service = providers.Factory(
         AppTemplateService,

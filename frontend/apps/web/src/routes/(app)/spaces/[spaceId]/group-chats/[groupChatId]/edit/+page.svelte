@@ -10,6 +10,7 @@
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams.js";
   import { m } from "$lib/paraglide/messages";
+  import IconUpload from "$lib/features/icons/IconUpload.svelte";
 
   export let data;
 
@@ -29,6 +30,55 @@
       refreshCurrentSpace("applications");
     }
   });
+
+  // Icon state
+  let currentIconId = data.groupChat.icon_id ?? null;
+  let iconUploading = false;
+  let iconError = null;
+
+  function getIconUrl(id) {
+    return id ? data.intric.icons.url({ id }) : null;
+  }
+
+  $: iconUrl = getIconUrl(currentIconId);
+
+  async function handleIconUpload(event) {
+    const file = event.detail;
+    iconUploading = true;
+    iconError = null;
+    try {
+      const newIcon = await data.intric.icons.upload({ file });
+      await data.intric.groupChats.update({
+        groupChat: { id: $resource.id },
+        update: { icon_id: newIcon.id }
+      });
+      currentIconId = newIcon.id;
+      await refreshCurrentSpace("applications");
+    } catch (error) {
+      console.error("Failed to upload icon:", error);
+      iconError = m.avatar_upload_failed();
+    } finally {
+      iconUploading = false;
+    }
+  }
+
+  async function handleIconDelete() {
+    iconError = null;
+    try {
+      if (currentIconId) {
+        await data.intric.icons.delete({ id: currentIconId });
+      }
+      await data.intric.groupChats.update({
+        groupChat: { id: $resource.id },
+        update: { icon_id: null }
+      });
+      currentIconId = null;
+      await refreshCurrentSpace("applications");
+    } catch (error) {
+      console.error("Failed to delete icon:", error);
+      iconError = m.avatar_delete_failed();
+    }
+  }
 
   beforeNavigate((navigate) => {
     if ($currentChanges.hasUnsavedChanges && !confirm(m.unsaved_changes_warning())) {
@@ -113,6 +163,16 @@
             {...aria}
             bind:value={$update.name}
             class="border-default bg-primary ring-default rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+          />
+        </Settings.Row>
+
+        <Settings.Row title={m.avatar()} description={m.avatar_description()}>
+          <IconUpload
+            {iconUrl}
+            uploading={iconUploading}
+            error={iconError}
+            on:upload={handleIconUpload}
+            on:delete={handleIconDelete}
           />
         </Settings.Row>
       </Settings.Group>

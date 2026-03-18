@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from intric.completion_models.infrastructure.completion_service import (
         CompletionService,
     )
+    from intric.icons.icon_repo import IconRepository
     from intric.sessions.session import SessionInDB
     from intric.sessions.session_service import SessionService
     from intric.spaces.space_repo import SpaceRepository
@@ -51,6 +52,7 @@ class GroupChatService:
         assistant_service: "AssistantService",
         session_service: "SessionService",
         completion_service: "CompletionService",
+        icon_repo: "IconRepository",
     ):
         self.user = user
         self.space_service = space_service
@@ -59,6 +61,7 @@ class GroupChatService:
         self.assistant_service = assistant_service
         self.session_service = session_service
         self.completion_service = completion_service
+        self.icon_repo = icon_repo
 
     async def create_group_chat(self, space_id: "UUID", name: str) -> "GroupChat":
         space = await self.space_service.get_space(id=space_id)
@@ -82,8 +85,13 @@ class GroupChatService:
             raise UnauthorizedException
 
         group_chat = space.get_group_chat(group_chat_id=group_chat_id)
+        icon_id = group_chat.icon_id
+
         space.remove_group_chat(group_chat)
         await self.space_repo.update(space=space)
+
+        if icon_id:
+            await self.icon_repo.delete(icon_id)
 
     async def update_group_chat(
         self,
@@ -96,6 +104,7 @@ class GroupChatService:
         published: Optional[bool] = None,
         insight_enabled: Optional[bool] = None,
         metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
+        icon_id: Union["UUID", None, NotProvided] = NOT_PROVIDED,
     ) -> "GroupChat":
         space = await self.space_service.get_space_by_group_chat(group_chat_id=id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -131,6 +140,7 @@ class GroupChatService:
             new_assistants=assistants,
             insight_enabled=insight_enabled,
             metadata_json=metadata_json,
+            icon_id=icon_id,
         )
 
         updated_space = await self.space_repo.update(space=space)

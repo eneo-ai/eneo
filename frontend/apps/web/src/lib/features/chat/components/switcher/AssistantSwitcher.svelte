@@ -18,7 +18,7 @@
 
   // Helper function to get icon URL from icon_id
   function getIconUrl(partner: AssistantSparse | GroupChatSparse): string | null {
-    if (partner.type === "assistant" && partner.icon_id) {
+    if (partner.icon_id) {
       return `${environment.baseUrl}/api/v1/icons/${partner.icon_id}/`;
     }
     return null;
@@ -79,7 +79,7 @@
       {...$option({ value: partner, label: partner.name, disabled: false })}
       use:option
     >
-      {#if partner.type === "assistant" && getIconUrl(partner)}
+      {#if getIconUrl(partner)}
         <div class="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg">
           <img src={getIconUrl(partner)} alt={partner.name} class="h-full w-full object-cover" />
         </div>

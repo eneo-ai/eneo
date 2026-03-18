@@ -3,7 +3,7 @@
 # Licensed under the MIT License.
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, model_validator
 from intric.files.file_models import FilePublic, FileRestrictions
 from intric.main.models import (
     NOT_PROVIDED,
+    NotProvided,
     ResourcePermission,
     ResourcePermissionsMixin,
 )
@@ -73,6 +74,10 @@ class GroupChatUpdateSchema(BaseModel):
         default=NOT_PROVIDED,
         description="Metadata for the group chat.",
     )
+    icon_id: Union[UUID, None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        description="Icon ID referencing an uploaded icon. Set to null to remove.",
+    )
 
 
 # Presentation
@@ -85,6 +90,7 @@ class GroupChatSparse(ResourcePermissionsMixin):
     published: bool
     type: Literal["group-chat"]
     metadata_json: Optional[dict]
+    icon_id: Optional[UUID] = None
 
 
 class GroupChatAssistantPublic(ToolAssistant):
@@ -143,3 +149,4 @@ class GroupChatPublic(BaseModel):
     # Instead it checks against assistant permissions.
     permissions: list[ResourcePermission]
     metadata_json: Optional[dict]
+    icon_id: Optional[UUID] = None

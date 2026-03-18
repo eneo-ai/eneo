@@ -450,6 +450,7 @@ class SpaceRepository:
                         show_response_label=group_chat.show_response_label,
                         published=group_chat.published,
                         insight_enabled=group_chat.insight_enabled,
+                        icon_id=group_chat.icon_id,
                     )
                     for group_chat in new_group_chats
                 ]
@@ -467,6 +468,7 @@ class SpaceRepository:
                     published=group_chat.published,
                     insight_enabled=group_chat.insight_enabled,
                     metadata_json=group_chat.metadata_json,
+                    icon_id=group_chat.icon_id,
                 )
                 .where(GroupChatsTable.id == group_chat.id)
             )

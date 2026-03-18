@@ -291,14 +291,11 @@ export function initMCPServers(client) {
      * @throws {IntricError}
      * */
     approveToolChanges: async ({ mcp_server_id, tool_ids }) => {
-      const res = await client.fetch(
-        "/api/v1/mcp-servers/{mcp_server_id}/tools/review/approve/",
-        {
-          method: "post",
-          params: { path: { mcp_server_id } },
-          requestBody: { "application/json": { tool_ids } }
-        }
-      );
+      const res = await client.fetch("/api/v1/mcp-servers/{mcp_server_id}/tools/review/approve/", {
+        method: "post",
+        params: { path: { mcp_server_id } },
+        requestBody: { "application/json": { tool_ids } }
+      });
       return res;
     },
 
@@ -310,14 +307,11 @@ export function initMCPServers(client) {
      * @throws {IntricError}
      * */
     rejectToolChanges: async ({ mcp_server_id, tool_ids }) => {
-      const res = await client.fetch(
-        "/api/v1/mcp-servers/{mcp_server_id}/tools/review/reject/",
-        {
-          method: "post",
-          params: { path: { mcp_server_id } },
-          requestBody: { "application/json": { tool_ids } }
-        }
-      );
+      const res = await client.fetch("/api/v1/mcp-servers/{mcp_server_id}/tools/review/reject/", {
+        method: "post",
+        params: { path: { mcp_server_id } },
+        requestBody: { "application/json": { tool_ids } }
+      });
       return res;
     },
 
