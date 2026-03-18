@@ -163,7 +163,23 @@ async def test_update_assistant_completion_model_not_in_space(setup: Setup):
         BadRequestException,
         match="Completion model is not in space.",
     ):
-        await setup.service.update_assistant(TEST_UUID)
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID, completion_model_id=uuid4()
+        )
+
+
+async def test_partial_update_skips_completion_model_validation(setup: Setup):
+    """Partial updates (e.g. icon_id) should not fail when completion model is stale."""
+    space = MagicMock()
+    space.is_completion_model_in_space.return_value = False
+    setup.service.space_repo.get_space_by_assistant.return_value = space
+
+    # Should NOT raise — we're only changing icon_id, not completion model
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID, icon_id=uuid4()
+    )
+
+    space.is_completion_model_in_space.assert_not_called()
 
 
 async def test_update_assistant_completion_model_in_space(setup: Setup):
