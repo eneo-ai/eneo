@@ -135,21 +135,27 @@ class AssistantService:
     async def web_search(self):
         return WebSearch()
 
-    def validate_space_assistant(self, space: "Space", assistant: Assistant):
-        # validate completion model
-        if assistant.completion_model is not None:
+    def validate_space_assistant(
+        self,
+        space: "Space",
+        assistant: Assistant,
+        completion_model_changing: bool = True,
+        knowledge_changing: bool = True,
+    ):
+        # validate completion model only if it was actually updated
+        if completion_model_changing and assistant.completion_model is not None:
             if not space.is_completion_model_in_space(assistant.completion_model.id):
                 raise BadRequestException("Completion model is not in space.")
 
-        # validate groups
-        for group in assistant.collections:
-            if not space.is_group_in_space(group.id):
-                raise BadRequestException("Group is not in space.")
+        # validate groups and websites only if knowledge is changing
+        if knowledge_changing:
+            for group in assistant.collections:
+                if not space.is_group_in_space(group.id):
+                    raise BadRequestException("Group is not in space.")
 
-        # validate websites
-        for website in assistant.websites:
-            if not space.is_website_in_space(website.id):
-                raise BadRequestException("Website is not in space.")
+            for website in assistant.websites:
+                if not space.is_website_in_space(website.id):
+                    raise BadRequestException("Website is not in space.")
 
         for integration_knowledge in assistant.integration_knowledge_list:
             if not space.is_integration_knowledge_in_space(
@@ -376,7 +382,13 @@ class AssistantService:
                     "Remove one before enabling the other."
                 )
 
-        self.validate_space_assistant(space=space, assistant=assistant)
+        # Only validate space references when the relevant fields are actually changing
+        self.validate_space_assistant(
+            space=space,
+            assistant=assistant,
+            completion_model_changing=completion_model is not None,
+            knowledge_changing=knowledge_changing,
+        )
 
         refreshed_space = await self.space_repo.update(space)
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)

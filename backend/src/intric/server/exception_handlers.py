@@ -1,8 +1,12 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from intric.main.exceptions import EXCEPTION_MAP
 from intric.main.models import GeneralError
+
+logger = logging.getLogger(__name__)
 
 
 def add_exception_handlers(app: FastAPI):
@@ -19,6 +23,18 @@ def add_exception_handlers(app: FastAPI):
             details = getattr(exc, "details", None)
             if not isinstance(details, dict) or len(details) == 0:
                 details = None
+
+            if status_code >= 400:
+                log_level = logging.WARNING if status_code < 500 else logging.ERROR
+                logger.log(
+                    log_level,
+                    "%s %s → %d: %s",
+                    request.method,
+                    request.url.path,
+                    status_code,
+                    message,
+                    extra={"details": details, "error_code": error_code},
+                )
 
             return JSONResponse(
                 status_code=status_code,
