@@ -2,24 +2,23 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 import httpx
-import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-from intric.database.tables.flow_tables import Flows
 from intric.flows.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStepAttemptStatus,
     FlowStepResult,
 )
-from intric.flows.flow_repo import FlowRepository
-from intric.flows.flow_run_repo import FlowRunRepository
-from intric.flows.flow_version_repo import FlowVersionRepository
+from intric.flows.infrastructure.flow_repo import FlowRepository
+from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
+from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.flow_template_asset_service import FlowTemplateAssetService
 from intric.flows.variable_resolver import FlowVariableResolver
 from intric.flows.runtime.http_runtime import FlowHttpRuntimeHelper, IPAddress
@@ -105,6 +104,7 @@ class FlowRunExecutor:
         self,
         *,
         user: UserInDB,
+        session: AsyncSession,
         flow_repo: FlowRepository,
         flow_run_repo: FlowRunRepository,
         flow_version_repo: FlowVersionRepository,
@@ -121,6 +121,7 @@ class FlowRunExecutor:
         max_generic_files: int | None = None,
     ):
         self.user = user
+        self.session = session
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
         self.flow_version_repo = flow_version_repo
@@ -286,6 +287,7 @@ class FlowRunExecutor:
                 if postclaim_decision.action == "continue":
                     continue
 
+            claimed_result = cast(FlowStepResult, claimed)
             attempt_no = retry_count + 1
             try:
                 await self.flow_run_repo.create_or_get_attempt_started(
@@ -299,27 +301,12 @@ class FlowRunExecutor:
                 )
                 await self._commit()
             except Exception:
-                logger.exception(
-                    "flow_executor.step_attempt_start_failed run_id=%s step_order=%d step_id=%s",
-                    run_id,
-                    step.step_order,
-                    step.step_id,
-                )
-                await self._rollback()
-                failure_plan = build_generic_failure_plan(
-                    claimed=claimed,
-                    public_error=f"Flow step {step.step_order} execution failed.",
-                )
-                await self.flow_repo.save_step_result(run_id, failure_plan.failed_result, tenant_id=tenant_id)
-                await self.flow_run_repo.update_status(
+                return await self._handle_attempt_start_failure(
                     run_id=run_id,
                     tenant_id=tenant_id,
-                    status=FlowRunStatus.FAILED,
-                    error_message=failure_plan.run_error_message,
-                    from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
+                    step=step,
+                    claimed=claimed_result,
                 )
-                await self._commit()
-                return failure_plan.return_result
 
             logger.info(
                 "flow_executor.step_start run_id=%s step_order=%d step_id=%s input_type=%s output_type=%s",
@@ -358,67 +345,30 @@ class FlowRunExecutor:
                     contract_diag.get("candidate_type") if isinstance(contract_diag, dict) else None,
                     str(typed_exc),
                 )
-                await self._rollback()
-                failed_prompt = getattr(typed_exc, "effective_prompt", None)
-                failure_plan = build_typed_failure_plan(
-                    claimed=claimed,
-                    error_code=typed_exc.code,
-                    error_message=str(typed_exc),
-                    input_payload_json=failed_input_payload if isinstance(failed_input_payload, dict) else None,
-                    effective_prompt=failed_prompt if isinstance(failed_prompt, str) else None,
-                )
-                await self.flow_run_repo.finish_attempt(
+                return await self._handle_typed_step_failure(
                     run_id=run_id,
-                    step_id=step.step_id,
+                    tenant_id=tenant_id,
+                    step=step,
                     attempt_no=attempt_no,
-                    tenant_id=tenant_id,
-                    status=failure_plan.attempt_status,
-                    error_code=failure_plan.error_code,
-                    error_message=failure_plan.error_message,
+                    claimed=claimed_result,
+                    typed_exc=typed_exc,
+                    failed_input_payload=failed_input_payload if isinstance(failed_input_payload, dict) else None,
                 )
-                await self.flow_repo.save_step_result(run_id, failure_plan.failed_result, tenant_id=tenant_id)
-                await self.flow_run_repo.update_status(
-                    run_id=run_id,
-                    tenant_id=tenant_id,
-                    status=FlowRunStatus.FAILED,
-                    error_message=failure_plan.run_error_message,
-                    from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
-                )
-                await self._commit()
-                return failure_plan.return_result
             except Exception as exc:
                 logger.exception(
                     "flow_executor.step_failed run_id=%s step_order=%d error=%s",
                     run_id, step.step_order, str(exc),
                 )
-                public_error = f"Flow step {step.step_order} execution failed."
-                await self._rollback()
-                failure_plan = build_generic_failure_plan(
-                    claimed=claimed,
-                    public_error=public_error,
-                )
-                await self.flow_run_repo.finish_attempt(
+                return await self._handle_generic_step_failure(
                     run_id=run_id,
-                    step_id=step.step_id,
+                    tenant_id=tenant_id,
+                    step=step,
                     attempt_no=attempt_no,
-                    tenant_id=tenant_id,
-                    status=failure_plan.attempt_status,
-                    error_code=failure_plan.error_code,
-                    error_message=failure_plan.error_message,
+                    claimed=claimed_result,
                 )
-                await self.flow_repo.save_step_result(run_id, failure_plan.failed_result, tenant_id=tenant_id)
-                await self.flow_run_repo.update_status(
-                    run_id=run_id,
-                    tenant_id=tenant_id,
-                    status=FlowRunStatus.FAILED,
-                    error_message=failure_plan.run_error_message,
-                    from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
-                )
-                await self._commit()
-                return failure_plan.return_result
 
             success_plan = build_step_success_plan(
-                claimed=claimed,
+                claimed=claimed_result,
                 run_id=run_id,
                 flow_id=flow_id,
                 tenant_id=tenant_id,
@@ -433,60 +383,40 @@ class FlowRunExecutor:
                 ),
             )
             step_result = success_plan.step_result
-            await self.flow_repo.save_step_result(run_id, step_result, tenant_id=tenant_id)
-            logger.info("flow_executor.step_completed run_id=%s step_order=%d", run_id, step.step_order)
-            await self.flow_run_repo.finish_attempt(
+            await self._persist_successful_step(
                 run_id=run_id,
-                step_id=step.step_id,
-                attempt_no=attempt_no,
                 tenant_id=tenant_id,
-                status=FlowStepAttemptStatus.COMPLETED,
+                step=step,
+                step_result=step_result,
+                attempt_no=attempt_no,
             )
-            await self._commit()
 
             # Track completed step in run state
             state.append_completed(step_result)
 
             if success_plan.should_deliver_webhook:
                 try:
-                    webhook_context = self.variable_resolver.build_context(
-                        latest_run.input_payload_json,
-                        state.prior_results,
-                        current_step_order=step.step_order + 1,
-                        step_names_by_order=state.step_names_by_order,
-                    )
-                    webhook_context["text"] = output.full_text
-                    if output.structured_output is not None:
-                        webhook_context["structured"] = output.structured_output
-                    await self._deliver_webhook(
+                    await self._deliver_step_webhook(
                         step=step,
-                        text_payload=output.full_text,
+                        output=output,
                         run=latest_run,
-                        context=webhook_context,
+                        state=state,
                     )
                 except Exception as exc:
-                    step_result = with_webhook_delivery_status(
-                        step_result=step_result,
-                        delivered=False,
-                        error=str(exc),
-                    )
-                    await self.flow_repo.save_step_result(run_id, step_result, tenant_id=tenant_id)
-                    await self.flow_run_repo.update_status(
+                    return await self._handle_webhook_delivery_failure(
                         run_id=run_id,
                         tenant_id=tenant_id,
-                        status=FlowRunStatus.FAILED,
-                        error_message=f"Webhook delivery failed: {exc}",
-                        from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
+                        step=step,
+                        step_result=step_result,
+                        error=exc,
                     )
-                    await self._commit()
-                    return {"status": "failed", "error": str(exc)}
 
-                step_result = with_webhook_delivery_status(
+                step_result = await self._mark_webhook_delivery_success(
+                    run_id=run_id,
+                    tenant_id=tenant_id,
                     step_result=step_result,
-                    delivered=True,
                 )
-                await self.flow_repo.save_step_result(run_id, step_result, tenant_id=tenant_id)
-                await self._commit()
+                state.completed_by_order[step.step_order] = step_result
 
         results = await self.flow_run_repo.list_step_results(run_id=run_id, tenant_id=tenant_id)
         outcome = determine_run_outcome(results=results)
@@ -532,7 +462,7 @@ class FlowRunExecutor:
                 variable_resolver=self.variable_resolver,
                 file_repo=self.file_repo,
                 template_asset_service=self.template_asset_service,
-                apply_output_cap=self._apply_output_cap,
+                apply_output_cap=self._apply_output_cap_positional,
                 user_id=self.user.id,
                 logger=logger,
             )
@@ -598,13 +528,206 @@ class FlowRunExecutor:
         )
 
     async def _flow_is_active(self, *, flow_id: UUID, tenant_id: UUID) -> bool:
-        flow_id_in_db = await self.flow_repo.session.scalar(
-            sa.select(Flows.id)
-            .where(Flows.id == flow_id)
-            .where(Flows.tenant_id == tenant_id)
-            .where(Flows.deleted_at.is_(None))
+        return await self.flow_repo.is_active(flow_id=flow_id, tenant_id=tenant_id)
+
+    async def _handle_attempt_start_failure(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        step: RuntimeStep,
+        claimed: FlowStepResult,
+    ) -> dict[str, Any]:
+        logger.exception(
+            "flow_executor.step_attempt_start_failed run_id=%s step_order=%d step_id=%s",
+            run_id,
+            step.step_order,
+            step.step_id,
         )
-        return flow_id_in_db is not None
+        failure_plan = build_generic_failure_plan(
+            claimed=claimed,
+            public_error=f"Flow step {step.step_order} execution failed.",
+        )
+        await self._rollback()
+        await self.flow_repo.save_step_result(run_id, failure_plan.failed_result, tenant_id=tenant_id)
+        await self._mark_run_failed(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            error_message=failure_plan.run_error_message,
+        )
+        return failure_plan.return_result
+
+    async def _handle_typed_step_failure(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        step: RuntimeStep,
+        attempt_no: int,
+        claimed: FlowStepResult,
+        typed_exc: TypedIOValidationException,
+        failed_input_payload: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        failed_prompt = getattr(typed_exc, "effective_prompt", None)
+        failure_plan = build_typed_failure_plan(
+            claimed=claimed,
+            error_code=typed_exc.code,
+            error_message=str(typed_exc),
+            input_payload_json=failed_input_payload,
+            effective_prompt=failed_prompt if isinstance(failed_prompt, str) else None,
+        )
+        await self._rollback()
+        await self.flow_run_repo.finish_attempt(
+            run_id=run_id,
+            step_id=step.step_id,
+            attempt_no=attempt_no,
+            tenant_id=tenant_id,
+            status=failure_plan.attempt_status,
+            error_code=failure_plan.error_code,
+            error_message=failure_plan.error_message,
+        )
+        await self.flow_repo.save_step_result(run_id, failure_plan.failed_result, tenant_id=tenant_id)
+        await self._mark_run_failed(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            error_message=failure_plan.run_error_message,
+        )
+        return failure_plan.return_result
+
+    async def _handle_generic_step_failure(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        step: RuntimeStep,
+        attempt_no: int,
+        claimed: FlowStepResult,
+    ) -> dict[str, Any]:
+        failure_plan = build_generic_failure_plan(
+            claimed=claimed,
+            public_error=f"Flow step {step.step_order} execution failed.",
+        )
+        await self._rollback()
+        await self.flow_run_repo.finish_attempt(
+            run_id=run_id,
+            step_id=step.step_id,
+            attempt_no=attempt_no,
+            tenant_id=tenant_id,
+            status=failure_plan.attempt_status,
+            error_code=failure_plan.error_code,
+            error_message=failure_plan.error_message,
+        )
+        await self.flow_repo.save_step_result(run_id, failure_plan.failed_result, tenant_id=tenant_id)
+        await self._mark_run_failed(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            error_message=failure_plan.run_error_message,
+        )
+        return failure_plan.return_result
+
+    async def _persist_successful_step(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        step: RuntimeStep,
+        step_result: FlowStepResult,
+        attempt_no: int,
+    ) -> None:
+        await self.flow_repo.save_step_result(run_id, step_result, tenant_id=tenant_id)
+        logger.info("flow_executor.step_completed run_id=%s step_order=%d", run_id, step.step_order)
+        await self.flow_run_repo.finish_attempt(
+            run_id=run_id,
+            step_id=step.step_id,
+            attempt_no=attempt_no,
+            tenant_id=tenant_id,
+            status=FlowStepAttemptStatus.COMPLETED,
+        )
+        await self._commit()
+
+    async def _deliver_step_webhook(
+        self,
+        *,
+        step: RuntimeStep,
+        output: StepExecutionOutput,
+        run: FlowRun,
+        state: RunExecutionState,
+    ) -> None:
+        webhook_context = self.variable_resolver.build_context(
+            run.input_payload_json,
+            state.prior_results,
+            current_step_order=step.step_order + 1,
+            step_names_by_order=state.step_names_by_order,
+        )
+        webhook_context["text"] = output.full_text
+        if output.structured_output is not None:
+            webhook_context["structured"] = output.structured_output
+        await self._deliver_webhook(
+            step=step,
+            text_payload=output.full_text,
+            run=run,
+            context=webhook_context,
+        )
+
+    async def _handle_webhook_delivery_failure(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        step: RuntimeStep,
+        step_result: FlowStepResult,
+        error: Exception,
+    ) -> dict[str, Any]:
+        logger.exception(
+            "flow_executor.webhook_delivery_failed run_id=%s step_order=%d step_id=%s error=%s",
+            run_id,
+            step.step_order,
+            step.step_id,
+            str(error),
+        )
+        failed_result = with_webhook_delivery_status(
+            step_result=step_result,
+            delivered=False,
+            error=str(error),
+        )
+        await self.flow_repo.save_step_result(run_id, failed_result, tenant_id=tenant_id)
+        await self._mark_run_failed(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            error_message=f"Webhook delivery failed: {error}",
+        )
+        return {"status": "failed", "error": str(error)}
+
+    async def _mark_webhook_delivery_success(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        step_result: FlowStepResult,
+    ) -> FlowStepResult:
+        delivered_result = with_webhook_delivery_status(
+            step_result=step_result,
+            delivered=True,
+        )
+        await self.flow_repo.save_step_result(run_id, delivered_result, tenant_id=tenant_id)
+        await self._commit()
+        return delivered_result
+
+    async def _mark_run_failed(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        error_message: str,
+    ) -> None:
+        await self.flow_run_repo.update_status(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            status=FlowRunStatus.FAILED,
+            error_message=error_message,
+            from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
+        )
+        await self._commit()
 
     async def _resolve_step_input(
         self,
@@ -828,12 +951,20 @@ class FlowRunExecutor:
         )
         return text[:4096], [file_row.id]
 
+    async def _apply_output_cap_positional(
+        self,
+        text: str,
+        run: FlowRun,
+        step: RuntimeStep,
+    ) -> tuple[str, list[UUID]]:
+        return await self._apply_output_cap(text=text, run=run, step=step)
+
     @staticmethod
     def _parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
         return parse_runtime_steps(definition_json)
 
     async def _commit(self) -> None:
-        await self.flow_repo.session.commit()
+        await self.session.commit()
 
     async def _rollback(self) -> None:
-        await self.flow_repo.session.rollback()
+        await self.session.rollback()

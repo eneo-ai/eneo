@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from intric.flows.flow import FlowRun, FlowStepResult
+from intric.flows.flow_input_limits import DEFAULT_MAX_AUDIO_FILES_PER_RUN
 from intric.flows.runtime_input import build_runtime_input_config
 from intric.flows.runtime.input_files import (
     load_files_by_requested_ids,
@@ -21,6 +22,7 @@ from intric.flows.runtime.transcription_runtime import (
     AudioRuntimeRequest,
     resolve_transcribe_and_attach_audio_input,
 )
+from intric.flows.template_reference_analyzer import analyze_template, consumes_runtime_input
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
 
 
@@ -97,20 +99,12 @@ async def resolve_step_input(
     requested_ids = _resolve_runtime_requested_ids(run=run, step=step)
 
     if requested_ids and runtime_input_config.enabled:
-        file_cache = state.file_cache if state else None
-        files = await load_files_by_requested_ids(
-            file_repo=deps.file_repo,
+        files = await _load_runtime_files(
             requested_ids=requested_ids,
-            user_id=deps.user_id,
-            file_cache=file_cache,
+            step_order=step.step_order,
+            state=state,
+            deps=deps,
         )
-        returned_ids = {f.id for f in files}
-        missing = [fid for fid in requested_ids if fid not in returned_ids]
-        if missing:
-            raise TypedIOValidationException(
-                f"File(s) not found or not accessible: {missing}",
-                code="typed_io_file_not_found",
-            )
 
         if runtime_input_config.input_format == "audio":
             if deps.transcriber is None:
@@ -125,7 +119,7 @@ async def resolve_step_input(
                 version_metadata=version_metadata,
                 files=files,
                 requested_ids=requested_ids,
-                max_audio_files=deps.max_audio_files,
+                max_audio_files=deps.max_audio_files or DEFAULT_MAX_AUDIO_FILES_PER_RUN,
                 max_inline_text_bytes=deps.max_inline_text_bytes,
             )
             audio_deps = AudioRuntimeDeps(
@@ -142,21 +136,15 @@ async def resolve_step_input(
             runtime_input_text = audio_resolution.text
             transcription_metadata = audio_resolution.transcription_metadata
         else:
-            extracted = [
-                str(f.text).strip()
-                for f in files
-                if isinstance(getattr(f, "text", None), str) and str(f.text).strip()
-            ]
-            if extracted:
-                runtime_input_text = "\n\n".join(extracted)
+            runtime_input_text = _extract_text_from_files(files)
+            if runtime_input_text:
                 raw_extracted_text = runtime_input_text
 
-        runtime_input_metadata = {
-            "text": runtime_input_text,
-            "file_ids": [str(file_id) for file_id in requested_ids],
-            "extracted_text_length": len(runtime_input_text),
-            "input_format": runtime_input_config.input_format,
-        }
+        runtime_input_metadata = _build_runtime_input_metadata(
+            text=runtime_input_text,
+            requested_ids=requested_ids,
+            input_format=runtime_input_config.input_format,
+        )
 
     bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
     if bindings is not None:
@@ -182,7 +170,22 @@ async def resolve_step_input(
             else:
                 input_text = interpolated_question
                 used_question_binding = True
-                if runtime_input_metadata is not None and "step_input." not in question_template:
+                references = analyze_template(
+                    question_template,
+                    step_refs={},
+                    form_field_names=set(),
+                )
+                diagnostics.append(
+                    StepDiagnostic(
+                        code="flow_underlag_summary",
+                        message=(
+                            f"Resolved underlag from {len(references)} template sources "
+                            f"({len(interpolated_question.encode('utf-8'))} bytes)."
+                        ),
+                        severity="info",
+                    )
+                )
+                if runtime_input_metadata is not None and not consumes_runtime_input(references):
                     raise TypedIOValidationException(
                         f"Step {step.step_order}: explicit runtime-input bindings must reference step_input.*",
                         code="flow_runtime_input_not_consumed",
@@ -211,24 +214,16 @@ async def resolve_step_input(
                     code="typed_io_too_many_files",
                 )
         if requested_ids:
-            file_cache = state.file_cache if state else None
-            files = await load_files_by_requested_ids(
-                file_repo=deps.file_repo,
+            files = await _load_runtime_files(
                 requested_ids=requested_ids,
-                user_id=deps.user_id,
-                file_cache=file_cache,
+                step_order=step.step_order,
+                state=state,
+                deps=deps,
             )
-            returned_ids = {f.id for f in files}
-            missing = [fid for fid in requested_ids if fid not in returned_ids]
             deps.logger.info(
                 "flow_executor.file_resolve_result run_id=%s step_order=%d requested=%d returned=%d missing=%s",
-                run.id, step.step_order, len(requested_ids), len(files), missing,
+                run.id, step.step_order, len(requested_ids), len(files), [],
             )
-            if missing:
-                raise TypedIOValidationException(
-                    f"File(s) not found or not accessible: {missing}",
-                    code="typed_io_file_not_found",
-                )
         if step.input_type == "audio":
             if deps.transcriber is None:
                 raise TypedIOValidationException(
@@ -242,7 +237,7 @@ async def resolve_step_input(
                 version_metadata=version_metadata,
                 files=files or [],
                 requested_ids=requested_ids,
-                max_audio_files=deps.max_audio_files,
+                max_audio_files=deps.max_audio_files or DEFAULT_MAX_AUDIO_FILES_PER_RUN,
                 max_inline_text_bytes=deps.max_inline_text_bytes,
             )
             audio_deps = AudioRuntimeDeps(
@@ -267,17 +262,16 @@ async def resolve_step_input(
                     )
                 )
         elif step.input_type in ("document", "file") and files:
-            extracted = [
-                str(f.text).strip()
-                for f in files
-                if isinstance(getattr(f, "text", None), str) and str(f.text).strip()
-            ]
+            extracted_text = _extract_text_from_files(files)
             deps.logger.info(
                 "flow_executor.document_text_extracted run_id=%s step_order=%d file_count=%d extracted_count=%d",
-                run.id, step.step_order, len(files), len(extracted),
+                run.id,
+                step.step_order,
+                len(files),
+                1 if extracted_text else 0,
             )
-            if extracted:
-                input_text = "\n\n".join(extracted)
+            if extracted_text:
+                input_text = extracted_text
                 raw_extracted_text = input_text
 
     if runtime_input_metadata is not None and not used_question_binding:
@@ -364,6 +358,53 @@ def _resolve_runtime_requested_ids(*, run: FlowRun, step: RuntimeStep) -> list[A
     if step.step_order == 1:
         return parse_requested_file_ids(raw_file_ids=payload.get("file_ids"))
     return []
+
+
+async def _load_runtime_files(
+    *,
+    requested_ids: list[Any],
+    step_order: int,
+    state: RunExecutionState | None,
+    deps: StepInputResolutionDeps,
+) -> list[Any]:
+    file_cache = state.file_cache if state else None
+    files = await load_files_by_requested_ids(
+        file_repo=deps.file_repo,
+        requested_ids=requested_ids,
+        user_id=deps.user_id,
+        file_cache=file_cache,
+    )
+    returned_ids = {f.id for f in files}
+    missing = [fid for fid in requested_ids if fid not in returned_ids]
+    if missing:
+        raise TypedIOValidationException(
+            f"File(s) not found or not accessible: {missing}",
+            code="typed_io_file_not_found",
+        )
+    return files
+
+
+def _extract_text_from_files(files: list[Any]) -> str:
+    extracted = [
+        str(file.text).strip()
+        for file in files
+        if isinstance(getattr(file, "text", None), str) and str(file.text).strip()
+    ]
+    return "\n\n".join(extracted)
+
+
+def _build_runtime_input_metadata(
+    *,
+    text: str,
+    requested_ids: list[Any],
+    input_format: str,
+) -> dict[str, Any]:
+    return {
+        "text": text,
+        "file_ids": [str(file_id) for file_id in requested_ids],
+        "extracted_text_length": len(text),
+        "input_format": input_format,
+    }
 
 
 def _compose_runtime_and_chained_input(

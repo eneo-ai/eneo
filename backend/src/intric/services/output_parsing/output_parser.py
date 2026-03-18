@@ -2,7 +2,10 @@ import abc
 import json
 from abc import abstractmethod
 
-from langchain import output_parsers
+from langchain_core.output_parsers import (
+    NumberedListOutputParser,
+    PydanticOutputParser as LangchainPydanticOutputParser,
+)
 
 from intric.services.output_parsing.pydantic_model_factory import (
     PydanticModelFactory,
@@ -51,7 +54,7 @@ class TextOutput(ParsedOutput):
 
 class ListOutputParser(OutputParserBase):
     def __init__(self):
-        self.output_parser = output_parsers.NumberedListOutputParser()
+        self.output_parser = NumberedListOutputParser()
 
     def parse(self, text):
         parsed = self.output_parser.parse(text)
@@ -66,7 +69,7 @@ class PydanticOutputParser(OutputParserBase):
     def __init__(self, schema):
         self.factory = PydanticModelFactory(schema)
         Model = self.factory.create_pydantic_model()
-        self.output_parser = output_parsers.PydanticOutputParser(pydantic_object=Model)
+        self.output_parser = LangchainPydanticOutputParser(pydantic_object=Model)
 
     def parse(self, text):
         parsed = self.output_parser.parse(text)

@@ -60,6 +60,7 @@ class Flows(BasePublic):
     published_version: Mapped[Optional[int]] = mapped_column(nullable=True)
     metadata_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     data_retention_days: Mapped[Optional[int]] = mapped_column(nullable=True)
+    draft_revision: Mapped[int] = mapped_column(nullable=False, server_default="0")
     deleted_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
 
     __table_args__ = (
@@ -503,4 +504,98 @@ class ModuleRegistry(BasePublic):
     __table_args__ = (
         CheckConstraint("last_health_status IN ('healthy','unhealthy','unknown')", name="ck_module_registry_last_health_status"),
         CheckConstraint("compat_status IN ('compatible','incompatible','unknown')", name="ck_module_registry_compat_status"),
+    )
+
+
+BUILDER_SESSION_STATUS_VALUES = (
+    "chatting",
+    "awaiting_approval",
+    "applying",
+    "applied",
+    "cancelled",
+)
+BUILDER_PLAN_STATUS_VALUES = (
+    "proposed",
+    "approved",
+    "applied",
+    "rejected",
+    "superseded",
+)
+BUILDER_TARGET_KIND_VALUES = ("create", "edit")
+
+
+class BuilderSessions(BasePublic):
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    space_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Spaces.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Flows.id, ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    target_kind: Mapped[str] = mapped_column(
+        sa.String(16),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default="chatting",
+    )
+    actor_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Users.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    conversation: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default="[]",
+    )
+    latest_plan_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            f"target_kind IN ({','.join(repr(v) for v in BUILDER_TARGET_KIND_VALUES)})",
+            name="ck_builder_sessions_target_kind",
+        ),
+        CheckConstraint(
+            f"status IN ({','.join(repr(v) for v in BUILDER_SESSION_STATUS_VALUES)})",
+            name="ck_builder_sessions_status",
+        ),
+    )
+
+
+class BuilderPlans(BasePublic):
+    session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("builder_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default="proposed",
+    )
+    spec_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    spec_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    envelope_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ({','.join(repr(v) for v in BUILDER_PLAN_STATUS_VALUES)})",
+            name="ck_builder_plans_status",
+        ),
     )

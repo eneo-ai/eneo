@@ -88,6 +88,14 @@ class ActionType(str, Enum):
     FLOW_HTTP_OUTBOUND_CALL = "flow_http_outbound_call"
     FLOW_RUN_ARTIFACT_DOWNLOADED = "flow_run_artifact_downloaded"
 
+    # AI Builder Actions
+    AI_BUILDER_SESSION_CREATED = "ai_builder_session_created"
+    AI_BUILDER_PLAN_PROPOSED = "ai_builder_plan_proposed"
+    AI_BUILDER_PLAN_APPROVED = "ai_builder_plan_approved"
+    AI_BUILDER_PLAN_REJECTED = "ai_builder_plan_rejected"
+    AI_BUILDER_FLOW_APPLIED = "ai_builder_flow_applied"
+    AI_BUILDER_SESSION_CANCELLED = "ai_builder_session_cancelled"
+
     # Security Classification Actions
     SECURITY_CLASSIFICATION_CREATED = "security_classification_created"
     SECURITY_CLASSIFICATION_UPDATED = "security_classification_updated"

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Path, Query, Request, UploadFile, status
 
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
@@ -19,6 +20,8 @@ from intric.flows.api.flow_models import (
     FlowTemplateInspectionPublic,
     FlowUpdateRequest,
 )
+from intric.flows.http_transport import HttpAuthoredConfig, is_authored_config
+from intric.flows.http_transport.test_action import execute_http_test
 from intric.authentication.signed_urls import generate_signed_token
 import time
 from intric.main.models import NOT_PROVIDED, PaginatedResponse
@@ -30,34 +33,70 @@ from intric.main.container.container import Container
 router = APIRouter()
 
 
+async def _require_flow_edit_access(
+    request: Request,
+    container: Container,
+    *,
+    flow_id: UUID,
+    require_flow_lookup_without_scope: bool = False,
+) -> common.FlowAccessContext:
+    access_context = await common.get_flow_access_context_for_request(
+        request,
+        container,
+        flow_id=flow_id,
+        required_access="manage",
+    )
+    if require_flow_lookup_without_scope:
+        # Kept for call-site compatibility; scope is still enforced by the shared access guard.
+        pass
+    if access_context.actor is None or not access_context.actor.can_edit_flows():
+        raise UnauthorizedException(
+            "You do not have permission to edit flows in this space.",
+            code="insufficient_space_permission",
+            context={"auth_layer": "space_membership"},
+        )
+    return access_context
+
+
 @router.post(
     "/",
     response_model=FlowPublic,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_flow",
+    summary="Create Flow",
+    description="Create a new draft flow definition, including its initial ordered steps, inside a space.",
+    responses={
+        400: error_response(
+            description="The submitted draft flow definition is invalid.",
+            message="Flow definition is invalid.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="bad_request",
+        ),
+        403: error_response(
+            description="Caller lacks permission or API key scope to create flows in this space.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+    },
 )
 async def create_flow(
     request: Request,
     flow_in: FlowCreateRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    scope_filter = common.get_scope_filter(request)
-    if scope_filter.space_id is not None and scope_filter.space_id != flow_in.space_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "insufficient_scope",
-                "message": (
-                    f"API key is scoped to space '{scope_filter.space_id}'. "
-                    f"Cannot create flow in space '{flow_in.space_id}'."
-                ),
-                "context": {"auth_layer": "api_key_scope"},
-            },
-        )
-
-    space = await container.space_service().get_space(flow_in.space_id)
-    actor = container.actor_manager().get_space_actor_from_space(space)
-    if not actor.can_create_flows():
+    access_context = await common.get_space_access_context_for_request(
+        request,
+        container,
+        space_id=flow_in.space_id,
+        required_access="manage",
+        scope_mismatch_message=(
+            f"API key is scoped to space '{common.get_scope_filter(request).space_id}'. "
+            f"Cannot create flow in space '{flow_in.space_id}'."
+        ),
+    )
+    if not access_context.actor.can_create_flows():
         raise UnauthorizedException(
             "You do not have permission to create flows in this space.",
             code="insufficient_space_permission",
@@ -111,28 +150,37 @@ async def create_flow(
     response_model=PaginatedResponse[FlowSparsePublic],
     status_code=status.HTTP_200_OK,
     operation_id="list_flows",
+    summary="List Flows",
+    description=(
+        "List flow definitions in a space with pagination-friendly sparse metadata. "
+        "The `count` field in the paginated response reports the number of items returned "
+        "in the current page, not the total number of matching flows across all pages."
+    ),
+    responses={
+        403: error_response(
+            description="Caller lacks permission or API key scope to list flows in this space.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+    },
 )
 async def list_flows(
     request: Request,
-    space_id: UUID = Query(...),
-    limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
+    space_id: UUID = Query(..., description="Only return flows that belong to this space."),
+    limit: int = Query(default=50, ge=1, le=200, description="Maximum number of flows to return."),
+    offset: int = Query(default=0, ge=0, description="Number of flows to skip before returning results."),
     container: Container = Depends(get_container(with_user=True)),
 ):
-    scope_filter = common.get_scope_filter(request)
-    if scope_filter.space_id is not None and scope_filter.space_id != space_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "insufficient_scope",
-                "message": "API key space scope does not match requested space.",
-                "context": {"auth_layer": "api_key_scope"},
-            },
-        )
-
-    space = await container.space_service().get_space(space_id)
-    actor = container.actor_manager().get_space_actor_from_space(space)
-    if not actor.can_read_flows():
+    access_context = await common.get_space_access_context_for_request(
+        request,
+        container,
+        space_id=space_id,
+        required_access="view",
+        scope_mismatch_message="API key space scope does not match requested space.",
+    )
+    if not access_context.actor.can_read_flows():
         raise UnauthorizedException(
             "You do not have permission to access flows in this space.",
             code="insufficient_space_permission",
@@ -155,24 +203,44 @@ async def list_flows(
     response_model=FlowPublic,
     status_code=status.HTTP_200_OK,
     operation_id="get_flow",
+    summary="Get Flow",
+    description="Return the full draft representation of a flow, including all configured steps and metadata.",
+    responses={
+        403: error_response(
+            description="Caller lacks permission or API key scope to view this flow.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow not found in tenant scope.",
+            message="Flow not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
 )
 async def get_flow(
-    id: UUID,
+    id: Annotated[UUID, Path(description="Identifier of the draft flow definition to return.")],
+    request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    access_context = await common.get_flow_access_context_for_request(
+        request,
+        container,
+        flow_id=id,
+        required_access="view",
+    )
     assembler = FlowAssembler()
-    flow = await container.flow_service().get_flow(id)
-
-    space = await container.space_service().get_space(flow.space_id)
-    actor = container.actor_manager().get_space_actor_from_space(space)
-    if not actor.can_read_flow(flow):
+    if access_context.actor is None or not access_context.actor.can_read_flow(access_context.flow):
         raise UnauthorizedException(
             "You do not have permission to access this flow.",
             code="insufficient_space_permission",
             context={"auth_layer": "space_membership"},
         )
 
-    return assembler.to_public(flow)
+    return assembler.to_public(access_context.flow)
 
 
 @router.patch(
@@ -180,21 +248,37 @@ async def get_flow(
     response_model=FlowPublic,
     status_code=status.HTTP_200_OK,
     operation_id="update_flow",
+    summary="Update Flow",
+    description="Update a draft flow definition, including steps, metadata, and retention settings.",
+    responses={
+        400: error_response(
+            description="The submitted draft flow update is invalid or the flow cannot be updated in its current state.",
+            message="Flow update is invalid.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="bad_request",
+        ),
+        403: error_response(
+            description="Caller lacks permission or API key scope to update this flow.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow not found in tenant scope.",
+            message="Flow not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
 )
 async def update_flow(
-    id: UUID,
+    id: Annotated[UUID, Path(description="Identifier of the draft flow definition to update.")],
+    request: Request,
     flow_in: FlowUpdateRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    flow = await container.flow_service().get_flow(id)
-    space = await container.space_service().get_space(flow.space_id)
-    actor = container.actor_manager().get_space_actor_from_space(space)
-    if not actor.can_edit_flows():
-        raise UnauthorizedException(
-            "You do not have permission to edit flows in this space.",
-            code="insufficient_space_permission",
-            context={"auth_layer": "space_membership"},
-        )
+    await _require_flow_edit_access(request, container, flow_id=id)
 
     assembler = FlowAssembler()
     flow_service = container.flow_service()
@@ -247,18 +331,38 @@ async def update_flow(
     "/{id}/",
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_flow",
+    summary="Delete Flow",
+    description="Soft-delete a flow definition so it is no longer available for editing or execution.",
+    responses={
+        403: error_response(
+            description="Caller lacks permission or API key scope to delete this flow.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow not found in tenant scope.",
+            message="Flow not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
 )
 async def delete_flow(
-    id: UUID,
+    id: Annotated[UUID, Path(description="Identifier of the draft flow definition to delete.")],
+    request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
     flow_service = container.flow_service()
     user = container.user()
-    flow = await flow_service.get_flow(id)
-
-    space = await container.space_service().get_space(flow.space_id)
-    actor = container.actor_manager().get_space_actor_from_space(space)
-    if not actor.can_delete_flows():
+    access_context = await common.get_flow_access_context_for_request(
+        request,
+        container,
+        flow_id=id,
+        required_access="manage",
+    )
+    if access_context.actor is None or not access_context.actor.can_delete_flows():
         raise UnauthorizedException(
             "You do not have permission to delete flows in this space.",
             code="insufficient_space_permission",
@@ -273,8 +377,8 @@ async def delete_flow(
         action=ActionType.FLOW_DELETED,
         entity_type=EntityType.FLOW,
         entity_id=id,
-        description=f"Deleted flow '{flow.name}'",
-        metadata=AuditMetadata.standard(actor=user, target=flow),
+        description=f"Deleted flow '{access_context.flow.name}'",
+        metadata=AuditMetadata.standard(actor=user, target=access_context.flow),
     )
 
 
@@ -283,15 +387,42 @@ async def delete_flow(
     response_model=FlowPublic,
     status_code=status.HTTP_200_OK,
     operation_id="publish_flow",
+    summary="Publish Flow",
+    description="Publish the current draft revision so new runs use a version-pinned definition.",
+    responses={
+        400: error_response(
+            description="The flow cannot be published because its draft definition is incomplete or invalid.",
+            message="Flow cannot be published in its current state.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="bad_request",
+        ),
+        403: error_response(
+            description="Caller lacks permission or API key scope to publish this flow.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow not found in tenant scope.",
+            message="Flow not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
 )
 async def publish_flow(
-    id: UUID,
+    id: Annotated[UUID, Path(description="Identifier of the draft flow definition to publish.")],
+    request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    flow = await container.flow_service().get_flow(id)
-    space = await container.space_service().get_space(flow.space_id)
-    actor = container.actor_manager().get_space_actor_from_space(space)
-    if not actor.can_publish_flows():
+    access_context = await common.get_flow_access_context_for_request(
+        request,
+        container,
+        flow_id=id,
+        required_access="manage",
+    )
+    if access_context.actor is None or not access_context.actor.can_publish_flows():
         raise UnauthorizedException(
             "You do not have permission to publish flows in this space.",
             code="insufficient_space_permission",
@@ -320,15 +451,42 @@ async def publish_flow(
     response_model=FlowPublic,
     status_code=status.HTTP_200_OK,
     operation_id="unpublish_flow",
+    summary="Unpublish Flow",
+    description="Remove the active published revision while keeping the draft definition available for editing.",
+    responses={
+        400: error_response(
+            description="The flow cannot be unpublished in its current state.",
+            message="Flow cannot be unpublished in its current state.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="bad_request",
+        ),
+        403: error_response(
+            description="Caller lacks permission or API key scope to unpublish this flow.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow not found in tenant scope.",
+            message="Flow not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
 )
 async def unpublish_flow(
-    id: UUID,
+    id: Annotated[UUID, Path(description="Identifier of the published flow definition to unpublish.")],
+    request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    flow = await container.flow_service().get_flow(id)
-    space = await container.space_service().get_space(flow.space_id)
-    actor = container.actor_manager().get_space_actor_from_space(space)
-    if not actor.can_publish_flows():
+    access_context = await common.get_flow_access_context_for_request(
+        request,
+        container,
+        flow_id=id,
+        required_access="manage",
+    )
+    if access_context.actor is None or not access_context.actor.can_publish_flows():
         raise UnauthorizedException(
             "You do not have permission to unpublish flows in this space.",
             code="insufficient_space_permission",
@@ -357,13 +515,33 @@ async def unpublish_flow(
     response_model=list[FlowTemplateAssetPublic],
     status_code=status.HTTP_200_OK,
     operation_id="list_flow_template_files",
+    summary="List Flow Templates",
+    description="List template assets attached to a flow draft for template-fill steps.",
+    responses={
+        403: error_response(
+            description="Caller lacks permission or API key scope to list template assets for this flow.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow not found in tenant scope.",
+            message="Flow not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
 )
 async def list_flow_template_files(
-    id: UUID,
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the draft flow whose template assets should be listed."),
+    ],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await common.enforce_flow_scope_for_request(request, container, flow_id=id)
+    await _require_flow_edit_access(request, container, flow_id=id)
     assets = await container.flow_template_asset_service().list_assets(
         flow_id=id,
         can_edit=True,
@@ -402,12 +580,18 @@ async def list_flow_template_files(
     },
 )
 async def inspect_flow_template(
-    id: UUID,
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the draft flow that owns the template asset."),
+    ],
     request: Request,
-    file_id: UUID = Query(...),
+    file_id: Annotated[
+        UUID,
+        Query(description="Identifier of the stored template asset to inspect."),
+    ],
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await common.enforce_flow_scope_for_request(request, container, flow_id=id)
+    await _require_flow_edit_access(request, container, flow_id=id)
     return await container.flow_template_asset_service().inspect_asset(flow_id=id, asset_id=file_id)
 
 
@@ -453,12 +637,15 @@ async def inspect_flow_template(
     },
 )
 async def upload_flow_template_file(
-    id: UUID,
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the draft flow that will own the uploaded template asset."),
+    ],
     request: Request,
-    upload_file: UploadFile,
+    upload_file: UploadFile = File(..., description="DOCX template file to store for later template_fill steps."),
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await common.enforce_flow_scope_for_request(
+    await _require_flow_edit_access(
         request,
         container,
         flow_id=id,
@@ -496,15 +683,38 @@ async def upload_flow_template_file(
     response_model=SignedURLResponse,
     status_code=status.HTTP_200_OK,
     operation_id="generate_flow_template_signed_url",
+    summary="Generate Template Download URL",
+    description="Generate a temporary signed download URL for a stored flow template asset.",
+    responses={
+        403: error_response(
+            description="Caller lacks permission or API key scope to access this flow template asset.",
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow or template asset not found in tenant scope.",
+            message="Flow not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
 )
 async def generate_flow_template_signed_url(
-    id: UUID,
-    file_id: UUID,
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the draft flow that owns the template asset."),
+    ],
+    file_id: Annotated[
+        UUID,
+        Path(description="Identifier of the stored template asset to download."),
+    ],
     request: Request,
     signed_url_req: SignedURLRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await common.enforce_flow_scope_for_request(request, container, flow_id=id)
+    await _require_flow_edit_access(request, container, flow_id=id)
     asset, _ = await container.flow_template_asset_service().get_asset_with_file(
         flow_id=id,
         asset_id=file_id,
@@ -518,3 +728,123 @@ async def generate_flow_template_signed_url(
     base_url = str(request.base_url).rstrip("/")
     url = f"{base_url}/api/v1/files/{asset.file_id}/download/?token={token}"
     return SignedURLResponse(url=url, expires_at=expires_at)
+
+
+from pydantic import BaseModel as _BaseModel
+
+
+class HttpTestRequest(_BaseModel):
+    config: dict  # authored config shape
+    direction: str = "output"
+    method: str = "POST"
+    test_variables: dict | None = None
+
+
+@router.post(
+    "/{id}/http-test",
+    status_code=status.HTTP_200_OK,
+    operation_id="test_flow_http",
+    summary="Test HTTP Connection",
+    description="Send a test HTTP request using the provided config snapshot. Does not persist anything.",
+    responses={
+        403: error_response(
+            description="Caller lacks permission to edit this flow.",
+            message="Insufficient permissions.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "space_membership"},
+        ),
+    },
+)
+async def test_flow_http(
+    id: Annotated[UUID, Path(description="Flow ID")],
+    request: Request,
+    body: HttpTestRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    import httpx as _httpx
+
+    await _require_flow_edit_access(request, container, flow_id=id)
+
+    try:
+        config = HttpAuthoredConfig.model_validate(body.config)
+    except Exception as exc:
+        return {"success": False, "error_code": "INVALID_CONFIG", "error_message": str(exc)}
+
+    # Resolve stored config for secret merging
+    flow_service = container.flow_service()
+    flow = await flow_service.get_flow(id)
+    stored_config = _find_stored_http_config(flow, body.direction)
+
+    encryption_service = container.encryption_service() if hasattr(container, "encryption_service") else None
+
+    async def _send(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        timeout_seconds: float,
+        body_bytes: bytes | None = None,
+        json_body: dict | list | None = None,
+        **_kwargs: object,
+    ) -> _httpx.Response:
+        async with _httpx.AsyncClient() as client:
+            return await client.request(
+                method=method,
+                url=url,
+                headers=headers,
+                content=body_bytes,
+                json=json_body,
+                timeout=timeout_seconds,
+            )
+
+    from intric.main.config import get_settings
+
+    result = await execute_http_test(
+        config=config,
+        direction=body.direction,
+        method=body.method,
+        test_variables=body.test_variables,
+        stored_config=stored_config,
+        encryption_service=encryption_service,
+        send_http_request=_send,
+        max_timeout=float(get_settings().flow_http_max_timeout_seconds),
+    )
+
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.FLOW_UPDATED,
+        entity_type=EntityType.FLOW,
+        entity_id=id,
+        description=f"Tested HTTP {body.method} connection for flow",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=flow,
+            extra={"test_direction": body.direction, "test_success": result.success},
+        ),
+    )
+
+    return {
+        "success": result.success,
+        "status_code": result.status_code,
+        "duration_ms": result.duration_ms,
+        "response_preview": result.response_preview,
+        "request_preview": result.request_preview,
+        "error_code": result.error_code,
+        "error_message": result.error_message,
+    }
+
+
+def _find_stored_http_config(flow: Any, direction: str) -> HttpAuthoredConfig | None:
+    """Find the first stored HTTP authored config in the flow steps for secret merging."""
+    for step in flow.steps:
+        config = step.output_config if direction == "output" else step.input_config
+        if isinstance(config, dict) and is_authored_config(config):
+            try:
+                return HttpAuthoredConfig.model_validate(config)
+            except Exception:
+                pass
+    return None

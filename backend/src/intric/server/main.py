@@ -162,6 +162,27 @@ def _remove_invalid_defaults(schema: dict) -> None:
                 _remove_invalid_defaults(sub_schema)
 
 
+def _retag_flow_ai_builder_operations(openapi_schema: dict) -> None:
+    """Keep AI Builder operations grouped under their dedicated tag in OpenAPI.
+
+    The runtime path stays nested under `/flows`, but from an API consumer perspective
+    these operations read better as one workflow section instead of appearing under
+    both `flows` and `ai-builder`.
+    """
+    paths = openapi_schema.get("paths", {})
+    if not isinstance(paths, dict):
+        return
+
+    for path, operations in paths.items():
+        if not isinstance(path, str) or not path.startswith("/api/v1/flows/ai-builder"):
+            continue
+        if not isinstance(operations, dict):
+            continue
+        for operation in operations.values():
+            if isinstance(operation, dict):
+                operation["tags"] = ["ai-builder"]
+
+
 def get_application():
     app = FastAPI(
         lifespan=app_lifespan,
@@ -244,6 +265,8 @@ def get_application():
         if "components" in openapi_schema and "schemas" in openapi_schema["components"]:
             for schema in openapi_schema["components"]["schemas"].values():
                 _remove_invalid_defaults(schema)
+
+        _retag_flow_ai_builder_operations(openapi_schema)
 
         flow_upload_operation = (
             openapi_schema.get("paths", {})

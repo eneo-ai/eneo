@@ -38,8 +38,8 @@
   data-row-has-changes={hasChanges}
 >
   <div class={descriptionSection({ fullWidth })}>
-    <div class="flex flex-col gap-2 pr-12 pl-2">
-      <h3 class="flex items-center text-lg font-medium" id={labelId}>
+    <div class="flex flex-col gap-1.5 pr-12 pl-2">
+      <h3 class="text-primary flex items-center text-base font-semibold tracking-tight" id={labelId}>
         <span class={changeIndicator({ hasChanges })}></span>{title}<slot name="title"></slot>
         {#if revertFn}
           <button
@@ -50,7 +50,7 @@
         {/if}
       </h3>
       {#if description}
-        <p class="text-secondary whitespace-pre-wrap" id={descriptionId}>
+        <p class="text-secondary text-[0.875rem] leading-relaxed" id={descriptionId}>
           {description}
         </p>
       {/if}

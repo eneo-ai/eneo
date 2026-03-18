@@ -429,11 +429,13 @@ class ContextBuilder:
         _prompt.add_web_search_result(web_search_results=web_search_results)
         tokens_used += _prompt.num_tokens
 
-        # Create the messages, keeping within the 80% mark,
-        # and minimum 3.
-        max_tokens_messages = (
-            int(max_tokens_usable * (1 - MIN_PERCENTAGE_KNOWLEDGE)) - tokens_used
-        )
+        if info_blob_chunks:
+            max_tokens_messages = (
+                int(max_tokens_usable * (1 - MIN_PERCENTAGE_KNOWLEDGE))
+                - tokens_used
+            )
+        else:
+            max_tokens_messages = max_tokens_usable - tokens_used
         messages, tokens_used_messages = self._build_messages(
             session=session, max_tokens=max_tokens_messages, min_len=3
         )
@@ -445,7 +447,7 @@ class ContextBuilder:
         # and erroring is preferable to not
         # including something.
         if tokens_used > max_tokens_usable:
-            raise QueryException("Query too long")
+            raise QueryException(tokens_used=tokens_used, token_limit=max_tokens_usable)
 
         # Add the knowledge in all the space that is left.
         tokens_left = max_tokens_usable - tokens_used

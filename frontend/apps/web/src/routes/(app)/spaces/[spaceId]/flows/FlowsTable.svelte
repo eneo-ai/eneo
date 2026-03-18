@@ -63,10 +63,14 @@
 </script>
 
 {#if flows.length === 0}
-  <div class="flex flex-col items-center justify-center gap-4 py-16 text-center">
-    <IconWorkflow class="text-secondary size-12" />
-    <h3 class="text-lg font-semibold">{m.flow_empty_title()}</h3>
-    <p class="text-secondary max-w-[40ch]">{m.flow_empty_description()}</p>
+  <div class="flex flex-col items-center justify-center gap-5 py-24 text-center">
+    <div class="flex h-16 w-16 items-center justify-center rounded-2xl bg-secondary border border-default text-muted shadow-sm">
+      <IconWorkflow class="size-8" />
+    </div>
+    <div class="space-y-1.5">
+      <h3 class="text-primary text-xl font-semibold tracking-tight">{m.flow_empty_title()}</h3>
+      <p class="text-secondary max-w-[40ch] text-sm leading-relaxed">{m.flow_empty_description()}</p>
+    </div>
   </div>
 {:else}
   <Table.Root

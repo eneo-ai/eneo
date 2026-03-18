@@ -1,0 +1,908 @@
+"""Tests for AI Builder spec validation — hard validation + quality lint."""
+
+from __future__ import annotations
+
+from intric.flows.ai_builder.ai_builder_models import (
+    AssistantSpec,
+    FormFieldSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    LintSeverity,
+    OutputMode,
+    OutputType,
+    StepSpec,
+)
+from intric.flows.ai_builder.ai_builder_validator import validate_spec
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _step(
+    ref: str = "step_a",
+    name: str = "Test step",
+    instructions: str = "Do something useful",
+    input_source: InputSource = InputSource.FLOW_INPUT,
+    input_type: InputType = InputType.TEXT,
+    output_mode: OutputMode = OutputMode.PASS_THROUGH,
+    output_type: OutputType = OutputType.TEXT,
+    **kwargs: object,
+) -> StepSpec:
+    return StepSpec(
+        plan_step_ref=ref,
+        name=name,
+        assistant_spec=AssistantSpec(instructions=instructions),
+        input_source=input_source,
+        input_type=input_type,
+        output_mode=output_mode,
+        output_type=output_type,
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+def _spec(steps: list[StepSpec], flow_name: str = "Test") -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(flow_name=flow_name, steps=steps)
+
+
+# ---------------------------------------------------------------------------
+# Happy path
+# ---------------------------------------------------------------------------
+
+
+class TestValidSpec:
+    def test_single_step_valid(self) -> None:
+        result = validate_spec(_spec([_step()]))
+        assert result.valid
+
+    def test_two_step_chain_valid(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="Extract"),
+                _step(ref="step_b", name="Summarize", input_source=InputSource.PREVIOUS_STEP),
+            ])
+        )
+        assert result.valid
+
+    def test_three_step_chain_valid(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="Extract", input_source=InputSource.FLOW_INPUT),
+                _step(ref="step_b", name="Analyze", input_source=InputSource.PREVIOUS_STEP),
+                _step(ref="step_c", name="Summarize", input_source=InputSource.ALL_PREVIOUS_STEPS),
+            ])
+        )
+        assert result.valid
+
+    def test_audio_transcription_chain_valid(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    ref="step_a",
+                    name="Transkribera",
+                    input_source=InputSource.FLOW_INPUT,
+                    input_type=InputType.AUDIO,
+                    output_mode=OutputMode.TRANSCRIBE_ONLY,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    ref="step_b",
+                    name="Sammanfatta",
+                    input_source=InputSource.PREVIOUS_STEP,
+                ),
+            ])
+        )
+        assert result.valid
+
+    def test_json_output_chain_valid(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="Extract", output_type=OutputType.JSON),
+                _step(
+                    ref="step_b",
+                    name="Parse",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                ),
+            ])
+        )
+        assert result.valid
+
+    def test_terminal_json_output_without_contract_stays_valid_without_warning(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    ref="step_a",
+                    name="Return structured payload",
+                    output_type=OutputType.JSON,
+                )
+            ])
+        )
+        assert result.valid
+        assert not any(w.code == "json_output_no_contract" for w in result.warnings)
+
+
+# ---------------------------------------------------------------------------
+# Empty steps
+# ---------------------------------------------------------------------------
+
+
+class TestEmptySteps:
+    def test_empty_steps_rejected(self) -> None:
+        result = validate_spec(_spec([]))
+        assert not result.valid
+        assert result.errors[0].code == "empty_steps"
+
+
+# ---------------------------------------------------------------------------
+# Duplicate refs / names
+# ---------------------------------------------------------------------------
+
+
+class TestDuplicates:
+    def test_duplicate_step_ref_rejected(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="First"),
+                _step(ref="step_a", name="Second", input_source=InputSource.PREVIOUS_STEP),
+            ])
+        )
+        assert not result.valid
+        assert any(e.code == "duplicate_step_ref" for e in result.errors)
+
+    def test_duplicate_step_name_rejected(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="Same Name"),
+                _step(ref="step_b", name="same name", input_source=InputSource.PREVIOUS_STEP),
+            ])
+        )
+        assert not result.valid
+        assert any(e.code == "duplicate_step_name" for e in result.errors)
+
+    def test_empty_step_name_rejected(self) -> None:
+        result = validate_spec(_spec([_step(name="   ")]))
+        assert not result.valid
+        assert any(e.code == "empty_step_name" for e in result.errors)
+
+
+# ---------------------------------------------------------------------------
+# Chaining rules
+# ---------------------------------------------------------------------------
+
+
+class TestChainingRules:
+    def test_first_step_cannot_use_previous_step(self) -> None:
+        result = validate_spec(
+            _spec([_step(input_source=InputSource.PREVIOUS_STEP)])
+        )
+        assert not result.valid
+        assert any(e.code == "first_step_invalid_source" for e in result.errors)
+
+    def test_first_step_cannot_use_all_previous_steps(self) -> None:
+        result = validate_spec(
+            _spec([_step(input_source=InputSource.ALL_PREVIOUS_STEPS)])
+        )
+        assert not result.valid
+        assert any(e.code == "first_step_invalid_source" for e in result.errors)
+
+    def test_only_one_flow_input_step(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="First", input_source=InputSource.FLOW_INPUT),
+                _step(ref="step_b", name="Second", input_source=InputSource.FLOW_INPUT),
+            ])
+        )
+        assert not result.valid
+        assert any(e.code == "multiple_flow_input" for e in result.errors)
+
+    def test_flow_input_must_be_first(self) -> None:
+        # Can't really test this directly since we'd need a step before flow_input
+        # that uses previous_step — which would also fail. But the validation checks.
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="First", input_source=InputSource.PREVIOUS_STEP),
+                _step(ref="step_b", name="Second", input_source=InputSource.FLOW_INPUT),
+            ])
+        )
+        assert not result.valid
+
+    def test_audio_requires_flow_input(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="First"),
+                _step(
+                    ref="step_b",
+                    name="Audio",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.AUDIO,
+                ),
+            ])
+        )
+        assert not result.valid
+        assert any(e.code == "media_source_mismatch" for e in result.errors)
+
+    def test_document_requires_flow_input(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="First"),
+                _step(
+                    ref="step_b",
+                    name="Doc",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.DOCUMENT,
+                ),
+            ])
+        )
+        assert not result.valid
+        assert any(e.code == "media_source_mismatch" for e in result.errors)
+
+    def test_file_requires_flow_input(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="First"),
+                _step(
+                    ref="step_b",
+                    name="File",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.FILE,
+                ),
+            ])
+        )
+        assert not result.valid
+        assert any(e.code == "media_source_mismatch" for e in result.errors)
+
+
+class TestSemanticVariableValidation:
+    def test_unknown_variable_reference_rejected(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    ref="step_a",
+                    name="Use missing variable",
+                    instructions="Use {{ MissingField }} in the prompt.",
+                )
+            ])
+        )
+        assert not result.valid
+        assert any(e.code == "unknown_variable_reference" for e in result.errors)
+
+    def test_scalar_runtime_variable_nested_access_rejected(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    ref="step_a",
+                    name="Use invalid datum access",
+                    instructions="Year {{ datum.year }}",
+                )
+            ])
+        )
+
+        assert not result.valid
+        assert any(e.code == "invalid_runtime_variable_path" for e in result.errors)
+
+    def test_unknown_step_input_key_rejected_at_plan_time(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    ref="step_a",
+                    name="Upload",
+                    input_bindings={"question": "Data {{ step_input.nonexistent }}"},
+                    input_config={"runtime_input": {"enabled": True}},
+                )
+            ])
+        )
+
+        assert not result.valid
+        assert any(e.code == "invalid_runtime_variable_path" for e in result.errors)
+
+    def test_form_field_variable_reference_allowed(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Form flow",
+            steps=[
+                _step(
+                    ref="step_a",
+                    name="Use form variable",
+                    instructions="Use {{ Ärendenummer }} in the summary.",
+                )
+            ],
+            form_fields=[
+                FormFieldSpec(
+                    name="Ärendenummer",
+                    type="text",
+                    label="Ärendenummer",
+                    required=True,
+                )
+            ],
+        )
+        result = validate_spec(spec)
+        assert result.valid
+
+    def test_reserved_runtime_variable_allowed(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    ref="step_a",
+                    name="Use system variables",
+                    instructions="Date {{ datum }} and input {{ flow_input.text }}.",
+                )
+            ])
+        )
+        assert result.valid
+
+    def test_future_step_reference_in_bindings_rejected(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    ref="step_a",
+                    name="First",
+                    input_bindings={"question": "Use {{ step_2.output.text }}"},
+                ),
+                _step(
+                    ref="step_b",
+                    name="Second",
+                    input_source=InputSource.PREVIOUS_STEP,
+                ),
+            ])
+        )
+        assert not result.valid
+        assert any(e.code == "future_step_reference" for e in result.errors)
+
+    def test_structured_access_requires_json_output(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    ref="step_a",
+                    name="Extract",
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    ref="step_b",
+                    name="Use field",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_bindings={"question": "Title: {{ step_1.output.structured.title }}"},
+                ),
+            ])
+        )
+        assert not result.valid
+        assert any(e.code == "structured_access_requires_json_output" for e in result.errors)
+
+    def test_missing_output_contract_field_reference_rejected(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    ref="step_a",
+                    name="Extract JSON",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                        },
+                    },
+                ),
+                _step(
+                    ref="step_b",
+                    name="Summarize",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_bindings={"question": "{{ step_1.output.structured.summary }}"},
+                ),
+            ])
+        )
+        assert not result.valid
+        assert any(e.code == "unknown_output_contract_field" for e in result.errors)
+
+
+class TestProductionParityValidation:
+    def test_reserved_form_field_alias_rejected(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Form flow",
+            steps=[_step()],
+            form_fields=[
+                FormFieldSpec(
+                    name="föregående_steg",
+                    type="text",
+                    label="Föregående steg",
+                )
+            ],
+        )
+        result = validate_spec(spec)
+        assert not result.valid
+        assert any("reserved" in e.message.lower() for e in result.errors)
+
+    def test_multiselect_requires_options(self) -> None:
+        spec = FlowDraftSpecCore.model_validate({
+            "flow_name": "Form flow",
+            "steps": [
+                {
+                    "plan_step_ref": "step_a",
+                    "name": "Extract",
+                    "assistant_spec": {"instructions": "Extract."},
+                    "input_source": "flow_input",
+                }
+            ],
+            "form_fields": [
+                {
+                    "name": "Kategorier",
+                    "type": "multiselect",
+                    "label": "Kategorier",
+                }
+            ],
+        })
+        result = validate_spec(spec)
+        assert not result.valid
+        assert any("multiselect" in e.message.lower() for e in result.errors)
+
+    def test_runtime_input_question_must_reference_step_input(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    ref="step_a",
+                    name="Upload",
+                    input_bindings={"question": "Sammanfatta filen"},
+                    input_config={"runtime_input": {"enabled": True}},
+                )
+            ])
+        )
+        assert not result.valid
+        assert any("step_input" in e.message for e in result.errors)
+
+    def test_runtime_input_literal_substring_does_not_count_as_consumed(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    ref="step_a",
+                    name="Upload",
+                    input_bindings={"question": "Literal step_input.text marker"},
+                    input_config={"runtime_input": {"enabled": True}},
+                )
+            ])
+        )
+
+        assert not result.valid
+        assert any(
+            e.code == "flow_step_invalid" and "step_input" in e.message
+            for e in result.errors
+        )
+
+    def test_template_fill_rejects_output_contract(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    ref="step_a",
+                    name="Fyll DOCX",
+                    output_mode=OutputMode.TEMPLATE_FILL,
+                    output_type=OutputType.DOCX,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"title": {"type": "string"}},
+                    },
+                    output_config={"bindings": {"TITLE": "{{ step_1.output.text }}"}},
+                )
+            ])
+        )
+        assert not result.valid
+        assert any("output_contract" in e.message for e in result.errors)
+
+
+class TestContractInstructionLint:
+    def test_warns_when_output_contract_fields_missing_from_instructions(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    ref="step_a",
+                    name="Extract JSON",
+                    instructions="Return JSON.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {
+                            "sammanfattning": {"type": "string"},
+                            "risk": {"type": "string"},
+                        },
+                    },
+                )
+            ])
+        )
+        assert result.valid
+        assert any(w.code == "contract_instruction_mismatch" for w in result.warnings)
+
+    def test_json_incompatible_with_all_previous_steps(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="First"),
+                _step(
+                    ref="step_b",
+                    name="JSON",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.JSON,
+                ),
+            ])
+        )
+        assert not result.valid
+        assert any(e.code == "json_all_previous_incompatible" for e in result.errors)
+
+
+# ---------------------------------------------------------------------------
+# Type compatibility
+# ---------------------------------------------------------------------------
+
+
+class TestTypeCompatibility:
+    def test_text_to_text_compatible(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="A", output_type=OutputType.TEXT),
+                _step(
+                    ref="step_b",
+                    name="B",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                ),
+            ])
+        )
+        assert result.valid
+
+    def test_text_to_json_compatible(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="A", output_type=OutputType.TEXT),
+                _step(
+                    ref="step_b",
+                    name="B",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                ),
+            ])
+        )
+        assert result.valid
+
+    def test_json_to_text_compatible(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="A", output_type=OutputType.JSON),
+                _step(
+                    ref="step_b",
+                    name="B",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                ),
+            ])
+        )
+        assert result.valid
+
+    def test_pdf_to_audio_incompatible(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="A", output_type=OutputType.PDF),
+                _step(
+                    ref="step_b",
+                    name="B",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.AUDIO,
+                ),
+            ])
+        )
+        assert not result.valid
+        assert any(e.code == "incompatible_type_chain" for e in result.errors)
+
+    def test_docx_to_json_incompatible(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="A", output_type=OutputType.DOCX),
+                _step(
+                    ref="step_b",
+                    name="B",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                ),
+            ])
+        )
+        assert not result.valid
+        assert any(e.code == "incompatible_type_chain" for e in result.errors)
+
+    def test_any_input_accepts_anything(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="A", output_type=OutputType.JSON),
+                _step(
+                    ref="step_b",
+                    name="B",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.ANY,
+                ),
+            ])
+        )
+        assert result.valid
+
+
+# ---------------------------------------------------------------------------
+# Transcribe-only constraints
+# ---------------------------------------------------------------------------
+
+
+class TestTranscribeOnly:
+    def test_transcribe_only_requires_audio(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    input_type=InputType.TEXT,
+                    output_mode=OutputMode.TRANSCRIBE_ONLY,
+                ),
+            ])
+        )
+        assert not result.valid
+        assert any(e.code == "transcribe_only_violation" for e in result.errors)
+
+    def test_transcribe_only_requires_text_output(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    input_type=InputType.AUDIO,
+                    output_mode=OutputMode.TRANSCRIBE_ONLY,
+                    output_type=OutputType.JSON,
+                ),
+            ])
+        )
+        assert not result.valid
+
+    def test_valid_transcribe_only(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    input_type=InputType.AUDIO,
+                    output_mode=OutputMode.TRANSCRIBE_ONLY,
+                    output_type=OutputType.TEXT,
+                ),
+            ])
+        )
+        assert result.valid
+
+
+# ---------------------------------------------------------------------------
+# Template fill constraints
+# ---------------------------------------------------------------------------
+
+
+class TestTemplateFill:
+    def test_template_fill_requires_docx(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    output_mode=OutputMode.TEMPLATE_FILL,
+                    output_type=OutputType.TEXT,
+                ),
+            ])
+        )
+        assert not result.valid
+        assert any(e.code == "template_fill_requires_docx" for e in result.errors)
+
+    def test_template_fill_with_docx_valid(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    output_mode=OutputMode.TEMPLATE_FILL,
+                    output_type=OutputType.DOCX,
+                ),
+            ])
+        )
+        assert result.valid
+
+
+# ---------------------------------------------------------------------------
+# Model / KB reference validation
+# ---------------------------------------------------------------------------
+
+
+class TestReferenceValidation:
+    def test_unknown_model_ref_rejected(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    instructions="Test",
+                ),
+            ]),
+            available_model_refs={"gpt-4", "claude-3"},
+        )
+        # step has no model_ref (None) so should pass
+        assert result.valid
+
+    def test_unknown_model_ref_error(self) -> None:
+        steps = [
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Test",
+                assistant_spec=AssistantSpec(
+                    instructions="Test",
+                    model_ref="nonexistent-model",
+                ),
+                input_source=InputSource.FLOW_INPUT,
+            ),
+        ]
+        result = validate_spec(
+            _spec(steps),
+            available_model_refs={"gpt-4", "claude-3"},
+        )
+        assert not result.valid
+        assert any(e.code == "unknown_model_ref" for e in result.errors)
+
+    def test_valid_model_ref_passes(self) -> None:
+        steps = [
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Test",
+                assistant_spec=AssistantSpec(
+                    instructions="Test",
+                    model_ref="gpt-4",
+                ),
+                input_source=InputSource.FLOW_INPUT,
+            ),
+        ]
+        result = validate_spec(
+            _spec(steps),
+            available_model_refs={"gpt-4", "claude-3"},
+        )
+        assert result.valid
+
+    def test_unknown_kb_ref_rejected(self) -> None:
+        steps = [
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Test",
+                assistant_spec=AssistantSpec(
+                    instructions="Test",
+                    knowledge_refs=["nonexistent_kb"],
+                ),
+                input_source=InputSource.FLOW_INPUT,
+            ),
+        ]
+        result = validate_spec(
+            _spec(steps),
+            available_kb_refs={"kb_policy"},
+        )
+        assert not result.valid
+        assert any(e.code == "unknown_kb_ref" for e in result.errors)
+
+    def test_no_ref_validation_when_none(self) -> None:
+        """When available refs are None, skip ref validation."""
+        steps = [
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Test",
+                assistant_spec=AssistantSpec(
+                    instructions="Test",
+                    model_ref="anything",
+                    knowledge_refs=["anything"],
+                ),
+                input_source=InputSource.FLOW_INPUT,
+            ),
+        ]
+        result = validate_spec(
+            _spec(steps),
+            available_model_refs=None,
+            available_kb_refs=None,
+        )
+        assert result.valid
+
+
+# ---------------------------------------------------------------------------
+# Quality lint
+# ---------------------------------------------------------------------------
+
+
+class TestQualityLint:
+    def test_all_previous_steps_overuse_warned(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="First"),
+                _step(ref="step_b", name="Second", input_source=InputSource.ALL_PREVIOUS_STEPS),
+                _step(ref="step_c", name="Third", input_source=InputSource.ALL_PREVIOUS_STEPS),
+            ])
+        )
+        assert result.valid
+        assert any(w.code == "all_previous_overuse" for w in result.warnings)
+
+    def test_single_all_previous_no_warning(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="First"),
+                _step(ref="step_b", name="Second", input_source=InputSource.ALL_PREVIOUS_STEPS),
+            ])
+        )
+        assert result.valid
+        assert not any(w.code == "all_previous_overuse" for w in result.warnings)
+
+    def test_vague_step_name_warned(self) -> None:
+        result = validate_spec(_spec([_step(name="Steg")]))
+        assert result.valid
+        assert any(w.code == "vague_step_name" for w in result.warnings)
+
+    def test_short_step_name_warned(self) -> None:
+        result = validate_spec(_spec([_step(name="AB")]))
+        assert result.valid
+        assert any(w.code == "vague_step_name" for w in result.warnings)
+
+    def test_descriptive_step_name_no_warning(self) -> None:
+        result = validate_spec(_spec([_step(name="Extrahera fakta")]))
+        assert result.valid
+        assert not any(w.code == "vague_step_name" for w in result.warnings)
+
+    def test_multi_goal_prompt_warned(self) -> None:
+        long_instructions = "Extrahera alla viktiga fakta och sedan bedöm konsekvenserna " + ("x " * 150)
+        result = validate_spec(
+            _spec([_step(instructions=long_instructions)])
+        )
+        assert result.valid
+        assert any(w.code == "multi_goal_prompt" for w in result.warnings)
+
+    def test_short_multi_goal_no_warning(self) -> None:
+        """Short prompts with 'och sedan' are fine — it's the combo with length."""
+        result = validate_spec(
+            _spec([_step(instructions="Extrahera data och sedan summera")])
+        )
+        assert result.valid
+        assert not any(w.code == "multi_goal_prompt" for w in result.warnings)
+
+    def test_single_step_flow_info(self) -> None:
+        result = validate_spec(_spec([_step(name="Sammanfatta")]))
+        assert result.valid
+        assert any(
+            w.code == "single_step_flow" and w.severity == LintSeverity.INFO
+            for w in result.warnings
+        )
+
+    def test_multi_step_no_single_step_warning(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(ref="step_a", name="First"),
+                _step(ref="step_b", name="Second", input_source=InputSource.PREVIOUS_STEP),
+            ])
+        )
+        assert result.valid
+        assert not any(w.code == "single_step_flow" for w in result.warnings)
+
+    def test_lint_only_runs_on_valid_spec(self) -> None:
+        """Lint should NOT run if hard validation fails."""
+        result = validate_spec(_spec([]))  # Empty = hard fail
+        assert not result.valid
+        assert result.warnings == []  # No lint ran
+
+    def test_runtime_input_without_binding_does_not_warn_for_transcribe_only_step(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    ref="step_a",
+                    name="Transkribera ljud",
+                    input_source=InputSource.FLOW_INPUT,
+                    input_type=InputType.AUDIO,
+                    output_mode=OutputMode.TRANSCRIBE_ONLY,
+                    output_type=OutputType.TEXT,
+                    input_config={"runtime_input": {"enabled": True, "input_format": "audio"}},
+                ),
+                _step(
+                    ref="step_b",
+                    name="Sammanfatta",
+                    input_source=InputSource.PREVIOUS_STEP,
+                ),
+            ])
+        )
+        assert result.valid
+        assert not any(w.code == "runtime_input_without_binding" for w in result.warnings)
+
+    def test_runtime_input_without_binding_does_not_warn_for_document_flow_input_step(self) -> None:
+        result = validate_spec(
+            _spec([
+                _step(
+                    ref="step_a",
+                    name="Analysera dokument",
+                    input_source=InputSource.FLOW_INPUT,
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.TEXT,
+                    input_config={"runtime_input": {"enabled": True, "input_format": "document"}},
+                ),
+            ])
+        )
+        assert result.valid
+        assert not any(w.code == "runtime_input_without_binding" for w in result.warnings)

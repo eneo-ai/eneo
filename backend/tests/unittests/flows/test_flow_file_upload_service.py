@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from io import BytesIO
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -302,6 +303,52 @@ async def test_upload_accepts_content_type_with_parameters(monkeypatch) -> None:
 
     await service.upload_file_for_flow(flow_id=flow.id, upload_file=upload)
 
+    file_service.save_file.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_upload_offloads_file_inspection_to_thread(monkeypatch) -> None:
+    flow_service = AsyncMock()
+    file_service = AsyncMock()
+    settings_service = AsyncMock()
+
+    flow = _flow(step=_step(step_order=1, input_type="audio"))
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+        file_max_size_bytes=11_000_000,
+        audio_max_size_bytes=25_000_000,
+    )
+    file_service.save_file.return_value = AsyncMock()
+
+    service = FlowFileUploadService(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+    )
+    upload = UploadFile(
+        filename="audio.mp3",
+        file=BytesIO(b"fake"),
+        headers={"content-type": "audio/mpeg"},
+    )
+
+    calls: list[str] = []
+
+    async def fake_to_thread(func, *args, **kwargs):
+        calls.append(func.__name__)
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "intric.flows.flow_file_upload_service.asyncio.to_thread",
+        fake_to_thread,
+    )
+    monkeypatch.setattr(
+        "intric.flows.flow_file_upload_service.magic.from_buffer",
+        lambda _chunk, mime=True: "audio/mpeg",
+    )
+
+    await service.upload_file_for_flow(flow_id=flow.id, upload_file=upload)
+
+    assert calls == ["_is_empty_upload_file", "_sniff_mimetype"]
     file_service.save_file.assert_awaited_once()
 
 
@@ -720,6 +767,69 @@ async def test_get_run_contract_returns_runtime_steps_and_template_readiness() -
     )
     assert contract["template_readiness"][0]["status"] == "ready"
     assert contract["template_readiness"][0]["template_asset_id"] == asset_id
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_logs_template_lookup_failures(caplog) -> None:
+    flow_service = AsyncMock()
+    file_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    template_asset_repo = AsyncMock()
+
+    template_step = _step(step_order=1, input_type="text").model_copy(
+        update={
+            "output_mode": "template_fill",
+            "output_type": "docx",
+            "output_config": {
+                "template_asset_id": str(uuid4()),
+                "template_file_id": str(uuid4()),
+                "template_checksum": "published-checksum",
+                "template_name": "Published template",
+                "bindings": {"Body": "{{step_1.output.text}}"},
+            },
+        }
+    )
+    flow = _flow(step=template_step).model_copy(update={"published_version": 4, "steps": [template_step]})
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+        file_max_size_bytes=12_000_000,
+        audio_max_size_bytes=25_000_000,
+        max_files_per_run=5,
+    )
+    template_asset_repo.get.side_effect = RuntimeError("lookup failed")
+    flow_version_repo.get.return_value = SimpleNamespace(
+        definition_json={
+            "steps": [
+                {
+                    "step_id": str(template_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(template_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "template_fill",
+                    "output_type": "docx",
+                    "output_config": template_step.output_config,
+                    "mcp_policy": "inherit",
+                }
+            ]
+        }
+    )
+
+    service = FlowFileUploadService(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+        template_asset_repo=template_asset_repo,
+    )
+
+    caplog.set_level(logging.WARNING)
+    contract = await service.get_run_contract(flow_id=flow.id)
+
+    assert contract["template_readiness"][0]["status"] == "unavailable"
+    assert contract["template_readiness"][0]["message_code"] == "flow_template_not_accessible"
+    assert "Failed to resolve template asset readiness" in caplog.text
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 from importlib import import_module
+from typing import TYPE_CHECKING
 
-from intric.flows.flow import (
+from intric.flows.domain.flow import (
     Flow,
     FlowRun,
     FlowRunStatus,
@@ -14,18 +15,24 @@ from intric.flows.flow import (
 )
 from intric.flows.execution_backend import FlowExecutionBackend
 from intric.flows.flow_factory import FlowFactory
-from intric.flows.flow_repo import FlowRepository
-from intric.flows.flow_run_repo import FlowRunRepository
-from intric.flows.flow_version_repo import FlowVersionRepository
+from intric.flows.infrastructure.flow_repo import FlowRepository
+from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
+from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.variable_resolver import FlowVariableResolver, iter_template_expressions
 
 _LAZY_EXPORTS = {
-    "FlowRunService": ("intric.flows.flow_run_service", "FlowRunService"),
-    "FlowService": ("intric.flows.flow_service", "FlowService"),
+    "FlowRunService": ("intric.flows.application.flow_run_service", "FlowRunService"),
+    "FlowService": ("intric.flows.application.flow_service", "FlowService"),
     "flow_file_upload_service": ("intric.flows.flow_file_upload_service", None),
-    "flow_run_service": ("intric.flows.flow_run_service", None),
-    "flow_service": ("intric.flows.flow_service", None),
+    "flow_run_service": ("intric.flows.application.flow_run_service", None),
+    "flow_service": ("intric.flows.application.flow_service", None),
 }
+
+if TYPE_CHECKING:
+    from intric.flows.application.flow_run_service import FlowRunService
+    from intric.flows.application.flow_service import FlowService
+    from intric.flows import flow_file_upload_service
+    from intric.flows.application import flow_run_service, flow_service
 
 __all__ = [
     "Flow",

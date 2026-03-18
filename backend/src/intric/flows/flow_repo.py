@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, cast
 from uuid import UUID
@@ -9,15 +10,26 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.database.tables.assistant_table import Assistants
+from intric.database.tables.assistant_table import Assistants, AssistantsGroups
+from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.flow_tables import (
     FlowStepResults,
     FlowSteps,
     Flows,
 )
+from intric.database.tables.prompts_table import Prompts, PromptsAssistants
+from intric.database.tables.spaces_table import Spaces
+from intric.database.tables.users_table import Users
 from intric.flows.flow import Flow, FlowSparse, FlowStep, FlowStepResult
 from intric.flows.flow_factory import FlowFactory
 from intric.main.exceptions import BadRequestException, NotFoundException
+
+
+@dataclass(frozen=True)
+class AssistantScopeRow:
+    id: UUID
+    origin: str | None
+    managing_flow_id: UUID | None
 
 
 class FlowRepository:
@@ -176,7 +188,117 @@ class FlowRepository:
         flow_rows = (await self.session.execute(stmt)).scalars().all()
         return [self.factory.from_flow_sparse_db(row) for row in flow_rows]
 
-    async def update(self, flow: Flow, tenant_id: UUID) -> Flow:
+    async def get_assistant_snapshots(
+        self,
+        *,
+        assistant_ids: list[UUID],
+        tenant_id: UUID,
+    ) -> dict[UUID, dict[str, Any]]:
+        if not assistant_ids:
+            return {}
+
+        assistant_rows = (
+            await self.session.execute(
+                sa.select(
+                    Assistants.id,
+                    Assistants.completion_model_id,
+                    Prompts.text.label("instructions"),
+                )
+                .join(Users, Users.id == Assistants.user_id)
+                .outerjoin(
+                    PromptsAssistants,
+                    sa.and_(
+                        PromptsAssistants.assistant_id == Assistants.id,
+                        PromptsAssistants.is_selected.is_(True),
+                    ),
+                )
+                .outerjoin(Prompts, Prompts.id == PromptsAssistants.prompt_id)
+                .where(Assistants.id.in_(assistant_ids))
+                .where(Users.tenant_id == tenant_id)
+            )
+        ).all()
+
+        snapshots: dict[UUID, dict[str, Any]] = {
+            row.id: {
+                "instructions": row.instructions,
+                "model_ref": str(row.completion_model_id) if row.completion_model_id else None,
+                "knowledge_refs": [],
+            }
+            for row in assistant_rows
+        }
+
+        collection_rows = (
+            await self.session.execute(
+                sa.select(
+                    AssistantsGroups.assistant_id,
+                    CollectionsTable.name,
+                )
+                .join(
+                    CollectionsTable,
+                    CollectionsTable.id == AssistantsGroups.group_id,
+                )
+                .where(AssistantsGroups.assistant_id.in_(assistant_ids))
+                .order_by(
+                    AssistantsGroups.assistant_id.asc(),
+                    CollectionsTable.created_at.asc(),
+                )
+            )
+        ).all()
+        for row in collection_rows:
+            if row.assistant_id not in snapshots:
+                continue
+            snapshots[row.assistant_id]["knowledge_refs"].append(row.name)
+
+        return {
+            assistant_id: snapshots[assistant_id]
+            for assistant_id in assistant_ids
+            if assistant_id in snapshots
+        }
+
+    async def get_assistant_scope_rows(
+        self,
+        *,
+        assistant_ids: set[UUID],
+        space_id: UUID,
+        tenant_id: UUID,
+    ) -> list[AssistantScopeRow]:
+        if not assistant_ids:
+            return []
+
+        rows = (
+            await self.session.execute(
+                sa.select(Assistants.id, Assistants.origin, Assistants.managing_flow_id)
+                .join(Spaces, Spaces.id == Assistants.space_id)
+                .where(Assistants.id.in_(assistant_ids))
+                .where(Assistants.space_id == space_id)
+                .where(Spaces.tenant_id == tenant_id)
+            )
+        ).all()
+        return [
+            AssistantScopeRow(
+                id=cast(UUID, row.id),
+                origin=cast(str | None, row.origin),
+                managing_flow_id=cast(UUID | None, row.managing_flow_id),
+            )
+            for row in rows
+        ]
+
+    async def is_active(self, *, flow_id: UUID, tenant_id: UUID) -> bool:
+        flow_id_in_db = await self.session.scalar(
+            sa.select(Flows.id)
+            .where(Flows.id == flow_id)
+            .where(Flows.tenant_id == tenant_id)
+            .where(Flows.deleted_at.is_(None))
+        )
+        return flow_id_in_db is not None
+
+    async def update(
+        self,
+        flow: Flow,
+        tenant_id: UUID,
+        *,
+        expected_revision: int | None = None,
+    ) -> Flow:
         if flow.id is None:
             raise BadRequestException("Flow id is required for update.")
 
@@ -192,11 +314,28 @@ class FlowRepository:
                 published_version=flow.published_version,
                 metadata_json=flow.metadata_json,
                 data_retention_days=flow.data_retention_days,
+                draft_revision=Flows.draft_revision + 1,
             )
             .returning(Flows)
         )
+        if expected_revision is not None:
+            stmt = stmt.where(Flows.draft_revision == expected_revision)
         flow_in_db = await self.session.scalar(stmt)
         if flow_in_db is None:
+            if expected_revision is not None:
+                exists_stmt = (
+                    sa.select(Flows.id)
+                    .where(Flows.id == flow.id)
+                    .where(Flows.tenant_id == tenant_id)
+                    .where(Flows.deleted_at.is_(None))
+                )
+                existing_id = await self.session.scalar(exists_stmt)
+                if existing_id is not None:
+                    raise BadRequestException(
+                        "Flödet ändrades av en annan användare. "
+                        "Dina ändringar beräknas mot den nya versionen.",
+                        code="stale_revision",
+                    )
             raise NotFoundException("Flow not found.")
 
         await self._sync_flow_steps(flow_id=flow.id, tenant_id=tenant_id, steps=flow.steps)

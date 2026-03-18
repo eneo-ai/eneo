@@ -210,6 +210,9 @@ class Settings(BaseSettings):
     flow_http_request_timeout_seconds: int = 30
     flow_http_max_timeout_seconds: int = 120
     flow_http_allow_private_networks: bool = False
+    ai_builder_conversation_safety_buffer_tokens: int = 2_000
+    ai_builder_minimum_conversation_budget_tokens: int = 4_000
+    ai_builder_unknown_model_context_window_tokens: int | None = None
 
     # Orphaned crawl run cleanup (prevents "Crawl already in progress" blocking)
     orphan_crawl_run_timeout_hours: int = (

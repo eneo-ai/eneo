@@ -13,6 +13,7 @@
   export let activeStepId: string | null;
   export let isPublished: boolean;
   export let validationErrors: Map<string, string[]> = new Map();
+  export let onBuildWithAI: (() => void) | undefined = undefined;
 
   const dispatch = createEventDispatcher<{
     selectStep: string | null;
@@ -92,6 +93,17 @@
       <div class="flex flex-col items-center gap-3 px-4 py-8 text-center">
         <p class="text-secondary text-sm">{m.flow_steps_empty()}</p>
         <p class="text-muted max-w-[200px] text-xs">{m.flow_step_list_empty_hint()}</p>
+        {#if !isPublished && onBuildWithAI}
+          <div class="mt-2 w-full">
+            <Button
+              variant="outlined"
+              size="small"
+              on:click={onBuildWithAI}
+            >
+              {m.ai_builder_empty_state_cta()}
+            </Button>
+          </div>
+        {/if}
         {#if !isPublished && $mode === "power_user"}
           <div class="bg-secondary/10 mt-2 w-full rounded-xl px-4 py-4 text-left">
             <p class="text-primary text-sm font-medium">

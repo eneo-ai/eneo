@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import logging
 from typing import Protocol
@@ -13,7 +14,7 @@ from intric.files.file_models import File
 from intric.files.file_service import FileService
 from intric.files.image import ImageMimeTypes
 from intric.files.text import TextMimeTypes
-from intric.flows.flow import Flow, FlowStep
+from intric.flows.flow import Flow, FlowStep, FlowTemplateAsset, FlowVersion
 from intric.flows.flow_input_limits import FlowInputLimits, effective_flow_input_limit, effective_max_files_per_run
 from intric.flows.runtime.step_definition_parser import parse_runtime_steps
 from intric.flows.runtime_input import build_runtime_input_config, runtime_input_accept_mimetypes
@@ -108,6 +109,14 @@ def _is_empty_upload_file(upload_file: UploadFile) -> bool:
     return isinstance(chunk, bytes) and len(chunk) == 0
 
 
+async def _sniff_mimetype_async(upload_file: UploadFile) -> str | None:
+    return await asyncio.to_thread(_sniff_mimetype, upload_file)
+
+
+async def _is_empty_upload_file_async(upload_file: UploadFile) -> bool:
+    return await asyncio.to_thread(_is_empty_upload_file, upload_file)
+
+
 class _FlowServiceProtocol(Protocol):
     async def get_flow(self, flow_id: UUID) -> Flow: ...
 
@@ -117,11 +126,19 @@ class _SettingsServiceProtocol(Protocol):
 
 
 class _FlowVersionRepositoryProtocol(Protocol):
-    async def get(self, flow_id: UUID, version: int, tenant_id: UUID): ...
+    async def get(self, flow_id: UUID, version: int, tenant_id: UUID) -> FlowVersion: ...
 
 
 class _FlowTemplateAssetRepositoryProtocol(Protocol):
-    async def get(self, *, asset_id: UUID, tenant_id: UUID): ...
+    async def get(self, *, asset_id: UUID, tenant_id: UUID) -> FlowTemplateAsset: ...
+
+    async def get_by_flow_file(
+        self,
+        *,
+        flow_id: UUID,
+        file_id: UUID,
+        tenant_id: UUID,
+    ) -> FlowTemplateAsset: ...
 
 
 @dataclass(frozen=True)
@@ -175,16 +192,11 @@ def _recommended_run_payload_for_input_type(
 
 
 def _build_policy(flow: Flow, limits: FlowInputLimits) -> FlowFileInputPolicy:
-    if flow.id is None:
-        raise BadRequestException(
-            "Flow id is missing.",
-            code="flow_id_missing",
-        )
-
+    flow_id = _require_flow_id(flow)
     step = _first_flow_input_step(flow)
     if step is None:
         return FlowFileInputPolicy(
-            flow_id=flow.id,
+            flow_id=flow_id,
             input_type=None,
             input_source=None,
             accepts_file_upload=False,
@@ -210,7 +222,7 @@ def _build_policy(flow: Flow, limits: FlowInputLimits) -> FlowFileInputPolicy:
         )
 
     return FlowFileInputPolicy(
-        flow_id=flow.id,
+        flow_id=flow_id,
         input_type=input_type,
         input_source=step.input_source,
         accepts_file_upload=accepts_file_upload,
@@ -222,6 +234,15 @@ def _build_policy(flow: Flow, limits: FlowInputLimits) -> FlowFileInputPolicy:
             accepts_file_upload=accepts_file_upload,
         ),
     )
+
+
+def _require_flow_id(flow: Flow) -> UUID:
+    if flow.id is None:
+        raise BadRequestException(
+            "Flow id is missing.",
+            code="flow_id_missing",
+        )
+    return flow.id
 
 
 class FlowFileUploadService:
@@ -247,81 +268,11 @@ class FlowFileUploadService:
 
     async def upload_file_for_flow(self, *, flow_id: UUID, upload_file: UploadFile) -> File:
         policy = await self.get_input_policy(flow_id=flow_id)
-
-        if not policy.accepts_file_upload:
-            raise BadRequestException(
-                "Flow does not accept file uploads for flow_input. "
-                "Use text/json payload for this flow.",
-                code="flow_input_upload_not_supported",
-                context={"flow_id": str(flow_id), "input_type": policy.input_type},
-            )
-
-        if _is_empty_upload_file(upload_file):
-            raise BadRequestException(
-                "Uploaded file is empty.",
-                code="flow_input_file_empty",
-                context={"flow_id": str(flow_id)},
-            )
-
-        declared_type = _normalize_mimetype(upload_file.content_type)
-        declared_canonical = _canonicalize_mimetype(declared_type)
-        allowed_canonical_types = {
-            _canonicalize_mimetype(mimetype) for mimetype in policy.accepted_mimetypes
-        }
-        sniffed_type = _sniff_mimetype(upload_file)
-        sniffed_canonical = _canonicalize_mimetype(sniffed_type) if sniffed_type else ""
-
-        if sniffed_type in _UNKNOWN_SNIFFED_TYPES:
-            sniffed_type = None
-            sniffed_canonical = ""
-
-        if sniffed_canonical and sniffed_canonical not in allowed_canonical_types:
-            allowed_types = ", ".join(policy.accepted_mimetypes)
-            raise FileNotSupportedException(
-                f"Detected file type '{sniffed_type}' is not allowed for flow input "
-                f"type '{policy.input_type}'. Allowed types: {allowed_types}.",
-                code="unsupported_media_type",
-                context={
-                    "flow_id": str(flow_id),
-                    "input_type": policy.input_type,
-                    "received_type": declared_type or "missing",
-                    "detected_type": sniffed_type,
-                },
-            )
-
-        if not declared_canonical or declared_canonical not in allowed_canonical_types:
-            received_type = upload_file.content_type or "missing"
-            allowed_types = ", ".join(policy.accepted_mimetypes)
-            raise FileNotSupportedException(
-                f"Unsupported file type '{received_type}' for flow input type '{policy.input_type}'. "
-                f"Allowed types: {allowed_types}.",
-                code="unsupported_media_type",
-                context={
-                    "flow_id": str(flow_id),
-                    "input_type": policy.input_type,
-                    "received_type": received_type,
-                },
-            )
-
-        max_size = policy.max_file_size_bytes
-        if max_size is None:
-            raise BadRequestException(
-                "Flow input policy is missing a max file size.",
-                code="flow_input_policy_missing_limit",
-                context={"flow_id": str(flow_id)},
-            )
-
-        try:
-            return await self.file_service.save_file(upload_file, max_size=max_size)
-        except FileTooLargeException as exc:
-            raise FileTooLargeException(
-                f"Uploaded file exceeds effective flow limit of {max_size} bytes.",
-                code="file_too_large",
-                context={
-                    "flow_id": str(flow_id),
-                    "max_file_size_bytes": max_size,
-                },
-            ) from exc
+        return await self._upload_with_policy(
+            flow_id=flow_id,
+            upload_file=upload_file,
+            policy=policy,
+        )
 
     async def get_run_contract(self, *, flow_id: UUID) -> dict[str, object]:
         if self.flow_version_repo is None or self.template_asset_repo is None:
@@ -330,6 +281,7 @@ class FlowFileUploadService:
                 code="flow_runtime_contract_unavailable",
             )
         flow = await self.flow_service.get_flow(flow_id)
+        persisted_flow_id = _require_flow_id(flow)
         if flow.published_version is None:
             raise BadRequestException(
                 "Flow must be published before a run contract can be created.",
@@ -337,7 +289,7 @@ class FlowFileUploadService:
             )
 
         version = await self.flow_version_repo.get(
-            flow_id=flow.id,
+            flow_id=persisted_flow_id,
             version=flow.published_version,
             tenant_id=flow.tenant_id,
         )
@@ -397,12 +349,21 @@ class FlowFileUploadService:
                     template_file_id = asset.file_id
                     checksum = asset.checksum
                 except Exception:
+                    logger.warning(
+                        "Failed to resolve template asset readiness for published flow contract.",
+                        extra={
+                            "flow_id": str(persisted_flow_id),
+                            "step_id": str(step.step_id),
+                            "template_asset_id": str(asset_id_raw),
+                        },
+                        exc_info=True,
+                    )
                     asset_status = "unavailable"
             elif template_file_id is not None:
                 try:
                     legacy_file_id = UUID(str(template_file_id))
                     asset = await self.template_asset_repo.get_by_flow_file(
-                        flow_id=flow.id,
+                        flow_id=persisted_flow_id,
                         file_id=legacy_file_id,
                         tenant_id=flow.tenant_id,
                     )
@@ -412,6 +373,15 @@ class FlowFileUploadService:
                     template_file_id = asset.file_id
                     checksum = asset.checksum
                 except Exception:
+                    logger.warning(
+                        "Failed to resolve template asset readiness for published flow contract.",
+                        extra={
+                            "flow_id": str(persisted_flow_id),
+                            "step_id": str(step.step_id),
+                            "template_file_id": str(template_file_id),
+                        },
+                        exc_info=True,
+                    )
                     asset_status = "unavailable"
             template_readiness.append(
                 {
@@ -434,7 +404,7 @@ class FlowFileUploadService:
             form_fields = list(form_schema["fields"])
 
         return {
-            "flow_id": flow.id,
+            "flow_id": persisted_flow_id,
             "published_flow_version": flow.published_version,
             "form_fields": form_fields,
             "steps_requiring_input": steps_requiring_input,
@@ -455,13 +425,14 @@ class FlowFileUploadService:
                 code="flow_runtime_contract_unavailable",
             )
         flow = await self.flow_service.get_flow(flow_id)
+        persisted_flow_id = _require_flow_id(flow)
         if flow.published_version is None:
             raise BadRequestException(
                 "Flow must be published before runtime files can be uploaded.",
                 code="flow_not_published",
             )
         version = await self.flow_version_repo.get(
-            flow_id=flow.id,
+            flow_id=persisted_flow_id,
             version=flow.published_version,
             tenant_id=flow.tenant_id,
         )
@@ -483,7 +454,7 @@ class FlowFileUploadService:
             limits=limits,
         )
         policy = FlowFileInputPolicy(
-            flow_id=flow.id,
+            flow_id=persisted_flow_id,
             input_type=runtime_input.input_format,
             input_source=runtime_step.input_source,
             accepts_file_upload=True,
@@ -497,7 +468,7 @@ class FlowFileUploadService:
             recommended_run_payload=None,
         )
         return await self._upload_with_policy(
-            flow_id=flow.id,
+            flow_id=persisted_flow_id,
             upload_file=upload_file,
             policy=policy,
         )
@@ -509,6 +480,31 @@ class FlowFileUploadService:
         upload_file: UploadFile,
         policy: FlowFileInputPolicy,
     ) -> File:
+        max_size = await self._validate_upload_with_policy(
+            flow_id=flow_id,
+            upload_file=upload_file,
+            policy=policy,
+        )
+
+        try:
+            return await self.file_service.save_file(upload_file, max_size=max_size)
+        except FileTooLargeException as exc:
+            raise FileTooLargeException(
+                f"Uploaded file exceeds effective flow limit of {max_size} bytes.",
+                code="file_too_large",
+                context={
+                    "flow_id": str(flow_id),
+                    "max_file_size_bytes": max_size,
+                },
+            ) from exc
+
+    async def _validate_upload_with_policy(
+        self,
+        *,
+        flow_id: UUID,
+        upload_file: UploadFile,
+        policy: FlowFileInputPolicy,
+    ) -> int:
         if not policy.accepts_file_upload:
             raise BadRequestException(
                 "Flow does not accept file uploads for flow_input. Use text/json payload for this flow.",
@@ -516,7 +512,7 @@ class FlowFileUploadService:
                 context={"flow_id": str(flow_id), "input_type": policy.input_type},
             )
 
-        if _is_empty_upload_file(upload_file):
+        if await _is_empty_upload_file_async(upload_file):
             raise BadRequestException(
                 "Uploaded file is empty.",
                 code="flow_input_file_empty",
@@ -528,7 +524,7 @@ class FlowFileUploadService:
         allowed_canonical_types = {
             _canonicalize_mimetype(mimetype) for mimetype in policy.accepted_mimetypes
         }
-        sniffed_type = _sniff_mimetype(upload_file)
+        sniffed_type = await _sniff_mimetype_async(upload_file)
         sniffed_canonical = _canonicalize_mimetype(sniffed_type) if sniffed_type else ""
 
         if sniffed_type in _UNKNOWN_SNIFFED_TYPES:
@@ -568,15 +564,4 @@ class FlowFileUploadService:
                 code="flow_input_policy_missing_limit",
                 context={"flow_id": str(flow_id)},
             )
-
-        try:
-            return await self.file_service.save_file(upload_file, max_size=max_size)
-        except FileTooLargeException as exc:
-            raise FileTooLargeException(
-                f"Uploaded file exceeds effective flow limit of {max_size} bytes.",
-                code="file_too_large",
-                context={
-                    "flow_id": str(flow_id),
-                    "max_file_size_bytes": max_size,
-                },
-            ) from exc
+        return max_size

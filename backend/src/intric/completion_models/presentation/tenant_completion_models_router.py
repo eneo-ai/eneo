@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from intric.ai_models.model_enums import ModelStability
 from intric.authentication.auth_dependencies import get_current_active_user
@@ -11,6 +11,8 @@ from intric.roles.permissions import Permission, validate_permission
 from intric.completion_models.presentation import CompletionModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.container.container import Container
+from intric.main.exceptions import BadRequestException
+from intric.model_providers.domain.model_defaults import lookup_model_defaults
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.users.user import UserInDB
@@ -25,7 +27,9 @@ class TenantCompletionModelCreate(BaseModel):
         description="Model identifier (e.g., 'gpt-4o', 'meta-llama/Meta-Llama-3-70B-Instruct')",
     )
     display_name: str = Field(..., description="User-friendly display name")
-    token_limit: int = Field(default=128000, description="Maximum context tokens")
+    max_input_tokens: int | None = Field(None, description="Maximum input context tokens")
+    max_output_tokens: int | None = Field(None, description="Maximum output tokens")
+    token_limit: int | None = Field(None, description="Backward-compatible alias for max_input_tokens")
     vision: bool = Field(default=False, description="Supports vision/image inputs")
     reasoning: bool = Field(default=False, description="Supports extended reasoning")
     supports_tool_calling: bool = Field(default=False, description="Supports function/tool calling")
@@ -34,18 +38,46 @@ class TenantCompletionModelCreate(BaseModel):
     is_active: bool = Field(default=True, description="Enable in organization")
     is_default: bool = Field(default=False, description="Set as default model")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_token_fields(cls, value):
+        data = dict(value)
+        if data.get("max_input_tokens") is None and data.get("token_limit") is not None:
+            data["max_input_tokens"] = data["token_limit"]
+        defaults = lookup_model_defaults(data.get("name"))
+        if data.get("max_input_tokens") is None and defaults and defaults.max_input_tokens is not None:
+            data["max_input_tokens"] = defaults.max_input_tokens
+        if data.get("max_output_tokens") is None and defaults and defaults.max_output_tokens is not None:
+            max_input_tokens = data.get("max_input_tokens")
+            data["max_output_tokens"] = (
+                min(int(max_input_tokens), defaults.max_output_tokens)
+                if max_input_tokens is not None
+                else defaults.max_output_tokens
+            )
+        return data
+
 
 class TenantCompletionModelUpdate(BaseModel):
     name: str | None = Field(None, description="Model identifier (e.g., 'gpt-4o', 'claude-3-sonnet')")
     display_name: str | None = Field(None, description="User-friendly display name")
     description: str | None = Field(None, description="Model description")
-    token_limit: int | None = Field(None, description="Maximum context tokens")
+    max_input_tokens: int | None = Field(None, description="Maximum input context tokens")
+    max_output_tokens: int | None = Field(None, description="Maximum output tokens")
+    token_limit: int | None = Field(None, description="Backward-compatible alias for max_input_tokens")
     vision: bool | None = Field(None, description="Supports vision/image inputs")
     reasoning: bool | None = Field(None, description="Supports extended reasoning")
     supports_tool_calling: bool | None = Field(None, description="Supports function/tool calling")
     hosting: str | None = Field(None, description="Hosting location (swe, eu, usa)")
     open_source: bool | None = Field(None, description="Is the model open source")
     stability: str | None = Field(None, description="Model stability (stable, experimental)")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_token_fields(cls, value):
+        data = dict(value)
+        if data.get("max_input_tokens") is None and data.get("token_limit") is not None:
+            data["max_input_tokens"] = data["token_limit"]
+        return data
 
 
 @router.post(
@@ -64,7 +96,7 @@ async def create_tenant_completion_model(
     from intric.database.tables.ai_models_table import CompletionModels
     from intric.database.tables.model_providers_table import ModelProviders
     import sqlalchemy as sa
-    from intric.main.exceptions import BadRequestException, NotFoundException
+    from intric.main.exceptions import NotFoundException
 
     assembler = container.completion_model_assembler()
 
@@ -81,6 +113,11 @@ async def create_tenant_completion_model(
 
     if not provider.is_active:
         raise BadRequestException("Model provider is not active")
+
+    if model_create.max_output_tokens is None:
+        raise BadRequestException(
+            "max_output_tokens is required when LiteLLM has no defaults for this model"
+        )
 
     # If setting as default, unset all other defaults first
     if model_create.is_default:
@@ -100,7 +137,9 @@ async def create_tenant_completion_model(
         name=model_create.name,  # Model identifier (may contain slashes)
         nickname=model_create.display_name,
         litellm_model_name=None,  # Constructed at runtime by TenantModelAdapter
-        token_limit=model_create.token_limit,
+        token_limit=model_create.max_input_tokens,
+        max_input_tokens=model_create.max_input_tokens,  # type: ignore[call-arg]
+        max_output_tokens=model_create.max_output_tokens,  # type: ignore[call-arg]
         vision=model_create.vision,
         reasoning=model_create.reasoning,
         supports_tool_calling=model_create.supports_tool_calling,  # type: ignore[call-arg]
@@ -178,8 +217,11 @@ async def update_tenant_completion_model(
         model.nickname = model_update.display_name
     if model_update.description is not None:
         model.description = model_update.description
-    if model_update.token_limit is not None:
-        model.token_limit = model_update.token_limit
+    if model_update.max_input_tokens is not None:
+        model.token_limit = model_update.max_input_tokens
+        model.max_input_tokens = model_update.max_input_tokens
+    if model_update.max_output_tokens is not None:
+        model.max_output_tokens = model_update.max_output_tokens
     if model_update.vision is not None:
         model.vision = model_update.vision
     if model_update.reasoning is not None:

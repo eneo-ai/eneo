@@ -1,7 +1,7 @@
-"""add flow tables and assistant hidden
+"""consolidated flow foundation migration
 
 Revision ID: 579199d395dd
-Revises: 847ef045f3c1
+Revises: 202602131000, 9d2a6c01f3e7
 Create Date: 2026-03-01 11:15:44.279045
 """
 
@@ -12,7 +12,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic
 revision = "579199d395dd"
-down_revision = "847ef045f3c1"
+down_revision = ("202602131000", "9d2a6c01f3e7")
 branch_labels = None
 depends_on = None
 
@@ -25,6 +25,15 @@ def upgrade() -> None:
             sa.Boolean(),
             nullable=False,
             server_default=sa.text("false"),
+        ),
+    )
+    op.add_column(
+        "tenants",
+        sa.Column(
+            "flow_settings",
+            postgresql.JSONB(),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
         ),
     )
 
@@ -181,7 +190,7 @@ def upgrade() -> None:
             name="ck_flow_steps_input_type",
         ),
         sa.CheckConstraint(
-            "output_mode IN ('pass_through','http_post')",
+            "output_mode IN ('pass_through','http_post','transcribe_only','template_fill')",
             name="ck_flow_steps_output_mode",
         ),
         sa.CheckConstraint(
@@ -681,8 +690,223 @@ def upgrade() -> None:
     )
     op.create_index("ix_module_registry_module_id", "module_registry", ["module_id"], unique=True)
 
+    op.add_column(
+        "assistants",
+        sa.Column(
+            "origin",
+            sa.String(length=32),
+            nullable=False,
+            server_default="user",
+        ),
+    )
+    op.add_column(
+        "assistants",
+        sa.Column("managing_flow_id", postgresql.UUID(as_uuid=True), nullable=True),
+    )
+    op.create_foreign_key(
+        "fk_assistants_managing_flow_id_flows",
+        "assistants",
+        "flows",
+        ["managing_flow_id"],
+        ["id"],
+        ondelete="RESTRICT",
+    )
+    op.create_check_constraint(
+        "ck_assistants_origin",
+        "assistants",
+        "origin IN ('user','flow_managed')",
+    )
+    op.create_check_constraint(
+        "ck_assistants_origin_flow_owner",
+        "assistants",
+        "(origin = 'user' AND managing_flow_id IS NULL) OR "
+        "(origin = 'flow_managed' AND managing_flow_id IS NOT NULL)",
+    )
+    op.create_check_constraint(
+        "ck_assistants_flow_managed_hidden",
+        "assistants",
+        "origin <> 'flow_managed' OR hidden = true",
+    )
+    op.create_index(
+        "ix_assistants_origin_managing_flow",
+        "assistants",
+        ["origin", "managing_flow_id"],
+        unique=False,
+    )
+
+    conn = op.get_bind()
+    conflicting_rows = conn.execute(
+        sa.text(
+            """
+            SELECT assistant_id
+            FROM flow_steps
+            GROUP BY assistant_id
+            HAVING COUNT(DISTINCT flow_id) > 1
+            """
+        )
+    ).fetchall()
+    if conflicting_rows:
+        conflicting_ids = ", ".join(str(row[0]) for row in conflicting_rows[:10])
+        raise RuntimeError(
+            "Flow assistant ownership backfill conflict: assistants linked to multiple flows. "
+            f"Example assistant IDs: {conflicting_ids}"
+        )
+
+    conn.execute(
+        sa.text(
+            """
+            UPDATE assistants AS a
+            SET origin = 'flow_managed',
+                managing_flow_id = flow_refs.flow_id,
+                hidden = true
+            FROM (
+                SELECT DISTINCT ON (assistant_id) assistant_id, flow_id
+                FROM flow_steps
+                ORDER BY assistant_id, flow_id
+            ) AS flow_refs
+            WHERE a.id = flow_refs.assistant_id
+            """
+        )
+    )
+
+    op.create_table(
+        "flow_template_assets",
+        sa.Column(
+            "flow_id",
+            postgresql.UUID(as_uuid=True),
+            nullable=False,
+        ),
+        sa.Column(
+            "space_id",
+            postgresql.UUID(as_uuid=True),
+            nullable=False,
+        ),
+        sa.Column(
+            "tenant_id",
+            postgresql.UUID(as_uuid=True),
+            nullable=False,
+        ),
+        sa.Column(
+            "file_id",
+            postgresql.UUID(as_uuid=True),
+            nullable=False,
+        ),
+        sa.Column("name", sa.String(), nullable=False),
+        sa.Column("checksum", sa.String(), nullable=False),
+        sa.Column("mimetype", sa.String(), nullable=True),
+        sa.Column(
+            "placeholders",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=False,
+            server_default=sa.text("'[]'::jsonb"),
+        ),
+        sa.Column(
+            "created_by_user_id",
+            postgresql.UUID(as_uuid=True),
+            nullable=True,
+        ),
+        sa.Column(
+            "updated_by_user_id",
+            postgresql.UUID(as_uuid=True),
+            nullable=True,
+        ),
+        sa.Column(
+            "status",
+            sa.String(length=32),
+            nullable=False,
+            server_default="ready",
+        ),
+        sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            server_default=sa.text("gen_random_uuid()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.CheckConstraint(
+            "status IN ('ready','needs_action','read_only','unavailable')",
+            name="ck_flow_template_assets_status",
+        ),
+        sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(["updated_by_user_id"], ["users.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(["file_id"], ["files.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["space_id"], ["spaces.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_template_assets_flow_tenant",
+        ),
+        sa.ForeignKeyConstraint(["flow_id"], ["flows.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("id", "tenant_id", name="uq_flow_template_assets_id_tenant_id"),
+    )
+    op.create_index(
+        op.f("ix_flow_template_assets_flow_id"),
+        "flow_template_assets",
+        ["flow_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_flow_template_assets_space_id"),
+        "flow_template_assets",
+        ["space_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_flow_template_assets_tenant_id"),
+        "flow_template_assets",
+        ["tenant_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_flow_template_assets_file_id"),
+        "flow_template_assets",
+        ["file_id"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_flow_template_assets_flow_active",
+        "flow_template_assets",
+        ["flow_id", "updated_at"],
+        unique=False,
+        postgresql_where=sa.text("deleted_at IS NULL"),
+    )
+
 
 def downgrade() -> None:
+    op.drop_index("ix_flow_template_assets_flow_active", table_name="flow_template_assets")
+    op.drop_index(op.f("ix_flow_template_assets_file_id"), table_name="flow_template_assets")
+    op.drop_index(op.f("ix_flow_template_assets_tenant_id"), table_name="flow_template_assets")
+    op.drop_index(op.f("ix_flow_template_assets_space_id"), table_name="flow_template_assets")
+    op.drop_index(op.f("ix_flow_template_assets_flow_id"), table_name="flow_template_assets")
+    op.drop_table("flow_template_assets")
+
+    op.drop_index("ix_assistants_origin_managing_flow", table_name="assistants")
+    op.drop_constraint("ck_assistants_flow_managed_hidden", "assistants", type_="check")
+    op.drop_constraint("ck_assistants_origin_flow_owner", "assistants", type_="check")
+    op.drop_constraint("ck_assistants_origin", "assistants", type_="check")
+    op.drop_constraint(
+        "fk_assistants_managing_flow_id_flows",
+        "assistants",
+        type_="foreignkey",
+    )
+    op.drop_column("assistants", "managing_flow_id")
+    op.drop_column("assistants", "origin")
+
     op.drop_index("ix_module_registry_module_id", table_name="module_registry")
     op.drop_table("module_registry")
 
@@ -723,4 +947,5 @@ def downgrade() -> None:
     op.drop_index("ix_flows_space_deleted", table_name="flows")
     op.drop_table("flows")
 
+    op.drop_column("tenants", "flow_settings")
     op.drop_column("assistants", "hidden")

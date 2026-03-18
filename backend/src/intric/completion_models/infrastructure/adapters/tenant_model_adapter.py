@@ -32,8 +32,6 @@ from intric.model_providers.infrastructure.tenant_model_credential_resolver impo
 
 logger = get_logger(__name__)
 
-TOKENS_RESERVED_FOR_COMPLETION = 1000
-
 # Regex to match Qwen3 thinking blocks: <think>...</think>
 THINKING_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 
@@ -304,7 +302,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             kwargs["api_base"] = endpoint
 
         # Inject additional config fields (e.g., api_version for Azure)
-        config_fields = ["api_version", "api_type", "organization"]
+        config_fields = ["api_version", "api_type", "organization", "deployment_name"]
         for field in config_fields:
             value = self.credential_resolver.get_credential_field(field=field)
             if value:
@@ -356,10 +354,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                     f"(reasoning_effort={model_kwargs_dict['reasoning_effort']})"
                 )
             elif not has_explicit_output_cap:
-                # Use 1/4 of model's token limit, capped at 4096
-                default_max = min(self.model.token_limit // 4, 4096) if self.model.token_limit else 4096
-                model_kwargs_dict["max_tokens"] = default_max
-                logger.debug(f"Added default max_tokens={default_max} (from token_limit={self.model.token_limit})")
+                model_kwargs_dict["max_tokens"] = self.model.max_output_tokens
+                logger.debug(
+                    f"Added default max_tokens={self.model.max_output_tokens}"
+                )
 
             kwargs.update(model_kwargs_dict)
 
@@ -1156,12 +1154,12 @@ class TenantModelAdapter(CompletionModelAdapter):
 
     def get_token_limit_of_model(self) -> int:
         """
-        Get token limit for tenant model (with reserved space for completion).
+        Get usable input budget for tenant model.
 
         Returns:
             int: Maximum tokens available for input context
         """
-        return self.model.token_limit - TOKENS_RESERVED_FOR_COMPLETION
+        return self.model.max_input_tokens - self.model.max_output_tokens
 
     def get_logging_details(
         self, context: "Context", model_kwargs: dict

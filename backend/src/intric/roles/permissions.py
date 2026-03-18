@@ -24,6 +24,42 @@ class Permission(str, Enum):
     WEBSITES = "websites"
     INTEGRATIONS = "integrations"
     FLOWS = "flows"
+    FLOWS_VIEW = "flows_view"
+    FLOWS_RUN = "flows_run"
+    FLOWS_MANAGE = "flows_manage"
+    FLOWS_AI_BUILDER = "flows_ai_builder"
+
+
+_FLOW_PERMISSION_ALIASES: dict[Permission, tuple[Permission, ...]] = {
+    Permission.FLOWS_VIEW: (
+        Permission.FLOWS_VIEW,
+        Permission.FLOWS_RUN,
+        Permission.FLOWS_MANAGE,
+        Permission.FLOWS,
+    ),
+    Permission.FLOWS_RUN: (
+        Permission.FLOWS_RUN,
+        Permission.FLOWS_MANAGE,
+        Permission.FLOWS,
+    ),
+    Permission.FLOWS_MANAGE: (
+        Permission.FLOWS_MANAGE,
+        Permission.FLOWS,
+    ),
+    Permission.FLOWS_AI_BUILDER: (
+        Permission.FLOWS_AI_BUILDER,
+        Permission.FLOWS,
+    ),
+}
+
+
+def has_permission(
+    permissions: list[Permission] | tuple[Permission, ...] | set[Permission],
+    permission: Permission,
+) -> bool:
+    effective_permissions = _FLOW_PERMISSION_ALIASES.get(permission, (permission,))
+    permission_set = set(permissions)
+    return any(candidate in permission_set for candidate in effective_permissions)
 
 
 def validate_permissions(permission: Permission):
@@ -33,7 +69,7 @@ def validate_permissions(permission: Permission):
 
     def _validate(func):
         async def _inner(self, *args, **kwargs):
-            if permission not in self.user.permissions:
+            if not has_permission(self.user.permissions, permission):
                 raise UnauthorizedException(
                     f"Need permission {permission.value} in order to access"
                 )
@@ -46,7 +82,7 @@ def validate_permissions(permission: Permission):
 
 
 def validate_permission(user: UserInDB, permission: Permission):
-    if permission not in user.permissions:
+    if not has_permission(user.permissions, permission):
         raise UnauthorizedException(
             f"Need permission {permission.value} in order to access"
         )

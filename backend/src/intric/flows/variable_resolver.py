@@ -2,26 +2,17 @@ from __future__ import annotations
 
 import json
 import re
+from difflib import get_close_matches
 from datetime import datetime
 from typing import Any
 
 from intric.flows.flow import FlowStepResult
+from intric.flows.flow_variable_definitions import RESERVED_RUNTIME_VARIABLES_NORMALIZED
 from intric.main.exceptions import BadRequestException
 
 
 _TEMPLATE_VAR_PATTERN = re.compile(r"\{\{\s*([^{}]+)\s*\}\}")
 _STEP_ALIAS_PATTERN = re.compile(r"^step_\d+($|[._])")
-_RESERVED_CONTEXT_KEYS = {
-    "flow",
-    "flow_input",
-    "step_input",
-    "transkribering",
-    "föregående_steg",
-    "indata_text",
-    "indata_json",
-    "indata_filer",
-}
-_RESERVED_CONTEXT_KEYS_NORMALIZED = {item.casefold() for item in _RESERVED_CONTEXT_KEYS}
 
 
 def iter_template_expressions(template: str) -> list[str]:
@@ -57,7 +48,7 @@ class FlowVariableResolver:
                 continue
             if normalized_key in context:
                 continue
-            if normalized_key.casefold() in _RESERVED_CONTEXT_KEYS_NORMALIZED:
+            if normalized_key.casefold() in RESERVED_RUNTIME_VARIABLES_NORMALIZED:
                 continue
             if _STEP_ALIAS_PATTERN.match(normalized_key.casefold()):
                 continue
@@ -143,8 +134,10 @@ class FlowVariableResolver:
                 )
             if isinstance(current, dict):
                 if token not in current:
+                    available_keys = [str(key) for key in current.keys()]
+                    suggestion = _format_missing_key_suggestion(token=token, available_keys=available_keys)
                     raise BadRequestException(
-                        f"Unknown variable reference: '{path}'. Missing key '{token}'."
+                        f"Unknown variable reference: '{path}'. Missing key '{token}'.{suggestion}"
                     )
                 current = current[token]
                 continue
@@ -176,8 +169,15 @@ class FlowVariableResolver:
             return ""
         if isinstance(value, str):
             return value
+        if isinstance(value, list) and len(value) <= 10 and all(_is_prompt_scalar(item) for item in value):
+            return ", ".join(_scalar_to_prompt_string(item) for item in value)
+        if isinstance(value, dict) and value and all(_is_prompt_scalar(item) for item in value.values()):
+            return "\n".join(
+                f"{key}: {_scalar_to_prompt_string(item)}"
+                for key, item in value.items()
+            )
         if isinstance(value, (dict, list)):
-            return json.dumps(value, ensure_ascii=False)
+            return json.dumps(value, ensure_ascii=False, indent=2)
         return str(value)
 
     @staticmethod
@@ -212,3 +212,24 @@ class FlowVariableResolver:
         if isinstance(runtime_input, dict):
             return dict(runtime_input)
         return {}
+
+
+def _is_prompt_scalar(value: Any) -> bool:
+    return value is None or isinstance(value, (str, int, float, bool))
+
+
+def _scalar_to_prompt_string(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _format_missing_key_suggestion(*, token: str, available_keys: list[str]) -> str:
+    if not available_keys:
+        return ""
+    if len(available_keys) <= 8:
+        return f" Available keys: {', '.join(sorted(available_keys))}."
+    matches = get_close_matches(token, available_keys, n=3, cutoff=0.6)
+    if matches:
+        return f" Did you mean: {', '.join(matches)}?"
+    return ""

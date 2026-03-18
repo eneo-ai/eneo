@@ -13,5 +13,9 @@ export const load = async (event) => {
     intric.roles.listPermissions()
   ]);
 
-  return { customRoles: roles.roles, defaultRoles: roles.predefined_roles, permissions };
+  return {
+    customRoles: roles.roles,
+    defaultRoles: roles.predefined_roles,
+    permissions: permissions.filter((permission) => permission.name !== "flows")
+  };
 };

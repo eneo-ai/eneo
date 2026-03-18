@@ -1,0 +1,852 @@
+import { m } from "$lib/paraglide/messages";
+import { getLocale } from "$lib/paraglide/runtime";
+import type { StructuredQuestion, StructuredQuestionAnswerMetadata } from "./structuredQuestionAnswer";
+import type {
+  AIBuilderConversationMessage,
+  AIBuilderDraftSession,
+  AIBuilderErrorEventData,
+  AIBuilderModel,
+  AIBuilderPhase,
+  AIBuilderQuestionEventData,
+  AIBuilderSession,
+  AIBuilderStatusEventData,
+  AIBuilderStreamEvent,
+  AIBuilderTextEventData,
+  ApplyResult,
+  ChatMessage,
+  PlanStatus,
+  ProposedPlan,
+  RequirementsSummary,
+  TargetKind
+} from "./protocol";
+
+interface AIBuilderStreamHandlers {
+  onMessage: (event: AIBuilderStreamEvent) => void;
+  onClose: () => void;
+}
+
+export interface AIBuilderClientTransport {
+  fetch: (path: string, init: unknown) => Promise<unknown>;
+  stream: (
+    path: string,
+    init: unknown,
+    handlers: AIBuilderStreamHandlers,
+    abortController?: AbortController
+  ) => Promise<void>;
+}
+
+export interface FlowAIBuilderState {
+  session: AIBuilderSession | null;
+  messages: ChatMessage[];
+  currentPlan: ProposedPlan | null;
+  isStreaming: boolean;
+  isInitializing: boolean;
+  error: string | null;
+  applyResult: ApplyResult | null;
+  isConflict: boolean;
+  statusMessage: string | null;
+  availableModels: AIBuilderModel[];
+  selectedModelId: string | null;
+  modelsLoaded: boolean;
+  draftSessions: AIBuilderDraftSession[];
+}
+
+export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
+  return {
+    session: null,
+    messages: [],
+    currentPlan: null,
+    isStreaming: false,
+    isInitializing: false,
+    error: null,
+    applyResult: null,
+    isConflict: false,
+    statusMessage: null,
+    availableModels: [],
+    selectedModelId: null,
+    modelsLoaded: false,
+    draftSessions: []
+  };
+}
+
+type FlowAIBuilderListener = (state: Readonly<FlowAIBuilderState>) => void;
+
+export class FlowAIBuilderDriver {
+  readonly #transport: AIBuilderClientTransport;
+  readonly #spaceId: string;
+  #flowId: string | null;
+  readonly #onChange?: FlowAIBuilderListener;
+
+  #abortController: AbortController | null = null;
+  #state: FlowAIBuilderState = createInitialFlowAIBuilderState();
+  #initGeneration = 0;
+
+  constructor(
+    transport: AIBuilderClientTransport,
+    spaceId: string,
+    flowId: string | null,
+    onChange?: FlowAIBuilderListener
+  ) {
+    this.#transport = transport;
+    this.#spaceId = spaceId;
+    this.#flowId = flowId;
+    this.#onChange = onChange;
+  }
+
+  get state(): Readonly<FlowAIBuilderState> {
+    return this.#state;
+  }
+
+  seedState(partial: Partial<FlowAIBuilderState>): void {
+    Object.assign(this.#state, partial);
+    this.#notify();
+  }
+
+  clearError(): void {
+    this.#state.error = null;
+    this.#notify();
+  }
+
+  async initialize(targetKind: TargetKind): Promise<void> {
+    const gen = ++this.#initGeneration;
+    this.#state.isInitializing = true;
+    this.#notify();
+
+    try {
+      await this.loadDraftSessions();
+      if (gen !== this.#initGeneration) return;
+
+      if (targetKind === "edit") {
+        await this.createSession("edit");
+        return;
+      }
+
+      if (this.#hasRecoverableCreateDraft()) {
+        return;
+      }
+
+      if (gen !== this.#initGeneration) return;
+      await this.createSession("create");
+    } finally {
+      if (gen === this.#initGeneration) {
+        this.#state.isInitializing = false;
+        this.#notify();
+      }
+    }
+  }
+
+  dismissConflict(): void {
+    this.#state.isConflict = false;
+    this.#notify();
+  }
+
+  dismissPlanPane(): void {
+    this.#state.currentPlan = null;
+    this.#state.isConflict = false;
+    this.#state.error = null;
+    this.#state.statusMessage = null;
+    this.#state.applyResult = null;
+    this.#notify();
+  }
+
+  selectModel(modelId: string): void {
+    this.#state.selectedModelId = modelId;
+    this.#notify();
+  }
+
+  async createSession(targetKind: TargetKind, options?: { forceNew?: boolean }): Promise<void> {
+    this.abort();
+    this.#resetFlowState();
+    this.#state.error = null;
+    this.#notify();
+
+    try {
+      const result = (await this.#transport.fetch("/api/v1/flows/ai-builder/sessions", {
+        method: "post",
+        params: {},
+        requestBody: {
+          "application/json": {
+            target_kind: targetKind,
+            space_id: this.#spaceId,
+            flow_id: this.#flowId,
+            force_new: options?.forceNew ?? false
+          }
+        }
+      })) as AIBuilderSession;
+      this.#state.session = result;
+      this.#hydrateMessagesFromConversation(result.conversation ?? []);
+      this.#notify();
+      await this.#fetchModels();
+      await this.refreshSession();
+      await this.loadDraftSessions();
+    } catch (e) {
+      this.#state.error = e instanceof Error ? e.message : "Failed to create session";
+      await this.loadDraftSessions();
+      this.#notify();
+      throw e;
+    }
+  }
+
+  async startFreshSession(targetKind: TargetKind): Promise<void> {
+    await this.createSession(targetKind, { forceNew: true });
+  }
+
+  async loadDraftSessions(): Promise<void> {
+    try {
+      const result = (await this.#transport.fetch("/api/v1/flows/ai-builder/sessions", {
+        method: "get",
+        params: {}
+      })) as { sessions: AIBuilderDraftSession[] };
+      this.#state.draftSessions = result.sessions;
+      this.#notify();
+    } catch {
+      // Non-critical — recovery affordances just won't render
+    }
+  }
+
+  hasRecoverableCreateDraft(): boolean {
+    return this.getRecoverableCreateDrafts().length > 0;
+  }
+
+  getRecoverableCreateDrafts(): AIBuilderDraftSession[] {
+    return this.#state.draftSessions.filter(
+      (session) =>
+        session.space_id === this.#spaceId &&
+        session.target_kind === "create" &&
+        session.flow_id === null &&
+        session.status !== "applied" &&
+        session.status !== "cancelled"
+    );
+  }
+
+  async resumeSession(sessionId: string): Promise<void> {
+    ++this.#initGeneration;
+    this.abort();
+    this.#resetFlowState();
+    this.#state.error = null;
+    this.#notify();
+
+    const result = (await this.#transport.fetch(`/api/v1/flows/ai-builder/sessions/${sessionId}`, {
+      method: "get",
+      params: {}
+    })) as AIBuilderSession;
+    this.#state.session = result;
+    this.#hydrateMessagesFromConversation(result.conversation ?? []);
+    this.#notify();
+    await this.#fetchModels();
+    await this.#syncPlanFromSession();
+    await this.loadDraftSessions();
+  }
+
+  async discardSession(sessionId: string): Promise<void> {
+    await this.#transport.fetch(`/api/v1/flows/ai-builder/sessions/${sessionId}/cancel`, {
+      method: "post",
+      params: {}
+    });
+
+    this.#state.draftSessions = this.#state.draftSessions.filter(
+      (session) => session.session_id !== sessionId
+    );
+    if (this.#state.session?.session_id === sessionId) {
+      this.#state.session = null;
+      this.#state.messages = [];
+      this.#state.currentPlan = null;
+      this.#state.applyResult = null;
+      this.#state.isConflict = false;
+      this.#state.statusMessage = null;
+    }
+    this.#notify();
+    await this.loadDraftSessions();
+  }
+
+  async refreshSession(): Promise<void> {
+    if (!this.#state.session) return;
+
+    try {
+      const result = (await this.#transport.fetch(
+        `/api/v1/flows/ai-builder/sessions/${this.#state.session.session_id}`,
+        {
+          method: "get",
+          params: {}
+        }
+      )) as AIBuilderSession;
+      this.#state.session = result;
+      this.#hydrateMessagesFromConversation(result.conversation ?? []);
+      this.#notify();
+      await this.#syncPlanFromSession();
+    } catch {
+      // Silently fail on refresh
+    }
+  }
+
+  async sendMessage(
+    message: string,
+    questionAnswer?: StructuredQuestionAnswerMetadata
+  ): Promise<void> {
+    if (!this.#state.session || this.#state.isStreaming) return;
+
+    this.#state.error = null;
+    this.#state.isConflict = false;
+    this.#state.isStreaming = true;
+    this.#abortController = new AbortController();
+    const abortController = this.#abortController;
+
+    const userMsg: ChatMessage = {
+      role: "user",
+      content: message,
+      timestamp: Date.now()
+    };
+    if (questionAnswer) {
+      userMsg.metadata =
+        "requirements_confirmed" in questionAnswer
+          ? {
+              requirements_confirmed: true,
+              requirements_version: questionAnswer.requirements_version
+            }
+          : {
+              question_answer: questionAnswer
+            };
+    }
+    this.#state.messages = [...this.#state.messages, userMsg];
+
+    if (this.#state.currentPlan) {
+      this.#state.currentPlan = null;
+      this.#state.applyResult = null;
+    }
+
+    this.#notify();
+
+    let assistantText = "";
+
+    try {
+      const requestBody: {
+        message: string;
+        model_id?: string;
+        question_answer?: StructuredQuestionAnswerMetadata;
+        ui_language?: string;
+      } = { message };
+
+      if (this.#state.selectedModelId) {
+        requestBody.model_id = this.#state.selectedModelId;
+      }
+      if (questionAnswer) {
+        requestBody.question_answer = questionAnswer;
+      }
+      requestBody.ui_language = getLocale();
+
+      await this.#transport.stream(
+        `/api/v1/flows/ai-builder/sessions/${this.#state.session.session_id}/messages`,
+        {
+          params: {},
+          requestBody: {
+            "application/json": requestBody
+          }
+        },
+        {
+          onMessage: (ev: AIBuilderStreamEvent) => {
+            switch (ev.event) {
+              case "text": {
+                const data = JSON.parse(ev.data) as AIBuilderTextEventData;
+                assistantText += data.text;
+                this.#updateOrAddAssistantMessage(assistantText);
+                break;
+              }
+              case "plan": {
+                const data = this.#normalizePlan(JSON.parse(ev.data) as ProposedPlan);
+                this.#state.currentPlan = data;
+                this.#state.statusMessage = null;
+                this.#updateOrAddAssistantMessage(assistantText, data);
+                if (this.#state.session) {
+                  this.#state.session = {
+                    ...this.#state.session,
+                    status: "awaiting_approval",
+                    latest_plan_id: data.plan_id
+                  };
+                }
+                this.#notify();
+                break;
+              }
+              case "question": {
+                const data = JSON.parse(ev.data) as AIBuilderQuestionEventData;
+                this.#updateOrAddAssistantMessage(assistantText, undefined, data);
+                break;
+              }
+              case "requirements_summary": {
+                const data = JSON.parse(ev.data) as RequirementsSummary;
+                this.#updateOrAddAssistantMessage(
+                  assistantText,
+                  undefined,
+                  undefined,
+                  data
+                );
+                break;
+              }
+              case "status": {
+                const data = JSON.parse(ev.data) as AIBuilderStatusEventData;
+                this.#state.statusMessage = data.status;
+                this.#notify();
+                break;
+              }
+              case "error": {
+                const data = JSON.parse(ev.data) as AIBuilderErrorEventData;
+                if (
+                  data.code === "requirements_incomplete" ||
+                  data.code === "requirements_not_confirmed"
+                ) {
+                  this.#state.error = null;
+                } else {
+                  this.#state.error = data.error;
+                }
+                this.#state.statusMessage = null;
+                this.#notify();
+                break;
+              }
+              case "done": {
+                this.#state.isStreaming = false;
+                this.#state.statusMessage = null;
+                this.#notify();
+                break;
+              }
+            }
+          },
+          onClose: () => {
+            this.#state.isStreaming = false;
+            this.#notify();
+          }
+        },
+        abortController
+      );
+    } catch (e) {
+      if (!abortController.signal.aborted) {
+        this.#state.error = e instanceof Error ? e.message : "Stream failed";
+        this.#notify();
+      }
+    } finally {
+      this.#state.isStreaming = false;
+      if (this.#abortController === abortController) {
+        this.#abortController = null;
+      }
+      this.#notify();
+    }
+  }
+
+  async approvePlan(): Promise<void> {
+    if (!this.#state.currentPlan) return;
+    this.#state.error = null;
+    this.#notify();
+
+    try {
+      await this.#transport.fetch(
+        `/api/v1/flows/ai-builder/plans/${this.#state.currentPlan.plan_id}/approve`,
+        {
+          method: "post",
+          params: {}
+        }
+      );
+      this.#state.currentPlan = { ...this.#state.currentPlan, status: "approved" };
+      this.#notify();
+    } catch (e) {
+      this.#state.error = e instanceof Error ? e.message : "Failed to approve plan";
+      this.#notify();
+      throw e;
+    }
+  }
+
+  async applyPlan(expectedRevision?: number): Promise<ApplyResult> {
+    if (!this.#state.currentPlan) throw new Error("No plan to apply");
+
+    this.#state.error = null;
+    this.#state.isConflict = false;
+    if (this.#state.session) {
+      this.#state.session = { ...this.#state.session, status: "applying" };
+    }
+    this.#notify();
+
+    try {
+      const result = (await this.#transport.fetch(
+        `/api/v1/flows/ai-builder/plans/${this.#state.currentPlan.plan_id}/apply`,
+        {
+          method: "post",
+          params: {},
+          requestBody: {
+            "application/json": {
+              expected_revision: expectedRevision ?? null
+            }
+          }
+        }
+      )) as ApplyResult;
+      this.#flowId = result.flow_id;
+      this.#state.applyResult = result;
+      this.#state.currentPlan = { ...this.#state.currentPlan, status: "applied" };
+      if (this.#state.session) {
+        this.#state.session = {
+          ...this.#state.session,
+          flow_id: result.flow_id
+        };
+      }
+      this.#notify();
+      await this.refreshSession();
+      return result;
+    } catch (e: unknown) {
+      const status =
+        typeof e === "object" && e !== null && "status" in e
+          ? (e as { status?: number }).status
+          : undefined;
+      if (status === 409) {
+        this.#state.isConflict = true;
+        this.#state.error = null;
+      } else {
+        this.#state.error = e instanceof Error ? e.message : "Failed to apply plan";
+      }
+      this.#notify();
+      await this.refreshSession();
+      throw e;
+    }
+  }
+
+  async confirmRequirements(): Promise<void> {
+    const latestSummary = this.#getLatestRequirementsSummary();
+    if (!latestSummary?.requirements_version) return;
+
+    await this.sendMessage(m.ai_builder_requirements_confirm_message(), {
+      requirements_confirmed: true,
+      requirements_version: latestSummary.requirements_version
+    });
+  }
+
+  async changeRequirements(feedback?: string): Promise<void> {
+    const message = feedback?.trim()
+      ? m.ai_builder_requirements_change_message({ feedback: feedback.trim() })
+      : m.ai_builder_requirements_change_message_empty();
+    await this.sendMessage(message);
+  }
+
+  derivePhase(): AIBuilderPhase {
+    if (this.#state.currentPlan) return "reviewing";
+    if (this.#state.isStreaming && this.#state.statusMessage) return "building";
+
+    const latestSummary = this.#getLatestRequirementsSummary();
+    if (latestSummary) {
+      return this.isRequirementsSummaryConfirmed(latestSummary) ? "building" : "confirming";
+    }
+
+    return "discovering";
+  }
+
+  isRequirementsSummaryConfirmed(summary: RequirementsSummary): boolean {
+    const version = summary.requirements_version;
+    if (!version) return false;
+
+    let confirmed = false;
+    let seenSummary = false;
+    for (const message of this.#state.messages) {
+      if (message.requirementsSummary?.requirements_version === version) {
+        seenSummary = true;
+        confirmed = false;
+        continue;
+      }
+
+      if (!seenSummary || message.role !== "user") {
+        continue;
+      }
+
+      if (
+        message.metadata?.requirements_confirmed === true &&
+        message.metadata?.requirements_version === version
+      ) {
+        confirmed = true;
+        continue;
+      }
+
+      confirmed = false;
+    }
+
+    return confirmed;
+  }
+
+  isLatestRequirementsSummary(summary: RequirementsSummary): boolean {
+    const latestSummary = this.#getLatestRequirementsSummary();
+    if (!latestSummary) {
+      return false;
+    }
+    if (!latestSummary.requirements_version || !summary.requirements_version) {
+      return latestSummary === summary;
+    }
+    return latestSummary.requirements_version === summary.requirements_version;
+  }
+
+  isQuestionAnswered(questionId: string): boolean {
+    for (let index = this.#state.messages.length - 1; index >= 0; index -= 1) {
+      const metadata = this.#state.messages[index]?.metadata;
+      const questionAnswer =
+        metadata && typeof metadata === "object" && "question_answer" in metadata
+          ? metadata.question_answer
+          : null;
+      if (
+        questionAnswer &&
+        typeof questionAnswer === "object" &&
+        "question_id" in questionAnswer &&
+        questionAnswer.question_id === questionId
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async continueEditing(): Promise<void> {
+    const editableFlowId =
+      this.#state.applyResult?.flow_id ?? this.#state.session?.flow_id ?? this.#flowId;
+    if (!editableFlowId) return;
+    this.#flowId = editableFlowId;
+    await this.createSession("edit");
+  }
+
+  abort(): void {
+    this.#abortController?.abort();
+    this.#abortController = null;
+    this.#state.isStreaming = false;
+    this.#notify();
+  }
+
+  #notify(): void {
+    this.#onChange?.(this.#state);
+  }
+
+  #getLatestRequirementsSummary(): RequirementsSummary | null {
+    for (let index = this.#state.messages.length - 1; index >= 0; index -= 1) {
+      const summary = this.#state.messages[index]?.requirementsSummary;
+      if (summary) {
+        return summary;
+      }
+    }
+    return null;
+  }
+
+  async #fetchModels(): Promise<void> {
+    if (!this.#state.session) return;
+
+    try {
+      const result = (await this.#transport.fetch(
+        `/api/v1/flows/ai-builder/sessions/${this.#state.session.session_id}/models`,
+        {
+          method: "get",
+          params: {}
+        }
+      )) as { models: AIBuilderModel[]; default_model_id: string | null };
+      this.#state.availableModels = result.models;
+      this.#state.selectedModelId = result.default_model_id;
+      this.#state.modelsLoaded = true;
+      this.#notify();
+    } catch {
+      // Non-critical — model selector just won't appear
+    }
+  }
+
+  #updateOrAddAssistantMessage(
+    text: string,
+    plan?: ProposedPlan,
+    question?: StructuredQuestion,
+    requirementsSummary?: RequirementsSummary
+  ): void {
+    const lastMsg = this.#state.messages[this.#state.messages.length - 1];
+    if (lastMsg?.role === "assistant") {
+      this.#state.messages = [
+        ...this.#state.messages.slice(0, -1),
+        {
+          ...lastMsg,
+          content: text,
+          plan: plan ?? lastMsg.plan,
+          question: question ?? lastMsg.question,
+          requirementsSummary: requirementsSummary ?? lastMsg.requirementsSummary
+        }
+      ];
+    } else {
+      this.#state.messages = [
+        ...this.#state.messages,
+        {
+          role: "assistant",
+          content: text,
+          plan,
+          question,
+          requirementsSummary,
+          timestamp: Date.now()
+        }
+      ];
+    }
+    this.#notify();
+  }
+
+  #resetFlowState(): void {
+    this.#state = createInitialFlowAIBuilderState();
+  }
+
+  #hydrateMessagesFromConversation(conversation: AIBuilderConversationMessage[]): void {
+    const hydrated: ChatMessage[] = [];
+
+    for (let index = 0; index < conversation.length; index += 1) {
+      const message = conversation[index];
+      if (!message) continue;
+
+      if (message.role === "user") {
+        hydrated.push({
+          role: "user",
+          content: message.content ?? "",
+          metadata: message.metadata ?? undefined,
+          timestamp: this.#parseTimestamp(message.timestamp)
+        });
+        continue;
+      }
+
+      if (message.role !== "assistant") {
+        continue;
+      }
+
+      const assistantMessage: ChatMessage = {
+        role: "assistant",
+        content: message.content ?? "",
+        timestamp: this.#parseTimestamp(message.timestamp)
+      };
+
+      const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+      const structuredQuestionToolCall = toolCalls.find(
+        (toolCall) => toolCall?.name === "ask_structured_question"
+      );
+      const requirementsToolCall = toolCalls.find(
+        (toolCall) => toolCall?.name === "confirm_requirements"
+      );
+
+      const structuredQuestion = this.#parseStructuredQuestion(
+        structuredQuestionToolCall?.arguments
+      );
+      if (structuredQuestion) {
+        assistantMessage.question = structuredQuestion;
+      }
+
+      for (let toolIndex = index + 1; toolIndex < conversation.length; toolIndex += 1) {
+        const toolMessage = conversation[toolIndex];
+        if (toolMessage?.role !== "tool") {
+          break;
+        }
+
+        if (
+          requirementsToolCall?.id &&
+          toolMessage.tool_call_id === requirementsToolCall.id
+        ) {
+          const requirementsSummary = this.#parseRequirementsSummary(
+            toolMessage.metadata?.requirements_summary
+          );
+          if (requirementsSummary) {
+            assistantMessage.requirementsSummary = requirementsSummary;
+          }
+        }
+
+        index = toolIndex;
+      }
+
+      hydrated.push(assistantMessage);
+    }
+
+    this.#state.messages = hydrated;
+  }
+
+  #parseStructuredQuestion(payload: unknown): StructuredQuestion | undefined {
+    if (!payload || typeof payload !== "object") return undefined;
+
+    const question = payload as Record<string, unknown>;
+    if (
+      typeof question.question_id !== "string" ||
+      typeof question.question !== "string" ||
+      !Array.isArray(question.options) ||
+      (question.selection_mode !== "single" && question.selection_mode !== "multi") ||
+      typeof question.allow_custom !== "boolean"
+    ) {
+      return undefined;
+    }
+
+    return {
+      question_id: question.question_id,
+      question: question.question,
+      options: question.options.filter((option): option is StructuredQuestion["options"][number] => {
+        return typeof option === "object" && option !== null && typeof option.label === "string";
+      }),
+      selection_mode: question.selection_mode,
+      allow_custom: question.allow_custom
+    };
+  }
+
+  #parseRequirementsSummary(payload: unknown): RequirementsSummary | undefined {
+    if (!payload || typeof payload !== "object") return undefined;
+
+    const summary = payload as Record<string, unknown>;
+    if (
+      typeof summary.summary !== "string" ||
+      !Array.isArray(summary.key_decisions) ||
+      typeof summary.input_description !== "string" ||
+      typeof summary.output_description !== "string"
+    ) {
+      return undefined;
+    }
+
+    return {
+      requirements_version:
+        typeof summary.requirements_version === "string" ? summary.requirements_version : null,
+      summary: summary.summary,
+      key_decisions: summary.key_decisions.filter((decision): decision is RequirementsSummary["key_decisions"][number] => {
+        return (
+          typeof decision === "object" &&
+          decision !== null &&
+          typeof decision.topic === "string" &&
+          typeof decision.decision === "string"
+        );
+      }),
+      input_description: summary.input_description,
+      output_description: summary.output_description,
+      assumptions: Array.isArray(summary.assumptions)
+        ? summary.assumptions.filter((assumption): assumption is string => typeof assumption === "string")
+        : [],
+      manual_setup_notes: Array.isArray(summary.manual_setup_notes)
+        ? summary.manual_setup_notes.filter((note): note is string => typeof note === "string")
+        : []
+    };
+  }
+
+  #parseTimestamp(timestamp?: string | null): number {
+    if (!timestamp) return Date.now();
+    const parsed = Date.parse(timestamp);
+    return Number.isNaN(parsed) ? Date.now() : parsed;
+  }
+
+  #normalizePlan(
+    plan: ProposedPlan | ({ status?: PlanStatus } & Omit<ProposedPlan, "status">)
+  ): ProposedPlan {
+    return {
+      ...plan,
+      status: plan.status ?? "proposed"
+    };
+  }
+
+  async #syncPlanFromSession(): Promise<void> {
+    const latestPlanId = this.#state.session?.latest_plan_id;
+    if (!latestPlanId) {
+      this.#state.currentPlan = null;
+      this.#notify();
+      return;
+    }
+
+    try {
+      const result = (await this.#transport.fetch(`/api/v1/flows/ai-builder/plans/${latestPlanId}`, {
+        method: "get",
+        params: {}
+      })) as ProposedPlan;
+      this.#state.currentPlan = this.#normalizePlan(result);
+      this.#notify();
+    } catch {
+      // Leave the current plan as-is if recovery fails.
+    }
+  }
+
+  #hasRecoverableCreateDraft(): boolean {
+    return this.getRecoverableCreateDrafts().length > 0;
+  }
+}

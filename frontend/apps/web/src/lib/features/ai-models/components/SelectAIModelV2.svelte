@@ -18,6 +18,8 @@
   export let selectedModel: T | undefined | null;
 
   export let aria: AriaProps = { "aria-label": m.select_ai_model() };
+  /** Optional label for the dropdown menu header — defaults to "Select a completion model" */
+  export let dropdownLabel: string = m.select_completion_model();
 
   const dispatch = createEventDispatcher<{
     change: { selectedModel: T | undefined | null };
@@ -98,7 +100,7 @@
   <div
     class="bg-frosted-glass-secondary border-default sticky top-0 border-b px-4 py-2 font-mono text-sm"
   >
-    {m.select_completion_model()}
+    {dropdownLabel}
   </div>
   {#if modelGroups}
     {#each modelGroups as group (group.id ?? "system")}

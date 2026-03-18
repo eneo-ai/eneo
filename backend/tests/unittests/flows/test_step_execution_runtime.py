@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -196,6 +197,29 @@ def test_detect_native_json_output_support_falls_back_to_provider_prefixed_name(
     assert captured == ["anthropic/claude-3-5-haiku"]
 
 
+def test_detect_native_json_output_support_logs_lookup_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    monkeypatch.setattr(
+        "intric.flows.runtime.step_execution_runtime._litellm_get_supported_openai_params",
+        MagicMock(side_effect=RuntimeError("lookup failed")),
+    )
+    assistant = SimpleNamespace(
+        completion_model=SimpleNamespace(
+            litellm_model_name="openai/gpt-4.1",
+            name="gpt-4.1",
+            provider_type="openai",
+        )
+    )
+
+    caplog.set_level(logging.WARNING)
+    supported = detect_native_json_output_support(assistant)
+
+    assert supported is None
+    assert "Failed to detect native JSON output support for flow step execution." in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     monkeypatch: pytest.MonkeyPatch,
@@ -262,6 +286,74 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     assert state.json_mode_supported["provider:model:1"] is False
     assert output.structured_output == {"ok": True}
     assert output.full_text == '{"ok": true}'
+
+
+@pytest.mark.asyncio
+async def test_complete_step_execution_logs_json_mode_kwargs_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    monkeypatch.setattr(
+        "intric.flows.runtime.step_execution_runtime.detect_native_json_output_support",
+        lambda assistant: None,
+    )
+    run = _run()
+    state = _state()
+    step = _step(output_type="json")
+    original_kwargs = MagicMock(name="original_kwargs")
+    assistant = MagicMock()
+    assistant.completion_model = SimpleNamespace(
+        litellm_model_name="openai/gpt-4.1",
+        name="gpt-4.1",
+        provider_type="openai",
+    )
+    assistant.completion_model_kwargs = original_kwargs
+    assistant.completion_model_kwargs.model_copy.side_effect = RuntimeError("bad kwargs")
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(total_token_count=4, completion='{"ok": true}')
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={"text": "hello", "source_text": "hello", "input_source": "flow_input"},
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(return_value=([], {"status": "skipped_no_service"}, [])),
+        process_typed_output=AsyncMock(return_value=({"ok": True}, None)),
+        apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
+        attach_typed_failure_context=lambda exc, **kwargs: exc,
+        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
+        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
+        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
+        count_tokens=lambda text: len(text),
+    )
+
+    caplog.set_level(logging.WARNING)
+    output = await complete_step_execution(
+        step=step,
+        run=run,
+        state=state,
+        prepared=prepared,
+        deps=deps,
+    )
+
+    assert assistant.get_response.await_count == 1
+    assert assistant.get_response.await_args.kwargs["model_kwargs"] is original_kwargs
+    assert state.json_mode_supported["provider:model:1"] is False
+    assert output.structured_output == {"ok": True}
+    assert "Failed to enable native JSON mode for flow step execution." in caplog.text
 
 
 @pytest.mark.asyncio

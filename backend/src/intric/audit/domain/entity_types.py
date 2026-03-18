@@ -32,3 +32,4 @@ class EntityType(str, Enum):
     SESSION = "session"
     FLOW = "flow"
     FLOW_RUN = "flow_run"
+    AI_BUILDER_SESSION = "ai_builder_session"

@@ -8,6 +8,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.flow_tables import FlowRuns, FlowStepAttempts, FlowStepResults
 from intric.flows.flow import (
     FlowRun,
@@ -106,6 +107,13 @@ class FlowRunRepository:
             .where(FlowRuns.status.in_(self._ACTIVE_STATUSES))
         )
         return int(count or 0)
+
+    async def acquire_tenant_run_creation_lock(self, *, tenant_id: UUID) -> None:
+        await self.session.execute(
+            sa.select(Tenants.id)
+            .where(Tenants.id == tenant_id)
+            .with_for_update()
+        )
 
     async def list_runs(
         self,

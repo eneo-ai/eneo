@@ -1,65 +1,30 @@
 from __future__ import annotations
 
-import logging
 from typing import Any, cast
 from uuid import UUID
 
-from dependency_injector import providers
 from fastapi import HTTPException, Request, status
 
 from intric.assistants.api.assistant_models import AssistantUpdatePublic
 from intric.authentication.auth_dependencies import get_scope_filter
-from intric.database.database import sessionmanager
-from intric.flows.flow import FlowRunStatus
 from intric.flows.api.flow_api_common import enforce_flow_scope
+from intric.flows.api.flow_api_common import (
+    FlowAccessContext,
+    FlowSpaceAccessContext,
+    resolve_flow_access_context,
+    resolve_space_access_context,
+)
 from intric.flows.api.flow_models import (
     FlowCreateRequest,
     FlowInputSource,
     FlowInputType,
     FlowUpdateRequest,
 )
+from intric.flows.application import flow_dispatch
 from intric.flows.flow_file_upload_service import FlowFileUploadService
 from intric.main.container.container import Container
 
-logger = logging.getLogger(__name__)
-
-
-async def dispatch_flow_run_after_commit(
-    *,
-    run_id: UUID,
-    flow_id: UUID,
-    tenant_id: UUID,
-    user_id: UUID | None,
-) -> None:
-    async with sessionmanager.session() as session:
-        container = Container(session=providers.Object(session))
-        backend = container.flow_execution_backend()
-        run_repo = container.flow_run_repo()
-        try:
-            await backend.dispatch(
-                run_id=run_id,
-                flow_id=flow_id,
-                tenant_id=tenant_id,
-                user_id=user_id,
-            )
-        except Exception:
-            logger.exception(
-                "flow_dispatch_after_commit_failed run_id=%s flow_id=%s tenant_id=%s",
-                run_id,
-                flow_id,
-                tenant_id,
-            )
-            async with session.begin():
-                await run_repo.update_status(
-                    run_id=run_id,
-                    tenant_id=tenant_id,
-                    status=FlowRunStatus.FAILED,
-                    error_message=(
-                        "flow_dispatch_failed: "
-                        "Flow dispatch failed before execution started. "
-                        "Retry creating a new run."
-                    ),
-                )
+dispatch_flow_run_after_commit = flow_dispatch.dispatch_flow_run_after_commit
 
 
 def find_classification_overrides(flow_data: FlowCreateRequest | FlowUpdateRequest) -> list[int]:
@@ -170,14 +135,52 @@ async def enforce_flow_scope_for_request(
     container: Container,
     *,
     flow_id: UUID,
+    required_access: str = "view",
     require_flow_lookup_without_scope: bool = False,
 ) -> None:
     await enforce_flow_scope(
         request,
         container,
         flow_id=flow_id,
+        required_access=required_access,
         require_flow_lookup_without_scope=require_flow_lookup_without_scope,
         scope_filter_getter=get_scope_filter,
+    )
+
+
+async def get_flow_access_context_for_request(
+    request: Request,
+    container: Container,
+    *,
+    flow_id: UUID,
+    required_access: str = "view",
+    load_actor_context: bool = True,
+) -> FlowAccessContext:
+    return await resolve_flow_access_context(
+        request,
+        container,
+        flow_id=flow_id,
+        required_access=required_access,
+        scope_filter_getter=get_scope_filter,
+        load_actor_context=load_actor_context,
+    )
+
+
+async def get_space_access_context_for_request(
+    request: Request,
+    container: Container,
+    *,
+    space_id: UUID,
+    required_access: str = "view",
+    scope_mismatch_message: str = "API key space scope does not match requested flow.",
+) -> FlowSpaceAccessContext:
+    return await resolve_space_access_context(
+        request,
+        container,
+        space_id=space_id,
+        required_access=required_access,
+        scope_filter_getter=get_scope_filter,
+        scope_mismatch_message=scope_mismatch_message,
     )
 
 

@@ -202,6 +202,83 @@ async def test_publish_flow_creates_version_and_updates_published_version(user):
 
 
 @pytest.mark.asyncio
+async def test_update_flow_passes_expected_revision_to_repo(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    existing = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        draft_revision=3,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1)],
+    )
+    flow_repo.get.return_value = existing
+    flow_repo.update.return_value = existing
+
+    await service.update_flow(
+        flow_id=flow_id,
+        name="Updated",
+        expected_revision=3,
+    )
+
+    flow_repo.update.assert_awaited_once()
+    assert flow_repo.update.await_args.kwargs["expected_revision"] == 3
+
+
+@pytest.mark.asyncio
+async def test_get_flow_assistant_snapshots_batches_and_deduplicates_assistant_ids(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    assistant_id = uuid4()
+    other_assistant_id = uuid4()
+    flow = Flow(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Snapshot flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[
+            _step(step_order=1).model_copy(update={"assistant_id": assistant_id}),
+            _step(step_order=2).model_copy(update={"assistant_id": assistant_id}),
+            _step(step_order=3).model_copy(update={"assistant_id": other_assistant_id}),
+        ],
+    )
+    expected = {
+        assistant_id: {"instructions": "A", "model_ref": None, "knowledge_refs": []},
+        other_assistant_id: {"instructions": "B", "model_ref": None, "knowledge_refs": []},
+    }
+    flow_repo.get_assistant_snapshots.return_value = expected
+
+    result = await service.get_flow_assistant_snapshots(flow)
+
+    assert result == expected
+    flow_repo.get_assistant_snapshots.assert_awaited_once_with(
+        assistant_ids=[assistant_id, other_assistant_id],
+        tenant_id=user.tenant_id,
+    )
+
+
+@pytest.mark.asyncio
 async def test_publish_flow_pins_template_metadata_for_template_fill(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
@@ -760,11 +837,7 @@ async def test_create_flow_rejects_assistants_outside_space_or_tenant(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     flow_repo.create.return_value = AsyncMock()
-
-    allowed_result = MagicMock()
-    allowed_result.all.return_value = []
-    flow_repo.session = AsyncMock()
-    flow_repo.session.execute.return_value = allowed_result
+    flow_repo.get_assistant_scope_rows.return_value = []
 
     service = FlowService(
         user=user,
@@ -782,6 +855,12 @@ async def test_create_flow_rejects_assistants_outside_space_or_tenant(user):
             steps=[_step(step_order=1)],
             metadata_json=None,
         )
+
+    flow_repo.get_assistant_scope_rows.assert_awaited_once()
+    kwargs = flow_repo.get_assistant_scope_rows.await_args.kwargs
+    assert kwargs["space_id"]
+    assert kwargs["tenant_id"] == user.tenant_id
+    assert len(kwargs["assistant_ids"]) == 1
 
 
 @pytest.mark.asyncio

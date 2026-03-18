@@ -5,10 +5,7 @@ import json
 from typing import Any, cast
 from uuid import UUID
 
-import sqlalchemy as sa
-
 from intric.files.file_repo import FileRepository
-from intric.database.tables.tenant_table import Tenants
 from intric.flows.flow import (
     FlowRun,
     FlowRunStatus,
@@ -166,11 +163,7 @@ class FlowRunService:
                 )
 
         # Serialize run creation per tenant to prevent concurrency-limit race conditions.
-        await self.flow_repo.session.execute(
-            sa.select(Tenants.id)
-            .where(Tenants.id == self.user.tenant_id)
-            .with_for_update()
-        )
+        await self.flow_run_repo.acquire_tenant_run_creation_lock(tenant_id=self.user.tenant_id)
         active_runs = await self.flow_run_repo.count_active_runs(tenant_id=self.user.tenant_id)
         if active_runs >= self.max_concurrent_runs:
             raise BadRequestException(

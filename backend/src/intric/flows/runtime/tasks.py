@@ -14,7 +14,7 @@ from intric.flows.flow_input_limits import (
     DEFAULT_MAX_AUDIO_FILES_PER_RUN,
     resolve_flow_input_limits,
 )
-from intric.flows.flow_run_repo import FlowRunRepository
+from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.runtime.celery_app import celery_app
 from intric.flows.runtime.executor import FlowRunExecutor
 from intric.main.config import get_settings
@@ -81,6 +81,7 @@ async def _execute_flow_run_async(
 
         executor = FlowRunExecutor(
             user=user,
+            session=session,
             flow_repo=container.flow_repo(),
             flow_run_repo=container.flow_run_repo(),
             flow_version_repo=container.flow_version_repo(),

@@ -56,6 +56,10 @@ class MockPermission:
     WEBSITES = "websites"
     SERVICES = "services"
     FLOWS = "flows"
+    FLOWS_VIEW = "flows_view"
+    FLOWS_RUN = "flows_run"
+    FLOWS_MANAGE = "flows_manage"
+    FLOWS_AI_BUILDER = "flows_ai_builder"
 
 
 @pytest.fixture()
@@ -548,7 +552,7 @@ def test_admin_can_crud_and_publish_flows(admin_user, shared_space):
 
 def test_owner_can_publish_flows_in_personal_space(owner_user, personal_space):
     """Flows require publishing before they can be run, so OWNER must have PUBLISH."""
-    owner_user.permissions = [MockPermission.FLOWS]
+    owner_user.permissions = [MockPermission.FLOWS_VIEW, MockPermission.FLOWS_MANAGE]
     actor = SpaceActor(owner_user, personal_space)
     assert actor.can_read_flows() is True
     assert actor.can_create_flows() is True
@@ -568,6 +572,19 @@ def test_owner_without_flows_permission_cannot_create_flows_in_personal_space(
     assert actor.can_delete_flows() is False
     # READ is also gated by permission in personal space
     assert actor.can_read_flows() is False
+
+
+def test_owner_with_flows_view_only_can_read_but_not_manage_flows_in_personal_space(
+    owner_user, personal_space,
+):
+    owner_user.permissions = [MockPermission.FLOWS_VIEW]
+    actor = SpaceActor(owner_user, personal_space)
+
+    assert actor.can_read_flows() is True
+    assert actor.can_create_flows() is False
+    assert actor.can_edit_flows() is False
+    assert actor.can_delete_flows() is False
+    assert actor.can_publish_flows() is False
 
 
 def test_flow_is_in_publishable_resources():

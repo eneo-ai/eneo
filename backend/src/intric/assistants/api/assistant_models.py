@@ -162,16 +162,27 @@ class AssistantCreatePublic(AssistantBase):
 
 @partial_model
 class AssistantUpdatePublic(AssistantCreatePublic):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "name": "Flow Step Assistant",
+                "description": "Summarizes extracted contract fields into a reviewer-ready note.",
+                "metadata_json": {"origin": "flow_managed"},
+                "icon_id": "00000000-0000-0000-0000-000000000099",
+            }
+        }
+    )
+
     prompt: Optional[PromptCreate] = None
     attachments: Optional[list[ModelId]] = None
     mcp_tools: Optional[list[MCPToolSetting]] = None
-    description: Optional[str] = Field(
+    description: Union[str, None, NotProvided] = Field(
         default=NOT_PROVIDED,
         description=(
             "A description of the assitant that will be used as "
             "default description in GroupChatAssistantPublic"
         ),
-        example="This is a helpful AI assistant",
+        json_schema_extra={"example": "This is a helpful AI assistant"},
     )
     insight_enabled: Optional[bool] = Field(
         default=None,
@@ -181,7 +192,7 @@ class AssistantUpdatePublic(AssistantCreatePublic):
         ),
     )
     data_retention_days: Optional[int] = None
-    metadata_json: Optional[dict] = Field(
+    metadata_json: Union[dict, None, NotProvided] = Field(
         default=NOT_PROVIDED,
         description="Metadata for the assistant",
     )
@@ -289,7 +300,7 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
             "A description of the assitant that will be used "
             "as default description in GroupChatAssistantPublic"
         ),
-        example="This is a helpful AI assistant",
+        json_schema_extra={"example": "This is a helpful AI assistant"},
     )
     icon_id: Optional[UUID] = Field(
         default=None,

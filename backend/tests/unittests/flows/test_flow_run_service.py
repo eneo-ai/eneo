@@ -19,10 +19,7 @@ from intric.main.exceptions import BadRequestException, NotFoundException, Unaut
 
 
 def _flow_repo() -> AsyncMock:
-    repo = AsyncMock()
-    repo.session = AsyncMock()
-    repo.session.execute = AsyncMock()
-    return repo
+    return AsyncMock()
 
 
 def _step(step_order: int = 1) -> FlowStep:
@@ -170,6 +167,9 @@ async def test_create_run_enforces_tenant_concurrency_limit(user):
     with pytest.raises(BadRequestException) as exc_info:
         await service.create_run(flow_id=flow.id, input_payload_json={"x": 1})
     assert exc_info.value.code == "flow_run_concurrency_limit_reached"
+    flow_run_repo.acquire_tenant_run_creation_lock.assert_awaited_once_with(
+        tenant_id=user.tenant_id
+    )
 
 
 @pytest.mark.asyncio
@@ -193,6 +193,9 @@ async def test_create_run_creates_preseeded_run(user):
     created = await service.create_run(flow_id=flow.id, input_payload_json={"case": "123"})
 
     assert created.status == FlowRunStatus.QUEUED
+    flow_run_repo.acquire_tenant_run_creation_lock.assert_awaited_once_with(
+        tenant_id=user.tenant_id
+    )
     flow_run_repo.create.assert_awaited_once()
     kwargs = flow_run_repo.create.await_args.kwargs
     assert kwargs["flow_id"] == flow.id

@@ -5,12 +5,8 @@ import json
 from typing import Any, cast
 from uuid import UUID
 
-import sqlalchemy as sa
-
 from intric.assistants.assistant import Assistant, AssistantOrigin
 from intric.assistants.assistant_service import AssistantService
-from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.spaces_table import Spaces
 from intric.files.file_models import File
 from intric.files.file_repo import FileRepository
 from intric.flows.flow import Flow, FlowSparse, FlowStep, JsonObject
@@ -26,6 +22,12 @@ from intric.flows.flow_validators import (
 from intric.flows.runtime.docx_template_runtime import (
     extract_docx_template_text_preview,
     inspect_docx_template_bytes,
+)
+from intric.flows.http_transport import (
+    HttpAuthoredConfig,
+    encrypt_authored_config,
+    is_authored_config,
+    merge_secrets_on_update,
 )
 from intric.flows.step_config_secrets import encrypt_step_headers_for_storage
 from intric.main.exceptions import BadRequestException, NotFoundException
@@ -130,6 +132,7 @@ class FlowService:
         steps: list[FlowStep] | None = None,
         metadata_json: JsonObject | None | NotProvided = NOT_PROVIDED,
         data_retention_days: int | None | NotProvided = NOT_PROVIDED,
+        expected_revision: int | None = None,
     ) -> Flow:
         existing = await self.get_flow(flow_id)
         if existing.published_version is not None:
@@ -157,7 +160,8 @@ class FlowService:
             next_retention = data_retention_days
 
         normalized_steps = self._normalize_steps_for_tenant(next_steps)
-        persisted_steps = self._prepare_steps_for_persist(normalized_steps)
+        merged_steps = self._merge_step_secrets(normalized_steps, existing.steps)
+        persisted_steps = self._prepare_steps_for_persist(merged_steps)
         updated = existing.model_copy(
             deep=True,
             update={
@@ -172,7 +176,11 @@ class FlowService:
                 "data_retention_days": next_retention,
             },
         )
-        return await self.flow_repo.update(flow=updated, tenant_id=self.user.tenant_id)
+        return await self.flow_repo.update(
+            flow=updated,
+            tenant_id=self.user.tenant_id,
+            expected_revision=expected_revision,
+        )
 
     async def delete_flow(self, flow_id: UUID) -> None:
         await self.flow_repo.delete(flow_id=flow_id, tenant_id=self.user.tenant_id)
@@ -203,6 +211,17 @@ class FlowService:
         assistant, permissions = await self.assistant_service.get_assistant(assistant_id)
         self._assert_flow_assistant_owned_by_flow(flow=flow, assistant=assistant)
         return assistant, permissions
+
+    async def get_flow_assistant_snapshots(self, flow: Flow) -> dict[UUID, dict[str, Any]]:
+        assistant_ids = list(
+            dict.fromkeys(
+                step.assistant_id for step in flow.steps if step.assistant_id is not None
+            )
+        )
+        return await self.flow_repo.get_assistant_snapshots(
+            assistant_ids=assistant_ids,
+            tenant_id=self.user.tenant_id,
+        )
 
     async def update_flow_assistant(
         self,
@@ -350,14 +369,11 @@ class FlowService:
         if not assistant_ids:
             return
 
-        rows = await self.flow_repo.session.execute(
-            sa.select(Assistants.id, Assistants.origin, Assistants.managing_flow_id)
-            .join(Spaces, Spaces.id == Assistants.space_id)
-            .where(Assistants.id.in_(assistant_ids))
-            .where(Assistants.space_id == space_id)
-            .where(Spaces.tenant_id == self.user.tenant_id)
+        assistant_rows = await self.flow_repo.get_assistant_scope_rows(
+            assistant_ids=assistant_ids,
+            space_id=space_id,
+            tenant_id=self.user.tenant_id,
         )
-        assistant_rows = rows.all()
         allowed_ids = {row.id for row in assistant_rows}
         missing = assistant_ids - allowed_ids
         if missing:
@@ -395,19 +411,61 @@ class FlowService:
         return [
             step.model_copy(
                 update={
-                    "input_config": encrypt_step_headers_for_storage(
-                        config=step.input_config,
-                        encryption_service=self.encryption_service,
-                    ),
-                    "output_config": encrypt_step_headers_for_storage(
-                        config=step.output_config,
-                        encryption_service=self.encryption_service,
-                    ),
+                    "input_config": self._encrypt_config(step.input_config),
+                    "output_config": self._encrypt_config(step.output_config),
                 },
                 deep=True,
             )
             for step in steps
         ]
+
+    def _encrypt_config(self, config: JsonObject | None) -> JsonObject | None:
+        if config is None:
+            return config
+        if is_authored_config(config):
+            authored = HttpAuthoredConfig.model_validate(config)
+            encrypted = encrypt_authored_config(authored, self.encryption_service)
+            return cast(JsonObject, encrypted.model_dump(mode="json"))
+        return encrypt_step_headers_for_storage(
+            config=config, encryption_service=self.encryption_service
+        )
+
+    def _merge_step_secrets(
+        self,
+        incoming_steps: list[FlowStep],
+        stored_steps: list[FlowStep],
+    ) -> list[FlowStep]:
+        """Merge sentinel secret values from incoming with stored encrypted values."""
+        stored_by_order = {s.step_order: s for s in stored_steps}
+        result = []
+        for step in incoming_steps:
+            stored = stored_by_order.get(step.step_order)
+            input_config = self._merge_config_secrets(
+                step.input_config, stored.input_config if stored else None
+            )
+            output_config = self._merge_config_secrets(
+                step.output_config, stored.output_config if stored else None
+            )
+            result.append(
+                step.model_copy(
+                    update={"input_config": input_config, "output_config": output_config},
+                    deep=True,
+                )
+            )
+        return result
+
+    @staticmethod
+    def _merge_config_secrets(
+        incoming: JsonObject | None, stored: JsonObject | None
+    ) -> JsonObject | None:
+        if incoming is None or not is_authored_config(incoming):
+            return incoming
+        if stored is None or not is_authored_config(stored):
+            return incoming
+        incoming_config = HttpAuthoredConfig.model_validate(incoming)
+        stored_config = HttpAuthoredConfig.model_validate(stored)
+        merged = merge_secrets_on_update(incoming_config, stored_config)
+        return cast(JsonObject, merged.model_dump(mode="json"))
 
     async def _build_definition(self, flow: Flow) -> JsonObject:
         return {

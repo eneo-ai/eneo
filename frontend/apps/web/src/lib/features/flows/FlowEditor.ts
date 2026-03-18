@@ -16,6 +16,7 @@ import {
 import { derived, get, writable } from "svelte/store";
 import { uid } from "uid";
 import { shouldSaveAssistantImmediately } from "./assistantSavePolicy";
+import { AssistantSaveManager } from "./flowAssistantSaveManager";
 import { remapStepOrderTemplateTokens, replaceExactTemplateToken } from "./flowVariableTokens";
 import { getFlowStepValidationIssues, mapOutputToInputType } from "./flowStepTypes";
 import { getTemplateFillOutputConfig } from "./templateFillConfig";
@@ -96,9 +97,6 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
     return $resource.published_version != null;
   });
 
-  // Assistant cache for step inspector
-  const assistantCache = new Map<string, unknown>();
-  const assistantSaveStatus = writable<"idle" | "pending" | "saving" | "error">("idle");
   const assistantErrorPrefix = "assistant:";
   const flowErrorPrefix = "flow:";
   const typedIOValidationPrefix = `${flowErrorPrefix}typed-io:`;
@@ -168,6 +166,29 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
           );
         }
       }
+      // HTTP output config: URL required
+      if (step.output_mode === "http_post" && step.output_config?.auth) {
+        const url = typeof step.output_config.url === "string" ? step.output_config.url : "";
+        if (!url.trim()) {
+          entries.set(
+            `${stepConfigValidationPrefix}http_missing_url:${step.step_order}`,
+            ["http_missing_url"]
+          );
+        }
+      }
+      // HTTP input config: URL required
+      if (
+        (step.input_source === "http_get" || step.input_source === "http_post") &&
+        step.input_config?.auth
+      ) {
+        const url = typeof step.input_config.url === "string" ? step.input_config.url : "";
+        if (!url.trim()) {
+          entries.set(
+            `${stepConfigValidationPrefix}http_missing_url:${step.step_order}`,
+            ["http_missing_url"]
+          );
+        }
+      }
     }
     replaceFlowValidationErrors(stepConfigValidationPrefix, entries);
   }
@@ -186,7 +207,7 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
         break;
       }
       // Check cached assistant prompt text
-      const cached = assistantCache.get(step.assistant_id);
+      const cached = assistantSaveManager.getCached(step.assistant_id);
       if (!cached || typeof cached !== "object") continue;
       const prompt = (cached as { prompt?: { text?: unknown } }).prompt;
       const text = typeof prompt?.text === "string" ? prompt.text : "";
@@ -222,61 +243,38 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
     return get(editor.state.resource).id;
   }
 
+  const assistantSaveManager = new AssistantSaveManager<LoadedAssistant>({
+    loadRemote: async (assistantId) =>
+      data.intric.flows.assistants.get({
+        id: getFlowId(),
+        assistantId
+      }),
+    saveRemote: async (assistantId, changes) =>
+      data.intric.flows.assistants.update({
+        id: getFlowId(),
+        assistantId,
+        update: changes
+      }),
+    shouldSaveImmediately: shouldSaveAssistantImmediately,
+    isDisabled: () => get(isPublished),
+    getErrorMessage: (error) =>
+      error instanceof IntricError ? error.getReadableMessage() : "assistant_save_failed",
+    onValidationError: setAssistantValidationError,
+    onPromptSaved: () => {
+      revalidateDeletedStepReferences();
+    }
+  });
+  const assistantSaveStatus = assistantSaveManager.status;
+
   async function loadAssistant(assistantId: string): Promise<LoadedAssistant | null> {
-    if (!assistantId || assistantId === "") return null;
-
-    // Wait for any in-flight save to land in the cache first
-    if (assistantSavePromises.has(assistantId)) {
-      await assistantSavePromises.get(assistantId)!.catch(() => {});
-    }
-
-    let base = (assistantCache.get(assistantId) as LoadedAssistant) ?? null;
-    if (!base) {
-      try {
-        base = await data.intric.flows.assistants.get({
-          id: getFlowId(),
-          assistantId
-        });
-        assistantCache.set(assistantId, base);
-      } catch {
-        return null;
-      }
-    }
-
-    // Overlay any pending unsaved changes so the caller sees the latest state
-    const pending = pendingAssistantChanges.get(assistantId);
-    if (pending && base) {
-      return { ...base, ...pending } as LoadedAssistant;
-    }
-    return base;
+    return assistantSaveManager.load(assistantId);
   }
 
   async function updateAssistantImmediately(
     assistantId: string,
     changes: Record<string, unknown>
   ): Promise<void> {
-    if (!assistantId || assistantId === "") return;
-    if (get(isPublished)) return;
-    assistantSaveStatus.set("saving");
-    setAssistantValidationError(assistantId, null);
-    try {
-      const updated = await data.intric.flows.assistants.update({
-        id: getFlowId(),
-        assistantId,
-        update: changes
-      });
-      assistantCache.set(assistantId, updated);
-      assistantSaveStatus.set("idle");
-      setAssistantValidationError(assistantId, null);
-    } catch (error) {
-      assistantSaveStatus.set("error");
-      const message =
-        error instanceof IntricError
-          ? error.getReadableMessage()
-          : "assistant_save_failed";
-      setAssistantValidationError(assistantId, message);
-      throw error;
-    }
+    await assistantSaveManager.saveImmediately(assistantId, changes);
   }
 
   let legacyTemplateCleanupStarted = false;
@@ -324,136 +322,12 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
     scheduleAutoSave();
   }
 
-  const pendingAssistantChanges = new Map<string, Record<string, unknown>>();
-  const assistantSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  const assistantSaveInFlight = new Set<string>();
-  const assistantSavePromises = new Map<string, Promise<void>>();
-
-  function clearAssistantSaveTimer(assistantId: string) {
-    const existingTimer = assistantSaveTimers.get(assistantId);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      assistantSaveTimers.delete(assistantId);
-    }
-  }
-
-  function refreshAssistantSaveStatus() {
-    if (assistantSaveInFlight.size > 0) {
-      assistantSaveStatus.set("saving");
-      return;
-    }
-    if (assistantSaveTimers.size > 0 || pendingAssistantChanges.size > 0) {
-      assistantSaveStatus.set("pending");
-      return;
-    }
-    if (get(assistantSaveStatus) !== "error") {
-      assistantSaveStatus.set("idle");
-    }
-  }
-
-  async function runAssistantSaveNow(assistantId: string): Promise<void> {
-    if (!assistantId || assistantId === "") return;
-    if (assistantSaveInFlight.has(assistantId)) {
-      await assistantSavePromises.get(assistantId);
-      return;
-    }
-    const merged = pendingAssistantChanges.get(assistantId);
-    if (!merged) return;
-
-    pendingAssistantChanges.delete(assistantId);
-    assistantSaveInFlight.add(assistantId);
-    assistantSaveStatus.set("saving");
-
-    const savePromise = (async () => {
-      try {
-        const updated = await data.intric.flows.assistants.update({
-          id: getFlowId(),
-          assistantId,
-          update: merged
-        });
-        assistantCache.set(assistantId, updated);
-        setAssistantValidationError(assistantId, null);
-        // If a prompt was saved, the user may have fixed deleted-step references
-        if ("prompt" in merged) {
-          revalidateDeletedStepReferences();
-        }
-      } catch (e) {
-        const queued = pendingAssistantChanges.get(assistantId) ?? {};
-        pendingAssistantChanges.set(assistantId, { ...merged, ...queued });
-        assistantSaveStatus.set("error");
-        const msg =
-          e instanceof IntricError ? e.getReadableMessage() : "assistant_save_failed";
-        setAssistantValidationError(assistantId, msg);
-        throw e;
-      } finally {
-        assistantSaveInFlight.delete(assistantId);
-        assistantSavePromises.delete(assistantId);
-        refreshAssistantSaveStatus();
-      }
-    })();
-
-    assistantSavePromises.set(assistantId, savePromise);
-    await savePromise;
-    if (pendingAssistantChanges.has(assistantId)) {
-      queueAssistantSave(assistantId, 0);
-    }
-  }
-
-  function queueAssistantSave(assistantId: string, delayMs = 500) {
-    clearAssistantSaveTimer(assistantId);
-    const timer = setTimeout(() => {
-      assistantSaveTimers.delete(assistantId);
-      void runAssistantSaveNow(assistantId).catch(() => {
-        // Validation/UI status is updated in runAssistantSaveNow.
-      });
-    }, delayMs);
-    assistantSaveTimers.set(assistantId, timer);
-    refreshAssistantSaveStatus();
-  }
-
   async function saveAssistant(assistantId: string, changes: Record<string, unknown>) {
-    if (!assistantId || assistantId === "") return;
-    if (get(isPublished)) return;
-    const current = pendingAssistantChanges.get(assistantId) ?? {};
-    const merged = { ...current, ...changes };
-    pendingAssistantChanges.set(assistantId, merged);
-    setAssistantValidationError(assistantId, null);
-    if (get(assistantSaveStatus) === "error") {
-      assistantSaveStatus.set("pending");
-    }
-    if (shouldSaveAssistantImmediately(changes)) {
-      clearAssistantSaveTimer(assistantId);
-      await runAssistantSaveNow(assistantId);
-      return;
-    }
-    queueAssistantSave(assistantId);
+    await assistantSaveManager.save(assistantId, changes);
   }
 
   async function flushAssistantSaves(): Promise<void> {
-    let guard = 0;
-    while (guard < 25) {
-      guard += 1;
-      const ids = new Set<string>([
-        ...assistantSaveTimers.keys(),
-        ...pendingAssistantChanges.keys(),
-        ...assistantSavePromises.keys()
-      ]);
-      if (ids.size === 0) {
-        refreshAssistantSaveStatus();
-        return;
-      }
-      for (const assistantId of ids) {
-        clearAssistantSaveTimer(assistantId);
-      }
-      const results = await Promise.allSettled(
-        [...ids].map((assistantId) => runAssistantSaveNow(assistantId))
-      );
-      const rejected = results.find((result) => result.status === "rejected");
-      if (rejected && rejected.status === "rejected") {
-        throw rejected.reason;
-      }
-    }
-    throw new Error("Assistant save flush exceeded retry guard.");
+    await assistantSaveManager.flush();
   }
 
   // Unified save status combining flow + assistant saves
@@ -562,7 +436,7 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
           s.id === tempId ? { ...s, assistant_id: assistant.id } : s
         )
       }));
-      assistantCache.set(assistant.id, assistant);
+      assistantSaveManager.primeCache(assistant.id, assistant);
     } catch {
       // Remove the step if assistant creation fails
       editor.state.update.update((u) => ({
@@ -628,7 +502,7 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
           s.id === tempId ? { ...s, assistant_id: assistant.id } : s
         )
       }));
-      assistantCache.set(assistant.id, assistant);
+      assistantSaveManager.primeCache(assistant.id, assistant);
     } catch {
       // Remove the step and re-renumber
       editor.state.update.update((u) => {
@@ -905,13 +779,10 @@ function initFlowEditor(data: { flow: Flow; intric: Intric; onUpdateDone?: (flow
 
   function destroy() {
     clearAutoSaveTimer();
-    for (const timer of assistantSaveTimers.values()) {
-      clearTimeout(timer);
-    }
-    assistantSaveTimers.clear();
     void flushAssistantSaves().catch(() => {
       // Best-effort flush during teardown.
     });
+    assistantSaveManager.destroy();
     unsubscribe();
     unsubscribeValidation();
   }

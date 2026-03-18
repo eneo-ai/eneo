@@ -1,0 +1,260 @@
+"""Dynamic edit-mode tool schema builder for the AI Builder.
+
+Builds the `edit_flow` tool schema with dynamic constraints based on the
+current flow state. By injecting valid step refs as enum values, the LLM
+cannot generate an invalid ref — the API layer rejects it before validation.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from intric.flows.flow import FlowStep
+
+EDIT_FLOW_TOOL_NAME = "edit_flow"
+
+
+def build_edit_flow_tool_schema(
+    current_steps: list[FlowStep],
+    available_models: list[dict[str, Any]] | None = None,
+    available_kbs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build the edit_flow tool schema with dynamic constraints.
+
+    Args:
+        current_steps: Existing flow steps (for valid ref enums).
+        available_models: Available model refs (for model_ref enum).
+        available_kbs: Available KB refs (for knowledge_refs enum).
+    """
+    valid_refs = [f"existing_step_{s.step_order}" for s in current_steps]
+    # Include None for add operations where target_ref should be absent
+    target_ref_enum: list[str | None] = valid_refs + [None]
+    anchor_ref_enum: list[str | None] = valid_refs + [None]
+
+    model_refs: list[str] | None = None
+    if available_models and len(available_models) <= 15:
+        model_refs = [m["ref"] for m in available_models if "ref" in m]
+
+    kb_refs: list[str] | None = None
+    if available_kbs and len(available_kbs) <= 15:
+        kb_refs = [kb["ref"] for kb in available_kbs if "ref" in kb]
+
+    step_payload_schema = _build_step_payload_schema(model_refs, kb_refs)
+
+    return {
+        "type": "function",
+        "function": {
+            "name": EDIT_FLOW_TOOL_NAME,
+            "description": (
+                "Edit an existing flow. Describe only the changes — "
+                "the backend preserves everything else. Each operation targets "
+                "a specific step by its ref. Unmentioned steps are kept as-is."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["operations", "plan_rationale"],
+                "properties": {
+                    "plan_rationale": {
+                        "type": "string",
+                        "description": (
+                            "Explain what changes you're making and why, "
+                            "in 1-2 sentences."
+                        ),
+                    },
+                    "flow_name": {
+                        "type": ["string", "null"],
+                        "description": "New flow name, or null to keep current.",
+                    },
+                    "flow_description": {
+                        "type": ["string", "null"],
+                        "description": "New flow description, or null to keep current.",
+                    },
+                    "operations": {
+                        "type": "array",
+                        "description": (
+                            "List of step operations. Each operation is add, modify, or remove."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "required": ["op"],
+                            "properties": {
+                                "op": {
+                                    "type": "string",
+                                    "enum": ["add", "modify", "remove"],
+                                    "description": (
+                                        "add: insert a new step. "
+                                        "modify: change fields on an existing step. "
+                                        "remove: delete an existing step."
+                                    ),
+                                },
+                                "target_ref": {
+                                    "type": ["string", "null"],
+                                    "enum": target_ref_enum,
+                                    "description": (
+                                        "For modify/remove: the existing step to target. "
+                                        f"Valid refs: {valid_refs}. "
+                                        "Must be null for add operations."
+                                    ),
+                                },
+                                "placement": {
+                                    "type": "object",
+                                    "description": "For add: where to insert the new step.",
+                                    "properties": {
+                                        "position": {
+                                            "type": "string",
+                                            "enum": ["before", "after", "append"],
+                                        },
+                                        "anchor_ref": {
+                                            "type": ["string", "null"],
+                                            "enum": anchor_ref_enum,
+                                            "description": (
+                                                "Required for before/after. "
+                                                f"Valid refs: {valid_refs}"
+                                            ),
+                                        },
+                                    },
+                                },
+                                "add_payload": step_payload_schema,
+                                "patch": _build_patch_schema(model_refs, kb_refs),
+                            },
+                        },
+                    },
+                    "assumptions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Assumptions made about the edit.",
+                    },
+                },
+            },
+        },
+    }
+
+
+def build_edit_mode_tool_schemas(
+    current_steps: list[FlowStep],
+    available_models: list[dict[str, Any]] | None = None,
+    available_kbs: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Build the full tool set for edit mode.
+
+    Includes edit_flow + ask_structured_question + confirm_requirements.
+    """
+    from intric.flows.ai_builder.ai_builder_tools import (
+        build_ask_structured_question_tool_schema,
+        build_confirm_requirements_tool_schema,
+    )
+
+    return [
+        build_edit_flow_tool_schema(current_steps, available_models, available_kbs),
+        build_ask_structured_question_tool_schema(),
+        build_confirm_requirements_tool_schema(),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Internal schema builders
+# ---------------------------------------------------------------------------
+
+
+def _build_step_payload_schema(
+    model_refs: list[str] | None,
+    kb_refs: list[str] | None,
+) -> dict[str, Any]:
+    """Schema for add_payload (full step spec for new steps)."""
+    assistant_spec = _build_assistant_spec_schema(model_refs, kb_refs)
+
+    return {
+        "type": "object",
+        "description": "Full step specification for new steps (add operations).",
+        "required": ["name", "assistant_spec"],
+        "properties": {
+            "name": {"type": "string", "description": "User-visible step name."},
+            "assistant_spec": assistant_spec,
+            "input_source": {
+                "type": "string",
+                "enum": ["flow_input", "previous_step", "all_previous_steps"],
+                "description": "Where this step gets its input.",
+            },
+            "input_type": {
+                "type": "string",
+                "enum": ["text", "json", "audio", "document", "file", "any"],
+            },
+            "output_mode": {
+                "type": "string",
+                "enum": ["pass_through", "transcribe_only", "template_fill"],
+            },
+            "output_type": {
+                "type": "string",
+                "enum": ["text", "json", "pdf", "docx"],
+            },
+        },
+    }
+
+
+def _build_patch_schema(
+    model_refs: list[str] | None,
+    kb_refs: list[str] | None,
+) -> dict[str, Any]:
+    """Schema for patch (partial update for modify operations)."""
+    assistant_spec = _build_assistant_spec_schema(model_refs, kb_refs)
+
+    return {
+        "type": "object",
+        "description": (
+            "Partial update for existing steps (modify operations). "
+            "Only include fields you want to change."
+        ),
+        "properties": {
+            "name": {"type": "string"},
+            "assistant_spec": assistant_spec,
+            "input_source": {
+                "type": "string",
+                "enum": ["flow_input", "previous_step", "all_previous_steps"],
+            },
+            "input_type": {
+                "type": "string",
+                "enum": ["text", "json", "audio", "document", "file", "any"],
+            },
+            "output_mode": {
+                "type": "string",
+                "enum": ["pass_through", "transcribe_only", "template_fill"],
+            },
+            "output_type": {
+                "type": "string",
+                "enum": ["text", "json", "pdf", "docx"],
+            },
+        },
+    }
+
+
+def _build_assistant_spec_schema(
+    model_refs: list[str] | None,
+    kb_refs: list[str] | None,
+) -> dict[str, Any]:
+    schema: dict[str, Any] = {
+        "type": "object",
+        "required": ["instructions"],
+        "properties": {
+            "instructions": {
+                "type": "string",
+                "description": "What this step's assistant should do.",
+            },
+            "model_ref": {
+                "type": ["string", "null"],
+                "description": "Model alias, or null for space default.",
+            },
+            "knowledge_refs": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Knowledge base aliases to attach.",
+            },
+        },
+    }
+
+    # Inject dynamic enums for small lists
+    if model_refs is not None:
+        schema["properties"]["model_ref"]["enum"] = model_refs + [None]
+    if kb_refs is not None:
+        schema["properties"]["knowledge_refs"]["items"]["enum"] = kb_refs
+
+    return schema

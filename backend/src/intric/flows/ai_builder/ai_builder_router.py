@@ -1,0 +1,923 @@
+"""API endpoints for the AI Flow Builder."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncGenerator, Awaitable, Callable
+import logging
+from types import SimpleNamespace
+from typing import Annotated, Any, Protocol, cast
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Path, Request, status
+from fastapi.responses import JSONResponse
+from sse_starlette import EventSourceResponse, ServerSentEvent
+
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
+from intric.flows.ai_builder.ai_builder_models import (
+    ApplyPlanRequest,
+    ApplyResultResponse,
+    CreateSessionRequest,
+    PlanResponse,
+    PlanApprovalResponse,
+    SessionModelOption,
+    SessionListResponse,
+    SessionModelsResponse,
+    SessionPlansResponse,
+    SendMessageRequest,
+    SessionResponse,
+)
+from intric.flows.ai_builder.ai_builder_context import (
+    build_planner_context,
+    resolve_planner_model,
+    serialize_space_kbs,
+    serialize_space_models,
+)
+from intric.flows.ai_builder.ai_builder_events import SSE_EVENT_DONE, build_error_event
+from intric.flows.flow_permissions import ensure_can_use_flow_ai_builder
+from intric.main.container.container import Container
+from intric.main.exceptions import BadRequestException, ErrorCodes, NotFoundException, UnauthorizedException
+from intric.main.models import GeneralError
+from intric.server.dependencies.container import get_container
+
+router = APIRouter(prefix="/ai-builder", tags=["ai-builder"])
+logger = logging.getLogger(__name__)
+
+
+class _CredentialResolverProtocol(Protocol):
+    def get_api_key(self) -> str | None: ...
+
+    def get_credential_field(self, *, field: str) -> str | None: ...
+
+
+class _CompletionModelAdapterProtocol(Protocol):
+    credential_resolver: _CredentialResolverProtocol
+    litellm_model: str
+
+
+class _CompletionServiceProtocol(Protocol):
+    async def resolve_litellm_params(self, model: Any) -> tuple[str, dict[str, object]]: ...
+
+    async def _get_adapter(self, model: Any) -> _CompletionModelAdapterProtocol: ...
+
+
+EventStream = AsyncGenerator[dict[str, str], None]
+
+
+def _scope_type_to_str(scope_type: object) -> str | None:
+    if isinstance(scope_type, str):
+        return scope_type
+    value = getattr(scope_type, "value", None)
+    if isinstance(value, str):
+        return value
+    return None
+
+
+async def _coerce_event_stream(
+    stream: EventStream | Awaitable[EventStream],
+) -> EventStream:
+    if hasattr(stream, "__aiter__"):
+        return cast(EventStream, stream)
+    return await cast(Awaitable[EventStream], stream)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _ensure_flow_edit_permission(container: Container, space) -> None:
+    ensure_can_use_flow_ai_builder(container.user())
+    actor = container.actor_manager().get_space_actor_from_space(space)
+    if not actor.can_edit_flows():
+        raise UnauthorizedException(
+            "You do not have permission to use the AI builder in this space.",
+            code="insufficient_space_permission",
+            context={"auth_layer": "space_membership"},
+        )
+
+
+async def _require_flow_edit_permission(
+    container: Container,
+    space_id: UUID,
+    *,
+    space=None,
+):
+    """Check that the current user can edit flows in the given space."""
+    resolved_space = space
+    if resolved_space is None:
+        resolved_space = await container.space_service().get_space(space_id)
+    _ensure_flow_edit_permission(container, resolved_space)
+    return resolved_space
+
+
+def _raise_scope_mismatch() -> None:
+    raise UnauthorizedException(
+        "API key space scope does not match requested AI builder resource.",
+        code="insufficient_scope",
+        context={"auth_layer": "api_key_scope"},
+    )
+
+
+def _request_correlation_id(request: Request) -> str | None:
+    request_id = request.headers.get("x-correlation-id") or request.headers.get(
+        "x-request-id"
+    )
+    return request_id if isinstance(request_id, str) else None
+
+
+def _require_ai_builder_scope(request: Request, *, space_id: UUID) -> None:
+    """Enforce space-scoped API key compatibility for AI Builder routes."""
+    state = getattr(request, "state", None)
+    if state is None or getattr(state, "scope_enforcement_enabled", True) is False:
+        return
+
+    scope_type = getattr(state, "api_key_scope_type", None)
+    scope_id = getattr(state, "api_key_scope_id", None)
+    if not isinstance(scope_id, UUID):
+        return
+
+    scope_type_str = _scope_type_to_str(scope_type)
+    if scope_type_str == "space" and scope_id != space_id:
+        _raise_scope_mismatch()
+
+
+def _get_ai_builder_scoped_space_id(request: Request) -> UUID | None:
+    """Return the enforced space scope for API keys, if present."""
+    state = getattr(request, "state", None)
+    if state is None or getattr(state, "scope_enforcement_enabled", True) is False:
+        return None
+
+    scope_type = getattr(state, "api_key_scope_type", None)
+    scope_id = getattr(state, "api_key_scope_id", None)
+    if not isinstance(scope_id, UUID):
+        return None
+
+    scope_type_str = _scope_type_to_str(scope_type)
+    if scope_type_str != "space":
+        return None
+    return scope_id
+
+
+async def _get_space_models(container: Container, space_id: UUID) -> list[dict]:
+    """Get available completion models for a space."""
+    space = await container.space_service().get_space(space_id)
+    return serialize_space_models(space)
+
+
+async def _get_space_kbs(container: Container, space_id: UUID) -> list[dict]:
+    """Get available knowledge bases for a space."""
+    space = await container.space_service().get_space(space_id)
+    return serialize_space_kbs(space)
+
+
+async def _get_flow_assistant_snapshots(container: Container, flow) -> dict[UUID, dict]:
+    """Build compact assistant snapshots for flow edit context."""
+    return await container.flow_service().get_flow_assistant_snapshots(flow)
+
+
+async def _get_planner_model(container: Container, space_id: UUID):
+    """Get a completion model to use for the AI builder planner."""
+    space = await container.space_service().get_space(space_id)
+    return resolve_planner_model(space)
+
+
+async def _resolve_litellm_params(container: Container, model) -> tuple[str, dict]:
+    """Resolve LiteLLM model name and provider kwargs for the planner model."""
+    completion_service = cast(_CompletionServiceProtocol, container.completion_service())
+    resolve_params = cast(
+        Callable[[Any], Awaitable[tuple[str, dict[str, object]]]] | None,
+        getattr(completion_service, "resolve_litellm_params", None),
+    )
+    if resolve_params is not None:
+        resolved = await resolve_params(model)
+        if (
+            isinstance(resolved, tuple)
+            and len(resolved) == 2
+            and isinstance(resolved[0], str)
+            and isinstance(resolved[1], dict)
+        ):
+            return resolved
+
+    adapter = await completion_service._get_adapter(model)
+    litellm_kwargs: dict[str, object] = {}
+    api_key = adapter.credential_resolver.get_api_key()
+    if api_key:
+        litellm_kwargs["api_key"] = api_key
+    field_mapping = {
+        "endpoint": "api_base",
+        "api_version": "api_version",
+        "api_type": "api_type",
+        "organization": "organization",
+        "deployment_name": "deployment_name",
+    }
+    for field, key in field_mapping.items():
+        value = adapter.credential_resolver.get_credential_field(field=field)
+        if value:
+            litellm_kwargs[key] = value
+
+    return adapter.litellm_model, litellm_kwargs
+
+
+def _to_plan_response(plan) -> PlanResponse:
+    public_envelope = plan.envelope.model_copy(update={"reasoning": None}, deep=True)
+    return PlanResponse(
+        plan_id=plan.id,
+        session_id=plan.session_id,
+        status=plan.status,
+        spec_hash=plan.spec_hash,
+        envelope=public_envelope,
+        created_at=plan.created_at,
+        updated_at=plan.updated_at,
+    )
+
+
+def _ai_builder_error_response(
+    *,
+    description: str,
+    message: str,
+    intric_error_code: ErrorCodes,
+    code: str | None = None,
+    context: dict[str, object] | None = None,
+) -> dict[str, Any]:
+    example: dict[str, Any] = {
+        "message": message,
+        "intric_error_code": int(intric_error_code),
+    }
+    if code is not None:
+        example["code"] = code
+    if context is not None:
+        example["context"] = context
+    return {
+        "model": GeneralError,
+        "description": description,
+        "content": {"application/json": {"example": example}},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/sessions",
+    response_model=SessionResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="create_ai_builder_session",
+    summary="Create AI Builder Session",
+    description="Start or resume an AI Builder session for a space-scoped flow drafting workflow.",
+    responses={
+        201: {"description": "AI Builder session created."},
+        400: _ai_builder_error_response(
+            description="The request payload is valid JSON but cannot start a builder session in its current state.",
+            message="A planner model is required to start an AI Builder session.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="bad_request",
+        ),
+        403: _ai_builder_error_response(
+            description="Caller lacks space permission or API key scope for this space.",
+            message="API key space scope does not match requested AI builder resource.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+    },
+)
+async def create_session(
+    request: Request,
+    body: CreateSessionRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    _require_ai_builder_scope(request, space_id=body.space_id)
+    space = await _require_flow_edit_permission(container, body.space_id)
+    resolve_planner_model(space)
+
+    service = container.ai_builder_service()
+    session = await service.create_session(
+        space_id=body.space_id,
+        target_kind=body.target_kind,
+        flow_id=body.flow_id,
+        force_new=body.force_new,
+    )
+
+    # Audit
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.AI_BUILDER_SESSION_CREATED,
+        entity_type=EntityType.AI_BUILDER_SESSION,
+        entity_id=session.id,
+        description=f"Started AI builder session ({session.target_kind.value})",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=session,
+            extra={
+                "target_kind": session.target_kind.value,
+                "flow_id": str(session.flow_id) if session.flow_id else None,
+            },
+        ),
+    )
+
+    return SessionResponse(
+        session_id=session.id,
+        status=session.status,
+        target_kind=session.target_kind,
+        flow_id=session.flow_id,
+        latest_plan_id=session.latest_plan_id,
+        conversation=session.conversation,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+    )
+
+
+@router.get(
+    "/sessions",
+    response_model=SessionListResponse,
+    operation_id="list_ai_builder_sessions",
+    summary="List AI Builder Sessions",
+    description="List AI Builder sessions visible to the caller within their permitted spaces.",
+    responses={
+        200: {"description": "Visible AI Builder sessions."},
+        403: _ai_builder_error_response(
+            description="Caller lacks permission to use the AI Builder.",
+            message="You do not have permission to use the AI builder in this space.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_space_permission",
+            context={"auth_layer": "space_membership"},
+        ),
+    },
+)
+async def list_sessions(
+    request: Request,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    ensure_can_use_flow_ai_builder(container.user())
+    service = container.ai_builder_service()
+    sessions = await service.list_sessions()
+    scoped_space_id = _get_ai_builder_scoped_space_id(request)
+
+    visible_sessions = []
+    for session in sessions:
+        if scoped_space_id is not None and session.space_id != scoped_space_id:
+            continue
+        try:
+            space = await container.space_service().get_space(session.space_id)
+        except NotFoundException:
+            logger.warning(
+                "Skipping AI builder session because its space could not be loaded.",
+                extra={
+                    "session_id": str(session.session_id),
+                    "space_id": str(session.space_id),
+                },
+                exc_info=True,
+            )
+            continue
+
+        if space is not None:
+            try:
+                _ensure_flow_edit_permission(container, space)
+            except UnauthorizedException:
+                continue
+        visible_sessions.append(session)
+
+    return SessionListResponse(sessions=visible_sessions)
+
+
+@router.post(
+    "/sessions/{session_id}/messages",
+    operation_id="send_ai_builder_message",
+    summary="Send AI Builder Message",
+    description=(
+        "Send a user message to an AI Builder session and receive planner events as "
+        "a server-sent event stream."
+    ),
+    responses={
+        200: {
+            "description": "Server-sent event stream with planner status, text, question, plan, error, and done events.",
+            "content": {
+                "text/event-stream": {
+                    "schema": {"type": "string"},
+                    "example": (
+                        "event: status\n"
+                        "data: {\"status\":\"thinking\"}\n\n"
+                        "event: text\n"
+                        "data: {\"text\":\"I need one more detail.\"}\n\n"
+                        "event: done\n"
+                        "data: \n\n"
+                    ),
+                }
+            },
+        },
+        400: _ai_builder_error_response(
+            description="The AI Builder session cannot accept a new message in its current state.",
+            message="Cannot send messages in this AI Builder session right now.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="bad_request",
+        ),
+        403: _ai_builder_error_response(
+            description="Caller lacks space permission or API key scope for this session.",
+            message="API key space scope does not match requested AI builder resource.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: _ai_builder_error_response(
+            description="AI Builder session or referenced flow context was not found.",
+            message="AI Builder session not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
+)
+async def send_message(
+    request: Request,
+    session_id: Annotated[
+        UUID,
+        Path(description="Identifier of the AI Builder session that will receive the message."),
+    ],
+    body: SendMessageRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.ai_builder_service()
+    session = await service.get_session(session_id)
+    _require_ai_builder_scope(request, space_id=session.space_id)
+    space = await _require_flow_edit_permission(container, session.space_id)
+    tenant = await container.tenant_repo().get(container.user().tenant_id)
+
+    # Pre-fetch everything while the DI transaction is still active.
+    # The SSE generator runs after the transaction commits, so any DB calls
+    # via services sharing the same session would fail.
+    planner_context = build_planner_context(
+        space,
+        model_id=body.model_id,
+        tenant_flow_settings=tenant.flow_settings if tenant else None,
+    )
+    model = planner_context.model
+
+    # Resolve the LLM adapter (queries ModelProviders for credentials)
+    litellm_model, litellm_kwargs = await _resolve_litellm_params(container, model)
+
+    flow = None
+    assistant_snapshots = None
+    if session.flow_id is not None:
+        flow = await container.flow_service().get_flow(session.flow_id)
+        assistant_snapshots = await _get_flow_assistant_snapshots(container, flow)
+
+    async def event_stream():
+        question_answer = (
+            {
+                **(body.question_answer or {}),
+                **(
+                    {"ui_language": body.ui_language}
+                    if body.ui_language is not None
+                    else {}
+                ),
+            }
+            if body.question_answer is not None or body.ui_language is not None
+            else None
+        )
+        try:
+            stream = await _coerce_event_stream(
+                service.send_message(
+                    session_id=session_id,
+                    message=body.message,
+                    question_answer=question_answer,
+                    litellm_model=litellm_model,
+                    litellm_kwargs=litellm_kwargs,
+                    available_models=planner_context.available_models,
+                    available_kbs=planner_context.available_kbs,
+                    flow=flow,
+                    assistant_snapshots=assistant_snapshots,
+                    max_input_tokens=planner_context.max_input_tokens,
+                    max_output_tokens=planner_context.max_output_tokens,
+                    budget_policy=planner_context.budget_policy,
+                )
+            )
+
+            async for event in stream:
+                yield ServerSentEvent(
+                    data=event["data"],
+                    event=event["event"],
+                )
+        except Exception as error:
+            logger.error(
+                "AI Builder event stream failed.",
+                exc_info=error,
+                extra={
+                    "session_id": str(session_id),
+                    "space_id": str(session.space_id),
+                },
+            )
+            error_event = build_error_event(
+                message="The AI Builder stream failed. Please try again.",
+                code="planner_stream_failed",
+                phase="router",
+                request_id=_request_correlation_id(request),
+            )
+            yield ServerSentEvent(data=error_event["data"], event=error_event["event"])
+            yield ServerSentEvent(data="", event=SSE_EVENT_DONE)
+
+    return EventSourceResponse(event_stream(), ping=15)
+
+
+@router.get(
+    "/sessions/{session_id}",
+    response_model=SessionResponse,
+    operation_id="get_ai_builder_session",
+    summary="Get AI Builder Session",
+    description="Return the current state and conversation for a single AI Builder session.",
+    responses={
+        200: {"description": "AI Builder session details."},
+        403: _ai_builder_error_response(
+            description="Caller lacks space permission or API key scope for this session.",
+            message="API key space scope does not match requested AI builder resource.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: _ai_builder_error_response(
+            description="AI Builder session not found.",
+            message="AI Builder session not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
+)
+async def get_session(
+    request: Request,
+    session_id: Annotated[
+        UUID,
+        Path(description="Identifier of the AI Builder session to return."),
+    ],
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.ai_builder_service()
+    session = await service.get_session(session_id)
+    _require_ai_builder_scope(request, space_id=session.space_id)
+    await _require_flow_edit_permission(container, session.space_id)
+
+    return SessionResponse(
+        session_id=session.id,
+        status=session.status,
+        target_kind=session.target_kind,
+        flow_id=session.flow_id,
+        latest_plan_id=session.latest_plan_id,
+        conversation=session.conversation,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/models",
+    response_model=SessionModelsResponse,
+    operation_id="get_ai_builder_models",
+    summary="List Session Models",
+    description="Return the completion models available to the AI Builder in the session's space.",
+    responses={
+        200: {"description": "Available completion models and default planner model."},
+        403: _ai_builder_error_response(
+            description="Caller lacks space permission or API key scope for this session.",
+            message="API key space scope does not match requested AI builder resource.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: _ai_builder_error_response(
+            description="AI Builder session not found.",
+            message="AI Builder session not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
+)
+async def get_session_models(
+    request: Request,
+    session_id: Annotated[
+        UUID,
+        Path(description="Identifier of the AI Builder session whose planner models should be listed."),
+    ],
+    container: Container = Depends(get_container(with_user=True)),
+):
+    """Return the completion models available in the session's space."""
+    service = container.ai_builder_service()
+    session = await service.get_session(session_id)
+    _require_ai_builder_scope(request, space_id=session.space_id)
+    space = await _require_flow_edit_permission(container, session.space_id)
+    models = serialize_space_models(space)
+    default_model = resolve_planner_model(space)
+    default_model_id = default_model.id if default_model else None
+
+    return SessionModelsResponse(
+        models=[SessionModelOption.model_validate(model) for model in models],
+        default_model_id=default_model_id,
+    )
+
+
+@router.get(
+    "/plans/{plan_id}",
+    response_model=PlanResponse,
+    operation_id="get_ai_builder_plan",
+    summary="Get AI Builder Plan",
+    description="Fetch a stored AI Builder plan proposal for review or approval.",
+    responses={
+        200: {"description": "Stored AI Builder plan."},
+        403: _ai_builder_error_response(
+            description="Caller lacks space permission or API key scope for the plan's session.",
+            message="API key space scope does not match requested AI builder resource.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: _ai_builder_error_response(
+            description="AI Builder plan not found.",
+            message="AI Builder plan not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
+)
+async def get_plan(
+    request: Request,
+    plan_id: Annotated[
+        UUID,
+        Path(description="Identifier of the stored AI Builder plan revision to fetch."),
+    ],
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.ai_builder_service()
+    plan = await service.get_plan(plan_id)
+    session = await service.get_session(plan.session_id)
+    _require_ai_builder_scope(request, space_id=session.space_id)
+    await _require_flow_edit_permission(container, session.space_id)
+    return _to_plan_response(plan)
+
+
+@router.get(
+    "/sessions/{session_id}/plans",
+    response_model=SessionPlansResponse,
+    operation_id="list_ai_builder_session_plans",
+    summary="List Session Plans",
+    description="List all plan revisions generated within a specific AI Builder session.",
+    responses={
+        200: {"description": "Stored plan revisions for the session."},
+        403: _ai_builder_error_response(
+            description="Caller lacks space permission or API key scope for this session.",
+            message="API key space scope does not match requested AI builder resource.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: _ai_builder_error_response(
+            description="AI Builder session not found.",
+            message="AI Builder session not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
+)
+async def list_session_plans(
+    request: Request,
+    session_id: Annotated[
+        UUID,
+        Path(description="Identifier of the AI Builder session whose stored plans should be listed."),
+    ],
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.ai_builder_service()
+    session = await service.get_session(session_id)
+    _require_ai_builder_scope(request, space_id=session.space_id)
+    await _require_flow_edit_permission(container, session.space_id)
+    plans = await service.list_session_plans(session_id)
+    return SessionPlansResponse(plans=[_to_plan_response(plan) for plan in plans])
+
+
+@router.post(
+    "/sessions/{session_id}/cancel",
+    response_model=SessionResponse,
+    operation_id="cancel_ai_builder_session",
+    summary="Cancel AI Builder Session",
+    description="Cancel an active AI Builder session and stop further planning work in that session.",
+    responses={
+        200: {"description": "AI Builder session cancelled."},
+        403: _ai_builder_error_response(
+            description="Caller lacks space permission or API key scope for this session.",
+            message="API key space scope does not match requested AI builder resource.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: _ai_builder_error_response(
+            description="AI Builder session not found.",
+            message="AI Builder session not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
+)
+async def cancel_session(
+    request: Request,
+    session_id: Annotated[
+        UUID,
+        Path(description="Identifier of the active AI Builder session to cancel."),
+    ],
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.ai_builder_service()
+    session = await service.get_session(session_id)
+    _require_ai_builder_scope(request, space_id=session.space_id)
+    await _require_flow_edit_permission(container, session.space_id)
+    session = await service.cancel_session(session_id)
+
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.AI_BUILDER_SESSION_CANCELLED,
+        entity_type=EntityType.AI_BUILDER_SESSION,
+        entity_id=session.id,
+        description="Cancelled AI builder session",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=session,
+            extra={"target_kind": session.target_kind.value},
+        ),
+    )
+
+    return SessionResponse(
+        session_id=session.id,
+        status=session.status,
+        target_kind=session.target_kind,
+        flow_id=session.flow_id,
+        latest_plan_id=session.latest_plan_id,
+        conversation=session.conversation,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+    )
+
+
+@router.post(
+    "/plans/{plan_id}/approve",
+    response_model=PlanApprovalResponse,
+    operation_id="approve_ai_builder_plan",
+    summary="Approve AI Builder Plan",
+    description="Mark a plan revision as approved so it can be applied to a flow.",
+    responses={
+        200: {"description": "Plan approved."},
+        403: _ai_builder_error_response(
+            description="Caller lacks space permission or API key scope for the plan's session.",
+            message="API key space scope does not match requested AI builder resource.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: _ai_builder_error_response(
+            description="AI Builder plan not found.",
+            message="AI Builder plan not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
+)
+async def approve_plan(
+    request: Request,
+    plan_id: Annotated[
+        UUID,
+        Path(description="Identifier of the AI Builder plan revision to approve."),
+    ],
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.ai_builder_service()
+    plan = await service.get_plan(plan_id)
+    session = await service.get_session(plan.session_id)
+    _require_ai_builder_scope(request, space_id=session.space_id)
+    await _require_flow_edit_permission(container, session.space_id)
+    plan = await service.approve_plan(plan_id=plan_id)
+
+    # Audit
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.AI_BUILDER_PLAN_APPROVED,
+        entity_type=EntityType.AI_BUILDER_SESSION,
+        entity_id=plan.session_id,
+        description="Approved AI builder plan",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=plan,
+            extra={"plan_id": str(plan.id)},
+        ),
+    )
+
+    return PlanApprovalResponse(
+        plan_id=plan.id,
+        status=plan.status,
+    )
+
+
+@router.post(
+    "/plans/{plan_id}/apply",
+    response_model=ApplyResultResponse,
+    operation_id="apply_ai_builder_plan",
+    summary="Apply AI Builder Plan",
+    description="Materialize an approved AI Builder plan into the target flow definition.",
+    responses={
+        200: {"description": "Plan applied to the target flow."},
+        400: _ai_builder_error_response(
+            description=(
+                "The approved plan cannot be materialized in the current space configuration. "
+                "Representative machine-readable codes include: transcription_model_required, "
+                "invalid_existing_step_ref."
+            ),
+            message="A transcription model must be selected when using audio input steps.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="transcription_model_required",
+        ),
+        403: _ai_builder_error_response(
+            description="Caller lacks space permission or API key scope for the plan's session.",
+            message="API key space scope does not match requested AI builder resource.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: _ai_builder_error_response(
+            description="AI Builder plan not found.",
+            message="AI Builder plan not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+        409: _ai_builder_error_response(
+            description="The target flow revision changed before apply completed.",
+            message="Flow revision changed while applying the plan.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="stale_revision",
+        ),
+    },
+)
+async def apply_plan(
+    request: Request,
+    plan_id: Annotated[
+        UUID,
+        Path(description="Identifier of the approved AI Builder plan revision to apply to the target flow."),
+    ],
+    body: ApplyPlanRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.ai_builder_service()
+
+    # Verify plan exists and get session for permission check
+    plan = await service.get_plan(plan_id)
+    session = await service.get_session(plan.session_id)
+    _require_ai_builder_scope(request, space_id=session.space_id)
+    await _require_flow_edit_permission(container, session.space_id)
+
+    try:
+        result = await service.apply_plan(
+            plan_id=plan_id,
+            expected_revision=body.expected_revision,
+        )
+    except BadRequestException as e:
+        if getattr(e, "code", None) == "stale_revision":
+            return JSONResponse(
+                status_code=409,
+                content=GeneralError(
+                    message=str(e),
+                    intric_error_code=ErrorCodes.BAD_REQUEST,
+                    code="stale_revision",
+                    context=getattr(e, "context", None),
+                    request_id=_request_correlation_id(request),
+                ).model_dump(exclude_none=True),
+            )
+        raise
+
+    # Audit
+    user = container.user()
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.AI_BUILDER_FLOW_APPLIED,
+        entity_type=EntityType.FLOW,
+        entity_id=result.flow_id,
+        description=f"Applied AI builder plan: {result.steps_created} created, "
+        f"{result.steps_updated} updated, {result.steps_removed} removed",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=SimpleNamespace(id=result.flow_id, name=result.flow_name),
+            extra={
+                "plan_id": str(plan_id),
+                "steps_created": result.steps_created,
+                "steps_updated": result.steps_updated,
+                "steps_removed": result.steps_removed,
+            },
+        ),
+    )
+
+    return result

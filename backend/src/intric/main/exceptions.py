@@ -84,7 +84,23 @@ class UnsupportedModelException(Exception):
 
 
 class QueryException(Exception):
-    pass
+    def __init__(
+        self,
+        message: str = "Query too long",
+        *,
+        tokens_used: int | None = None,
+        token_limit: int | None = None,
+    ):
+        super().__init__(message)
+        self.tokens_used = tokens_used
+        self.token_limit = token_limit
+
+        context: dict[str, int] = {}
+        if tokens_used is not None:
+            context["tokens_used"] = tokens_used
+        if token_limit is not None:
+            context["token_limit"] = token_limit
+        self.context = context or None
 
 
 class UniqueUserException(Exception):

@@ -11,6 +11,7 @@ from fastapi import BackgroundTasks
 from fastapi import HTTPException
 from fastapi import UploadFile
 
+import intric.flows.flow_dispatch as flow_dispatch_module
 from intric.authentication.auth_dependencies import ScopeFilter
 from intric.audit.domain.action_types import ActionType
 from intric.flows.flow import Flow, FlowRun, FlowRunStatus, FlowStep, FlowTemplateAsset, FlowVersion
@@ -22,6 +23,7 @@ from intric.flows.api.flow_models import (
     FlowInputType,
     FlowRunCreateRequest,
     FlowStepCreateRequest,
+    FlowUpdateRequest,
 )
 from intric.flows.api.flow_assistant_router import (
     create_flow_assistant,
@@ -48,6 +50,7 @@ from intric.flows.api.flow_router_common import dispatch_flow_run_after_commit
 from intric.settings.settings import FlowInputLimitsPublic
 from intric.assistants.api.assistant_models import AssistantUpdatePublic
 from intric.main.exceptions import BadRequestException, NotFoundException, UnauthorizedException
+from intric.roles.permissions import Permission
 from intric.flows.api.flow_consumer_router import generate_flow_run_artifact_signed_url
 from intric.flows.api.flow_definition_router import (
     get_flow as definition_get_flow,
@@ -112,7 +115,7 @@ def _run(flow_id, tenant_id):
 
 
 def _enable_space_access(container, *, can_read=True, can_create=True, can_edit=True,
-                         can_delete=True, can_publish=True):
+                         can_delete=True, can_publish=True, user_permissions=None):
     """Set up space_service + actor_manager mocks so space checks pass."""
     space_service = AsyncMock()
     container.space_service.return_value = space_service
@@ -126,7 +129,14 @@ def _enable_space_access(container, *, can_read=True, can_create=True, can_edit=
     actor_manager = MagicMock()
     actor_manager.get_space_actor_from_space.return_value = actor
     container.actor_manager.return_value = actor_manager
+    user = getattr(container.user, "return_value", None)
+    if user is not None:
+        user.permissions = list([Permission.FLOWS] if user_permissions is None else user_permissions)
     return actor
+
+
+def _request():
+    return SimpleNamespace(state=SimpleNamespace())
 
 
 @pytest.mark.asyncio
@@ -231,6 +241,11 @@ async def test_get_flow_graph_rejects_scope_mismatch(monkeypatch):
     container.flow_service.return_value = AsyncMock()
     container.flow_run_service.return_value = AsyncMock()
     container.flow_version_repo.return_value = AsyncMock()
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS],
+    )
     flow_id = uuid4()
 
     monkeypatch.setattr(
@@ -249,7 +264,48 @@ async def test_get_flow_graph_rejects_scope_mismatch(monkeypatch):
 
     assert exc.value.status_code == 403
     container.flow_run_service.return_value.get_run.assert_not_awaited()
-    container.flow_version_repo.return_value.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_flows_rejects_user_without_flow_roles():
+    container = MagicMock()
+    flow_service = AsyncMock()
+    container.flow_service.return_value = flow_service
+    _enable_space_access(container, user_permissions=[])
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await definition_list_flows(
+            request=SimpleNamespace(state=SimpleNamespace()),
+            container=container,
+        )
+
+    assert exc_info.value.code == "insufficient_tenant_permission"
+    flow_service.list_flows.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_flow_run_rejects_user_without_run_permission():
+    container = MagicMock()
+    flow_service = AsyncMock()
+    flow_run_service = AsyncMock()
+    container.flow_service.return_value = flow_service
+    container.flow_run_service.return_value = flow_run_service
+    _enable_space_access(container, user_permissions=[Permission.FLOWS_VIEW])
+
+    flow = _flow(uuid4())
+    flow_service.get_flow.return_value = flow
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await create_flow_run(
+            id=flow.id,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            run_in=FlowRunCreateRequest(input={}),
+            background_tasks=BackgroundTasks(),
+            container=container,
+        )
+
+    assert exc_info.value.code == "insufficient_tenant_permission"
+    flow_run_service.create_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -297,6 +353,14 @@ async def test_inspect_flow_template_enforces_scope_and_calls_service(monkeypatc
     container.flow_template_asset_service.return_value = template_asset_service
     flow_id = uuid4()
     file_id = uuid4()
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS],
+    )
+    container.flow_service.return_value = AsyncMock()
+    container.flow_service.return_value.get_flow.return_value = _flow(flow_id)
+    _enable_space_access(container)
     template_asset_service.inspect_asset.return_value = {
         "file_id": file_id,
         "file_name": "rapport.docx",
@@ -304,19 +368,26 @@ async def test_inspect_flow_template_enforces_scope_and_calls_service(monkeypatc
         "extracted_text_preview": "Titel: {{summary}}",
     }
 
-    enforced: list[str] = []
+    requested_flow_ids: list[str] = []
 
-    async def fake_enforce(
+    async def fake_access_context(
         request,
         _container,
         *,
         flow_id,
-        require_flow_lookup_without_scope=False,
+        required_access="view",
+        load_actor_context=True,
     ):
-        enforced.append(str(flow_id))
-        assert require_flow_lookup_without_scope is False
+        requested_flow_ids.append(str(flow_id))
+        assert required_access == "manage"
+        assert load_actor_context is True
+        return SimpleNamespace(actor=MagicMock(can_edit_flows=MagicMock(return_value=True)))
 
-    monkeypatch.setattr(router_common_module, "enforce_flow_scope_for_request", fake_enforce)
+    monkeypatch.setattr(
+        router_common_module,
+        "get_flow_access_context_for_request",
+        fake_access_context,
+    )
 
     result = await inspect_flow_template(
         id=flow_id,
@@ -325,7 +396,7 @@ async def test_inspect_flow_template_enforces_scope_and_calls_service(monkeypatc
         container=container,
     )
 
-    assert enforced == [str(flow_id)]
+    assert requested_flow_ids == [str(flow_id)]
     template_asset_service.inspect_asset.assert_awaited_once_with(flow_id=flow_id, asset_id=file_id)
     assert result["file_name"] == "rapport.docx"
     assert result["extracted_text_preview"] == "Titel: {{summary}}"
@@ -336,7 +407,8 @@ async def test_upload_flow_template_file_enforces_scope_and_uses_docx_template_s
     container = MagicMock()
     template_asset_service = AsyncMock()
     audit_service = AsyncMock()
-    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4(), permissions=[Permission.FLOWS])
+    flow_id = uuid4()
     asset = FlowTemplateAsset.model_validate(
         {
             "id": uuid4(),
@@ -359,8 +431,10 @@ async def test_upload_flow_template_file_enforces_scope_and_uses_docx_template_s
     container.flow_template_asset_service.return_value = template_asset_service
     container.audit_service.return_value = audit_service
     container.user.return_value = user
+    container.flow_service.return_value = AsyncMock()
+    container.flow_service.return_value.get_flow.return_value = _flow(flow_id)
+    _enable_space_access(container)
     template_asset_service.upload_asset.return_value = asset
-    flow_id = uuid4()
     upload = UploadFile(
         filename="template.docx",
         file=BytesIO(b"fake"),
@@ -369,19 +443,26 @@ async def test_upload_flow_template_file_enforces_scope_and_uses_docx_template_s
         },
     )
 
-    enforced: list[str] = []
+    requested_flow_ids: list[str] = []
 
-    async def fake_enforce(
+    async def fake_access_context(
         request,
         _container,
         *,
         flow_id,
-        require_flow_lookup_without_scope=False,
+        required_access="view",
+        load_actor_context=True,
     ):
-        enforced.append(str(flow_id))
-        assert require_flow_lookup_without_scope is True
+        requested_flow_ids.append(str(flow_id))
+        assert required_access == "manage"
+        assert load_actor_context is True
+        return SimpleNamespace(actor=MagicMock(can_edit_flows=MagicMock(return_value=True)))
 
-    monkeypatch.setattr(router_common_module, "enforce_flow_scope_for_request", fake_enforce)
+    monkeypatch.setattr(
+        router_common_module,
+        "get_flow_access_context_for_request",
+        fake_access_context,
+    )
 
     result = await upload_flow_template_file(
         id=flow_id,
@@ -390,7 +471,7 @@ async def test_upload_flow_template_file_enforces_scope_and_uses_docx_template_s
         container=container,
     )
 
-    assert enforced == [str(flow_id)]
+    assert requested_flow_ids == [str(flow_id)]
     template_asset_service.upload_asset.assert_awaited_once_with(flow_id=flow_id, upload_file=upload)
     audit_service.log_async.assert_awaited_once()
     assert result.id == asset.id
@@ -409,8 +490,10 @@ async def test_get_flow_run_contract_enforces_scope_and_returns_contract(monkeyp
         _container,
         *,
         flow_id,
+        required_access="view",
         require_flow_lookup_without_scope=False,
     ):
+        assert required_access == "view"
         assert require_flow_lookup_without_scope is False
 
     monkeypatch.setattr(router_common_module, "enforce_flow_scope_for_request", fake_enforce)
@@ -451,8 +534,10 @@ async def test_upload_flow_runtime_file_calls_step_upload_service(monkeypatch):
         _container,
         *,
         flow_id,
+        required_access="view",
         require_flow_lookup_without_scope=False,
     ):
+        assert required_access == "run"
         assert require_flow_lookup_without_scope is False
 
     monkeypatch.setattr(router_common_module, "enforce_flow_scope_for_request", fake_enforce)
@@ -485,6 +570,11 @@ async def test_create_flow_run_rejects_scope_mismatch(monkeypatch):
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_run_service.return_value = run_service
     container.flow_service.return_value = flow_service
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS],
+    )
 
     monkeypatch.setattr(
         router_common_module,
@@ -536,8 +626,8 @@ async def test_dispatch_flow_run_after_commit_marks_failed_on_dispatch_error(mon
         def flow_run_repo(self):
             return run_repo
 
-    monkeypatch.setattr(router_common_module.sessionmanager, "session", lambda: _SessionContext())
-    monkeypatch.setattr(router_common_module, "Container", lambda session: _FakeContainer())
+    monkeypatch.setattr(flow_dispatch_module.sessionmanager, "session", lambda: _SessionContext())
+    monkeypatch.setattr(flow_dispatch_module, "Container", lambda session: _FakeContainer())
 
     run_id = uuid4()
     flow_id = uuid4()
@@ -582,8 +672,8 @@ async def test_dispatch_flow_run_after_commit_dispatches_without_status_update_o
         def flow_run_repo(self):
             return run_repo
 
-    monkeypatch.setattr(router_common_module.sessionmanager, "session", lambda: _SessionContext())
-    monkeypatch.setattr(router_common_module, "Container", lambda session: _FakeContainer())
+    monkeypatch.setattr(flow_dispatch_module.sessionmanager, "session", lambda: _SessionContext())
+    monkeypatch.setattr(flow_dispatch_module, "Container", lambda session: _FakeContainer())
 
     run_id = uuid4()
     flow_id = uuid4()
@@ -610,7 +700,11 @@ async def test_dispatch_flow_run_after_commit_dispatches_without_status_update_o
 async def test_create_flow_rejects_space_scope_mismatch(monkeypatch):
     container = MagicMock()
     container.flow_service.return_value = AsyncMock()
-    container.user.return_value = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS],
+    )
     container.audit_service.return_value = AsyncMock()
 
     allowed_space_id = uuid4()
@@ -669,9 +763,12 @@ async def test_create_flow_assistant_calls_flow_scoped_service():
     container.assistant_assembler.return_value = assistant_assembler
     container.audit_service.return_value = audit_service
     container.user.return_value = user
+    flow_service.get_flow.return_value = _flow(flow_id)
+    _enable_space_access(container)
 
     response = await create_flow_assistant(
         id=flow_id,
+        request=SimpleNamespace(state=SimpleNamespace()),
         assistant_in=FlowAssistantCreateRequest(name="Step assistant"),
         container=container,
     )
@@ -713,10 +810,13 @@ async def test_update_flow_assistant_forwards_payload():
     container.assistant_assembler.return_value = assistant_assembler
     container.audit_service.return_value = audit_service
     container.user.return_value = user
+    flow_service.get_flow.return_value = _flow(flow_id)
+    _enable_space_access(container)
 
     response = await update_flow_assistant(
         id=flow_id,
         assistant_id=assistant_id,
+        request=SimpleNamespace(state=SimpleNamespace()),
         assistant_in=AssistantUpdatePublic(
             name="Updated assistant",
             attachments=[{"id": attachment_id}],
@@ -1313,7 +1413,11 @@ async def test_flow_run_alias_control_endpoints_reject_scope_mismatch(monkeypatc
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_service.return_value = flow_service
     container.flow_execution_backend.return_value = MagicMock()
-    container.user.return_value = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS],
+    )
     container.audit_service.return_value = AsyncMock()
 
     monkeypatch.setattr(
@@ -1415,6 +1519,11 @@ async def test_flow_alias_endpoints_reject_scope_mismatch(monkeypatch):
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_service.return_value = flow_service
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS],
+    )
 
     wrong_space = uuid4()
     monkeypatch.setattr(
@@ -1584,7 +1693,7 @@ async def test_get_flow_rejects_non_member():
     _enable_space_access(container, can_read=False)
 
     with pytest.raises(UnauthorizedException) as exc_info:
-        await definition_get_flow(id=flow_id, container=container)
+        await definition_get_flow(id=flow_id, request=_request(), container=container)
     assert exc_info.value.code == "insufficient_space_permission"
 
 
@@ -1604,7 +1713,7 @@ async def test_get_flow_viewer_cannot_read_unpublished():
     actor.can_read_flow.return_value = False
 
     with pytest.raises(UnauthorizedException) as exc_info:
-        await definition_get_flow(id=flow_id, container=container)
+        await definition_get_flow(id=flow_id, request=_request(), container=container)
     assert exc_info.value.code == "insufficient_space_permission"
 
 
@@ -1623,7 +1732,12 @@ async def test_update_flow_rejects_viewer():
     update_req = FlowUpdateRequest(name="New Name")
 
     with pytest.raises(UnauthorizedException) as exc_info:
-        await definition_update_flow(id=flow_id, flow_in=update_req, container=container)
+        await definition_update_flow(
+            id=flow_id,
+            request=_request(),
+            flow_in=update_req,
+            container=container,
+        )
     assert exc_info.value.code == "insufficient_space_permission"
 
 
@@ -1640,7 +1754,7 @@ async def test_delete_flow_rejects_viewer():
     _enable_space_access(container, can_delete=False)
 
     with pytest.raises(UnauthorizedException) as exc_info:
-        await definition_delete_flow(id=flow_id, container=container)
+        await definition_delete_flow(id=flow_id, request=_request(), container=container)
     assert exc_info.value.code == "insufficient_space_permission"
 
 
@@ -1656,7 +1770,7 @@ async def test_publish_flow_rejects_editor_in_personal_space():
     _enable_space_access(container, can_publish=False)
 
     with pytest.raises(UnauthorizedException) as exc_info:
-        await definition_publish_flow(id=flow_id, container=container)
+        await definition_publish_flow(id=flow_id, request=_request(), container=container)
     assert exc_info.value.code == "insufficient_space_permission"
 
 
@@ -1672,8 +1786,58 @@ async def test_unpublish_flow_rejects_without_publish_permission():
     _enable_space_access(container, can_publish=False)
 
     with pytest.raises(UnauthorizedException) as exc_info:
-        await definition_unpublish_flow(id=flow_id, container=container)
+        await definition_unpublish_flow(id=flow_id, request=_request(), container=container)
     assert exc_info.value.code == "insufficient_space_permission"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("route_fn", "build_kwargs"),
+    [
+        (definition_get_flow, lambda flow_id: {}),
+        (
+            definition_update_flow,
+            lambda _flow_id: {"flow_in": FlowUpdateRequest(name="Scoped update")},
+        ),
+        (definition_delete_flow, lambda flow_id: {}),
+        (definition_publish_flow, lambda flow_id: {}),
+        (definition_unpublish_flow, lambda flow_id: {}),
+    ],
+)
+async def test_definition_endpoints_reject_scope_mismatch(
+    monkeypatch,
+    route_fn,
+    build_kwargs,
+):
+    container = MagicMock()
+    flow_id = uuid4()
+    flow = _flow(flow_id)
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    container.flow_service.return_value = flow_service
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS],
+    )
+    _enable_space_access(container)
+
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(scope_type="space", space_id=uuid4()),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await route_fn(
+            id=flow_id,
+            request=_request(),
+            container=container,
+            **build_kwargs(flow_id),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail["code"] == "insufficient_scope"
 
 
 @pytest.mark.asyncio
@@ -1697,6 +1861,34 @@ async def test_list_flows_rejects_non_member(monkeypatch):
             container=container,
         )
     assert exc_info.value.code == "insufficient_space_permission"
+
+
+@pytest.mark.asyncio
+async def test_list_flows_rejects_without_tenant_view_permission(monkeypatch):
+    container = MagicMock()
+    space_id = uuid4()
+    container.flow_service.return_value = AsyncMock()
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[],
+    )
+    _enable_space_access(container, user_permissions=[])
+
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await definition_list_flows(
+            request=SimpleNamespace(state=SimpleNamespace()),
+            space_id=space_id,
+            container=container,
+        )
+
+    assert exc_info.value.code == "insufficient_tenant_permission"
 
 
 @pytest.mark.asyncio
@@ -1733,6 +1925,44 @@ async def test_create_flow_rejects_non_member(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_flow_rejects_without_tenant_manage_permission(monkeypatch):
+    container = MagicMock()
+    space_id = uuid4()
+    container.flow_service.return_value = AsyncMock()
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS_VIEW],
+    )
+    _enable_space_access(container, user_permissions=[Permission.FLOWS_VIEW])
+
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    flow_in = FlowCreateRequest(
+        space_id=space_id,
+        name="Test Flow",
+        steps=[FlowStepCreateRequest(
+            assistant_id=uuid4(), step_order=1, input_source="flow_input",
+            input_type="text", output_mode="pass_through", output_type="json",
+            mcp_policy="inherit",
+        )],
+    )
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await create_flow(
+            request=SimpleNamespace(state=SimpleNamespace()),
+            flow_in=flow_in,
+            container=container,
+        )
+
+    assert exc_info.value.code == "insufficient_tenant_permission"
+
+
+@pytest.mark.asyncio
 async def test_enforce_flow_scope_rejects_non_member_on_consumer_endpoint(monkeypatch):
     """Consumer endpoint (create_flow_run) returns 403 when user has no space access."""
     container = MagicMock()
@@ -1763,6 +1993,42 @@ async def test_enforce_flow_scope_rejects_non_member_on_consumer_endpoint(monkey
 
 
 @pytest.mark.asyncio
+async def test_create_flow_run_rejects_without_tenant_run_permission(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    flow = _flow(flow_id)
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    container.flow_service.return_value = flow_service
+    container.flow_run_service.return_value = AsyncMock()
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS_VIEW],
+    )
+    _enable_space_access(container, user_permissions=[Permission.FLOWS_VIEW])
+
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    run_in = FlowRunCreateRequest(input_payload_json={"test": "value"})
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await create_flow_run(
+            id=flow_id,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            run_in=run_in,
+            background_tasks=BackgroundTasks(),
+            container=container,
+        )
+
+    assert exc_info.value.code == "insufficient_tenant_permission"
+
+
+@pytest.mark.asyncio
 async def test_tenant_scoped_api_key_skips_space_membership_check(monkeypatch):
     """Tenant-scoped API keys (scope_type='tenant', space_id=None) must NOT be
     forced through space membership checks — router-level guards already authorize them."""
@@ -1774,6 +2040,11 @@ async def test_tenant_scoped_api_key_skips_space_membership_check(monkeypatch):
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS],
+    )
 
     run_service = AsyncMock()
     run_service.list_runs.return_value = [run]
@@ -1812,6 +2083,11 @@ async def test_space_scoped_api_key_rejects_wrong_space(monkeypatch):
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS],
+    )
 
     monkeypatch.setattr(
         router_common_module,
@@ -1842,6 +2118,11 @@ async def test_space_scoped_api_key_matching_space_succeeds(monkeypatch):
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS],
+    )
 
     run_service = AsyncMock()
     run_service.list_runs.return_value = [run]

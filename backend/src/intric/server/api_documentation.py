@@ -43,6 +43,23 @@ TAGS_METADATA = [
         },
     },
     {
+        "name": "flows",
+        "description": (
+            "Flow authoring and runtime operations. Use these endpoints to create draft "
+            "flows, manage flow-owned assistants, attach DOCX templates, inspect run "
+            "contracts, upload runtime input files, start runs, and fetch run outputs."
+        ),
+    },
+    {
+        "name": "ai-builder",
+        "description": (
+            "AI Builder workflow for flow creation and editing. Recommended consumer "
+            "sequence: create or resume a session, send one or more messages, inspect "
+            "the proposed plan, approve it, then apply it. All AI Builder endpoints "
+            "remain nested under `/flows` because the builder is a flow-drafting subsystem."
+        ),
+    },
+    {
         "name": "jobs",
         "description": "Job operations. Use this to keep track of running and completed jobs.",
     },

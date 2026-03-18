@@ -196,6 +196,16 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
 
         return v
 
+    @field_validator("flow_settings", mode="before")
+    @classmethod
+    def normalize_flow_settings(
+        cls,
+        v: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if v is None:
+            return {}
+        return v
+
     @field_validator("flow_settings")
     @classmethod
     def validate_flow_settings(cls, v: dict[str, Any]) -> dict[str, Any]:
@@ -204,6 +214,9 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         flow_settings currently supports:
         - input_limits.file_max_size_bytes
         - input_limits.audio_max_size_bytes
+        - ai_builder.conversation_safety_buffer_tokens
+        - ai_builder.minimum_conversation_budget_tokens
+        - ai_builder.unknown_model_context_window_tokens
         """
         if not v:
             return {}
@@ -212,37 +225,46 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             raise ValueError("flow_settings must be an object")
 
         input_limits = v.get("input_limits")
-        if input_limits is None:
-            return v
+        if input_limits is not None:
+            if not isinstance(input_limits, dict):
+                raise ValueError("flow_settings.input_limits must be an object")
 
-        if not isinstance(input_limits, dict):
-            raise ValueError("flow_settings.input_limits must be an object")
+            for key in ("file_max_size_bytes", "audio_max_size_bytes"):
+                if key not in input_limits:
+                    continue
+                value = input_limits[key]
+                if not isinstance(value, int) or isinstance(value, bool):
+                    raise ValueError(f"flow_settings.input_limits.{key} must be an integer")
+                if value < 1:
+                    raise ValueError(
+                        f"flow_settings.input_limits.{key} must be greater than 0"
+                    )
 
-        for key in ("file_max_size_bytes", "audio_max_size_bytes"):
-            if key not in input_limits:
-                continue
-            value = input_limits[key]
-            if not isinstance(value, int) or isinstance(value, bool):
-                raise ValueError(f"flow_settings.input_limits.{key} must be an integer")
-            if value < 1:
-                raise ValueError(
-                    f"flow_settings.input_limits.{key} must be greater than 0"
-                )
+            for key in ("max_files_per_run", "audio_max_files_per_run"):
+                if key not in input_limits:
+                    continue
+                value = input_limits[key]
+                if value is None:
+                    continue  # None = use default
+                if not isinstance(value, int) or isinstance(value, bool):
+                    raise ValueError(
+                        f"flow_settings.input_limits.{key} must be an integer or null"
+                    )
+                if value < 1:
+                    raise ValueError(
+                        f"flow_settings.input_limits.{key} must be greater than 0"
+                    )
 
-        for key in ("max_files_per_run", "audio_max_files_per_run"):
-            if key not in input_limits:
-                continue
-            value = input_limits[key]
-            if value is None:
-                continue  # None = use default
-            if not isinstance(value, int) or isinstance(value, bool):
-                raise ValueError(
-                    f"flow_settings.input_limits.{key} must be an integer or null"
-                )
-            if value < 1:
-                raise ValueError(
-                    f"flow_settings.input_limits.{key} must be greater than 0"
-                )
+        ai_builder = v.get("ai_builder")
+        if ai_builder is not None:
+            from intric.flows.ai_builder.ai_builder_settings import (
+                validate_ai_builder_budget_settings_object,
+            )
+
+            try:
+                validate_ai_builder_budget_settings_object(ai_builder)
+            except Exception as error:
+                raise ValueError(str(error))
 
         return v
 

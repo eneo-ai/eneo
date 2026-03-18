@@ -17,6 +17,8 @@ class CompletionModels(BasePublic):
     nickname: Mapped[str] = mapped_column()
     open_source: Mapped[Optional[bool]] = mapped_column()
     token_limit: Mapped[int] = mapped_column()
+    max_input_tokens: Mapped[Optional[int]] = mapped_column(nullable=True)
+    max_output_tokens: Mapped[Optional[int]] = mapped_column(nullable=True)
     is_deprecated: Mapped[bool] = mapped_column(server_default="False")
     nr_billion_parameters: Mapped[Optional[int]] = mapped_column()
     hf_link: Mapped[Optional[str]] = mapped_column()

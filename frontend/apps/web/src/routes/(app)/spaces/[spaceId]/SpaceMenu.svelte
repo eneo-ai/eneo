@@ -14,6 +14,7 @@
   import { IconSpeechBubble } from "@intric/icons/speech-bubble";
   import { IconWorkflow } from "@intric/icons/workflow";
   import { page } from "$app/stores";
+  import { getAppContext } from "$lib/core/AppContext";
   import { Navigation } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { m } from "$lib/paraglide/messages";
@@ -22,6 +23,7 @@
   const {
     state: { currentSpace }
   } = getSpacesManager();
+  const { user } = getAppContext();
 
   $: section = $page.url.pathname.split("/")[3];
   $: chatPartnerIsDefined = $page.url.searchParams.get("type") !== null;
@@ -64,7 +66,7 @@
       label={m.apps()}
     />
   {/if}
-  {#if !isOrgSpace && $currentSpace.hasPermission("read", "app")}
+  {#if !isOrgSpace && $currentSpace.hasPermission("read", "app") && user.hasPermission("flows_view")}
     <Navigation.Link
       href={localizeHref(`/spaces/${$currentSpace.routeId}/flows`)}
       isActive={section === "flows"}

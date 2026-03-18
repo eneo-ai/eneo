@@ -1,0 +1,112 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+from uuid import UUID
+
+from intric.flows.ai_builder.ai_builder_settings import (
+    AIBuilderBudgetPolicy,
+    resolve_ai_builder_budget_policy,
+)
+from intric.main.exceptions import BadRequestException
+from intric.model_providers.domain.model_defaults import lookup_model_defaults
+
+
+@dataclass(frozen=True)
+class AIBuilderPlannerContext:
+    model: Any
+    available_models: list[dict[str, str]]
+    available_kbs: list[dict[str, str]]
+    max_input_tokens: int
+    max_output_tokens: int
+    budget_policy: AIBuilderBudgetPolicy
+
+
+def serialize_space_models(space) -> list[dict[str, str]]:
+    return [
+        {
+            "id": str(model.id),
+            "name": model.name,
+            "provider": getattr(model, "provider_type", "unknown"),
+        }
+        for model in getattr(space, "completion_models", [])
+    ]
+
+
+def serialize_space_kbs(space) -> list[dict[str, str]]:
+    return [
+        {
+            "id": str(collection.id),
+            "name": getattr(collection, "name", ""),
+            "description": getattr(collection, "description", "") or "",
+        }
+        for collection in getattr(space, "collections", [])
+    ]
+
+
+def resolve_planner_model(space):
+    model = space.get_default_completion_model()
+    if model:
+        return model
+    if space.completion_models:
+        return space.completion_models[0]
+    raise BadRequestException(
+        "No AI builder planner model is available in this space.",
+        code="no_planner_model_available",
+    )
+
+
+def resolve_requested_model(space, *, model_id: UUID | None):
+    if model_id is None:
+        return resolve_planner_model(space)
+
+    model = next(
+        (candidate for candidate in getattr(space, "completion_models", []) if candidate.id == model_id),
+        None,
+    )
+    if model is None:
+        raise BadRequestException("Selected model not available in this space")
+    return model
+
+
+def build_planner_context(
+    space,
+    *,
+    model_id: UUID | None = None,
+    tenant_flow_settings: dict[str, Any] | None = None,
+) -> AIBuilderPlannerContext:
+    model = resolve_requested_model(space, model_id=model_id)
+    defaults = lookup_model_defaults(
+        getattr(model, "litellm_model_name", None),
+        getattr(model, "name", None),
+    )
+    budget_policy = resolve_ai_builder_budget_policy(tenant_flow_settings)
+    max_input_tokens = (
+        getattr(model, "max_input_tokens", None)
+        or (defaults.max_input_tokens if defaults else None)
+        or budget_policy.unknown_model_context_window_tokens
+    )
+    if max_input_tokens is None:
+        raise BadRequestException(
+            "Planner model is missing a usable context window. Configure max_input_tokens for the model or set an AI Builder fallback in flow settings.",
+            code="planner_model_missing_context_window",
+        )
+
+    max_output_tokens = (
+        getattr(model, "max_output_tokens", None)
+        or (defaults.max_output_tokens if defaults else None)
+    )
+    if max_output_tokens is None:
+        raise BadRequestException(
+            "Planner model is missing max_output_tokens. Configure the model before using AI Builder.",
+            code="planner_model_missing_output_tokens",
+        )
+
+    return AIBuilderPlannerContext(
+        model=model,
+        available_models=serialize_space_models(space),
+        available_kbs=serialize_space_kbs(space),
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        budget_policy=budget_policy,
+    )

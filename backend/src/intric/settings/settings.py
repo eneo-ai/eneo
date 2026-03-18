@@ -50,3 +50,15 @@ class FlowInputLimitsUpdate(BaseModel):
     audio_max_size_bytes: int | None = None
     max_files_per_run: int | None = None
     audio_max_files_per_run: int | None = None
+
+
+class AIBuilderBudgetSettingsPublic(BaseModel):
+    conversation_safety_buffer_tokens: int
+    minimum_conversation_budget_tokens: int
+    unknown_model_context_window_tokens: int | None = None
+
+
+class AIBuilderBudgetSettingsUpdate(BaseModel):
+    conversation_safety_buffer_tokens: int | None = None
+    minimum_conversation_budget_tokens: int | None = None
+    unknown_model_context_window_tokens: int | None = None

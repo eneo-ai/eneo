@@ -1,10 +1,15 @@
 import { error } from "@sveltejs/kit";
+import { hasPermission } from "$lib/core/hasPermission";
 
 export const ssr = false;
 
 export const load = async (event) => {
-  const { intric, currentSpace } = await event.parent();
+  const { intric, currentSpace, user } = await event.parent();
   const flowId = event.params.flowId;
+
+  if (!hasPermission(user)("flows_manage")) {
+    throw error(403);
+  }
 
   const flow = await intric.flows.get({ id: flowId });
   if (flow.space_id !== currentSpace.id) {

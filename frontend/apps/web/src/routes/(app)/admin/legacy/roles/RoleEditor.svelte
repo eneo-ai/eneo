@@ -80,6 +80,24 @@
     }
     editableRole.permissions = editableRole.permissions.toSpliced(index, 1);
   }
+
+  const permissionLabels: Partial<Record<Permission, string>> = {
+    AI: "AI",
+    flows_view: "Flows: View",
+    flows_run: "Flows: Run",
+    flows_manage: "Flows: Manage",
+    flows_ai_builder: "Flows: AI Builder"
+  };
+
+  function formatPermissionLabel(permission: Permission): string {
+    return (
+      permissionLabels[permission] ??
+      permission
+        .split("_")
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ")
+    );
+  }
 </script>
 
 <Dialog.Root bind:isOpen={showDialog}>
@@ -126,7 +144,7 @@
                 value={editableRole.permissions.includes(permission.name)}
                 sideEffect={() => {
                   togglePermission(permission.name);
-                }}>{permission.name}</Input.Switch
+                }}>{formatPermissionLabel(permission.name)}</Input.Switch
               >
               <p class="text-secondary text-[0.9rem]">{permission.description}</p>
             </div>

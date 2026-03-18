@@ -120,6 +120,7 @@ class FlowSparse(BaseModel):
     published_version: Optional[int] = None
     metadata_json: JsonObject | None = None
     data_retention_days: Optional[int] = None
+    draft_revision: int = 0
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

@@ -61,6 +61,169 @@ class FlowTemplateAssetStatus(str, Enum):
     UNAVAILABLE = "unavailable"
 
 
+FLOW_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "id": "00000000-0000-0000-0000-000000000101",
+    "assistant_id": "00000000-0000-0000-0000-000000000201",
+    "step_order": 1,
+    "user_description": "Transcribe uploaded audio into Swedish text.",
+    "input_source": "flow_input",
+    "input_type": "audio",
+    "output_mode": "transcribe_only",
+    "output_type": "text",
+    "mcp_policy": "inherit",
+    "created_at": "2026-03-17T09:30:00Z",
+    "updated_at": "2026-03-17T09:30:00Z",
+}
+
+FLOW_SPARSE_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "id": "00000000-0000-0000-0000-000000000001",
+    "tenant_id": "00000000-0000-0000-0000-000000000010",
+    "space_id": "00000000-0000-0000-0000-000000000020",
+    "name": "Employee Review Summary",
+    "description": "Transcribe a review conversation and return a PDF summary.",
+    "created_by_user_id": "00000000-0000-0000-0000-000000000030",
+    "owner_user_id": "00000000-0000-0000-0000-000000000030",
+    "published_version": 3,
+    "metadata_json": {"category": "hr"},
+    "data_retention_days": 30,
+    "created_at": "2026-03-17T09:30:00Z",
+    "updated_at": "2026-03-17T10:00:00Z",
+}
+
+FLOW_PUBLIC_EXAMPLE: dict[str, Any] = {
+    **FLOW_SPARSE_PUBLIC_EXAMPLE,
+    "steps": [
+        FLOW_STEP_PUBLIC_EXAMPLE,
+        {
+            "id": "00000000-0000-0000-0000-000000000102",
+            "assistant_id": "00000000-0000-0000-0000-000000000202",
+            "step_order": 2,
+            "user_description": "Summarize the transcription into a PDF for HR follow-up.",
+            "input_source": "previous_step",
+            "input_type": "text",
+            "output_mode": "pass_through",
+            "output_type": "pdf",
+            "mcp_policy": "inherit",
+            "created_at": "2026-03-17T09:30:00Z",
+            "updated_at": "2026-03-17T09:30:00Z",
+        },
+    ],
+}
+
+FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "id": "00000000-0000-0000-0000-000000000301",
+    "flow_id": "00000000-0000-0000-0000-000000000001",
+    "flow_version": 3,
+    "user_id": "00000000-0000-0000-0000-000000000030",
+    "tenant_id": "00000000-0000-0000-0000-000000000010",
+    "status": "queued",
+    "cancelled_at": None,
+    "input_payload_json": {"employee_name": "Alex Example"},
+    "output_payload_json": None,
+    "error_message": None,
+    "job_id": "00000000-0000-0000-0000-000000000401",
+    "created_at": "2026-03-17T10:05:00Z",
+    "updated_at": "2026-03-17T10:05:00Z",
+}
+
+FLOW_RUN_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "id": "00000000-0000-0000-0000-000000000501",
+    "step_id": "00000000-0000-0000-0000-000000000101",
+    "step_order": 1,
+    "assistant_id": "00000000-0000-0000-0000-000000000201",
+    "status": "completed",
+    "input_payload_json": {"diagnostics": [{"code": "runtime_input_consumed", "message": "Uploaded audio file was used."}]},
+    "output_payload_json": {"text": "Hello and welcome to the annual review..."},
+    "num_tokens_input": 0,
+    "num_tokens_output": 0,
+    "error_message": None,
+    "diagnostics": [{"code": "runtime_input_consumed", "message": "Uploaded audio file was used."}],
+    "created_at": "2026-03-17T10:05:05Z",
+    "updated_at": "2026-03-17T10:05:30Z",
+}
+
+FLOW_TEMPLATE_INSPECTION_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "asset_id": "00000000-0000-0000-0000-000000000601",
+    "file_id": "00000000-0000-0000-0000-000000000602",
+    "file_name": "ibic-template.docx",
+    "placeholders": [
+        {"name": "brukare_namn", "location": "body", "preview": "{{ brukare_namn }}"},
+        {"name": "handlaggare", "location": "header", "preview": "{{ handlaggare }}"},
+    ],
+    "extracted_text_preview": "IBIC plan template with placeholders.",
+    "status": "ready",
+}
+
+FLOW_TEMPLATE_ASSET_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "id": "00000000-0000-0000-0000-000000000601",
+    "flow_id": "00000000-0000-0000-0000-000000000001",
+    "file_id": "00000000-0000-0000-0000-000000000602",
+    "name": "ibic-template.docx",
+    "checksum": "sha256:abc123",
+    "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "placeholders": ["brukare_namn", "handlaggare"],
+    "status": "ready",
+    "last_updated_by_name": "Case Worker Admin",
+    "can_edit": True,
+    "can_download": True,
+    "can_select": True,
+    "can_inspect": True,
+    "created_at": "2026-03-17T09:40:00Z",
+    "updated_at": "2026-03-17T09:45:00Z",
+}
+
+FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "flow_id": "00000000-0000-0000-0000-000000000001",
+    "published_flow_version": 3,
+    "form_fields": [
+        {"name": "employee_name", "type": "text", "label": "Employee name", "required": True}
+    ],
+    "steps_requiring_input": [
+        {
+            "step_id": "00000000-0000-0000-0000-000000000101",
+            "step_order": 1,
+            "label": "Upload audio",
+            "description": "Provide the recorded review conversation.",
+            "required": True,
+            "input_format": "audio",
+            "max_files": 1,
+            "max_file_size_bytes": 52428800,
+            "accepted_mimetypes": ["audio/wav", "audio/mpeg"],
+        }
+    ],
+    "aggregate_max_files": 1,
+    "template_readiness": [
+        {
+            "step_id": "00000000-0000-0000-0000-000000000102",
+            "template_asset_id": None,
+            "template_file_id": None,
+            "template_name": None,
+            "checksum": None,
+            "published_flow_version": 3,
+            "status": "unavailable",
+            "can_edit": False,
+            "can_download": False,
+            "message_code": None,
+        }
+    ],
+}
+
+FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE: dict[str, Any] = {
+    "run": FLOW_RUN_PUBLIC_EXAMPLE,
+    "redispatched_count": 1,
+}
+
+GRAPH_RESPONSE_EXAMPLE: dict[str, Any] = {
+    "nodes": [
+        {"id": "step-1", "label": "Transcribe uploaded audio", "type": "step"},
+        {"id": "step-2", "label": "Create PDF summary", "type": "step"},
+    ],
+    "edges": [
+        {"source": "step-1", "target": "step-2"},
+    ],
+}
+
+
 class FlowStepCreateRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -125,6 +288,29 @@ class FlowCreateRequest(BaseModel):
 
 @partial_model
 class FlowUpdateRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "name": "Municipality Intake Transcription v2",
+                "description": "Transcribe, redact, and summarize citizen audio submissions.",
+                "steps": [
+                    {
+                        "assistant_id": "00000000-0000-0000-0000-000000000002",
+                        "step_order": 1,
+                        "user_description": "Transcribe incoming audio",
+                        "input_source": "flow_input",
+                        "input_type": "audio",
+                        "output_mode": "transcribe_only",
+                        "output_type": "text",
+                        "mcp_policy": "inherit",
+                    }
+                ],
+                "metadata_json": {"category": "municipality-intake"},
+                "data_retention_days": 30,
+            }
+        }
+    )
+
     name: str
     description: str | None
     steps: list[FlowStepCreateRequest]
@@ -133,7 +319,7 @@ class FlowUpdateRequest(BaseModel):
 
 
 class FlowStepPublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, json_schema_extra={"example": FLOW_STEP_PUBLIC_EXAMPLE})
 
     id: UUID | None = None
     assistant_id: UUID
@@ -155,7 +341,10 @@ class FlowStepPublic(BaseModel):
 
 
 class FlowSparsePublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={"example": FLOW_SPARSE_PUBLIC_EXAMPLE},
+    )
 
     id: UUID
     tenant_id: UUID
@@ -172,6 +361,11 @@ class FlowSparsePublic(BaseModel):
 
 
 class FlowPublic(FlowSparsePublic):
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={"example": FLOW_PUBLIC_EXAMPLE},
+    )
+
     steps: list[FlowStepPublic]
 
 
@@ -207,7 +401,7 @@ class FlowAssistantCreateRequest(BaseModel):
 
 
 class FlowRunPublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, json_schema_extra={"example": FLOW_RUN_PUBLIC_EXAMPLE})
 
     id: UUID
     flow_id: UUID
@@ -254,7 +448,10 @@ class FlowInputPolicyPublic(BaseModel):
 
 
 class FlowRunStepPublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={"example": FLOW_RUN_STEP_PUBLIC_EXAMPLE},
+    )
 
     id: UUID | None = None
     step_id: UUID | None = None
@@ -272,11 +469,15 @@ class FlowRunStepPublic(BaseModel):
 
 
 class FlowRunRedispatchResponse(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE})
+
     run: FlowRunPublic
     redispatched_count: int
 
 
 class GraphResponse(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": GRAPH_RESPONSE_EXAMPLE})
+
     nodes: list[dict[str, Any]]
     edges: list[dict[str, Any]]
 
@@ -288,6 +489,8 @@ class FlowTemplatePlaceholderPublic(BaseModel):
 
 
 class FlowTemplateInspectionPublic(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": FLOW_TEMPLATE_INSPECTION_PUBLIC_EXAMPLE})
+
     asset_id: UUID | None = None
     file_id: UUID
     file_name: str
@@ -297,7 +500,10 @@ class FlowTemplateInspectionPublic(BaseModel):
 
 
 class FlowTemplateAssetPublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={"example": FLOW_TEMPLATE_ASSET_PUBLIC_EXAMPLE},
+    )
 
     id: UUID
     flow_id: UUID
@@ -342,6 +548,8 @@ class FlowTemplateReadinessPublic(BaseModel):
 
 
 class FlowRunContractPublic(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE})
+
     flow_id: UUID
     published_flow_version: int
     form_fields: list[dict[str, Any]] = Field(default_factory=list)

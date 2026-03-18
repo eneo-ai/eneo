@@ -2,6 +2,7 @@
   import { Page } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { initFlowsManager } from "$lib/features/flows/FlowsManager";
+  import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import FlowsTable from "./FlowsTable.svelte";
   import CreateFlowDialog from "./CreateFlowDialog.svelte";
@@ -11,6 +12,7 @@
   const {
     state: { currentSpace }
   } = getSpacesManager();
+  const { user } = getAppContext();
 
   const {
     state: { flows }
@@ -28,7 +30,7 @@
 <Page.Root>
   <Page.Header>
     <Page.Title title={m.flows()}></Page.Title>
-    {#if $currentSpace.hasPermission("create", "app")}
+    {#if user.hasPermission("flows_manage")}
       <CreateFlowDialog />
     {/if}
   </Page.Header>

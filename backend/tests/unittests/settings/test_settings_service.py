@@ -5,6 +5,7 @@ import pytest
 from intric.main.exceptions import BadRequestException
 from intric.settings.setting_service import SettingService
 from intric.settings.settings import (
+    AIBuilderBudgetSettingsUpdate,
     FlowInputLimitsUpdate,
     SettingsInDB,
     SettingsPublic,
@@ -228,3 +229,107 @@ async def test_update_flow_input_limits_rejects_empty_patch():
 
     with pytest.raises(BadRequestException, match="At least one flow input limit field"):
         await service.update_flow_input_limits(FlowInputLimitsUpdate())
+
+
+async def test_get_ai_builder_budget_settings_reads_tenant_override(monkeypatch):
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "ai_builder": {
+                    "conversation_safety_buffer_tokens": 1234,
+                    "minimum_conversation_budget_tokens": 5678,
+                }
+            }
+        }
+    )
+
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_settings.get_settings",
+        lambda: SimpleNamespace(
+            ai_builder_conversation_safety_buffer_tokens=2000,
+            ai_builder_minimum_conversation_budget_tokens=4000,
+            ai_builder_unknown_model_context_window_tokens=None,
+        ),
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+    )
+
+    settings = await service.get_ai_builder_budget_settings()
+
+    assert settings.conversation_safety_buffer_tokens == 1234
+    assert settings.minimum_conversation_budget_tokens == 5678
+    assert settings.unknown_model_context_window_tokens is None
+
+
+async def test_update_ai_builder_budget_settings_persists_and_audits(monkeypatch):
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    audit_service = MockAuditService()
+    calls = []
+
+    async def _capture(*args, **kwargs):
+        calls.append(kwargs)
+
+    audit_service.log_async = _capture
+
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_settings.get_settings",
+        lambda: SimpleNamespace(
+            ai_builder_conversation_safety_buffer_tokens=2000,
+            ai_builder_minimum_conversation_budget_tokens=4000,
+            ai_builder_unknown_model_context_window_tokens=128000,
+        ),
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
+    )
+
+    updated = await service.update_ai_builder_budget_settings(
+        AIBuilderBudgetSettingsUpdate(
+            conversation_safety_buffer_tokens=1500,
+            unknown_model_context_window_tokens=None,
+        )
+    )
+
+    assert updated.conversation_safety_buffer_tokens == 1500
+    assert updated.minimum_conversation_budget_tokens == 4000
+    assert updated.unknown_model_context_window_tokens == 128000
+
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert tenant.flow_settings["ai_builder"]["conversation_safety_buffer_tokens"] == 1500
+    assert "unknown_model_context_window_tokens" not in tenant.flow_settings["ai_builder"]
+    assert len(calls) == 1
+    assert calls[0]["metadata"]["setting"] == "ai_builder_budget_settings"
+
+
+async def test_update_ai_builder_budget_settings_rejects_empty_patch():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+    )
+
+    with pytest.raises(BadRequestException, match="At least one AI Builder budget field"):
+        await service.update_ai_builder_budget_settings(AIBuilderBudgetSettingsUpdate())

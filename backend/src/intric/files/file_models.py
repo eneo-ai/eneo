@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from intric.main.models import InDB
 
@@ -79,6 +79,15 @@ class FileRestrictions(BaseModel):
 
 
 class SignedURLRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "expires_in": 900,
+                "content_disposition": "attachment",
+            }
+        }
+    )
+
     expires_in: int = 3600  # Default expiration time in seconds (1 hour)
     content_disposition: ContentDisposition = ContentDisposition.ATTACHMENT
 

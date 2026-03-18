@@ -27,6 +27,7 @@ from intric.ai_models.embedding_models.embedding_models_repo import (
     AdminEmbeddingModelsService,
 )
 import sqlalchemy as sa
+from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.integration_table import IntegrationKnowledge
 from intric.database.tables.websites_table import Websites
@@ -1210,10 +1211,18 @@ async def update_completion_model_metadata(
     session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = CompletionModelsRepository(session=session)
-
-        # Ensure model_data has the id
+        update_payload = model_data.model_dump(exclude={"id"}, exclude_unset=True)
+        if (
+            "max_input_tokens" in update_payload
+            and "max_output_tokens" not in update_payload
+        ):
+            existing_model = await repo.delegate.get_by(
+                conditions={CompletionModels.id: id}
+            )
+            update_payload["max_output_tokens"] = existing_model.max_output_tokens
         update_with_id = CompletionModelUpdate(
-            id=id, **model_data.model_dump(exclude={"id"}, exclude_unset=True)
+            id=id,
+            **update_payload,
         )
         model = await repo.update_model(update_with_id)
 

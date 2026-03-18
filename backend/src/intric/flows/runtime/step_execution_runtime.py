@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -27,6 +28,9 @@ try:
     from litellm import get_supported_openai_params as _litellm_get_supported_openai_params  # pyright: ignore[reportPrivateImportUsage]
 except Exception:  # pragma: no cover - defensive import guard
     _litellm_get_supported_openai_params = None
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -91,6 +95,11 @@ def detect_native_json_output_support(assistant: Any) -> bool | None:
     try:
         supported = _litellm_get_supported_openai_params(model=litellm_model_name)
     except Exception:
+        logger.warning(
+            "Failed to detect native JSON output support for flow step execution.",
+            extra={"litellm_model_name": litellm_model_name},
+            exc_info=True,
+        )
         return None
 
     if not supported:
@@ -445,6 +454,15 @@ async def complete_step_execution(
                     update={"response_format": {"type": "json_object"}}
                 )
             except Exception:
+                logger.warning(
+                    "Failed to enable native JSON mode for flow step execution.",
+                    extra={
+                        "run_id": str(run.id),
+                        "step_order": step.step_order,
+                        "cache_key": cache_key,
+                    },
+                    exc_info=True,
+                )
                 state.json_mode_supported[cache_key] = False
 
     if deps.logger is not None:

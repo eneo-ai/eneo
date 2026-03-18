@@ -9,7 +9,7 @@ from intric.files.file_models import File
 from intric.files.file_service import FileService
 from intric.files.file_repo import FileRepository
 from intric.flows.flow import FlowTemplateAsset, FlowTemplateAssetStatus
-from intric.flows.flow_repo import FlowRepository
+from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from intric.flows.runtime.docx_template_runtime import (
     extract_docx_template_text_preview,

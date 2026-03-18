@@ -16,7 +16,6 @@ roles:
       - AI
       - websites
       - integrations
-      - flows
 
   - name: 'Owner'
     permissions:
@@ -30,4 +29,7 @@ roles:
       - AI
       - websites
       - integrations
-      - flows
+      - flows_view
+      - flows_run
+      - flows_manage
+      - flows_ai_builder

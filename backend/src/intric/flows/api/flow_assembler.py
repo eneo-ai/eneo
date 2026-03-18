@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from typing import Any
+
 from intric.flows.flow import Flow, FlowRun, FlowSparse, FlowStep
 from intric.flows.api.flow_models import (
     FlowPublic,
     FlowRunPublic,
     FlowSparsePublic,
     FlowStepCreateRequest,
+)
+from intric.flows.http_transport import (
+    HttpAuthoredConfig,
+    is_authored_config,
+    redact_authored_config,
 )
 
 
@@ -29,10 +36,34 @@ class FlowAssembler:
         )
 
     def to_public(self, flow: Flow) -> FlowPublic:
-        return FlowPublic.model_validate(flow)
+        redacted = self._redact_step_configs(flow)
+        return FlowPublic.model_validate(redacted)
 
     def to_sparse_public(self, flow: FlowSparse) -> FlowSparsePublic:
         return FlowSparsePublic.model_validate(flow)
 
     def to_run_public(self, run: FlowRun) -> FlowRunPublic:
         return FlowRunPublic.model_validate(run)
+
+    @staticmethod
+    def _redact_step_configs(flow: Flow) -> Flow:
+        """Replace encrypted secrets with sentinel values in authored HTTP configs."""
+        redacted_steps = [
+            step.model_copy(
+                update={
+                    "input_config": _redact_config(step.input_config),
+                    "output_config": _redact_config(step.output_config),
+                },
+                deep=True,
+            )
+            for step in flow.steps
+        ]
+        return flow.model_copy(update={"steps": redacted_steps}, deep=True)
+
+
+def _redact_config(config: dict[str, Any] | None) -> dict[str, Any] | None:
+    if config is None or not is_authored_config(config):
+        return config
+    authored = HttpAuthoredConfig.model_validate(config)
+    redacted = redact_authored_config(authored)
+    return redacted.model_dump(mode="json")

@@ -7,6 +7,7 @@ from intric.ai_models.model_enums import (
     ModelOrg,
     ModelStability,
 )
+from intric.model_providers.domain.model_defaults import lookup_model_defaults
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -44,6 +45,8 @@ class CompletionModel(AIModel):
         is_org_default: bool,
         reasoning: bool,
         supports_tool_calling: bool = False,
+        max_input_tokens: Optional[int] = None,
+        max_output_tokens: Optional[int] = None,
         base_url: Optional[str] = None,
         litellm_model_name: Optional[str] = None,
         security_classification: Optional[SecurityClassification] = None,
@@ -77,7 +80,18 @@ class CompletionModel(AIModel):
         self.reasoning = reasoning
         self.vision = vision
         self.supports_tool_calling = supports_tool_calling
-        self.token_limit = token_limit
+        defaults = lookup_model_defaults(litellm_model_name, name)
+        self.max_input_tokens = max_input_tokens or token_limit or (
+            defaults.max_input_tokens if defaults else None
+        )
+        if self.max_input_tokens is None:
+            raise ValueError("Completion model is missing max_input_tokens")
+        self.token_limit = self.max_input_tokens
+        self.max_output_tokens = max_output_tokens or (
+            defaults.max_output_tokens if defaults else None
+        )
+        if self.max_output_tokens is None:
+            raise ValueError("Completion model is missing max_output_tokens")
         self.deployment_name = deployment_name
         self.nr_billion_parameters = nr_billion_parameters
         self.tenant_id = tenant_id
@@ -126,6 +140,12 @@ class CompletionModel(AIModel):
             is_org_default=completion_model_db.is_default,
             reasoning=completion_model_db.reasoning,
             supports_tool_calling=completion_model_db.supports_tool_calling,
+            max_input_tokens=getattr(
+                completion_model_db,
+                "max_input_tokens",
+                completion_model_db.token_limit,
+            ),
+            max_output_tokens=completion_model_db.max_output_tokens,
             base_url=completion_model_db.base_url,
             litellm_model_name=completion_model_db.litellm_model_name,
             security_classification=SecurityClassification.to_domain(

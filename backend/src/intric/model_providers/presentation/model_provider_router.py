@@ -16,6 +16,7 @@ from intric.model_providers.presentation.model_provider_models import (
     ModelProviderUpdate,
     ValidateModelRequest,
 )
+from intric.model_providers.domain.model_defaults import lookup_model_defaults
 from intric.server.protocol import responses
 from intric.settings.encryption_service import EncryptionService
 from intric.users.user import UserInDB
@@ -116,6 +117,27 @@ async def get_provider_capabilities(
         result[provider] = provider_data
 
     return result
+
+
+@router.get(
+    "/model-defaults/",
+)
+async def get_model_defaults(
+    model_name: str,
+    _user: UserInDB = Depends(get_current_active_user),
+):
+    defaults = lookup_model_defaults(model_name)
+    if defaults is None:
+        return {"found": False}
+
+    return {
+        "found": True,
+        "max_input_tokens": defaults.max_input_tokens,
+        "max_output_tokens": defaults.max_output_tokens,
+        "supports_vision": defaults.supports_vision,
+        "supports_function_calling": defaults.supports_function_calling,
+        "supports_reasoning": defaults.supports_reasoning,
+    }
 
 
 @router.get(

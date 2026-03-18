@@ -16,6 +16,8 @@ from intric.server.protocol import to_paginated_response
 from intric.settings import settings_factory
 from intric.settings.setting_service import SettingService
 from intric.settings.settings import (
+    AIBuilderBudgetSettingsPublic,
+    AIBuilderBudgetSettingsUpdate,
     FlowInputLimitsPublic,
     FlowInputLimitsUpdate,
     GetModelsResponse,
@@ -345,6 +347,63 @@ async def get_flow_input_limits(
 ):
     service = container.settings_service()
     return await service.get_flow_input_limits()
+
+
+@settings_admin_router.patch(
+    "/ai-builder-budget",
+    response_model=AIBuilderBudgetSettingsPublic,
+    summary="Update AI Builder conversation budget settings",
+    description="""
+Update tenant-level AI Builder conversation budgeting settings.
+
+**Admin Only:** Requires admin permissions.
+
+Values are persisted under tenant `flow_settings.ai_builder` and take effect immediately.
+    """,
+    responses={
+        400: _error_response(
+            description="Invalid patch (range/type) or empty payload.",
+            message="AI Builder budget settings patch is invalid.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="ai_builder_budget_invalid_patch",
+        ),
+        403: _error_response(
+            description="Forbidden: admin permission required.",
+            message="Admin permission required.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="forbidden",
+        ),
+    },
+)
+async def update_ai_builder_budget_settings(
+    payload: AIBuilderBudgetSettingsUpdate,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.settings_service()
+    return await service.update_ai_builder_budget_settings(payload)
+
+
+@settings_admin_router.get(
+    "/ai-builder-budget",
+    response_model=AIBuilderBudgetSettingsPublic,
+    summary="Get effective AI Builder conversation budget settings",
+    description="""
+Returns effective tenant-level AI Builder conversation budgeting settings, including defaults when no override exists.
+    """,
+    responses={
+        403: _error_response(
+            description="Forbidden: admin permission required.",
+            message="Admin permission required.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="forbidden",
+        ),
+    },
+)
+async def get_ai_builder_budget_settings(
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.settings_service()
+    return await service.get_ai_builder_budget_settings()
 
 
 @settings_admin_router.patch(

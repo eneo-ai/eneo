@@ -96,8 +96,10 @@ from intric.flows import (
     FlowRunRepository,
     FlowVersionRepository,
 )
-from intric.flows.flow_run_service import FlowRunService
-from intric.flows.flow_service import FlowService
+from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from intric.flows.ai_builder.ai_builder_service import AIBuilderService
+from intric.flows.application.flow_run_service import FlowRunService
+from intric.flows.application.flow_service import FlowService
 from intric.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from intric.flows.flow_template_asset_service import FlowTemplateAssetService
 from intric.flows.runtime.celery_app import celery_app as flow_celery_app
@@ -1134,6 +1136,18 @@ class Container(containers.DeclarativeContainer):
         file_repo=file_repo,
         file_service=file_service,
         template_asset_repo=flow_template_asset_repo,
+    )
+    ai_builder_repo = providers.Factory(
+        AIBuilderRepository,
+        session=session,
+    )
+    ai_builder_service = providers.Factory(
+        AIBuilderService,
+        user=user,
+        repo=ai_builder_repo,
+        flow_service=flow_service,
+        completion_service=completion_service,
+        space_service=space_service,
     )
     group_chat_service = providers.Factory(
         GroupChatService,

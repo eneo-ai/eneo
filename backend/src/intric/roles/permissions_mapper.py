@@ -14,5 +14,9 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.INTEGRATIONS: "Management of Integrations. Create, Update, and Delete Integration Knowledge.",
     Permission.AI: "More in-depth AI configuration.",
     Permission.ADMIN: "Organization owner. Management of Users, Roles, and Groups.",
-    Permission.FLOWS: "Management of Flows. Create, Update, and Delete Flows.",
+    Permission.FLOWS: "Legacy full-access Flow permission. Grants flow view, run, manage, and AI Builder access.",
+    Permission.FLOWS_VIEW: "View flow definitions, published flow structure, and flow run details.",
+    Permission.FLOWS_RUN: "Run published flows, upload runtime inputs, and manage flow runs.",
+    Permission.FLOWS_MANAGE: "Create, update, publish, and delete flows and flow-managed resources.",
+    Permission.FLOWS_AI_BUILDER: "Use the AI Builder to plan and edit flows.",
 }

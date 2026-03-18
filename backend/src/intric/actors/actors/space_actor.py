@@ -391,7 +391,23 @@ class SpaceActor:
         self._personal_space_permissions = personal_space_permissions
         self._org_space_permissions = org_space_permissions
 
-    def _to_permisson(self, resource_type: SpaceResourceType):
+    def _to_permisson(
+        self,
+        resource_type: SpaceResourceType,
+        action: SpaceAction | None = None,
+    ):
+        if resource_type == SpaceResourceType.FLOW:
+            if action == SpaceAction.READ:
+                return Permission.FLOWS_VIEW
+            if action in {
+                SpaceAction.CREATE,
+                SpaceAction.EDIT,
+                SpaceAction.DELETE,
+                SpaceAction.PUBLISH,
+            }:
+                return Permission.FLOWS_MANAGE
+            return Permission.FLOWS_VIEW
+
         permission_map = {
             SpaceResourceType.ASSISTANT: Permission.ASSISTANTS,
             SpaceResourceType.GROUP_CHAT: Permission.GROUP_CHATS,
@@ -400,7 +416,6 @@ class SpaceActor:
             SpaceResourceType.COLLECTION: Permission.COLLECTIONS,
             SpaceResourceType.WEBSITE: Permission.WEBSITES,
             SpaceResourceType.INTEGRATION_KNOWLEDGE: Permission.INTEGRATIONS,
-            SpaceResourceType.FLOW: Permission.FLOWS,
         }
 
         return permission_map.get(resource_type)
@@ -481,7 +496,10 @@ class SpaceActor:
             self.space.is_personal()
             and resource_type in PERMISSION_RESOURCES
         ):
-            permission = self._to_permisson(resource_type=resource_type)
+            permission = self._to_permisson(
+                resource_type=resource_type,
+                action=action,
+            )
             has_permission = permission in self.user.permissions if permission else False
             if not has_permission and not (
                 resource_type in {SpaceResourceType.WEBSITE, SpaceResourceType.INTEGRATION_KNOWLEDGE}

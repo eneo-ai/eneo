@@ -7,11 +7,20 @@ from intric.completion_models.infrastructure.adapters.tenant_model_adapter impor
 )
 
 
-def _make_adapter(provider_type: str = "openai", token_limit: int = 64000) -> TenantModelAdapter:
+def _make_adapter(
+    provider_type: str = "openai",
+    token_limit: int = 64000,
+    max_output_tokens: int = 12000,
+) -> TenantModelAdapter:
     """Create a minimal TenantModelAdapter for _prepare_kwargs testing."""
     adapter = object.__new__(TenantModelAdapter)
     adapter.litellm_model = f"{provider_type}/test-model"
-    adapter.model = SimpleNamespace(name="test-model", token_limit=token_limit)
+    adapter.model = SimpleNamespace(
+        name="test-model",
+        token_limit=token_limit,
+        max_input_tokens=token_limit,
+        max_output_tokens=max_output_tokens,
+    )
     adapter.provider_type = provider_type
     adapter.credential_resolver = SimpleNamespace(
         get_api_key=lambda: "test-key",
@@ -27,7 +36,7 @@ class TestPrepareKwargsMaxTokens:
         """Normal case: no reasoning_effort → inject default max_tokens."""
         adapter = _make_adapter("openai", token_limit=64000)
         result = adapter._prepare_kwargs(model_kwargs={"temperature": 0.7})
-        assert result["max_tokens"] == 4096
+        assert result["max_tokens"] == 12000
 
     def test_injects_default_max_tokens_for_non_anthropic_with_reasoning(self):
         """Non-Anthropic provider with reasoning_effort → still inject max_tokens."""
@@ -35,7 +44,7 @@ class TestPrepareKwargsMaxTokens:
         with patch("intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm") as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "high"})
-        assert result["max_tokens"] == 4096
+        assert result["max_tokens"] == 12000
 
     def test_skips_max_tokens_for_anthropic_with_reasoning(self):
         """Anthropic + reasoning_effort → defer to LiteLLM (no max_tokens injected)."""
@@ -81,7 +90,7 @@ class TestPrepareKwargsMaxTokens:
             mock_litellm.get_supported_openai_params.return_value = []
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "high"})
         # reasoning_effort removed by guard → normal max_tokens injection
-        assert result["max_tokens"] == 4096
+        assert result["max_tokens"] == 12000
         assert "reasoning_effort" not in result
 
     def test_injects_max_tokens_when_reasoning_effort_empty(self):
@@ -90,14 +99,19 @@ class TestPrepareKwargsMaxTokens:
         with patch("intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm") as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": ""})
-        assert result["max_tokens"] == 4096
+        assert result["max_tokens"] == 12000
         assert "reasoning_effort" not in result
 
-    def test_max_tokens_respects_token_limit(self):
-        """Default max_tokens uses min(token_limit // 4, 4096)."""
-        adapter = _make_adapter("openai", token_limit=8000)
+    def test_max_tokens_uses_stored_max_output_tokens(self):
+        """Default max_tokens uses the model's explicit max_output_tokens."""
+        adapter = _make_adapter("openai", token_limit=8000, max_output_tokens=6000)
         result = adapter._prepare_kwargs(model_kwargs={"temperature": 0.5})
-        assert result["max_tokens"] == 2000  # 8000 // 4 = 2000 < 4096
+        assert result["max_tokens"] == 6000
+
+    def test_get_token_limit_uses_input_minus_output_budget(self):
+        """Input context budget reserves the configured output budget."""
+        adapter = _make_adapter("openai", token_limit=128000, max_output_tokens=32000)
+        assert adapter.get_token_limit_of_model() == 96000
 
     def test_no_model_kwargs_injects_nothing(self):
         """No model_kwargs → no max_tokens injection (no model_kwargs block runs)."""

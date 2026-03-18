@@ -5,7 +5,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field, model_validator
 
 from intric.ai_models.model_enums import ModelFamily as CompletionModelFamily
 from intric.ai_models.model_enums import ModelHostingLocation, ModelStability
@@ -13,6 +13,7 @@ from intric.ai_models.model_enums import ModelOrg as Orgs
 from intric.files.file_models import File
 from intric.logging.logging import LoggingDetails
 from intric.main.models import NOT_PROVIDED, InDB, ModelId, NotProvided, partial_model
+from intric.model_providers.domain.model_defaults import lookup_model_defaults
 from intric.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
 )
@@ -81,7 +82,8 @@ class CompletionModelBase(BaseModel):
     nickname: str
     # Allow both enum and string for tenant models with dynamic values
     family: Union[CompletionModelFamily, str]
-    token_limit: int
+    max_input_tokens: int
+    max_output_tokens: int
     is_deprecated: bool
     nr_billion_parameters: Optional[int] = None
     hf_link: Optional[str] = None
@@ -97,9 +99,56 @@ class CompletionModelBase(BaseModel):
     base_url: Optional[str] = None
     litellm_model_name: Optional[str] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_token_fields(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            data = dict(value)
+            token_limit = data.get("token_limit")
+        else:
+            missing = object()
+            data = {}
+            for field in cls.model_fields:
+                attr = getattr(value, field, missing)
+                if attr is not missing:
+                    data[field] = attr
+            token_limit = getattr(value, "token_limit", None)
+
+        max_input_tokens = data.get("max_input_tokens")
+        if max_input_tokens is None and token_limit is not None:
+            max_input_tokens = token_limit
+            data["max_input_tokens"] = token_limit
+
+        return data
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def token_limit(self) -> int:
+        return self.max_input_tokens
+
 
 class CompletionModelCreate(CompletionModelBase):
-    pass
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_litellm_defaults(cls, value: Any) -> Any:
+        data = cls._normalize_token_fields(value)
+        defaults = lookup_model_defaults(
+            data.get("litellm_model_name"),
+            data.get("name"),
+        )
+        if defaults is None:
+            return data
+
+        if data.get("max_input_tokens") is None and defaults.max_input_tokens is not None:
+            data["max_input_tokens"] = defaults.max_input_tokens
+        if data.get("max_output_tokens") is None and defaults.max_output_tokens is not None:
+            max_input_tokens = data.get("max_input_tokens")
+            data["max_output_tokens"] = (
+                min(int(max_input_tokens), defaults.max_output_tokens)
+                if max_input_tokens is not None
+                else defaults.max_output_tokens
+            )
+        return data
 
 
 @partial_model
@@ -141,7 +190,8 @@ class CompletionModelPublic(CompletionModel):
             name=completion_model.name,
             nickname=completion_model.nickname,
             family=completion_model.family,
-            token_limit=completion_model.token_limit,
+            max_input_tokens=completion_model.max_input_tokens,
+            max_output_tokens=completion_model.max_output_tokens,
             is_deprecated=completion_model.is_deprecated,
             nr_billion_parameters=completion_model.nr_billion_parameters,
             hf_link=completion_model.hf_link,

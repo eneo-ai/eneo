@@ -1,18 +1,19 @@
 <script lang="ts">
   import { Page } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { getAppContext } from "$lib/core/AppContext";
   import { initFlowEditor } from "$lib/features/flows/FlowEditor";
-  import { initFlowUserMode, getFlowUserMode } from "$lib/features/flows/FlowUserMode";
+  import { initFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import FlowStepList from "$lib/features/flows/components/FlowStepList.svelte";
-  import FlowStepEditPanelComponent from "$lib/features/flows/components/FlowStepEditPanel.svelte";
+  import FlowStepEditPanel from "$lib/features/flows/components/FlowStepEditPanel.svelte";
   import FlowGraphPanel from "$lib/features/flows/components/FlowGraphPanel.svelte";
   import FlowFormSchemaEditor from "$lib/features/flows/components/FlowFormSchemaEditor.svelte";
   import FlowUserModeToggle from "$lib/features/flows/components/FlowUserModeToggle.svelte";
   import FlowSaveStatus from "$lib/features/flows/components/FlowSaveStatus.svelte";
   import FlowVersionBadge from "$lib/features/flows/components/FlowVersionBadge.svelte";
   import FlowValidationBanner from "$lib/features/flows/components/FlowValidationBanner.svelte";
-  import FlowRunsTableComponent from "$lib/features/flows/components/FlowRunsTable.svelte";
-  import FlowRunDialogComponent from "$lib/features/flows/components/FlowRunDialog.svelte";
+  import FlowRunsTable from "$lib/features/flows/components/FlowRunsTable.svelte";
+  import FlowRunDialog from "$lib/features/flows/components/FlowRunDialog.svelte";
   import { Button, Input } from "@intric/ui";
   import { IntricError } from "@intric/intric-js";
   import { toast } from "$lib/components/toast";
@@ -22,6 +23,7 @@
   import FlowDryRun from "$lib/features/flows/components/FlowDryRun.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import { getFlowFormStats } from "$lib/features/flows/flowFormSchema";
+  import FlowAIBuilderEditHost from "$lib/features/flows/ai-builder/FlowAIBuilderEditHost.svelte";
 
   export let data;
   let publishLoading = false;
@@ -44,6 +46,10 @@
   const {
     state: { currentSpace }
   } = getSpacesManager();
+  const { user } = getAppContext();
+  const canUseAIBuilder = user.hasPermission({
+    allOf: ["flows_manage", "flows_ai_builder"]
+  });
 
   const userMode = initFlowUserMode();
 
@@ -51,9 +57,14 @@
     flow: data.flow,
     intric: data.intric
   });
-  const FlowStepEditPanel = FlowStepEditPanelComponent as any;
-  const FlowRunsTable = FlowRunsTableComponent as any;
-  const FlowRunDialog = FlowRunDialogComponent as any;
+
+  // AI Builder service — initialized lazily when user switches to the AI Builder tab
+  let aiBuilderInitialized = false;
+  function ensureAIBuilder() {
+    if (!aiBuilderInitialized) {
+      aiBuilderInitialized = true;
+    }
+  }
 
   const {
     state: { resource, update, activeStepId, isPublished, saveStatus, validationErrors }
@@ -79,7 +90,10 @@
     flowEditor.destroy();
   });
 
-  let activeTab: "builder" | "history" = "builder";
+  let activeTab: "builder" | "history" | "ai-builder" = "builder";
+  $: if (!canUseAIBuilder && activeTab === "ai-builder") {
+    activeTab = "builder";
+  }
 
   const FLOW_BUILDER_STAGES: { id: BuilderStageId; labelKey: () => string }[] = [
     { id: 1, labelKey: () => m.flow_stage_basic_settings() },
@@ -90,7 +104,6 @@
   ];
 
   $: currentStageIndex = FLOW_BUILDER_STAGES.findIndex((item) => item.id === builderStage);
-  $: currentStage = FLOW_BUILDER_STAGES[currentStageIndex];
   $: previousStage = currentStageIndex > 0 ? FLOW_BUILDER_STAGES[currentStageIndex - 1] : null;
   $: nextStage =
     currentStageIndex >= 0 && currentStageIndex < FLOW_BUILDER_STAGES.length - 1
@@ -126,21 +139,24 @@
     typeof wizardMetadata.transcription_enabled === "boolean"
       ? wizardMetadata.transcription_enabled
       : hasAudioInputStep;
-  $: latestStep = ($update.steps ?? []).at(-1) ?? null;
   $: isTranscriptionSkipped = !transcriptionEnabled;
   $: transcriptionModelId =
     typeof (wizardMetadata as FlowWizardMetadata).transcription_model?.id === "string"
       ? (wizardMetadata as FlowWizardMetadata).transcription_model?.id
       : null;
-  $: transcriptionModel =
+  let transcriptionModel:
+    | { id?: string; name?: string | null; nickname?: string | null }
+    | null = null;
+  $: resolvedTranscriptionModel =
     ($currentSpace.transcription_models ?? []).find((model) => model.id === transcriptionModelId) ??
     null;
-  $: selectedTranscriptionModelId =
-    transcriptionModel && typeof transcriptionModel.id === "string" ? transcriptionModel.id : null;
-  $: if (selectedTranscriptionModelId && selectedTranscriptionModelId !== transcriptionModelId) {
-    setWizardMeta({
-      transcription_model: { id: selectedTranscriptionModelId }
-    });
+  // Sync from metadata → local ONLY when the persisted id changes.
+  // Using transcriptionModelId as sole trigger avoids a reactive race where
+  // the user's selection (transcriptionModel) is overwritten before it persists.
+  let lastSyncedTranscriptionModelId: string | null | undefined = undefined;
+  $: if (transcriptionModelId !== lastSyncedTranscriptionModelId) {
+    lastSyncedTranscriptionModelId = transcriptionModelId;
+    transcriptionModel = resolvedTranscriptionModel;
   }
   $: transcriptionModelMissingInSpace =
     transcriptionModelId !== null && transcriptionModel === null;
@@ -217,7 +233,7 @@
           role="tab"
           aria-selected={activeTab === "builder"}
           aria-controls="panel-builder"
-          class="border-b-[3px] px-4 py-2 text-sm font-medium transition-colors duration-200"
+          class="border-b-[3px] px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors duration-200"
           class:border-accent-default={activeTab === "builder"}
           class:text-primary={activeTab === "builder"}
           class:border-transparent={activeTab !== "builder"}
@@ -230,7 +246,7 @@
           role="tab"
           aria-selected={activeTab === "history"}
           aria-controls="panel-history"
-          class="border-b-[3px] px-4 py-2 text-sm font-medium transition-colors duration-200"
+          class="border-b-[3px] px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors duration-200"
           class:border-accent-default={activeTab === "history"}
           class:text-primary={activeTab === "history"}
           class:border-transparent={activeTab !== "history"}
@@ -239,22 +255,36 @@
         >
           {m.flow_history()}
         </button>
+        {#if canUseAIBuilder}
+          <button
+            role="tab"
+            aria-selected={activeTab === "ai-builder"}
+            aria-controls="panel-ai-builder"
+            class="border-b-[3px] px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors duration-200"
+            class:border-accent-default={activeTab === "ai-builder"}
+            class:text-primary={activeTab === "ai-builder"}
+            class:border-transparent={activeTab !== "ai-builder"}
+            class:text-secondary={activeTab !== "ai-builder"}
+            on:click={() => {
+              ensureAIBuilder();
+              activeTab = "ai-builder";
+            }}
+          >
+            {m.ai_builder_tab()}
+          </button>
+        {/if}
       </div>
     </Page.Tabbar>
 
-    <div class="relative z-10 flex min-w-0 shrink items-center gap-2 overflow-hidden">
+    <div class="relative z-10 flex shrink-0 items-center gap-2">
       <FlowVersionBadge publishedVersion={$resource.published_version} />
       {#if !$isPublished}
         <FlowSaveStatus status={$saveStatus} />
       {/if}
-      {#if $isPublished}
-        <!-- Hide mode toggle on narrower screens when published (read-only mode) -->
-        <div class="hidden xl:block">
-          <FlowUserModeToggle />
-        </div>
-      {:else}
+      <!-- Hide mode toggle on narrower screens to prevent crowding -->
+      <div class="hidden xl:block">
         <FlowUserModeToggle />
-      {/if}
+      </div>
       <div class="flex shrink-0 items-center gap-2">
         {#if $isPublished}
           <Button
@@ -347,7 +377,7 @@
       >
         <nav class="flex items-center justify-between" aria-label="Flow builder stages">
           <ol class="flex flex-1 items-center">
-            {#each FLOW_BUILDER_STAGES as stage, i}
+            {#each FLOW_BUILDER_STAGES as stage, i (stage.id)}
               {@const isActive = builderStage === stage.id}
               {@const isCompleted = isStageCompleted(stage.id)}
               {@const isSkipped = stage.id === 2 && isTranscriptionSkipped}
@@ -739,6 +769,12 @@
                       <SelectAIModelV2
                         bind:selectedModel={transcriptionModel}
                         availableModels={$currentSpace.transcription_models}
+                        dropdownLabel={m.flow_transcription_model_label()}
+                        on:change={() => {
+                          if (transcriptionModel?.id) {
+                            setWizardMeta({ transcription_model: { id: transcriptionModel.id } });
+                          }
+                        }}
                       />
                     </div>
                     <div class="flex flex-col gap-1.5">
@@ -819,6 +855,12 @@
                 activeStepId={$activeStepId}
                 isPublished={$isPublished}
                 validationErrors={$validationErrors}
+                onBuildWithAI={canUseAIBuilder
+                  ? () => {
+                      ensureAIBuilder();
+                      activeTab = "ai-builder";
+                    }
+                  : undefined}
                 on:selectStep={async (e) => {
                   try {
                     await flowEditor.flushAssistantSaves();
@@ -918,8 +960,13 @@
                   >
                     {m.flow_review_input_label()}
                   </div>
-                  {#each $update.steps ?? [] as pipeStep}
+                  {#each $update.steps ?? [] as pipeStep (pipeStep.id ?? pipeStep.step_order)}
                     <span class="text-secondary text-lg">&rarr;</span>
+                    {@const completionModel =
+                      "completion_model" in pipeStep
+                        ? (pipeStep as { completion_model?: { name?: string | null } | null })
+                            .completion_model
+                        : null}
                     <div
                       class="border-default bg-primary flex flex-col items-center rounded-lg border px-4 py-2"
                     >
@@ -927,10 +974,8 @@
                         >{pipeStep.user_description ||
                           m.flow_step_fallback_label({ order: String(pipeStep.step_order) })}</span
                       >
-                      {#if (pipeStep as any).completion_model?.name}
-                        <span class="text-muted text-xs"
-                          >{(pipeStep as any).completion_model.name}</span
-                        >
+                      {#if completionModel?.name}
+                        <span class="text-muted text-xs">{completionModel.name}</span>
                       {/if}
                     </div>
                   {/each}
@@ -985,6 +1030,35 @@
         {/if}
       </div>
     </div>
+
+    {#if canUseAIBuilder && aiBuilderInitialized}
+      <div
+        id="panel-ai-builder"
+        role="tabpanel"
+        class="flex flex-1 flex-col overflow-hidden"
+        class:hidden={activeTab !== "ai-builder"}
+      >
+        <FlowAIBuilderEditHost
+          intric={data.intric}
+          spaceId={$currentSpace.id}
+          flowId={$resource.id}
+          onapplied={async (detail) => {
+            try {
+              const updated = await data.intric.flows.get({ id: detail.flow_id });
+              flowEditor.setResource(updated);
+              // Select first step for immediate visibility
+              const firstStep = updated.steps?.[0];
+              if (firstStep?.id) {
+                $activeStepId = firstStep.id;
+              }
+            } catch (err) {
+              console.error("Failed to refresh flow after apply:", err);
+            }
+            // Stay in AI builder tab — user can click "Continue editing" or switch manually
+          }}
+        />
+      </div>
+    {/if}
 
     <div
       id="panel-history"

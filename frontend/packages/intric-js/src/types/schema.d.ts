@@ -449,6 +449,22 @@ export interface paths {
      */
     patch: operations["update_flow_input_limits_api_v1_settings_flow_input_limits_patch"];
   };
+  "/api/v1/settings/ai-builder-budget": {
+    /**
+     * Get effective AI Builder conversation budget settings
+     * @description Returns effective tenant-level AI Builder conversation budgeting settings, including defaults when no override exists.
+     */
+    get: operations["get_ai_builder_budget_settings_api_v1_settings_ai_builder_budget_get"];
+    /**
+     * Update AI Builder conversation budget settings
+     * @description Update tenant-level AI Builder conversation budgeting settings.
+     *
+     * **Admin Only:** Requires admin permissions.
+     *
+     * Values are persisted under tenant `flow_settings.ai_builder` and take effect immediately.
+     */
+    patch: operations["update_ai_builder_budget_settings_api_v1_settings_ai_builder_budget_patch"];
+  };
   "/api/v1/settings/api-key-expiry-notifications": {
     /**
      * Toggle API key expiry notifications
@@ -1491,6 +1507,10 @@ export interface paths {
      */
     get: operations["get_provider_capabilities_api_v1_admin_model_providers_capabilities__get"];
   };
+  "/api/v1/admin/model-providers/model-defaults/": {
+    /** Get Model Defaults */
+    get: operations["get_model_defaults_api_v1_admin_model_providers_model_defaults__get"];
+  };
   "/api/v1/admin/model-providers/{provider_id}/": {
     /**
      * Get Provider
@@ -1910,29 +1930,53 @@ export interface paths {
     get: operations["get_info_blobs_api_v1_websites__id__info_blobs__get"];
   };
   "/api/v1/flows/": {
-    /** List Flows */
+    /**
+     * List Flows
+     * @description List flow definitions in a space with pagination-friendly sparse metadata. The `count` field in the paginated response reports the number of items returned in the current page, not the total number of matching flows across all pages.
+     */
     get: operations["list_flows"];
-    /** Create Flow */
+    /**
+     * Create Flow
+     * @description Create a new draft flow definition, including its initial ordered steps, inside a space.
+     */
     post: operations["create_flow"];
   };
   "/api/v1/flows/{id}/": {
-    /** Get Flow */
+    /**
+     * Get Flow
+     * @description Return the full draft representation of a flow, including all configured steps and metadata.
+     */
     get: operations["get_flow"];
-    /** Delete Flow */
+    /**
+     * Delete Flow
+     * @description Soft-delete a flow definition so it is no longer available for editing or execution.
+     */
     delete: operations["delete_flow"];
-    /** Update Flow */
+    /**
+     * Update Flow
+     * @description Update a draft flow definition, including steps, metadata, and retention settings.
+     */
     patch: operations["update_flow"];
   };
   "/api/v1/flows/{id}/publish/": {
-    /** Publish Flow */
+    /**
+     * Publish Flow
+     * @description Publish the current draft revision so new runs use a version-pinned definition.
+     */
     post: operations["publish_flow"];
   };
   "/api/v1/flows/{id}/unpublish/": {
-    /** Unpublish Flow */
+    /**
+     * Unpublish Flow
+     * @description Remove the active published revision while keeping the draft definition available for editing.
+     */
     post: operations["unpublish_flow"];
   };
   "/api/v1/flows/{id}/template-files/": {
-    /** List Flow Template Files */
+    /**
+     * List Flow Templates
+     * @description List template assets attached to a flow draft for template-fill steps.
+     */
     get: operations["list_flow_template_files"];
     /**
      * Upload a DOCX template asset for a flow
@@ -1948,39 +1992,42 @@ export interface paths {
     get: operations["inspect_flow_template"];
   };
   "/api/v1/flows/{id}/template-files/{file_id}/signed-url/": {
-    /** Generate Flow Template Signed Url */
+    /**
+     * Generate Template Download URL
+     * @description Generate a temporary signed download URL for a stored flow template asset.
+     */
     post: operations["generate_flow_template_signed_url"];
   };
+  "/api/v1/flows/{id}/http-test": {
+    /**
+     * Test HTTP Connection
+     * @description Send a test HTTP request using the provided config snapshot. Does not persist anything.
+     */
+    post: operations["test_flow_http"];
+  };
   "/api/v1/flows/{id}/assistants/": {
-    /** Create Flow Assistant */
+    /**
+     * Create Flow Assistant
+     * @description Create a flow-managed assistant that can be attached to steps in the specified flow.
+     */
     post: operations["create_flow_assistant"];
   };
   "/api/v1/flows/{id}/assistants/{assistant_id}/": {
-    /** Get Flow Assistant */
+    /**
+     * Get Flow Assistant
+     * @description Return a single flow-managed assistant and its effective permissions for the caller.
+     */
     get: operations["get_flow_assistant"];
-    /** Delete Flow Assistant */
+    /**
+     * Delete Flow Assistant
+     * @description Delete a flow-managed assistant from the specified flow.
+     */
     delete: operations["delete_flow_assistant"];
-    /** Update Flow Assistant */
+    /**
+     * Update Flow Assistant
+     * @description Update a flow-managed assistant that belongs to the specified flow.
+     */
     patch: operations["update_flow_assistant"];
-  };
-  "/api/v1/flows/{id}/runs/": {
-    /**
-     * List flow runs (flow-first)
-     * @description List runs for a specific flow.
-     *
-     * This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
-     */
-    get: operations["list_flow_runs_alias"];
-    /**
-     * Create flow run
-     * @description Create a new run for a published flow.
-     *
-     * Speech-to-text consumer sequence:
-     * 1. Upload one or more files via `POST /api/v1/flows/{id}/files/`
-     * 2. Submit the returned `file_ids` in this run request
-     * 3. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs
-     */
-    post: operations["create_flow_run"];
   };
   "/api/v1/flows/{id}/run-contract/": {
     /**
@@ -2034,12 +2081,38 @@ export interface paths {
      */
     post: operations["upload_flow_runtime_file"];
   };
+  "/api/v1/flows/{id}/runs/": {
+    /**
+     * List flow runs (flow-first)
+     * @description List runs for a specific flow.
+     *
+     *     This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
+     *     The `count` field in the paginated response reports the number of items returned in the
+     *     current page, not the total number of matching runs across all pages.
+     */
+    get: operations["list_flow_runs_alias"];
+    /**
+     * Create flow run
+     * @description Create a new run for a published flow.
+     *
+     *     Generic consumer sequence:
+     *     1. Inspect `GET /api/v1/flows/{id}/run-contract/` to understand the published form fields,
+     *        required runtime step inputs, and version pinning requirements.
+     *     2. Upload any required files via `POST /api/v1/flows/{id}/files/` or the relevant
+     *        `.../steps/{step_id}/runtime-files/` endpoint.
+     *     3. Submit the returned uploaded files as `file_ids`, together with any optional `step_inputs`
+     *        and structured
+     *        `input_payload_json` fields in this run request.
+     *     4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs.
+     */
+    post: operations["create_flow_run"];
+  };
   "/api/v1/flows/{id}/runs/{run_id}/": {
     /**
      * Get flow run (flow-first)
      * @description Get one run for a flow using flow-first routing.
      *
-     * Use this endpoint for run status and top-level output payload when building consumer apps.
+     *     Use this endpoint for run status and top-level output payload when building consumer apps.
      */
     get: operations["get_flow_run_alias"];
   };
@@ -2057,7 +2130,8 @@ export interface paths {
      * Redispatch stale queued run (flow-first)
      * @description Attempt to redispatch a stale queued run.
      *
-     * Returns `redispatched_count` indicating whether dispatch was re-triggered.
+     *     Returns the refreshed run payload together with `redispatched_count`, which indicates
+     *     whether dispatch was re-triggered for this request.
      */
     post: operations["redispatch_flow_run_alias"];
   };
@@ -2102,6 +2176,74 @@ export interface paths {
      * specified run.
      */
     post: operations["generate_flow_run_artifact_signed_url"];
+  };
+  "/api/v1/flows/ai-builder/sessions": {
+    /**
+     * List AI Builder Sessions
+     * @description List AI Builder sessions visible to the caller within their permitted spaces.
+     */
+    get: operations["list_ai_builder_sessions"];
+    /**
+     * Create AI Builder Session
+     * @description Start or resume an AI Builder session for a space-scoped flow drafting workflow.
+     */
+    post: operations["create_ai_builder_session"];
+  };
+  "/api/v1/flows/ai-builder/sessions/{session_id}/messages": {
+    /**
+     * Send AI Builder Message
+     * @description Send a user message to an AI Builder session and receive planner events as a server-sent event stream.
+     */
+    post: operations["send_ai_builder_message"];
+  };
+  "/api/v1/flows/ai-builder/sessions/{session_id}": {
+    /**
+     * Get AI Builder Session
+     * @description Return the current state and conversation for a single AI Builder session.
+     */
+    get: operations["get_ai_builder_session"];
+  };
+  "/api/v1/flows/ai-builder/sessions/{session_id}/models": {
+    /**
+     * List Session Models
+     * @description Return the completion models available to the AI Builder in the session's space.
+     */
+    get: operations["get_ai_builder_models"];
+  };
+  "/api/v1/flows/ai-builder/plans/{plan_id}": {
+    /**
+     * Get AI Builder Plan
+     * @description Fetch a stored AI Builder plan proposal for review or approval.
+     */
+    get: operations["get_ai_builder_plan"];
+  };
+  "/api/v1/flows/ai-builder/sessions/{session_id}/plans": {
+    /**
+     * List Session Plans
+     * @description List all plan revisions generated within a specific AI Builder session.
+     */
+    get: operations["list_ai_builder_session_plans"];
+  };
+  "/api/v1/flows/ai-builder/sessions/{session_id}/cancel": {
+    /**
+     * Cancel AI Builder Session
+     * @description Cancel an active AI Builder session and stop further planning work in that session.
+     */
+    post: operations["cancel_ai_builder_session"];
+  };
+  "/api/v1/flows/ai-builder/plans/{plan_id}/approve": {
+    /**
+     * Approve AI Builder Plan
+     * @description Mark a plan revision as approved so it can be applied to a flow.
+     */
+    post: operations["approve_ai_builder_plan"];
+  };
+  "/api/v1/flows/ai-builder/plans/{plan_id}/apply": {
+    /**
+     * Apply AI Builder Plan
+     * @description Materialize an approved AI Builder plan into the target flow definition.
+     */
+    post: operations["apply_ai_builder_plan"];
   };
   "/api/v1/prompts/{id}/": {
     /** Get Prompt */
@@ -3112,6 +3254,24 @@ export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
+    /** AIBuilderBudgetSettingsPublic */
+    AIBuilderBudgetSettingsPublic: {
+      /** Conversation Safety Buffer Tokens */
+      conversation_safety_buffer_tokens: number;
+      /** Minimum Conversation Budget Tokens */
+      minimum_conversation_budget_tokens: number;
+      /** Unknown Model Context Window Tokens */
+      unknown_model_context_window_tokens?: number | null;
+    };
+    /** AIBuilderBudgetSettingsUpdate */
+    AIBuilderBudgetSettingsUpdate: {
+      /** Conversation Safety Buffer Tokens */
+      conversation_safety_buffer_tokens?: number | null;
+      /** Minimum Conversation Budget Tokens */
+      minimum_conversation_budget_tokens?: number | null;
+      /** Unknown Model Context Window Tokens */
+      unknown_model_context_window_tokens?: number | null;
+    };
     /**
      * ARQHealth
      * @description Parsed ARQ health metrics (clean view).
@@ -3372,6 +3532,12 @@ export interface components {
       | "flow_run_audio_transcribed"
       | "flow_http_outbound_call"
       | "flow_run_artifact_downloaded"
+      | "ai_builder_session_created"
+      | "ai_builder_plan_proposed"
+      | "ai_builder_plan_approved"
+      | "ai_builder_plan_rejected"
+      | "ai_builder_flow_applied"
+      | "ai_builder_session_cancelled"
       | "security_classification_created"
       | "security_classification_updated"
       | "security_classification_deleted"
@@ -4302,6 +4468,41 @@ export interface components {
       services: components["schemas"]["PaginatedPermissions_ServiceSparse_"];
       apps: components["schemas"]["PaginatedPermissions_AppSparse_"];
     };
+    /**
+     * ApplyPlanRequest
+     * @example {
+     *   "expected_revision": 12
+     * }
+     */
+    ApplyPlanRequest: {
+      /** Expected Revision */
+      expected_revision?: number | null;
+    };
+    /**
+     * ApplyResultResponse
+     * @example {
+     *   "flow_id": "00000000-0000-0000-0000-000000000001",
+     *   "flow_name": "Employee Review Summary",
+     *   "steps_created": 2,
+     *   "steps_removed": 0,
+     *   "steps_updated": 0
+     * }
+     */
+    ApplyResultResponse: {
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /** Flow Name */
+      flow_name: string;
+      /** Steps Created */
+      steps_created: number;
+      /** Steps Updated */
+      steps_updated: number;
+      /** Steps Removed */
+      steps_removed: number;
+    };
     /** AskAnalysis */
     AskAnalysis: {
       /** Question */
@@ -4634,6 +4835,18 @@ export interface components {
        * @description ID of the completion model, or None if not configured
        */
       completion_model_id?: string | null;
+    };
+    /**
+     * AssistantSpec
+     * @description Inline assistant definition embedded in each step spec.
+     */
+    AssistantSpec: {
+      /** Instructions */
+      instructions: string;
+      /** Model Ref */
+      model_ref?: string | null;
+      /** Knowledge Refs */
+      knowledge_refs?: string[];
     };
     /**
      * AssistantTemplateAdminCreate
@@ -5051,6 +5264,7 @@ export interface components {
       /**
        * Upload File
        * Format: binary
+       * @description DOCX template file to store for later template_fill steps.
        */
       upload_file: string;
     };
@@ -5213,8 +5427,10 @@ export interface components {
       nickname: string;
       /** Family */
       family: components["schemas"]["ModelFamily"] | string;
-      /** Token Limit */
-      token_limit: number;
+      /** Max Input Tokens */
+      max_input_tokens: number;
+      /** Max Output Tokens */
+      max_output_tokens: number;
       /** Is Deprecated */
       is_deprecated: boolean;
       /** Nr Billion Parameters */
@@ -5260,6 +5476,8 @@ export interface components {
       tenant_id?: string | null;
       /** Provider Id */
       provider_id?: string | null;
+      /** Token Limit */
+      token_limit: number;
     };
     /** CompletionModelCreate */
     CompletionModelCreate: {
@@ -5269,8 +5487,10 @@ export interface components {
       nickname: string;
       /** Family */
       family: components["schemas"]["ModelFamily"] | string;
-      /** Token Limit */
-      token_limit: number;
+      /** Max Input Tokens */
+      max_input_tokens: number;
+      /** Max Output Tokens */
+      max_output_tokens: number;
       /** Is Deprecated */
       is_deprecated: boolean;
       /** Nr Billion Parameters */
@@ -5320,8 +5540,10 @@ export interface components {
       nickname: string;
       /** Family */
       family: components["schemas"]["ModelFamily"] | string;
-      /** Token Limit */
-      token_limit: number;
+      /** Max Input Tokens */
+      max_input_tokens: number;
+      /** Max Output Tokens */
+      max_output_tokens: number;
       /** Is Deprecated */
       is_deprecated: boolean;
       /** Nr Billion Parameters */
@@ -5386,6 +5608,8 @@ export interface components {
       provider_name?: string | null;
       /** Provider Type */
       provider_type?: string | null;
+      /** Token Limit */
+      token_limit: number;
     };
     /** CompletionModelPublicAppTemplate */
     CompletionModelPublicAppTemplate: {
@@ -5420,8 +5644,10 @@ export interface components {
       nickname: string;
       /** Family */
       family: components["schemas"]["ModelFamily"] | string;
-      /** Token Limit */
-      token_limit: number;
+      /** Max Input Tokens */
+      max_input_tokens: number;
+      /** Max Output Tokens */
+      max_output_tokens: number;
       /** Is Deprecated */
       is_deprecated: boolean;
       /** Nr Billion Parameters */
@@ -5488,6 +5714,8 @@ export interface components {
       provider_type?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
+      /** Token Limit */
+      token_limit: number;
     };
     /** CompletionModelSparse */
     CompletionModelSparse: {
@@ -5506,8 +5734,10 @@ export interface components {
       nickname: string;
       /** Family */
       family: components["schemas"]["ModelFamily"] | string;
-      /** Token Limit */
-      token_limit: number;
+      /** Max Input Tokens */
+      max_input_tokens: number;
+      /** Max Output Tokens */
+      max_output_tokens: number;
       /** Is Deprecated */
       is_deprecated: boolean;
       /** Nr Billion Parameters */
@@ -5539,6 +5769,8 @@ export interface components {
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Token Limit */
+      token_limit: number;
     };
     /** CompletionModelUpdateFlags */
     CompletionModelUpdateFlags: {
@@ -5560,6 +5792,27 @@ export interface components {
       total_conversations: number;
       /** Total Questions */
       total_questions: number;
+    };
+    /** ConversationMessage */
+    ConversationMessage: {
+      /** Role */
+      role: string;
+      /** Content */
+      content?: string | null;
+      /** Timestamp */
+      timestamp?: string | null;
+      /** Tool Calls */
+      tool_calls?:
+        | {
+            [key: string]: unknown;
+          }[]
+        | null;
+      /** Tool Call Id */
+      tool_call_id?: string | null;
+      /** Metadata */
+      metadata?: {
+        [key: string]: unknown;
+      } | null;
     };
     /**
      * ConversationRequest
@@ -5880,6 +6133,29 @@ export interface components {
       /** Name */
       name: string;
       embedding_model: components["schemas"]["ModelId"];
+    };
+    /**
+     * CreateSessionRequest
+     * @example {
+     *   "force_new": false,
+     *   "space_id": "00000000-0000-0000-0000-000000000001",
+     *   "target_kind": "create"
+     * }
+     */
+    CreateSessionRequest: {
+      target_kind: components["schemas"]["TargetKind"];
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Flow Id */
+      flow_id?: string | null;
+      /**
+       * Force New
+       * @default false
+       */
+      force_new?: boolean;
     };
     /** CreateSpaceAppRequest */
     CreateSpaceAppRequest: {
@@ -6610,7 +6886,8 @@ export interface components {
       | "mcp_server_tool"
       | "session"
       | "flow"
-      | "flow_run";
+      | "flow_run"
+      | "ai_builder_session";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -6970,6 +7247,27 @@ export interface components {
       /** Data Retention Days */
       data_retention_days?: number | null;
     };
+    /**
+     * FlowDraftSpecCore
+     * @description Canonical portable flow definition.
+     *
+     * Used for:
+     * 1. AI planning — the AI outputs this; validated, stored, rendered
+     * 2. Export/import (Phase 2) — portable between Eneo instances
+     */
+    FlowDraftSpecCore: {
+      /** Flow Name */
+      flow_name: string;
+      /**
+       * Flow Description
+       * @default
+       */
+      flow_description?: string;
+      /** Steps */
+      steps: components["schemas"]["StepSpec"][];
+      /** Form Fields */
+      form_fields?: components["schemas"]["FormFieldSpec"][] | null;
+    };
     /** FlowInputLimitsPublic */
     FlowInputLimitsPublic: {
       /** File Max Size Bytes */
@@ -7065,7 +7363,53 @@ export interface components {
      * @enum {string}
      */
     FlowOutputType: "text" | "json" | "pdf" | "docx";
-    /** FlowPublic */
+    /**
+     * FlowPublic
+     * @example {
+     *   "created_at": "2026-03-17T09:30:00Z",
+     *   "created_by_user_id": "00000000-0000-0000-0000-000000000030",
+     *   "data_retention_days": 30,
+     *   "description": "Transcribe a review conversation and return a PDF summary.",
+     *   "id": "00000000-0000-0000-0000-000000000001",
+     *   "metadata_json": {
+     *     "category": "hr"
+     *   },
+     *   "name": "Employee Review Summary",
+     *   "owner_user_id": "00000000-0000-0000-0000-000000000030",
+     *   "published_version": 3,
+     *   "space_id": "00000000-0000-0000-0000-000000000020",
+     *   "steps": [
+     *     {
+     *       "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *       "created_at": "2026-03-17T09:30:00Z",
+     *       "id": "00000000-0000-0000-0000-000000000101",
+     *       "input_source": "flow_input",
+     *       "input_type": "audio",
+     *       "mcp_policy": "inherit",
+     *       "output_mode": "transcribe_only",
+     *       "output_type": "text",
+     *       "step_order": 1,
+     *       "updated_at": "2026-03-17T09:30:00Z",
+     *       "user_description": "Transcribe uploaded audio into Swedish text."
+     *     },
+     *     {
+     *       "assistant_id": "00000000-0000-0000-0000-000000000202",
+     *       "created_at": "2026-03-17T09:30:00Z",
+     *       "id": "00000000-0000-0000-0000-000000000102",
+     *       "input_source": "previous_step",
+     *       "input_type": "text",
+     *       "mcp_policy": "inherit",
+     *       "output_mode": "pass_through",
+     *       "output_type": "pdf",
+     *       "step_order": 2,
+     *       "updated_at": "2026-03-17T09:30:00Z",
+     *       "user_description": "Summarize the transcription into a PDF for HR follow-up."
+     *     }
+     *   ],
+     *   "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *   "updated_at": "2026-03-17T10:00:00Z"
+     * }
+     */
     FlowPublic: {
       /**
        * Id
@@ -7105,7 +7449,47 @@ export interface components {
       /** Steps */
       steps: components["schemas"]["FlowStepPublic"][];
     };
-    /** FlowRunContractPublic */
+    /**
+     * FlowRunContractPublic
+     * @example {
+     *   "aggregate_max_files": 1,
+     *   "flow_id": "00000000-0000-0000-0000-000000000001",
+     *   "form_fields": [
+     *     {
+     *       "label": "Employee name",
+     *       "name": "employee_name",
+     *       "required": true,
+     *       "type": "text"
+     *     }
+     *   ],
+     *   "published_flow_version": 3,
+     *   "steps_requiring_input": [
+     *     {
+     *       "accepted_mimetypes": [
+     *         "audio/wav",
+     *         "audio/mpeg"
+     *       ],
+     *       "description": "Provide the recorded review conversation.",
+     *       "input_format": "audio",
+     *       "label": "Upload audio",
+     *       "max_file_size_bytes": 52428800,
+     *       "max_files": 1,
+     *       "required": true,
+     *       "step_id": "00000000-0000-0000-0000-000000000101",
+     *       "step_order": 1
+     *     }
+     *   ],
+     *   "template_readiness": [
+     *     {
+     *       "can_download": false,
+     *       "can_edit": false,
+     *       "published_flow_version": 3,
+     *       "status": "unavailable",
+     *       "step_id": "00000000-0000-0000-0000-000000000102"
+     *     }
+     *   ]
+     * }
+     */
     FlowRunContractPublic: {
       /**
        * Flow Id
@@ -7365,7 +7749,23 @@ export interface components {
       }[];
       debug_export: components["schemas"]["FlowRunDebugExport"];
     };
-    /** FlowRunPublic */
+    /**
+     * FlowRunPublic
+     * @example {
+     *   "created_at": "2026-03-17T10:05:00Z",
+     *   "flow_id": "00000000-0000-0000-0000-000000000001",
+     *   "flow_version": 3,
+     *   "id": "00000000-0000-0000-0000-000000000301",
+     *   "input_payload_json": {
+     *     "employee_name": "Alex Example"
+     *   },
+     *   "job_id": "00000000-0000-0000-0000-000000000401",
+     *   "status": "queued",
+     *   "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *   "updated_at": "2026-03-17T10:05:00Z",
+     *   "user_id": "00000000-0000-0000-0000-000000000030"
+     * }
+     */
     FlowRunPublic: {
       /**
        * Id
@@ -7412,7 +7812,26 @@ export interface components {
        */
       updated_at: string;
     };
-    /** FlowRunRedispatchResponse */
+    /**
+     * FlowRunRedispatchResponse
+     * @example {
+     *   "redispatched_count": 1,
+     *   "run": {
+     *     "created_at": "2026-03-17T10:05:00Z",
+     *     "flow_id": "00000000-0000-0000-0000-000000000001",
+     *     "flow_version": 3,
+     *     "id": "00000000-0000-0000-0000-000000000301",
+     *     "input_payload_json": {
+     *       "employee_name": "Alex Example"
+     *     },
+     *     "job_id": "00000000-0000-0000-0000-000000000401",
+     *     "status": "queued",
+     *     "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *     "updated_at": "2026-03-17T10:05:00Z",
+     *     "user_id": "00000000-0000-0000-0000-000000000030"
+     *   }
+     * }
+     */
     FlowRunRedispatchResponse: {
       run: components["schemas"]["FlowRunPublic"];
       /** Redispatched Count */
@@ -7423,7 +7842,37 @@ export interface components {
      * @enum {string}
      */
     FlowRunStatus: "queued" | "running" | "completed" | "failed" | "cancelled";
-    /** FlowRunStepPublic */
+    /**
+     * FlowRunStepPublic
+     * @example {
+     *   "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *   "created_at": "2026-03-17T10:05:05Z",
+     *   "diagnostics": [
+     *     {
+     *       "code": "runtime_input_consumed",
+     *       "message": "Uploaded audio file was used."
+     *     }
+     *   ],
+     *   "id": "00000000-0000-0000-0000-000000000501",
+     *   "input_payload_json": {
+     *     "diagnostics": [
+     *       {
+     *         "code": "runtime_input_consumed",
+     *         "message": "Uploaded audio file was used."
+     *       }
+     *     ]
+     *   },
+     *   "num_tokens_input": 0,
+     *   "num_tokens_output": 0,
+     *   "output_payload_json": {
+     *     "text": "Hello and welcome to the annual review..."
+     *   },
+     *   "status": "completed",
+     *   "step_id": "00000000-0000-0000-0000-000000000101",
+     *   "step_order": 1,
+     *   "updated_at": "2026-03-17T10:05:30Z"
+     * }
+     */
     FlowRunStepPublic: {
       /** Id */
       id?: string | null;
@@ -7491,7 +7940,25 @@ export interface components {
      * @enum {string}
      */
     FlowRuntimeInputFormat: "document" | "audio" | "file";
-    /** FlowSparsePublic */
+    /**
+     * FlowSparsePublic
+     * @example {
+     *   "created_at": "2026-03-17T09:30:00Z",
+     *   "created_by_user_id": "00000000-0000-0000-0000-000000000030",
+     *   "data_retention_days": 30,
+     *   "description": "Transcribe a review conversation and return a PDF summary.",
+     *   "id": "00000000-0000-0000-0000-000000000001",
+     *   "metadata_json": {
+     *     "category": "hr"
+     *   },
+     *   "name": "Employee Review Summary",
+     *   "owner_user_id": "00000000-0000-0000-0000-000000000030",
+     *   "published_version": 3,
+     *   "space_id": "00000000-0000-0000-0000-000000000020",
+     *   "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *   "updated_at": "2026-03-17T10:00:00Z"
+     * }
+     */
     FlowSparsePublic: {
       /**
        * Id
@@ -7580,7 +8047,22 @@ export interface components {
         [key: string]: unknown;
       } | null;
     };
-    /** FlowStepPublic */
+    /**
+     * FlowStepPublic
+     * @example {
+     *   "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *   "created_at": "2026-03-17T09:30:00Z",
+     *   "id": "00000000-0000-0000-0000-000000000101",
+     *   "input_source": "flow_input",
+     *   "input_type": "audio",
+     *   "mcp_policy": "inherit",
+     *   "output_mode": "transcribe_only",
+     *   "output_type": "text",
+     *   "step_order": 1,
+     *   "updated_at": "2026-03-17T09:30:00Z",
+     *   "user_description": "Transcribe uploaded audio into Swedish text."
+     * }
+     */
     FlowStepPublic: {
       /** Id */
       id?: string | null;
@@ -7630,7 +8112,29 @@ export interface components {
      * @enum {string}
      */
     FlowStepResultStatus: "pending" | "running" | "completed" | "failed" | "cancelled";
-    /** FlowTemplateAssetPublic */
+    /**
+     * FlowTemplateAssetPublic
+     * @example {
+     *   "can_download": true,
+     *   "can_edit": true,
+     *   "can_inspect": true,
+     *   "can_select": true,
+     *   "checksum": "sha256:abc123",
+     *   "created_at": "2026-03-17T09:40:00Z",
+     *   "file_id": "00000000-0000-0000-0000-000000000602",
+     *   "flow_id": "00000000-0000-0000-0000-000000000001",
+     *   "id": "00000000-0000-0000-0000-000000000601",
+     *   "last_updated_by_name": "Case Worker Admin",
+     *   "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+     *   "name": "ibic-template.docx",
+     *   "placeholders": [
+     *     "brukare_namn",
+     *     "handlaggare"
+     *   ],
+     *   "status": "ready",
+     *   "updated_at": "2026-03-17T09:45:00Z"
+     * }
+     */
     FlowTemplateAssetPublic: {
       /**
        * Id
@@ -7688,7 +8192,28 @@ export interface components {
      * @enum {string}
      */
     FlowTemplateAssetStatus: "ready" | "needs_action" | "read_only" | "unavailable";
-    /** FlowTemplateInspectionPublic */
+    /**
+     * FlowTemplateInspectionPublic
+     * @example {
+     *   "asset_id": "00000000-0000-0000-0000-000000000601",
+     *   "extracted_text_preview": "IBIC plan template with placeholders.",
+     *   "file_id": "00000000-0000-0000-0000-000000000602",
+     *   "file_name": "ibic-template.docx",
+     *   "placeholders": [
+     *     {
+     *       "location": "body",
+     *       "name": "brukare_namn",
+     *       "preview": "{{ brukare_namn }}"
+     *     },
+     *     {
+     *       "location": "header",
+     *       "name": "handlaggare",
+     *       "preview": "{{ handlaggare }}"
+     *     }
+     *   ],
+     *   "status": "ready"
+     * }
+     */
     FlowTemplateInspectionPublic: {
       /** Asset Id */
       asset_id?: string | null;
@@ -7745,6 +8270,25 @@ export interface components {
       /** Message Code */
       message_code?: string | null;
     };
+    /**
+     * FormFieldSpec
+     * @description Form field definition for flow runtime input forms.
+     */
+    FormFieldSpec: {
+      /** Name */
+      name: string;
+      /** Type */
+      type: string;
+      /** Label */
+      label: string;
+      /**
+       * Required
+       * @default false
+       */
+      required?: boolean;
+      /** Options */
+      options?: string[] | null;
+    };
     /** FormatLimit */
     FormatLimit: {
       /** Mimetype */
@@ -7777,7 +8321,29 @@ export interface components {
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublicLegacy"][];
     };
-    /** GraphResponse */
+    /**
+     * GraphResponse
+     * @example {
+     *   "edges": [
+     *     {
+     *       "source": "step-1",
+     *       "target": "step-2"
+     *     }
+     *   ],
+     *   "nodes": [
+     *     {
+     *       "id": "step-1",
+     *       "label": "Transcribe uploaded audio",
+     *       "type": "step"
+     *     },
+     *     {
+     *       "id": "step-2",
+     *       "label": "Create PDF summary",
+     *       "type": "step"
+     *     }
+     *   ]
+     * }
+     */
     GraphResponse: {
       /** Nodes */
       nodes: {
@@ -8042,6 +8608,27 @@ export interface components {
       /** Heartbeat Ttl Expected Seconds */
       heartbeat_ttl_expected_seconds: number;
     };
+    /** HttpTestRequest */
+    HttpTestRequest: {
+      /** Config */
+      config: {
+        [key: string]: unknown;
+      };
+      /**
+       * Direction
+       * @default output
+       */
+      direction?: string;
+      /**
+       * Method
+       * @default POST
+       */
+      method?: string;
+      /** Test Variables */
+      test_variables?: {
+        [key: string]: unknown;
+      } | null;
+    };
     /** IconPublic */
     IconPublic: {
       /** Created At */
@@ -8189,6 +8776,16 @@ export interface components {
       | "audio-upload"
       | "audio-recorder"
       | "image-upload";
+    /**
+     * InputSource
+     * @enum {string}
+     */
+    InputSource: "flow_input" | "previous_step" | "all_previous_steps";
+    /**
+     * InputType
+     * @enum {string}
+     */
+    InputType: "text" | "json" | "audio" | "document" | "file" | "any";
     /** Integration */
     Integration: {
       /**
@@ -8388,6 +8985,22 @@ export interface components {
       info_blobs: components["schemas"]["InfoBlobLimits"];
       attachments: components["schemas"]["AttachmentLimits"];
     };
+    /**
+     * LintSeverity
+     * @enum {string}
+     */
+    LintSeverity: "warning" | "info";
+    /** LintWarning */
+    LintWarning: {
+      /** Step Ref */
+      step_ref?: string | null;
+      /** Code */
+      code: string;
+      /** Message */
+      message: string;
+      /** @default warning */
+      severity?: components["schemas"]["LintSeverity"];
+    };
     /** LoggingDetailsPublic */
     LoggingDetailsPublic: {
       /** Context */
@@ -8414,6 +9027,11 @@ export interface components {
       /** Error Message */
       error_message?: string | null;
     };
+    /**
+     * MCPPolicy
+     * @enum {string}
+     */
+    MCPPolicy: "inherit" | "restricted";
     /**
      * MCPServerCreate
      * @description DTO for creating an MCP server (admin only, uses Streamable HTTP transport).
@@ -9258,6 +9876,16 @@ export interface components {
      * @enum {string}
      */
     Outcome: "success" | "failure";
+    /**
+     * OutputMode
+     * @enum {string}
+     */
+    OutputMode: "pass_through" | "transcribe_only" | "template_fill";
+    /**
+     * OutputType
+     * @enum {string}
+     */
+    OutputType: "text" | "json" | "pdf" | "docx";
     /** PaginatedPermissions[AppSparse] */
     PaginatedPermissions_AppSparse_: {
       /**
@@ -9970,7 +10598,17 @@ export interface components {
         [key: string]: number;
       } | null;
     };
-    /** PartialAssistantUpdatePublic */
+    /**
+     * PartialAssistantUpdatePublic
+     * @example {
+     *   "description": "Summarizes extracted contract fields into a reviewer-ready note.",
+     *   "icon_id": "00000000-0000-0000-0000-000000000099",
+     *   "metadata_json": {
+     *     "origin": "flow_managed"
+     *   },
+     *   "name": "Flow Step Assistant"
+     * }
+     */
     PartialAssistantUpdatePublic: {
       /** Name */
       name?: string | null;
@@ -10062,8 +10700,10 @@ export interface components {
       nickname?: string | null;
       /** Family */
       family?: components["schemas"]["ModelFamily"] | string | null;
-      /** Token Limit */
-      token_limit?: number | null;
+      /** Max Input Tokens */
+      max_input_tokens?: number | null;
+      /** Max Output Tokens */
+      max_output_tokens?: number | null;
       /** Is Deprecated */
       is_deprecated?: boolean | null;
       /** Nr Billion Parameters */
@@ -10122,7 +10762,29 @@ export interface components {
       /** Id */
       id?: string | null;
     };
-    /** PartialFlowUpdateRequest */
+    /**
+     * PartialFlowUpdateRequest
+     * @example {
+     *   "data_retention_days": 30,
+     *   "description": "Transcribe, redact, and summarize citizen audio submissions.",
+     *   "metadata_json": {
+     *     "category": "municipality-intake"
+     *   },
+     *   "name": "Municipality Intake Transcription v2",
+     *   "steps": [
+     *     {
+     *       "assistant_id": "00000000-0000-0000-0000-000000000002",
+     *       "input_source": "flow_input",
+     *       "input_type": "audio",
+     *       "mcp_policy": "inherit",
+     *       "output_mode": "transcribe_only",
+     *       "output_type": "text",
+     *       "step_order": 1,
+     *       "user_description": "Transcribe incoming audio"
+     *     }
+     *   ]
+     * }
+     */
     PartialFlowUpdateRequest: {
       /** Name */
       name?: string | null;
@@ -10230,12 +10892,140 @@ export interface components {
       | "admin"
       | "websites"
       | "integrations"
-      | "flows";
+      | "flows"
+      | "flows_view"
+      | "flows_run"
+      | "flows_manage"
+      | "flows_ai_builder";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
       /** Description */
       description: string;
+    };
+    /**
+     * PlanApprovalResponse
+     * @example {
+     *   "plan_id": "00000000-0000-0000-0000-000000000702",
+     *   "status": "approved"
+     * }
+     */
+    PlanApprovalResponse: {
+      /**
+       * Plan Id
+       * Format: uuid
+       */
+      plan_id: string;
+      status: components["schemas"]["PlanStatus"];
+    };
+    /**
+     * PlanResponse
+     * @example {
+     *   "created_at": "2026-03-17T10:02:00Z",
+     *   "envelope": {
+     *     "assumptions": [
+     *       "Uploaded audio is clear enough to transcribe."
+     *     ],
+     *     "lint_warnings": [],
+     *     "plan_rationale": "A two-step flow keeps the transcription and summary concerns separate.",
+     *     "risk_acknowledgments": [],
+     *     "spec": {
+     *       "flow_description": "Transcribe a review conversation and generate a PDF summary.",
+     *       "flow_name": "Employee Review Summary",
+     *       "form_fields": [
+     *         {
+     *           "label": "Employee name",
+     *           "name": "employee_name",
+     *           "required": true,
+     *           "type": "text"
+     *         }
+     *       ],
+     *       "steps": [
+     *         {
+     *           "assistant_spec": {
+     *             "instructions": "Transcribe the uploaded audio into Swedish text.",
+     *             "knowledge_refs": [],
+     *             "model_ref": "model:gpt-5.4"
+     *           },
+     *           "input_source": "flow_input",
+     *           "input_type": "audio",
+     *           "mcp_policy": "inherit",
+     *           "name": "Transcribe uploaded audio",
+     *           "output_mode": "transcribe_only",
+     *           "output_type": "text",
+     *           "plan_step_ref": "step_a"
+     *         },
+     *         {
+     *           "assistant_spec": {
+     *             "instructions": "Summarize the transcription into a professional PDF.",
+     *             "knowledge_refs": [],
+     *             "model_ref": "model:gpt-5.4"
+     *           },
+     *           "input_bindings": {
+     *             "question": "{{ step_a.output.text }}"
+     *           },
+     *           "input_source": "previous_step",
+     *           "input_type": "text",
+     *           "mcp_policy": "inherit",
+     *           "name": "Create PDF summary",
+     *           "output_mode": "pass_through",
+     *           "output_type": "pdf",
+     *           "plan_step_ref": "step_b"
+     *         }
+     *       ]
+     *     }
+     *   },
+     *   "plan_id": "00000000-0000-0000-0000-000000000702",
+     *   "session_id": "00000000-0000-0000-0000-000000000701",
+     *   "spec_hash": "abc123def456",
+     *   "status": "proposed",
+     *   "updated_at": "2026-03-17T10:02:00Z"
+     * }
+     */
+    PlanResponse: {
+      /**
+       * Plan Id
+       * Format: uuid
+       */
+      plan_id: string;
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      status: components["schemas"]["PlanStatus"];
+      /** Spec Hash */
+      spec_hash: string;
+      envelope: components["schemas"]["PlannerPlanEnvelope"];
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+    };
+    /**
+     * PlanStatus
+     * @enum {string}
+     */
+    PlanStatus: "proposed" | "approved" | "applied" | "rejected" | "superseded";
+    /**
+     * PlannerPlanEnvelope
+     * @description Wraps FlowDraftSpecCore with AI session metadata.
+     *
+     * This separation keeps the portable schema clean.
+     * Export strips the envelope; AI output includes it.
+     */
+    PlannerPlanEnvelope: {
+      spec: components["schemas"]["FlowDraftSpecCore"];
+      /** Assumptions */
+      assumptions?: string[];
+      /** Lint Warnings */
+      lint_warnings?: components["schemas"]["LintWarning"][];
+      /** Risk Acknowledgments */
+      risk_acknowledgments?: string[];
+      /** Plan Rationale */
+      plan_rationale?: string | null;
+      /** Reasoning */
+      reasoning?: string | null;
     };
     /** PredefinedRoleInDB */
     PredefinedRoleInDB: {
@@ -10675,6 +11465,35 @@ export interface components {
       updated_at: string;
     };
     /**
+     * SendMessageRequest
+     * @example {
+     *   "message": "Build a flow that extracts key dates from uploaded contracts and returns structured JSON.",
+     *   "model_id": "00000000-0000-0000-0000-000000000010",
+     *   "question_answer": {
+     *     "question_id": "final_output_mode",
+     *     "selected_option_ids": [
+     *       "structured_json"
+     *     ],
+     *     "selected_values": [
+     *       "structured_json"
+     *     ]
+     *   },
+     *   "ui_language": "en"
+     * }
+     */
+    SendMessageRequest: {
+      /** Message */
+      message: string;
+      /** Model Id */
+      model_id?: string | null;
+      /** Question Answer */
+      question_answer?: {
+        [key: string]: unknown;
+      } | null;
+      /** Ui Language */
+      ui_language?: string | null;
+    };
+    /**
      * ServiceAccountAuthCallback
      * @description Request model for service account OAuth callback.
      */
@@ -10857,6 +11676,52 @@ export interface components {
       /** Text */
       text?: string | null;
     };
+    /** SessionListItemResponse */
+    SessionListItemResponse: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      status: components["schemas"]["SessionStatus"];
+      target_kind: components["schemas"]["TargetKind"];
+      /** Flow Id */
+      flow_id?: string | null;
+      /** Latest Plan Id */
+      latest_plan_id?: string | null;
+      /** Draft Title */
+      draft_title?: string | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+    };
+    /**
+     * SessionListResponse
+     * @example {
+     *   "sessions": [
+     *     {
+     *       "created_at": "2026-03-17T10:00:00Z",
+     *       "draft_title": "Employee Review Summary",
+     *       "latest_plan_id": "00000000-0000-0000-0000-000000000702",
+     *       "session_id": "00000000-0000-0000-0000-000000000701",
+     *       "space_id": "00000000-0000-0000-0000-000000000020",
+     *       "status": "awaiting_approval",
+     *       "target_kind": "create",
+     *       "updated_at": "2026-03-17T10:02:00Z"
+     *     }
+     *   ]
+     * }
+     */
+    SessionListResponse: {
+      /** Sessions */
+      sessions: components["schemas"]["SessionListItemResponse"][];
+    };
     /** SessionMetadata */
     SessionMetadata: {
       /**
@@ -10888,6 +11753,109 @@ export interface components {
        */
       id: string;
     };
+    /** SessionModelOption */
+    SessionModelOption: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Provider */
+      provider: string;
+    };
+    /**
+     * SessionModelsResponse
+     * @example {
+     *   "default_model_id": "00000000-0000-0000-0000-000000000710",
+     *   "models": [
+     *     {
+     *       "id": "00000000-0000-0000-0000-000000000710",
+     *       "name": "gpt-5.4",
+     *       "provider": "openai"
+     *     }
+     *   ]
+     * }
+     */
+    SessionModelsResponse: {
+      /** Models */
+      models: components["schemas"]["SessionModelOption"][];
+      /** Default Model Id */
+      default_model_id?: string | null;
+    };
+    /**
+     * SessionPlansResponse
+     * @example {
+     *   "plans": [
+     *     {
+     *       "created_at": "2026-03-17T10:02:00Z",
+     *       "envelope": {
+     *         "assumptions": [
+     *           "Uploaded audio is clear enough to transcribe."
+     *         ],
+     *         "lint_warnings": [],
+     *         "plan_rationale": "A two-step flow keeps the transcription and summary concerns separate.",
+     *         "risk_acknowledgments": [],
+     *         "spec": {
+     *           "flow_description": "Transcribe a review conversation and generate a PDF summary.",
+     *           "flow_name": "Employee Review Summary",
+     *           "form_fields": [
+     *             {
+     *               "label": "Employee name",
+     *               "name": "employee_name",
+     *               "required": true,
+     *               "type": "text"
+     *             }
+     *           ],
+     *           "steps": [
+     *             {
+     *               "assistant_spec": {
+     *                 "instructions": "Transcribe the uploaded audio into Swedish text.",
+     *                 "knowledge_refs": [],
+     *                 "model_ref": "model:gpt-5.4"
+     *               },
+     *               "input_source": "flow_input",
+     *               "input_type": "audio",
+     *               "mcp_policy": "inherit",
+     *               "name": "Transcribe uploaded audio",
+     *               "output_mode": "transcribe_only",
+     *               "output_type": "text",
+     *               "plan_step_ref": "step_a"
+     *             },
+     *             {
+     *               "assistant_spec": {
+     *                 "instructions": "Summarize the transcription into a professional PDF.",
+     *                 "knowledge_refs": [],
+     *                 "model_ref": "model:gpt-5.4"
+     *               },
+     *               "input_bindings": {
+     *                 "question": "{{ step_a.output.text }}"
+     *               },
+     *               "input_source": "previous_step",
+     *               "input_type": "text",
+     *               "mcp_policy": "inherit",
+     *               "name": "Create PDF summary",
+     *               "output_mode": "pass_through",
+     *               "output_type": "pdf",
+     *               "plan_step_ref": "step_b"
+     *             }
+     *           ]
+     *         }
+     *       },
+     *       "plan_id": "00000000-0000-0000-0000-000000000702",
+     *       "session_id": "00000000-0000-0000-0000-000000000701",
+     *       "spec_hash": "abc123def456",
+     *       "status": "proposed",
+     *       "updated_at": "2026-03-17T10:02:00Z"
+     *     }
+     *   ]
+     * }
+     */
+    SessionPlansResponse: {
+      /** Plans */
+      plans: components["schemas"]["PlanResponse"][];
+    };
     /** SessionPublic */
     SessionPublic: {
       /** Created At */
@@ -10905,6 +11873,53 @@ export interface components {
       messages: components["schemas"]["Message"][];
       feedback?: components["schemas"]["SessionFeedback"] | null;
     };
+    /**
+     * SessionResponse
+     * @example {
+     *   "conversation": [
+     *     {
+     *       "content": "Build a flow that transcribes uploaded audio and returns a PDF summary.",
+     *       "role": "user",
+     *       "timestamp": "2026-03-17T10:00:00Z"
+     *     },
+     *     {
+     *       "content": "I need one more detail about the final PDF format.",
+     *       "role": "assistant",
+     *       "timestamp": "2026-03-17T10:00:03Z"
+     *     }
+     *   ],
+     *   "created_at": "2026-03-17T10:00:00Z",
+     *   "latest_plan_id": "00000000-0000-0000-0000-000000000702",
+     *   "session_id": "00000000-0000-0000-0000-000000000701",
+     *   "status": "chatting",
+     *   "target_kind": "create",
+     *   "updated_at": "2026-03-17T10:00:03Z"
+     * }
+     */
+    SessionResponse: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      status: components["schemas"]["SessionStatus"];
+      target_kind: components["schemas"]["TargetKind"];
+      /** Flow Id */
+      flow_id?: string | null;
+      /** Latest Plan Id */
+      latest_plan_id?: string | null;
+      /** Conversation */
+      conversation?: components["schemas"]["ConversationMessage"][];
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+    };
+    /**
+     * SessionStatus
+     * @enum {string}
+     */
+    SessionStatus: "chatting" | "awaiting_approval" | "applying" | "applied" | "cancelled";
     /**
      * SetFederationRequest
      * @description Request model for setting tenant federation config.
@@ -11092,7 +12107,13 @@ export interface components {
       /** Site Id */
       site_id?: string | null;
     };
-    /** SignedURLRequest */
+    /**
+     * SignedURLRequest
+     * @example {
+     *   "content_disposition": "attachment",
+     *   "expires_in": 900
+     * }
+     */
     SignedURLRequest: {
       /**
        * Expires In
@@ -11304,6 +12325,57 @@ export interface components {
      * @enum {string}
      */
     Status: "in progress" | "queued" | "complete" | "failed" | "not found";
+    /**
+     * StepSpec
+     * @description Single step in a FlowDraftSpecCore.
+     */
+    StepSpec: {
+      /**
+       * Plan Step Ref
+       * @description Stable reference like 'step_a', 'step_b'. Used for variable bindings.
+       */
+      plan_step_ref: string;
+      /**
+       * Existing Step Ref
+       * @description Server-provided alias for an existing step (not raw UUID). Set when modifying.
+       */
+      existing_step_ref?: string | null;
+      /**
+       * Name
+       * @description User-visible step name (user_description).
+       */
+      name: string;
+      assistant_spec: components["schemas"]["AssistantSpec"];
+      /** @default inherit */
+      mcp_policy?: components["schemas"]["MCPPolicy"];
+      input_source: components["schemas"]["InputSource"];
+      /** @default text */
+      input_type?: components["schemas"]["InputType"];
+      /** @default pass_through */
+      output_mode?: components["schemas"]["OutputMode"];
+      /** @default text */
+      output_type?: components["schemas"]["OutputType"];
+      /** Input Bindings */
+      input_bindings?: {
+        [key: string]: unknown;
+      } | null;
+      /** Input Contract */
+      input_contract?: {
+        [key: string]: unknown;
+      } | null;
+      /** Output Contract */
+      output_contract?: {
+        [key: string]: unknown;
+      } | null;
+      /** Input Config */
+      input_config?: {
+        [key: string]: unknown;
+      } | null;
+      /** Output Config */
+      output_config?: {
+        [key: string]: unknown;
+      } | null;
+    };
     /** StorageInfoModel */
     StorageInfoModel: {
       /** Count */
@@ -11499,6 +12571,11 @@ export interface components {
       total_items_processed: number;
     };
     /**
+     * TargetKind
+     * @enum {string}
+     */
+    TargetKind: "create" | "edit";
+    /**
      * Task
      * @enum {string}
      */
@@ -11610,11 +12687,20 @@ export interface components {
        */
       display_name: string;
       /**
-       * Token Limit
-       * @description Maximum context tokens
-       * @default 128000
+       * Max Input Tokens
+       * @description Maximum input context tokens
        */
-      token_limit?: number;
+      max_input_tokens?: number | null;
+      /**
+       * Max Output Tokens
+       * @description Maximum output tokens
+       */
+      max_output_tokens?: number | null;
+      /**
+       * Token Limit
+       * @description Backward-compatible alias for max_input_tokens
+       */
+      token_limit?: number | null;
       /**
        * Vision
        * @description Supports vision/image inputs
@@ -11676,8 +12762,18 @@ export interface components {
        */
       description?: string | null;
       /**
+       * Max Input Tokens
+       * @description Maximum input context tokens
+       */
+      max_input_tokens?: number | null;
+      /**
+       * Max Output Tokens
+       * @description Maximum output tokens
+       */
+      max_output_tokens?: number | null;
+      /**
        * Token Limit
-       * @description Maximum context tokens
+       * @description Backward-compatible alias for max_input_tokens
        */
       token_limit?: number | null;
       /**
@@ -16508,6 +17604,67 @@ export interface operations {
     };
   };
   /**
+   * Get effective AI Builder conversation budget settings
+   * @description Returns effective tenant-level AI Builder conversation budgeting settings, including defaults when no override exists.
+   */
+  get_ai_builder_budget_settings_api_v1_settings_ai_builder_budget_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AIBuilderBudgetSettingsPublic"];
+        };
+      };
+      /** @description Forbidden: admin permission required. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update AI Builder conversation budget settings
+   * @description Update tenant-level AI Builder conversation budgeting settings.
+   *
+   * **Admin Only:** Requires admin permissions.
+   *
+   * Values are persisted under tenant `flow_settings.ai_builder` and take effect immediately.
+   */
+  update_ai_builder_budget_settings_api_v1_settings_ai_builder_budget_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AIBuilderBudgetSettingsUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AIBuilderBudgetSettingsPublic"];
+        };
+      };
+      /** @description Invalid patch (range/type) or empty payload. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden: admin permission required. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Toggle API key expiry notifications
    * @description Toggle API key expiry notifications for your tenant.
    *
@@ -16802,8 +17959,10 @@ export interface operations {
                 nickname: string;
                 /** Family */
                 family: components["schemas"]["ModelFamily"] | string;
-                /** Token Limit */
-                token_limit: number;
+                /** Max Input Tokens */
+                max_input_tokens: number;
+                /** Max Output Tokens */
+                max_output_tokens: number;
                 /** Is Deprecated */
                 is_deprecated: boolean;
                 /** Nr Billion Parameters */
@@ -17135,8 +18294,10 @@ export interface operations {
                 nickname: string;
                 /** Family */
                 family: components["schemas"]["ModelFamily"] | string;
-                /** Token Limit */
-                token_limit: number;
+                /** Max Input Tokens */
+                max_input_tokens: number;
+                /** Max Output Tokens */
+                max_output_tokens: number;
                 /** Is Deprecated */
                 is_deprecated: boolean;
                 /** Nr Billion Parameters */
@@ -22186,6 +23347,28 @@ export interface operations {
       };
     };
   };
+  /** Get Model Defaults */
+  get_model_defaults_api_v1_admin_model_providers_model_defaults__get: {
+    parameters: {
+      query: {
+        model_name: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /**
    * Get Provider
    * @description Get a specific model provider.
@@ -24462,12 +25645,18 @@ export interface operations {
       };
     };
   };
-  /** List Flows */
+  /**
+   * List Flows
+   * @description List flow definitions in a space with pagination-friendly sparse metadata. The `count` field in the paginated response reports the number of items returned in the current page, not the total number of matching flows across all pages.
+   */
   list_flows: {
     parameters: {
       query: {
+        /** @description Only return flows that belong to this space. */
         space_id: string;
+        /** @description Maximum number of flows to return. */
         limit?: number;
+        /** @description Number of flows to skip before returning results. */
         offset?: number;
       };
     };
@@ -24478,6 +25667,12 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_FlowSparsePublic_"];
         };
       };
+      /** @description Caller lacks permission or API key scope to list flows in this space. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         content: {
@@ -24486,7 +25681,10 @@ export interface operations {
       };
     };
   };
-  /** Create Flow */
+  /**
+   * Create Flow
+   * @description Create a new draft flow definition, including its initial ordered steps, inside a space.
+   */
   create_flow: {
     requestBody: {
       content: {
@@ -24500,6 +25698,18 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
+      /** @description The submitted draft flow definition is invalid. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to create flows in this space. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         content: {
@@ -24508,10 +25718,14 @@ export interface operations {
       };
     };
   };
-  /** Get Flow */
+  /**
+   * Get Flow
+   * @description Return the full draft representation of a flow, including all configured steps and metadata.
+   */
   get_flow: {
     parameters: {
       path: {
+        /** @description Identifier of the draft flow definition to return. */
         id: string;
       };
     };
@@ -24522,6 +25736,18 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
+      /** @description Caller lacks permission or API key scope to view this flow. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         content: {
@@ -24530,10 +25756,14 @@ export interface operations {
       };
     };
   };
-  /** Delete Flow */
+  /**
+   * Delete Flow
+   * @description Soft-delete a flow definition so it is no longer available for editing or execution.
+   */
   delete_flow: {
     parameters: {
       path: {
+        /** @description Identifier of the draft flow definition to delete. */
         id: string;
       };
     };
@@ -24542,6 +25772,18 @@ export interface operations {
       204: {
         content: never;
       };
+      /** @description Caller lacks permission or API key scope to delete this flow. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         content: {
@@ -24550,10 +25792,14 @@ export interface operations {
       };
     };
   };
-  /** Update Flow */
+  /**
+   * Update Flow
+   * @description Update a draft flow definition, including steps, metadata, and retention settings.
+   */
   update_flow: {
     parameters: {
       path: {
+        /** @description Identifier of the draft flow definition to update. */
         id: string;
       };
     };
@@ -24569,6 +25815,24 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
+      /** @description The submitted draft flow update is invalid or the flow cannot be updated in its current state. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to update this flow. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         content: {
@@ -24577,10 +25841,14 @@ export interface operations {
       };
     };
   };
-  /** Publish Flow */
+  /**
+   * Publish Flow
+   * @description Publish the current draft revision so new runs use a version-pinned definition.
+   */
   publish_flow: {
     parameters: {
       path: {
+        /** @description Identifier of the draft flow definition to publish. */
         id: string;
       };
     };
@@ -24591,6 +25859,24 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
+      /** @description The flow cannot be published because its draft definition is incomplete or invalid. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to publish this flow. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         content: {
@@ -24599,10 +25885,14 @@ export interface operations {
       };
     };
   };
-  /** Unpublish Flow */
+  /**
+   * Unpublish Flow
+   * @description Remove the active published revision while keeping the draft definition available for editing.
+   */
   unpublish_flow: {
     parameters: {
       path: {
+        /** @description Identifier of the published flow definition to unpublish. */
         id: string;
       };
     };
@@ -24613,6 +25903,24 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
+      /** @description The flow cannot be unpublished in its current state. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to unpublish this flow. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         content: {
@@ -24621,10 +25929,14 @@ export interface operations {
       };
     };
   };
-  /** List Flow Template Files */
+  /**
+   * List Flow Templates
+   * @description List template assets attached to a flow draft for template-fill steps.
+   */
   list_flow_template_files: {
     parameters: {
       path: {
+        /** @description Identifier of the draft flow whose template assets should be listed. */
         id: string;
       };
     };
@@ -24633,6 +25945,18 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["FlowTemplateAssetPublic"][];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to list template assets for this flow. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -24650,6 +25974,7 @@ export interface operations {
   upload_flow_template_file: {
     parameters: {
       path: {
+        /** @description Identifier of the draft flow that will own the uploaded template asset. */
         id: string;
       };
     };
@@ -24710,9 +26035,11 @@ export interface operations {
   inspect_flow_template: {
     parameters: {
       query: {
+        /** @description Identifier of the stored template asset to inspect. */
         file_id: string;
       };
       path: {
+        /** @description Identifier of the draft flow that owns the template asset. */
         id: string;
       };
     };
@@ -24749,11 +26076,16 @@ export interface operations {
       };
     };
   };
-  /** Generate Flow Template Signed Url */
+  /**
+   * Generate Template Download URL
+   * @description Generate a temporary signed download URL for a stored flow template asset.
+   */
   generate_flow_template_signed_url: {
     parameters: {
       path: {
+        /** @description Identifier of the draft flow that owns the template asset. */
         id: string;
+        /** @description Identifier of the stored template asset to download. */
         file_id: string;
       };
     };
@@ -24769,6 +26101,18 @@ export interface operations {
           "application/json": components["schemas"]["SignedURLResponse"];
         };
       };
+      /** @description Caller lacks permission or API key scope to access this flow template asset. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow or template asset not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         content: {
@@ -24777,10 +26121,51 @@ export interface operations {
       };
     };
   };
-  /** Create Flow Assistant */
+  /**
+   * Test HTTP Connection
+   * @description Send a test HTTP request using the provided config snapshot. Does not persist anything.
+   */
+  test_flow_http: {
+    parameters: {
+      path: {
+        /** @description Flow ID */
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["HttpTestRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Caller lacks permission to edit this flow. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Flow Assistant
+   * @description Create a flow-managed assistant that can be attached to steps in the specified flow.
+   */
   create_flow_assistant: {
     parameters: {
       path: {
+        /** @description Identifier of the flow that will own the new flow-managed assistant. */
         id: string;
       };
     };
@@ -24796,110 +26181,7 @@ export interface operations {
           "application/json": components["schemas"]["AssistantPublic"];
         };
       };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /** Get Flow Assistant */
-  get_flow_assistant: {
-    parameters: {
-      path: {
-        id: string;
-        assistant_id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["AssistantPublic"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /** Delete Flow Assistant */
-  delete_flow_assistant: {
-    parameters: {
-      path: {
-        id: string;
-        assistant_id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      204: {
-        content: never;
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /** Update Flow Assistant */
-  update_flow_assistant: {
-    parameters: {
-      path: {
-        id: string;
-        assistant_id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["PartialAssistantUpdatePublic"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["AssistantPublic"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /**
-   * List flow runs (flow-first)
-   * @description List runs for a specific flow.
-   *
-   * This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
-   */
-  list_flow_runs_alias: {
-    parameters: {
-      query?: {
-        limit?: number;
-        offset?: number;
-      };
-      path: {
-        id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["PaginatedResponse_FlowRunPublic_"];
-        };
-      };
-      /** @description Forbidden: API key scope does not match flow space. */
+      /** @description Caller lacks permission or API key scope to manage assistants for this flow. */
       403: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
@@ -24920,45 +26202,115 @@ export interface operations {
     };
   };
   /**
-   * Create flow run
-   * @description Create a new run for a published flow.
-   *
-   * Speech-to-text consumer sequence:
-   * 1. Upload one or more files via `POST /api/v1/flows/{id}/files/`
-   * 2. Submit the returned `file_ids` in this run request
-   * 3. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs
+   * Get Flow Assistant
+   * @description Return a single flow-managed assistant and its effective permissions for the caller.
    */
-  create_flow_run: {
+  get_flow_assistant: {
     parameters: {
       path: {
+        /** @description Identifier of the flow that owns the requested assistant. */
         id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["FlowRunCreateRequest"];
+        /** @description Identifier of the flow-managed assistant to return. */
+        assistant_id: string;
       };
     };
     responses: {
       /** @description Successful Response */
-      201: {
+      200: {
         content: {
-          "application/json": components["schemas"]["FlowRunPublic"];
+          "application/json": components["schemas"]["AssistantPublic"];
         };
       };
-      /** @description Flow cannot be run in its current state or request payload is invalid. Representative machine-readable codes include: flow_not_published, flow_run_input_payload_too_large, flow_run_concurrency_limit_reached, flow_input_required_field_missing, flow_input_invalid_number. */
-      400: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Forbidden: API key scope does not match flow space. */
+      /** @description Caller lacks permission or API key scope to access assistants for this flow. */
       403: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Flow not found in tenant scope. */
+      /** @description Flow or flow-managed assistant not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Flow Assistant
+   * @description Delete a flow-managed assistant from the specified flow.
+   */
+  delete_flow_assistant: {
+    parameters: {
+      path: {
+        /** @description Identifier of the flow that owns the assistant to delete. */
+        id: string;
+        /** @description Identifier of the flow-managed assistant to delete. */
+        assistant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Caller lacks permission or API key scope to delete assistants for this flow. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow or flow-managed assistant not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Flow Assistant
+   * @description Update a flow-managed assistant that belongs to the specified flow.
+   */
+  update_flow_assistant: {
+    parameters: {
+      path: {
+        /** @description Identifier of the flow that owns the assistant to update. */
+        id: string;
+        /** @description Identifier of the flow-managed assistant to update. */
+        assistant_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PartialAssistantUpdatePublic"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AssistantPublic"];
+        };
+      };
+      /** @description Caller lacks permission or API key scope to update assistants for this flow. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow or flow-managed assistant not found in tenant scope. */
       404: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
@@ -24986,6 +26338,7 @@ export interface operations {
   get_flow_run_contract: {
     parameters: {
       path: {
+        /** @description Identifier of the published flow whose run contract should be returned. */
         id: string;
       };
     };
@@ -25036,6 +26389,7 @@ export interface operations {
   get_flow_input_policy: {
     parameters: {
       path: {
+        /** @description Identifier of the flow whose effective input policy should be returned. */
         id: string;
       };
     };
@@ -25080,6 +26434,7 @@ export interface operations {
   upload_flow_file: {
     parameters: {
       path: {
+        /** @description Identifier of the published flow that should receive the uploaded run input file. */
         id: string;
       };
     };
@@ -25143,7 +26498,9 @@ export interface operations {
   upload_flow_runtime_file: {
     parameters: {
       path: {
+        /** @description Identifier of the published flow that owns the runtime-input step. */
         id: string;
+        /** @description Identifier of the published step that should receive the uploaded runtime file. */
         step_id: string;
       };
     };
@@ -25198,15 +26555,124 @@ export interface operations {
     };
   };
   /**
+   * List flow runs (flow-first)
+   * @description List runs for a specific flow.
+   *
+   *     This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
+   *     The `count` field in the paginated response reports the number of items returned in the
+   *     current page, not the total number of matching runs across all pages.
+   */
+  list_flow_runs_alias: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of runs to return. */
+        limit?: number;
+        /** @description Number of runs to skip before returning results. */
+        offset?: number;
+      };
+      path: {
+        /** @description Identifier of the flow whose runs should be listed. */
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_FlowRunPublic_"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create flow run
+   * @description Create a new run for a published flow.
+   *
+   *     Generic consumer sequence:
+   *     1. Inspect `GET /api/v1/flows/{id}/run-contract/` to understand the published form fields,
+   *        required runtime step inputs, and version pinning requirements.
+   *     2. Upload any required files via `POST /api/v1/flows/{id}/files/` or the relevant
+   *        `.../steps/{step_id}/runtime-files/` endpoint.
+   *     3. Submit the returned uploaded files as `file_ids`, together with any optional `step_inputs`
+   *        and structured
+   *        `input_payload_json` fields in this run request.
+   *     4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs.
+   */
+  create_flow_run: {
+    parameters: {
+      path: {
+        /** @description Identifier of the published flow that should be executed. */
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["FlowRunPublic"];
+        };
+      };
+      /** @description Flow cannot be run in its current state or request payload is invalid. Representative machine-readable codes include: flow_not_published, flow_run_input_payload_too_large, flow_run_concurrency_limit_reached, flow_input_required_field_missing, flow_input_invalid_number. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Get flow run (flow-first)
    * @description Get one run for a flow using flow-first routing.
    *
-   * Use this endpoint for run status and top-level output payload when building consumer apps.
+   *     Use this endpoint for run status and top-level output payload when building consumer apps.
    */
   get_flow_run_alias: {
     parameters: {
       path: {
+        /** @description Identifier of the flow that owns the requested run. */
         id: string;
+        /** @description Identifier of the run to return. */
         run_id: string;
       };
     };
@@ -25246,7 +26712,9 @@ export interface operations {
   cancel_flow_run_alias: {
     parameters: {
       path: {
+        /** @description Identifier of the flow that owns the run to cancel. */
         id: string;
+        /** @description Identifier of the run to cancel. */
         run_id: string;
       };
     };
@@ -25281,12 +26749,15 @@ export interface operations {
    * Redispatch stale queued run (flow-first)
    * @description Attempt to redispatch a stale queued run.
    *
-   * Returns `redispatched_count` indicating whether dispatch was re-triggered.
+   *     Returns the refreshed run payload together with `redispatched_count`, which indicates
+   *     whether dispatch was re-triggered for this request.
    */
   redispatch_flow_run_alias: {
     parameters: {
       path: {
+        /** @description Identifier of the flow that owns the stale queued run. */
         id: string;
+        /** @description Identifier of the run to redispatch if it is still queued. */
         run_id: string;
       };
     };
@@ -25326,7 +26797,9 @@ export interface operations {
   get_flow_run_evidence_alias: {
     parameters: {
       path: {
+        /** @description Identifier of the flow that owns the run evidence export. */
         id: string;
+        /** @description Identifier of the run whose evidence export should be returned. */
         run_id: string;
       };
     };
@@ -25367,7 +26840,9 @@ export interface operations {
   list_flow_run_steps: {
     parameters: {
       path: {
+        /** @description Identifier of the flow that owns the run step outputs. */
         id: string;
+        /** @description Identifier of the run whose step outputs should be listed. */
         run_id: string;
       };
     };
@@ -25408,9 +26883,11 @@ export interface operations {
   get_flow_graph: {
     parameters: {
       query?: {
+        /** @description Optional run identifier. When provided, the graph is resolved from that run's version-pinned snapshot and annotated with run results. */
         run_id?: string | null;
       };
       path: {
+        /** @description Identifier of the flow whose graph should be returned. */
         id: string;
       };
     };
@@ -25454,8 +26931,11 @@ export interface operations {
   generate_flow_run_artifact_signed_url: {
     parameters: {
       path: {
+        /** @description Identifier of the flow that owns the requested run artifact. */
         id: string;
+        /** @description Identifier of the run that produced the artifact. */
         run_id: string;
+        /** @description Identifier of the run artifact file to download. */
         file_id: string;
       };
     };
@@ -25479,6 +26959,396 @@ export interface operations {
       };
       /** @description Flow, run, or artifact not found. */
       404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List AI Builder Sessions
+   * @description List AI Builder sessions visible to the caller within their permitted spaces.
+   */
+  list_ai_builder_sessions: {
+    responses: {
+      /** @description Visible AI Builder sessions. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionListResponse"];
+        };
+      };
+      /** @description Caller lacks permission to use the AI Builder. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create AI Builder Session
+   * @description Start or resume an AI Builder session for a space-scoped flow drafting workflow.
+   */
+  create_ai_builder_session: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateSessionRequest"];
+      };
+    };
+    responses: {
+      /** @description AI Builder session created. */
+      201: {
+        content: {
+          "application/json": components["schemas"]["SessionResponse"];
+        };
+      };
+      /** @description The request payload is valid JSON but cannot start a builder session in its current state. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for this space. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Send AI Builder Message
+   * @description Send a user message to an AI Builder session and receive planner events as a server-sent event stream.
+   */
+  send_ai_builder_message: {
+    parameters: {
+      path: {
+        /** @description Identifier of the AI Builder session that will receive the message. */
+        session_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SendMessageRequest"];
+      };
+    };
+    responses: {
+      /** @description Server-sent event stream with planner status, text, question, plan, error, and done events. */
+      200: {
+        content: {
+          "application/json": unknown;
+          "text/event-stream": string;
+        };
+      };
+      /** @description The AI Builder session cannot accept a new message in its current state. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for this session. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description AI Builder session or referenced flow context was not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get AI Builder Session
+   * @description Return the current state and conversation for a single AI Builder session.
+   */
+  get_ai_builder_session: {
+    parameters: {
+      path: {
+        /** @description Identifier of the AI Builder session to return. */
+        session_id: string;
+      };
+    };
+    responses: {
+      /** @description AI Builder session details. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionResponse"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for this session. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description AI Builder session not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List Session Models
+   * @description Return the completion models available to the AI Builder in the session's space.
+   */
+  get_ai_builder_models: {
+    parameters: {
+      path: {
+        /** @description Identifier of the AI Builder session whose planner models should be listed. */
+        session_id: string;
+      };
+    };
+    responses: {
+      /** @description Available completion models and default planner model. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionModelsResponse"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for this session. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description AI Builder session not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get AI Builder Plan
+   * @description Fetch a stored AI Builder plan proposal for review or approval.
+   */
+  get_ai_builder_plan: {
+    parameters: {
+      path: {
+        /** @description Identifier of the stored AI Builder plan revision to fetch. */
+        plan_id: string;
+      };
+    };
+    responses: {
+      /** @description Stored AI Builder plan. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PlanResponse"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for the plan's session. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description AI Builder plan not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List Session Plans
+   * @description List all plan revisions generated within a specific AI Builder session.
+   */
+  list_ai_builder_session_plans: {
+    parameters: {
+      path: {
+        /** @description Identifier of the AI Builder session whose stored plans should be listed. */
+        session_id: string;
+      };
+    };
+    responses: {
+      /** @description Stored plan revisions for the session. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionPlansResponse"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for this session. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description AI Builder session not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Cancel AI Builder Session
+   * @description Cancel an active AI Builder session and stop further planning work in that session.
+   */
+  cancel_ai_builder_session: {
+    parameters: {
+      path: {
+        /** @description Identifier of the active AI Builder session to cancel. */
+        session_id: string;
+      };
+    };
+    responses: {
+      /** @description AI Builder session cancelled. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionResponse"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for this session. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description AI Builder session not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Approve AI Builder Plan
+   * @description Mark a plan revision as approved so it can be applied to a flow.
+   */
+  approve_ai_builder_plan: {
+    parameters: {
+      path: {
+        /** @description Identifier of the AI Builder plan revision to approve. */
+        plan_id: string;
+      };
+    };
+    responses: {
+      /** @description Plan approved. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PlanApprovalResponse"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for the plan's session. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description AI Builder plan not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Apply AI Builder Plan
+   * @description Materialize an approved AI Builder plan into the target flow definition.
+   */
+  apply_ai_builder_plan: {
+    parameters: {
+      path: {
+        /** @description Identifier of the approved AI Builder plan revision to apply to the target flow. */
+        plan_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApplyPlanRequest"];
+      };
+    };
+    responses: {
+      /** @description Plan applied to the target flow. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ApplyResultResponse"];
+        };
+      };
+      /** @description The approved plan cannot be materialized in the current space configuration. Representative machine-readable codes include: transcription_model_required, invalid_existing_step_ref. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for the plan's session. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description AI Builder plan not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The target flow revision changed before apply completed. */
+      409: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };

@@ -46,7 +46,11 @@ class CompletionModelsRepository:
         return await self.delegate.get_by(conditions={CompletionModels.name: name})
 
     async def create_model(self, model: CompletionModelCreate) -> CompletionModel:
-        return await self.delegate.add(model)
+        return await self.delegate.add(
+            model,
+            exclude={"token_limit"},
+            token_limit=model.max_input_tokens,
+        )
 
     async def enable_completion_model(
         self,
@@ -70,7 +74,14 @@ class CompletionModelsRepository:
             raise UniqueException("Default completion model already exists.") from e
 
     async def update_model(self, model: CompletionModelUpdate) -> CompletionModel:
-        return await self.delegate.update(model)
+        extra_kwargs = {}
+        if model.max_input_tokens is not None:
+            extra_kwargs["token_limit"] = model.max_input_tokens
+        return await self.delegate.update(
+            model,
+            exclude={"token_limit"},
+            **extra_kwargs,
+        )
 
     async def delete_model(self, id: UUID) -> CompletionModel:
         stmt = (

@@ -13,10 +13,12 @@ from intric.database.tables.flow_tables import (
     FLOW_STEP_OUTPUT_TYPE_VALUES,
 )
 from intric.flows.flow import FlowStep, JsonObject
+from intric.flows.flow_variable_definitions import RESERVED_RUNTIME_VARIABLES_NORMALIZED
 from intric.flows.output_modes import transcribe_only_violation
 from intric.flows.output_processing import validate_schema_syntax
 from intric.flows.runtime_input import build_runtime_input_config
 from intric.flows.step_chain_rules import find_first_step_chain_violation
+from intric.flows.template_reference_analyzer import analyze_template, consumes_runtime_input
 from intric.flows.transcription_config import (
     FlowTranscriptionConfigError,
     parse_transcription_config,
@@ -34,19 +36,6 @@ _LEGACY_FORM_FIELD_TYPE_NORMALIZATION = {
     "string": "text",
     "email": "text",
     "textarea": "text",
-}
-_RESERVED_VARIABLE_ALIASES = {
-    "flow",
-    "flow_input",
-    "transkribering",
-    "föregående_steg",
-    "indata_text",
-    "indata_json",
-    "indata_filer",
-    "step_input",
-}
-_RESERVED_VARIABLE_ALIASES_NORMALIZED = {
-    alias.casefold() for alias in _RESERVED_VARIABLE_ALIASES
 }
 _STEP_ALIAS_PATTERN = re.compile(r"^step_\d+($|[._])")
 _ALLOWED_FLOW_INPUT_SOURCES = set(FLOW_STEP_INPUT_SOURCE_VALUES)
@@ -196,7 +185,7 @@ def validate_form_schema(metadata_json: JsonObject | None) -> None:
             raise BadRequestException(
                 f"metadata_json.form_schema.fields[{index}].name cannot contain template delimiters."
             )
-        if normalized_name in _RESERVED_VARIABLE_ALIASES_NORMALIZED:
+        if normalized_name in RESERVED_RUNTIME_VARIABLES_NORMALIZED:
             raise BadRequestException(
                 f"metadata_json.form_schema.fields[{index}].name uses a reserved variable alias."
             )
@@ -322,7 +311,7 @@ def validate_variable_alias_collisions(
     steps: list[FlowStep],
     metadata_json: JsonObject | None,
 ) -> None:
-    normalized_reserved = _RESERVED_VARIABLE_ALIASES_NORMALIZED
+    normalized_reserved = RESERVED_RUNTIME_VARIABLES_NORMALIZED
     field_names: dict[str, str] = {}
 
     form_schema = metadata_json.get("form_schema") if metadata_json else None
@@ -485,11 +474,13 @@ def _validate_http_input_config(*, step: FlowStep) -> None:
         raise BadRequestException(
             f"Step {step.step_order}: input_type '{step.input_type}' is not supported with input_source '{step.input_source}'."
         )
-    _validate_http_config_common(
+    method = "GET" if step.input_source == "http_get" else "POST"
+    _validate_http_config_dispatch(
         step_order=step.step_order,
         label="input_config",
         config=step.input_config,
-        method=step.input_source,
+        method=method,
+        direction="input",
     )
     if isinstance(step.input_config, dict) and step.input_source == "http_get":
         if "body_template" in step.input_config or "body_json" in step.input_config:
@@ -499,12 +490,68 @@ def _validate_http_input_config(*, step: FlowStep) -> None:
 
 
 def _validate_http_output_config(*, step: FlowStep) -> None:
-    _validate_http_config_common(
+    _validate_http_config_dispatch(
         step_order=step.step_order,
         label="output_config",
         config=step.output_config,
-        method="http_post",
+        method="POST",
+        direction="output",
     )
+
+
+def _validate_http_config_dispatch(
+    *,
+    step_order: int,
+    label: str,
+    config: JsonObject | None,
+    method: str,
+    direction: str,
+) -> None:
+    """Route to authored-config or legacy validation based on config shape."""
+    from intric.flows.http_transport import is_authored_config as _is_authored
+
+    if isinstance(config, dict) and _is_authored(config):
+        _validate_authored_http_config(
+            step_order=step_order,
+            label=label,
+            config=config,
+            method=method,
+            direction=direction,
+        )
+    else:
+        _validate_http_config_common(
+            step_order=step_order,
+            label=label,
+            config=config,
+            method=f"http_{method.lower()}" if method in ("GET", "POST") else method,
+        )
+
+
+def _validate_authored_http_config(
+    *,
+    step_order: int,
+    label: str,
+    config: dict[str, Any],
+    method: str,
+    direction: str,
+) -> None:
+    """Validate authored HTTP config using the http_transport validator."""
+    from intric.flows.http_transport import HttpAuthoredConfig, validate_authored_config
+
+    max_timeout = float(get_settings().flow_http_max_timeout_seconds)
+    try:
+        authored = HttpAuthoredConfig.model_validate(config)
+    except Exception as exc:
+        raise BadRequestException(
+            f"Step {step_order}: {label} is not a valid HTTP config: {exc}"
+        ) from exc
+    errors = validate_authored_config(
+        authored, direction=direction, method=method, max_timeout=max_timeout
+    )
+    if errors:
+        raise BadRequestException(
+            f"Step {step_order}: {label} validation failed: {errors[0].value}"
+        )
 
 
 def _validate_http_config_common(
@@ -682,7 +729,12 @@ def _validate_runtime_input_publish_rules(*, step: FlowStep) -> None:
 
     question_binding = bindings.get("question")
     if isinstance(question_binding, str) and question_binding.strip():
-        if "step_input." not in question_binding:
+        references = analyze_template(
+            question_binding,
+            step_refs={},
+            form_field_names=set(),
+        )
+        if not consumes_runtime_input(references):
             raise BadRequestException(
                 f"Step {step.step_order}: explicit question bindings must reference step_input.* when runtime input is enabled."
             )

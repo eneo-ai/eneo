@@ -4,6 +4,10 @@ from intric.ai_models.ai_models_service import AIModelsService
 from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.flows.ai_builder.ai_builder_settings import (
+    apply_ai_builder_budget_policy_patch,
+    resolve_ai_builder_budget_policy,
+)
 from intric.flows.flow_input_limits import (
     FlowInputLimits,
     apply_flow_input_limits_patch,
@@ -14,6 +18,8 @@ from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.roles.permissions import Permission, validate_permissions
 from intric.settings.settings import (
+    AIBuilderBudgetSettingsPublic,
+    AIBuilderBudgetSettingsUpdate,
     FlowInputLimitsPublic,
     FlowInputLimitsUpdate,
     SettingsInDB,
@@ -556,4 +562,87 @@ class SettingService:
             audio_max_size_bytes=current.audio_max_size_bytes,
             max_files_per_run=current.max_files_per_run,
             audio_max_files_per_run=current.audio_max_files_per_run,
+        )
+
+    async def get_ai_builder_budget_settings_resolved(self):
+        tenant = await self.tenant_repo.get(self.user.tenant_id)
+        return resolve_ai_builder_budget_policy(tenant.flow_settings if tenant else None)
+
+    @validate_permissions(Permission.ADMIN)
+    async def get_ai_builder_budget_settings(self) -> AIBuilderBudgetSettingsPublic:
+        settings = await self.get_ai_builder_budget_settings_resolved()
+        return AIBuilderBudgetSettingsPublic(
+            conversation_safety_buffer_tokens=settings.conversation_safety_buffer_tokens,
+            minimum_conversation_budget_tokens=settings.minimum_conversation_budget_tokens,
+            unknown_model_context_window_tokens=settings.unknown_model_context_window_tokens,
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_ai_builder_budget_settings(
+        self,
+        payload: AIBuilderBudgetSettingsUpdate,
+    ) -> AIBuilderBudgetSettingsPublic:
+        if not payload.model_fields_set:
+            raise BadRequestException(
+                "At least one AI Builder budget field must be provided."
+            )
+
+        tenant = await self.tenant_repo.get(self.user.tenant_id)
+        current_flow_settings = tenant.flow_settings if tenant else {}
+        previous = resolve_ai_builder_budget_policy(current_flow_settings)
+
+        remove_keys: set[str] = set()
+        if (
+            "unknown_model_context_window_tokens" in payload.model_fields_set
+            and payload.unknown_model_context_window_tokens is None
+        ):
+            remove_keys.add("unknown_model_context_window_tokens")
+
+        updated_flow_settings = apply_ai_builder_budget_policy_patch(
+            current_flow_settings=current_flow_settings,
+            conversation_safety_buffer_tokens=payload.conversation_safety_buffer_tokens,
+            minimum_conversation_budget_tokens=payload.minimum_conversation_budget_tokens,
+            unknown_model_context_window_tokens=payload.unknown_model_context_window_tokens,
+            remove_keys=remove_keys,
+        )
+        updated_tenant = await self.tenant_repo.set_flow_settings(
+            tenant_id=self.user.tenant_id,
+            flow_settings=updated_flow_settings,
+        )
+        current = resolve_ai_builder_budget_policy(updated_tenant.flow_settings)
+
+        changes: dict[str, dict[str, int | None]] = {}
+        if "conversation_safety_buffer_tokens" in payload.model_fields_set:
+            changes["conversation_safety_buffer_tokens"] = {
+                "old": previous.conversation_safety_buffer_tokens,
+                "new": current.conversation_safety_buffer_tokens,
+            }
+        if "minimum_conversation_budget_tokens" in payload.model_fields_set:
+            changes["minimum_conversation_budget_tokens"] = {
+                "old": previous.minimum_conversation_budget_tokens,
+                "new": current.minimum_conversation_budget_tokens,
+            }
+        if "unknown_model_context_window_tokens" in payload.model_fields_set:
+            changes["unknown_model_context_window_tokens"] = {
+                "old": previous.unknown_model_context_window_tokens,
+                "new": current.unknown_model_context_window_tokens,
+            }
+
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            actor_id=self.user.id,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description="Updated AI Builder budget settings",
+            metadata={
+                "setting": "ai_builder_budget_settings",
+                "changes": changes,
+            },
+        )
+
+        return AIBuilderBudgetSettingsPublic(
+            conversation_safety_buffer_tokens=current.conversation_safety_buffer_tokens,
+            minimum_conversation_budget_tokens=current.minimum_conversation_budget_tokens,
+            unknown_model_context_window_tokens=current.unknown_model_context_window_tokens,
         )

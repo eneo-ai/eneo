@@ -210,7 +210,36 @@ def test_interpolate_serializes_non_ascii_json_values_without_ascii_escaping():
         context=context,
     )
 
-    assert rendered == 'Payload: {"namn": "Åke", "stad": "Örebro"}'
+    assert rendered == "Payload: namn: Åke\nstad: Örebro"
+
+
+def test_interpolate_renders_short_scalar_lists_as_comma_separated_values():
+    resolver = FlowVariableResolver()
+    context = resolver.build_context(
+        flow_input={"file_ids": ["miljo", "buller", "trafik"]},
+        prior_results=[],
+    )
+
+    rendered = resolver.interpolate(
+        template="Tags: {{ indata_filer }}",
+        context=context,
+    )
+
+    assert rendered == "Tags: miljo, buller, trafik"
+
+
+def test_interpolate_error_includes_available_keys_for_small_dicts():
+    resolver = FlowVariableResolver()
+    context = resolver.build_context(
+        flow_input={"namn": "Anna", "roll": "Handläggare"},
+        prior_results=[],
+    )
+
+    with pytest.raises(BadRequestException, match="Available keys: namn, roll"):
+        resolver.interpolate(
+            template="{{ flow_input.person }}",
+            context=context,
+        )
 
 
 def test_interpolate_raises_for_non_numeric_list_index():

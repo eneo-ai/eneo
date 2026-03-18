@@ -145,6 +145,35 @@ class CompletionService:
             provider_type=provider_db.provider_type,
         )
 
+    async def resolve_litellm_params(
+        self,
+        model: CompletionModel,
+    ) -> tuple[str, dict[str, object]]:
+        """Resolve the LiteLLM model name and provider kwargs for a model."""
+        adapter = await self._get_adapter(model)
+        prepare_kwargs = getattr(adapter, "_prepare_kwargs", None)
+        if callable(prepare_kwargs):
+            return adapter.litellm_model, prepare_kwargs()
+
+        kwargs: dict[str, object] = {}
+        api_key = adapter.credential_resolver.get_api_key()
+        if api_key:
+            kwargs["api_key"] = api_key
+
+        field_mapping = {
+            "endpoint": "api_base",
+            "api_version": "api_version",
+            "api_type": "api_type",
+            "organization": "organization",
+            "deployment_name": "deployment_name",
+        }
+        for field, key in field_mapping.items():
+            value = adapter.credential_resolver.get_credential_field(field=field)
+            if value:
+                kwargs[key] = value
+
+        return adapter.litellm_model, kwargs
+
     @staticmethod
     def is_valid_arguments(arguments: str):
         try:

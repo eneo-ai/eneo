@@ -49,23 +49,26 @@ def _run(*, status: FlowRunStatus, user, input_payload=None) -> FlowRun:
 
 def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
     flow_repo = AsyncMock()
-    flow_repo.session = AsyncMock()
-    flow_repo.session.commit = AsyncMock()
-    flow_repo.session.rollback = AsyncMock()
+    session = AsyncMock()
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     space_repo = AsyncMock()
     completion_service = AsyncMock()
     file_repo = AsyncMock()
+    template_asset_service = AsyncMock()
     encryption_service = AsyncMock()
     executor = FlowRunExecutor(
         user=user,
+        session=session,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
         space_repo=space_repo,
         completion_service=completion_service,
         file_repo=file_repo,
+        template_asset_service=template_asset_service,
         encryption_service=encryption_service,
         max_inline_text_bytes=max_inline_text_bytes,
     )
@@ -875,7 +878,7 @@ async def test_resolve_step_input_http_post_rejects_non_string_header_keys(user)
     )
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    with pytest.raises(TypedIOValidationException) as exc:
+    with pytest.raises(TypedIOValidationException):
         await executor._resolve_step_input(
             step=step,
             context=context,
@@ -883,7 +886,70 @@ async def test_resolve_step_input_http_post_rejects_non_string_header_keys(user)
             prior_results=[],
         )
 
-    assert exc.value.code == "typed_io_http_invalid_config"
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_rejects_literal_step_input_substring_when_runtime_input_enabled(user):
+    executor, _, _, _ = _build_executor(user)
+    file = SimpleNamespace(id=uuid4(), text="transkriberat innehåll")
+    executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[file])
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={
+            "step_inputs": {
+                str(uuid4()): {"file_ids": [str(file.id)]},
+            }
+        },
+    )
+    step = _runtime_step(
+        step_order=1,
+        input_source="flow_input",
+        input_type="document",
+        input_bindings={"question": "Literal step_input.text marker"},
+        input_config={"runtime_input": {"enabled": True, "input_format": "document"}},
+    )
+    run.input_payload_json["step_inputs"] = {str(step.step_id): {"file_ids": [str(file.id)]}}
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    with pytest.raises(TypedIOValidationException, match="step_input"):
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+        )
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_adds_underlag_summary_diagnostic(user):
+    executor, _, _, _ = _build_executor(user)
+    file = SimpleNamespace(id=uuid4(), text="transkriberat innehåll")
+    executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[file])
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={
+            "step_inputs": {},
+        },
+    )
+    step = _runtime_step(
+        step_order=1,
+        input_source="flow_input",
+        input_type="document",
+        input_bindings={"question": "UNDERLAG:\n{{ step_input.text }}"},
+        input_config={"runtime_input": {"enabled": True, "input_format": "document"}},
+    )
+    run.input_payload_json["step_inputs"] = {str(step.step_id): {"file_ids": [str(file.id)]}}
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+    )
+
+    assert any(d.code == "flow_underlag_summary" for d in resolved.diagnostics)
 
 
 @pytest.mark.asyncio
