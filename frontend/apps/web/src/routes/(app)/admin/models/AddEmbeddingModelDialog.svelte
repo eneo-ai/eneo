@@ -62,21 +62,15 @@
 
   // Sync the store with providerType variable
   $: {
-    if ($providerTypeStore && $providerTypeStore.value) {
-      const value = typeof $providerTypeStore.value === 'object'
-        ? $providerTypeStore.value.value
-        : $providerTypeStore.value;
-      providerType = value;
+    if ($providerTypeStore) {
+      providerType = $providerTypeStore.value;
     }
   }
 
   // Sync the store with family variable
   $: {
-    if ($modelFamilyStore && $modelFamilyStore.value) {
-      const value = typeof $modelFamilyStore.value === 'object'
-        ? $modelFamilyStore.value.value
-        : $modelFamilyStore.value;
-      family = value;
+    if ($modelFamilyStore) {
+      family = $modelFamilyStore.value;
     }
   }
 
@@ -307,8 +301,8 @@
           <div class="flex items-start gap-3 rounded-lg border border-label-default bg-label-dimmer px-4 py-3 text-sm label-warning">
             <TriangleAlert class="h-5 w-5 flex-shrink-0 text-label-stronger mt-0.5" />
             <div>
-              <p class="font-medium text-label-stronger">{m.provider_no_support_title({ providerType: selectedProviderType })}</p>
-              <p class="text-label-default mt-0.5">{m.provider_no_support_description({ modelType: "embedding" })}</p>
+              <p class="font-medium text-label-stronger">{m.provider_no_support_title({ providerType: selectedProviderType, modelType: "embedding" })}</p>
+              <p class="text-label-default mt-0.5">{m.provider_no_support_description()}</p>
             </div>
           </div>
         {/if}

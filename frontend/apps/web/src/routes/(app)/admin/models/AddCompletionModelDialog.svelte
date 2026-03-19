@@ -23,8 +23,8 @@
   let showProviderForm = false;
   let modelName = "";
   let displayName = "";
-  let maxInputTokens: number | undefined = undefined;
-  let maxOutputTokens: number | undefined = undefined;
+  let maxInputTokens = "";
+  let maxOutputTokens = "";
   let vision = false;
   let reasoning = false;
   let supportsToolCalling = false;
@@ -142,8 +142,8 @@
         provider_id: actualProviderId,
         name: modelName,
         display_name: displayName,
-        max_input_tokens: maxInputTokens,
-        max_output_tokens: maxOutputTokens,
+        max_input_tokens: maxInputTokens ? parseInt(maxInputTokens) : undefined,
+        max_output_tokens: maxOutputTokens ? parseInt(maxOutputTokens) : undefined,
         vision: vision,
         reasoning: reasoning,
         supports_tool_calling: supportsToolCalling,
@@ -169,8 +169,8 @@
   function resetForm() {
     modelName = "";
     displayName = "";
-    maxInputTokens = undefined;
-    maxOutputTokens = undefined;
+    maxInputTokens = "";
+    maxOutputTokens = "";
     vision = false;
     reasoning = false;
     supportsToolCalling = false;

@@ -56,9 +56,9 @@ jobs:
       - name: Install dependencies
         run: bun run setup:github
       - name: Run svelte-check
-        run: bun run check || echo "Svelte check failed but continuing..."
-      - name: Run eslint (non-blocking)
-        run: bun run lint || echo "ESLint failed but continuing..."
+        run: bun run check
+      - name: Run eslint
+        run: bun run lint
 
   backend-checks:
     runs-on: ubuntu-latest

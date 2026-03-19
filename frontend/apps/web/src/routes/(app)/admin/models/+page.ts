@@ -13,26 +13,16 @@ export const load = async (event) => {
   // Fetch credentials only if tenant credentials feature is enabled
   const tenantCredentialsEnabled = settings.tenant_credentials_enabled || false;
 
-  const promises = [
+  const [securityClassifications, models, providers, favoritesResponse] = await Promise.all([
     intric.securityClassifications.list(),
     intric.models.list(),
-    intric.modelProviders.list(),  // Always fetch providers
+    intric.modelProviders.list(),
     intric.modelProviders.getFavorites()
-  ];
+  ]);
 
-  // Add credentials fetch if feature is enabled
-  if (tenantCredentialsEnabled) {
-    promises.push(intric.credentials.list());
-  }
-
-  const results = await Promise.all(promises);
-  let securityClassifications, models, providers, favoritesResponse, credentialsResponse;
-
-  if (tenantCredentialsEnabled) {
-    [securityClassifications, models, providers, favoritesResponse, credentialsResponse] = results;
-  } else {
-    [securityClassifications, models, providers, favoritesResponse] = results;
-  }
+  const credentialsResponse = tenantCredentialsEnabled
+    ? await intric.credentials.list()
+    : undefined;
 
   return {
     securityClassifications,
