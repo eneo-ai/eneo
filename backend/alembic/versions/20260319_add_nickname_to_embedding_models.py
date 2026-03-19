@@ -10,7 +10,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "20260319_add_nickname"
-down_revision = "mcp_security_classification"
+down_revision = "gc_icon_id"
 branch_labels = None
 depends_on = None
 
