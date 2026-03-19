@@ -58,7 +58,7 @@ jobs:
       - name: Run svelte-check
         run: bun run check
       - name: Run eslint
-        run: bun run lint
+        run: FORCE_COLOR=1 bun run --filter '@intric/*' lint
 
   backend-checks:
     runs-on: ubuntu-latest
