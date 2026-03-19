@@ -26,7 +26,6 @@
   let description = $state("");
   let isSubmitting = $state(false);
   let categoryError = $state<string | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   let _descriptionError = $state<string | null>(null);
 
   // Access reason options

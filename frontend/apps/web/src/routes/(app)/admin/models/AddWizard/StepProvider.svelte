@@ -28,7 +28,6 @@
   let viewMode: ViewMode = providers.length > 0 ? "select" : "create";
 
   // Selection state
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   let _hoveredProvider: string | null = null;
   let selectedNewProviderType: string | null = null;
 

@@ -112,7 +112,7 @@
   }
 
   // When doing "use:field" svelte-check complains about the number of arguments... this "fixes" it for now
-  const fieldWrap = (_: unknown) => field(); // eslint-disable-line @typescript-eslint/no-unused-vars
+  const fieldWrap = (_: unknown) => field();
 </script>
 
 <div class="flex items-center justify-between gap-4 {cls}">

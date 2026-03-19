@@ -22,7 +22,6 @@
 
   const {
     mcpServerId,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     serverName: _serverName,
     tools: initialTools,
     intricClient

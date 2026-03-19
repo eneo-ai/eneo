@@ -38,6 +38,8 @@ export default ts.config(
       "@typescript-eslint/no-unused-vars": [
         "error",
         {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
           caughtErrors: "none"
         }
       ]

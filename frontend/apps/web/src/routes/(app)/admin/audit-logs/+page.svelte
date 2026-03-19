@@ -150,7 +150,6 @@
   let exportProcessedRecords = $state(0);
   let exportTotalRecords = $state(0);
   let pollTimer: ReturnType<typeof setTimeout>;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   let _isInitializingFromUrl = false; // Flag to prevent auto-apply during URL initialization
 
   // Retention policy state - initialize from server data

@@ -275,7 +275,6 @@
       </div>
     </div>
     <!-- Skeleton category cards -->
-    <!-- eslint-disable-next-line @typescript-eslint/no-unused-vars -->
     {#each Array(5) as _, i (i)}
       <div class="border-default bg-primary h-20 rounded-xl border"></div>
     {/each}

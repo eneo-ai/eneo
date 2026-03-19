@@ -404,7 +404,6 @@
     try {
       mediaStream = await requestAudioStream();
 
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const streamEndedHandler = (_: Event) => {
         if (!isRecording) return;
         const errorMsg = m.recording_device_disconnected();

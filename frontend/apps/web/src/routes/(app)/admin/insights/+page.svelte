@@ -81,7 +81,6 @@
   };
   let activityStats: AssistantActivityStats | null = $state(null);
   let isLoadingActivity = $state(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   let _activityError = $state(false);
 
   // Cache for previously fetched date ranges
@@ -598,7 +597,6 @@
                           <div class="bg-secondary/30 flex-1 animate-pulse rounded-lg"></div>
                           <!-- X-axis labels skeleton -->
                           <div class="flex justify-between px-4">
-                            <!-- eslint-disable-next-line @typescript-eslint/no-unused-vars -->
                             {#each Array(7) as _, i (i)}
                               <div class="bg-secondary/30 h-3 w-12 animate-pulse rounded"></div>
                             {/each}
@@ -625,7 +623,6 @@
                         </div>
                         <!-- Scrollable skeleton cards -->
                         <div class="flex-1 overflow-y-auto">
-                          <!-- eslint-disable-next-line @typescript-eslint/no-unused-vars -->
                           {#each Array(6) as _, i (i)}
                             <div
                               class="flex flex-col bg-[var(--background-primary)] px-5 py-4 {i > 0
