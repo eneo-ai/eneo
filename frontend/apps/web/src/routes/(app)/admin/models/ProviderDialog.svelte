@@ -51,7 +51,7 @@
   });
 
   // Build provider type options from capabilities (or fallback)
-  const fallbackProviderTypes = [
+  const fallbackProviderTypes: ReadonlyArray<{ value: string; label: string }> = [
     { value: "openai", label: "OpenAI" },
     { value: "azure", label: "Azure OpenAI" },
     { value: "anthropic", label: "Anthropic" },
@@ -234,7 +234,12 @@
 
       if (isEditMode && provider) {
         // Update existing provider
-        const updateData: any = {
+        const updateData: {
+          name: string;
+          config: Record<string, string>;
+          is_active: boolean;
+          credentials?: Record<string, string>;
+        } = {
           name: providerName,
           config,
           is_active: isActive,
@@ -267,8 +272,8 @@
 
       // Reset form
       resetForm();
-    } catch (e: any) {
-      error = e.message || (isEditMode ? m.failed_to_update_provider() : m.failed_to_create_provider());
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : (isEditMode ? m.failed_to_update_provider() : m.failed_to_create_provider());
       toast.error(isEditMode ? m.failed_to_update_provider() : m.failed_to_create_provider());
     } finally {
       isSubmitting = false;

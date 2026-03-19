@@ -9,7 +9,7 @@
   import { RefreshCw, AlertTriangle, Trash2, Check, X, ShieldAlert } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { invalidate } from "$app/navigation";
-  import type { components } from "@intric/intric-js";
+  import type { Intric, components } from "@intric/intric-js";
 
   type MCPTool = components["schemas"]["MCPServerToolPublic"];
 
@@ -17,7 +17,7 @@
     mcpServerId: string;
     serverName: string;
     tools: MCPTool[];
-    intricClient: any;
+    intricClient: Intric;
   };
 
   const { mcpServerId, serverName, tools: initialTools, intricClient }: Props = $props();

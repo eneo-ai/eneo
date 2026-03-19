@@ -164,8 +164,8 @@
 
       // Close dialog
       openController.set(false);
-    } catch (e: any) {
-      error = e.message || m.failed_to_update_model();
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : m.failed_to_update_model();
       toast.error(m.failed_to_update_model());
     } finally {
       isSubmitting = false;

@@ -11,8 +11,10 @@
 
   const intric = getIntric();
 
+  import type { ModelProviderCapabilities } from "../modelProviderCapabilities";
+
   /** Capabilities loaded by parent (AddWizard) */
-  export let capabilities: { providers: Record<string, any>; default_fields: any[] } | null = null;
+  export let capabilities: ModelProviderCapabilities | null = null;
 
   // Hosting location options
   const hostingOptions = [
@@ -126,8 +128,8 @@
       if (result && Array.isArray(result) && result.length > 0 && (result[0] as Record<string, unknown>)?.error) {
         liveModelsError = (result[0] as Record<string, unknown>).error as string;
       } else if (result && Array.isArray(result)) {
-        liveModels = result.map((m: any) => ({
-          name: m.model ? `${m.name} (${m.model})` : m.name,
+        liveModels = result.map((item: Record<string, unknown>) => ({
+          name: item.model ? `${item.name} (${item.model})` : String(item.name),
           max_input_tokens: undefined,
           max_output_tokens: undefined,
           supports_vision: false,

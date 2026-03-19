@@ -31,24 +31,26 @@
       await intric.modelProviders.delete({ id: provider.id });
       await invalidate("admin:model-providers:load");
       $showDeleteConfirm = false;
-    } catch (e: any) {
-      deleteError = e.message || m.failed_to_delete_provider();
+    } catch (e: unknown) {
+      deleteError = e instanceof Error ? e.message : m.failed_to_delete_provider();
     } finally {
       isDeleting = false;
     }
   }
 
-  function getModelName(model: any): string {
+  type AnyModel = Record<string, unknown>;
+
+  function getModelName(model: AnyModel): string {
     if ("nickname" in model && model.nickname) {
-      return model.nickname;
+      return String(model.nickname);
     }
     if ("model_name" in model && model.model_name) {
-      return model.model_name;
+      return String(model.model_name);
     }
-    return model.name;
+    return String(model.name);
   }
 
-  function getModelTypeLabel(model: any): string {
+  function getModelTypeLabel(model: AnyModel): string {
     if ("token_limit" in model || "vision" in model || "reasoning" in model) {
       return m.completion_model();
     }
@@ -58,7 +60,7 @@
     return m.transcription_model();
   }
 
-  function getModelTypeIcon(model: any): typeof Sparkles {
+  function getModelTypeIcon(model: AnyModel): typeof Sparkles {
     if ("token_limit" in model || "vision" in model || "reasoning" in model) {
       return Sparkles;
     }
@@ -68,7 +70,7 @@
     return AudioLines;
   }
 
-  function getModelTypeRaw(model: any): "completion" | "embedding" | "transcription" {
+  function getModelTypeRaw(model: AnyModel): "completion" | "embedding" | "transcription" {
     if ("token_limit" in model || "vision" in model || "reasoning" in model) {
       return "completion";
     }
@@ -100,8 +102,8 @@
           icon: getModelTypeIcon(model)
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
-    } catch (e: any) {
-      modelsLoadError = e.message || m.failed_to_load_models();
+    } catch (e: unknown) {
+      modelsLoadError = e instanceof Error ? e.message : m.failed_to_load_models();
     } finally {
       isLoadingModels = false;
     }

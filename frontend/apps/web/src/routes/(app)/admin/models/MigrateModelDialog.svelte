@@ -71,8 +71,8 @@
       }
       await invalidate("admin:model-providers:load");
       openController.set(false);
-    } catch (e: any) {
-      const msg = e.message || "";
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "";
       if (msg.includes("compatibility issues")) {
         error = m.migration_compatibility_issues();
       } else {

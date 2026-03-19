@@ -39,7 +39,7 @@
   let apiKey = "";
   let endpoint = "";
 
-  $: providerTypes = [
+  const providerTypes = [
     { value: "openai", label: "OpenAI" },
     { value: "azure", label: "Azure OpenAI" },
     { value: "anthropic", label: "Anthropic" },
@@ -89,7 +89,13 @@
       throw new Error(m.api_key_required());
     }
 
-    const providerData: any = {
+    const providerData: {
+      name: string;
+      provider_type: string;
+      credentials: { api_key: string };
+      config: Record<string, string>;
+      is_active: boolean;
+    } = {
       name: providerName,
       provider_type: providerType,
       credentials: { api_key: apiKey },
@@ -159,8 +165,8 @@
 
       // Reset form
       resetForm();
-    } catch (e: any) {
-      error = e.message || m.failed_to_create_model();
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : m.failed_to_create_model();
     } finally {
       isSubmitting = false;
     }

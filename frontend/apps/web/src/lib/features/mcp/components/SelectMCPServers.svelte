@@ -24,11 +24,12 @@
     description?: string;
     tags?: string[];
     tools?: MCPTool[];
+    [key: string]: unknown;
   }
 
   type Props = {
-    /** Array of MCP server objects that are selected. */
-    selectedMCPServers: Array<any>;
+    /** Array of MCP server objects that are selected. Uses index signature for schema compatibility. */
+    selectedMCPServers: { [key: string]: unknown }[];
     /** Optional: MCP tool settings to track tool-level overrides */
     selectedMCPTools?: Array<{ tool_id: string; is_enabled: boolean }>;
     /** Optional: Currently selected completion model to check tool calling support */
@@ -36,6 +37,9 @@
   };
 
   let { selectedMCPServers = $bindable([]), selectedMCPTools = $bindable([]), selectedModel = null }: Props = $props();
+
+  /** Type-safe view of selectedMCPServers */
+  let servers = $derived(selectedMCPServers as unknown as MCPServer[]);
 
   let modelSupportsTools = $derived(selectedModel?.supports_tool_calling !== false);
 
@@ -87,7 +91,7 @@
   function ensureAllSelectedServersToolsTracked() {
     let newOverrides: Array<{ tool_id: string; is_enabled: boolean }> = [];
 
-    for (const selectedServer of selectedMCPServers) {
+    for (const selectedServer of servers) {
       if (!selectedServer.tools) continue;
 
       // Check if any tool from this server is already tracked
@@ -115,12 +119,12 @@
 
   // Check if a server is selected
   function isServerSelected(serverId: string): boolean {
-    return selectedMCPServers.some((s) => s.id === serverId);
+    return servers.some((s) => s.id === serverId);
   }
 
   // Get the selected server object (if it exists with tools)
   function getSelectedServer(serverId: string): MCPServer | undefined {
-    return selectedMCPServers.find((s) => s.id === serverId);
+    return servers.find((s) => s.id === serverId);
   }
 
   // Check if a tool is enabled
@@ -147,7 +151,7 @@
   function toggleServer(server: MCPServer) {
     if (isServerSelected(server.id)) {
       // Remove server and its tool overrides
-      selectedMCPServers = selectedMCPServers.filter((s) => s.id !== server.id);
+      selectedMCPServers = servers.filter((s) => s.id !== server.id);
       if (server.tools) {
         selectedMCPTools = selectedMCPTools.filter(
           (t) => !server.tools?.some((tool) => tool.id === t.tool_id)
@@ -159,7 +163,7 @@
         ...server,
         tools: server.tools?.map((tool) => ({ ...tool, is_enabled: true })) || []
       };
-      selectedMCPServers = [...selectedMCPServers, newServer];
+      selectedMCPServers = [...servers, newServer];
 
       // Also add tool overrides so they're sent to backend
       if (server.tools && server.tools.length > 0) {
@@ -188,14 +192,14 @@
     }
 
     // Also update the tool in the selected server object
-    const selectedServerIndex = selectedMCPServers.findIndex((s) => s.id === server.id);
-    if (selectedServerIndex !== -1 && selectedMCPServers[selectedServerIndex].tools) {
-      const toolIndex = selectedMCPServers[selectedServerIndex].tools.findIndex(
+    const selectedServerIndex = servers.findIndex((s) => s.id === server.id);
+    if (selectedServerIndex !== -1 && servers[selectedServerIndex].tools) {
+      const toolIndex = servers[selectedServerIndex].tools!.findIndex(
         (t: MCPTool) => t.id === tool.id
       );
       if (toolIndex !== -1) {
-        selectedMCPServers[selectedServerIndex].tools[toolIndex].is_enabled = !currentEnabled;
-        selectedMCPServers = [...selectedMCPServers];
+        servers[selectedServerIndex].tools![toolIndex].is_enabled = !currentEnabled;
+        selectedMCPServers = [...servers];
       }
     }
   }

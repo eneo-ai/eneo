@@ -14,11 +14,13 @@
   import { onMount } from "svelte";
   import {
     getModelProviderCapabilities,
-    type ModelProviderCapabilities
+    type ModelProviderCapabilities,
+    type CapabilityModel
   } from "./modelProviderCapabilities";
+  import type { ModelProviderPublic } from "@intric/intric-js";
 
   export let openController: Writable<boolean>;
-  export let providers: any[] = [];
+  export let providers: ModelProviderPublic[] = [];
   export let preSelectedProviderId: Writable<string | null> | undefined = undefined;
 
   const intric = getIntric();
@@ -43,7 +45,7 @@
   let apiVersion = "";
   let deploymentName = "";
 
-  const providerTypes = [
+  const providerTypes: ReadonlyArray<{ value: string; label: string }> = [
     { value: "openai", label: "OpenAI Compatible (Self-Hosted)" },
     { value: "openai", label: "OpenAI" },
     { value: "azure", label: "Azure OpenAI" },
@@ -52,7 +54,7 @@
     { value: "cohere", label: "Cohere" },
   ];
 
-  const modelFamilies = [
+  const modelFamilies: ReadonlyArray<{ value: string; label: string }> = [
     { value: "openai", label: "OpenAI (Standard)" },
     { value: "e5", label: "E5 (HuggingFace)" },
   ];
@@ -100,7 +102,7 @@
   // Sync selected provider ID and show/hide provider form
   $: {
     if ($providerStore && $providerStore.value) {
-      const value = typeof $providerStore.value === 'object' ? ($providerStore.value as any).value : $providerStore.value;
+      const value = typeof $providerStore.value === 'object' ? ($providerStore.value as { value: string }).value : $providerStore.value;
       selectedProviderId = value;
       showProviderForm = value === CREATE_NEW_PROVIDER;
     }
@@ -114,7 +116,13 @@
       throw new Error("API key is required");
     }
 
-    const providerData: any = {
+    const providerData: {
+      name: string;
+      provider_type: string;
+      credentials: { api_key: string };
+      config: Record<string, string>;
+      is_active: boolean;
+    } = {
       name: providerName,
       provider_type: providerType,
       credentials: { api_key: apiKey },
@@ -190,8 +198,8 @@
 
       // Reset form
       resetForm();
-    } catch (e: any) {
-      error = e.message || "Failed to create embedding model";
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : "Failed to create embedding model";
     } finally {
       isSubmitting = false;
     }
@@ -251,7 +259,7 @@
   });
 
   // Available embedding models for the selected provider
-  $: availableModels = (capabilities?.providers[selectedProviderType]?.models?.embedding ?? []).map((m: any) => typeof m === "string" ? m : m.name) as string[];
+  $: availableModels = (capabilities?.providers[selectedProviderType]?.models?.embedding ?? []).map((m: CapabilityModel) => typeof m === "string" ? m : m.name ?? "") as string[];
 
   function selectModel(model: string) {
     modelName = model;
