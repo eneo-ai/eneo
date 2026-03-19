@@ -11,23 +11,10 @@
   import EmbeddingModelsTable from "./EmbeddingModelsTable.svelte";
   import TranscriptionModelsTable from "./TranscriptionModelsTable.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { writable } from "svelte/store";
-  import AddCompletionModelDialog from "./AddCompletionModelDialog.svelte";
-  import AddEmbeddingModelDialog from "./AddEmbeddingModelDialog.svelte";
-  import AddTranscriptionModelDialog from "./AddTranscriptionModelDialog.svelte";
 
   export let data;
 
   setSecurityContext(data.securityClassifications);
-
-  let addCompletionModelDialogOpen = writable(false);
-  let addEmbeddingModelDialogOpen = writable(false);
-  let addTranscriptionModelDialogOpen = writable(false);
-
-  // Track which provider to preselect when opening add model dialogs
-  let preSelectedCompletionProviderId = writable<string | null>(null);
-  let preSelectedEmbeddingProviderId = writable<string | null>(null);
-  let preSelectedTranscriptionProviderId = writable<string | null>(null);
 </script>
 
 <svelte:head>
@@ -67,7 +54,3 @@
     </Page.Tab>
   </Page.Main>
 </Page.Root>
-
-<AddCompletionModelDialog openController={addCompletionModelDialogOpen} providers={data.providers} preSelectedProviderId={preSelectedCompletionProviderId} />
-<AddEmbeddingModelDialog openController={addEmbeddingModelDialogOpen} providers={data.providers} preSelectedProviderId={preSelectedEmbeddingProviderId} />
-<AddTranscriptionModelDialog openController={addTranscriptionModelDialogOpen} providers={data.providers} preSelectedProviderId={preSelectedTranscriptionProviderId} />

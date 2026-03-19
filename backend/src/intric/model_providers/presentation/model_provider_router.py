@@ -79,13 +79,23 @@ async def get_provider_capabilities(
         "audio_transcription": "transcription",
     }
 
-    # Extract YYYY-MM-DD date from model name for sorting by recency
-    _date_pattern = re.compile(r"(\d{4}-\d{2}-\d{2})")
+    # Date extraction for sorting by release date (newest first).
+    # LiteLLM has no release_date field, so we extract from model names.
+    # Supports: YYYY-MM-DD (OpenAI), YYYYMMDD (Anthropic), @YYYYMMDD (Vertex)
+    _date_dashed = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+    _date_compact = re.compile(r"(?:@|-)(\d{8})(?:\D|$)|(\d{8})$")
 
     def _extract_model_date(name: str) -> str:
-        """Extract date from model name, returns '0000-00-00' if none found."""
-        m = _date_pattern.search(name)
-        return m.group(1) if m else "0000-00-00"
+        """Extract date from model name, normalized to YYYYMMDD for sorting."""
+        # YYYY-MM-DD (e.g. gpt-4o-2024-08-06)
+        m = _date_dashed.search(name)
+        if m:
+            return f"{m.group(1)}{m.group(2)}{m.group(3)}"
+        # YYYYMMDD (e.g. claude-opus-4-6-20260205, vertex @20241022)
+        m = _date_compact.search(name)
+        if m:
+            return m.group(1) or m.group(2)
+        return "00000000"
 
     # Collect all models per provider per mode with metadata
     raw: dict[str, dict[str, dict[str, dict]]] = defaultdict(
@@ -149,7 +159,7 @@ async def get_provider_capabilities(
             for f in fields
         ]
 
-    # Build response sorted by release date (newest models first)
+    # Build response sorted by release date (newest first)
     providers = {}
     for provider, modes in raw.items():
         provider_data: dict = {

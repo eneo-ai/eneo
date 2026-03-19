@@ -18,7 +18,7 @@
   import { getChartColour } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { m } from "$lib/paraglide/messages";
 
-  import { writable, type Writable } from "svelte/store";
+  import { writable } from "svelte/store";
   import { Button } from "@intric/ui";
   import { Plus } from "lucide-svelte";
   import ProviderDialog from "./ProviderDialog.svelte";
@@ -29,8 +29,6 @@
   export let completionModels: CompletionModel[];
   export let providers: ModelProviderPublic[] = [];
   export let favoriteProviders: string[] = [];
-  export let addModelDialogOpen: Writable<boolean> | undefined = undefined;
-  export let preSelectedProviderId: Writable<string | null> | undefined = undefined;
 
   const addWizardOpen = writable(false);
   // Pre-selected provider for "Add Model" from provider dropdown
@@ -253,6 +251,7 @@
               <ProviderActions
                 {provider}
                 onAddModel={handleAddModelToProvider}
+                onEditProvider={handleEditProvider}
               />
             {/if}
           </div>

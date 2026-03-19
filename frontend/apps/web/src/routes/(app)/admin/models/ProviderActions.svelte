@@ -7,17 +7,16 @@
   import { getIntric } from "$lib/core/Intric";
   import { invalidate } from "$app/navigation";
   import { writable } from "svelte/store";
-  import { Plus, Pencil, Trash2, AlertTriangle, Loader2, Box, Sparkles, AudioLines } from "lucide-svelte";
-  import ProviderDialog from "./ProviderDialog.svelte";
+  import { Pencil, Trash2, AlertTriangle, Loader2, Box, Sparkles, AudioLines } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
 
   export let provider: ModelProviderPublic;
   /** Pass this to open AddCompletionModelDialog with this provider pre-selected */
   export let onAddModel: ((providerId: string) => void) | undefined = undefined;
+  export let onEditProvider: ((provider: ModelProviderPublic) => void) | undefined = undefined;
 
   const intric = getIntric();
 
-  const showEditDialog = writable(false);
   const showDeleteConfirm = writable(false);
   let isDeleting = false;
   let deleteError: string | null = null;
@@ -120,7 +119,7 @@
       is={item}
       padding="icon-leading"
       on:click={() => {
-        $showEditDialog = true;
+        onEditProvider?.(provider);
       }}
     >
       <Pencil class="h-4 w-4" />
@@ -141,9 +140,6 @@
     </Button>
   </Dropdown.Menu>
 </Dropdown.Root>
-
-<!-- Edit Provider Dialog -->
-<ProviderDialog openController={showEditDialog} {provider} />
 
 <!-- Delete Confirmation Dialog -->
 <Dialog.Root openController={showDeleteConfirm}>

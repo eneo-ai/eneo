@@ -11,6 +11,11 @@
   import ProviderGlyph from "./components/ProviderGlyph.svelte";
   import { toast } from "$lib/components/toast";
   import { onMount } from "svelte";
+  import {
+    getModelProviderCapabilities,
+    type ModelProviderCapabilities,
+    type ModelProviderFieldDef
+  } from "./modelProviderCapabilities";
 
   export let openController: Writable<boolean>;
   /** If provided, dialog is in edit mode. If null/undefined, dialog is in add mode. */
@@ -19,26 +24,30 @@
   const intric = getIntric();
 
   // --- Capabilities ---
-  interface FieldDef {
-    name: string;
-    required: boolean;
-    secret: boolean;
-    in: "credentials" | "config";
-  }
+  let capabilities: ModelProviderCapabilities | null = null;
+  let capabilitiesLoading = false;
 
-  interface Capabilities {
-    providers: Record<string, { modes: string[]; models: Record<string, any[]>; fields: FieldDef[] }>;
-    default_fields: FieldDef[];
-  }
+  async function loadCapabilities() {
+    if (capabilities || capabilitiesLoading) return;
 
-  let capabilities: Capabilities | null = null;
-
-  onMount(async () => {
+    capabilitiesLoading = true;
     try {
-      capabilities = await intric.modelProviders.getCapabilities() as Capabilities;
+      capabilities = await getModelProviderCapabilities(intric);
     } catch {
       // Silently fail — fall back to hardcoded defaults
+    } finally {
+      capabilitiesLoading = false;
     }
+  }
+
+  onMount(() => {
+    const unsubscribe = openController.subscribe((open) => {
+      if (open) {
+        void loadCapabilities();
+      }
+    });
+
+    return unsubscribe;
   });
 
   // Build provider type options from capabilities (or fallback)
@@ -79,7 +88,7 @@
   })();
 
   // Fallback fields when capabilities haven't loaded
-  const fallbackFields: FieldDef[] = [
+  const fallbackFields: ModelProviderFieldDef[] = [
     { name: "api_key", required: true, secret: true, in: "credentials" },
     { name: "endpoint", required: false, secret: false, in: "config" },
   ];
@@ -429,7 +438,7 @@
       <Button
         variant="primary"
         on:click={handleSubmit}
-        disabled={isSubmitting}
+        disabled={isSubmitting || capabilitiesLoading}
         class="min-w-[120px]"
       >
         {#if isSubmitting}

@@ -14,6 +14,11 @@
   import StepCredentials from "./StepCredentials.svelte";
   import StepModels from "./StepModels.svelte";
   import type { ModelProviderPublic } from "@intric/intric-js";
+  import { onMount } from "svelte";
+  import {
+    getModelProviderCapabilities,
+    type ModelProviderCapabilities
+  } from "../modelProviderCapabilities";
 
   export let openController: Writable<boolean>;
   export let providers: ModelProviderPublic[] = [];
@@ -27,32 +32,14 @@
 
   // --- Capabilities (loaded once, shared across steps) ---
 
-  interface FieldDef {
-    name: string;
-    required: boolean;
-    secret: boolean;
-    in: "credentials" | "config";
-  }
-
-  interface ProviderCapability {
-    modes: string[];
-    models: Record<string, any[]>;
-    fields: FieldDef[];
-  }
-
-  interface Capabilities {
-    providers: Record<string, ProviderCapability>;
-    default_fields: FieldDef[];
-  }
-
-  let capabilities: Capabilities | null = null;
+  let capabilities: ModelProviderCapabilities | null = null;
   let capabilitiesLoading = false;
 
   async function loadCapabilities() {
     if (capabilities || capabilitiesLoading) return;
     capabilitiesLoading = true;
     try {
-      capabilities = await intric.modelProviders.getCapabilities() as Capabilities;
+      capabilities = await getModelProviderCapabilities(intric);
     } catch {
       // Silently fail — steps will fall back gracefully
     } finally {
@@ -60,10 +47,15 @@
     }
   }
 
-  // Load capabilities when dialog opens
-  $: if ($openController && !capabilities) {
-    loadCapabilities();
-  }
+  onMount(() => {
+    const unsubscribe = openController.subscribe((open) => {
+      if (open) {
+        void loadCapabilities();
+      }
+    });
+
+    return unsubscribe;
+  });
 
   // Derive provider fields for StepCredentials based on selected provider type
   $: providerFields = (() => {

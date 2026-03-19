@@ -1993,7 +1993,7 @@
   "add_models": "Add Models",
   "add_models_description": "Add one or more models to this provider",
   "skip_for_now": "Skip for now",
-  "suggested_models": "Latest models",
+  "suggested_models": "Available models",
   "browse_all": "Browse all",
   "search_models": "Search models...",
   "no_models_found": "No models found",

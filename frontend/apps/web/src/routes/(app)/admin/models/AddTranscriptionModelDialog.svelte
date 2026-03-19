@@ -11,6 +11,11 @@
   import { writable, type Writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { TriangleAlert } from "lucide-svelte";
+  import { onMount } from "svelte";
+  import {
+    getModelProviderCapabilities,
+    type ModelProviderCapabilities
+  } from "./modelProviderCapabilities";
 
   export let openController: Writable<boolean>;
   export let providers: any[] = [];
@@ -206,18 +211,33 @@
   $: requiresEndpoint = providerType === "azure";
 
   // Dynamic provider capabilities from LiteLLM
-  let capabilities: Record<string, { modes: string[], models: Record<string, string[]> }> = {};
+  let capabilities: ModelProviderCapabilities | null = null;
+  let capabilitiesLoading = false;
+
   async function loadCapabilities() {
+    if (capabilities || capabilitiesLoading) return;
+
+    capabilitiesLoading = true;
     try {
-      capabilities = await intric.modelProviders.getCapabilities();
+      capabilities = await getModelProviderCapabilities(intric);
     } catch {
       // Silently fail — warning just won't show
+    } finally {
+      capabilitiesLoading = false;
     }
   }
-  $: if ($openController) loadCapabilities();
+  onMount(() => {
+    const unsubscribe = openController.subscribe((open) => {
+      if (open) {
+        void loadCapabilities();
+      }
+    });
+
+    return unsubscribe;
+  });
 
   // Available transcription models for the selected provider
-  $: availableModels = (capabilities[selectedProviderType]?.models?.transcription ?? []).map((m: any) => typeof m === "string" ? m : m.name) as string[];
+  $: availableModels = (capabilities?.providers[selectedProviderType]?.models?.transcription ?? []).map((m: any) => typeof m === "string" ? m : m.name) as string[];
 
   function selectModel(model: string) {
     modelName = model;
@@ -233,9 +253,9 @@
   })();
 
   $: providerHasNoSupport = selectedProviderType !== ""
-    && Object.keys(capabilities).length > 0
-    && selectedProviderType in capabilities
-    && !capabilities[selectedProviderType]?.modes?.includes("transcription");
+    && !!capabilities
+    && selectedProviderType in capabilities.providers
+    && !capabilities.providers[selectedProviderType]?.modes?.includes("transcription");
 </script>
 
 <Dialog.Root {openController}>
