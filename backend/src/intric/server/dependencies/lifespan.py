@@ -24,6 +24,11 @@ async def startup():
     if settings.openapi_only_mode:
         return
 
+    # Configure LiteLLM SSL verification
+    if not settings.litellm_ssl_verify:
+        import litellm
+        litellm.ssl_verify = False
+
     aiohttp_client.start()
     sessionmanager.init(settings.database_url)
     await job_manager.init()

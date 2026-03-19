@@ -131,6 +131,9 @@ class Settings(BaseSettings):
     eneo_super_api_key: Optional[str] = None
     eneo_super_duper_api_key: Optional[str] = None
 
+    # LiteLLM SSL verification (set to false to skip SSL verification for model endpoints)
+    litellm_ssl_verify: bool = True
+
     # Infrastructure dependencies
     postgres_user: str
     postgres_host: str
