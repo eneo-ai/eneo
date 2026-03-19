@@ -326,13 +326,10 @@ export function initMCPServers(client) {
      * @throws {IntricError}
      * */
     approveAllToolChanges: async ({ mcp_server_id }) => {
-      const res = await client.fetch(
-        "/api/v1/mcp-servers/{id}/tools/review/approve-all/",
-        {
-          method: "post",
-          params: { path: { id: mcp_server_id } }
-        }
-      );
+      const res = await client.fetch("/api/v1/mcp-servers/{id}/tools/review/approve-all/", {
+        method: "post",
+        params: { path: { id: mcp_server_id } }
+      });
       return res;
     },
 

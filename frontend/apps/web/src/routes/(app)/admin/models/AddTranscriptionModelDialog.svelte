@@ -281,7 +281,7 @@
             <Select.Label>Provider</Select.Label>
             <Select.Trigger placeholder="Select or create provider"></Select.Trigger>
             <Select.Options>
-              {#each providerOptions as provider}
+              {#each providerOptions as provider (provider.value)}
                 <Select.Item value={provider} label={provider.label}>{provider.label}</Select.Item>
               {/each}
             </Select.Options>
@@ -308,7 +308,7 @@
                 <Select.Label>Provider Type</Select.Label>
                 <Select.Trigger placeholder="Select provider type"></Select.Trigger>
                 <Select.Options>
-                  {#each providerTypes as type}
+                  {#each providerTypes as type (type.value)}
                     <Select.Item value={type} label={type.label}>{type.label}</Select.Item>
                   {/each}
                 </Select.Options>
@@ -402,7 +402,7 @@
               <div class="flex flex-col gap-2">
                 <span class="text-sm font-medium">{m.suggested_models()}</span>
                 <div class="flex flex-wrap gap-2">
-                  {#each availableModels as model}
+                  {#each availableModels as model (model)}
                     <button
                       type="button"
                       class="rounded-full border px-3 py-1.5 text-sm transition-all duration-150
@@ -460,7 +460,7 @@
       </form>
     </Dialog.Section>
 
-    <Dialog.Controls let:close>
+    <Dialog.Controls>
       <Button variant="outlined" on:click={handleCancel}>Cancel</Button>
       <Button
         variant="primary"

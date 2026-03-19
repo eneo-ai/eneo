@@ -165,13 +165,16 @@ export function initModelProviders(client) {
      * @throws {IntricError}
      * */
     validateModel: async ({ id }, { model_name, model_type = "completion" }) => {
-      const res = await client.fetch("/api/v1/admin/model-providers/{provider_id}/validate-model/", {
-        method: "post",
-        params: { path: { provider_id: id } },
-        requestBody: {
-          "application/json": { model_name, model_type }
+      const res = await client.fetch(
+        "/api/v1/admin/model-providers/{provider_id}/validate-model/",
+        {
+          method: "post",
+          params: { path: { provider_id: id } },
+          requestBody: {
+            "application/json": { model_name, model_type }
+          }
         }
-      });
+      );
 
       return res;
     },

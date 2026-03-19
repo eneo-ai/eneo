@@ -430,12 +430,15 @@ export function initIntegrations(client) {
          * */
         recreateSubscription: async (subscription) => {
           const { id } = subscription;
-          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/{subscription_id}/recreate", {
-            method: "post",
-            params: {
-              path: { subscription_id: id }
+          const res = await client.fetch(
+            "/api/v1/admin/sharepoint/subscriptions/{subscription_id}/recreate",
+            {
+              method: "post",
+              params: {
+                path: { subscription_id: id }
+              }
             }
-          });
+          );
           return res;
         }
       }

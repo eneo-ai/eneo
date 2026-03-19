@@ -53,7 +53,7 @@ export function getTableContext<T>(): TableContext<T> {
 
 export interface CreateTableOptions {
   disableClientFilter?: boolean;
-  serverSideFilter?: boolean;  // Keep filter UI but make it trigger server-side search
+  serverSideFilter?: boolean; // Keep filter UI but make it trigger server-side search
 }
 
 export function createWithResource<Resource extends Record<string, unknown>>(
@@ -90,7 +90,7 @@ export function createWithStore<Resource extends Record<string, unknown>>(
       // Keep filter UI but disable client-side filtering (always returns true)
       // Component will watch filterValue and trigger server-side search
       plugins.tableFilter = addTableFilter({
-        fn: () => true  // No-op: all rows pass filter (server does filtering)
+        fn: () => true // No-op: all rows pass filter (server does filtering)
       });
     } else {
       // Standard client-side filtering

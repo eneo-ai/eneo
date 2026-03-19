@@ -188,10 +188,13 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       rollbackAssistant: async (id) => {
-        const res = await client.fetch("/api/v1/admin/templates/assistants/{template_id}/rollback", {
-          method: "post",
-          params: { path: { template_id: id } }
-        });
+        const res = await client.fetch(
+          "/api/v1/admin/templates/assistants/{template_id}/rollback",
+          {
+            method: "post",
+            params: { path: { template_id: id } }
+          }
+        );
         return res;
       },
 
@@ -240,10 +243,13 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       permanentDeleteAssistant: async (id) => {
-        const res = await client.fetch("/api/v1/admin/templates/assistants/{template_id}/permanent", {
-          method: "delete",
-          params: { path: { template_id: id } }
-        });
+        const res = await client.fetch(
+          "/api/v1/admin/templates/assistants/{template_id}/permanent",
+          {
+            method: "delete",
+            params: { path: { template_id: id } }
+          }
+        );
         return res;
       },
 

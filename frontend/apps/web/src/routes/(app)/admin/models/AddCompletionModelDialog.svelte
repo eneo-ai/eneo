@@ -12,7 +12,7 @@
   import { m } from "$lib/paraglide/messages";
 
   export let openController: Writable<boolean>;
-  export let providers: any[] = [];
+  export let providers: { id: string; name: string; [key: string]: unknown }[] = [];
   export let preSelectedProviderId: Writable<string | null> | undefined = undefined;
 
   const intric = getIntric();
@@ -75,7 +75,7 @@
   // Sync selected provider ID and show/hide provider form
   $: {
     if ($providerStore && $providerStore.value) {
-      const value = typeof $providerStore.value === 'object' ? ($providerStore.value as any).value : $providerStore.value;
+      const value = typeof $providerStore.value === 'object' ? ($providerStore.value as { value: string }).value : $providerStore.value;
       selectedProviderId = value;
       showProviderForm = value === CREATE_NEW_PROVIDER;
     }
@@ -197,12 +197,6 @@
     error = null;
   }
 
-  function formatTokenLimit(limit: number): string {
-    if (limit >= 1_000_000) return `${(limit / 1_000_000).toFixed(limit % 1_000_000 === 0 ? 0 : 1)}M`;
-    if (limit >= 1_000) return `${Math.round(limit / 1_000)}K`;
-    return limit.toString();
-  }
-
   $: requiresEndpoint = providerType === "azure";
 </script>
 
@@ -224,7 +218,7 @@
             <Select.Label>{m.provider()}</Select.Label>
             <Select.Trigger placeholder={m.select_or_create_provider()}></Select.Trigger>
             <Select.Options>
-              {#each providerOptions as provider}
+              {#each providerOptions as provider (provider.value)}
                 <Select.Item value={provider} label={provider.label}>{provider.label}</Select.Item>
               {/each}
             </Select.Options>
@@ -256,7 +250,7 @@
                 bind:value={providerType}
                 class="rounded border border-dimmer bg-surface px-3 py-2 text-sm"
               >
-                {#each providerTypes as type}
+                {#each providerTypes as type (type.value)}
                   <option value={type.value}>{type.label}</option>
                 {/each}
               </select>
@@ -403,7 +397,7 @@
       </form>
     </Dialog.Section>
 
-    <Dialog.Controls let:close>
+    <Dialog.Controls>
       <Button variant="outlined" on:click={handleCancel}>{m.cancel()}</Button>
       <Button
         variant="primary"
