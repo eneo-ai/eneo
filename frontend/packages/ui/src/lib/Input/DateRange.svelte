@@ -104,9 +104,10 @@
 
   // When the calendar closes with only a start date selected, treat it as a single-day range
   $: if (!$open && value.start && !value.end) {
-    value = { start: value.start, end: value.start };
+    const start = value.start;
+    value = { start, end: start };
     if (onValueCommit) {
-      onValueCommit({ start: value.start, end: value.start });
+      onValueCommit({ start, end: start });
     }
   }
 

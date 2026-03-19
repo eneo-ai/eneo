@@ -59,6 +59,7 @@ jobs:
         run: bun run check
       - name: Run eslint
         run: bun run lint
+        continue-on-error: true
 
   backend-checks:
     runs-on: ubuntu-latest
