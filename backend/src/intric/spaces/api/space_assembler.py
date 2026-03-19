@@ -272,6 +272,7 @@ class SpaceAssembler:
             permissions=group_chat.permissions,
             type="group-chat",
             metadata_json=group_chat.metadata_json,
+            icon_id=group_chat.icon_id,
         )
 
     def _get_app_model(self, app: "App"):
