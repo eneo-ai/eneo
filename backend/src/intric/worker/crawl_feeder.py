@@ -72,7 +72,7 @@ class CrawlFeeder:
         defaults to QUEUED but these are ghost records that accumulate.
         Uses same timeout threshold as job cleanup for consistency.
         """
-        from sqlalchemy import delete, and_
+        from sqlalchemy import and_, delete
 
         from intric.database.database import sessionmanager
         from intric.database.tables.websites_table import CrawlRuns
@@ -232,7 +232,7 @@ class CrawlFeeder:
                 continue
 
             # Enqueue to ARQ
-            success, is_duplicate, returned_job_id = await self._job_enqueuer.enqueue(
+            success, is_duplicate, _returned_job_id = await self._job_enqueuer.enqueue(
                 job_data, tenant_id
             )
 

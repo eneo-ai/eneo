@@ -92,7 +92,11 @@ class BaseRepoImpl(Generic[T, DB, M]):
         if not keys:
             return []
 
-        query = select(self._db_model).where(self._db_model.id.in_(keys)).options(*self._options)
+        query = (
+            select(self._db_model)
+            .where(self._db_model.id.in_(keys))
+            .options(*self._options)
+        )
         result = await self.session.scalars(query)
         records = result.all()
 

@@ -3,9 +3,10 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 import sqlalchemy as sa
+from html2text import html2text
 
-from intric.embedding_models.infrastructure.datastore import Datastore
 from intric.database.tables.info_blob_chunk_table import InfoBlobChunks
+from intric.embedding_models.infrastructure.datastore import Datastore
 from intric.info_blobs.info_blob import InfoBlobAdd
 from intric.integration.domain.entities.oauth_token import SharePointToken
 from intric.integration.domain.entities.sync_log import SyncLog
@@ -20,8 +21,6 @@ from intric.integration.infrastructure.office_change_key_service import (
     OfficeChangeKeyService,
 )
 from intric.main.logging import get_logger
-
-from html2text import html2text
 
 
 def _extract_text_from_canvas_layout(content: dict) -> str:
@@ -98,17 +97,17 @@ if TYPE_CHECKING:
     from intric.integration.domain.repositories.sync_log_repo import (
         SyncLogRepository,
     )
-    from intric.integration.domain.repositories.user_integration_repo import (
-        UserIntegrationRepository,
-    )
     from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
         TenantSharePointAppRepository,
     )
-    from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
-        TenantAppAuthService,
+    from intric.integration.domain.repositories.user_integration_repo import (
+        UserIntegrationRepository,
     )
     from intric.integration.infrastructure.auth_service.service_account_auth_service import (
         ServiceAccountAuthService,
+    )
+    from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
+        TenantAppAuthService,
     )
     from intric.integration.infrastructure.oauth_token_service import (
         OauthTokenService,
@@ -121,21 +120,63 @@ logger = get_logger(__name__)
 
 # File extensions that cannot produce useful text content.
 # These are skipped before download to save bandwidth and avoid database pollution.
-_UNSUPPORTED_EXTENSIONS: frozenset[str] = frozenset({
-    # Images
-    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".ico", ".webp", ".tiff", ".tif",
-    ".heic", ".heif", ".raw", ".cr2", ".nef", ".arw", ".psd",
-    # Video
-    ".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv", ".m4v",
-    # Audio
-    ".mp3", ".wav", ".ogg", ".flac", ".aac", ".wma", ".m4a",
-    # Archives
-    ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2",
-    # Executables / binaries
-    ".exe", ".dll", ".msi", ".bin", ".iso",
-    # Other non-text
-    ".ttf", ".otf", ".woff", ".woff2",
-})
+_UNSUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        # Images
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".bmp",
+        ".svg",
+        ".ico",
+        ".webp",
+        ".tiff",
+        ".tif",
+        ".heic",
+        ".heif",
+        ".raw",
+        ".cr2",
+        ".nef",
+        ".arw",
+        ".psd",
+        # Video
+        ".mp4",
+        ".avi",
+        ".mov",
+        ".wmv",
+        ".mkv",
+        ".webm",
+        ".flv",
+        ".m4v",
+        # Audio
+        ".mp3",
+        ".wav",
+        ".ogg",
+        ".flac",
+        ".aac",
+        ".wma",
+        ".m4a",
+        # Archives
+        ".zip",
+        ".rar",
+        ".7z",
+        ".tar",
+        ".gz",
+        ".bz2",
+        # Executables / binaries
+        ".exe",
+        ".dll",
+        ".msi",
+        ".bin",
+        ".iso",
+        # Other non-text
+        ".ttf",
+        ".otf",
+        ".woff",
+        ".woff2",
+    }
+)
 
 
 def _unsupported_file_reason(filename: str) -> Optional[str]:
@@ -144,8 +185,25 @@ def _unsupported_file_reason(filename: str) -> Optional[str]:
     for ext in _UNSUPPORTED_EXTENSIONS:
         if name.endswith(ext):
             # Determine a human-readable category
-            if ext in {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".ico", ".webp", ".tiff", ".tif",
-                       ".heic", ".heif", ".raw", ".cr2", ".nef", ".arw", ".psd"}:
+            if ext in {
+                ".jpg",
+                ".jpeg",
+                ".png",
+                ".gif",
+                ".bmp",
+                ".svg",
+                ".ico",
+                ".webp",
+                ".tiff",
+                ".tif",
+                ".heic",
+                ".heif",
+                ".raw",
+                ".cr2",
+                ".nef",
+                ".arw",
+                ".psd",
+            }:
                 return "Unsupported file type (image)"
             if ext in {".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv", ".m4v"}:
                 return "Unsupported file type (video)"
@@ -455,9 +513,7 @@ class SharePointContentService:
                 if not actual_drive_id and site_id:
                     actual_drive_id = await content_client.get_default_drive_id(site_id)
                 if not actual_drive_id:
-                    raise ValueError(
-                        f"Could not resolve drive ID for site {site_id}"
-                    )
+                    raise ValueError(f"Could not resolve drive ID for site {site_id}")
 
                 logger.info(
                     f"Starting delta sync with token: {integration_knowledge.delta_token[:20]}..."
@@ -713,7 +769,10 @@ class SharePointContentService:
                         else:
                             stats["skipped_items"] += 1
                             stats["skipped_details"].append(
-                                {"file": item_name, "reason": "Empty or unreadable content"}
+                                {
+                                    "file": item_name,
+                                    "reason": "Empty or unreadable content",
+                                }
                             )
 
                     except ValueError as e:
@@ -884,7 +943,9 @@ class SharePointContentService:
                                 item_id=integration_knowledge.folder_id,
                             )
                         except Exception as e:
-                            logger.error(f"Error getting file content for {item_name}: {e}")
+                            logger.error(
+                                f"Error getting file content for {item_name}: {e}"
+                            )
                             stats["skipped_items"] += 1
                             stats["skipped_details"].append(
                                 {"file": item_name, "reason": f"Error: {e}"}
@@ -903,7 +964,10 @@ class SharePointContentService:
                         else:
                             stats["skipped_items"] += 1
                             stats["skipped_details"].append(
-                                {"file": item_name, "reason": "Empty or unreadable content"}
+                                {
+                                    "file": item_name,
+                                    "reason": "Empty or unreadable content",
+                                }
                             )
 
                         return stats
@@ -1036,7 +1100,11 @@ class SharePointContentService:
                 )
                 stats["pages_processed"] += 1
             else:
-                page_name = page.get("name", "") or page.get("title", "") or f"Page {page.get('id', 'unknown')}"
+                page_name = (
+                    page.get("name", "")
+                    or page.get("title", "")
+                    or f"Page {page.get('id', 'unknown')}"
+                )
                 stats["skipped_items"] += 1
                 stats["skipped_details"].append(
                     {"file": page_name, "reason": "Empty or unreadable content"}

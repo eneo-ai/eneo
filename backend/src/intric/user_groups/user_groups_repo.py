@@ -67,7 +67,9 @@ class UserGroupsRepository:
             ),
         ]
 
-    async def update_user_group(self, user_group: UserGroupUpdate) -> UserGroupInDB | None:
+    async def update_user_group(
+        self, user_group: UserGroupUpdate
+    ) -> UserGroupInDB | None:
         try:
             return await self.delegate.update(
                 user_group,

@@ -6,9 +6,12 @@ from intric.allowed_origins.allowed_origin_router import (
     router as allowed_origins_router,
 )
 from intric.analysis.analysis_router import router as analysis_router
+from intric.api.audit.routes import router as audit_router
+from intric.api.documentation.openapi_endpoints import router as documentation_router
 from intric.apps.app_runs.api.app_run_router import router as app_run_router
 from intric.apps.apps.api.app_router import router as app_router
 from intric.assistants.api.assistant_router import router as assistants_router
+from intric.authentication.federation_router import router as federation_router
 from intric.completion_models.presentation.completion_models_router import (
     router as completion_models_router,
 )
@@ -29,25 +32,29 @@ from intric.group_chat.presentation.group_chat_router import router as group_cha
 from intric.groups_legacy.api.group_router import router as groups_router
 from intric.icons.api.icon_router import router as icons_router
 from intric.info_blobs.info_blobs_router import router as info_blobs_router
+from intric.integration.presentation.admin_sharepoint_router import (
+    router as admin_sharepoint_router,
+)
 from intric.integration.presentation.integration_auth_router import (
     router as integration_auth_router,
 )
 from intric.integration.presentation.integration_router import (
     router as integration_router,
 )
-from intric.mcp_servers.presentation.mcp_server_router import (
-    router as mcp_server_router,
-)
 from intric.integration.presentation.sharepoint_webhook_router import (
     router as sharepoint_webhook_router,
-)
-from intric.integration.presentation.admin_sharepoint_router import (
-    router as admin_sharepoint_router,
 )
 from intric.jobs.job_router import router as jobs_router
 from intric.limits.limit_router import router as limit_router
 from intric.logging.logging_router import router as logging_router
 from intric.main.config import get_settings
+from intric.mcp_servers.presentation.mcp_server_router import (
+    router as mcp_server_router,
+)
+from intric.model_providers.presentation.model_provider_router import (
+    router as model_providers_router,
+)
+from intric.modules.module_router import router as module_router
 from intric.prompts.api.prompt_router import router as prompt_router
 from intric.security_classifications.presentation.security_classification_router import (
     router as security_classifications_router,
@@ -57,52 +64,44 @@ from intric.services.service_router import router as services_router
 from intric.settings.settings_router import router as settings_router
 from intric.spaces.api.space_router import router as space_router
 from intric.storage.presentation.storage_router import router as storage_router
+from intric.sysadmin.sysadmin_router import router as sysadmin_router
 from intric.templates.api.templates_router import router as template_router
+from intric.templates.app_template.api.admin_router import (
+    router as app_template_admin_router,
+)
 from intric.templates.app_template.api.app_template_router import (
     router as app_template_router,
-)
-from intric.templates.assistant_template.api.assistant_template_router import (
-    router as assistant_template_router,
 )
 from intric.templates.assistant_template.api.admin_router import (
     router as assistant_template_admin_router,
 )
-from intric.templates.app_template.api.admin_router import (
-    router as app_template_admin_router,
-)
-from intric.token_usage.presentation.token_usage_router import (
-    router as token_usage_router,
-)
-from intric.transcription_models.presentation.transcription_models_router import (
-    router as transcription_models_router,
-)
-from intric.transcription_models.presentation.tenant_transcription_models_router import (
-    router as tenant_transcription_models_router,
-)
-from intric.user_groups.user_groups_router import router as user_groups_router
-from intric.users.user_router import router as users_router
-from intric.websites.presentation.website_router import router as website_router
-from intric.modules.module_router import router as module_router
-from intric.sysadmin.sysadmin_router import router as sysadmin_router
-from intric.tenants.presentation.tenant_credentials_router import (
-    router as tenant_credentials_router,
+from intric.templates.assistant_template.api.assistant_template_router import (
+    router as assistant_template_router,
 )
 from intric.tenants.presentation.tenant_crawler_settings_router import (
     router as tenant_crawler_settings_router,
 )
-from intric.tenants.presentation.tenant_self_credentials_router import (
-    router as tenant_self_credentials_router,
+from intric.tenants.presentation.tenant_credentials_router import (
+    router as tenant_credentials_router,
 )
 from intric.tenants.presentation.tenant_federation_router import (
     router as tenant_federation_router,
 )
-from intric.authentication.federation_router import router as federation_router
-from intric.api.documentation.openapi_endpoints import router as documentation_router
-
-from intric.model_providers.presentation.model_provider_router import (
-    router as model_providers_router,
+from intric.tenants.presentation.tenant_self_credentials_router import (
+    router as tenant_self_credentials_router,
 )
-from intric.api.audit.routes import router as audit_router
+from intric.token_usage.presentation.token_usage_router import (
+    router as token_usage_router,
+)
+from intric.transcription_models.presentation.tenant_transcription_models_router import (
+    router as tenant_transcription_models_router,
+)
+from intric.transcription_models.presentation.transcription_models_router import (
+    router as transcription_models_router,
+)
+from intric.user_groups.user_groups_router import router as user_groups_router
+from intric.users.user_router import router as users_router
+from intric.websites.presentation.website_router import router as website_router
 
 router = APIRouter()
 

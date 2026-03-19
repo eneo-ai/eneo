@@ -154,14 +154,14 @@ class AppService:
 
         return completion_model  # type: ignore[return-value]
 
-    async def get_transcription_model(self, space: Space) -> Optional["TranscriptionModel"]:
+    async def get_transcription_model(
+        self, space: Space
+    ) -> Optional["TranscriptionModel"]:
         """Get a transcription model for the space. Returns None if no model is available."""
         transcription_model = space.get_latest_transcription_model()
         if not transcription_model:
             # Get default from tenant (for both personal and non-personal spaces)
-            transcription_model = (
-                await self.transcription_model_crud_service.get_default_transcription_model()
-            )
+            transcription_model = await self.transcription_model_crud_service.get_default_transcription_model()
 
         if transcription_model is None:
             raise BadRequestException(
@@ -207,12 +207,18 @@ class AppService:
 
         completion_model = None
         if completion_model_id is not None:
-            if not space.is_completion_model_in_space(completion_model_id=completion_model_id):
-                raise BadRequestException("The completion model is not enabled in the space.")
+            if not space.is_completion_model_in_space(
+                completion_model_id=completion_model_id
+            ):
+                raise BadRequestException(
+                    "The completion model is not enabled in the space."
+                )
 
             else:
-                completion_model = await self.completion_model_crud_service.get_completion_model(
-                    completion_model_id
+                completion_model = (
+                    await self.completion_model_crud_service.get_completion_model(
+                        completion_model_id
+                    )
                 )
 
         transcription_model = None
@@ -220,7 +226,9 @@ class AppService:
             if not space.is_transcription_model_in_space(
                 transcription_model_id=transcription_model_id
             ):
-                raise BadRequestException("The transcription model is not enabled in the space.")
+                raise BadRequestException(
+                    "The transcription model is not enabled in the space."
+                )
             else:
                 transcription_model = (
                     await self.transcription_model_crud_service.get_transcription_model(

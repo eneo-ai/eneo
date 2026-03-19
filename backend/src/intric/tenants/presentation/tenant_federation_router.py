@@ -7,16 +7,15 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
+# Audit logging - module level imports for consistency
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
 from intric.authentication import auth
 from intric.main.config import Settings, get_settings, validate_public_origin
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.server.dependencies.container import get_container
-
-# Audit logging - module level imports for consistency
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.actor_types import ActorType
-from intric.audit.domain.entity_types import EntityType
 
 logger = get_logger(__name__)
 
@@ -175,6 +174,7 @@ async def set_tenant_federation(
 
     # Fetch OIDC discovery to validate config
     import aiohttp
+
     from intric.main.aiohttp_client import aiohttp_client
 
     logger.info(
@@ -508,6 +508,7 @@ async def test_tenant_federation(
 
     # Test connection
     import aiohttp
+
     from intric.main.aiohttp_client import aiohttp_client
 
     logger.info(

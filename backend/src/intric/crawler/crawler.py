@@ -262,7 +262,9 @@ class Crawler:
             files_dir=files_dir,
             tenant_crawler_settings=tenant_crawler_settings,
         )
-        return runner.crawl(CrawlSpider, url=url, http_user=http_user, http_pass=http_pass)
+        return runner.crawl(
+            CrawlSpider, url=url, http_user=http_user, http_pass=http_pass
+        )
 
     @crochet.run_in_reactor
     @staticmethod
@@ -286,7 +288,10 @@ class Crawler:
             tenant_crawler_settings=tenant_crawler_settings,
         )
         return runner.crawl(
-            SitemapSpider, sitemap_url=sitemap_url, http_user=http_user, http_pass=http_pass
+            SitemapSpider,
+            sitemap_url=sitemap_url,
+            http_user=http_user,
+            http_pass=http_pass,
         )
 
     @staticmethod
@@ -369,7 +374,9 @@ class Crawler:
                     logger.warning(f"Heartbeat error during crawl: {e}")
                 # Wait for interval or until crawl completes
                 try:
-                    await asyncio.wait_for(crawl_done.wait(), timeout=heartbeat_interval)
+                    await asyncio.wait_for(
+                        crawl_done.wait(), timeout=heartbeat_interval
+                    )
                     break  # Crawl completed
                 except asyncio.TimeoutError:
                     pass  # Interval elapsed, continue heartbeat loop
@@ -472,7 +479,9 @@ class Crawler:
                 except Exception as e:
                     logger.warning(f"Heartbeat error during sitemap crawl: {e}")
                 try:
-                    await asyncio.wait_for(crawl_done.wait(), timeout=heartbeat_interval)
+                    await asyncio.wait_for(
+                        crawl_done.wait(), timeout=heartbeat_interval
+                    )
                     break
                 except asyncio.TimeoutError:
                     pass

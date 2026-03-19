@@ -16,7 +16,10 @@ from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.config import SETTINGS, Settings, get_settings
 from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
 from intric.main.logging import get_logger
-from intric.mcp_servers.infrastructure.proxy import MCPProxySession, MCPProxySessionFactory
+from intric.mcp_servers.infrastructure.proxy import (
+    MCPProxySession,
+    MCPProxySessionFactory,
+)
 from intric.mcp_servers.infrastructure.tool_approval import get_approval_manager
 from intric.sessions.session import SessionInDB
 from intric.vision_models.infrastructure.flux_ai import FluxAdapter
@@ -67,16 +70,17 @@ class CompletionService:
         Uses TenantModelAdapter which routes through LiteLLM.
         """
         import sqlalchemy as sa
+
+        from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
+            TenantModelAdapter,
+        )
         from intric.database.tables.model_providers_table import ModelProviders
         from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
             TenantModelCredentialResolver,
         )
-        from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
-            TenantModelAdapter,
-        )
 
         # All models must have provider_id
-        if not hasattr(model, 'provider_id') or not model.provider_id:
+        if not hasattr(model, "provider_id") or not model.provider_id:
             raise ValueError(
                 f"Model '{model.name}' is missing required provider_id. "
                 "All models must be associated with a ModelProvider."
@@ -87,11 +91,11 @@ class CompletionService:
             logger.error(
                 "Model requires database session but none available",
                 extra={
-                    "model_id": str(model.id) if hasattr(model, 'id') else None,
+                    "model_id": str(model.id) if hasattr(model, "id") else None,
                     "model_name": model.name,
                     "provider_id": str(model.provider_id),
                     "tenant_id": str(self.tenant.id) if self.tenant else None,
-                }
+                },
             )
             raise ValueError(
                 f"Model '{model.name}' requires database session to load provider credentials. "
@@ -127,12 +131,12 @@ class CompletionService:
         logger.info(
             f"Using TenantModelAdapter for model '{model.name}'",
             extra={
-                "model_id": str(model.id) if hasattr(model, 'id') else None,
+                "model_id": str(model.id) if hasattr(model, "id") else None,
                 "model_name": model.name,
                 "provider_id": str(model.provider_id),
                 "provider_type": provider_db.provider_type,
                 "tenant_id": str(self.tenant.id) if self.tenant else None,
-            }
+            },
         )
 
         return TenantModelAdapter(
@@ -172,7 +176,6 @@ class CompletionService:
             if chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
                 yield chunk
                 continue
-
 
             if chunk.tool_call:
                 if chunk.tool_call.name:
@@ -228,7 +231,9 @@ class CompletionService:
 
         # Image generation only works on streaming for now
         # And only if feature flag is turned on
-        use_image_generation = use_image_generation and stream and get_settings().using_image_generation
+        use_image_generation = (
+            use_image_generation and stream and get_settings().using_image_generation
+        )
 
         context = self.context_builder.build_context(
             input_str=text_input,
@@ -255,7 +260,9 @@ class CompletionService:
         mcp_proxy: MCPProxySession | None = None
         if mcp_servers:
             mcp_proxy = self._mcp_proxy_factory.create(mcp_servers)
-            logger.debug(f"[MCP] Proxy created with {mcp_proxy.get_tool_count()} tools from {len(mcp_servers)} server(s)")
+            logger.debug(
+                f"[MCP] Proxy created with {mcp_proxy.get_tool_count()} tools from {len(mcp_servers)} server(s)"
+            )
 
         if not stream:
             try:
@@ -289,7 +296,9 @@ class CompletionService:
                 """
                 try:
                     # Get approval manager if tool approval is required
-                    approval_manager = get_approval_manager() if require_tool_approval else None
+                    approval_manager = (
+                        get_approval_manager() if require_tool_approval else None
+                    )
 
                     async for chunk in model_adapter.iterate_stream(
                         stream=stream_obj,

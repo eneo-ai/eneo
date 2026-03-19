@@ -104,7 +104,9 @@ class GroupChat(Entity):
 
     def get_assistant_by_id(self, assistant_id: "UUID") -> Optional[GroupChatAssistant]:
         """Get an assistant in this group chat by ID"""
-        return next((a for a in self.assistants if a.assistant.id == assistant_id), None)
+        return next(
+            (a for a in self.assistants if a.assistant.id == assistant_id), None
+        )
 
     def get_assistants(self):
         return [assistant.assistant for assistant in self.assistants]

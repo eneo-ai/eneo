@@ -50,7 +50,9 @@ class PromptService:
         if prompt.user.id != self.user.id:
             raise UnauthorizedException("Prompt belongs to other user")
 
-        result = await self.repo.update_prompt_description(id=id, description=description)
+        result = await self.repo.update_prompt_description(
+            id=id, description=description
+        )
         assert result is not None
         return result
 

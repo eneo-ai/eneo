@@ -20,7 +20,9 @@ class PromptRepository:
         self.session = session
         self.factory = factory
 
-    def _to_domain(self, prompt_in_db: Prompts | None, is_selected: bool) -> Prompt | None:
+    def _to_domain(
+        self, prompt_in_db: Prompts | None, is_selected: bool
+    ) -> Prompt | None:
         if prompt_in_db is None:
             return None
 
@@ -45,7 +47,11 @@ class PromptRepository:
         result = await self.session.execute(stmt)
         rows = result.all()
 
-        return [p for row in rows if (p := self._to_domain(row[0], row[1].is_selected)) is not None]
+        return [
+            p
+            for row in rows
+            if (p := self._to_domain(row[0], row[1].is_selected)) is not None
+        ]
 
     async def get_prompts_by_app(self, app_id: UUID) -> list[Prompt]:
         stmt = (
@@ -59,7 +65,11 @@ class PromptRepository:
         result = await self.session.execute(stmt)
         rows = result.all()
 
-        return [p for row in rows if (p := self._to_domain(row[0], row[1].is_selected)) is not None]
+        return [
+            p
+            for row in rows
+            if (p := self._to_domain(row[0], row[1].is_selected)) is not None
+        ]
 
     async def get(self, id: UUID) -> Prompt | None:
         stmt = (
@@ -92,7 +102,9 @@ class PromptRepository:
 
         return self.factory.create_prompt_from_db(prompt_in_db=prompt_in_db)
 
-    async def update_prompt_description(self, id: UUID, description: str) -> Prompt | None:
+    async def update_prompt_description(
+        self, id: UUID, description: str
+    ) -> Prompt | None:
         stmt = (
             sa.update(Prompts)
             .values(description=description)

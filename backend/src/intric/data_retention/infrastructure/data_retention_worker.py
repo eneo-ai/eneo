@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Any, Dict
 
 from dependency_injector import providers
 
@@ -30,13 +30,9 @@ async def cleanup_old_data(container: Container) -> Dict[str, Any]:
 
     results = {
         "start_time": start_time.isoformat(),
-        "deleted": {
-            "questions": 0,
-            "app_runs": 0,
-            "sessions": 0
-        },
+        "deleted": {"questions": 0, "app_runs": 0, "sessions": 0},
         "errors": [],
-        "success": True
+        "success": True,
     }
 
     logger.info("Starting data retention cleanup job")
@@ -50,10 +46,14 @@ async def cleanup_old_data(container: Container) -> Dict[str, Any]:
             # Delete old questions
             try:
                 async with session.begin():
-                    questions_count = await data_retention_service.delete_old_questions()
+                    questions_count = (
+                        await data_retention_service.delete_old_questions()
+                    )
                     results["deleted"]["questions"] = questions_count
                     if questions_count > 0:
-                        logger.info(f"Deleted {questions_count} old questions based on retention policies")
+                        logger.info(
+                            f"Deleted {questions_count} old questions based on retention policies"
+                        )
             except Exception as e:
                 error_msg = f"Failed to delete old questions: {str(e)}"
                 logger.error(error_msg, exc_info=True)
@@ -66,7 +66,9 @@ async def cleanup_old_data(container: Container) -> Dict[str, Any]:
                     app_runs_count = await data_retention_service.delete_old_app_runs()
                     results["deleted"]["app_runs"] = app_runs_count
                     if app_runs_count > 0:
-                        logger.info(f"Deleted {app_runs_count} old app runs based on retention policies")
+                        logger.info(
+                            f"Deleted {app_runs_count} old app runs based on retention policies"
+                        )
             except Exception as e:
                 error_msg = f"Failed to delete old app runs: {str(e)}"
                 logger.error(error_msg, exc_info=True)

@@ -1,10 +1,10 @@
 import json
 import secrets
-from fastapi import APIRouter, Body, Depends, HTTPException, status
 from typing import Dict, Optional
 from uuid import UUID
 
 import redis.asyncio as redis
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 
 from intric.integration.application.tenant_sharepoint_app_service import (
     TenantSharePointAppService,
@@ -15,22 +15,22 @@ from intric.integration.infrastructure.auth_service.service_account_auth_service
 from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
     TenantAppAuthService,
 )
-from intric.settings.encryption_service import EncryptionService
 from intric.integration.presentation.admin_models import (
-    TenantSharePointAppCreate,
-    TenantSharePointAppPublic,
-    TenantAppTestResult,
-    SharePointSubscriptionPublic,
-    SubscriptionRenewalResult,
+    ServiceAccountAuthCallback,
     ServiceAccountAuthStart,
     ServiceAccountAuthStartResponse,
-    ServiceAccountAuthCallback,
+    SharePointSubscriptionPublic,
+    SubscriptionRenewalResult,
+    TenantAppTestResult,
+    TenantSharePointAppCreate,
+    TenantSharePointAppPublic,
 )
-from intric.main.container.container import Container
 from intric.main.config import get_settings
+from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
+from intric.settings.encryption_service import EncryptionService
 
 logger = get_logger(__name__)
 router = APIRouter()

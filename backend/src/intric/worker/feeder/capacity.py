@@ -272,7 +272,11 @@ class CapacityManager:
                     cursor=cursor, match=pattern, count=100
                 )
                 for key_bytes in keys:
-                    key = key_bytes.decode() if isinstance(key_bytes, bytes) else key_bytes
+                    key = (
+                        key_bytes.decode()
+                        if isinstance(key_bytes, bytes)
+                        else key_bytes
+                    )
                     parts = key.split(":")
                     if len(parts) >= 2:
                         try:

@@ -50,7 +50,9 @@ class UserGroupsService:
         return await self.repo.create_user_group(user_group)
 
     @validate_permissions(Permission.ADMIN)
-    async def get_user_group_by_uuid(self, user_group_uuid: UUID) -> UserGroupInDB | None:
+    async def get_user_group_by_uuid(
+        self, user_group_uuid: UUID
+    ) -> UserGroupInDB | None:
         user_group = await self.repo.get_user_group(user_group_uuid)
         self._validate(user_group, user_group_uuid)
 

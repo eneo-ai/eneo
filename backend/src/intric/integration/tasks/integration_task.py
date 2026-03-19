@@ -1,19 +1,22 @@
 import asyncio
 from typing import TYPE_CHECKING, cast
+
 import redis.asyncio as redis
 import sqlalchemy as sa
 
 from intric.database.tables.model_providers_table import ModelProviders
+from intric.main.config import get_settings
 from intric.main.exceptions import NotFoundException
 from intric.main.logging import get_logger
 from intric.main.models import ChannelType
-from intric.main.config import get_settings
 from intric.worker.worker import Worker
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from intric.integration.domain.entities.integration_knowledge import IntegrationKnowledge
+    from intric.integration.domain.entities.integration_knowledge import (
+        IntegrationKnowledge,
+    )
     from intric.integration.presentation.models import (
         ConfluenceContentTaskParam,
         SharepointContentTaskParam,
@@ -24,7 +27,9 @@ worker = Worker()
 logger = get_logger(__name__)
 
 
-async def _get_knowledge_with_retry(container: "Container", knowledge_id, *, retries: int = 20, delay: float = 1.0):
+async def _get_knowledge_with_retry(
+    container: "Container", knowledge_id, *, retries: int = 20, delay: float = 1.0
+):
     repo = container.integration_knowledge_repo()
 
     for attempt in range(1, retries + 1):
@@ -44,7 +49,9 @@ async def _get_knowledge_with_retry(container: "Container", knowledge_id, *, ret
             await asyncio.sleep(delay)
 
 
-async def _validate_embedding_provider(container: "Container", knowledge: "IntegrationKnowledge"):
+async def _validate_embedding_provider(
+    container: "Container", knowledge: "IntegrationKnowledge"
+):
     provider_id = knowledge.embedding_model.provider_id
     if provider_id is None:
         return
@@ -67,7 +74,9 @@ async def _validate_embedding_provider(container: "Container", knowledge: "Integ
 async def pull_confluence_content(
     params: "ConfluenceContentTaskParam", container: "Container", **kw
 ):
-    knowledge = await _get_knowledge_with_retry(container, params.integration_knowledge_id)
+    knowledge = await _get_knowledge_with_retry(
+        container, params.integration_knowledge_id
+    )
     assert knowledge is not None
     await _validate_embedding_provider(container, knowledge)
 
@@ -95,15 +104,12 @@ async def pull_sharepoint_content(
         redis_client = await redis.from_url(
             f"redis://{settings.redis_host}:{settings.redis_port}",
             encoding="utf8",
-            decode_responses=True
+            decode_responses=True,
         )
 
         # SET NX EX - Set if Not eXists with EXpiration
         lock_acquired = await redis_client.set(
-            lock_key,
-            "locked",
-            nx=True,
-            ex=lock_ttl_seconds
+            lock_key, "locked", nx=True, ex=lock_ttl_seconds
         )
 
         if not lock_acquired:
@@ -117,7 +123,9 @@ async def pull_sharepoint_content(
         logger.info(f"Acquired sync lock for knowledge {knowledge_id_str}")
 
         try:
-            knowledge = await _get_knowledge_with_retry(container, params.integration_knowledge_id)
+            knowledge = await _get_knowledge_with_retry(
+                container, params.integration_knowledge_id
+            )
             assert knowledge is not None
             await _validate_embedding_provider(container, knowledge)
             service = container.sharepoint_content_service()
@@ -145,7 +153,7 @@ async def pull_sharepoint_content(
     except Exception as exc:
         logger.error(
             f"Error in full sync task for knowledge {knowledge_id_str}: {exc}",
-            exc_info=True
+            exc_info=True,
         )
         raise
 
@@ -162,7 +170,9 @@ async def sync_sharepoint_delta(
     # This lock persists across the webhook handler and worker task boundary
     knowledge_id_str = str(params.integration_knowledge_id)
     lock_key = f"sharepoint_sync_lock:{knowledge_id_str}"
-    lock_ttl_seconds = 300  # Lock expires after 5 minutes (longer than any sync should take)
+    lock_ttl_seconds = (
+        300  # Lock expires after 5 minutes (longer than any sync should take)
+    )
 
     try:
         # Try to acquire the lock in Redis (SET only if not exists)
@@ -170,15 +180,12 @@ async def sync_sharepoint_delta(
         redis_client = await redis.from_url(
             f"redis://{settings.redis_host}:{settings.redis_port}",
             encoding="utf8",
-            decode_responses=True
+            decode_responses=True,
         )
 
         # SET NX EX - Set if Not eXists with EXpiration
         lock_acquired = await redis_client.set(
-            lock_key,
-            "locked",
-            nx=True,
-            ex=lock_ttl_seconds
+            lock_key, "locked", nx=True, ex=lock_ttl_seconds
         )
 
         if not lock_acquired:
@@ -192,7 +199,9 @@ async def sync_sharepoint_delta(
         logger.info(f"Acquired sync lock for knowledge {knowledge_id_str}")
 
         try:
-            knowledge = await _get_knowledge_with_retry(container, params.integration_knowledge_id)
+            knowledge = await _get_knowledge_with_retry(
+                container, params.integration_knowledge_id
+            )
             assert knowledge is not None
             await _validate_embedding_provider(container, knowledge)
             service = container.sharepoint_content_service()

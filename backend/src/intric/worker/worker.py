@@ -370,8 +370,9 @@ class Worker:
                         async with session.begin():
                             # Import here to avoid circular imports at module level
                             from sqlalchemy.orm import selectinload
-                            from intric.database.tables.users_table import Users
+
                             from intric.database.tables.tenant_table import Tenants
+                            from intric.database.tables.users_table import Users
                             from intric.users.user import UserInDB
 
                             # Query with ALL selectinload options (exact match with UsersRepository._get_options())

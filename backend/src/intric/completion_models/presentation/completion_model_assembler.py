@@ -83,7 +83,9 @@ class CompletionModelAssembler:
             base_url=completion_model.base_url,
         )
 
-    def from_completion_models_to_models(self, completion_models: list["CompletionModel"]):
+    def from_completion_models_to_models(
+        self, completion_models: list["CompletionModel"]
+    ):
         completion_models_public = [
             self.from_completion_model_to_model(completion_model=completion_model)
             for completion_model in completion_models

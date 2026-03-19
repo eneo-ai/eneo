@@ -20,6 +20,7 @@ class IntegrationKnowledgeFactory:
         # We need to use sqlalchemy.inspect to check if the attribute was loaded
         # without triggering a lazy load (which causes greenlet errors in async context)
         from sqlalchemy import inspect
+
         sharepoint_subscription = None
         try:
             insp = inspect(record)
@@ -44,7 +45,9 @@ class IntegrationKnowledgeFactory:
             site_id=record.site_id,
             last_synced_at=record.last_synced_at,
             last_sync_summary=record.last_sync_summary,
-            sharepoint_subscription_id=getattr(record, "sharepoint_subscription_id", None),
+            sharepoint_subscription_id=getattr(
+                record, "sharepoint_subscription_id", None
+            ),
             sharepoint_subscription=sharepoint_subscription,
             delta_token=getattr(record, "delta_token", None),
             folder_id=getattr(record, "folder_id", None),
@@ -58,7 +61,9 @@ class IntegrationKnowledgeFactory:
 
     @classmethod
     def create_entities(
-        cls, records: list["IntegrationKnowledgeDBModel"], embedding_models: list["EmbeddingModel"]
+        cls,
+        records: list["IntegrationKnowledgeDBModel"],
+        embedding_models: list["EmbeddingModel"],
     ) -> list["IntegrationKnowledge"]:
         entities = []
         for record in records:
@@ -71,7 +76,9 @@ class IntegrationKnowledgeFactory:
                 None,
             )
             if embedding_model:
-                entities.append(cls.create_entity(record=record, embedding_model=embedding_model))
+                entities.append(
+                    cls.create_entity(record=record, embedding_model=embedding_model)
+                )
             else:
                 raise ValueError(f"Embedding model not found for record {record.id}")
         return entities

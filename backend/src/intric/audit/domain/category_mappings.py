@@ -2,7 +2,6 @@
 
 from intric.audit.domain.action_types import ActionType
 
-
 # Category descriptions for UI display
 CATEGORY_DESCRIPTIONS = {
     "admin_actions": "User management, role changes, API keys, tenant settings",

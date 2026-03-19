@@ -1,7 +1,7 @@
 """Database table for audit logs."""
 
-from sqlalchemy import Column, String, Text, ForeignKey, TIMESTAMP, Index
-from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
+from sqlalchemy import TIMESTAMP, Column, ForeignKey, Index, String, Text
+from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 
 from intric.database.tables.base_class import BasePublic
 

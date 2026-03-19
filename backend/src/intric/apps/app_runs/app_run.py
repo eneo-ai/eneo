@@ -31,7 +31,7 @@ class AppRun:
         job_id: UUID | None = None,
         output: str | None = None,
         num_tokens_input: int | None = None,
-        num_tokens_output: int | None = None
+        num_tokens_output: int | None = None,
     ):
         if job_id is not None:
             self.job_id = job_id

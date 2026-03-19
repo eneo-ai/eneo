@@ -100,7 +100,9 @@ class GroupChatAssistantPublic(ToolAssistant):
     @model_validator(mode="after")
     def validate_descriptions(self) -> "GroupChatAssistantPublic":
         if self.default_description is None and self.user_description is None:
-            raise ValueError("Both default_description and user_description cannot be null")
+            raise ValueError(
+                "Both default_description and user_description cannot be null"
+            )
         return self
 
 

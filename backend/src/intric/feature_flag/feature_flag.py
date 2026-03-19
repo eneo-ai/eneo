@@ -16,7 +16,9 @@ class FeatureFlag:
         self.feature_id = feature_id
         self.name = name
         self.tenant_ids = tenant_ids if tenant_ids is not None else set()
-        self.disabled_tenant_ids = disabled_tenant_ids if disabled_tenant_ids is not None else set()
+        self.disabled_tenant_ids = (
+            disabled_tenant_ids if disabled_tenant_ids is not None else set()
+        )
         self.is_enabled_globally = is_enabled_globally
         self.description = description
 

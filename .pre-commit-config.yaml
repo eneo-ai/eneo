@@ -6,8 +6,25 @@ repos:
       - id: ruff-check
         name: ruff
         args: [--fix]
-        stages: [commit]
+        stages: [pre-commit]
         files: ^backend/
+      # Format using project configuration (pyproject.toml)
+      - id: ruff-format
+        name: ruff-format
+        stages: [pre-commit]
+        files: ^backend/
+
+  # Pyright type checking via devcontainer
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright
+        entry: docker exec -u vscode -i eneo_devcontainer-eneo-1 bash -i -c 'cd /workspace/backend && uv run pyright'
+        language: system
+        types: [python]
+        files: ^backend/src/intric/
+        pass_filenames: false
+        stages: [pre-commit]
 
   # Keep uv.lock in sync with pyproject.toml
   - repo: https://github.com/astral-sh/uv-pre-commit

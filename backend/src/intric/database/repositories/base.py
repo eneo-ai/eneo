@@ -71,7 +71,7 @@ class BaseRepositoryDelegate(Generic[T_Model]):
         *,
         exclude: set = set(),
         relationships: list[RelationshipOption] = [],
-        **extra_kwargs
+        **extra_kwargs,
     ) -> T_Model:
         query = (
             sa.insert(self.table)
@@ -80,7 +80,7 @@ class BaseRepositoryDelegate(Generic[T_Model]):
                     exclude_none=True,
                     exclude=exclude | self._get_relationships_names(),
                 ),
-                **extra_kwargs
+                **extra_kwargs,
             )
             .returning(self.table)
         )
@@ -147,12 +147,16 @@ class BaseRepositoryDelegate(Generic[T_Model]):
 
         return query
 
-    async def get_by(self, conditions: dict[InstrumentedAttribute, Any]) -> T_Model | None:
+    async def get_by(
+        self, conditions: dict[InstrumentedAttribute, Any]
+    ) -> T_Model | None:
         query = self._get_query_with_conditions(conditions)
 
         return await self.get_model_from_query(query)
 
-    async def filter_by(self, conditions: dict[InstrumentedAttribute, Any]) -> list[T_Model]:
+    async def filter_by(
+        self, conditions: dict[InstrumentedAttribute, Any]
+    ) -> list[T_Model]:
         query = self._get_query_with_conditions(conditions)
 
         return await self.get_models_from_query(query)
@@ -163,7 +167,7 @@ class BaseRepositoryDelegate(Generic[T_Model]):
         *,
         exclude: set = set(),
         relationships: list[RelationshipOption] = [],
-        **extra_kwargs
+        **extra_kwargs,
     ) -> T_Model | None:
         query = (
             sa.update(self.table)
@@ -172,7 +176,7 @@ class BaseRepositoryDelegate(Generic[T_Model]):
                     exclude_unset=True,
                     exclude={"id", "uuid"} | exclude | self._get_relationships_names(),
                 ),
-                **extra_kwargs
+                **extra_kwargs,
             )
             .where(self.table.id == new_entry.id)  # type: ignore[attr-defined]
             .returning(self.table)
@@ -202,7 +206,9 @@ class BaseRepositoryDelegate(Generic[T_Model]):
 
         return await self.get_model_from_query(query)
 
-    async def delete_by(self, conditions: dict[InstrumentedAttribute, Any]) -> T_Model | None:
+    async def delete_by(
+        self, conditions: dict[InstrumentedAttribute, Any]
+    ) -> T_Model | None:
         query = sa.delete(self.table).returning(self.table)
 
         for attr in conditions.keys():

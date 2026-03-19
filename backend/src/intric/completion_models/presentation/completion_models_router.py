@@ -5,30 +5,31 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from intric.completion_models.presentation import (
-    CompletionModelPublic,
-    CompletionModelUpdateFlags,
-)
-from intric.roles.permissions import Permission, validate_permission
-from intric.completion_models.presentation.completion_model_models import (
-    ModelUsageStatistics,
-    ModelMigrationRequest,
-    MigrationResult,
-    ModelUsageSummary,
-    ModelMigrationHistory,
-    PaginatedResponse as ModelUsagePaginatedResponse,
-)
-from intric.main.container.container import Container
-from intric.main.models import PaginatedResponse, is_provided
-from intric.server.dependencies.container import get_container
-from intric.authentication.auth_dependencies import get_current_active_user
-from intric.server.protocol import responses
-from intric.users.user import UserInDB
-
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.authentication.auth_dependencies import get_current_active_user
+from intric.completion_models.presentation import (
+    CompletionModelPublic,
+    CompletionModelUpdateFlags,
+)
+from intric.completion_models.presentation.completion_model_models import (
+    MigrationResult,
+    ModelMigrationHistory,
+    ModelMigrationRequest,
+    ModelUsageStatistics,
+    ModelUsageSummary,
+)
+from intric.completion_models.presentation.completion_model_models import (
+    PaginatedResponse as ModelUsagePaginatedResponse,
+)
+from intric.main.container.container import Container
+from intric.main.models import PaginatedResponse, is_provided
+from intric.roles.permissions import Permission, validate_permission
+from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
+from intric.users.user import UserInDB
 
 router = APIRouter()
 
@@ -98,8 +99,16 @@ async def update_completion_model(
 
     # Track security classification changes
     if is_provided(update_flags.security_classification):
-        old_sc_name = old_model.security_classification.name if old_model.security_classification else None
-        new_sc_name = completion_model.security_classification.name if completion_model.security_classification else None
+        old_sc_name = (
+            old_model.security_classification.name
+            if old_model.security_classification
+            else None
+        )
+        new_sc_name = (
+            completion_model.security_classification.name
+            if completion_model.security_classification
+            else None
+        )
         if old_sc_name != new_sc_name:
             changes["security_classification"] = {
                 "old": old_sc_name,
@@ -156,8 +165,9 @@ async def get_model_usage_details(
 ) -> ModelUsagePaginatedResponse | None:
     """Get detailed list of entities using this model with cursor pagination"""
     import logging
+
     logger = logging.getLogger(__name__)
-    
+
     logger.info(
         "Starting get_model_usage_details endpoint",
         extra={
@@ -167,32 +177,34 @@ async def get_model_usage_details(
             "entity_type": entity_type,
             "cursor": cursor,
             "limit": limit,
-        }
+        },
     )
-    
+
     try:
         # Get the service and verify container is properly configured
         logger.debug("Getting completion_model_usage_service from container")
         service = container.completion_model_usage_service()
         logger.debug(f"Got service instance: {type(service)}")
-        
+
         # Validate inputs
         if not model_id:
             logger.error("Model ID is required but was None")
             from fastapi import HTTPException
+
             raise HTTPException(status_code=400, detail="Model ID is required")
-        
+
         if not user.tenant_id:
             logger.error("User tenant_id is required but was None")
             from fastapi import HTTPException
+
             raise HTTPException(status_code=400, detail="User tenant_id is required")
-        
+
         # Call the service method
         logger.info("Calling service.get_model_usage_details")
         result = await service.get_model_usage_details(
             model_id, user.tenant_id, entity_type, cursor, limit
         )
-        
+
         logger.info(
             "Successfully retrieved model usage details",
             extra={
@@ -201,11 +213,11 @@ async def get_model_usage_details(
                 "results_count": len(result.items) if result and result.items else 0,
                 "has_more": result.has_more if result else False,
                 "total": result.total if result else 0,
-            }
+            },
         )
-        
+
         return result
-        
+
     except Exception as e:
         logger.error(
             "Error in get_model_usage_details endpoint",
@@ -219,7 +231,7 @@ async def get_model_usage_details(
                 "error": str(e),
                 "error_type": type(e).__name__,
             },
-            exc_info=True
+            exc_info=True,
         )
         # Re-raise to let FastAPI handle the error response
         raise
@@ -238,8 +250,9 @@ async def migrate_model_usage(
 ) -> MigrationResult:
     """Migrate all usage from one model to another with safety checks"""
     import logging
+
     logger = logging.getLogger(__name__)
-    
+
     logger.info(
         "Starting migrate_model_usage endpoint",
         extra={
@@ -249,39 +262,45 @@ async def migrate_model_usage(
             "user_id": str(user.id),
             "entity_types": migration_request.entity_types,
             "confirm_migration": migration_request.confirm_migration,
-        }
+        },
     )
-    
+
     try:
         # Get the service and verify container is properly configured
         logger.debug("Getting completion_model_migration_service from container")
         migration_service = container.completion_model_migration_service()
         logger.debug(f"Got migration service instance: {type(migration_service)}")
-        
+
         # Validate inputs
         if not model_id:
             logger.error("From model ID is required but was None")
             from fastapi import HTTPException
+
             raise HTTPException(status_code=400, detail="From model ID is required")
-        
+
         if not migration_request.to_model_id:
             logger.error("To model ID is required but was None")
             from fastapi import HTTPException
+
             raise HTTPException(status_code=400, detail="To model ID is required")
-        
+
         if model_id == migration_request.to_model_id:
             logger.error("From and to model IDs cannot be the same")
             from fastapi import HTTPException
-            raise HTTPException(status_code=400, detail="From and to model IDs cannot be the same")
-        
+
+            raise HTTPException(
+                status_code=400, detail="From and to model IDs cannot be the same"
+            )
+
         if not user.tenant_id:
             logger.error("User tenant_id is required but was None")
             from fastapi import HTTPException
+
             raise HTTPException(status_code=400, detail="User tenant_id is required")
-        
+
         # Validate admin permissions
         validate_permission(user, Permission.ADMIN)
-        
+
         # Call the service method
         logger.info("Calling migration_service.migrate_model_usage")
         result = await migration_service.migrate_model_usage(
@@ -291,7 +310,7 @@ async def migrate_model_usage(
             user=user,
             confirm_migration=migration_request.confirm_migration,
         )
-        
+
         logger.info(
             "Successfully completed model migration",
             extra={
@@ -304,11 +323,11 @@ async def migrate_model_usage(
                 "duration": result.duration,
                 "success": result.success,
                 "warnings": result.warnings,
-            }
+            },
         )
-        
+
         return result
-        
+
     except Exception as e:
         logger.error(
             "Error in migrate_model_usage endpoint",
@@ -321,7 +340,7 @@ async def migrate_model_usage(
                 "error": str(e),
                 "error_type": type(e).__name__,
             },
-            exc_info=True
+            exc_info=True,
         )
         # Re-raise to let FastAPI handle the error response
         raise
@@ -341,6 +360,7 @@ async def get_all_models_usage_summary(
         return await service.get_all_models_usage_summary(user.tenant_id)
     except Exception as e:
         import logging
+
         logger = logging.getLogger(__name__)
         logger.error(
             "Error in get_all_models_usage_summary endpoint",
@@ -348,9 +368,9 @@ async def get_all_models_usage_summary(
                 "tenant_id": str(user.tenant_id),
                 "user_id": str(user.id),
                 "error": str(e),
-                "error_type": type(e).__name__
+                "error_type": type(e).__name__,
             },
-            exc_info=True
+            exc_info=True,
         )
         # Re-raise to let FastAPI handle the error response
         raise
@@ -387,9 +407,7 @@ async def get_all_migration_history(
 ) -> List[ModelMigrationHistory]:
     """Get all migration history for the tenant"""
     service = container.completion_model_migration_history_service()
-    return await service.get_migration_history_for_tenant(
-        user.tenant_id, limit, offset
-    )
+    return await service.get_migration_history_for_tenant(user.tenant_id, limit, offset)
 
 
 @router.get(
@@ -405,9 +423,10 @@ async def get_migration_history_by_id(
     """Get a specific migration history record by ID"""
     service = container.completion_model_migration_history_service()
     history = await service.get_migration_history_by_id(migration_id, user.tenant_id)
-    
+
     if not history:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="Migration history not found")
-    
+
     return history

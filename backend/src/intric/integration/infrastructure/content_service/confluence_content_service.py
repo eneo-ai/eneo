@@ -61,20 +61,30 @@ class ConfluenceContentService:
     ):
         token = await self.oauth_token_repo.one(id=token_id)
 
-        async def fetch_space_content(token: "ConfluenceToken", start: int, space_key: str):
+        async def fetch_space_content(
+            token: "ConfluenceToken", start: int, space_key: str
+        ):
             async with ConfluenceContentClient(
                 base_url=token.base_url, api_token=token.access_token
             ) as content_client:
-                return await content_client.get_content(start=start, space_key=space_key)
+                return await content_client.get_content(
+                    start=start, space_key=space_key
+                )
 
         size = 50
         start = 0
         while True:
             try:
-                content = await fetch_space_content(token=token, start=start, space_key=space_key)
+                content = await fetch_space_content(
+                    token=token, start=start, space_key=space_key
+                )
             except aiohttp.ClientResponseError:
-                token = await self.oauth_token_service.refresh_and_update_token(token_id=token.id)
-                content = await fetch_space_content(token=token, start=start, space_key=space_key)
+                token = await self.oauth_token_service.refresh_and_update_token(
+                    token_id=token.id
+                )
+                content = await fetch_space_content(
+                    token=token, start=start, space_key=space_key
+                )
 
             logger.info(f"Fetching knowledge, batch {start // 50}")
             results = content.get("results")
@@ -110,9 +120,12 @@ class ConfluenceContentService:
                 integration_knowledge_id=integration_knowledge_id,
             )
 
-            info_blob = await self.info_blob_service.add_info_blob_without_validation(info_blob_add)
+            info_blob = await self.info_blob_service.add_info_blob_without_validation(
+                info_blob_add
+            )
             await self.datastore.add(
-                info_blob=info_blob, embedding_model=integration_knowledge.embedding_model
+                info_blob=info_blob,
+                embedding_model=integration_knowledge.embedding_model,
             )
 
             integration_knowledge_size += info_blob.size

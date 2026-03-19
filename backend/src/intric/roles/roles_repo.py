@@ -11,7 +11,9 @@ from intric.roles.role import RoleCreate, RoleInDB, RoleUpdate
 
 class RolesRepository:
     def __init__(self, session: AsyncSession):
-        self.delegate: BaseRepositoryDelegate[RoleInDB] = BaseRepositoryDelegate(session, Roles, RoleInDB)
+        self.delegate: BaseRepositoryDelegate[RoleInDB] = BaseRepositoryDelegate(
+            session, Roles, RoleInDB
+        )
         self.session = session
 
     async def get_role(self, id: UUID) -> RoleInDB | None:

@@ -29,9 +29,7 @@ def get_container(
 ):
     if sum([with_user, with_user_from_assistant_api_key]) > 1:
         raise ValueError(
-            "Only one of with_user, "
-            "with_user_from_assistant_api_key "
-            "can be set to True"
+            "Only one of with_user, with_user_from_assistant_api_key can be set to True"
         )
 
     async def _get_container(
@@ -79,12 +77,13 @@ def get_container(
 
 def get_container_for_sysadmin():
     """Get a container for sysadmin endpoints that manage their own transactions.
-    
+
     This function creates a container with a session that does NOT have a transaction
     already started. This allows worker tasks and services to manage their own
     transactions without running into "A transaction is already begun on this Session"
     errors.
     """
+
     async def _get_container_for_sysadmin(
         session: AsyncSession = Depends(get_session),
     ):

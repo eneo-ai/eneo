@@ -65,7 +65,9 @@ class AssistantRepository:
             .selectinload(CrawlRuns.job),
             selectinload(Assistants.websites).selectinload(Websites.embedding_model),
             selectinload(Assistants.attachments).selectinload(AssistantsFiles.file),
-            selectinload(Assistants.template).selectinload(AssistantTemplates.completion_model),
+            selectinload(Assistants.template).selectinload(
+                AssistantTemplates.completion_model
+            ),
             selectinload(Assistants.integration_knowledge_list).selectinload(
                 IntegrationKnowledge.embedding_model
             ),
@@ -126,7 +128,9 @@ class AssistantRepository:
                 assistant_id=assistant_id, prompt_id=prompt.id
             )
         else:
-            await self._add_assistant_prompt_entry(assistant_id=assistant_id, prompt_id=prompt.id)
+            await self._add_assistant_prompt_entry(
+                assistant_id=assistant_id, prompt_id=prompt.id
+            )
 
         return prompt
 
@@ -142,15 +146,20 @@ class AssistantRepository:
 
         return await self.session.scalar(stmt)
 
-    async def _set_attachments(self, assistant_in_db: Assistants, attachments: list[FileInfo]):
+    async def _set_attachments(
+        self, assistant_in_db: Assistants, attachments: list[FileInfo]
+    ):
         # Delete all
-        stmt = sa.delete(AssistantsFiles).where(AssistantsFiles.assistant_id == assistant_in_db.id)
+        stmt = sa.delete(AssistantsFiles).where(
+            AssistantsFiles.assistant_id == assistant_in_db.id
+        )
         await self.session.execute(stmt)
 
         # Add attachments
         if attachments:
             attachments_dicts = [
-                dict(assistant_id=assistant_in_db.id, file_id=file.id) for file in attachments
+                dict(assistant_id=assistant_in_db.id, file_id=file.id)
+                for file in attachments
             ]
 
             stmt = sa.insert(AssistantsFiles).values(attachments_dicts)
@@ -158,7 +167,9 @@ class AssistantRepository:
 
         await self.session.refresh(assistant_in_db)
 
-    async def _set_collections(self, assistant_in_db: Assistants, collections: list["Collection"]):
+    async def _set_collections(
+        self, assistant_in_db: Assistants, collections: list["Collection"]
+    ):
         # Delete all
         stmt = sa.delete(AssistantsGroups).where(
             AssistantsGroups.assistant_id == assistant_in_db.id
@@ -167,13 +178,18 @@ class AssistantRepository:
 
         if collections:
             stmt = sa.insert(AssistantsGroups).values(
-                [dict(group_id=group.id, assistant_id=assistant_in_db.id) for group in collections]
+                [
+                    dict(group_id=group.id, assistant_id=assistant_in_db.id)
+                    for group in collections
+                ]
             )
             await self.session.execute(stmt)
 
         await self.session.refresh(assistant_in_db)
 
-    async def _set_websites(self, assistant_in_db: Assistants, websites: list["Website"]):
+    async def _set_websites(
+        self, assistant_in_db: Assistants, websites: list["Website"]
+    ):
         # Delete all
         stmt = sa.delete(AssistantsWebsites).where(
             AssistantsWebsites.assistant_id == assistant_in_db.id
@@ -288,7 +304,9 @@ class AssistantRepository:
                 sa.func.coalesce(sa.func.count(InfoBlobs.id).label("infoblob_count")),
             )
             .outerjoin(InfoBlobs, CollectionsTable.id == InfoBlobs.group_id)
-            .outerjoin(AssistantsGroups, AssistantsGroups.group_id == CollectionsTable.id)
+            .outerjoin(
+                AssistantsGroups, AssistantsGroups.group_id == CollectionsTable.id
+            )
             .where(AssistantsGroups.assistant_id == assistant_id)
             .group_by(CollectionsTable.id)
             .order_by(CollectionsTable.created_at)
@@ -312,10 +330,14 @@ class AssistantRepository:
 
     async def add(self, assistant: Assistant):
         completion_model_id = (
-            assistant.completion_model.id if assistant.completion_model is not None else None
+            assistant.completion_model.id
+            if assistant.completion_model is not None
+            else None
         )
 
-        template_id = assistant.source_template.id if assistant.source_template else None
+        template_id = (
+            assistant.source_template.id if assistant.source_template else None
+        )
         assert assistant.user is not None
         query = (
             sa.insert(Assistants)
@@ -362,7 +384,9 @@ class AssistantRepository:
         completion_models = await self.completion_model_repo.all()
 
         return [
-            self.factory.create_assistant_from_db(record, completion_model_list=completion_models)
+            self.factory.create_assistant_from_db(
+                record, completion_model_list=completion_models
+            )
             for record in records
         ]
 
@@ -393,13 +417,17 @@ class AssistantRepository:
         completion_models = await self.completion_model_repo.all()
 
         return [
-            self.factory.create_assistant_from_db(record, completion_model_list=completion_models)
+            self.factory.create_assistant_from_db(
+                record, completion_model_list=completion_models
+            )
             for record in records
         ]
 
     async def update(self, assistant: Assistant):
         completion_model_id = (
-            assistant.completion_model.id if assistant.completion_model is not None else None
+            assistant.completion_model.id
+            if assistant.completion_model is not None
+            else None
         )
         query = (
             sa.update(Assistants)
@@ -426,15 +454,23 @@ class AssistantRepository:
         # assign groups and websites
         await self._set_collections(entry_in_db, assistant.collections)
         await self._set_websites(entry_in_db, assistant.websites)
-        await self._set_integration_knowledge(entry_in_db, assistant.integration_knowledge_list)
+        await self._set_integration_knowledge(
+            entry_in_db, assistant.integration_knowledge_list
+        )
         await self._set_attachments(entry_in_db, assistant.attachments)
 
         # Set MCP servers if provided
-        if hasattr(assistant, '_mcp_server_ids') and assistant._mcp_server_ids is not None:
+        if (
+            hasattr(assistant, "_mcp_server_ids")
+            and assistant._mcp_server_ids is not None
+        ):
             await self._set_mcp_servers(entry_in_db, assistant._mcp_server_ids)
 
         # Set MCP tool overrides if provided
-        if hasattr(assistant, '_mcp_tool_settings') and assistant._mcp_tool_settings is not None:
+        if (
+            hasattr(assistant, "_mcp_tool_settings")
+            and assistant._mcp_tool_settings is not None
+        ):
             await self._set_mcp_tools(entry_in_db, assistant._mcp_tool_settings)
 
         if assistant.prompt:

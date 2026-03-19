@@ -47,7 +47,7 @@ class WebSocketManager:
         try:
             _ = task.result()
         except asyncio.exceptions.CancelledError:
-            logger.debug(f'Task {task.get_name()} was cancelled')
+            logger.debug(f"Task {task.get_name()} was cancelled")
         except Exception:
             logger.exception(traceback.format_exc())
 
@@ -60,7 +60,7 @@ class WebSocketManager:
     async def _listen_to_redis(self, channel: str):
         async with self.redis.pubsub() as pubsub:
             await pubsub.subscribe(channel)
-            logger.debug('Subscribed to Redis channel: %s', channel)
+            logger.debug("Subscribed to Redis channel: %s", channel)
 
             while True:
                 raw_message = await pubsub.get_message(

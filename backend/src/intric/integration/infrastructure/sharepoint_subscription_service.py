@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import socket
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List
+from typing import List, Optional
 from uuid import UUID
 
 import aiohttp
-import socket
 
+from intric.integration.domain.entities.oauth_token import SharePointToken
 from intric.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
-from intric.integration.domain.entities.oauth_token import SharePointToken
 from intric.integration.domain.repositories.sharepoint_subscription_repo import (
     SharePointSubscriptionRepository,
 )

@@ -58,7 +58,11 @@ class SessionService:
             )
 
         # Verify the session belongs to the specified assistant/group chat
-        if assistant_id is not None and session.assistant is not None and session.assistant.id != assistant_id:
+        if (
+            assistant_id is not None
+            and session.assistant is not None
+            and session.assistant.id != assistant_id
+        ):
             raise NotFoundException("Session belongs to another assistant")
         if group_chat_id is not None and session.group_chat_id != group_chat_id:
             raise NotFoundException("Session belongs to another group chat")
@@ -96,7 +100,9 @@ class SessionService:
         self._check_exists_and_belongs_to_user(session)
         return session
 
-    async def delete(self, id: UUID, assistant_id: UUID = None, group_chat_id: UUID = None):
+    async def delete(
+        self, id: UUID, assistant_id: UUID = None, group_chat_id: UUID = None
+    ):
         session = await self.session_repo.get(id)
         self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id

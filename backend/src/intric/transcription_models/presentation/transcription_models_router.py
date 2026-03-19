@@ -2,6 +2,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.main.container.container import Container
 from intric.main.models import PaginatedResponse, is_provided
 from intric.roles.permissions import Permission, validate_permission
@@ -11,11 +15,6 @@ from intric.transcription_models.presentation.transcription_model_models import 
     TranscriptionModelPublic,
     TranscriptionModelUpdate,
 )
-
-# Audit logging - module level imports for consistency
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
 
 router = APIRouter()
 
@@ -85,8 +84,16 @@ async def update_transcription_model(
 
     # Track security classification changes
     if is_provided(update_flags.security_classification):
-        old_sc_name = old_model.security_classification.name if old_model.security_classification else None
-        new_sc_name = transcription_model.security_classification.name if transcription_model.security_classification else None
+        old_sc_name = (
+            old_model.security_classification.name
+            if old_model.security_classification
+            else None
+        )
+        new_sc_name = (
+            transcription_model.security_classification.name
+            if transcription_model.security_classification
+            else None
+        )
         if old_sc_name != new_sc_name:
             changes["security_classification"] = {
                 "old": old_sc_name,

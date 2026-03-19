@@ -102,8 +102,4 @@ class SyncLog(Entity):
     @property
     def total_items_processed(self) -> int:
         """Total items processed in this sync."""
-        return (
-            self.files_processed
-            + self.pages_processed
-            + self.folders_processed
-        )
+        return self.files_processed + self.pages_processed + self.folders_processed

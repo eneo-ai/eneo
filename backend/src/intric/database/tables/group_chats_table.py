@@ -38,7 +38,9 @@ class GroupChatsTable(BasePublic):
 
     space_id: Mapped[UUID] = mapped_column(ForeignKey(Spaces.id, ondelete="CASCADE"))
     user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="CASCADE"))
-    group_chat_assistants: Mapped[list["GroupChatsAssistantsMapping"]] = relationship(viewonly=True)
+    group_chat_assistants: Mapped[list["GroupChatsAssistantsMapping"]] = relationship(
+        viewonly=True
+    )
 
 
 class GroupChatsAssistantsMapping(BaseCrossReference):

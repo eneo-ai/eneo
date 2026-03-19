@@ -2,6 +2,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
     EmbeddingModelUpdate,
@@ -11,11 +15,6 @@ from intric.main.models import PaginatedResponse, is_provided
 from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
-
-# Audit logging - module level imports for consistency
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
 
 router = APIRouter()
 
@@ -27,7 +26,9 @@ async def get_embedding_models(
     service = container.embedding_model_crud_service()
     models = await service.get_embedding_models()
 
-    return PaginatedResponse(items=[EmbeddingModelPublic.from_domain(model) for model in models])
+    return PaginatedResponse(
+        items=[EmbeddingModelPublic.from_domain(model) for model in models]
+    )
 
 
 @router.get(
@@ -85,8 +86,16 @@ async def update_embedding_model(
 
     # Track security classification changes
     if is_provided(update.security_classification):
-        old_sc_name = old_model.security_classification.name if old_model.security_classification else None
-        new_sc_name = model.security_classification.name if model.security_classification else None
+        old_sc_name = (
+            old_model.security_classification.name
+            if old_model.security_classification
+            else None
+        )
+        new_sc_name = (
+            model.security_classification.name
+            if model.security_classification
+            else None
+        )
         if old_sc_name != new_sc_name:
             changes["security_classification"] = {
                 "old": old_sc_name,

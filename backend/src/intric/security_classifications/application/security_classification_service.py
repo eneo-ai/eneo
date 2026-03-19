@@ -84,7 +84,9 @@ class SecurityClassificationService:
         # Validate all IDs exist before making any updates
         for sc_id in security_classifications:
             if sc_id not in db_classifications_map:
-                raise NotFoundException(f"Security classification with ID {sc_id} not found")
+                raise NotFoundException(
+                    f"Security classification with ID {sc_id} not found"
+                )
 
         for db_sc_id in list(db_classifications_map.keys()):
             if db_sc_id not in security_classifications:

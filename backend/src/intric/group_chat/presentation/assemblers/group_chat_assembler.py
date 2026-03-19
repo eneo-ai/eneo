@@ -36,7 +36,8 @@ class GroupChatAssembler:
         group_chat_assistants = []
         if len(assistants) > 0:
             group_chat_assistants = [
-                cls._assemble_group_chat_assistant(assistant=assistant) for assistant in assistants
+                cls._assemble_group_chat_assistant(assistant=assistant)
+                for assistant in assistants
             ]
 
         return GroupChatTools(assistants=group_chat_assistants)

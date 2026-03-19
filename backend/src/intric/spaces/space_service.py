@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Union
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
+
 from intric.completion_models.application.completion_model_crud_service import (
     CompletionModelCRUDService,
 )
@@ -16,12 +18,10 @@ from intric.main.exceptions import (
     BadRequestException,
     NotFoundException,
     UnauthorizedException,
+    UniqueException,
 )
-from sqlalchemy.exc import IntegrityError
-from intric.main.exceptions import UniqueException
 from intric.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
 from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
-from intric.user_groups.user_groups_repo import UserGroupsRepository
 from intric.spaces.space import Space
 from intric.spaces.space_factory import SpaceFactory
 from intric.spaces.space_repo import SpaceRepository
@@ -31,13 +31,16 @@ from intric.transcription_models.application.transcription_model_crud_service im
 from intric.transcription_models.domain.transcription_model_service import (
     TranscriptionModelService,
 )
+from intric.user_groups.user_groups_repo import UserGroupsRepository
 from intric.users.user import UserInDB
 from intric.users.user_repo import UsersRepository
 
 if TYPE_CHECKING:
     from intric.actors import ActorManager
     from intric.completion_models.domain import CompletionModel
-    from intric.embedding_models.domain import EmbeddingModel  # type: ignore[attr-defined]
+    from intric.embedding_models.domain import (
+        EmbeddingModel,  # type: ignore[attr-defined]
+    )
     from intric.security_classifications.application.security_classification_service import (
         SecurityClassificationService,
     )
@@ -52,7 +55,9 @@ class SpaceSecurityClassificationImpactAnalysis:
     affected_transcription_models: list["TranscriptionModel"]
     affected_mcp_servers: list = field(default_factory=list)
 
-TENANT_SPACE_NAME = "Organization space" 
+
+TENANT_SPACE_NAME = "Organization space"
+
 
 class SpaceService:
     def __init__(
@@ -95,23 +100,31 @@ class SpaceService:
     async def create_space(self, name: str):
         hub = await self.get_or_create_tenant_space()
         space = self.factory.create_space(
-            name=name, 
-            tenant_id=self.user.tenant_id, 
-            tenant_space_id=getattr(hub, "id", None)
+            name=name,
+            tenant_id=self.user.tenant_id,
+            tenant_space_id=getattr(hub, "id", None),
         )
 
         def _get_latest_model(models):
-            for model in sorted(models, key=lambda model: model.created_at, reverse=True):
+            for model in sorted(
+                models, key=lambda model: model.created_at, reverse=True
+            ):
                 if model.can_access:
                     return model
 
         # Set embedding models as only the latest one
-        embedding_models = await self.embedding_model_crud_service.get_embedding_models()
+        embedding_models = (
+            await self.embedding_model_crud_service.get_embedding_models()
+        )
         latest_embedding_model = _get_latest_model(embedding_models)
-        space.embedding_models = [latest_embedding_model] if latest_embedding_model else []
+        space.embedding_models = (
+            [latest_embedding_model] if latest_embedding_model else []
+        )
 
         # Set completion models
-        completion_models = await self.completion_model_service.get_available_completion_models()
+        completion_models = (
+            await self.completion_model_service.get_available_completion_models()
+        )
         space.completion_models = completion_models
 
         # Set transcription models as only the default one
@@ -125,9 +138,12 @@ class SpaceService:
         space.transcription_models = transcription_models
 
         # Set all tenant-enabled MCP servers for new spaces
-        from intric.database.tables.mcp_server_table import MCPServers as MCPServersTable
-        from intric.mcp_servers.domain.entities.mcp_server import MCPServer
         import sqlalchemy as sa
+
+        from intric.database.tables.mcp_server_table import (
+            MCPServers as MCPServersTable,
+        )
+        from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 
         query = (
             sa.select(MCPServersTable)
@@ -203,10 +219,8 @@ class SpaceService:
             if not self.user.tenant.security_enabled:
                 raise BadRequestException("Security is not enabled for this tenant")
             if security_classification is not None:
-                space_security_classification = (
-                    await self.security_classification_service.get_security_classification(  # noqa: E501
-                        security_classification.id
-                    )
+                space_security_classification = await self.security_classification_service.get_security_classification(  # noqa: E501
+                    security_classification.id
                 )
                 if space_security_classification is None:
                     raise BadRequestException("Security classification not found")
@@ -214,7 +228,9 @@ class SpaceService:
         completion_models = None
         if completion_model_ids is not None:
             completion_models = [
-                await self.completion_model_crud_service.get_completion_model(model_id=model_id)
+                await self.completion_model_crud_service.get_completion_model(
+                    model_id=model_id
+                )
                 for model_id in completion_model_ids
             ]
 
@@ -222,7 +238,9 @@ class SpaceService:
         if embedding_model_ids is not None:
             embedding_models = []
             for model_id in embedding_model_ids:
-                model = await self.embedding_model_crud_service.get_embedding_model(model_id)
+                model = await self.embedding_model_crud_service.get_embedding_model(
+                    model_id
+                )
                 if model:
                     embedding_models.append(model)
 
@@ -238,7 +256,12 @@ class SpaceService:
         mcp_servers = None
         if mcp_server_ids is not None:
             # Query tenant MCP servers directly from database
-            from intric.database.tables.mcp_server_table import MCPServers as MCPServersTable
+            import sqlalchemy as sa
+            from sqlalchemy.orm import selectinload as _selectinload
+
+            from intric.database.tables.mcp_server_table import (
+                MCPServers as MCPServersTable,
+            )
             from intric.database.tables.security_classifications_table import (
                 SecurityClassification as SecurityClassificationDBModel,
             )
@@ -246,8 +269,6 @@ class SpaceService:
             from intric.security_classifications.domain.entities.security_classification import (
                 SecurityClassification,
             )
-            import sqlalchemy as sa
-            from sqlalchemy.orm import selectinload as _selectinload
 
             query = (
                 sa.select(MCPServersTable)
@@ -314,10 +335,7 @@ class SpaceService:
         # Convert MCPToolSetting objects to tuples for repository
         mcp_tool_settings = None
         if mcp_tools is not None:
-            mcp_tool_settings = [
-                (tool.tool_id, tool.is_enabled)
-                for tool in mcp_tools
-            ]
+            mcp_tool_settings = [(tool.tool_id, tool.is_enabled) for tool in mcp_tools]
 
         return await self.repo.update(space, mcp_tool_settings=mcp_tool_settings)
 
@@ -353,10 +371,14 @@ class SpaceService:
         remaining_mcp_server_ids = [s.id for s in space.mcp_servers]
 
         affected_completion_models = [
-            cm for cm in current_completion_models if cm.id not in remaining_completion_model_ids
+            cm
+            for cm in current_completion_models
+            if cm.id not in remaining_completion_model_ids
         ]
         affected_embedding_models = [
-            em for em in current_embedding_models if em.id not in remaining_embedding_model_ids
+            em
+            for em in current_embedding_models
+            if em.id not in remaining_embedding_model_ids
         ]
         affected_transcription_models = [
             tm
@@ -369,7 +391,10 @@ class SpaceService:
 
         affected_assistants = []
         for assistant in space.assistants:
-            if assistant.completion_model is not None and assistant.completion_model.id not in remaining_completion_model_ids:
+            if (
+                assistant.completion_model is not None
+                and assistant.completion_model.id not in remaining_completion_model_ids
+            ):
                 affected_assistants.append(assistant)
             if (
                 assistant.embedding_model_id is not None
@@ -395,7 +420,10 @@ class SpaceService:
 
         affected_services = []
         for service in space.services:
-            if service.completion_model is not None and service.completion_model.id not in remaining_completion_model_ids:
+            if (
+                service.completion_model is not None
+                and service.completion_model.id not in remaining_completion_model_ids
+            ):
                 affected_services.append(service)
             for group in service.groups:
                 if group.embedding_model.id not in remaining_embedding_model_ids:  # type: ignore[attr-defined]
@@ -505,9 +533,13 @@ class SpaceService:
         try:
             return space.get_member(user_id)
         except KeyError:
-            raise NotFoundException(f"User {user_id} is not a member of space {space_id}")
+            raise NotFoundException(
+                f"User {user_id} is not a member of space {space_id}"
+            )
 
-    async def change_role_of_member(self, id: UUID, user_id: UUID, new_role: SpaceRoleValue):
+    async def change_role_of_member(
+        self, id: UUID, user_id: UUID, new_role: SpaceRoleValue
+    ):
         if user_id == self.user.id:
             raise BadRequestException("Can not change role of yourself")
 
@@ -515,7 +547,9 @@ class SpaceService:
         actor = self._get_actor(space)
 
         if not actor.can_edit_space():
-            raise UnauthorizedException("Only Admins of the space can change the roles of members")
+            raise UnauthorizedException(
+                "Only Admins of the space can change the roles of members"
+            )
 
         space.change_member_role(user_id, new_role)
         space = await self.repo.update(space)
@@ -546,7 +580,9 @@ class SpaceService:
         actor = self._get_actor(space)
 
         if not actor.can_add_group_members():
-            raise UnauthorizedException("Only Admins can add group members to the space")
+            raise UnauthorizedException(
+                "Only Admins can add group members to the space"
+            )
 
         if space.is_personal():
             raise BadRequestException("Cannot add group members to personal spaces")
@@ -583,7 +619,9 @@ class SpaceService:
         actor = self._get_actor(space)
 
         if not actor.can_delete_group_members():
-            raise UnauthorizedException("Only Admins can remove group members from the space")
+            raise UnauthorizedException(
+                "Only Admins can remove group members from the space"
+            )
 
         space.remove_group_member(group_id)
         await self.repo.update(space)
@@ -616,7 +654,9 @@ class SpaceService:
 
         return space.get_group_member(group_id)
 
-    async def get_group_member(self, space_id: UUID, group_id: UUID) -> SpaceGroupMember:
+    async def get_group_member(
+        self, space_id: UUID, group_id: UUID
+    ) -> SpaceGroupMember:
         """Get a group member by ID.
 
         Args:
@@ -633,7 +673,9 @@ class SpaceService:
         try:
             return space.get_group_member(group_id)
         except KeyError:
-            raise NotFoundException(f"Group {group_id} is not a member of space {space_id}")
+            raise NotFoundException(
+                f"Group {group_id} is not a member of space {space_id}"
+            )
 
     async def create_personal_space(self):
         hub = await self.get_or_create_tenant_space()
@@ -652,7 +694,7 @@ class SpaceService:
 
         return space_in_db
 
-    async def get_personal_space(self): 
+    async def get_personal_space(self):
         return await self.repo.get_personal_space(self.user.id)
 
     async def _get_space_by_resource(self, space: Space) -> Space:
@@ -687,8 +729,6 @@ class SpaceService:
         space = await self.repo.get_space_by_service(service_id=service_id)
         return await self._get_space_by_resource(space)
 
-
-
     async def get_knowledge_for_space(self, space_id: UUID):
         space = await self.get_space(space_id)
         return (
@@ -696,7 +736,7 @@ class SpaceService:
             space.websites,
             space.integration_knowledge_list,
         )
-    
+
     async def ensure_org_admin_members(self, hub: "Space") -> "Space":
         admins = await self.user_repo.list_tenant_admins(self.user.tenant_id)
         added = False

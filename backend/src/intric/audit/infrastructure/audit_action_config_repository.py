@@ -1,8 +1,7 @@
 """Repository for managing per-action audit logging configuration."""
 
-from uuid import UUID
-
 from typing import Any, cast
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

@@ -15,7 +15,11 @@ class RetentionPolicyResponse(BaseModel):
     """
 
     tenant_id: UUID
-    retention_days: int = Field(ge=1, le=2555, description="Days to retain audit logs (1-2555). Recommended: 90+")
+    retention_days: int = Field(
+        ge=1,
+        le=2555,
+        description="Days to retain audit logs (1-2555). Recommended: 90+",
+    )
     last_purge_at: Optional[datetime] = None
     purge_count: int
     created_at: datetime

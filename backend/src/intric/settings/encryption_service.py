@@ -27,7 +27,9 @@ class EncryptionService:
 
     def __init__(
         self,
-        encryption_key: Optional[Union[str, "EncryptionService._HasEncryptionKey"]] = None,
+        encryption_key: Optional[
+            Union[str, "EncryptionService._HasEncryptionKey"]
+        ] = None,
     ):
         """Initialize with optional encryption key or settings wrapper.
 
@@ -38,7 +40,9 @@ class EncryptionService:
         self._fernet: Optional[Fernet] = None
 
         key_value: Optional[str]
-        if hasattr(encryption_key, "encryption_key") and not isinstance(encryption_key, str):
+        if hasattr(encryption_key, "encryption_key") and not isinstance(
+            encryption_key, str
+        ):
             key_value = getattr(encryption_key, "encryption_key", None)
         else:
             key_value = encryption_key  # type: ignore[assignment]
@@ -126,7 +130,7 @@ class EncryptionService:
         if len(parts) != 4:
             raise ValueError(f"Invalid encrypted format: {ciphertext[:30]}...")
 
-        scheme, algorithm, version, token = parts
+        _scheme, algorithm, version, token = parts
 
         if algorithm != "fernet" or version != "v1":
             raise ValueError(

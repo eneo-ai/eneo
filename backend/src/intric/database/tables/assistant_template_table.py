@@ -1,8 +1,8 @@
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
-from datetime import datetime
 
-from sqlalchemy import ForeignKey, Text, TIMESTAMP
+from sqlalchemy import TIMESTAMP, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,47 +27,28 @@ class AssistantTemplates(BasePublic):
 
     # New fields for tenant-scoped template management
     tenant_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey("tenants.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True, index=True
     )
     deleted_at: Mapped[Optional[datetime]] = mapped_column(
-        TIMESTAMP(timezone=True),
-        nullable=True,
-        index=True
+        TIMESTAMP(timezone=True), nullable=True, index=True
     )
-    original_snapshot: Mapped[Optional[dict]] = mapped_column(
-        JSONB,
-        nullable=True
-    )
+    original_snapshot: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     # Audit trail fields for delete/restore operations
     deleted_by_user_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     restored_by_user_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     restored_at: Mapped[Optional[datetime]] = mapped_column(
-        TIMESTAMP(timezone=True),
-        nullable=True
+        TIMESTAMP(timezone=True), nullable=True
     )
 
     # Default template configuration field
-    is_default: Mapped[bool] = mapped_column(
-        default=False,
-        nullable=False,
-        index=True
-    )
+    is_default: Mapped[bool] = mapped_column(default=False, nullable=False, index=True)
 
     # Icon support - Lucide icon name (e.g., "rocket", "building")
-    icon_name: Mapped[Optional[str]] = mapped_column(
-        nullable=True,
-        index=True
-    )
+    icon_name: Mapped[Optional[str]] = mapped_column(nullable=True, index=True)
 
     completion_model: Mapped[CompletionModels] = relationship()

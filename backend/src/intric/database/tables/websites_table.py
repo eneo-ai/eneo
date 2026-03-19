@@ -1,8 +1,8 @@
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
-from datetime import datetime
 
-from sqlalchemy import BigInteger, ForeignKey, and_, select, TIMESTAMP, String
+from sqlalchemy import TIMESTAMP, BigInteger, ForeignKey, String, and_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship
 

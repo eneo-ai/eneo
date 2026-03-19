@@ -104,9 +104,12 @@ class AppFactory:
             else None
         )
         input_fields = [
-            InputField.model_validate(input_field) for input_field in app_in_db.input_fields
+            InputField.model_validate(input_field)
+            for input_field in app_in_db.input_fields
         ]
-        attachments = [File(**attachment.file.to_dict()) for attachment in app_in_db.attachments]
+        attachments = [
+            File(**attachment.file.to_dict()) for attachment in app_in_db.attachments
+        ]
         model_kwargs = (
             ModelKwargs(**app_in_db.completion_model_kwargs)
             if app_in_db.completion_model_kwargs is not None
@@ -148,15 +151,19 @@ class AppFactory:
     ):
         if app_in_db.prompt is not None:  # type: ignore[attr-defined]
             prompt = PromptFactory.create_prompt_from_db(
-                prompt_in_db=app_in_db.prompt, is_selected=True  # type: ignore[attr-defined]
+                prompt_in_db=app_in_db.prompt,  # type: ignore[attr-defined]
+                is_selected=True,
             )
         else:
             prompt = None
 
         input_fields = [
-            InputField.model_validate(input_field) for input_field in app_in_db.input_fields
+            InputField.model_validate(input_field)
+            for input_field in app_in_db.input_fields
         ]
-        attachments = [File(**attachment.file.to_dict()) for attachment in app_in_db.attachments]
+        attachments = [
+            File(**attachment.file.to_dict()) for attachment in app_in_db.attachments
+        ]
         model_kwargs = (
             ModelKwargs(**app_in_db.completion_model_kwargs)
             if app_in_db.completion_model_kwargs is not None
@@ -170,7 +177,11 @@ class AppFactory:
         )
 
         completion_model = next(
-            (model for model in completion_models if model.id == app_in_db.completion_model_id),
+            (
+                model
+                for model in completion_models
+                if model.id == app_in_db.completion_model_id
+            ),
             None,
         )
 

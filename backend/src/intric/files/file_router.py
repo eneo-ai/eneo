@@ -6,6 +6,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.authentication.signed_urls import generate_signed_token, verify_signed_token
 from intric.files.file_models import (
     ContentDisposition,
@@ -25,11 +29,6 @@ from intric.main.models import PaginatedResponse
 from intric.server import protocol
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
-
-# Audit logging - module level imports for consistency
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
 
 router = APIRouter()
 
@@ -255,7 +254,7 @@ async def download_file_signed(
 
     total_size = len(content_bytes)
     headers = {
-        "Content-Disposition": f"{content_disposition.value}; filename=\"{response_filename}\"",
+        "Content-Disposition": f'{content_disposition.value}; filename="{response_filename}"',
         "Accept-Ranges": "bytes",
     }
 

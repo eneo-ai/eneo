@@ -15,14 +15,11 @@ from intric.integration.infrastructure.mappers.tenant_integration_mapper import 
 from intric.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
 
 if TYPE_CHECKING:
-
     from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class TenantIntegrationRepoImpl(
-    BaseRepoImpl[
-        TenantIntegration, TenantIntegrationDBModel, TenantIntegrationMapper
-    ],
+    BaseRepoImpl[TenantIntegration, TenantIntegrationDBModel, TenantIntegrationMapper],
     TenantIntegrationRepository,
 ):
     def __init__(self, session: "AsyncSession", mapper: TenantIntegrationMapper):

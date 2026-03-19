@@ -12,13 +12,19 @@ from intric.integration.infrastructure.preview_service.base_preview_service impo
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
+    from intric.integration.domain.entities.tenant_sharepoint_app import (
+        TenantSharePointApp,
+    )
     from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
         TenantSharePointAppRepository,
     )
+    from intric.integration.infrastructure.auth_service.service_account_auth_service import (
+        ServiceAccountAuthService,
+    )
+    from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
+        TenantAppAuthService,
+    )
     from intric.integration.infrastructure.oauth_token_service import OauthTokenService
-    from intric.integration.domain.entities.tenant_sharepoint_app import TenantSharePointApp
-    from intric.integration.infrastructure.auth_service.tenant_app_auth_service import TenantAppAuthService
-    from intric.integration.infrastructure.auth_service.service_account_auth_service import ServiceAccountAuthService
 
 logger = get_logger(__name__)
 
@@ -77,13 +83,15 @@ class SharePointPreviewService(BasePreviewService):
                 if drive_data:
                     owner = drive_data.get("owner", {}).get("user", {})
                     display_name = owner.get("displayName", "OneDrive")
-                    results.append(IntegrationPreview(
-                        name=f"OneDrive - {display_name}",
-                        key=drive_data.get("id"),
-                        url=drive_data.get("webUrl"),
-                        type="onedrive",
-                        category=self.CATEGORY_ONEDRIVE,
-                    ))
+                    results.append(
+                        IntegrationPreview(
+                            name=f"OneDrive - {display_name}",
+                            key=drive_data.get("id"),
+                            url=drive_data.get("webUrl"),
+                            type="onedrive",
+                            category=self.CATEGORY_ONEDRIVE,
+                        )
+                    )
             except Exception as e:
                 # OneDrive may not be available (e.g., permissions not granted)
                 logger.warning(f"Could not fetch OneDrive: {e}")
@@ -102,26 +110,42 @@ class SharePointPreviewService(BasePreviewService):
                 raise ValueError("ServiceAccountAuthService not configured")
             logger.info(
                 "Refreshing service account token",
-                extra={"tenant_app_id": str(tenant_app.id), "auth_method": tenant_app.auth_method}
+                extra={
+                    "tenant_app_id": str(tenant_app.id),
+                    "auth_method": tenant_app.auth_method,
+                },
             )
-            token_data = await self.service_account_auth_service.refresh_access_token(tenant_app)
+            token_data = await self.service_account_auth_service.refresh_access_token(
+                tenant_app
+            )
             new_refresh_token = token_data.get("refresh_token")
-            if new_refresh_token and new_refresh_token != tenant_app.service_account_refresh_token:
+            if (
+                new_refresh_token
+                and new_refresh_token != tenant_app.service_account_refresh_token
+            ):
                 tenant_app.update_refresh_token(new_refresh_token)
                 if self.tenant_sharepoint_app_repo:
                     await self.tenant_sharepoint_app_repo.update(tenant_app)
             access_token = token_data["access_token"]
             logger.info(
                 "Service account token refreshed successfully",
-                extra={"tenant_app_id": str(tenant_app.id), "token_length": len(access_token) if access_token else 0}
+                extra={
+                    "tenant_app_id": str(tenant_app.id),
+                    "token_length": len(access_token) if access_token else 0,
+                },
             )
         else:
             if not self.tenant_app_auth_service:
                 raise ValueError("TenantAppAuthService not configured")
-            access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+            access_token = await self.tenant_app_auth_service.get_access_token(
+                tenant_app
+            )
             logger.info(
                 "Using tenant app authentication for preview",
-                extra={"tenant_app_id": str(tenant_app.id), "auth_method": tenant_app.auth_method}
+                extra={
+                    "tenant_app_id": str(tenant_app.id),
+                    "auth_method": tenant_app.auth_method,
+                },
             )
 
         # Use the token to fetch sites
@@ -135,7 +159,9 @@ class SharePointPreviewService(BasePreviewService):
             try:
                 data = await content_client.get_sites()
             except Exception as e:
-                logger.error(f"Error fetching SharePoint preview data with app auth: {e}")
+                logger.error(
+                    f"Error fetching SharePoint preview data with app auth: {e}"
+                )
                 raise
 
             site_previews = self._to_sharepoint_preview_data(data=data)
@@ -143,7 +169,9 @@ class SharePointPreviewService(BasePreviewService):
                 content_client=content_client, site_previews=site_previews
             )
             for preview in site_previews:
-                preview.category = categories.get(preview.key, self.CATEGORY_OTHER_SITES)
+                preview.category = categories.get(
+                    preview.key, self.CATEGORY_OTHER_SITES
+                )
 
         return site_previews
 
@@ -171,7 +199,9 @@ class SharePointPreviewService(BasePreviewService):
         site_previews: List[IntegrationPreview],
     ) -> Dict[str, str]:
         categories = {
-            preview.key: self.CATEGORY_OTHER_SITES for preview in site_previews if preview.key
+            preview.key: self.CATEGORY_OTHER_SITES
+            for preview in site_previews
+            if preview.key
         }
         if not site_previews:
             return categories

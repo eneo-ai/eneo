@@ -5,11 +5,15 @@ These functions provide token counting for different model families,
 helping users understand their context window usage without blocking
 their ability to send messages.
 """
+
 import logging
 from typing import Optional
 
 import tiktoken
-from intric.tokens.model_encodings import get_encoding_for_model as get_model_encoding_from_config
+
+from intric.tokens.model_encodings import (
+    get_encoding_for_model as get_model_encoding_from_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +53,7 @@ def count_tokens(text: str, model_name: str) -> int:
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
                 f"Counted {tokens} tokens for {len(text)} chars using {encoding_name} "
-                f"(model: {model_name}, ratio: {len(text)/tokens:.2f} chars/token)"
+                f"(model: {model_name}, ratio: {len(text) / tokens:.2f} chars/token)"
             )
         return tokens
 
@@ -58,7 +62,9 @@ def count_tokens(text: str, model_name: str) -> int:
         # rather than breaking the user experience
         logger.error(f"Token counting failed for model {model_name}: {e}")
         estimated = len(text) // 4  # Fallback approximation
-        logger.debug(f"Using fallback estimate: {estimated} tokens for {len(text)} chars")
+        logger.debug(
+            f"Using fallback estimate: {estimated} tokens for {len(text)} chars"
+        )
         return estimated
 
 

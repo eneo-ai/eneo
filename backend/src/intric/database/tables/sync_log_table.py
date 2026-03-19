@@ -19,9 +19,7 @@ class SyncLog(BasePublic):
         ForeignKey(IntegrationKnowledge.id, ondelete="CASCADE"), index=True
     )
     sync_type: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(
-        Text, nullable=False
-    )
+    status: Mapped[str] = mapped_column(Text, nullable=False)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     sync_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

@@ -6,7 +6,6 @@ from intric.assistants.api.assistant_models import (
     DefaultAssistant,
     ModelInfo,
 )
-from intric.tokens.token_utils import count_assistant_prompt_tokens
 from intric.assistants.assistant import Assistant
 from intric.collections.presentation.collection_models import CollectionPublic
 from intric.completion_models.presentation.completion_model_assembler import (
@@ -27,6 +26,7 @@ from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
 )
 from intric.prompts.api.prompt_assembler import PromptAssembler
 from intric.questions.question import ToolAssistant, UseTools
+from intric.tokens.token_utils import count_assistant_prompt_tokens
 from intric.users.user import UserInDB
 from intric.websites.presentation.website_models import WebsitePublic
 
@@ -47,7 +47,9 @@ class AssistantAssembler:
         if model is None:
             return None
 
-        return CompletionModelAssembler.from_completion_model_to_sparse(completion_model=model)
+        return CompletionModelAssembler.from_completion_model_to_sparse(
+            completion_model=model
+        )
 
     def _get_prompt(self, assistant: Assistant):
         return (
@@ -57,7 +59,10 @@ class AssistantAssembler:
         )
 
     def _get_attachments(self, assistant: Assistant):
-        return [FilePublic(**attachment.model_dump()) for attachment in assistant.attachments]
+        return [
+            FilePublic(**attachment.model_dump())
+            for attachment in assistant.attachments
+        ]
 
     def _get_allowed_attachments(self):
         return FileRestrictions(
@@ -76,7 +81,9 @@ class AssistantAssembler:
         permissions = permissions or []
 
         prompt = self._get_prompt(assistant)
-        completion_model = self._get_completion_model_sparse(model=assistant.completion_model)
+        completion_model = self._get_completion_model_sparse(
+            model=assistant.completion_model
+        )
         attachments = self._get_attachments(assistant)
         allowed_attachments = self._get_allowed_attachments()
         tools = UseTools(
@@ -86,10 +93,15 @@ class AssistantAssembler:
             ]
         )
 
-        groups = [CollectionPublic.from_domain(collection=group) for group in assistant.collections]
+        groups = [
+            CollectionPublic.from_domain(collection=group)
+            for group in assistant.collections
+        ]
 
-        integration_knowledge_list = IntegrationKnowledgeAssembler.to_knowledge_model_list(
-            items=assistant.integration_knowledge_list
+        integration_knowledge_list = (
+            IntegrationKnowledgeAssembler.to_knowledge_model_list(
+                items=assistant.integration_knowledge_list
+            )
         )
 
         # Calculate model info
@@ -127,7 +139,9 @@ class AssistantAssembler:
             allowed_attachments=allowed_attachments,
             user=assistant.user,
             groups=groups,
-            websites=[WebsitePublic.from_domain(website) for website in assistant.websites],
+            websites=[
+                WebsitePublic.from_domain(website) for website in assistant.websites
+            ],
             integration_knowledge_list=integration_knowledge_list,
             mcp_servers=[
                 MCPServerAssembler.to_dict_with_tools(server)

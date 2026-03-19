@@ -1,9 +1,9 @@
 """Database table for audit retention policies."""
 
-from sqlalchemy import Column, Integer, ForeignKey, TIMESTAMP, Boolean
+from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID
 
-from intric.database.tables.base_class import TimestampMixin, BaseWithTableName
+from intric.database.tables.base_class import BaseWithTableName, TimestampMixin
 
 
 class AuditRetentionPolicy(TimestampMixin, BaseWithTableName):

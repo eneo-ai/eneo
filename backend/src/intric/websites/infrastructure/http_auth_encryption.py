@@ -9,6 +9,7 @@ Why Infrastructure Layer:
 
 import base64
 from typing import Optional
+
 from cryptography.fernet import Fernet
 
 from intric.websites.domain.http_auth_credentials import HttpAuthCredentials
@@ -33,6 +34,7 @@ class HttpAuthEncryptionService:
             RuntimeError: If encryption key is invalid
         """
         from intric.main.config import get_settings
+
         encryption_key = get_settings().encryption_key
         self._fernet = self._initialize_fernet(encryption_key)
 
@@ -52,7 +54,7 @@ class HttpAuthEncryptionService:
             # Return None - encryption service is disabled
             # This should only happen if validation was bypassed
             return None
-        
+
         try:
             return Fernet(encryption_key.encode())
         except Exception as e:
@@ -70,7 +72,7 @@ class HttpAuthEncryptionService:
 
         Returns:
             Base64-encoded encrypted password safe for database storage
-            
+
         Raises:
             RuntimeError: If encryption service is not initialized (missing encryption_key)
         """
@@ -80,7 +82,7 @@ class HttpAuthEncryptionService:
                 "ENCRYPTION_KEY is required for HTTP authentication. "
                 "Generate key: uv run python -m intric.cli.generate_encryption_key"
             )
-        encrypted_bytes = self._fernet.encrypt(password.encode('utf-8'))
+        encrypted_bytes = self._fernet.encrypt(password.encode("utf-8"))
         return base64.urlsafe_b64encode(encrypted_bytes).decode()
 
     def decrypt_password(self, encrypted_password: str) -> str:
@@ -105,13 +107,12 @@ class HttpAuthEncryptionService:
         try:
             encrypted_bytes = base64.urlsafe_b64decode(encrypted_password.encode())
             decrypted_bytes = self._fernet.decrypt(encrypted_bytes)
-            return decrypted_bytes.decode('utf-8')
+            return decrypted_bytes.decode("utf-8")
         except Exception as e:
             raise ValueError(f"Failed to decrypt password: {str(e)}")
 
     def encrypt_credentials(
-        self,
-        credentials: HttpAuthCredentials
+        self, credentials: HttpAuthCredentials
     ) -> tuple[str, str, str]:
         """Encrypt credentials for database storage.
 
@@ -124,14 +125,11 @@ class HttpAuthEncryptionService:
         return (
             credentials.username,
             self.encrypt_password(credentials.password),
-            credentials.auth_domain
+            credentials.auth_domain,
         )
 
     def decrypt_credentials(
-        self,
-        username: str,
-        encrypted_password: str,
-        auth_domain: str
+        self, username: str, encrypted_password: str, auth_domain: str
     ) -> HttpAuthCredentials:
         """Decrypt credentials from database storage.
 
@@ -148,7 +146,5 @@ class HttpAuthEncryptionService:
         """
         plaintext_password = self.decrypt_password(encrypted_password)
         return HttpAuthCredentials(
-            username=username,
-            password=plaintext_password,
-            auth_domain=auth_domain
+            username=username, password=plaintext_password, auth_domain=auth_domain
         )

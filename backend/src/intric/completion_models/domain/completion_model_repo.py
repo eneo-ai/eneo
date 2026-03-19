@@ -25,8 +25,12 @@ class CompletionModelRepository:
 
     async def all(self, with_deprecated: bool = False):
         stmt = (
-            sa.select(CompletionModels, ModelProviders.name, ModelProviders.provider_type)
-            .outerjoin(ModelProviders, CompletionModels.provider_id == ModelProviders.id)
+            sa.select(
+                CompletionModels, ModelProviders.name, ModelProviders.provider_type
+            )
+            .outerjoin(
+                ModelProviders, CompletionModels.provider_id == ModelProviders.id
+            )
             .options(
                 selectinload(CompletionModels.security_classification),
                 selectinload(CompletionModels.security_classification).options(
@@ -39,7 +43,7 @@ class CompletionModelRepository:
                 # UI filtering happens at the presentation layer
                 sa.or_(
                     CompletionModels.tenant_id.is_(None),
-                    CompletionModels.tenant_id == self.user.tenant_id
+                    CompletionModels.tenant_id == self.user.tenant_id,
                 )
             )
             .order_by(
@@ -68,8 +72,12 @@ class CompletionModelRepository:
     async def one_or_none(self, model_id: "UUID") -> Optional["CompletionModel"]:
         # When fetching by ID, return ANY model (global or tenant) that the user can access
         stmt = (
-            sa.select(CompletionModels, ModelProviders.name, ModelProviders.provider_type)
-            .outerjoin(ModelProviders, CompletionModels.provider_id == ModelProviders.id)
+            sa.select(
+                CompletionModels, ModelProviders.name, ModelProviders.provider_type
+            )
+            .outerjoin(
+                ModelProviders, CompletionModels.provider_id == ModelProviders.id
+            )
             .options(
                 selectinload(CompletionModels.security_classification),
                 selectinload(CompletionModels.security_classification).options(
@@ -81,8 +89,8 @@ class CompletionModelRepository:
                 # Allow both global models (tenant_id IS NULL) and tenant models (tenant_id = user.tenant_id)
                 sa.or_(
                     CompletionModels.tenant_id.is_(None),
-                    CompletionModels.tenant_id == self.user.tenant_id
-                )
+                    CompletionModels.tenant_id == self.user.tenant_id,
+                ),
             )
         )
 

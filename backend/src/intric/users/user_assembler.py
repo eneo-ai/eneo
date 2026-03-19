@@ -1,4 +1,5 @@
 from typing import Optional
+
 from intric.main.models import CursorPaginatedResponse
 from intric.users.user import UserInDB, UserSparse
 

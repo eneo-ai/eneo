@@ -29,23 +29,23 @@ if TYPE_CHECKING:
     from intric.integration.domain.repositories.oauth_token_repo import (
         OauthTokenRepository,
     )
-    from intric.integration.domain.repositories.user_integration_repo import (
-        UserIntegrationRepository,
-    )
     from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
         TenantSharePointAppRepository,
     )
-    from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
-        TenantAppAuthService,
+    from intric.integration.domain.repositories.user_integration_repo import (
+        UserIntegrationRepository,
     )
     from intric.integration.infrastructure.auth_service.service_account_auth_service import (
         ServiceAccountAuthService,
     )
-    from intric.jobs.job_service import JobService
-    from intric.spaces.space import Space
+    from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
+        TenantAppAuthService,
+    )
     from intric.integration.infrastructure.sharepoint_subscription_service import (
         SharePointSubscriptionService,
     )
+    from intric.jobs.job_service import JobService
+    from intric.spaces.space import Space
     from intric.spaces.space_repo import SpaceRepository
     from intric.users.user import UserInDB
 
@@ -379,6 +379,7 @@ class IntegrationKnowledgeService:
         """
         import sqlalchemy as sa
         from sqlalchemy.dialects.postgresql import insert as pg_insert
+
         from intric.database.tables.integration_knowledge_spaces_table import (
             IntegrationKnowledgesSpaces,
         )
@@ -435,6 +436,7 @@ class IntegrationKnowledgeService:
         integration_knowledge_id: "UUID",
     ) -> None:
         import sqlalchemy as sa
+
         from intric.database.tables.integration_knowledge_spaces_table import (
             IntegrationKnowledgesSpaces,
         )
@@ -602,19 +604,21 @@ class IntegrationKnowledgeService:
 
         resource_type = knowledge.resource_type or "site"
         is_onedrive = resource_type == "onedrive"
-        subscription_resource_id = knowledge.drive_id if is_onedrive else knowledge.site_id
+        subscription_resource_id = (
+            knowledge.drive_id if is_onedrive else knowledge.site_id
+        )
 
         if subscription_resource_id:
             try:
-                subscription = (
-                    await self.sharepoint_subscription_service.ensure_subscription_for_site(
-                        user_integration_id=user_integration.id,
-                        site_id=subscription_resource_id,
-                        token=subscription_token,
-                        is_onedrive=is_onedrive,
-                    )
+                subscription = await self.sharepoint_subscription_service.ensure_subscription_for_site(
+                    user_integration_id=user_integration.id,
+                    site_id=subscription_resource_id,
+                    token=subscription_token,
+                    is_onedrive=is_onedrive,
                 )
-                subscription_db_id = getattr(subscription, "id", None) if subscription else None
+                subscription_db_id = (
+                    getattr(subscription, "id", None) if subscription else None
+                )
                 existing_subscription_db_id = getattr(
                     knowledge, "sharepoint_subscription_id", None
                 )
@@ -740,7 +744,9 @@ class IntegrationKnowledgeService:
         for item in owned_items:
             knowledge = await self.integration_knowledge_repo.one(id=item.id)
             knowledge.wrapper_name = normalized_name
-            updated_items.append(await self.integration_knowledge_repo.update(knowledge))
+            updated_items.append(
+                await self.integration_knowledge_repo.update(knowledge)
+            )
 
         return updated_items
 

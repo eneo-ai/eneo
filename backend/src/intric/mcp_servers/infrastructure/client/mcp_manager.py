@@ -6,7 +6,10 @@ from types import TracebackType
 from typing import Any
 
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer
-from intric.mcp_servers.infrastructure.client.mcp_client import MCPClient, MCPClientError
+from intric.mcp_servers.infrastructure.client.mcp_client import (
+    MCPClient,
+    MCPClientError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +20,14 @@ class MCPManager:
     def __init__(self):
         """Initialize MCP manager."""
         self.clients: dict[str, MCPClient] = {}
-        self.tools: dict[str, dict[str, Any]] = {}  # tool_name -> tool_definition + mcp_server_id
+        self.tools: dict[
+            str, dict[str, Any]
+        ] = {}  # tool_name -> tool_definition + mcp_server_id
 
     async def connect_servers(
-        self, mcp_servers: list[MCPServer], env_vars_map: dict[str, dict[str, str]] | None = None
+        self,
+        mcp_servers: list[MCPServer],
+        env_vars_map: dict[str, dict[str, str]] | None = None,
     ) -> None:
         """
         Connect to multiple MCP servers.
@@ -37,13 +44,17 @@ class MCPManager:
             env_vars = env_vars_map.get(str(server.id), {})
             client = MCPClient(server, env_vars)
             self.clients[str(server.id)] = client
-            task = asyncio.create_task(self._connect_and_list_tools(client, str(server.id)))
+            task = asyncio.create_task(
+                self._connect_and_list_tools(client, str(server.id))
+            )
             connection_tasks.append(task)
 
         # Wait for all connections
         await asyncio.gather(*connection_tasks, return_exceptions=True)
 
-        logger.info(f"Connected to {len(self.clients)} MCP servers with {len(self.tools)} total tools")
+        logger.info(
+            f"Connected to {len(self.clients)} MCP servers with {len(self.tools)} total tools"
+        )
 
     async def _connect_and_list_tools(self, client: MCPClient, server_id: str) -> None:
         """Connect to an MCP server and list its tools."""
@@ -54,7 +65,9 @@ class MCPManager:
             # Register tools with server ID prefix to avoid name collisions
             for tool in tools:
                 # Prefix tool name with server name to make it unique
-                prefixed_name = f"{client.mcp_server.name.lower().replace(' ', '_')}_{tool['name']}"
+                prefixed_name = (
+                    f"{client.mcp_server.name.lower().replace(' ', '_')}_{tool['name']}"
+                )
 
                 self.tools[prefixed_name] = {
                     **tool,
@@ -63,7 +76,9 @@ class MCPManager:
                     "original_tool_name": tool["name"],
                 }
 
-                logger.debug(f"Registered tool: {prefixed_name} from {client.mcp_server.name}")
+                logger.debug(
+                    f"Registered tool: {prefixed_name} from {client.mcp_server.name}"
+                )
 
         except MCPClientError as e:
             logger.error(f"Failed to connect to MCP server {server_id}: {e}")
@@ -86,7 +101,9 @@ class MCPManager:
                 "function": {
                     "name": tool_name,
                     "description": tool_def.get("description", ""),
-                    "parameters": tool_def.get("input_schema", {"type": "object", "properties": {}}),
+                    "parameters": tool_def.get(
+                        "input_schema", {"type": "object", "properties": {}}
+                    ),
                 },
                 # Include metadata for display purposes
                 "mcp_server_name": tool_def.get("mcp_server_name"),
@@ -96,7 +113,9 @@ class MCPManager:
 
         return llm_tools
 
-    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def call_tool(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Call a tool by name.
 
@@ -125,7 +144,9 @@ class MCPManager:
         except Exception as e:
             logger.error(f"Error calling tool {tool_name}: {e}")
             return {
-                "content": [{"type": "text", "text": f"Error executing tool: {str(e)}"}],
+                "content": [
+                    {"type": "text", "text": f"Error executing tool: {str(e)}"}
+                ],
                 "is_error": True,
             }
 

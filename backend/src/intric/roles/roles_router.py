@@ -4,6 +4,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.main.container.container import Container
 from intric.roles.role import (
     PermissionPublic,
@@ -15,11 +19,6 @@ from intric.roles.role import (
 from intric.roles.roles_protocol import to_roles_paginated_response
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
-
-# Audit logging - module level imports for consistency
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
 
 router = APIRouter()
 

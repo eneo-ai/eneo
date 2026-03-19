@@ -29,7 +29,9 @@ def validate_retention_days(days: int, context: str = "retention") -> int:
         ValueError: If days is outside valid range
     """
     if days < MIN_RETENTION_DAYS:
-        raise ValueError(f"Minimum {context} retention period is {MIN_RETENTION_DAYS} day")
+        raise ValueError(
+            f"Minimum {context} retention period is {MIN_RETENTION_DAYS} day"
+        )
 
     if days > MAX_RETENTION_DAYS:
         raise ValueError(

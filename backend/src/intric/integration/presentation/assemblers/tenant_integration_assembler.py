@@ -1,6 +1,8 @@
 from typing import TYPE_CHECKING
 
-from intric.integration.presentation.models import TenantIntegration as TenantIntegrationModel
+from intric.integration.presentation.models import (
+    TenantIntegration as TenantIntegrationModel,
+)
 from intric.integration.presentation.models import TenantIntegrationList
 
 if TYPE_CHECKING:

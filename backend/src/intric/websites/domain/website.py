@@ -211,18 +211,12 @@ class Website(Entity):
                 self.next_retry_at = None
 
         # Handle auth updates (both must be provided together or both None)
-        if (
-            is_provided(http_auth_username)
-            or is_provided(http_auth_password)
-        ):
+        if is_provided(http_auth_username) or is_provided(http_auth_password):
             # If either is explicitly None, remove auth
             if http_auth_username is None or http_auth_password is None:
                 self.remove_http_auth()
             # If both provided, set/update auth
-            elif (
-                is_provided(http_auth_username)
-                and is_provided(http_auth_password)
-            ):
+            elif is_provided(http_auth_username) and is_provided(http_auth_password):
                 self.set_http_auth(http_auth_username, http_auth_password)
             # If only one provided, that's an error
             else:

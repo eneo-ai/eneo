@@ -4,10 +4,14 @@ from intric.base.base_entity import EntityMapper
 from intric.database.tables.sharepoint_subscription_table import (
     SharePointSubscription as SharePointSubscriptionDBModel,
 )
-from intric.integration.domain.entities.sharepoint_subscription import SharePointSubscription
+from intric.integration.domain.entities.sharepoint_subscription import (
+    SharePointSubscription,
+)
 
 
-class SharePointSubscriptionMapper(EntityMapper[SharePointSubscription, SharePointSubscriptionDBModel]):
+class SharePointSubscriptionMapper(
+    EntityMapper[SharePointSubscription, SharePointSubscriptionDBModel]
+):
     def to_db_dict(self, entity: SharePointSubscription) -> Dict[str, Any]:
         result = {
             "id": entity.id,
@@ -25,7 +29,9 @@ class SharePointSubscriptionMapper(EntityMapper[SharePointSubscription, SharePoi
             result["updated_at"] = entity.updated_at
         return result
 
-    def to_entity(self, db_model: SharePointSubscriptionDBModel) -> SharePointSubscription:
+    def to_entity(
+        self, db_model: SharePointSubscriptionDBModel
+    ) -> SharePointSubscription:
         return SharePointSubscription(
             id=db_model.id,
             user_integration_id=db_model.user_integration_id,

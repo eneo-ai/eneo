@@ -3,14 +3,13 @@ from typing import TYPE_CHECKING, Optional
 from intric.main.exceptions import BadRequestException
 from intric.spaces.api.space_models import WizardType
 
-
 if TYPE_CHECKING:
-    from uuid import UUID
     from datetime import datetime
+    from uuid import UUID
+
     from intric.ai_models.completion_models.completion_model import (
         CompletionModelPublic,
     )
-
     from intric.spaces.api.space_models import TemplateCreate
     from intric.templates.app_template.api.app_template_models import AppTemplateWizard
 
@@ -54,9 +53,13 @@ class AppTemplate:
         self.input_type = input_type
         self.organization = organization
         # New fields for tenant-scoped template management
-        self.tenant_id = tenant_id  # NULL = global/system template, NOT NULL = tenant-specific
+        self.tenant_id = (
+            tenant_id  # NULL = global/system template, NOT NULL = tenant-specific
+        )
         self.deleted_at = deleted_at  # NULL = active, NOT NULL = soft-deleted
-        self.original_snapshot = original_snapshot  # Snapshot for rollback functionality
+        self.original_snapshot = (
+            original_snapshot  # Snapshot for rollback functionality
+        )
         # Audit trail fields
         self.deleted_by_user_id = deleted_by_user_id
         self.restored_by_user_id = restored_by_user_id
@@ -82,7 +85,7 @@ class AppTemplate:
                 )
 
     def is_from_intric(self) -> bool:
-        return self.organization == 'default'
+        return self.organization == "default"
 
     def belongs_to_tenant(self, tenant_id: "UUID") -> bool:
         """Check if template belongs to given tenant (ignoring global templates)."""
@@ -117,14 +120,16 @@ class AppTemplate:
             "input_description": template_data.get("input_description"),
             "completion_model_kwargs": template_data.get("completion_model_kwargs"),
             "wizard": template_data.get("wizard"),
-            "completion_model_id": str(template_data.get("completion_model_id")) if template_data.get("completion_model_id") else None,
+            "completion_model_id": str(template_data.get("completion_model_id"))
+            if template_data.get("completion_model_id")
+            else None,
         }
 
         # Add created_at if available (should be datetime object)
         created_at = template_data.get("created_at")
         if created_at is not None:
             # Convert to ISO format string if datetime object
-            if hasattr(created_at, 'isoformat'):
+            if hasattr(created_at, "isoformat"):
                 snapshot["created_at"] = created_at.isoformat()
             else:
                 snapshot["created_at"] = created_at

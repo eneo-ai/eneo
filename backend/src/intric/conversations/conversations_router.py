@@ -6,13 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 from intric.assistants.api.assistant_protocol import to_conversation_response
 from intric.conversations.conversation_models import ConversationRequest
+from intric.database.database import AsyncSession, get_session_with_transaction
+from intric.main.container.container import Container
+from intric.main.models import CursorPaginatedResponse
 from intric.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     get_approval_manager,
 )
-from intric.database.database import AsyncSession, get_session_with_transaction
-from intric.main.container.container import Container
-from intric.main.models import CursorPaginatedResponse
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.sessions.session import (
@@ -104,7 +104,9 @@ async def chat(
 )
 async def list_conversations(
     assistant_id: Optional[UUID] = Query(None, description="The UUID of the assistant"),
-    group_chat_id: Optional[UUID] = Query(None, description="The UUID of the group chat"),
+    group_chat_id: Optional[UUID] = Query(
+        None, description="The UUID of the group chat"
+    ),
     limit: int = Query(default=None, gt=0),
     cursor: datetime = None,
     previous: bool = False,
@@ -247,7 +249,9 @@ async def set_title_of_conversation(
     responses=responses.get_responses([400, 404]),
 )
 async def approve_tools(
-    approval_id: str = Query(..., description="The approval ID from the tool_approval_required event"),
+    approval_id: str = Query(
+        ..., description="The approval ID from the tool_approval_required event"
+    ),
     decisions: list[ToolApprovalDecision] = [],
     container: Container = Depends(get_container(with_user=True)),
 ):

@@ -154,6 +154,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         # Validate canonical_public_origin (optional field)
         if "canonical_public_origin" in v:
             from intric.main.config import validate_public_origin
+
             try:
                 v["canonical_public_origin"] = validate_public_origin(
                     v["canonical_public_origin"]

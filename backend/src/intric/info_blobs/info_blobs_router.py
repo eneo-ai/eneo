@@ -116,4 +116,6 @@ async def get_space_info_blobs(
 ):
     service = container.info_blob_service()
     blobs = await service.get_for_space(space_id)
-    return protocol.to_paginated_response([to_info_blob_public_no_text(b) for b in blobs])
+    return protocol.to_paginated_response(
+        [to_info_blob_public_no_text(b) for b in blobs]
+    )

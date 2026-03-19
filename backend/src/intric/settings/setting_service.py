@@ -36,14 +36,14 @@ class SettingService:
 
         # Populate using_templates from feature flag
         using_templates = await self.feature_flag_service.check_is_feature_enabled(
-            feature_name="using_templates",
-            tenant_id=self.user.tenant_id
+            feature_name="using_templates", tenant_id=self.user.tenant_id
         )
 
         # Populate audit_logging_enabled from feature flag
-        audit_logging_enabled = await self.feature_flag_service.check_is_feature_enabled(
-            feature_name="audit_logging_enabled",
-            tenant_id=self.user.tenant_id
+        audit_logging_enabled = (
+            await self.feature_flag_service.check_is_feature_enabled(
+                feature_name="audit_logging_enabled", tenant_id=self.user.tenant_id
+            )
         )
 
         # Get tenant_credentials_enabled from global config
@@ -109,13 +109,11 @@ class SettingService:
         # Enable or disable for tenant
         if enabled:
             await self.feature_flag_service.enable_tenant(
-                feature_id=feature_flag.feature_id,
-                tenant_id=self.user.tenant_id
+                feature_id=feature_flag.feature_id, tenant_id=self.user.tenant_id
             )
         else:
             await self.feature_flag_service.disable_tenant(
-                feature_id=feature_flag.feature_id,
-                tenant_id=self.user.tenant_id
+                feature_id=feature_flag.feature_id, tenant_id=self.user.tenant_id
             )
 
         # Return updated settings with the known state (avoid read-after-write race)
@@ -132,7 +130,7 @@ class SettingService:
         return SettingsPublic(
             chatbot_widget=settings.chatbot_widget if settings else {},
             using_templates=enabled,  # Use the value we just set, not a re-query
-            tenant_credentials_enabled=tenant_credentials_enabled
+            tenant_credentials_enabled=tenant_credentials_enabled,
         )
 
     @validate_permissions(Permission.ADMIN)
@@ -157,13 +155,11 @@ class SettingService:
         # Enable or disable for tenant
         if enabled:
             await self.feature_flag_service.enable_tenant(
-                feature_id=feature_flag.feature_id,
-                tenant_id=self.user.tenant_id
+                feature_id=feature_flag.feature_id, tenant_id=self.user.tenant_id
             )
         else:
             await self.feature_flag_service.disable_tenant(
-                feature_id=feature_flag.feature_id,
-                tenant_id=self.user.tenant_id
+                feature_id=feature_flag.feature_id, tenant_id=self.user.tenant_id
             )
 
         # Return updated settings with the known state (avoid read-after-write race)
@@ -180,11 +176,10 @@ class SettingService:
         return SettingsPublic(
             chatbot_widget=settings.chatbot_widget if settings else {},
             using_templates=await self.feature_flag_service.check_is_feature_enabled(
-                feature_name="using_templates",
-                tenant_id=self.user.tenant_id
+                feature_name="using_templates", tenant_id=self.user.tenant_id
             ),
             audit_logging_enabled=enabled,  # Use the value we just set, not a re-query
-            tenant_credentials_enabled=tenant_credentials_enabled
+            tenant_credentials_enabled=tenant_credentials_enabled,
         )
 
     @validate_permissions(Permission.ADMIN)
@@ -207,12 +202,10 @@ class SettingService:
         return SettingsPublic(
             chatbot_widget=settings.chatbot_widget if settings else {},
             using_templates=await self.feature_flag_service.check_is_feature_enabled(
-                feature_name="using_templates",
-                tenant_id=self.user.tenant_id
+                feature_name="using_templates", tenant_id=self.user.tenant_id
             ),
             audit_logging_enabled=await self.feature_flag_service.check_is_feature_enabled(
-                feature_name="audit_logging_enabled",
-                tenant_id=self.user.tenant_id
+                feature_name="audit_logging_enabled", tenant_id=self.user.tenant_id
             ),
             tenant_credentials_enabled=tenant_credentials_enabled,
             provisioning=enabled,  # Use the value we just set

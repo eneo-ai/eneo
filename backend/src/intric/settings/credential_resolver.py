@@ -1,8 +1,9 @@
 import os
 from typing import TYPE_CHECKING, Optional
+
 from intric.main.config import Settings, get_settings
-from intric.tenants.tenant import TenantInDB
 from intric.main.logging import get_logger
+from intric.tenants.tenant import TenantInDB
 
 if TYPE_CHECKING:
     from intric.settings.encryption_service import EncryptionService
@@ -365,7 +366,10 @@ class CredentialResolver:
         # SINGLE-TENANT MODE (federation_per_tenant_enabled=false):
         # ONLY use environment variables, never check database
         if not self.settings.federation_per_tenant_enabled:
-            if self.settings.oidc_discovery_endpoint and self.settings.oidc_client_secret:
+            if (
+                self.settings.oidc_discovery_endpoint
+                and self.settings.oidc_client_secret
+            ):
                 config = {
                     "provider": "mobilityguard",  # Legacy global provider
                     "discovery_endpoint": self.settings.oidc_discovery_endpoint,
@@ -570,7 +574,9 @@ class CredentialResolver:
                 )
             else:
                 # Single-tenant mode: need global config
-                tenant_context = f" for tenant '{self.tenant.name}'" if self.tenant else ""
+                tenant_context = (
+                    f" for tenant '{self.tenant.name}'" if self.tenant else ""
+                )
                 logger.error(
                     f"No public origin configured{tenant_context}",
                     extra={
@@ -585,7 +591,9 @@ class CredentialResolver:
 
         # Origin should already be validated and normalized by Settings/Tenant validators
         # But double-check HTTPS as defense in depth (allow http://localhost for development)
-        is_localhost = origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1")
+        is_localhost = origin.startswith("http://localhost") or origin.startswith(
+            "http://127.0.0.1"
+        )
         if not origin.startswith("https://") and not is_localhost:
             logger.error(
                 f"Public origin must be HTTPS: {origin}",
@@ -612,7 +620,9 @@ class CredentialResolver:
                 "tenant_id": str(self.tenant.id) if self.tenant else None,
                 "tenant_name": self.tenant.name if self.tenant else "single-tenant",
                 "redirect_uri": redirect_uri,
-                "source": "tenant" if federation_config.get("canonical_public_origin") else "global",
+                "source": "tenant"
+                if federation_config.get("canonical_public_origin")
+                else "global",
                 "metric_name": "oidc.redirect_uri.resolved",
                 "metric_value": 1,
             },

@@ -21,8 +21,12 @@ class IntegrationKnowledgeAssembler:
         cls,
         item: "IntegrationKnowledge",
     ) -> IntegrationKnowledgePublic:
-        embedding_model = EmbeddingModelPublicLegacy.model_validate(item.embedding_model)
-        integration_type = item.user_integration.tenant_integration.integration.integration_type
+        embedding_model = EmbeddingModelPublicLegacy.model_validate(
+            item.embedding_model
+        )
+        integration_type = (
+            item.user_integration.tenant_integration.integration.integration_type
+        )
 
         if integration_type == "confluence":
             task = Task.PULL_CONFLUENCE_CONTENT
@@ -47,7 +51,9 @@ class IntegrationKnowledgeAssembler:
             embedding_model=embedding_model,
             permissions=getattr(item, "permissions", []),
             site_id=getattr(item, "site_id", None),
-            sharepoint_subscription_id=getattr(item, "sharepoint_subscription_id", None),
+            sharepoint_subscription_id=getattr(
+                item, "sharepoint_subscription_id", None
+            ),
             folder_id=getattr(item, "folder_id", None),
             folder_path=getattr(item, "folder_path", None),
             selected_item_type=getattr(item, "selected_item_type", None),

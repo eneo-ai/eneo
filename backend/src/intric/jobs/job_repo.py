@@ -44,11 +44,7 @@ class JobRepository:
         Args:
             id: Job UUID to touch
         """
-        stmt = (
-            sa.update(Jobs)
-            .where(Jobs.id == id)
-            .values(updated_at=sa.func.now())
-        )
+        stmt = sa.update(Jobs).where(Jobs.id == id).values(updated_at=sa.func.now())
         await self.delegate.session.execute(stmt)
 
     async def mark_job_started(self, id: UUID) -> bool:
@@ -83,9 +79,7 @@ class JobRepository:
         result = await self.delegate.session.execute(stmt)
         return result.rowcount > 0
 
-    async def mark_job_failed_if_running(
-        self, id: UUID, error_message: str
-    ) -> int:
+    async def mark_job_failed_if_running(self, id: UUID, error_message: str) -> int:
         """Atomically mark a job as FAILED only if it's currently IN_PROGRESS or QUEUED.
 
         Uses Compare-and-Swap pattern to prevent race conditions when multiple
@@ -128,12 +122,11 @@ class JobRepository:
                     Jobs.status.in_(["in progress", "queued"]),
                     sa.and_(
                         Jobs.status == "failed",
-                        Jobs.finished_at >= twenty_four_hours_ago
+                        Jobs.finished_at >= twenty_four_hours_ago,
                     ),
                     sa.and_(
-                        Jobs.status == "complete",
-                        Jobs.finished_at >= five_minutes_ago
-                    )
+                        Jobs.status == "complete", Jobs.finished_at >= five_minutes_ago
+                    ),
                 )
             )
             .order_by(Jobs.created_at)

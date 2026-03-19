@@ -6,9 +6,12 @@ from typing import Optional
 from uuid import UUID
 
 import redis.exceptions
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
 
+# Import config routes
+from intric.api.audit.config_routes import router as config_router
 from intric.api.audit.retention_schemas import (
     RetentionPolicyResponse,
     RetentionPolicyUpdateRequest,
@@ -36,10 +39,6 @@ from intric.database.tables.users_table import Users
 from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
-import sqlalchemy as sa
-
-# Import config routes
-from intric.api.audit.config_routes import router as config_router
 
 logger = logging.getLogger(__name__)
 
@@ -716,7 +715,7 @@ async def export_audit_logs(
 
     # Count records that will be exported (for compliance tracking)
     if user_id:
-        export_logs, export_count = await audit_service.get_user_logs(
+        _export_logs, export_count = await audit_service.get_user_logs(
             tenant_id=current_user.tenant_id,
             user_id=user_id,
             from_date=from_date,
@@ -725,7 +724,7 @@ async def export_audit_logs(
             page_size=1,  # Just get count
         )
     else:
-        export_logs, export_count = await audit_service.get_logs(
+        _export_logs, export_count = await audit_service.get_logs(
             tenant_id=current_user.tenant_id,
             actor_id=actor_id,
             action=action,

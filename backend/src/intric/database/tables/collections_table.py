@@ -23,7 +23,9 @@ class CollectionsTable(BasePublic):
     embedding_model_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(EmbeddingModels.id, ondelete="SET NULL"),
     )
-    space_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey(Spaces.id, ondelete="CASCADE"))
+    space_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Spaces.id, ondelete="CASCADE")
+    )
 
     # relationships
     user: Mapped[Users] = relationship()

@@ -6,9 +6,10 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from intric.actors import ActorManager
+    from intric.groups_legacy.group_service import GroupService
     from intric.spaces.space_repo import SpaceRepository
     from intric.spaces.space_service import SpaceService
-    from intric.groups_legacy.group_service import GroupService
+
 
 class ResourceMoverService:
     def __init__(
@@ -16,13 +17,12 @@ class ResourceMoverService:
         space_service: "SpaceService",
         space_repo: "SpaceRepository",
         actor_manager: "ActorManager",
-        group_service: "GroupService"
+        group_service: "GroupService",
     ):
         self.space_service = space_service
         self.space_repo = space_repo
         self.actor_manager = actor_manager
         self.group_service = group_service
-
 
     async def link_website_to_space(self, website_id: "UUID", space_id: "UUID"):
         source_space = await self.space_service.get_space_by_website(website_id)
@@ -35,7 +35,9 @@ class ResourceMoverService:
         target_actor = self.actor_manager.get_space_actor_from_space(target_space)
 
         if not target_actor.can_create_websites():
-            raise UnauthorizedException("User cannot create websites in the target space")
+            raise UnauthorizedException(
+                "User cannot create websites in the target space"
+            )
 
         website = source_space.get_website(website_id)
 
@@ -53,13 +55,17 @@ class ResourceMoverService:
         source_actor = self.actor_manager.get_space_actor_from_space(source_space)
 
         if not source_actor.can_delete_websites():
-            raise UnauthorizedException("User does not have permission to move website from space")
+            raise UnauthorizedException(
+                "User does not have permission to move website from space"
+            )
 
         target_space = await self.space_service.get_space(space_id)
         target_actor = self.actor_manager.get_space_actor_from_space(target_space)
 
         if not target_actor.can_create_websites():
-            raise UnauthorizedException("User does not have permission to create websites in the space")
+            raise UnauthorizedException(
+                "User does not have permission to create websites in the space"
+            )
 
         website = source_space.get_website(website_id)
 
@@ -71,7 +77,6 @@ class ResourceMoverService:
 
         await self.space_repo.update(space=target_space)
         await self.space_repo.update(space=source_space)
-
 
     async def move_collection_to_space(self, collection_id: "UUID", space_id: "UUID"):
         source_space = await self.space_service.get_space_by_collection(collection_id)
@@ -95,7 +100,6 @@ class ResourceMoverService:
             space_id=space_id,
         )
 
-   
     async def move_assistant_to_space(
         self, assistant_id: "UUID", space_id: "UUID", move_resources: bool = False
     ):
@@ -141,10 +145,16 @@ class ResourceMoverService:
                 )
 
             for website in assistant.websites:
-                if not getattr(source_space_actor, "can_read_websites", lambda: False)():
-                    raise UnauthorizedException("User cannot read websites in source space")
+                if not getattr(
+                    source_space_actor, "can_read_websites", lambda: False
+                )():
+                    raise UnauthorizedException(
+                        "User cannot read websites in source space"
+                    )
                 if not target_space_actor.can_create_websites():
-                    raise UnauthorizedException("User cannot create websites in target space")
+                    raise UnauthorizedException(
+                        "User cannot create websites in target space"
+                    )
 
                 if website.id not in [w.id for w in target_space.websites]:
                     target_space.add_website(website)

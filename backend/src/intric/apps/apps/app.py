@@ -131,10 +131,15 @@ class App:
     @input_fields.setter
     def input_fields(self, input_fields: list[InputField]):
         if len(input_fields) > 1:
-            raise BadRequestException(f"A {self.__class__.__name__} can only have one input.")
+            raise BadRequestException(
+                f"A {self.__class__.__name__} can only have one input."
+            )
 
         for input_field in input_fields:
-            if input_field.type == InputFieldType.IMAGE_UPLOAD and not self.completion_model.vision:
+            if (
+                input_field.type == InputFieldType.IMAGE_UPLOAD
+                and not self.completion_model.vision
+            ):
                 raise BadRequestException(
                     "Need to have a vision model enabled in order to specify image upload"
                 )
@@ -220,7 +225,10 @@ class App:
                     return False
 
                 # Check if there are audio files that require a transcription model
-                if AudioMimeTypes.has_value(file.mimetype) and not self.transcription_model:
+                if (
+                    AudioMimeTypes.has_value(file.mimetype)
+                    and not self.transcription_model
+                ):
                     return False
 
             total_size = sum(file.size for file in files)
@@ -255,15 +263,20 @@ class App:
         if text is None:
             text = ""
 
-        audio_files = [file for file in files if AudioMimeTypes.has_value(file.mimetype)]
+        audio_files = [
+            file for file in files if AudioMimeTypes.has_value(file.mimetype)
+        ]
 
         transcriptions = [
-            await transcriber.transcribe(file, self.transcription_model) for file in audio_files
+            await transcriber.transcribe(file, self.transcription_model)
+            for file in audio_files
         ]
 
         text_files = [file for file in files if TextMimeTypes.has_value(file.mimetype)]
 
-        image_files = [file for file in files if ImageMimeTypes.has_value(file.mimetype)]
+        image_files = [
+            file for file in files if ImageMimeTypes.has_value(file.mimetype)
+        ]
 
         return await completion_service.get_response(
             text_input=text,

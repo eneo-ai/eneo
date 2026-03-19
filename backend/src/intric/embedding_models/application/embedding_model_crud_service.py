@@ -46,8 +46,10 @@ class EmbeddingModelCRUDService:
             if security_classification is None:
                 embedding_model.security_classification = None
             else:
-                em_security_classification = await self.security_classification_repo.one(
-                    id=security_classification.id
+                em_security_classification = (
+                    await self.security_classification_repo.one(
+                        id=security_classification.id
+                    )
                 )
                 embedding_model.security_classification = em_security_classification
 

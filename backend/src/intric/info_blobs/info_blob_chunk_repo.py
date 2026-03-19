@@ -17,8 +17,10 @@ from intric.info_blobs.info_blob import (
 
 class InfoBlobChunkRepo:
     def __init__(self, session: AsyncSession):
-        self.delegate: BaseRepositoryDelegate[InfoBlobChunkInDB] = BaseRepositoryDelegate(
-            session=session, table=InfoBlobChunks, in_db_model=InfoBlobChunkInDB
+        self.delegate: BaseRepositoryDelegate[InfoBlobChunkInDB] = (
+            BaseRepositoryDelegate(
+                session=session, table=InfoBlobChunks, in_db_model=InfoBlobChunkInDB
+            )
         )
         self.session = session
 

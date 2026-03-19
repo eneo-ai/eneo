@@ -23,13 +23,13 @@ from intric.sessions.session import (
     AskResponse,
     IntricEventType,
     SessionInDB,
+    SSEError,
     SSEFiles,
     SSEFirstChunk,
     SSEIntricEvent,
     SSEText,
     SSEToolApprovalRequired,
     SSEToolCall,
-    SSEError,
     ToolCallInfo,
 )
 
@@ -190,7 +190,6 @@ async def to_response(
         @gen_transaction(db_session)  # type: ignore[call-overload]
         async def event_stream():
             async for chunk in response.answer:
-
                 if chunk.response_type == ResponseType.TEXT:
                     yield to_ask_response(
                         question=response.question,

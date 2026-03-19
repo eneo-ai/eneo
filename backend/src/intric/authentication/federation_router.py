@@ -14,25 +14,24 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from jwt import PyJWKClient as _PyJWKClient
 from pydantic import BaseModel
 
-from intric.main.aiohttp_client import aiohttp_client
-from intric.main.config import get_settings
-from intric.main.container.container import Container
-from intric.main.logging import get_logger
-from intric.main.request_context import set_request_context
-from intric.observability.debug_toggle import is_debug_enabled
-from intric.observability.redaction import sanitize_payload
-from intric.server.dependencies.container import get_container
-from intric.settings.credential_resolver import CredentialResolver
-from intric.tenants.tenant import TenantState
-
 # JIT provisioning imports
 from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
+from intric.main.aiohttp_client import aiohttp_client
+from intric.main.config import get_settings
+from intric.main.container.container import Container
+from intric.main.logging import get_logger
 from intric.main.models import ModelId
+from intric.main.request_context import set_request_context
+from intric.observability.debug_toggle import is_debug_enabled
+from intric.observability.redaction import sanitize_payload
 from intric.predefined_roles.predefined_role import PredefinedRoleName
+from intric.server.dependencies.container import get_container
+from intric.settings.credential_resolver import CredentialResolver
+from intric.tenants.tenant import TenantState
 from intric.users.user import UserAdd, UserInDB, UserState
 
 logger = get_logger(__name__)
@@ -902,7 +901,9 @@ async def auth_callback(
             await _log_oidc_debug(
                 redis_client=redis_client,
                 correlation_id=correlation_id,
-                event="callback.state_cache_hit" if cached_state else "callback.state_cache_miss",
+                event="callback.state_cache_hit"
+                if cached_state
+                else "callback.state_cache_miss",
                 tenant_slug=tenant_slug,
             )
         except Exception as exc:  # pragma: no cover - best effort cache fetch
@@ -993,7 +994,10 @@ async def auth_callback(
                     )
 
                 expected_tenant_slug = (cached_state.get("tenant_slug") or "").lower()
-                if expected_tenant_slug and expected_tenant_slug != (tenant_slug or "").lower():
+                if (
+                    expected_tenant_slug
+                    and expected_tenant_slug != (tenant_slug or "").lower()
+                ):
                     logger.error(
                         "OIDC state tenant slug mismatch detected",
                         extra={
@@ -1279,9 +1283,9 @@ async def auth_callback(
                     discovery = await fetch_discovery(
                         federation_config["discovery_endpoint"]
                     )
-                    supported_methods = discovery.get(
-                        "token_endpoint_auth_methods_supported"
-                    ) or []
+                    supported_methods = (
+                        discovery.get("token_endpoint_auth_methods_supported") or []
+                    )
                     token_auth_method = _select_auth_method(supported_methods)
                 except HTTPException:
                     # Discovery failure handled earlier when resolving endpoints; fall back
@@ -1310,9 +1314,7 @@ async def auth_callback(
             headers: dict[str, str] = {}
 
             if token_auth_method == "client_secret_basic":
-                credentials = (
-                    f"{federation_config['client_id']}:{federation_config['client_secret']}"
-                )
+                credentials = f"{federation_config['client_id']}:{federation_config['client_secret']}"
                 basic_token = base64.b64encode(credentials.encode()).decode()
                 headers["Authorization"] = f"Basic {basic_token}"
                 token_data.pop("client_secret", None)
@@ -1638,7 +1640,9 @@ async def auth_callback(
                             "tenant_slug": tenant_slug,
                             "email": email,
                             "correlation_id": correlation_id,
-                            "provisioning_enabled": tenant.provisioning if tenant else False,
+                            "provisioning_enabled": tenant.provisioning
+                            if tenant
+                            else False,
                         },
                     )
                     await _log_oidc_debug(

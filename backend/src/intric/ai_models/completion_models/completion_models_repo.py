@@ -28,14 +28,15 @@ class CompletionModelsRepository:
             CompletionModels.id == id,
             sa.or_(
                 CompletionModels.tenant_id.is_(None),
-                CompletionModels.tenant_id == tenant_id
-            )
+                CompletionModels.tenant_id == tenant_id,
+            ),
         )
         result = await self.session.execute(stmt)
         db_model = result.scalar_one_or_none()
 
         if db_model is None:
             from intric.main.exceptions import NotFoundException
+
             raise NotFoundException()
 
         model = CompletionModel.model_validate(db_model)
@@ -69,7 +70,9 @@ class CompletionModelsRepository:
         except IntegrityError as e:
             raise UniqueException("Default completion model already exists.") from e
 
-    async def update_model(self, model: CompletionModelUpdate) -> CompletionModel | None:
+    async def update_model(
+        self, model: CompletionModelUpdate
+    ) -> CompletionModel | None:
         return await self.delegate.update(model, exclude={"token_limit"})
 
     async def delete_model(self, id: UUID) -> CompletionModel | None:
@@ -101,7 +104,7 @@ class CompletionModelsRepository:
             query = query.where(
                 sa.or_(
                     CompletionModels.tenant_id.is_(None),
-                    CompletionModels.tenant_id == tenant_id
+                    CompletionModels.tenant_id == tenant_id,
                 )
             )
 

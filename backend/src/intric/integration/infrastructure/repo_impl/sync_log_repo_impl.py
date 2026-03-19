@@ -7,8 +7,8 @@ from sqlalchemy.future import select
 from intric.database.tables.sync_log_table import SyncLog as SyncLogDBModel
 from intric.integration.domain.entities.sync_log import SyncLog
 from intric.integration.domain.repositories.sync_log_repo import SyncLogRepository
-from intric.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
 from intric.integration.infrastructure.mappers.sync_log_mapper import SyncLogMapper
+from intric.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,8 +43,10 @@ class SyncLogRepoImpl(
         self, integration_knowledge_id: UUID
     ) -> int:
         """Get the total count of sync logs for an integration."""
-        query = select(sa.func.count()).select_from(self._db_model).where(
-            self._db_model.integration_knowledge_id == integration_knowledge_id
+        query = (
+            select(sa.func.count())
+            .select_from(self._db_model)
+            .where(self._db_model.integration_knowledge_id == integration_knowledge_id)
         )
         result = await self.session.scalar(query)
         return result or 0

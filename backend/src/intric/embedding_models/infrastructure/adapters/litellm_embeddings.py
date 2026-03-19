@@ -52,13 +52,17 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         # Falls back to model.litellm_model_name for mutable ORM objects.
         self.litellm_model = litellm_model_name or model.litellm_model_name
 
-        logger.debug(f"[LiteLLM] Initializing embedding adapter for model: {model.name} -> {self.litellm_model}")
+        logger.debug(
+            f"[LiteLLM] Initializing embedding adapter for model: {model.name} -> {self.litellm_model}"
+        )
 
     async def get_embeddings(self, chunks: list["InfoBlobChunk"]) -> ChunkEmbeddingList:
         chunk_embedding_list = ChunkEmbeddingList()
         batch_size = getattr(self.model, "max_batch_size", None) or 32
         total_chunks = len(chunks)
-        total_batches = (total_chunks + batch_size - 1) // batch_size if total_chunks else 0
+        total_batches = (
+            (total_chunks + batch_size - 1) // batch_size if total_chunks else 0
+        )
         logger.debug(
             "[LiteLLM] Model %s (family=%s) batching %s chunks into %s batches (size=%s)",
             self.model.name,
@@ -71,11 +75,21 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         for chunked_chunks in self._chunk_chunks(chunks):
             # Add "passage:" prefix for E5 models, use text directly for others
             if self.model.family == "e5":
-                texts_for_chunks = [f"passage: {chunk.text}" for chunk in chunked_chunks]
-                logger.debug("[LiteLLM] %s: Using 'passage:' prefix (family=%s)", self.model.name, self.model.family)
+                texts_for_chunks = [
+                    f"passage: {chunk.text}" for chunk in chunked_chunks
+                ]
+                logger.debug(
+                    "[LiteLLM] %s: Using 'passage:' prefix (family=%s)",
+                    self.model.name,
+                    self.model.family,
+                )
             else:
                 texts_for_chunks = [chunk.text for chunk in chunked_chunks]
-                logger.debug("[LiteLLM] %s: No prefix applied (family=%s)", self.model.name, self.model.family)
+                logger.debug(
+                    "[LiteLLM] %s: No prefix applied (family=%s)",
+                    self.model.name,
+                    self.model.family,
+                )
 
             embeddings_for_chunks = await self._get_embeddings(texts=texts_for_chunks)
             chunk_embedding_list.add(chunked_chunks, embeddings_for_chunks)
@@ -86,10 +100,18 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         # Add "query:" prefix for E5 models, use query directly for others
         if self.model.family == "e5":
             truncated_query = f"query: {query[: self.model.max_input]}"
-            logger.debug("[LiteLLM] %s: Using 'query:' prefix (family=%s)", self.model.name, self.model.family)
+            logger.debug(
+                "[LiteLLM] %s: Using 'query:' prefix (family=%s)",
+                self.model.name,
+                self.model.family,
+            )
         else:
             truncated_query = query[: self.model.max_input]
-            logger.debug("[LiteLLM] %s: No query prefix applied (family=%s)", self.model.name, self.model.family)
+            logger.debug(
+                "[LiteLLM] %s: No query prefix applied (family=%s)",
+                self.model.name,
+                self.model.family,
+            )
 
         embeddings = await self._get_embeddings([truncated_query])
         return embeddings[0]
@@ -104,7 +126,9 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         try:
             # Guard against empty input - some APIs require non-empty input
             if not texts or len(texts) == 0:
-                logger.warning("[LiteLLM] Empty text list provided to embeddings, returning empty result")
+                logger.warning(
+                    "[LiteLLM] Empty text list provided to embeddings, returning empty result"
+                )
                 return []
 
             # Prepare the parameters for the embeddings
@@ -120,13 +144,17 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
                 try:
                     api_key = self.credential_resolver.get_api_key()
-                    logger.debug(f"[LiteLLM] {self.litellm_model}: Injecting tenant model API key for {provider}")
-                    params['api_key'] = api_key
+                    logger.debug(
+                        f"[LiteLLM] {self.litellm_model}: Injecting tenant model API key for {provider}"
+                    )
+                    params["api_key"] = api_key
                 except ValueError as e:
-                    logger.error(f"[LiteLLM] {self.litellm_model}: Credential resolution failed: {e}")
+                    logger.error(
+                        f"[LiteLLM] {self.litellm_model}: Credential resolution failed: {e}"
+                    )
                     raise HTTPException(
                         status_code=503,
-                        detail=f"Embedding service unavailable: {str(e)}"
+                        detail=f"Embedding service unavailable: {str(e)}",
                     )
 
                 # Inject endpoint for providers with custom endpoints
@@ -143,8 +171,10 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                 )
 
                 if endpoint:
-                    params['api_base'] = endpoint
-                    logger.debug(f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}")
+                    params["api_base"] = endpoint
+                    logger.debug(
+                        f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}"
+                    )
 
                 # Inject api_version for Azure embeddings
                 if provider == "azure":
@@ -156,7 +186,9 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
                     if api_version:
                         params["api_version"] = api_version
-                        logger.debug(f"[LiteLLM] {self.litellm_model}: Injecting api_version for Azure: {api_version}")
+                        logger.debug(
+                            f"[LiteLLM] {self.litellm_model}: Injecting api_version for Azure: {api_version}"
+                        )
 
             safe_params = {k: v for k, v in params.items() if k != "input"}
             logger.debug(
@@ -167,11 +199,21 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             # Call LiteLLM API to get the embeddings
             response = await litellm.aembedding(**params)
 
-            logger.debug(f"[LiteLLM] {self.litellm_model}: Embedding request successful")
+            logger.debug(
+                f"[LiteLLM] {self.litellm_model}: Embedding request successful"
+            )
 
         except AuthenticationError:
-            provider = self.credential_resolver.provider_type if self.credential_resolver else "unknown"
-            provider_id = self.credential_resolver.provider_id if self.credential_resolver else None
+            provider = (
+                self.credential_resolver.provider_type
+                if self.credential_resolver
+                else "unknown"
+            )
+            provider_id = (
+                self.credential_resolver.provider_id
+                if self.credential_resolver
+                else None
+            )
 
             logger.error(
                 "Tenant API credential authentication failed",
@@ -179,14 +221,14 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                     "provider_id": str(provider_id) if provider_id else None,
                     "provider": provider,
                     "error_type": "AuthenticationError",
-                    "model": self.litellm_model
-                }
+                    "model": self.litellm_model,
+                },
             )
 
             raise HTTPException(
                 status_code=401,
                 detail=f"Invalid API credentials for provider {provider}. "
-                       f"Please verify your API key configuration."
+                f"Please verify your API key configuration.",
             )
         except BadRequestError as e:
             logger.exception(f"[LiteLLM] {self.litellm_model}: Bad request error:")
@@ -195,7 +237,9 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             logger.exception(f"[LiteLLM] {self.litellm_model}: Rate limit error:")
             raise OpenAIException("LiteLLM Rate limit exception") from e
         except Exception as e:
-            logger.exception(f"[LiteLLM] {self.litellm_model}: Unknown LiteLLM exception:")
+            logger.exception(
+                f"[LiteLLM] {self.litellm_model}: Unknown LiteLLM exception:"
+            )
             raise OpenAIException("Unknown LiteLLM exception") from e
 
-        return [embedding['embedding'] for embedding in response.data]
+        return [embedding["embedding"] for embedding in response.data]

@@ -124,7 +124,9 @@ class TenantRepository:
 
         return await self.delegate.get_model_from_query(stmt)
 
-    async def get_tenant_from_zitadel_org_id(self, zitadel_org_id: str) -> TenantInDB | None:
+    async def get_tenant_from_zitadel_org_id(
+        self, zitadel_org_id: str
+    ) -> TenantInDB | None:
         return await self.delegate.get_by(
             conditions={Tenants.zitadel_org_id: zitadel_org_id}
         )
@@ -412,7 +414,9 @@ class TenantRepository:
                     .values(slug=check_slug, updated_at=datetime.now(timezone.utc))
                 )
                 await self.session.execute(stmt)
-                logger.info(f"Generated and saved slug '{check_slug}' for tenant {tenant.name}")
+                logger.info(
+                    f"Generated and saved slug '{check_slug}' for tenant {tenant.name}"
+                )
                 return check_slug
             counter += 1
 

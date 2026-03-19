@@ -8,7 +8,6 @@ from typing import Any
 from intric.main.config import get_loglevel
 from intric.main.request_context import get_request_context
 
-
 JSON_LOGS_ENABLED = os.getenv("JSON_LOGS", "true").lower() in {"1", "true", "yes", "on"}
 
 

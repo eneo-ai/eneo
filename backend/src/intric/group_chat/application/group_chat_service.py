@@ -70,7 +70,9 @@ class GroupChatService:
         if not actor.can_create_group_chats():
             raise UnauthorizedException
 
-        group_chat = GroupChat.create(name=name, space_id=space_id, user_id=self.user.id)
+        group_chat = GroupChat.create(
+            name=name, space_id=space_id, user_id=self.user.id
+        )
 
         space.add_group_chat(group_chat)
         updated_space = await self.space_repo.update(space=space)
@@ -78,7 +80,9 @@ class GroupChatService:
         return updated_space.get_group_chat(group_chat_id=group_chat.id)
 
     async def delete_group_chat(self, group_chat_id: "UUID") -> "GroupChat | None":
-        space = await self.space_service.get_space_by_group_chat(group_chat_id=group_chat_id)
+        space = await self.space_service.get_space_by_group_chat(
+            group_chat_id=group_chat_id
+        )
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_delete_group_chats():
@@ -156,7 +160,9 @@ class GroupChatService:
         self,
         group_chat_id: "UUID",
     ) -> "GroupChat":
-        space = await self.space_service.get_space_by_group_chat(group_chat_id=group_chat_id)
+        space = await self.space_service.get_space_by_group_chat(
+            group_chat_id=group_chat_id
+        )
         actor = self.actor_manager.get_space_actor_from_space(space)
         group_chat = space.get_group_chat(group_chat_id=group_chat_id)
 
@@ -167,7 +173,9 @@ class GroupChatService:
 
         return group_chat
 
-    async def _find_suitable_completion_model(self, assistants: list[GroupChatAssistant]):
+    async def _find_suitable_completion_model(
+        self, assistants: list[GroupChatAssistant]
+    ):
         """Return the completion model of the first assistant in the list"""
         if not assistants:
             raise BadRequestException("No assistants in the group chat")
@@ -215,7 +223,9 @@ class GroupChatService:
                 Take earlier questions in the context into account.
                 """
 
-    def _is_match(self, response_text: str, assistants: list[GroupChatAssistant]) -> int | None:
+    def _is_match(
+        self, response_text: str, assistants: list[GroupChatAssistant]
+    ) -> int | None:
         """Parse the model's response to determine which assistant to use"""
         response_text = response_text.strip().upper()
 
@@ -315,7 +325,8 @@ class GroupChatService:
                 await self.session_service.add_question_to_session(
                     question=question,
                     answer=response,
-                    num_tokens_question=question_token_count + assistant_selector_tokens,
+                    num_tokens_question=question_token_count
+                    + assistant_selector_tokens,
                     num_tokens_answer=token_count,
                     session=session,
                     completion_model=completion_model,
@@ -386,7 +397,9 @@ class GroupChatService:
                 assistant.assistant.id for assistant in group_chat.assistants
             ]
             if tool_assistant_id not in group_chat_assistant_ids:
-                raise BadRequestException("The specified assistant is not part of this group chat")
+                raise BadRequestException(
+                    "The specified assistant is not part of this group chat"
+                )
 
             assistant_to_ask = tool_assistant_id
         else:
@@ -444,12 +457,16 @@ class GroupChatService:
             assistant_name = selected_assistant.assistant.name
 
             # set assistant info in tools
-            response.tools.assistants = [ToolAssistant(id=assistant_to_ask, handle=assistant_name)]
+            response.tools.assistants = [
+                ToolAssistant(id=assistant_to_ask, handle=assistant_name)
+            ]
 
         return response
 
     async def publish_group_chat(self, group_chat_id: "UUID", publish: bool):
-        space = await self.space_repo.get_space_by_group_chat(group_chat_id=group_chat_id)
+        space = await self.space_repo.get_space_by_group_chat(
+            group_chat_id=group_chat_id
+        )
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_publish_group_chats():

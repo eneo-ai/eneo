@@ -5,7 +5,6 @@ from __future__ import annotations
 from contextvars import ContextVar
 from typing import Any, Dict
 
-
 _request_context: ContextVar[Dict[str, Any]] = ContextVar("request_context", default={})
 
 

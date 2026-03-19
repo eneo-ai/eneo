@@ -141,11 +141,15 @@ class ConversationService:
                     "Either session_id, assistant_id, or group_chat_id must be provided"
                 )
 
-    async def set_title_of_conversation(self, session_id: "UUID") -> "SessionInDB | None":
+    async def set_title_of_conversation(
+        self, session_id: "UUID"
+    ) -> "SessionInDB | None":
         session = await self.session_service.get_session_by_uuid(session_id)
         assert session is not None
         assert session.assistant is not None
-        space = await self.space_service.get_space_by_assistant(assistant_id=session.assistant.id)
+        space = await self.space_service.get_space_by_assistant(
+            assistant_id=session.assistant.id
+        )
         assistant = space.get_assistant(assistant_id=session.assistant.id)
 
         response = await self.completion_service.get_response(

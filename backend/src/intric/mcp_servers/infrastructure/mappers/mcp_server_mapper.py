@@ -10,7 +10,9 @@ from intric.security_classifications.domain.entities.security_classification imp
 )
 
 if TYPE_CHECKING:
-    from intric.database.tables.mcp_server_table import MCPServerTools as MCPServerToolsTable
+    from intric.database.tables.mcp_server_table import (
+        MCPServerTools as MCPServerToolsTable,
+    )
 
 
 class MCPServerToolMapper:

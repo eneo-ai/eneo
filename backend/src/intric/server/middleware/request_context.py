@@ -17,7 +17,9 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         clear_request_context()
-        correlation_id = request.headers.get("x-correlation-id") or request.headers.get("x-request-id")
+        correlation_id = request.headers.get("x-correlation-id") or request.headers.get(
+            "x-request-id"
+        )
 
         set_request_context(
             correlation_id=correlation_id,

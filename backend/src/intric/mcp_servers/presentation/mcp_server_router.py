@@ -200,7 +200,11 @@ async def update_tenant_tool_enabled(
     # Audit logging
     user = container.user()
     audit_service = container.audit_service()
-    action = ActionType.MCP_SERVER_TOOL_ENABLED if data.is_enabled else ActionType.MCP_SERVER_TOOL_DISABLED
+    action = (
+        ActionType.MCP_SERVER_TOOL_ENABLED
+        if data.is_enabled
+        else ActionType.MCP_SERVER_TOOL_DISABLED
+    )
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -211,7 +215,10 @@ async def update_tenant_tool_enabled(
         metadata=AuditMetadata.standard(
             actor=user,
             target=tool,
-            extra={"mcp_server_id": str(mcp_server.id), "mcp_server_name": mcp_server.name},
+            extra={
+                "mcp_server_id": str(mcp_server.id),
+                "mcp_server_name": mcp_server.name,
+            },
         ),
     )
 
@@ -272,7 +279,9 @@ async def create_mcp_server(
         http_auth_config_schema=data.http_auth_config_schema,
         tags=data.tags,
         icon_url=str(data.icon_url) if data.icon_url else None,
-        documentation_url=str(data.documentation_url) if data.documentation_url else None,
+        documentation_url=str(data.documentation_url)
+        if data.documentation_url
+        else None,
         security_classification=security_classification,
     )
 
@@ -343,7 +352,9 @@ async def update_mcp_server(
         http_auth_config_schema=data.http_auth_config_schema,
         tags=data.tags,
         icon_url=str(data.icon_url) if data.icon_url else None,
-        documentation_url=str(data.documentation_url) if data.documentation_url else None,
+        documentation_url=str(data.documentation_url)
+        if data.documentation_url
+        else None,
         security_classification=security_classification,
     )
 
@@ -362,9 +373,18 @@ async def update_mcp_server(
     if data.http_url is not None and str(data.http_url) != old_server.http_url:
         changes["http_url"] = {"old": old_server.http_url, "new": str(data.http_url)}
     if data.description is not None and data.description != old_server.description:
-        changes["description"] = {"old": old_server.description, "new": data.description}
-    if data.http_auth_type is not None and data.http_auth_type != old_server.http_auth_type:
-        changes["http_auth_type"] = {"old": old_server.http_auth_type, "new": data.http_auth_type}
+        changes["description"] = {
+            "old": old_server.description,
+            "new": data.description,
+        }
+    if (
+        data.http_auth_type is not None
+        and data.http_auth_type != old_server.http_auth_type
+    ):
+        changes["http_auth_type"] = {
+            "old": old_server.http_auth_type,
+            "new": data.http_auth_type,
+        }
     if data.tags is not None and data.tags != old_server.tags:
         changes["tags"] = {"old": old_server.tags, "new": data.tags}
     if data.http_auth_config_schema is not None:
@@ -638,7 +658,11 @@ async def update_tool_default_enabled(
     # Audit logging
     user = container.user()
     audit_service = container.audit_service()
-    action = ActionType.MCP_SERVER_TOOL_ENABLED if data.is_enabled else ActionType.MCP_SERVER_TOOL_DISABLED
+    action = (
+        ActionType.MCP_SERVER_TOOL_ENABLED
+        if data.is_enabled
+        else ActionType.MCP_SERVER_TOOL_DISABLED
+    )
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
@@ -649,7 +673,10 @@ async def update_tool_default_enabled(
         metadata=AuditMetadata.standard(
             actor=user,
             target=tool,
-            extra={"mcp_server_id": str(mcp_server.id), "mcp_server_name": mcp_server.name},
+            extra={
+                "mcp_server_id": str(mcp_server.id),
+                "mcp_server_name": mcp_server.name,
+            },
         ),
     )
 

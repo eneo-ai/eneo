@@ -47,22 +47,34 @@ class AppAssembler:
                 return []
             case InputFieldType.TEXT_UPLOAD:
                 return [
-                    AcceptedFileType(mimetype=mimetype, size_limit=settings.upload_file_to_session_max_size)
+                    AcceptedFileType(
+                        mimetype=mimetype,
+                        size_limit=settings.upload_file_to_session_max_size,
+                    )
                     for mimetype in TextMimeTypes.values()
                 ]
             case InputFieldType.AUDIO_UPLOAD:
                 return [
-                    AcceptedFileType(mimetype=mimetype, size_limit=settings.transcription_max_file_size)
+                    AcceptedFileType(
+                        mimetype=mimetype,
+                        size_limit=settings.transcription_max_file_size,
+                    )
                     for mimetype in AudioMimeTypes.values()
                 ]
             case InputFieldType.AUDIO_RECORDER:
                 return [
-                    AcceptedFileType(mimetype=mimetype, size_limit=settings.transcription_max_file_size)
+                    AcceptedFileType(
+                        mimetype=mimetype,
+                        size_limit=settings.transcription_max_file_size,
+                    )
                     for mimetype in AudioMimeTypes.values()
                 ]
             case InputFieldType.IMAGE_UPLOAD:
                 return [
-                    AcceptedFileType(mimetype=mimetype, size_limit=settings.upload_image_to_session_max_size)
+                    AcceptedFileType(
+                        mimetype=mimetype,
+                        size_limit=settings.upload_image_to_session_max_size,
+                    )
                     for mimetype in ImageMimeTypes.values()
                 ]
 
@@ -77,15 +89,27 @@ class AppAssembler:
                     max_size=_TEXT_MAX_FILES * settings.upload_file_to_session_max_size,
                 )
             case InputFieldType.AUDIO_UPLOAD:
-                return Limit(max_files=_AUDIO_MAX_FILES, max_size=_AUDIO_MAX_FILES * settings.transcription_max_file_size)
+                return Limit(
+                    max_files=_AUDIO_MAX_FILES,
+                    max_size=_AUDIO_MAX_FILES * settings.transcription_max_file_size,
+                )
             case InputFieldType.AUDIO_RECORDER:
-                return Limit(max_files=_AUDIO_MAX_FILES, max_size=_AUDIO_MAX_FILES * settings.transcription_max_file_size)
+                return Limit(
+                    max_files=_AUDIO_MAX_FILES,
+                    max_size=_AUDIO_MAX_FILES * settings.transcription_max_file_size,
+                )
             case InputFieldType.IMAGE_UPLOAD:
-                return Limit(max_files=_IMAGE_MAX_FILES, max_size=_IMAGE_MAX_FILES * settings.upload_image_to_session_max_size)
+                return Limit(
+                    max_files=_IMAGE_MAX_FILES,
+                    max_size=_IMAGE_MAX_FILES
+                    * settings.upload_image_to_session_max_size,
+                )
 
     def _get_input_fields(self, input_fields: list[InputField]):
         def _get_input_field(input_field: InputField):
-            accepted_file_types = self._get_accepted_file_types(input_type=input_field.type)
+            accepted_file_types = self._get_accepted_file_types(
+                input_type=input_field.type
+            )
             limit = self._get_limit(input_type=input_field.type)
 
             return InputFieldPublic(
@@ -96,11 +120,15 @@ class AppAssembler:
 
         return [_get_input_field(input_field) for input_field in input_fields]
 
-    def from_app_to_model(self, app: App, permissions: list["ResourcePermission"] = None):
+    def from_app_to_model(
+        self, app: App, permissions: list["ResourcePermission"] = None
+    ):
         permissions = permissions or []
 
         input_fields = self._get_input_fields(app.input_fields)
-        attachments = [FilePublic(**attachment.model_dump()) for attachment in app.attachments]
+        attachments = [
+            FilePublic(**attachment.model_dump()) for attachment in app.attachments
+        ]
         prompt = (
             self.prompt_assembler.from_prompt_to_model(app.prompt)
             if app.prompt is not None
@@ -121,10 +149,16 @@ class AppAssembler:
         settings = get_settings()
         allowed_attachments = FileRestrictions(
             accepted_file_types=[
-                AcceptedFileType(mimetype=mimetype, size_limit=settings.upload_file_to_session_max_size)
+                AcceptedFileType(
+                    mimetype=mimetype,
+                    size_limit=settings.upload_file_to_session_max_size,
+                )
                 for mimetype in TextMimeTypes.values()
             ],
-            limit=Limit(max_files=_TEXT_MAX_FILES, max_size=_TEXT_MAX_FILES * settings.upload_file_to_session_max_size),
+            limit=Limit(
+                max_files=_TEXT_MAX_FILES,
+                max_size=_TEXT_MAX_FILES * settings.upload_file_to_session_max_size,
+            ),
         )
 
         transcription_model = (

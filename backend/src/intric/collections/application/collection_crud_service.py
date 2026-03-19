@@ -1,15 +1,15 @@
 from typing import TYPE_CHECKING, Optional
+from uuid import UUID
 
 from intric.collections.domain.collection import Collection
 from intric.main.exceptions import UnauthorizedException
-from uuid import UUID
 
 if TYPE_CHECKING:
     from intric.actors.actor_manager import ActorManager
+    from intric.groups_legacy.group_service import GroupService
     from intric.spaces.space_repo import SpaceRepository
     from intric.spaces.space_service import SpaceService
     from intric.users.user import UserInDB
-    from intric.groups_legacy.group_service import GroupService
 
 
 class CollectionCRUDService:
@@ -46,14 +46,14 @@ class CollectionCRUDService:
 
         space_after = await self.space_service.get_space_by_collection(group_id=grp.id)
         return space_after.get_collection(collection_id=grp.id)
-    
+
     async def get_collection(self, collection_id: "UUID") -> Collection:
         space = await self.space_service.get_space_by_collection(collection_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
         if not actor.can_read_collections():
             raise UnauthorizedException()
         return space.get_collection(collection_id=collection_id)
-    
+
     async def update_collection(
         self,
         collection_id: "UUID",

@@ -7,12 +7,11 @@ sensitive information from appearing in URLs, browser history, or server logs.
 
 import logging
 import secrets
-
-import orjson
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
+import orjson
 import redis.exceptions
 from fastapi import HTTPException
 
@@ -75,7 +74,7 @@ class AuditSessionService:
             logger.error(f"Redis error creating audit session: {e}", exc_info=True)
             raise HTTPException(
                 status_code=503,
-                detail="Audit session service temporarily unavailable. Please try again."
+                detail="Audit session service temporarily unavailable. Please try again.",
             )
 
         return session_id
@@ -116,7 +115,7 @@ class AuditSessionService:
             logger.error(f"Redis error retrieving audit session: {e}", exc_info=True)
             raise HTTPException(
                 status_code=503,
-                detail="Audit session service temporarily unavailable. Please try again."
+                detail="Audit session service temporarily unavailable. Please try again.",
             )
 
     async def validate_session(
@@ -187,7 +186,7 @@ class AuditSessionService:
             logger.error(f"Redis error revoking audit session: {e}", exc_info=True)
             raise HTTPException(
                 status_code=503,
-                detail="Audit session service temporarily unavailable. Please try again."
+                detail="Audit session service temporarily unavailable. Please try again.",
             )
 
     async def extend_session(self, session_id: str) -> bool:
@@ -217,5 +216,5 @@ class AuditSessionService:
             logger.error(f"Redis error extending audit session: {e}", exc_info=True)
             raise HTTPException(
                 status_code=503,
-                detail="Audit session service temporarily unavailable. Please try again."
+                detail="Audit session service temporarily unavailable. Please try again.",
             )

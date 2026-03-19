@@ -6,6 +6,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.main.container.container import Container
 from intric.security_classifications.presentation.security_classification_models import (
     SecurityClassificationCreatePublic,
@@ -19,11 +23,6 @@ from intric.security_classifications.presentation.security_classification_models
 )
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
-
-# Audit logging - module level imports for consistency
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
 
 router = APIRouter()
 
@@ -158,7 +157,9 @@ async def update_security_classification_levels(
     user = container.user()
 
     sc_ids = [model.id for model in request.security_classifications]
-    security_classifications = await service.update_security_levels(security_classifications=sc_ids)
+    security_classifications = await service.update_security_levels(
+        security_classifications=sc_ids
+    )
 
     # Audit logging
     audit_service = container.audit_service()
@@ -189,7 +190,9 @@ async def update_security_classification_levels(
 
     return SecurityClassificationsListPublic(
         security_classifications=[
-            SecurityClassificationPublic.from_domain(sc, return_none_if_not_enabled=False)
+            SecurityClassificationPublic.from_domain(
+                sc, return_none_if_not_enabled=False
+            )
             for sc in security_classifications
         ]
     )

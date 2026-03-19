@@ -8,7 +8,9 @@ from intric.integration.domain.entities.tenant_sharepoint_app import TenantShare
 from intric.settings.encryption_service import EncryptionService
 
 
-class TenantSharePointAppMapper(EntityMapper[TenantSharePointApp, TenantSharePointAppDBModel]):
+class TenantSharePointAppMapper(
+    EntityMapper[TenantSharePointApp, TenantSharePointAppDBModel]
+):
     """Mapper for TenantSharePointApp with automatic secret encryption/decryption."""
 
     def __init__(self, encryption_service: EncryptionService):
@@ -32,7 +34,9 @@ class TenantSharePointAppMapper(EntityMapper[TenantSharePointApp, TenantSharePoi
             "id": entity.id,
             "tenant_id": entity.tenant_id,
             "client_id": entity.client_id,
-            "client_secret_encrypted": self.encryption_service.encrypt(entity.client_secret),
+            "client_secret_encrypted": self.encryption_service.encrypt(
+                entity.client_secret
+            ),
             "certificate_path": entity.certificate_path,
             "tenant_domain": entity.tenant_domain,
             "is_active": entity.is_active,
@@ -59,7 +63,9 @@ class TenantSharePointAppMapper(EntityMapper[TenantSharePointApp, TenantSharePoi
             id=db_model.id,
             tenant_id=db_model.tenant_id,
             client_id=db_model.client_id,
-            client_secret=self.encryption_service.decrypt(db_model.client_secret_encrypted),
+            client_secret=self.encryption_service.decrypt(
+                db_model.client_secret_encrypted
+            ),
             certificate_path=db_model.certificate_path,
             tenant_domain=db_model.tenant_domain,
             is_active=db_model.is_active,

@@ -6,11 +6,11 @@ from intric.authentication.auth_factory import get_auth_service
 from intric.authentication.auth_service import AuthService
 from intric.main.config import get_settings
 from intric.main.container.container import Container
+from intric.main.exceptions import UnauthorizedException
+from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.auth_definitions import OAUTH2_SCHEME
 from intric.server.dependencies.container import get_container
 from intric.users.user import UserInDB
-from intric.roles.permissions import Permission, validate_permission
-from intric.main.exceptions import UnauthorizedException
 
 
 async def _get_api_key_from_header(
@@ -75,10 +75,12 @@ def get_api_key(hashed: bool = True):
 
     return _get_api_key
 
+
 def require_permission(permission: Permission):
     async def _dep(user: UserInDB = Depends(get_current_active_user)):
         try:
-            validate_permission(user, permission) 
+            validate_permission(user, permission)
         except UnauthorizedException as e:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
     return _dep

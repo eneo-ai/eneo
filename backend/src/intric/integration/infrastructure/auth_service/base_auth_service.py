@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Optional, TypedDict
 
-
 DEFAULT_AUTH_TIMEOUT = 20
 
 

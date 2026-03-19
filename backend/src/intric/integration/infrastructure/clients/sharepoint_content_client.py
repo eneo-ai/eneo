@@ -197,7 +197,9 @@ class SharePointContentClient(BaseClient):
             return await self._get_all_paged_items(endpoint)
         except aiohttp.ClientResponseError as e:
             if e.status == 401 and self.token_refresh_callback and self.token_id:
-                logger.info("SharePoint token expired while listing M365 groups, refreshing...")
+                logger.info(
+                    "SharePoint token expired while listing M365 groups, refreshing..."
+                )
                 await self.refresh_token()
                 return await self._get_all_paged_items(endpoint)
             raise
@@ -474,7 +476,9 @@ class SharePointContentClient(BaseClient):
                 logger.error(f"SharePoint API error when getting file content: {e}")
                 raise
 
-    async def initialize_delta_token(self, drive_id: str, *, _retried: bool = False) -> Optional[str]:
+    async def initialize_delta_token(
+        self, drive_id: str, *, _retried: bool = False
+    ) -> Optional[str]:
         """
         Initialize delta tracking for a drive by calling delta without a token.
         Returns the deltaLink token for future incremental syncs.
@@ -516,7 +520,7 @@ class SharePointContentClient(BaseClient):
                 return None
 
             # Extract just the token parameter from the deltaLink
-            from urllib.parse import urlparse, parse_qs
+            from urllib.parse import parse_qs, urlparse
 
             parsed = urlparse(delta_link)
             query_params = parse_qs(parsed.query)
@@ -534,7 +538,12 @@ class SharePointContentClient(BaseClient):
                 raise DeltaTokenExpiredException(
                     f"Delta token expired (410 Gone) during initialization for drive {drive_id}"
                 ) from e
-            elif e.status == 401 and self.token_refresh_callback and self.token_id and not _retried:
+            elif (
+                e.status == 401
+                and self.token_refresh_callback
+                and self.token_id
+                and not _retried
+            ):
                 logger.info("SharePoint token expired during delta init, refreshing...")
                 await self.refresh_token()
                 return await self.initialize_delta_token(drive_id, _retried=True)
@@ -584,7 +593,7 @@ class SharePointContentClient(BaseClient):
                     delta_link = response["@odata.deltaLink"]
 
                     # Extract token from deltaLink
-                    from urllib.parse import urlparse, parse_qs
+                    from urllib.parse import parse_qs, urlparse
 
                     parsed = urlparse(delta_link)
                     query_params = parse_qs(parsed.query)
@@ -604,12 +613,19 @@ class SharePointContentClient(BaseClient):
                 raise DeltaTokenExpiredException(
                     f"Delta token expired (410 Gone) for drive {drive_id}"
                 ) from e
-            elif e.status == 401 and self.token_refresh_callback and self.token_id and not _retried:
+            elif (
+                e.status == 401
+                and self.token_refresh_callback
+                and self.token_id
+                and not _retried
+            ):
                 logger.info(
                     "SharePoint token expired during delta query, refreshing..."
                 )
                 await self.refresh_token()
-                return await self.get_delta_changes(drive_id, delta_token, _retried=True)
+                return await self.get_delta_changes(
+                    drive_id, delta_token, _retried=True
+                )
             else:
                 logger.error(f"Error getting delta changes: {e}")
                 raise

@@ -1,8 +1,9 @@
 from fastapi import Request, Security
 from fastapi.security import APIKeyHeader
+
+from intric.main.config import get_settings
 from intric.main.exceptions import AuthenticationException
 from intric.main.logging import get_logger
-from intric.main.config import get_settings
 
 logger = get_logger(__name__)
 

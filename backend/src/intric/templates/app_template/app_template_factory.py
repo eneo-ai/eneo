@@ -1,8 +1,7 @@
 from typing import TYPE_CHECKING
 
-from intric.templates.app_template.app_template import AppTemplate
 from intric.templates.app_template.api.app_template_models import AppTemplateWizard
-
+from intric.templates.app_template.app_template import AppTemplate
 
 if TYPE_CHECKING:
     from intric.database.tables.app_template_table import AppTemplates

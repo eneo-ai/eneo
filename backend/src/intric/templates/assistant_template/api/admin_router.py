@@ -1,18 +1,18 @@
-from fastapi import APIRouter, Depends
 from uuid import UUID
 
-from intric.main.container.container import Container
-from intric.server.dependencies.container import get_container
-from intric.server.protocol import responses
+from fastapi import APIRouter, Depends
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.main.container.container import Container
+from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 from intric.templates.assistant_template.api.assistant_template_models import (
-    AssistantTemplateAdminPublic,
-    AssistantTemplateAdminListPublic,
     AssistantTemplateAdminCreate,
+    AssistantTemplateAdminListPublic,
+    AssistantTemplateAdminPublic,
     AssistantTemplateAdminUpdate,
     AssistantTemplateToggleDefaultRequest,
 )
@@ -39,14 +39,14 @@ Use this endpoint for the admin template management page.
     """,
     responses=responses.get_responses([401, 403]),
 )
-async def list_templates(
-    container: Container = Depends(get_container(with_user=True))
-):
+async def list_templates(container: Container = Depends(get_container(with_user=True))):
     """List all active assistant templates for the tenant with usage counts."""
     service = container.assistant_template_service()
     user = container.user()
 
-    templates_with_usage = await service.get_templates_for_tenant(tenant_id=user.tenant_id)
+    templates_with_usage = await service.get_templates_for_tenant(
+        tenant_id=user.tenant_id
+    )
 
     # Convert to admin response model
     items = [
@@ -58,7 +58,9 @@ async def list_templates(
             prompt_text=t.prompt_text,
             completion_model_kwargs=t.completion_model_kwargs or {},
             completion_model_id=t.completion_model.id if t.completion_model else None,
-            completion_model_name=t.completion_model.name if t.completion_model else None,
+            completion_model_name=t.completion_model.name
+            if t.completion_model
+            else None,
             wizard=t.wizard,
             organization=t.organization,
             tenant_id=t.tenant_id,
@@ -169,8 +171,12 @@ async def create_template(
         category=template.category,
         prompt_text=template.prompt_text,
         completion_model_kwargs=template.completion_model_kwargs or {},
-        completion_model_id=template.completion_model.id if template.completion_model else None,
-        completion_model_name=template.completion_model.name if template.completion_model else None,
+        completion_model_id=template.completion_model.id
+        if template.completion_model
+        else None,
+        completion_model_name=template.completion_model.name
+        if template.completion_model
+        else None,
         wizard=template.wizard,
         organization=template.organization,
         tenant_id=template.tenant_id,
@@ -247,8 +253,12 @@ async def update_template(
         category=template.category,
         prompt_text=template.prompt_text,
         completion_model_kwargs=template.completion_model_kwargs or {},
-        completion_model_id=template.completion_model.id if template.completion_model else None,
-        completion_model_name=template.completion_model.name if template.completion_model else None,
+        completion_model_id=template.completion_model.id
+        if template.completion_model
+        else None,
+        completion_model_name=template.completion_model.name
+        if template.completion_model
+        else None,
         wizard=template.wizard,
         organization=template.organization,
         tenant_id=template.tenant_id,
@@ -314,8 +324,12 @@ async def toggle_default(
         category=template.category,
         prompt_text=template.prompt_text,
         completion_model_kwargs=template.completion_model_kwargs or {},
-        completion_model_id=template.completion_model.id if template.completion_model else None,
-        completion_model_name=template.completion_model.name if template.completion_model else None,
+        completion_model_id=template.completion_model.id
+        if template.completion_model
+        else None,
+        completion_model_name=template.completion_model.name
+        if template.completion_model
+        else None,
         wizard=template.wizard,
         organization=template.organization,
         tenant_id=template.tenant_id,
@@ -421,8 +435,12 @@ async def rollback_template(
         category=template.category,
         prompt_text=template.prompt_text,
         completion_model_kwargs=template.completion_model_kwargs or {},
-        completion_model_id=template.completion_model.id if template.completion_model else None,
-        completion_model_name=template.completion_model.name if template.completion_model else None,
+        completion_model_id=template.completion_model.id
+        if template.completion_model
+        else None,
+        completion_model_name=template.completion_model.name
+        if template.completion_model
+        else None,
         wizard=template.wizard,
         organization=template.organization,
         tenant_id=template.tenant_id,
@@ -466,8 +484,12 @@ async def restore_template(
         category=template.category,
         prompt_text=template.prompt_text,
         completion_model_kwargs=template.completion_model_kwargs or {},
-        completion_model_id=template.completion_model.id if template.completion_model else None,
-        completion_model_name=template.completion_model.name if template.completion_model else None,
+        completion_model_id=template.completion_model.id
+        if template.completion_model
+        else None,
+        completion_model_name=template.completion_model.name
+        if template.completion_model
+        else None,
         wizard=template.wizard,
         organization=template.organization,
         tenant_id=template.tenant_id,
@@ -512,13 +534,15 @@ async def permanent_delete_template(
     responses=responses.get_responses([401, 403]),
 )
 async def list_deleted_templates(
-    container: Container = Depends(get_container(with_user=True))
+    container: Container = Depends(get_container(with_user=True)),
 ):
     """List all deleted assistant templates for audit purposes with usage counts."""
     service = container.assistant_template_service()
     user = container.user()
 
-    templates_with_usage = await service.get_deleted_templates_for_tenant(tenant_id=user.tenant_id)
+    templates_with_usage = await service.get_deleted_templates_for_tenant(
+        tenant_id=user.tenant_id
+    )
 
     items = [
         AssistantTemplateAdminPublic(
@@ -529,7 +553,9 @@ async def list_deleted_templates(
             prompt_text=t.prompt_text,
             completion_model_kwargs=t.completion_model_kwargs or {},
             completion_model_id=t.completion_model.id if t.completion_model else None,
-            completion_model_name=t.completion_model.name if t.completion_model else None,
+            completion_model_name=t.completion_model.name
+            if t.completion_model
+            else None,
             wizard=t.wizard,
             organization=t.organization,
             tenant_id=t.tenant_id,

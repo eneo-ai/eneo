@@ -1,7 +1,9 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from intric.completion_models.domain.completion_model_repo import CompletionModelRepository
+    from intric.completion_models.domain.completion_model_repo import (
+        CompletionModelRepository,
+    )
 
 
 class CompletionModelService:

@@ -6,6 +6,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+
 from intric.main.container.container import Container
 from intric.prompts.api.prompt_models import PromptPublic, PromptUpdateRequest
 from intric.server.dependencies.container import get_container

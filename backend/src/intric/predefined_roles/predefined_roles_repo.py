@@ -18,8 +18,8 @@ from intric.predefined_roles.predefined_role import (
 
 class PredefinedRolesRepository:
     def __init__(self, session: AsyncSession):
-        self.delegate: BaseRepositoryDelegate[PredefinedRoleInDB] = BaseRepositoryDelegate(
-            session, PredefinedRoles, PredefinedRoleInDB
+        self.delegate: BaseRepositoryDelegate[PredefinedRoleInDB] = (
+            BaseRepositoryDelegate(session, PredefinedRoles, PredefinedRoleInDB)
         )
 
     async def get_predefined_role_by_uuid(self, id: UUID) -> PredefinedRoleInDB | None:

@@ -1,7 +1,9 @@
 from typing import Optional
 
 from intric.transcription_models.domain.transcription_model import TranscriptionModel
-from intric.transcription_models.domain.transcription_model_repo import TranscriptionModelRepository
+from intric.transcription_models.domain.transcription_model_repo import (
+    TranscriptionModelRepository,
+)
 
 
 class TranscriptionModelService:
@@ -18,7 +20,9 @@ class TranscriptionModelService:
                 return model
 
         # Otherwise get the latest model
-        sorted_models = sorted(available_models, key=lambda model: model.created_at, reverse=True)  # type: ignore[call-overload]
+        sorted_models = sorted(
+            available_models, key=lambda model: model.created_at, reverse=True
+        )  # type: ignore[call-overload]
 
         if not sorted_models:
             return None

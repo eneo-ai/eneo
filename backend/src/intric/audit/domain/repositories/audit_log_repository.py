@@ -1,8 +1,8 @@
 """Audit log repository interface."""
 
 from abc import ABC, abstractmethod
-from datetime import datetime
 from collections.abc import AsyncIterator
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 

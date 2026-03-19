@@ -7,7 +7,9 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.audit.domain.repositories.audit_config_repository import AuditConfigRepository
+from intric.audit.domain.repositories.audit_config_repository import (
+    AuditConfigRepository,
+)
 from intric.database.tables.audit_category_config_table import AuditCategoryConfig
 
 logger = logging.getLogger(__name__)
@@ -70,9 +72,7 @@ class AuditConfigRepositoryImpl(AuditConfigRepository):
 
         return (row[0], row[1], row[2] or {})
 
-    async def find_all_by_tenant(
-        self, tenant_id: UUID
-    ) -> list[tuple[str, bool, dict]]:
+    async def find_all_by_tenant(self, tenant_id: UUID) -> list[tuple[str, bool, dict]]:
         """
         Get all category configurations for a tenant in a single batch query.
 

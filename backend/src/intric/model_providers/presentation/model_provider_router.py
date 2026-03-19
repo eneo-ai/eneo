@@ -60,10 +60,10 @@ async def get_provider_capabilities(
     - default_fields: fallback field definitions for providers without custom fields
     """
     import re
-
-    import litellm
     from collections import defaultdict
     from datetime import date
+
+    import litellm
 
     from intric.tenants.provider_field_config import (
         DEFAULT_FIELDS,
@@ -98,9 +98,7 @@ async def get_provider_capabilities(
         return "00000000"
 
     # Collect all models per provider per mode with metadata
-    raw: dict[str, dict[str, dict[str, dict]]] = defaultdict(
-        lambda: defaultdict(dict)
-    )
+    raw: dict[str, dict[str, dict[str, dict]]] = defaultdict(lambda: defaultdict(dict))
 
     today = date.today().isoformat()
 
@@ -128,7 +126,14 @@ async def get_provider_capabilities(
             continue
         if any(
             kw in model_lower
-            for kw in ("realtime", "-audio-", "gpt-audio", "search-preview", "search-api", "-diarize")
+            for kw in (
+                "realtime",
+                "-audio-",
+                "gpt-audio",
+                "search-preview",
+                "search-api",
+                "-diarize",
+            )
         ):
             continue
 
@@ -144,9 +149,7 @@ async def get_provider_capabilities(
                 model_info["supports_function_calling"] = info.get(
                     "supports_function_calling", False
                 )
-                model_info["supports_reasoning"] = info.get(
-                    "supports_reasoning", False
-                )
+                model_info["supports_reasoning"] = info.get("supports_reasoning", False)
             elif mode == "embedding":
                 model_info["max_input_tokens"] = info.get("max_input_tokens")
                 model_info["output_vector_size"] = info.get("output_vector_size")
@@ -155,7 +158,12 @@ async def get_provider_capabilities(
     # Serialize field definitions (convert in_ -> in for JSON)
     def serialize_fields(fields: list) -> list[dict]:
         return [
-            {"name": f["name"], "required": f["required"], "secret": f["secret"], "in": f["in_"]}
+            {
+                "name": f["name"],
+                "required": f["required"],
+                "secret": f["secret"],
+                "in": f["in_"],
+            }
             for f in fields
         ]
 

@@ -8,7 +8,13 @@ from intric.ai_models.completion_models.completion_model import CompletionModelP
 from intric.files.file_models import FilePublic
 from intric.info_blobs.info_blob import InfoBlobAskAssistantPublic
 from intric.main.models import DateTimeModelMixin, InDB
-from intric.questions.question import Message, Question, ToolCallInfo, UseTools, WebSearchResultPublic
+from intric.questions.question import (
+    Message,
+    Question,
+    ToolCallInfo,
+    UseTools,
+    WebSearchResultPublic,
+)
 
 if TYPE_CHECKING:
     from intric.assistants.api.assistant_models import AssistantSparse
@@ -115,12 +121,14 @@ class SSEIntricEvent(SSEBase):
 
 class SSEToolCall(SSEBase):
     """Event emitted when MCP tools are being executed."""
+
     intric_event_type: IntricEventType = IntricEventType.TOOL_CALL
     tools: list[ToolCallInfo]
 
 
 class SSEToolApprovalRequired(SSEBase):
     """Event emitted when MCP tools require user approval before execution."""
+
     intric_event_type: IntricEventType = IntricEventType.TOOL_APPROVAL_REQUIRED
     approval_id: str  # UUID to correlate approval response
     tools: list[ToolCallInfo]  # Tools pending approval
@@ -136,7 +144,15 @@ class SSEError(SSEBase):
 
 
 # Add the SSE models here in order to include them in the openapi schema
-SSE_MODELS = [SSEText, SSEIntricEvent, SSEToolCall, SSEToolApprovalRequired, SSEFiles, SSEFirstChunk, SSEError]
+SSE_MODELS = [
+    SSEText,
+    SSEIntricEvent,
+    SSEToolCall,
+    SSEToolApprovalRequired,
+    SSEFiles,
+    SSEFirstChunk,
+    SSEError,
+]
 
 # Add standalone enums that need to be included in the openapi schema
 SSE_ENUMS = [IntricEventType]

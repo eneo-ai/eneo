@@ -2,7 +2,6 @@ from typing import TYPE_CHECKING
 
 from intric.templates.templates_factory import TemplatesFactory
 
-
 if TYPE_CHECKING:
     from intric.templates.app_template.app_template_service import AppTemplateService
     from intric.templates.assistant_template.assistant_template_service import (

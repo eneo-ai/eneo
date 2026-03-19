@@ -93,9 +93,9 @@ class SecurityClassificationRepoImpl(BaseRepository):
     async def update(
         self, security_classification: SecurityClassification
     ) -> SecurityClassification:
-        assert (
-            security_classification.id is not None
-        ), "Security classification must have an ID to update"
+        assert security_classification.id is not None, (
+            "Security classification must have an ID to update"
+        )
 
         # Convert domain entity to db values
         values = {

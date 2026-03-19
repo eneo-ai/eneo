@@ -1,11 +1,10 @@
 """Redis-backed manager for tracking async audit log export jobs."""
 
 from datetime import datetime, timedelta, timezone
-
-import orjson
 from typing import Optional
 from uuid import UUID
 
+import orjson
 import redis.asyncio as aioredis
 
 from intric.audit.domain.export_job import ExportJob, ExportJobStatus

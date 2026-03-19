@@ -1,5 +1,5 @@
-from uuid import UUID
 from typing import TYPE_CHECKING, Optional
+from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.orm import selectinload

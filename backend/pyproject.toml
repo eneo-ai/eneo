@@ -110,8 +110,9 @@ exclude = [
 [tool.ruff.lint]
 # Minimal ruleset to start with
 select = [
-    "F",   # Pyflakes (correctness: undefined names, etc.)
-    "E9",  # pycodestyle “runtime”/syntax errors,
+    "F",
+    "E9",
+    "I",
 ]
 
 # Basic ignores for formatter compatibility (kept for when E/W are enabled later)

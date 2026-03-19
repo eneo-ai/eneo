@@ -2,9 +2,9 @@
 
 from intric.analysis.analysis import (
     AssistantMetadata,
+    MetadataCount,
     MetadataStatistics,
     MetadataStatisticsAggregated,
-    MetadataCount,
     QuestionMetadata,
     SessionMetadata,
 )

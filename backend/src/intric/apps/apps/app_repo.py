@@ -111,7 +111,9 @@ class AppRepository:
 
         # Add attachments
         if attachments:
-            attachments_dicts = [dict(app_id=app_in_db.id, file_id=file.id) for file in attachments]
+            attachments_dicts = [
+                dict(app_id=app_in_db.id, file_id=file.id) for file in attachments
+            ]
 
             stmt = sa.insert(AppsFiles).values(attachments_dicts)
             await self.session.execute(stmt)
@@ -229,7 +231,9 @@ class AppRepository:
         await self.session.execute(stmt)
 
     async def get_by_space(self, space_id: UUID):
-        stmt = sa.select(Apps).where(Apps.space_id == space_id).order_by(Apps.created_at)
+        stmt = (
+            sa.select(Apps).where(Apps.space_id == space_id).order_by(Apps.created_at)
+        )
 
         for option in self._options():
             stmt = stmt.options(option)

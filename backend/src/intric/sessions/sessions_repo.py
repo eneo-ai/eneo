@@ -79,7 +79,9 @@ class SessionRepository:
 
         return SessionInDB.model_validate(session)
 
-    async def get(self, id: Optional[UUID] = None, user_id: UUID = None) -> SessionInDB | None:
+    async def get(
+        self, id: Optional[UUID] = None, user_id: UUID = None
+    ) -> SessionInDB | None:
         if id is None and user_id is None:
             raise ValueError("One of id and user_id is required")
 

@@ -18,11 +18,17 @@ class ModelProviders(BasePublic):
         ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(nullable=False)
-    provider_type: Mapped[str] = mapped_column(nullable=False)  # "openai", "azure", "anthropic"
-    credentials: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)  # Encrypted API keys
+    provider_type: Mapped[str] = mapped_column(
+        nullable=False
+    )  # "openai", "azure", "anthropic"
+    credentials: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False
+    )  # Encrypted API keys
     config: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default="{}"
     )  # Additional config like endpoints
     is_active: Mapped[bool] = mapped_column(nullable=False, server_default="true")
 
-    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_model_providers_tenant_name"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_model_providers_tenant_name"),
+    )

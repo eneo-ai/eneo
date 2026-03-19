@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from uuid import UUID
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Query, Security
 from pydantic import BaseModel, Field
 
@@ -19,22 +20,33 @@ from intric.ai_models.embedding_models.embedding_model import (
     EmbeddingModelLegacy,
     EmbeddingModelPublicLegacy,
     EmbeddingModelSparse,
-    EmbeddingModelUpdate as EmbeddingModelMetadataUpdate,
     EmbeddingModelUpdateFlags,
+)
+from intric.ai_models.embedding_models.embedding_model import (
+    EmbeddingModelUpdate as EmbeddingModelMetadataUpdate,
 )
 from intric.ai_models.embedding_models.embedding_models_repo import (
     AdminEmbeddingModelsService,
 )
-import sqlalchemy as sa
-from intric.database.tables.collections_table import CollectionsTable
-from intric.database.tables.integration_table import IntegrationKnowledge
-from intric.database.tables.websites_table import Websites
-from intric.main.exceptions import BadRequestException
 from intric.allowed_origins.allowed_origin_models import (
     AllowedOriginCreate,
     AllowedOriginInDB,
 )
+
+# Audit logging - module level imports for sysadmin operations
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
+from intric.authentication import auth
+from intric.completion_models.presentation.completion_model_models import (
+    MigrationResult,
+    ModelMigrationRequest,
+)
+from intric.database.tables.collections_table import CollectionsTable
+from intric.database.tables.integration_table import IntegrationKnowledge
+from intric.database.tables.websites_table import Websites
 from intric.main.container.container import Container
+from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse, PaginatedResponse
 from intric.observability.debug_toggle import DebugFlag, get_debug_flag, set_debug_flag
@@ -51,17 +63,7 @@ from intric.tenants.tenant import (
     TenantWithMaskedCredentials,
 )
 from intric.users.user import UserAddSuperAdmin, UserCreated, UserInDB, UserUpdatePublic
-from intric.authentication import auth
 from intric.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direct
-from intric.completion_models.presentation.completion_model_models import (
-    ModelMigrationRequest,
-    MigrationResult,
-)
-
-# Audit logging - module level imports for sysadmin operations
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.actor_types import ActorType
-from intric.audit.domain.entity_types import EntityType
 
 logger = get_logger(__name__)
 
@@ -827,8 +829,9 @@ async def migrate_completion_model_for_tenant(
             )
 
         # Get a user from this tenant to set the context (needed for domain repo)
-        from intric.database.tables.users_table import Users
         from sqlalchemy import select
+
+        from intric.database.tables.users_table import Users
 
         stmt = select(Users).where(Users.tenant_id == tenant_id).limit(1)
         result = await session.execute(stmt)  # type: ignore[union-attr]
@@ -971,8 +974,9 @@ async def migrate_completion_model_for_all_tenants(
                 # Process each tenant in its own transaction
                 async with container.session().begin():  # type: ignore[union-attr]
                     # Get a user from this tenant to set the context
-                    from intric.database.tables.users_table import Users
                     from sqlalchemy import select
+
+                    from intric.database.tables.users_table import Users
 
                     stmt = select(Users).where(Users.tenant_id == tenant.id).limit(1)
                     result = await container.session().execute(stmt)  # type: ignore[union-attr]
@@ -1291,9 +1295,21 @@ async def delete_embedding_model(
         if not force:
             usage_counts = await session.execute(  # type: ignore[union-attr]
                 sa.select(
-                    sa.select(sa.func.count()).where(CollectionsTable.embedding_model_id == id).correlate(None).scalar_subquery().label("collections"),
-                    sa.select(sa.func.count()).where(Websites.embedding_model_id == id).correlate(None).scalar_subquery().label("websites"),
-                    sa.select(sa.func.count()).where(IntegrationKnowledge.embedding_model_id == id).correlate(None).scalar_subquery().label("integrations"),
+                    sa.select(sa.func.count())
+                    .where(CollectionsTable.embedding_model_id == id)
+                    .correlate(None)
+                    .scalar_subquery()
+                    .label("collections"),
+                    sa.select(sa.func.count())
+                    .where(Websites.embedding_model_id == id)
+                    .correlate(None)
+                    .scalar_subquery()
+                    .label("websites"),
+                    sa.select(sa.func.count())
+                    .where(IntegrationKnowledge.embedding_model_id == id)
+                    .correlate(None)
+                    .scalar_subquery()
+                    .label("integrations"),
                 )
             )
             row = usage_counts.one()

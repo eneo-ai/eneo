@@ -81,8 +81,10 @@ class TranscriptionModelCRUDService:
                 tm_security_classification = None
             else:
                 assert self.security_classification_repo is not None
-                tm_security_classification = await self.security_classification_repo.one(
-                    id=security_classification.id
+                tm_security_classification = (
+                    await self.security_classification_repo.one(
+                        id=security_classification.id
+                    )
                 )
             transcription_model.security_classification = tm_security_classification
 

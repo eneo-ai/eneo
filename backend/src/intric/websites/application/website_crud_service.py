@@ -8,7 +8,11 @@ from intric.main.exceptions import (
     UnauthorizedException,
 )
 from intric.main.logging import get_logger
-from intric.main.models import NOT_PROVIDED, NotProvided, Status  # Status used for job status check
+from intric.main.models import (  # Status used for job status check
+    NOT_PROVIDED,
+    NotProvided,
+    Status,
+)
 from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.websites.domain.website import UpdateInterval, Website
 
@@ -139,8 +143,9 @@ class WebsiteCRUDService:
         if not owner_actor.can_delete_websites():
             raise UnauthorizedException()
 
-        await self.space_repo.hard_delete_website(website_id=id, owner_space_id=owner_space.id)
-        
+        await self.space_repo.hard_delete_website(
+            website_id=id, owner_space_id=owner_space.id
+        )
 
     async def crawl_website(self, id: UUID) -> bool:
         space = await self.space_service.get_space_by_website(id)
@@ -151,7 +156,10 @@ class WebsiteCRUDService:
 
         website = space.get_website(website_id=id)
 
-        if website.latest_crawl is not None and website.latest_crawl.status in [Status.QUEUED, Status.IN_PROGRESS]:
+        if website.latest_crawl is not None and website.latest_crawl.status in [
+            Status.QUEUED,
+            Status.IN_PROGRESS,
+        ]:
             # Safe preemption: Check if job is stale (no activity for threshold period)
             preempted = await self._try_preempt_stale_job(website)
             if not preempted:
@@ -203,7 +211,9 @@ class WebsiteCRUDService:
                 threshold_minutes = get_crawler_setting(
                     "crawl_stale_threshold_minutes", tenant_settings
                 )
-            cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
+            cutoff_time = datetime.now(timezone.utc) - timedelta(
+                minutes=threshold_minutes
+            )
 
             # Use updated_at if available, otherwise created_at
             job_activity_time = job.updated_at or job.created_at
@@ -213,9 +223,7 @@ class WebsiteCRUDService:
             if job_activity_time and job_activity_time < cutoff_time:
                 # Job is stale - attempt ATOMIC preemption (Compare-and-Swap)
                 # Only succeeds if job is still IN_PROGRESS or QUEUED
-                error_message = (
-                    f"Preempted: Job was stale (no activity for {threshold_minutes} minutes)"
-                )
+                error_message = f"Preempted: Job was stale (no activity for {threshold_minutes} minutes)"
                 rows_affected = await job_repo.mark_job_failed_if_running(
                     latest_crawl.job_id, error_message
                 )
@@ -321,20 +329,21 @@ class WebsiteCRUDService:
                 crawl_run = await self.crawl_website(website_id)
                 successful_runs.append(crawl_run)
             except CrawlAlreadyRunningException:
-                errors.append({
-                    "website_id": str(website_id),
-                    "error": "Crawl already in progress for this website"
-                })
+                errors.append(
+                    {
+                        "website_id": str(website_id),
+                        "error": "Crawl already in progress for this website",
+                    }
+                )
             except UnauthorizedException:
-                errors.append({
-                    "website_id": str(website_id),
-                    "error": "Not authorized to crawl this website"
-                })
+                errors.append(
+                    {
+                        "website_id": str(website_id),
+                        "error": "Not authorized to crawl this website",
+                    }
+                )
             except Exception as e:
-                errors.append({
-                    "website_id": str(website_id),
-                    "error": str(e)
-                })
+                errors.append({"website_id": str(website_id), "error": str(e)})
 
         return successful_runs, errors
 
@@ -381,7 +390,7 @@ class WebsiteCRUDService:
                     files_downloaded = website.latest_crawl.files_downloaded
                     files_failed = website.latest_crawl.files_failed
                     status = website.latest_crawl.status
-                    crawl_status = status.value if hasattr(status, 'value') else status
+                    crawl_status = status.value if hasattr(status, "value") else status
 
                 return {
                     "website_id": website.id,

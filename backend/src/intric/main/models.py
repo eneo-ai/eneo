@@ -2,8 +2,6 @@ from copy import deepcopy
 from datetime import datetime
 from enum import Enum
 from typing import Any, Generic, Optional, Tuple, Type, TypeVar, Union, cast
-
-from typing_extensions import TypeIs
 from uuid import UUID
 
 from pydantic import (
@@ -16,6 +14,7 @@ from pydantic import (
 )
 from pydantic.fields import FieldInfo
 from pydantic_core import core_schema
+from typing_extensions import TypeIs
 
 from intric.main.exceptions import ErrorCodes
 
@@ -60,6 +59,7 @@ def is_provided(value: _T_NP | NotProvided) -> TypeIs[_T_NP]:
 
 class MCPToolSetting(BaseModel):
     """MCP server tool enablement setting."""
+
     tool_id: UUID
     is_enabled: bool
 
@@ -83,7 +83,9 @@ def partial_model(model: Type[_M]) -> Type[_M]:
     ) -> Tuple[Any, FieldInfo]:
         new = deepcopy(field)
         new.default = default
-        new.default_factory = None  # Clear default_factory to avoid conflict with default
+        new.default_factory = (
+            None  # Clear default_factory to avoid conflict with default
+        )
         new.annotation = Optional[field.annotation]  # type: ignore
         return new.annotation, new
 
