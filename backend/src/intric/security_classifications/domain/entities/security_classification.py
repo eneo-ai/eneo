@@ -10,7 +10,7 @@ from intric.base.base_entity import Entity
 from intric.database.tables.security_classifications_table import (
     SecurityClassification as SecurityDBModel,
 )
-from intric.main.models import NOT_PROVIDED, NotProvided
+from intric.main.models import NOT_PROVIDED, NotProvided, is_provided
 
 
 class SecurityClassification(Entity):
@@ -54,7 +54,7 @@ class SecurityClassification(Entity):
     @classmethod
     def to_domain(
         cls, db_security_classification: Optional[SecurityDBModel] = None
-    ) -> "SecurityClassification":
+    ) -> "SecurityClassification | None":
         if db_security_classification is None:
             return None
 
@@ -90,9 +90,9 @@ class SecurityClassification(Entity):
         Returns:
             The updated security classification
         """
-        if name is not NOT_PROVIDED:
+        if is_provided(name):
             self.name = name
-        if description is not NOT_PROVIDED:
+        if is_provided(description):
             self.description = description
         if security_level is not None:
             self.security_level = security_level

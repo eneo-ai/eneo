@@ -54,14 +54,14 @@ class Users(BasePublic):
 
 users_roles_table = Table(
     "users_roles",
-    Base.metadata,
+    Base.metadata,  # type: ignore[attr-defined]
     Column("user_id", ForeignKey(Users.id, ondelete="CASCADE"), primary_key=True),
     Column("role_id", ForeignKey(Roles.id, ondelete="CASCADE"), primary_key=True),
 )
 
 users_predefined_roles_table = Table(
     "users_predefined_roles",
-    Base.metadata,
+    Base.metadata,  # type: ignore[attr-defined]
     Column("user_id", ForeignKey(Users.id, ondelete="CASCADE"), primary_key=True),
     Column(
         "predefined_role_id",
@@ -73,7 +73,7 @@ users_predefined_roles_table = Table(
 
 usergroups_users_table = Table(
     "usergroups_users",
-    Base.metadata,
+    Base.metadata,  # type: ignore[attr-defined]
     Column("user_id", ForeignKey(Users.id, ondelete="CASCADE"), primary_key=True),
     Column(
         "user_group_id", ForeignKey(UserGroups.id, ondelete="CASCADE"), primary_key=True

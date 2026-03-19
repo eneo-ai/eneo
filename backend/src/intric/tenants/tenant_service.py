@@ -50,13 +50,13 @@ class TenantService:
     async def get_all_tenants(self, domain: str | None) -> list[TenantInDB]:
         return await self.repo.get_all_tenants(domain=domain)
 
-    async def get_tenant_by_id(self, id: UUID) -> TenantInDB:
+    async def get_tenant_by_id(self, id: UUID) -> TenantInDB | None:
         tenant = await self.repo.get(id)
         self._validate(tenant, id)
 
         return tenant
 
-    async def create_tenant(self, tenant: TenantBase) -> TenantInDB:
+    async def create_tenant(self, tenant: TenantBase) -> TenantInDB | None:
         tenant_in_db = await self.repo.add(tenant)
 
         # Note: Models are now managed via API/UI by admins
@@ -64,15 +64,16 @@ class TenantService:
 
         return tenant_in_db
 
-    async def delete_tenant(self, tenant_id: UUID) -> TenantInDB:
+    async def delete_tenant(self, tenant_id: UUID) -> TenantInDB | None:
         tenant = await self.get_tenant_by_id(tenant_id)
         self._validate(tenant, tenant_id)
 
         return await self.repo.delete_tenant_by_id(tenant_id)
 
-    async def update_tenant(self, tenant_update: TenantUpdatePublic, id: UUID) -> TenantInDB:
+    async def update_tenant(self, tenant_update: TenantUpdatePublic, id: UUID) -> TenantInDB | None:
         tenant = await self.get_tenant_by_id(id)
         self._validate(tenant, id)
+        assert tenant is not None
 
         tenant_update = TenantUpdate(**tenant_update.model_dump(exclude_unset=True), id=tenant.id)
         return await self.repo.update_tenant(tenant_update)
@@ -248,6 +249,7 @@ class TenantService:
         # Validate tenant exists
         tenant = await self.repo.get(tenant_id)
         self._validate(tenant, tenant_id)
+        assert tenant is not None
 
         # Get credentials with metadata (masked keys + encryption status)
         credentials_metadata = await self.repo.get_api_credentials_with_metadata(
@@ -261,7 +263,7 @@ class TenantService:
         for provider, metadata in credentials_metadata.items():
             credential_data = tenant_credentials.get(provider, {})
             config: dict[str, Any] = {}
-            configured_at: datetime = tenant.updated_at
+            configured_at: datetime = tenant.updated_at  # type: ignore[assignment]
 
             if isinstance(credential_data, dict):
                 # Extract config (all fields except sensitive ones)
@@ -280,7 +282,7 @@ class TenantService:
                     try:
                         configured_at = datetime.fromisoformat(timestamp_candidate)
                     except ValueError:
-                        configured_at = tenant.updated_at
+                        configured_at = tenant.updated_at  # type: ignore[assignment]
 
             credentials.append({
                 "provider": provider,
@@ -331,6 +333,7 @@ class TenantService:
         )
 
         # Build response with defaults filled in using the helper
+        assert updated_tenant is not None
         effective_settings = get_all_crawler_settings(updated_tenant.crawler_settings)
 
         return {
@@ -365,6 +368,7 @@ class TenantService:
         # Validate tenant exists
         tenant = await self.repo.get(tenant_id)
         self._validate(tenant, tenant_id)
+        assert tenant is not None
 
         # Get tenant overrides
         overrides = tenant.crawler_settings or {}
@@ -400,6 +404,7 @@ class TenantService:
         # Validate tenant exists
         tenant = await self.repo.get(tenant_id)
         self._validate(tenant, tenant_id)
+        assert tenant is not None
 
         # Get keys before deletion
         deleted_keys = list((tenant.crawler_settings or {}).keys())
@@ -416,7 +421,7 @@ class TenantService:
         self,
         tenant_id: UUID,
         privacy_policy_url: HttpUrl | None,
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """
         Set privacy policy URL for a tenant.
 
@@ -443,7 +448,7 @@ class TenantService:
         self,
         tenant_id: UUID,
         enabled: bool,
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """
         Enable or disable security classifications for a tenant.
 

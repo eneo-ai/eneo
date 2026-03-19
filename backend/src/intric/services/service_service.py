@@ -51,9 +51,9 @@ class ServiceService:
         if service.json_schema is not None:
             PydanticModelFactory(service.json_schema).validate_schema()
 
-        if service.completion_model_id is not None:
+        if service.completion_model_id is not None:  # type: ignore[attr-defined]
             await self.completion_model_crud_service.get_completion_model(
-                service.completion_model_id
+                service.completion_model_id  # type: ignore[attr-defined]
             )
 
     async def _validate_same_embedding_model(self, service: ServiceCreate | ServiceUpdate):
@@ -203,6 +203,7 @@ class ServiceService:
                 "User does not have permission to create service in the space"
             )
 
+        assert service.completion_model is not None
         if not target_space.is_completion_model_in_space(service.completion_model.id):
             raise BadRequestException(
                 f"Space does not have completion model {service.completion_model.name} enabled"

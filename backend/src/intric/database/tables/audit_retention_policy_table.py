@@ -9,7 +9,7 @@ from intric.database.tables.base_class import TimestampMixin, BaseWithTableName
 class AuditRetentionPolicy(TimestampMixin, BaseWithTableName):
     """Table for per-tenant audit log retention configuration."""
 
-    __tablename__ = "audit_retention_policies"
+    __tablename__ = "audit_retention_policies"  # type: ignore[assignment]
 
     # Tenant ID is primary key (one policy per tenant)
     tenant_id = Column(

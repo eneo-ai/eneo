@@ -6,7 +6,7 @@ from scrapy.http import Response
 from intric.crawler.parse_html import parse_response
 
 
-class SitemapSpider(scrapy.spiders.SitemapSpider):
+class SitemapSpider(scrapy.spiders.SitemapSpider):  # type: ignore[attr-defined]
     name = "sitemapspider"
 
     def __init__(

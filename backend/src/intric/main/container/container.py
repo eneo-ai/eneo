@@ -408,7 +408,7 @@ class SessionProxy:
                 "Cannot call SessionProxy without active session scope. "
                 "Wrap your code in 'async with container.session_scope():'."
             )
-        return session(*args, **kwargs)
+        return session(*args, **kwargs)  # type: ignore[call-issue]
 
 
 class Container(containers.DeclarativeContainer):

@@ -96,7 +96,7 @@ class Websites(BasePublic):
             .where(CrawlRuns.website_id == cls.id)
             .order_by(CrawlRuns.created_at.desc())
             .limit(1)
-            .correlate(cls.__table__)
+            .correlate(cls.__table__)  # type: ignore[attr-defined]
             .scalar_subquery()
         )
 

@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 
 from intric.main.models import ModelId
-from intric.spaces.presentation.space_models import AddSpaceMemberRequest
+from intric.spaces.presentation.space_models import AddSpaceMemberRequest  # type: ignore[import-not-found]
 
 
 class InfoBlobDifference(BaseModel):

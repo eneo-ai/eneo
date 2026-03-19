@@ -44,7 +44,7 @@ class AssistantTemplateFactory:
     def create_assistant_template_list(
         items: list["AssistantTemplateDBModel"],
     ) -> AssistantTemplate:
-        return [
+        return [  # type: ignore[return-value]
             AssistantTemplateFactory.create_assistant_template(item=item)
             for item in items
         ]

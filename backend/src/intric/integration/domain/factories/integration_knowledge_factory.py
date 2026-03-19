@@ -23,7 +23,7 @@ class IntegrationKnowledgeFactory:
         sharepoint_subscription = None
         try:
             insp = inspect(record)
-            if "sharepoint_subscription" not in insp.unloaded:
+            if insp is not None and "sharepoint_subscription" not in insp.unloaded:
                 sharepoint_subscription = record.sharepoint_subscription
         except Exception:
             # If inspection fails, fall back to None

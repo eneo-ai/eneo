@@ -63,12 +63,14 @@ class ModelProviderRepository:
     async def create(self, provider: ModelProvider) -> ModelProvider:
         """Create a new provider."""
         provider_db = ModelProviders(
-            tenant_id=provider.tenant_id,
-            name=provider.name,
-            provider_type=provider.provider_type,
-            credentials=provider.credentials,
-            config=provider.config,
-            is_active=provider.is_active,
+            **dict(  # type: ignore[arg-type]
+                tenant_id=provider.tenant_id,
+                name=provider.name,
+                provider_type=provider.provider_type,
+                credentials=provider.credentials,
+                config=provider.config,
+                is_active=provider.is_active,
+            )
         )
 
         self.session.add(provider_db)

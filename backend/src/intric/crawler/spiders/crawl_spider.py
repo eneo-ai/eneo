@@ -8,7 +8,7 @@ from scrapy.spiders import Rule
 from intric.crawler.parse_html import parse_file, parse_response
 
 
-class CrawlSpider(scrapy.spiders.CrawlSpider):
+class CrawlSpider(scrapy.spiders.CrawlSpider):  # type: ignore[attr-defined]
     name = "crawlspider"
 
     def __init__(

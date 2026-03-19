@@ -82,12 +82,12 @@ def to_ask_conversation_response(
     updated_at: Optional[datetime] = None,
     web_search_results: list[WebSearchResultPublic] = [],
 ):
-    return AskChatResponse(
-        created_at=created_at,
-        updated_at=updated_at,
+    return AskChatResponse(  # type: ignore[call-arg]
+        created_at=created_at,  # type: ignore[call-arg]
+        updated_at=updated_at,  # type: ignore[call-arg]
         session_id=session.id,
-        id=question_id,
-        completion_model=completion_model,
+        id=question_id,  # type: ignore[call-arg]
+        completion_model=completion_model,  # type: ignore[call-arg]
         files=[FilePublic(**file.model_dump()) for file in files],
         generated_files=[],
         question=question,
@@ -121,11 +121,12 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
                     **blob.model_dump(),
                     metadata=InfoBlobMetadata(**blob.model_dump()),
                 )
-                for blob in chunk.reference_chunks
+                for blob in (chunk.reference_chunks or [])
             ],
         )
 
     if chunk.response_type == ResponseType.FILES:
+        assert chunk.generated_file is not None
         data = SSEFiles(
             session_id=session_id,
             generated_files=[FilePublic(**chunk.generated_file.model_dump())],
@@ -175,7 +176,8 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
             error_code=chunk.error_code,
         )
 
-    return ServerSentEvent(data.model_dump_json(), event=chunk.response_type.value)
+    assert chunk.response_type is not None
+    return ServerSentEvent(data.model_dump_json(), event=chunk.response_type.value)  # type: ignore[possibly-undefined]
 
 
 async def to_response(
@@ -185,7 +187,7 @@ async def to_response(
 ):
     if stream:
 
-        @gen_transaction(db_session)
+        @gen_transaction(db_session)  # type: ignore[call-overload]
         async def event_stream():
             async for chunk in response.answer:
 
@@ -220,7 +222,7 @@ async def to_conversation_response(
 ):
     if stream:
 
-        @gen_transaction(db_session)
+        @gen_transaction(db_session)  # type: ignore[call-overload]
         async def event_stream():
             data = SSEFirstChunk(
                 **to_ask_conversation_response(

@@ -118,13 +118,11 @@ jobs:
 
   backend-type-check:
     runs-on: ubuntu-latest
-    name: Backend type check (Pyright baseline)
+    name: Backend type check (Pyright)
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -139,8 +137,6 @@ jobs:
         working-directory: ./backend
         run: uv sync --group dev
 
-      - name: Run pyright on changed files
+      - name: Run pyright
         working-directory: ./backend
-        env:
-          RATCHET_IGNORE_RANGE: "1"
-        run: ./scripts/typecheck_changed.sh
+        run: uv run pyright

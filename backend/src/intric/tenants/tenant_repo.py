@@ -32,7 +32,7 @@ class TenantRepository:
         session: AsyncSession,
         encryption_service: Optional["EncryptionService"] = None,
     ):
-        self.delegate = BaseRepositoryDelegate(
+        self.delegate: BaseRepositoryDelegate[TenantInDB] = BaseRepositoryDelegate(
             session,
             Tenants,
             TenantInDB,
@@ -41,7 +41,7 @@ class TenantRepository:
         self.session = session
         self.encryption = encryption_service
 
-    async def add(self, tenant: TenantBase) -> TenantInDB:
+    async def add(self, tenant: TenantBase) -> TenantInDB | None:
         """Create new tenant with auto-generated slug.
 
         If the tenant doesn't have a slug, it will be auto-generated from the name.
@@ -68,6 +68,7 @@ class TenantRepository:
                     .options(selectinload(Tenants.modules))
                 )
                 tenant_in_db = await self.delegate.get_model_from_query(stmt)
+                assert tenant_in_db is not None
                 logger.info(
                     f"Generated slug '{slug}' for tenant {tenant_in_db.name}",
                     extra={"tenant_id": str(tenant_in_db.id), "slug": slug},
@@ -77,7 +78,7 @@ class TenantRepository:
         except IntegrityError as e:
             raise exceptions.UniqueException("Tenant name already exists.") from e
 
-    async def get(self, id: UUID) -> TenantInDB:
+    async def get(self, id: UUID) -> TenantInDB | None:
         return await self.delegate.get(id)
 
     async def get_all_tenants(self, domain: str | None = None):
@@ -97,21 +98,22 @@ class TenantRepository:
             .options(selectinload(Tenants.modules))
         )
         tenant = await self.session.scalar(tenant_stmt)
+        assert tenant is not None
 
-        tenant.modules = modules.all()
+        tenant.modules = modules.all()  # type: ignore[attr-defined]
 
         return TenantInDB.model_validate(tenant)
 
-    async def update_tenant(self, tenant: TenantUpdate) -> TenantInDB:
+    async def update_tenant(self, tenant: TenantUpdate) -> TenantInDB | None:
         return await self.delegate.update(tenant)
 
-    async def delete_tenant_by_id(self, id: UUID) -> TenantInDB:
+    async def delete_tenant_by_id(self, id: UUID) -> TenantInDB | None:
         return await self.delegate.delete(id)
 
     async def set_privacy_policy(
         self, privacy_policy: Optional[HttpUrl], tenant_id: UUID
-    ) -> TenantInDB:
-        privacy_policy = str(privacy_policy) if privacy_policy is not None else None
+    ) -> TenantInDB | None:
+        privacy_policy = str(privacy_policy) if privacy_policy is not None else None  # type: ignore[assignment]
         stmt = (
             sa.update(Tenants)
             .where(Tenants.id == tenant_id)
@@ -122,7 +124,7 @@ class TenantRepository:
 
         return await self.delegate.get_model_from_query(stmt)
 
-    async def get_tenant_from_zitadel_org_id(self, zitadel_org_id: str) -> TenantInDB:
+    async def get_tenant_from_zitadel_org_id(self, zitadel_org_id: str) -> TenantInDB | None:
         return await self.delegate.get_by(
             conditions={Tenants.zitadel_org_id: zitadel_org_id}
         )
@@ -132,7 +134,7 @@ class TenantRepository:
         tenant_id: UUID,
         provider: str,
         credential: dict[str, Any],
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """Update or add API credential using JSONB set operation with encryption.
 
         Uses PostgreSQL's jsonb_set function to efficiently update a single
@@ -145,7 +147,7 @@ class TenantRepository:
             credential: The credential dictionary containing api_key and optional fields
 
         Returns:
-            Updated TenantInDB instance with refreshed api_credentials
+            Updated TenantInDB instance with refreshed api_credentials, or None
         """
         # DEBUG: Log encryption state
         logger.info(
@@ -192,7 +194,7 @@ class TenantRepository:
         self,
         tenant_id: UUID,
         provider: str,
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """Remove API credential using JSONB delete operator.
 
         Uses PostgreSQL's JSONB #- operator to efficiently remove a single
@@ -537,7 +539,7 @@ class TenantRepository:
         self,
         tenant_id: UUID,
         favorites: list[str],
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """Replace the tenant's favorite providers list.
 
         Args:
@@ -563,7 +565,7 @@ class TenantRepository:
         self,
         tenant_id: UUID,
         crawler_settings: dict[str, Any],
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """Atomically merge crawler settings for a tenant.
 
         Uses PostgreSQL's || operator to merge JSONB objects atomically,
@@ -594,7 +596,7 @@ class TenantRepository:
     async def clear_crawler_settings(
         self,
         tenant_id: UUID,
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """Clear all crawler settings for a tenant, reverting to defaults.
 
         Args:

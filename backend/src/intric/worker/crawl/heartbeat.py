@@ -16,7 +16,7 @@ from uuid import UUID
 if TYPE_CHECKING:
     from redis.asyncio import Redis
 
-    from intric.tenants.tenant import Tenant
+    from intric.tenants.tenant import Tenant  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
 

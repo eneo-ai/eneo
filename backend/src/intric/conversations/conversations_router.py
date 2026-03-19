@@ -183,10 +183,12 @@ async def delete_conversation(
     session_service = container.session_service()
     # Note: We'll need to determine if this is an assistant or group chat session
     session = await session_service.get_session_by_uuid(session_id)
+    assert session is not None
 
     if session.group_chat_id:
         await session_service.delete(session_id, group_chat_id=session.group_chat_id)
     else:
+        assert session.assistant is not None
         await session_service.delete(session_id, assistant_id=session.assistant.id)
 
     # Return None to produce 204 No Content response
@@ -208,6 +210,7 @@ async def leave_feedback(
 
     # Determine if this is a group chat or assistant session
     session = await session_service.get_session_by_uuid(session_id)
+    assert session is not None
 
     if session.group_chat_id:
         updated_session = await session_service.leave_feedback(
@@ -216,6 +219,7 @@ async def leave_feedback(
             feedback=feedback,
         )
     else:
+        assert session.assistant is not None
         updated_session = await session_service.leave_feedback(
             session_id=session_id, assistant_id=session.assistant.id, feedback=feedback
         )

@@ -365,7 +365,7 @@ class SharepointWebhookService:
         )
 
         result = await self.session.execute(stmt)
-        return result.all()
+        return result.all()  # type: ignore[return-value]
 
     async def _fetch_knowledge_by_drive(
         self, drive_id: str
@@ -385,7 +385,7 @@ class SharepointWebhookService:
         )
 
         result = await self.session.execute(stmt)
-        return result.all()
+        return result.all()  # type: ignore[return-value]
 
     def _is_notification_in_scope(
         self, notification: Dict, knowledge_db: IntegrationKnowledgeDBModel

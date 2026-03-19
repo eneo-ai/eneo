@@ -9,7 +9,7 @@ from intric.database.tables.base_class import BasePublic
 class AuditLog(BasePublic):
     """Table for tracking audit logs with multi-tenant isolation."""
 
-    __tablename__ = "audit_logs"
+    __tablename__ = "audit_logs"  # type: ignore[assignment]
 
     # Multi-Tenant Isolation (MANDATORY)
     tenant_id = Column(

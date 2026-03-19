@@ -339,7 +339,7 @@ async def purge_old_audit_logs(container: Container):
     # Uses the container's session (provided by cron_job decorator) for read-only query
     session = container.session()
     query = select(Tenants.id)
-    result = await session.execute(query)
+    result = await session.execute(query)  # type: ignore[union-attr]
     tenant_ids: list[UUID] = list(result.scalars().all())
 
     logger.info(f"Starting audit log retention purge for {len(tenant_ids)} tenants")

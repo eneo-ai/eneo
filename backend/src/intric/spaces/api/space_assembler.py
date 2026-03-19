@@ -65,11 +65,11 @@ class SpaceAssembler:
         for assistant in space.assistants:
             assistant.permissions = actor.get_assistant_permissions(assistant=assistant)
 
-        for group_chat in space.group_chats:
+        for group_chat in space.group_chats or []:
             group_chat.permissions = actor.get_group_chat_permissions(group_chat=group_chat)
 
         for app in space.apps:
-            app.permissions = actor.get_app_permissions()
+            app.permissions = actor.get_app_permissions()  # type: ignore[attr-defined]
 
         for service in space.services:
             service.permissions = actor.get_service_permissions()
@@ -244,6 +244,7 @@ class SpaceAssembler:
         ]
 
     def _get_assistant_model(self, assistant: "Assistant"):
+        assert assistant.user is not None
         return AssistantSparse(
             created_at=assistant.created_at,
             updated_at=assistant.updated_at,
@@ -284,7 +285,7 @@ class SpaceAssembler:
             description=app.description,
             published=app.published,
             user_id=app.user_id,
-            permissions=app.permissions,
+            permissions=app.permissions,  # type: ignore[attr-defined]
             icon_id=app.icon_id,
         )
 
@@ -303,7 +304,7 @@ class SpaceAssembler:
             group_chats=PaginatedPermissions[GroupChatSparse](
                 items=[
                     self._get_group_chat_model(group_chat=group_chat)
-                    for group_chat in space.group_chats
+                    for group_chat in (space.group_chats or [])
                     if actor.can_read_group_chat(group_chat=group_chat)
                     and (not only_published or group_chat.published)
                 ],

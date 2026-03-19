@@ -143,7 +143,7 @@ class EmbeddingModels(BasePublic):
 
 class CompletionModelUsageStats(BasePublic):
     """Pre-aggregated usage statistics for completion models per tenant."""
-    __tablename__ = "completion_model_usage_stats"
+    __tablename__ = "completion_model_usage_stats"  # type: ignore[assignment]
     
     # Foreign keys
     model_id: Mapped[UUID] = mapped_column(

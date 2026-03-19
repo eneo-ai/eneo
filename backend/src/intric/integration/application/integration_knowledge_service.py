@@ -213,7 +213,7 @@ class IntegrationKnowledgeService:
                     "Tenant app ID is required for tenant_app integrations"
                 )
 
-            tenant_app = await self.tenant_sharepoint_app_repo.one(
+            tenant_app = await self.tenant_sharepoint_app_repo.one(  # type: ignore[attr-defined]
                 id=user_integration.tenant_app_id
             )
             access_token = await self._get_tenant_app_access_token(tenant_app)
@@ -228,7 +228,7 @@ class IntegrationKnowledgeService:
             token_id = oauth_token.id
             tenant_app_id = None
 
-        if hasattr(token, "token_type") and token.token_type.is_confluence:
+        if hasattr(token, "token_type") and token.token_type.is_confluence:  # type: ignore[union-attr]
             job = await self.job_service.queue_job(
                 task=Task.PULL_CONFLUENCE_CONTENT,
                 name=name,
@@ -479,7 +479,7 @@ class IntegrationKnowledgeService:
                             "Tenant app ID is required for tenant_app integrations"
                         )
 
-                    tenant_app = await self.tenant_sharepoint_app_repo.one(
+                    tenant_app = await self.tenant_sharepoint_app_repo.one(  # type: ignore[attr-defined]
                         id=user_integration.tenant_app_id
                     )
                     access_token = await self._get_tenant_app_access_token(tenant_app)
@@ -585,7 +585,7 @@ class IntegrationKnowledgeService:
                     "Tenant app ID is required for tenant_app integrations"
                 )
 
-            tenant_app = await self.tenant_sharepoint_app_repo.one(
+            tenant_app = await self.tenant_sharepoint_app_repo.one(  # type: ignore[attr-defined]
                 id=user_integration.tenant_app_id
             )
             access_token = await self._get_tenant_app_access_token(tenant_app)

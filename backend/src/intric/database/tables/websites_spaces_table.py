@@ -6,7 +6,7 @@ from intric.database.tables.websites_table import Websites
 from intric.database.tables.spaces_table import Spaces
 
 class WebsitesSpaces(BaseCrossReference):
-    __tablename__ = "websites_spaces"
+    __tablename__ = "websites_spaces"  # type: ignore[assignment]
 
     website_id: Mapped[UUID] = mapped_column(
         ForeignKey(Websites.id, ondelete="CASCADE"),

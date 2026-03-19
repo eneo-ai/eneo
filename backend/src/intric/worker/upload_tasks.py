@@ -51,6 +51,7 @@ async def transcription_task(
             title=params.filename,
             group_id=params.group_id,
         )
+        assert info_blob is not None
 
         task_manager.result_location = f"/api/v1/info-blobs/{info_blob.id}/"
 
@@ -81,6 +82,7 @@ async def upload_info_blob_task(
             group_id=params.group_id,
             embedding_model=group.embedding_model,
         )
+        assert info_blob is not None
 
         task_manager.result_location = f"/api/v1/info-blobs/{info_blob.id}/"
 

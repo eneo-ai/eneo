@@ -18,7 +18,7 @@ from intric.main.models import IdAndName
 class CompletionModelsRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
-        self.delegate = BaseRepositoryDelegate(
+        self.delegate: BaseRepositoryDelegate[CompletionModel] = BaseRepositoryDelegate(
             session, CompletionModels, CompletionModel
         )
 
@@ -42,7 +42,7 @@ class CompletionModelsRepository:
         model.is_org_enabled = db_model.is_enabled
         return model
 
-    async def get_model_by_name(self, name: str) -> CompletionModel:
+    async def get_model_by_name(self, name: str) -> CompletionModel | None:
         return await self.delegate.get_by(conditions={CompletionModels.name: name})
 
     async def create_model(self, model: CompletionModelCreate) -> CompletionModel:
@@ -69,10 +69,10 @@ class CompletionModelsRepository:
         except IntegrityError as e:
             raise UniqueException("Default completion model already exists.") from e
 
-    async def update_model(self, model: CompletionModelUpdate) -> CompletionModel:
+    async def update_model(self, model: CompletionModelUpdate) -> CompletionModel | None:
         return await self.delegate.update(model, exclude={"token_limit"})
 
-    async def delete_model(self, id: UUID) -> CompletionModel:
+    async def delete_model(self, id: UUID) -> CompletionModel | None:
         stmt = (
             sa.delete(CompletionModels)
             .where(CompletionModels.id == id)
@@ -116,9 +116,9 @@ class CompletionModelsRepository:
 
         return models
 
-    async def get_ids_and_names(self) -> list[(UUID, str)]:
+    async def get_ids_and_names(self) -> list[tuple[UUID, str]]:  # type: ignore[type-arg]
         stmt = sa.select(CompletionModels)
 
         models = await self.delegate.get_records_from_query(stmt)
 
-        return [IdAndName(id=model.id, name=model.name) for model in models.all()]
+        return [IdAndName(id=model.id, name=model.name) for model in models.all()]  # type: ignore[return-value]

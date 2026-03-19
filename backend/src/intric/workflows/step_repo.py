@@ -28,6 +28,7 @@ class StepRepository(BaseRepository):
                 sa.insert(Filters).values(**step.filter.model_dump()).returning(Filters)
             )
             filter_in_db = await self.session.scalar(filter_stmt)
+            assert filter_in_db is not None
 
             step_stmt = step_stmt.values(filter_id=filter_in_db.id)
 

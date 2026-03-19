@@ -16,7 +16,7 @@ from intric.collections.presentation.collection_models import CollectionPublic
 from intric.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
 from intric.jobs.job_models import JobPublic
 from intric.main.container.container import Container
-from intric.main.models import NOT_PROVIDED, ModelId, PaginatedResponse
+from intric.main.models import NOT_PROVIDED, ModelId, PaginatedResponse, is_provided
 from intric.server import protocol
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
@@ -186,7 +186,7 @@ async def update_space(
         changes["name"] = {"old": old_space.name, "new": update_space_req.name}
     if update_space_req.description is not None and update_space_req.description != old_space.description:
         changes["description"] = {"old": old_space.description, "new": update_space_req.description}
-    if data_retention_days is not NOT_PROVIDED and data_retention_days != old_space.data_retention_days:
+    if is_provided(data_retention_days) and data_retention_days != old_space.data_retention_days:
         changes["data_retention_days"] = {
             "old": old_space.data_retention_days,
             "new": data_retention_days
@@ -221,7 +221,7 @@ async def update_space(
             }
 
     # Track security classification changes
-    if security_classification is not NOT_PROVIDED:
+    if is_provided(security_classification):
         old_sc = old_space.security_classification.name if old_space.security_classification else None
         new_sc = space.security_classification.name if space.security_classification else None
         if old_sc != new_sc:

@@ -9,7 +9,7 @@ from intric.database.tables.base_class import BasePublic
 class CompletionModelMigrationHistory(BasePublic):
     """Table for tracking completion model migration history."""
     
-    __tablename__ = "completion_model_migration_history"
+    __tablename__ = "completion_model_migration_history"  # type: ignore[assignment]
     
     migration_id = Column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)

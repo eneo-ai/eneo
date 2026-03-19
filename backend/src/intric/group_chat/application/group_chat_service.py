@@ -77,7 +77,7 @@ class GroupChatService:
 
         return updated_space.get_group_chat(group_chat_id=group_chat.id)
 
-    async def delete_group_chat(self, group_chat_id: "UUID") -> "GroupChat":
+    async def delete_group_chat(self, group_chat_id: "UUID") -> "GroupChat | None":
         space = await self.space_service.get_space_by_group_chat(group_chat_id=group_chat_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
@@ -232,7 +232,7 @@ class GroupChatService:
         question: str,
         assistants: list[GroupChatAssistant],
         session: Optional["SessionInDB"] = None,
-    ) -> GroupChatAssistantSelectionResult:
+    ) -> GroupChatAssistantSelectionResult | None:
         """Select the most appropriate assistant using a completion model to analyze the question"""
 
         # if no assistants, no need for completion model
@@ -261,20 +261,20 @@ class GroupChatService:
         )
         # parse the response to determine which assistant to use
         assistant_match = self._is_match(
-            response.completion.text,
+            response.completion.text,  # type: ignore[union-attr]
             assistants,
         )
         if assistant_match:
             if 1 <= assistant_match <= len(assistants):
                 return GroupChatAssistantSelectionResult(
                     assistant=assistants[assistant_match - 1],
-                    response_str=response.completion.text,
+                    response_str=response.completion.text,  # type: ignore[union-attr]
                     assistant_selector_tokens=assistant_selector_tokens,
                 )
         else:
             return GroupChatAssistantSelectionResult(
                 assistant=None,
-                response_str=response.completion.text,
+                response_str=response.completion.text,  # type: ignore[union-attr]
                 assistant_selector_tokens=assistant_selector_tokens,
             )
 
@@ -395,6 +395,7 @@ class GroupChatService:
             selection_result = await self._select_assistant_with_completion_model(
                 question, group_chat.assistants, session
             )
+            assert selection_result is not None
             response_from_selector = selection_result.response_str
             if selection_result.assistant:
                 assistant_to_ask = selection_result.assistant.assistant.id
@@ -402,6 +403,7 @@ class GroupChatService:
                 assistant_to_ask = None
 
         if assistant_to_ask is None:
+            assert selection_result is not None
             final_response = await self._handle_response(
                 response=response_from_selector,
                 question=question,
@@ -438,6 +440,7 @@ class GroupChatService:
             # ensure the response tools contain which assistant answered
             # get the assistant name for the handle
             selected_assistant = group_chat.get_assistant_by_id(assistant_to_ask)
+            assert selected_assistant is not None
             assistant_name = selected_assistant.assistant.name
 
             # set assistant info in tools

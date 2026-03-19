@@ -34,7 +34,7 @@ class FeatureFlagRepository:
             .returning(GlobalFeatureFlag)
         )
         feature = await self.db_session.execute(stmt)
-        return feature.scalar_one()
+        return feature.scalar_one()  # type: ignore[return-value]
 
     async def update(self, obj: FeatureFlag) -> FeatureFlag:
         """Update tenant preferences for a feature flag.
@@ -121,4 +121,4 @@ class FeatureFlagRepository:
 
         query = select(TenantFeatureFlag).filter_by(**filters)
         result = await self.db_session.scalars(query)
-        return result.all()
+        return result.all()  # type: ignore[return-value]

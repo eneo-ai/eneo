@@ -86,9 +86,9 @@ class CompletionModelMigrationHistoryService:
         # Convert to public models
         public_models = []
         for record in migration_records:
-            from_model_name = model_names.get(record.from_model_id, "Unknown Model")
-            to_model_name = model_names.get(record.to_model_id, "Unknown Model")
-            initiated_by_name = user_names.get(record.initiated_by, "Unknown User")
+            from_model_name = model_names.get(record.from_model_id, "Unknown Model")  # type: ignore[call-overload]
+            to_model_name = model_names.get(record.to_model_id, "Unknown Model")  # type: ignore[call-overload]
+            initiated_by_name = user_names.get(record.initiated_by, "Unknown User")  # type: ignore[call-overload]
             
             public_model = ModelMigrationHistory(
                 id=record.id,

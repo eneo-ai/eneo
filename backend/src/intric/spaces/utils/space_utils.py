@@ -8,5 +8,5 @@ def effective_space_ids(space: Space) -> list[UUID]:
     and the parent org space ID so that org-level knowledge is accessible.
     """
     if space.tenant_space_id:
-        return [space.id, space.tenant_space_id]
-    return [space.id]
+        return [space.id, space.tenant_space_id]  # type: ignore[return-value]
+    return [space.id]  # type: ignore[return-value]

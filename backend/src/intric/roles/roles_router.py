@@ -113,9 +113,11 @@ async def update_role(
 
     # Update role
     updated_role = await service.update_role(role_id=role_id, role_update=role)
+    assert updated_role is not None
 
     # Track changes
     changes = {}
+    assert old_role is not None
     if role.name and role.name != old_role.name:
         changes["name"] = {"old": old_role.name, "new": role.name}
     if role.permissions and set(role.permissions) != set(old_role.permissions):
@@ -157,6 +159,7 @@ async def delete_role_by_id(
 
     # Get role info before deletion (snapshot pattern)
     role_to_delete = await service.get_role_by_uuid(role_id)
+    assert role_to_delete is not None
 
     # Delete role
     deleted_role = await service.delete_role(role_id)

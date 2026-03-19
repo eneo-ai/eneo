@@ -153,7 +153,7 @@ class SharePointPreviewService(BasePreviewService):
     ) -> List[IntegrationPreview]:
         results = data.get("value", [])
 
-        data: List[IntegrationPreview] = []
+        previews: List[IntegrationPreview] = []
         for r in results:
             item = IntegrationPreview(
                 name=r.get("displayName"),
@@ -162,8 +162,8 @@ class SharePointPreviewService(BasePreviewService):
                 type="site",
                 category=self.CATEGORY_OTHER_SITES,
             )
-            data.append(item)
-        return data
+            previews.append(item)
+        return previews
 
     async def _classify_site_categories(
         self,

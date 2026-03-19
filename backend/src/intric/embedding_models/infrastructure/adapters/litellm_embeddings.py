@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Optional
 
 import litellm
 from fastapi import HTTPException
+from litellm.exceptions import AuthenticationError, BadRequestError, RateLimitError
 from tenacity import (
     retry,
     retry_if_not_exception_type,
@@ -168,7 +169,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
             logger.debug(f"[LiteLLM] {self.litellm_model}: Embedding request successful")
 
-        except litellm.AuthenticationError:
+        except AuthenticationError:
             provider = self.credential_resolver.provider_type if self.credential_resolver else "unknown"
             provider_id = self.credential_resolver.provider_id if self.credential_resolver else None
 
@@ -187,10 +188,10 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                 detail=f"Invalid API credentials for provider {provider}. "
                        f"Please verify your API key configuration."
             )
-        except litellm.BadRequestError as e:
+        except BadRequestError as e:
             logger.exception(f"[LiteLLM] {self.litellm_model}: Bad request error:")
             raise BadRequestException("Invalid input") from e
-        except litellm.RateLimitError as e:
+        except RateLimitError as e:
             logger.exception(f"[LiteLLM] {self.litellm_model}: Rate limit error:")
             raise OpenAIException("LiteLLM Rate limit exception") from e
         except Exception as e:

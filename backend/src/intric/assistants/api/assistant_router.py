@@ -18,7 +18,7 @@ from intric.authentication.auth_models import ApiKey
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.config import get_settings
 from intric.main.container.container import Container
-from intric.main.models import NOT_PROVIDED, CursorPaginatedResponse, PaginatedResponse
+from intric.main.models import NOT_PROVIDED, CursorPaginatedResponse, PaginatedResponse, is_provided
 from intric.prompts.api.prompt_models import PromptSparse
 from intric.server import protocol
 from intric.server.dependencies.container import get_container
@@ -285,7 +285,7 @@ async def update_assistant(
         changes["top_p"] = {"old": old_top_p, "new": new_top_p}
 
     # Description change
-    if description is not NOT_PROVIDED and description != old_assistant.description:
+    if is_provided(description) and description != old_assistant.description:
         old_desc_preview = (old_assistant.description[:50] + "...") if old_assistant.description and len(old_assistant.description) > 50 else old_assistant.description
         new_desc_preview = (description[:50] + "...") if description and len(description) > 50 else description
         changes["description"] = {"old": old_desc_preview, "new": new_desc_preview}

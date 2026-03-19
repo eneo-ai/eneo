@@ -94,7 +94,7 @@ class CredentialResolver:
                         "metric_value": 1,
                     },
                 )
-                return api_key
+                return api_key  # type: ignore[return-value]
 
         # Strict mode: When tenant credentials enabled, each tenant MUST configure their own
         # This prevents billing confusion (tenant thinks they use their own key, but actually use global)

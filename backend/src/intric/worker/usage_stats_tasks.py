@@ -183,7 +183,7 @@ async def recalculate_tenant_usage_stats(container: Container, tenant_id: UUID):
     from sqlalchemy import select
     from intric.database.tables.users_table import Users
 
-    result = await session.execute(
+    result = await session.execute(  # type: ignore[union-attr]
         select(Users).where(Users.tenant_id == tenant_id).limit(1)
     )
     user_row = result.scalar_one_or_none()

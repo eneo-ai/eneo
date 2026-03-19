@@ -27,5 +27,5 @@ class ConfluenceContentAssembler:
         cls,
         items: list["IntegrationPreview"],
     ) -> IntegrationPreviewDataList:
-        items = [cls.to_model(i) for i in items]
+        items = [cls.to_model(i) for i in items]  # type: ignore[assignment]
         return IntegrationPreviewDataList(items=items)

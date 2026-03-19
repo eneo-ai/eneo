@@ -205,7 +205,7 @@ class AssistantService:
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_assistant_permissions(assistant=assistant)
 
-        return assistant, permissions
+        return assistant, permissions  # type: ignore[return-value]
 
     async def _create_from_template(
         self,
@@ -256,18 +256,18 @@ class AssistantService:
         """Get a completion model for the space. Returns None if no model is available."""
         model = space.get_default_completion_model()
         if model:
-            return model
+            return model  # type: ignore[return-value]
 
         if space.completion_models:
             try:
                 model = space.get_latest_completion_model()
                 if model:
-                    return model
+                    return model  # type: ignore[return-value]
             except Exception:
                 pass
 
         # Try to get tenant default model
-        return await self.completion_model_crud_service.get_default_completion_model()
+        return await self.completion_model_crud_service.get_default_completion_model()  # type: ignore[return-value]
 
     async def create_default_assistant(self, name: str, space: "Space"):
         cm = space.get_default_completion_model()
@@ -324,7 +324,7 @@ class AssistantService:
             # Create the prompt if the prompt contains text
             # Update the description if the prompt contains description
             if prompt.text is not None:
-                prompt = await self.prompt_service.create_prompt(prompt.text, prompt.description)
+                prompt = await self.prompt_service.create_prompt(prompt.text, prompt.description)  # type: ignore[assignment]
 
         completion_model = None
         if completion_model_id is not None:
@@ -335,10 +335,10 @@ class AssistantService:
             attachments = await self.file_service.get_file_infos(attachment_ids)
 
         if groups is not None:
-            groups = [space.get_collection(collection_id=group_id) for group_id in groups]
+            groups = [space.get_collection(collection_id=group_id) for group_id in groups]  # type: ignore[assignment]
 
         if websites is not None:
-            websites = [space.get_website(website_id=website_id) for website_id in websites]
+            websites = [space.get_website(website_id=website_id) for website_id in websites]  # type: ignore[assignment]
 
         integration_knowledge_list = None
         if integration_knowledge_ids is not None:
@@ -412,7 +412,7 @@ class AssistantService:
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_assistant_permissions(assistant=assistant)
 
-        return assistant, permissions
+        return assistant, permissions  # type: ignore[return-value]
 
     async def get_assistants(self, name: str = None, for_tenant: bool = False) -> list[Assistant]:
         if for_tenant:
@@ -608,8 +608,8 @@ class AssistantService:
 
             if response.completion is not None:
                 answer = response.completion
-                reasoning_token_count = answer.reasoning_token_count
-                final_answer = answer.text
+                reasoning_token_count = answer.reasoning_token_count  # type: ignore[union-attr]
+                final_answer = answer.text  # type: ignore[union-attr]
 
             reference_chunks = get_references(
                 response_string=final_answer,
@@ -655,6 +655,7 @@ class AssistantService:
             return final_answer
 
     async def _check_assistant_models(self, assistant: "Assistant", space: "Space"):
+        assert assistant.completion_model is not None
         if not assistant.completion_model.can_access:
             raise UnauthorizedException(
                 "Completion model is inaccessible, please contact your administrator"
@@ -734,11 +735,12 @@ class AssistantService:
                     name=name, assistant_id=active_assistant.id
                 )
 
+        assert session is not None
         for _question in session.questions:
             _question.question = clean_intric_tag(_question.question)
 
         if use_web_search and version == 2:
-            web_search_results = await self.web_search.search(search_query=question)
+            web_search_results = await self.web_search.search(search_query=question)  # type: ignore[union-attr]
         else:
             web_search_results = []
 

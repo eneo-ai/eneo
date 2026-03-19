@@ -19,7 +19,7 @@ from intric.main.exceptions import (
     NoModelSelectedException,
     UnauthorizedException,
 )
-from intric.main.models import NOT_PROVIDED, NotProvided
+from intric.main.models import NOT_PROVIDED, NotProvided, is_provided
 from intric.prompts.prompt import Prompt
 from intric.sessions.session import SessionInDB
 from intric.users.user import UserSparse
@@ -214,7 +214,7 @@ class Assistant(Entity):
         self._metadata_json = metadata_json
 
     def has_knowledge(self) -> bool:
-        return self.collections or self.websites or self.integration_knowledge_list
+        return self.collections or self.websites or self.integration_knowledge_list  # type: ignore[return-value]
 
     def has_mcp(self) -> bool:
         return bool(self.mcp_servers)
@@ -245,7 +245,7 @@ class Assistant(Entity):
             self.prompt = prompt
 
         if completion_model is not None:
-            self.completion_model = completion_model
+            self.completion_model = completion_model  # type: ignore[assignment]
 
         if completion_model_kwargs is not None:
             self.completion_model_kwargs = completion_model_kwargs
@@ -267,19 +267,19 @@ class Assistant(Entity):
         if mcp_servers is not None:
             self.mcp_servers = mcp_servers
 
-        if description is not NOT_PROVIDED:
+        if is_provided(description):
             self.description = description
 
         if insight_enabled is not None:
             self.insight_enabled = insight_enabled
 
-        if data_retention_days is not NOT_PROVIDED:
+        if is_provided(data_retention_days):
             self.data_retention_days = data_retention_days
 
-        if metadata_json is not NOT_PROVIDED:
-            self.metadata_json = metadata_json
+        if is_provided(metadata_json):
+            self.metadata_json = metadata_json  # type: ignore[assignment]
 
-        if icon_id is not NOT_PROVIDED:
+        if is_provided(icon_id):
             self.icon_id = icon_id
 
     def get_prompt_text(self):

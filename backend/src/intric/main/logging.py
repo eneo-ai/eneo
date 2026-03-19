@@ -137,7 +137,7 @@ class SimpleLogger(logging.Logger):
             files = [files]
 
         def _add_stream(handler: logging.Handler, **kwargs):
-            handler = handler(**kwargs)
+            handler = handler(**kwargs)  # type: ignore[call-issue]
             handler.setLevel(level)
             handler.setFormatter(formatter_obj)
             self.addHandler(handler)

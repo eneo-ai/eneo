@@ -32,4 +32,4 @@ def create_logging_table(metadata_obj):
     return Logging
 
 
-logging_table = create_logging_table(Base.metadata)
+logging_table = create_logging_table(Base.metadata)  # type: ignore[attr-defined]

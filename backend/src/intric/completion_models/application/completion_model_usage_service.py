@@ -91,7 +91,7 @@ class CompletionModelUsageService:
         entity_type: Optional[str] = None,
         cursor: Optional[str] = None,
         limit: int = 50,
-    ) -> PaginatedResponse:
+    ) -> PaginatedResponse | None:
         """Get detailed list of entities using this model with cursor pagination."""
         # Decode cursor if provided
         cursor_data = None
@@ -677,10 +677,10 @@ class CompletionModelUsageService:
         if not stats:
             # Create new stats record
             self.logger.info(f"No existing stats found for model {model_id}, creating new record")
-            stats = CompletionModelUsageStats(
+            stats = CompletionModelUsageStats(**dict(  # type: ignore[call-arg]
                 model_id=model_id,
                 tenant_id=tenant_id,
-            )
+            ))
             self.session.add(stats)
         else:
             self.logger.info(f"Found existing stats for model {model_id}, updating")

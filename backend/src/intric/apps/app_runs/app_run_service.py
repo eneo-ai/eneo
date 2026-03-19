@@ -114,7 +114,7 @@ class AppRunService:
             num_tokens_output = response.usage.completion_tokens
             output_source = "provider"
         else:
-            num_tokens_output = count_tokens(response.completion.text)
+            num_tokens_output = count_tokens(response.completion.text)  # type: ignore[union-attr]
             output_source = "tiktoken"
 
         logger.info(
@@ -124,7 +124,7 @@ class AppRunService:
         )
 
         app_run.update(
-            output=response.completion.text,
+            output=response.completion.text,  # type: ignore[union-attr]
             num_tokens_input=num_tokens_input,
             num_tokens_output=num_tokens_output,
         )

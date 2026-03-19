@@ -171,6 +171,7 @@ async def set_tenant_federation(
 
     # Validate tenant exists (raises NotFoundException if not found)
     tenant = await tenant_service.get_tenant_by_id(tenant_id)
+    assert tenant is not None
 
     # Fetch OIDC discovery to validate config
     import aiohttp
@@ -394,6 +395,7 @@ async def delete_tenant_federation(
 
     # Validate tenant exists (raises NotFoundException if not found)
     tenant = await tenant_service.get_tenant_by_id(tenant_id)
+    assert tenant is not None
 
     # Delete federation config
     await tenant_repo.delete_federation_config(tenant_id=tenant_id)
@@ -443,6 +445,7 @@ async def get_tenant_federation(
 
     # Validate tenant exists (raises NotFoundException if not found)
     tenant = await tenant_service.get_tenant_by_id(tenant_id)
+    assert tenant is not None
 
     # Get config with metadata
     metadata = await tenant_repo.get_federation_config_with_metadata(tenant_id)
@@ -489,6 +492,7 @@ async def test_tenant_federation(
 
     # Validate tenant exists (raises NotFoundException if not found)
     tenant = await tenant_service.get_tenant_by_id(tenant_id)
+    assert tenant is not None
     if not tenant.federation_config:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

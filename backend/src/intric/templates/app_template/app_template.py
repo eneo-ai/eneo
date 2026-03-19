@@ -67,6 +67,7 @@ class AppTemplate:
         self.icon_name = icon_name  # NULL = no custom icon (first letter fallback), e.g., "rocket", "building"
 
     def validate_wizard_data(self, template_data: "TemplateCreate") -> None:
+        assert template_data.additional_fields is not None
         for data in template_data.additional_fields:
             # App only supports attachment atm
             if data.type != WizardType.attachments:
@@ -120,8 +121,8 @@ class AppTemplate:
         }
 
         # Add created_at if available (should be datetime object)
-        if template_data.get("created_at"):
-            created_at = template_data.get("created_at")
+        created_at = template_data.get("created_at")
+        if created_at is not None:
             # Convert to ISO format string if datetime object
             if hasattr(created_at, 'isoformat'):
                 snapshot["created_at"] = created_at.isoformat()

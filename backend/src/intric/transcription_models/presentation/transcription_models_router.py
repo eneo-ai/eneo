@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from intric.main.container.container import Container
-from intric.main.models import NOT_PROVIDED, PaginatedResponse
+from intric.main.models import PaginatedResponse, is_provided
 from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
@@ -68,7 +68,7 @@ async def update_transcription_model(
     changes = {}
 
     # Track is_org_enabled changes
-    if update_flags.is_org_enabled is not NOT_PROVIDED:
+    if is_provided(update_flags.is_org_enabled):
         if old_model.is_org_enabled != transcription_model.is_org_enabled:
             changes["is_org_enabled"] = {
                 "old": old_model.is_org_enabled,
@@ -76,7 +76,7 @@ async def update_transcription_model(
             }
 
     # Track is_org_default changes
-    if update_flags.is_org_default is not NOT_PROVIDED:
+    if is_provided(update_flags.is_org_default):
         if old_model.is_org_default != transcription_model.is_org_default:
             changes["is_org_default"] = {
                 "old": old_model.is_org_default,
@@ -84,7 +84,7 @@ async def update_transcription_model(
             }
 
     # Track security classification changes
-    if update_flags.security_classification is not NOT_PROVIDED:
+    if is_provided(update_flags.security_classification):
         old_sc_name = old_model.security_classification.name if old_model.security_classification else None
         new_sc_name = transcription_model.security_classification.name if transcription_model.security_classification else None
         if old_sc_name != new_sc_name:

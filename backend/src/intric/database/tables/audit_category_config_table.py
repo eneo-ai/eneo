@@ -13,7 +13,7 @@ class AuditCategoryConfig(BasePublic):
     Allows admins to control which categories of audit events are logged.
     """
 
-    __tablename__ = "audit_category_config"
+    __tablename__ = "audit_category_config"  # type: ignore[assignment]
 
     # Composite Primary Key
     tenant_id = Column(

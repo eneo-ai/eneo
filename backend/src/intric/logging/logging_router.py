@@ -19,6 +19,7 @@ async def get_logging_details(
     message_id: UUID, question_repo: QuestionRepository = Depends(get_questions_repo)
 ):
     question = await question_repo.get(message_id)
+    assert question is not None
 
     if question.logging_details is None:
         raise BadRequestException("Question was not logged.")

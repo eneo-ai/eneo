@@ -897,7 +897,7 @@ class AnalysisService:
     async def get_insight_session(
         self,
         session_id: UUID,
-    ) -> SessionInDB:
+    ) -> SessionInDB | None:
         """Get a specific session with insight access
 
         Args:
@@ -913,6 +913,7 @@ class AnalysisService:
             BadRequestException: If neither assistant_id nor group_chat_id is provided
         """
         session = await self.session_repo.get(id=session_id)
+        assert session is not None
 
         if session.group_chat_id is not None:
             await self._check_insight_access(group_chat_id=session.group_chat_id)

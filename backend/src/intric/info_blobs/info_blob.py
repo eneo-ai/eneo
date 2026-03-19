@@ -85,7 +85,7 @@ class InfoBlobInDBWithScore(InfoBlobInDB):
 
 
 class InfoBlobAddPublic(InfoBlobBase):
-    metadata: InfoBlobMetadataUpsertPublic = None
+    metadata: InfoBlobMetadataUpsertPublic = None  # type: ignore[assignment]
 
 
 class InfoBlobPublicNoText(InDB):

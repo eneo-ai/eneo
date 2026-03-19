@@ -176,6 +176,7 @@ async def queue_website_crawls(container: Container):
 
                     # Get user for this website
                     user = await user_repo.get_user_by_id(website.user_id)
+                    assert user is not None
                     container.user.override(providers.Object(user))
                     container.tenant.override(providers.Object(user.tenant))
 
@@ -255,7 +256,7 @@ async def queue_website_crawls(container: Container):
                                 from intric.main.models import Status
 
                                 job_in_db.status = Status.FAILED
-                                await job_repo.update_job(job_in_db)
+                                await job_repo.update_job(job_in_db)  # type: ignore[call-overload]
 
                                 crawl_run.status = Status.FAILED
                                 await crawl_run_repo.update(crawl_run)
@@ -956,7 +957,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             semaphore_ttl_seconds = get_crawler_setting(
                 "tenant_worker_semaphore_ttl_seconds",
                 tenant.crawler_settings
-                if hasattr(tenant, "crawler_settings")
+                if tenant is not None and hasattr(tenant, "crawler_settings")
                 else None,
                 default=settings.tenant_worker_semaphore_ttl_seconds,
             )
@@ -1117,7 +1118,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 file_start = time.time()
                 # Process downloaded files with content hash checking
                 # Uses session-per-file pattern: each file gets its own short-lived session
-                for file in crawl.files:
+                for file in crawl.files or []:
                     num_files += 1
                     try:
                         filename = file.stem

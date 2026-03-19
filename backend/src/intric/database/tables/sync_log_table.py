@@ -13,7 +13,7 @@ from intric.database.tables.integration_table import IntegrationKnowledge
 class SyncLog(BasePublic):
     """Detailed log of each sync operation for an integration."""
 
-    __tablename__ = "sync_logs"
+    __tablename__ = "sync_logs"  # type: ignore[assignment]
 
     integration_knowledge_id: Mapped[UUID] = mapped_column(
         ForeignKey(IntegrationKnowledge.id, ondelete="CASCADE"), index=True

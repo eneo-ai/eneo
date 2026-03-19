@@ -32,7 +32,7 @@ class Questions(BasePublic):
         ForeignKey(CompletionModels.id, ondelete="SET NULL"),
     )
     logging_details_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey(logging_table.id, ondelete="SET NULL")
+        ForeignKey(logging_table.id, ondelete="SET NULL")  # type: ignore[attr-defined]
     )
     session_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Sessions.id, ondelete="CASCADE"), index=True

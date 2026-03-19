@@ -88,7 +88,7 @@ class SharepointAuthService(BaseOauthService):
         url = f"{auth_endpoint}?{urlencode(params)}"
         return {"auth_url": url}
 
-    async def exchange_token(self, auth_code: str, tenant_id: Optional[UUID] = None) -> TokenResponse:
+    async def exchange_token(self, auth_code: str, tenant_id: Optional[UUID] = None) -> TokenResponse | None:
         """Exchange authorization code for access token.
 
         Args:
@@ -119,7 +119,7 @@ class SharepointAuthService(BaseOauthService):
             else:
                 response.raise_for_status()
 
-    async def refresh_access_token(self, refresh_token: str, tenant_id: Optional[UUID] = None) -> TokenResponse:
+    async def refresh_access_token(self, refresh_token: str, tenant_id: Optional[UUID] = None) -> TokenResponse | None:
         """Refresh access token using refresh token.
 
         Args:

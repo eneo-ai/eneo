@@ -2,6 +2,8 @@ from copy import deepcopy
 from datetime import datetime
 from enum import Enum
 from typing import Any, Generic, Optional, Tuple, Type, TypeVar, Union, cast
+
+from typing_extensions import TypeIs
 from uuid import UUID
 
 from pydantic import (
@@ -42,6 +44,18 @@ class NotProvided:
 
 
 NOT_PROVIDED = NotProvided()
+
+
+_T_NP = TypeVar("_T_NP")
+
+
+def is_provided(value: _T_NP | NotProvided) -> TypeIs[_T_NP]:
+    """Check if a value was provided (is not the NOT_PROVIDED sentinel).
+
+    Use this instead of ``value is not NOT_PROVIDED`` so that pyright
+    can narrow ``T | NotProvided`` to ``T`` in the true branch.
+    """
+    return not isinstance(value, NotProvided)
 
 
 class MCPToolSetting(BaseModel):

@@ -15,7 +15,7 @@ from intric.websites.crawl_dependencies.crawl_models import (
 
 class CrawlRunRepository:
     def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(
+        self.delegate: BaseRepositoryDelegate[CrawlRun] = BaseRepositoryDelegate(
             session=session,
             table=CrawlRuns,
             in_db_model=CrawlRun,
@@ -31,7 +31,7 @@ class CrawlRunRepository:
     async def add(self, crawl: CrawlRunCreate) -> CrawlRun:
         return await self.delegate.add(crawl)
 
-    async def get(self, id: UUID) -> CrawlRun:
+    async def get(self, id: UUID) -> CrawlRun | None:
         return await self.delegate.get(id)
 
     async def get_by_website(self, website_id: UUID) -> list[CrawlRun]:
@@ -39,7 +39,7 @@ class CrawlRunRepository:
             conditions={CrawlRuns.website_id: website_id}
         )
 
-    async def get_latest_run_for_website(self, website_id: UUID) -> CrawlRun:
+    async def get_latest_run_for_website(self, website_id: UUID) -> CrawlRun | None:
         stmt = (
             sa.select(CrawlRuns)
             .where(CrawlRuns.website_id == website_id)
@@ -49,5 +49,5 @@ class CrawlRunRepository:
 
         return await self.delegate.get_model_from_query(stmt)
 
-    async def update(self, crawl: CrawlRunUpdate) -> CrawlRun:
+    async def update(self, crawl: CrawlRunUpdate) -> CrawlRun | None:
         return await self.delegate.update(crawl)

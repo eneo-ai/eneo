@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 class QuestionRepository:
     def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(
+        self.delegate: BaseRepositoryDelegate[Question] = BaseRepositoryDelegate(
             session,
             Questions,
             Question,

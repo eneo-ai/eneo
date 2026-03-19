@@ -12,7 +12,7 @@ from intric.files.file_models import File, FileCreate, FileInfo
 
 class FileRepository:
     def __init__(self, session: AsyncSession):
-        self._delegate = BaseRepositoryDelegate(
+        self._delegate: BaseRepositoryDelegate[File] = BaseRepositoryDelegate(
             session=session, table=Files, in_db_model=File
         )
         self.session = session

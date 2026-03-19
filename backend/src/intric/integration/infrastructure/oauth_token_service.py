@@ -71,6 +71,8 @@ class OauthTokenService:
                 )
             elif token.token_type.is_sharepoint:
                 # Get tenant_id from the user_integration to use tenant-specific configuration
+                assert token.user_integration is not None
+                assert token.user_integration.tenant_integration is not None
                 tenant_id = token.user_integration.tenant_integration.tenant_id
                 token_result = await self.sharepoint_auth_service.refresh_access_token(
                     refresh_token=token.refresh_token, tenant_id=tenant_id
@@ -78,6 +80,7 @@ class OauthTokenService:
             else:
                 raise ValueError("Unknown integration type")
 
+            assert token_result is not None
             token.access_token = token_result["access_token"]
             token.refresh_token = token_result["refresh_token"]
 

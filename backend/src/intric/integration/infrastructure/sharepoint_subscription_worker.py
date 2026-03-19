@@ -98,7 +98,7 @@ async def get_token_for_subscription(
 
             # Refresh token if needed
             token = await oauth_token_service.refresh_and_update_token(token_id=token.id)
-            return token
+            return token  # type: ignore[return-value]
 
         except Exception as e:
             logger.error(

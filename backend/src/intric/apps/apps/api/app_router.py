@@ -9,7 +9,7 @@ from intric.apps.app_runs.api.app_run_models import (
 )
 from intric.apps.apps.api.app_models import AppPublic, AppUpdateRequest
 from intric.main.container.container import Container
-from intric.main.models import NOT_PROVIDED, PaginatedResponse
+from intric.main.models import NOT_PROVIDED, PaginatedResponse, is_provided
 from intric.prompts.api.prompt_models import PromptSparse
 from intric.server import protocol
 from intric.server.dependencies.container import get_container
@@ -220,7 +220,7 @@ async def update_app(
             change_summary.append("attachments")
 
     # Data retention changes
-    if update_service_req.data_retention_days is not NOT_PROVIDED:
+    if is_provided(update_service_req.data_retention_days):
         old_retention = old_app.data_retention_days
         new_retention = update_service_req.data_retention_days
 

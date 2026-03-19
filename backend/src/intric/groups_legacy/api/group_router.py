@@ -73,7 +73,7 @@ async def create_group(
     Use the `name` field of the response from this endpoint.
     """
     service = container.group_service()
-    group = await service.create_group(group)
+    group = await service.create_group(group)  # type: ignore[assignment]
 
     return group_protocol.to_group_public_with_metadata(group, num_info_blobs=0)
 

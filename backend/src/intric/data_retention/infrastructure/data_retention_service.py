@@ -89,8 +89,8 @@ class DataRetentionService:
 
         # Build base subquery to identify records to delete (will be limited per batch)
         base_subquery = (
-            sa.select(record_table.id)
-            .join(entity_table, record_fk_col == entity_table.id)
+            sa.select(record_table.id)  # type: ignore[attr-defined]
+            .join(entity_table, record_fk_col == entity_table.id)  # type: ignore[attr-defined]
             .join(Spaces, entity_fk_col == Spaces.id)
             .outerjoin(
                 AuditRetentionPolicy,
@@ -99,7 +99,7 @@ class DataRetentionService:
             .where(
                 sa.and_(
                     effective_retention_days.isnot(None),
-                    record_table.created_at
+                    record_table.created_at  # type: ignore[attr-defined]
                     # make_interval signature: (years, months, weeks, days, hours, mins, secs)
                     < sa.func.now() - sa.func.make_interval(0, 0, 0, effective_retention_days),
                 )
@@ -110,8 +110,8 @@ class DataRetentionService:
         total_deleted = 0
         while True:
             # Delete batch of records (ORDER BY ensures deterministic batch selection)
-            batch_subquery = base_subquery.order_by(record_table.id).limit(RETENTION_BATCH_SIZE)
-            query = sa.delete(record_table).where(record_table.id.in_(batch_subquery))
+            batch_subquery = base_subquery.order_by(record_table.id).limit(RETENTION_BATCH_SIZE)  # type: ignore[attr-defined]
+            query = sa.delete(record_table).where(record_table.id.in_(batch_subquery))  # type: ignore[attr-defined]
             result = await self.session.execute(query)
             batch_deleted = result.rowcount
 

@@ -10,7 +10,7 @@ from intric.database.tables.spaces_table import Spaces
 
 
 class GroupsSpaces(BaseCrossReference):
-    __tablename__ = "groups_spaces" 
+    __tablename__ = "groups_spaces"  # type: ignore[assignment]
 
     collection_id: Mapped[UUID] = mapped_column(
         "group_id",

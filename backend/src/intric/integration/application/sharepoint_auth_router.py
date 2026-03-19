@@ -50,7 +50,7 @@ class SharePointAuthRouter:
         self,
         user_integration: "UserIntegration",
         space: "Space"
-    ) -> SharePointToken:
+    ) -> SharePointToken | None:
         """Get an appropriate SharePoint token based on space type and integration config.
 
         Args:
@@ -105,9 +105,9 @@ class SharePointAuthRouter:
                 raise ValueError(f"Integration {user_integration.id} has no tenant_app_id")
 
             # Note: This is a bit hacky - ideally we'd inject the repo
-            if hasattr(user_integration, 'tenant_app') and user_integration.tenant_app:
+            if hasattr(user_integration, 'tenant_app') and user_integration.tenant_app:  # type: ignore[attr-defined]
                 return await self._get_tenant_app_token(
-                    user_integration.tenant_app,
+                    user_integration.tenant_app,  # type: ignore[attr-defined]
                     user_integration
                 )
             else:

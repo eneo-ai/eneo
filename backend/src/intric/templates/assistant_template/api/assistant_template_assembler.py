@@ -62,4 +62,4 @@ class AssistantTemplateAssembler:
             AssistantTemplateAssembler.from_domain_to_model(assistant_template=i)
             for i in items
         ]
-        return AssistantTemplateListPublic(items=public_item, count=len(public_item))
+        return AssistantTemplateListPublic(items=public_item, count=len(public_item))  # type: ignore[call-overload]

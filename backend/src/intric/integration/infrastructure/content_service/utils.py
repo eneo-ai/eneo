@@ -200,9 +200,9 @@ def extract_text_from_pptx(
                     # Process each shape
                     for shape in slide.shapes:
                         # Extract text from text frames
-                        if hasattr(shape, "text") and shape.text.strip():
+                        if hasattr(shape, "text") and shape.text.strip():  # type: ignore[attr-defined]
                             # Skip template placeholders
-                            text = shape.text.strip()
+                            text = shape.text.strip()  # type: ignore[attr-defined]
 
                             # Skip common placeholders and formatting text
                             skip_phrases = [

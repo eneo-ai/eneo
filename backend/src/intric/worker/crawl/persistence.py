@@ -280,7 +280,7 @@ async def persist_batch(
                 embeddings: list[list[float]] = []
                 for _, embedding in chunk_embedding_list:
                     # ChunkEmbeddingList returns numpy arrays, convert to list
-                    embeddings.append(embedding.tolist() if hasattr(embedding, "tolist") else list(embedding))
+                    embeddings.append(embedding.tolist() if hasattr(embedding, "tolist") else list(embedding))  # type: ignore[attr-defined]
 
                 # 6. Track embedding memory for early flush
                 embedding_bytes = sum(len(e) * 4 for e in embeddings)  # float32 = 4 bytes

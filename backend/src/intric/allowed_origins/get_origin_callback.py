@@ -8,7 +8,7 @@ logger = get_logger(__name__)
 async def get_origin(origin: str):
     async with sessionmanager.session() as session, session.begin():
         repo = AllowedOriginRepository(session)
-        origin = await repo.get_origin(origin)
+        origin = await repo.get_origin(origin)  # type: ignore[assignment]
 
         logger.debug(
             f"Origin attempted to be resolved from database, success = {origin is not None}"

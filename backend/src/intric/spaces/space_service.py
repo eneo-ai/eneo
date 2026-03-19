@@ -19,7 +19,7 @@ from intric.main.exceptions import (
 )
 from sqlalchemy.exc import IntegrityError
 from intric.main.exceptions import UniqueException
-from intric.main.models import NOT_PROVIDED, ModelId, NotProvided
+from intric.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
 from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
 from intric.user_groups.user_groups_repo import UserGroupsRepository
 from intric.spaces.space import Space
@@ -37,7 +37,7 @@ from intric.users.user_repo import UsersRepository
 if TYPE_CHECKING:
     from intric.actors import ActorManager
     from intric.completion_models.domain import CompletionModel
-    from intric.embedding_models.domain import EmbeddingModel
+    from intric.embedding_models.domain import EmbeddingModel  # type: ignore[attr-defined]
     from intric.security_classifications.application.security_classification_service import (
         SecurityClassificationService,
     )
@@ -199,7 +199,7 @@ class SpaceService:
             raise UnauthorizedException("User does not have permission to edit space")
 
         space_security_classification = None
-        if security_classification is not NOT_PROVIDED:
+        if is_provided(security_classification):
             if not self.user.tenant.security_enabled:
                 raise BadRequestException("Security is not enabled for this tenant")
             if security_classification is not None:
@@ -304,7 +304,7 @@ class SpaceService:
             mcp_servers=mcp_servers,
             security_classification=(
                 space_security_classification
-                if security_classification is not NOT_PROVIDED
+                if is_provided(security_classification)
                 else NOT_PROVIDED
             ),
             data_retention_days=data_retention_days,
@@ -369,7 +369,7 @@ class SpaceService:
 
         affected_assistants = []
         for assistant in space.assistants:
-            if assistant.completion_model.id not in remaining_completion_model_ids:
+            if assistant.completion_model is not None and assistant.completion_model.id not in remaining_completion_model_ids:
                 affected_assistants.append(assistant)
             if (
                 assistant.embedding_model_id is not None
@@ -379,7 +379,7 @@ class SpaceService:
                     affected_assistants.append(assistant)
 
         affected_group_chats = []
-        for group_chat in space.group_chats:
+        for group_chat in space.group_chats or []:
             for assistant in group_chat.get_assistants():
                 if assistant.id in [a.id for a in affected_assistants]:
                     if group_chat not in affected_group_chats:
@@ -395,10 +395,10 @@ class SpaceService:
 
         affected_services = []
         for service in space.services:
-            if service.completion_model.id not in remaining_completion_model_ids:
+            if service.completion_model is not None and service.completion_model.id not in remaining_completion_model_ids:
                 affected_services.append(service)
             for group in service.groups:
-                if group.embedding_model.id not in remaining_embedding_model_ids:
+                if group.embedding_model.id not in remaining_embedding_model_ids:  # type: ignore[attr-defined]
                     if service not in affected_services:
                         affected_services.append(service)
 
@@ -444,7 +444,7 @@ class SpaceService:
 
         if include_personal:
             personal_space = await self.get_personal_space()
-            return [personal_space] + spaces
+            return [personal_space] + spaces  # type: ignore[return-value]
 
         return spaces
 

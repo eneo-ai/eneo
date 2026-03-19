@@ -10,7 +10,7 @@ from intric.database.tables.allowed_origins_table import AllowedOrigins
 
 class AllowedOriginRepository:
     def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(
+        self.delegate: BaseRepositoryDelegate[AllowedOriginInDB] = BaseRepositoryDelegate(
             session=session, table=AllowedOrigins, in_db_model=AllowedOriginInDB
         )
 

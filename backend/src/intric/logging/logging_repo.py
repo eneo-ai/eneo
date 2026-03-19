@@ -24,7 +24,7 @@ class LoggingRepository:
         return LoggingDetailsInDB.model_validate(entry_in_db)
 
     async def get(self, id: int):
-        query = sa.select(logging_table).where(logging_table.id == id)
+        query = sa.select(logging_table).where(logging_table.id == id)  # type: ignore[attr-defined]
 
         result = await self.session.execute(query)
         entry_in_db = result.scalar_one_or_none()

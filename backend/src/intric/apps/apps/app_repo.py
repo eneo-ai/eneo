@@ -160,7 +160,7 @@ class AppRepository:
             entry_in_db, prompt=app.prompt, transcription_model=app.transcription_model
         )
 
-    async def get(self, id: UUID) -> App:
+    async def get(self, id: UUID) -> App | None:
         stmt = sa.select(Apps).where(Apps.id == id)
 
         entry_in_db = await self._get_record_with_options(stmt)

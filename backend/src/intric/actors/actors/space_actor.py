@@ -471,7 +471,7 @@ class SpaceActor:
                 return False
 
         if resource_type in INSIGHT_RESOURCES and action == SpaceAction.INSIGHT_VIEW:
-            if resource is not None and not resource.insight_enabled:
+            if resource is not None and not resource.insight_enabled:  # type: ignore[attr-defined]
                 return False
 
         allowed_actions = permissions.get(resource_type, set())

@@ -19,7 +19,7 @@ from intric.completion_models.presentation.completion_model_models import (
     PaginatedResponse as ModelUsagePaginatedResponse,
 )
 from intric.main.container.container import Container
-from intric.main.models import NOT_PROVIDED, PaginatedResponse
+from intric.main.models import PaginatedResponse, is_provided
 from intric.server.dependencies.container import get_container
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.server.protocol import responses
@@ -81,7 +81,7 @@ async def update_completion_model(
     changes = {}
 
     # Track is_org_enabled changes
-    if update_flags.is_org_enabled is not NOT_PROVIDED:
+    if is_provided(update_flags.is_org_enabled):
         if old_model.is_org_enabled != completion_model.is_org_enabled:
             changes["is_org_enabled"] = {
                 "old": old_model.is_org_enabled,
@@ -89,7 +89,7 @@ async def update_completion_model(
             }
 
     # Track is_org_default changes
-    if update_flags.is_org_default is not NOT_PROVIDED:
+    if is_provided(update_flags.is_org_default):
         if old_model.is_org_default != completion_model.is_org_default:
             changes["is_org_default"] = {
                 "old": old_model.is_org_default,
@@ -97,7 +97,7 @@ async def update_completion_model(
             }
 
     # Track security classification changes
-    if update_flags.security_classification is not NOT_PROVIDED:
+    if is_provided(update_flags.security_classification):
         old_sc_name = old_model.security_classification.name if old_model.security_classification else None
         new_sc_name = completion_model.security_classification.name if completion_model.security_classification else None
         if old_sc_name != new_sc_name:
@@ -153,7 +153,7 @@ async def get_model_usage_details(
     limit: int = Query(default=50, le=100, description="Number of results per page"),
     user: UserInDB = Depends(get_current_active_user),
     container: Container = Depends(get_container(with_user=True)),
-) -> ModelUsagePaginatedResponse:
+) -> ModelUsagePaginatedResponse | None:
     """Get detailed list of entities using this model with cursor pagination"""
     import logging
     logger = logging.getLogger(__name__)

@@ -6,12 +6,12 @@ import uuid
 from typing import TYPE_CHECKING, AsyncIterator
 
 import litellm
-from litellm import (
-    AuthenticationError,
+from litellm import get_supported_openai_params
+from litellm.exceptions import (
     APIError,
+    AuthenticationError,
     BadRequestError,
     RateLimitError,
-    get_supported_openai_params,
 )
 
 from intric.ai_models.completion_models.completion_model import (
@@ -353,9 +353,9 @@ class TenantModelAdapter(CompletionModelAdapter):
         if model_kwargs:
             # Convert Pydantic ModelKwargs to dict if needed
             if hasattr(model_kwargs, 'model_dump'):
-                model_kwargs_dict = model_kwargs.model_dump(exclude_none=True)
+                model_kwargs_dict = model_kwargs.model_dump(exclude_none=True)  # type: ignore[attr-defined]
             elif hasattr(model_kwargs, 'dict'):
-                model_kwargs_dict = model_kwargs.dict(exclude_none=True)
+                model_kwargs_dict = model_kwargs.dict(exclude_none=True)  # type: ignore[attr-defined]
             else:
                 model_kwargs_dict = model_kwargs if isinstance(model_kwargs, dict) else {}
 
@@ -450,9 +450,9 @@ class TenantModelAdapter(CompletionModelAdapter):
 
             # Parse response
             completion = Completion()
-            if response.choices and len(response.choices) > 0:
-                choice = response.choices[0]
-                msg = choice.message
+            if response.choices and len(response.choices) > 0:  # type: ignore[attr-defined]
+                choice = response.choices[0]  # type: ignore[attr-defined]
+                msg = choice.message  # type: ignore[attr-defined]
 
                 # DEBUG: Log message details
                 logger.debug(f"[DEBUG] Message: {msg}")
@@ -526,7 +526,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         **follow_up_kwargs,
                     )
                     usage = self._accumulate_usage(usage, response)
-                    msg = response.choices[0].message
+                    msg = response.choices[0].message  # type: ignore[attr-defined]
 
                 if hasattr(msg, "content") and msg.content:
                     completion.text = self._strip_thinking_content(msg.content)
@@ -671,7 +671,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             logger.info(
                 f"[TenantModelAdapter] {self.litellm_model}: Stream connection created successfully"
             )
-            return stream
+            return stream  # type: ignore[attr-defined]
 
         except AuthenticationError as exc:
             logger.error(
@@ -1063,9 +1063,9 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         # Convert model_kwargs to a plain dict
         if hasattr(model_kwargs, "model_dump"):
-            kwargs_dict = model_kwargs.model_dump(exclude_none=True)
+            kwargs_dict = model_kwargs.model_dump(exclude_none=True)  # type: ignore[attr-defined]
         elif hasattr(model_kwargs, "dict"):
-            kwargs_dict = model_kwargs.dict(exclude_none=True)
+            kwargs_dict = model_kwargs.dict(exclude_none=True)  # type: ignore[attr-defined]
         else:
             kwargs_dict = model_kwargs if isinstance(model_kwargs, dict) else {}
 

@@ -10,7 +10,7 @@ from intric.database.tables.api_keys_table import ApiKeys
 
 class ApiKeysRepository:
     def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(session, ApiKeys, ApiKeyInDB)
+        self.delegate: BaseRepositoryDelegate[ApiKeyInDB] = BaseRepositoryDelegate(session, ApiKeys, ApiKeyInDB)
         self.session = session
 
     async def get(self, key: str):

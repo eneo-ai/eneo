@@ -26,7 +26,7 @@ def parse_response(response: Response):
         return None
 
     # Handle JSON responses (e.g., API endpoints)
-    content_type = response.headers.get(b"Content-Type", b"").decode("utf-8").lower()
+    content_type = (response.headers.get(b"Content-Type") or b"").decode("utf-8").lower()
     if "application/json" in content_type:
         # For JSON responses, use the body as-is with URL as title
         return CrawledPage(url=response.url, title=response.url, content=response.text)

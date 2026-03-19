@@ -68,6 +68,7 @@ async def pull_confluence_content(
     params: "ConfluenceContentTaskParam", container: "Container", **kw
 ):
     knowledge = await _get_knowledge_with_retry(container, params.integration_knowledge_id)
+    assert knowledge is not None
     await _validate_embedding_provider(container, knowledge)
 
     service = container.confluence_content_service()
@@ -117,6 +118,7 @@ async def pull_sharepoint_content(
 
         try:
             knowledge = await _get_knowledge_with_retry(container, params.integration_knowledge_id)
+            assert knowledge is not None
             await _validate_embedding_provider(container, knowledge)
             service = container.sharepoint_content_service()
 
@@ -191,6 +193,7 @@ async def sync_sharepoint_delta(
 
         try:
             knowledge = await _get_knowledge_with_retry(container, params.integration_knowledge_id)
+            assert knowledge is not None
             await _validate_embedding_provider(container, knowledge)
             service = container.sharepoint_content_service()
 

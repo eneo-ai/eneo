@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from intric.completion_models.domain.completion_model_repo import (
         CompletionModelRepository,
     )
-    from intric.users.user import User
+    from intric.users.user import User  # type: ignore[attr-defined]
 
 
 class CompletionModelMigrationService:

@@ -281,7 +281,7 @@ async def register_user(
         session = container.session()
         role_ids = [role.id for role in new_user.predefined_roles]
         role_query = sa.select(PredefinedRoles).where(PredefinedRoles.id.in_(role_ids))
-        role_result = await session.execute(role_query)
+        role_result = await session.execute(role_query)  # type: ignore[union-attr]
         predefined_roles = role_result.scalars().all()
 
         role_names = [role.name for role in predefined_roles]
@@ -301,7 +301,7 @@ async def register_user(
         session = container.session()
         custom_role_ids = [role.id for role in new_user.roles]
         role_query = sa.select(Roles).where(Roles.id.in_(custom_role_ids))
-        role_result = await session.execute(role_query)
+        role_result = await session.execute(role_query)  # type: ignore[union-attr]
         custom_roles = role_result.scalars().all()
 
         if custom_roles:

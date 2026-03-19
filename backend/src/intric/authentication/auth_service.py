@@ -164,7 +164,7 @@ class AuthService:
 
         return await self.api_key_repo.get(key)
 
-    def get_username_from_token(self, token: str, secret_key: str) -> str:
+    def get_username_from_token(self, token: str, secret_key: str) -> str | None:
         return self.get_jwt_payload(token, key=str(secret_key)).username
 
     def get_jwt_payload(

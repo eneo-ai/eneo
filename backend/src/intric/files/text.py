@@ -230,7 +230,7 @@ class TextExtractor:
                         # Collect all text from runs in this shape
                         shape_text = " ".join(
                             run.text
-                            for para in shape.text_frame.paragraphs
+                            for para in shape.text_frame.paragraphs  # type: ignore[attr-defined]
                             for run in para.runs
                             if run.text
                         )

@@ -98,7 +98,7 @@ class AppService:
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_app_permissions()
 
-        return app_in_db, permissions
+        return app_in_db, permissions  # type: ignore[return-value]
 
     async def _create_from_template(
         self,
@@ -152,7 +152,7 @@ class AppService:
             else await self.completion_model_crud_service.get_default_completion_model()
         )
 
-        return completion_model
+        return completion_model  # type: ignore[return-value]
 
     async def get_transcription_model(self, space: Space) -> Optional["TranscriptionModel"]:
         """Get a transcription model for the space. Returns None if no model is available."""
@@ -258,7 +258,7 @@ class AppService:
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_app_permissions()
 
-        return app_in_db, permissions
+        return app_in_db, permissions  # type: ignore[return-value]
 
     async def delete_app(self, app_id: UUID):
         space = await self.space_repo.get_space_by_app(app_id=app_id)

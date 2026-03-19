@@ -35,7 +35,7 @@ class ConfluencePreviewService(BasePreviewService):
         try:
             content = await fetch_spaces(token)
         except aiohttp.ClientResponseError:
-            token = await self.oauth_token_service.refresh_and_update_token(
+            token = await self.oauth_token_service.refresh_and_update_token(  # type: ignore[assignment]
                 token_id=token.id
             )
             content = await fetch_spaces(token)

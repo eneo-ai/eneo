@@ -190,7 +190,7 @@ class CompletionService:
                     if name == "generate_image":
                         yield Completion(response_type=ResponseType.INTRIC_EVENT)
 
-                        chunk.image_data = await generate_image(**call_args)
+                        chunk.image_data = await generate_image(**call_args)  # type: ignore[attr-defined]
                         chunk.response_type = ResponseType.FILES
 
                         yield chunk

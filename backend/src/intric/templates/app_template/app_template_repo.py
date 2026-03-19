@@ -127,6 +127,7 @@ class AppTemplateRepository:
         id: "UUID",
         obj: "AppTemplateUpdate",
     ) -> "AppTemplate":
+        assert obj.wizard is not None
         stmt = (
             sa.update(self._db_model)
             .values(
@@ -186,6 +187,7 @@ class AppTemplateRepository:
             query = query.where(self._db_model.tenant_id.is_(None))
 
         count = await self.session.scalar(query)
+        assert count is not None
         return count > 0
 
     async def soft_delete(self, id: "UUID", tenant_id: "UUID", user_id: "UUID") -> Optional["AppTemplate"]:

@@ -202,6 +202,7 @@ async def get_favorite_providers(
     """Get the tenant's favorite provider types."""
     repo = TenantRepository(session)
     tenant = await repo.get(user.tenant_id)
+    assert tenant is not None
     return {"providers": tenant.favorite_providers}
 
 

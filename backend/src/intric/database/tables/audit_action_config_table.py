@@ -19,7 +19,7 @@ class AuditActionConfig(BasePublic):
     for each tenant. Complements the category-level configuration.
     """
 
-    __tablename__ = "audit_action_config"
+    __tablename__ = "audit_action_config"  # type: ignore[assignment]
 
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey("tenants.id", ondelete="CASCADE"),

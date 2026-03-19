@@ -93,17 +93,17 @@ async def create_tenant_completion_model(
     # Create the completion model with settings directly on it
     # Note: litellm_model_name is set to None - TenantModelAdapter constructs it
     # at runtime as f"{provider.provider_type}/{model.name}"
-    new_model = CompletionModels(
+    new_model = CompletionModels(**dict(  # type: ignore[call-arg]
         tenant_id=user.tenant_id,
         provider_id=model_create.provider_id,
         name=model_create.name,  # Model identifier (may contain slashes)
         nickname=model_create.display_name,
         litellm_model_name=None,  # Constructed at runtime by TenantModelAdapter
-        max_input_tokens=model_create.max_input_tokens,  # type: ignore[call-arg]
-        max_output_tokens=model_create.max_output_tokens,  # type: ignore[call-arg]
+        max_input_tokens=model_create.max_input_tokens,
+        max_output_tokens=model_create.max_output_tokens,
         vision=model_create.vision,
         reasoning=model_create.reasoning,
-        supports_tool_calling=model_create.supports_tool_calling,  # type: ignore[call-arg]
+        supports_tool_calling=model_create.supports_tool_calling,
         # Simplified defaults - these fields don't matter for tenant models (grouped by provider in UI)
         family=model_create.family,
         hosting=model_create.hosting,
@@ -120,7 +120,7 @@ async def create_tenant_completion_model(
         is_enabled=model_create.is_active,
         is_default=model_create.is_default,
         security_classification_id=None,
-    )
+    ))
 
     session.add(new_model)
     await session.flush()

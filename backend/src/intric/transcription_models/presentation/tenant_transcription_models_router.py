@@ -75,7 +75,7 @@ async def create_tenant_transcription_model(
         await session.execute(stmt)
 
     # Create the transcription model with settings directly on it
-    new_model = TranscriptionModels(
+    new_model = TranscriptionModels(**dict(  # type: ignore[call-arg]
         tenant_id=user.tenant_id,
         provider_id=model_create.provider_id,
         name=model_create.display_name,  # User-friendly display name
@@ -94,7 +94,7 @@ async def create_tenant_transcription_model(
         is_enabled=model_create.is_active,
         is_default=model_create.is_default,
         security_classification_id=None,
-    )
+    ))
 
     session.add(new_model)
     await session.flush()

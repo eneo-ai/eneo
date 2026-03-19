@@ -399,11 +399,11 @@ class SpaceRepository:
         existing_assistants = [assistant for assistant in assistants if not assistant.is_new]
 
         for assistant in new_assistants:
-            assistant.space_id = space_in_db.id
+            assistant.space_id = space_in_db.id  # type: ignore[attr-defined]
             await self.assistant_repo.add(assistant)
 
         for assistant in existing_assistants:
-            assistant.space_id = space_in_db.id
+            assistant.space_id = space_in_db.id  # type: ignore[attr-defined]
             await self.assistant_repo.update(assistant)
 
         # Delete all assistants that are not in the list
@@ -826,7 +826,7 @@ class SpaceRepository:
         prompts = prompt_records.all()
 
         for assistant in assistants:
-            assistant.prompt = next(
+            assistant.prompt = next(  # type: ignore[attr-defined]
                 (prompt for prompt, assistant_id in prompts if assistant_id == assistant.id),
                 None,
             )
@@ -881,7 +881,7 @@ class SpaceRepository:
 
         return group_chats_db
 
-    def _decrypt_website_auth(self, website_record: WebsitesTable) -> Optional:
+    def _decrypt_website_auth(self, website_record: WebsitesTable) -> Optional:  # type: ignore[valid-type]
         """Decrypt HTTP auth credentials from database record.
 
         Why: Repository is the encryption boundary - domain gets clean objects.
@@ -913,7 +913,7 @@ class SpaceRepository:
             )
             # Set transient flag for crawl task to detect
             # Why: Enables fail-fast behavior in crawler with clear error message
-            website_record._auth_decrypt_failed = True
+            website_record._auth_decrypt_failed = True  # type: ignore[attr-defined]
             return None
 
     async def _get_websites(self, space_ids: list[UUID] | UUID):
@@ -944,7 +944,7 @@ class SpaceRepository:
                 )
             )
             .options(
-                selectinload(ws.latest_crawl).selectinload(CrawlRunsTable.job),
+                selectinload(ws.latest_crawl).selectinload(CrawlRunsTable.job),  # type: ignore[attr-defined]
             )
             .order_by(ws.created_at)
         )
@@ -954,7 +954,7 @@ class SpaceRepository:
 
         # Decrypt auth credentials and attach as transient attribute
         for website_record in websites_db:
-            website_record._decrypted_http_auth = self._decrypt_website_auth(website_record)
+            website_record._decrypted_http_auth = self._decrypt_website_auth(website_record)  # type: ignore[attr-defined]
 
         return websites_db
 
@@ -1085,7 +1085,7 @@ class SpaceRepository:
         prompts = prompt_records.all()
 
         for app in apps_db:
-            app.prompt = next((prompt for prompt, app_id in prompts if app_id == app.id), None)
+            app.prompt = next((prompt for prompt, app_id in prompts if app_id == app.id), None)  # type: ignore[attr-defined]
 
         return apps_db
 
@@ -1208,6 +1208,7 @@ class SpaceRepository:
         except IntegrityError as e:
             raise UniqueException("Users can only have one personal space") from e
 
+        assert entry_in_db is not None
         await self._set_completion_models(entry_in_db, space.completion_models)
         await self._set_embedding_models(entry_in_db, space.embedding_models)
         await self._set_transcription_models(entry_in_db, space.transcription_models)
@@ -1255,6 +1256,7 @@ class SpaceRepository:
             .returning(Spaces)
         )
         entry_in_db = await self._get_record_with_options(query)
+        assert entry_in_db is not None
 
         await self._set_completion_models(entry_in_db, space.completion_models)
         await self._set_embedding_models(entry_in_db, space.embedding_models)
@@ -1338,7 +1340,7 @@ class SpaceRepository:
 
         return spaces
 
-    async def get_personal_space(self, user_id: UUID) -> Space:
+    async def get_personal_space(self, user_id: UUID) -> Space | None:
         query = sa.select(Spaces).where(Spaces.user_id == user_id)
 
         return await self._get_from_query(query)
@@ -1416,7 +1418,7 @@ class SpaceRepository:
 
         return space
 
-    async def get_space_by_session(self, session_id: UUID) -> Space:
+    async def get_space_by_session(self, session_id: UUID) -> Space | None:
         session_stmt = sa.select(Sessions).where(Sessions.id == session_id)
         session = await self.session.scalar(session_stmt)
 

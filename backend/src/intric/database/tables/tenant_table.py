@@ -44,7 +44,7 @@ class Tenants(BasePublic):
 
 tenants_modules_table = Table(
     "tenants_modules",
-    Base.metadata,
+    Base.metadata,  # type: ignore[attr-defined]
     Column("tenant_id", ForeignKey(Tenants.id, ondelete="CASCADE"), primary_key=True),
     Column("module_id", ForeignKey(Modules.id, ondelete="CASCADE"), primary_key=True),
 )

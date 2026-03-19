@@ -32,13 +32,13 @@ async def init_predefined_roles():
             repository = PredefinedRolesRepository(session=session)
 
             existing_roles = await repository.get_ids_and_names()
-            existing_role_names = {role.name: role.id for role in existing_roles}
+            existing_role_names = {role.name: role.id for role in existing_roles}  # type: ignore[attr-defined]
             new_role_names = [role["name"] for role in predefined_roles]
 
             # remove roles
             for role in existing_roles:
-                if role.name not in new_role_names:
-                    await repository.delete_predefined_role_by_id(role.id)
+                if role.name not in new_role_names:  # type: ignore[attr-defined]
+                    await repository.delete_predefined_role_by_id(role.id)  # type: ignore[attr-defined]
 
             # create new roles or update existing
             for role in predefined_roles:

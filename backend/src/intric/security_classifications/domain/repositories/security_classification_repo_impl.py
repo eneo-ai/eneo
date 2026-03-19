@@ -40,7 +40,7 @@ class SecurityClassificationRepoImpl(BaseRepository):
         result = await self.session.scalars(query)
         records = result.all()
 
-        return [
+        return [  # type: ignore[return-value]
             SecurityClassification.to_domain(db_security_classification=record)
             for record in records
         ]

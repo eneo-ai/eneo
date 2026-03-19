@@ -635,6 +635,7 @@ class UserService:
 
     async def update_used_tokens(self, user_id: UUID, tokens_to_add: int):
         user_in_db = await self.repo.get_user_by_id(user_id)
+        assert user_in_db is not None
         new_used_tokens = user_in_db.used_tokens + tokens_to_add
         user_update = UserUpdate(id=user_in_db.id, used_tokens=new_used_tokens)
         await self.repo.update(user_update)

@@ -99,7 +99,7 @@ class AssistantTemplateRepository:
 
         results = await self.session.scalars(query)
 
-        return self.factory.create_assistant_template_list(items=results.all())
+        return self.factory.create_assistant_template_list(items=results.all())  # type: ignore[return-value]
 
     async def add(self, obj: "AssistantTemplateCreate") -> "AssistantTemplate":
         stmt = (
@@ -128,6 +128,7 @@ class AssistantTemplateRepository:
         id: "UUID",
         obj: "AssistantTemplateUpdate",
     ) -> "AssistantTemplate":
+        assert obj.wizard is not None
         stmt = (
             sa.update(self._db_model)
             .values(
@@ -158,7 +159,7 @@ class AssistantTemplateRepository:
         )
         query = self._apply_options(query=base_query)
         results = await self.session.scalars(query)
-        return self.factory.create_assistant_template_list(items=results.all())
+        return self.factory.create_assistant_template_list(items=results.all())  # type: ignore[return-value]
 
     async def check_duplicate_name(self, name: str, tenant_id: Optional["UUID"] = None) -> bool:
         """Check if template name already exists.
@@ -181,9 +182,10 @@ class AssistantTemplateRepository:
             query = query.where(self._db_model.tenant_id.is_(None))
 
         count = await self.session.scalar(query)
+        assert count is not None
         return count > 0
 
-    async def soft_delete(self, id: "UUID", tenant_id: "UUID", user_id: "UUID") -> "AssistantTemplate":
+    async def soft_delete(self, id: "UUID", tenant_id: "UUID", user_id: "UUID") -> "AssistantTemplate | None":
         """Soft-delete template (mark with deleted_at).
 
         Validates: template belongs to tenant
@@ -209,7 +211,7 @@ class AssistantTemplateRepository:
 
         return self.factory.create_assistant_template(item=record)
 
-    async def restore(self, id: "UUID", tenant_id: "UUID", user_id: "UUID") -> "AssistantTemplate":
+    async def restore(self, id: "UUID", tenant_id: "UUID", user_id: "UUID") -> "AssistantTemplate | None":
         """Restore soft-deleted template (clear deleted_at).
 
         Validates: template belongs to tenant and is deleted
@@ -271,4 +273,4 @@ class AssistantTemplateRepository:
 
         query = self._apply_options(query=base_query)
         results = await self.session.scalars(query)
-        return self.factory.create_assistant_template_list(items=results.all())
+        return self.factory.create_assistant_template_list(items=results.all())  # type: ignore[return-value]

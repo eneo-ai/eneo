@@ -299,6 +299,7 @@ async def create_tenant(
 
     # Create tenant
     created_tenant = await tenant_service.create_tenant(tenant)
+    assert created_tenant is not None
 
     # Audit logging (sysadmin - system actor)
     audit_service = container.audit_service()
@@ -339,9 +340,11 @@ async def update_tenant(
 
     # Get old state
     old_tenant = await tenant_service.get_tenant_by_id(id)
+    assert old_tenant is not None
 
     # Update tenant
     updated_tenant = await tenant_service.update_tenant(tenant, id)
+    assert updated_tenant is not None
 
     # Track changes
     changes = {}
@@ -390,9 +393,11 @@ async def delete_tenant_by_id(
 
     # Get tenant BEFORE deletion
     tenant_to_delete = await tenant_service.get_tenant_by_id(id)
+    assert tenant_to_delete is not None
 
     # Delete tenant
     deleted_tenant = await tenant_service.delete_tenant(id)
+    assert deleted_tenant is not None
 
     # Audit logging
     audit_service = container.audit_service()
@@ -826,7 +831,7 @@ async def migrate_completion_model_for_tenant(
         from sqlalchemy import select
 
         stmt = select(Users).where(Users.tenant_id == tenant_id).limit(1)
-        result = await session.execute(stmt)
+        result = await session.execute(stmt)  # type: ignore[union-attr]
         user_row = result.scalar_one_or_none()
 
         if not user_row:
@@ -964,13 +969,13 @@ async def migrate_completion_model_for_all_tenants(
                 )
 
                 # Process each tenant in its own transaction
-                async with container.session().begin():
+                async with container.session().begin():  # type: ignore[union-attr]
                     # Get a user from this tenant to set the context
                     from intric.database.tables.users_table import Users
                     from sqlalchemy import select
 
                     stmt = select(Users).where(Users.tenant_id == tenant.id).limit(1)
-                    result = await container.session().execute(stmt)
+                    result = await container.session().execute(stmt)  # type: ignore[union-attr]
                     user_row = result.scalar_one_or_none()
 
                     if not user_row:
@@ -1130,11 +1135,11 @@ async def create_completion_model(
     use POST /api/v1/completion-models/{id}/ with tenant credentials.
     """
     session = container.session()
-    async with session.begin():
+    async with session.begin():  # type: ignore[union-attr]
         repo = CompletionModelsRepository(session=session)
         model = await repo.create_model(model_data)
 
-    return model
+    return model  # type: ignore[return-value]
 
 
 @router.put(
@@ -1157,7 +1162,7 @@ async def update_completion_model_metadata(
     from intric.main.exceptions import NotFoundException
 
     session = container.session()
-    async with session.begin():
+    async with session.begin():  # type: ignore[union-attr]
         repo = CompletionModelsRepository(session=session)
 
         # Ensure model_data has the id
@@ -1169,7 +1174,7 @@ async def update_completion_model_metadata(
         if model is None:
             raise NotFoundException(f"Completion model with id {id} not found")
 
-    return model
+    return model  # type: ignore[return-value]
 
 
 @router.delete(
@@ -1194,7 +1199,7 @@ async def delete_completion_model(
     # Future enhancement: Add cross-tenant usage check
 
     session = container.session()
-    async with session.begin():
+    async with session.begin():  # type: ignore[union-attr]
         repo = CompletionModelsRepository(session=session)
         await repo.delete_model(id)
 
@@ -1222,11 +1227,11 @@ async def create_embedding_model(
     use POST /api/v1/embedding-models/{id}/ with tenant credentials.
     """
     session = container.session()
-    async with session.begin():
+    async with session.begin():  # type: ignore[union-attr]
         repo = AdminEmbeddingModelsService(session=session)
         model = await repo.create_model(model_data)
 
-    return model
+    return model  # type: ignore[return-value]
 
 
 @router.put(
@@ -1249,7 +1254,7 @@ async def update_embedding_model_metadata(
     from intric.main.exceptions import NotFoundException
 
     session = container.session()
-    async with session.begin():
+    async with session.begin():  # type: ignore[union-attr]
         repo = AdminEmbeddingModelsService(session=session)
 
         # Ensure model_data has the id
@@ -1261,7 +1266,7 @@ async def update_embedding_model_metadata(
         if model is None:
             raise NotFoundException(f"Embedding model with id {id} not found")
 
-    return model
+    return model  # type: ignore[return-value]
 
 
 @router.delete(
@@ -1282,9 +1287,9 @@ async def delete_embedding_model(
     """
     session = container.session()
 
-    async with session.begin():
+    async with session.begin():  # type: ignore[union-attr]
         if not force:
-            usage_counts = await session.execute(
+            usage_counts = await session.execute(  # type: ignore[union-attr]
                 sa.select(
                     sa.select(sa.func.count()).where(CollectionsTable.embedding_model_id == id).correlate(None).scalar_subquery().label("collections"),
                     sa.select(sa.func.count()).where(Websites.embedding_model_id == id).correlate(None).scalar_subquery().label("websites"),

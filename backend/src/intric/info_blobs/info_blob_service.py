@@ -66,6 +66,7 @@ class InfoBlobService:
             )
 
         else:
+            assert info_blob is not None
             if info_blob.group_id is not None:
                 space = await self.space_repo.get_space_by_collection(
                     info_blob.group_id
@@ -192,8 +193,10 @@ class InfoBlobService:
 
     async def update_info_blob(self, info_blob: InfoBlobUpdate):
         current_info_blob = await self.repo.get(info_blob.id)
+        assert current_info_blob is not None
 
         if info_blob.title:
+            assert current_info_blob.group is not None
             info_blob_with_same_name = await self.repo.get_by_title_and_group(
                 info_blob.title, current_info_blob.group.id
             )
@@ -211,6 +214,7 @@ class InfoBlobService:
 
     async def update_info_blob_size(self, info_blob_id: UUID):
         updated_info_blob = await self.repo.update_size(info_blob_id=info_blob_id)
+        assert updated_info_blob is not None
 
         if updated_info_blob.group_id is not None:
             await self.group_service.update_group_size(updated_info_blob.group_id)
@@ -238,7 +242,7 @@ class InfoBlobService:
                 item_dict = item.model_dump()
                 return filter_dict.items() <= item_dict.items()
 
-            info_blobs = list(filter(filter_func, info_blobs))
+            info_blobs = list(filter(filter_func, info_blobs))  # type: ignore[call-overload]
 
         return [blob for blob in info_blobs]
 
@@ -287,7 +291,7 @@ class InfoBlobService:
 
         space_ids = effective_space_ids(space)
 
-        return await self.repo.list_by_space_ids(
+        return await self.repo.list_by_space_ids(  # type: ignore[attr-defined]
             space_ids=space_ids,
             include_groups=True,
             include_websites=True,

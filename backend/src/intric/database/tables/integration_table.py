@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 class Integration(BasePublic):
-    __tablename__ = "integrations"
+    __tablename__ = "integrations"  # type: ignore[assignment]
 
     name: Mapped[str] = mapped_column(Text, index=True, unique=True)
     description: Mapped[str] = mapped_column(Text, nullable=False)
@@ -28,7 +28,7 @@ class Integration(BasePublic):
 
 
 class TenantIntegration(BasePublic):
-    __tablename__ = "tenant_integrations"
+    __tablename__ = "tenant_integrations"  # type: ignore[assignment]
 
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
     integration_id: Mapped[UUID] = mapped_column(
@@ -47,7 +47,7 @@ class TenantIntegration(BasePublic):
 
 
 class UserIntegration(BasePublic):
-    __tablename__ = "user_integrations"
+    __tablename__ = "user_integrations"  # type: ignore[assignment]
 
     user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Users.id, ondelete="CASCADE"), nullable=True
@@ -85,7 +85,7 @@ class UserIntegration(BasePublic):
 
 
 class OauthToken(BasePublic):
-    __tablename__ = "oauth_tokens"
+    __tablename__ = "oauth_tokens"  # type: ignore[assignment]
 
     access_token: Mapped[str] = mapped_column(Text)
     token_type: Mapped[str] = mapped_column(Text)
@@ -99,7 +99,7 @@ class OauthToken(BasePublic):
 
 
 class IntegrationKnowledge(BasePublic):
-    __tablename__ = "integration_knowledge"
+    __tablename__ = "integration_knowledge"  # type: ignore[assignment]
 
     name: Mapped[Optional[str]] = mapped_column(Text)
     original_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

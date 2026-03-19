@@ -81,7 +81,7 @@ class UserIntegrationService:
                 )
             )
         )
-        tenant_app_result = await self.user_integration_repo.session.execute(tenant_app_stmt)
+        tenant_app_result = await self.user_integration_repo.session.execute(tenant_app_stmt)  # type: ignore[attr-defined]
         tenant_app_db_models = [row[0] for row in tenant_app_result.all()]
         tenant_app_list = UserIntegrationFactory.create_entities(records=tenant_app_db_models)
 
@@ -150,7 +150,7 @@ class UserIntegrationService:
         ).where(
             SharePointSubscriptionDB.user_integration_id == integration.id
         )
-        result = await self.user_integration_repo.session.execute(stmt)
+        result = await self.user_integration_repo.session.execute(stmt)  # type: ignore[attr-defined]
         graph_subscription_ids = [row[0] for row in result.all()]
 
         if not graph_subscription_ids:
@@ -212,7 +212,7 @@ class UserIntegrationService:
         tenant_app = None
         if self.tenant_sharepoint_app_repo:
             try:
-                tenant_app = await self.tenant_sharepoint_app_repo.one_or_none(
+                tenant_app = await self.tenant_sharepoint_app_repo.one_or_none(  # type: ignore[attr-defined]
                     tenant_id=self.user.tenant_id
                 )
             except Exception as e:

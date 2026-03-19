@@ -146,9 +146,9 @@ class AppFactory:
         completion_models: list["CompletionModel"] = [],
         transcription_models: list[TranscriptionModel] = [],
     ):
-        if app_in_db.prompt is not None:
+        if app_in_db.prompt is not None:  # type: ignore[attr-defined]
             prompt = PromptFactory.create_prompt_from_db(
-                prompt_in_db=app_in_db.prompt, is_selected=True
+                prompt_in_db=app_in_db.prompt, is_selected=True  # type: ignore[attr-defined]
             )
         else:
             prompt = None

@@ -23,7 +23,7 @@ from intric.info_blobs.info_blob import (
 
 class InfoBlobRepository:
     def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(
+        self.delegate: BaseRepositoryDelegate[InfoBlobInDB] = BaseRepositoryDelegate(
             session,
             InfoBlobs,
             InfoBlobInDB,
@@ -61,16 +61,19 @@ class InfoBlobRepository:
     async def add(self, info_blob: InfoBlobAdd):
         if info_blob.group_id is not None:
             group = await self._get_group(info_blob.group_id)
+            assert group is not None
             embedding_model_id = group.embedding_model_id
 
         elif info_blob.website_id is not None:
             website = await self._get_website(info_blob.website_id)
+            assert website is not None
             embedding_model_id = website.embedding_model_id
 
         elif info_blob.integration_knowledge_id is not None:
             integration_knowledge = await self._get_integration_knowledge(
                 knowledge_id=info_blob.integration_knowledge_id
             )
+            assert integration_knowledge is not None
             embedding_model_id = integration_knowledge.embedding_model_id
 
         else:
@@ -170,10 +173,10 @@ class InfoBlobRepository:
 
         return await self.add(info_blob)
 
-    async def update(self, info_blob: InfoBlobUpdate) -> InfoBlobInDB:
+    async def update(self, info_blob: InfoBlobUpdate) -> InfoBlobInDB | None:
         return await self.delegate.update(info_blob)
 
-    async def update_size(self, info_blob_id: UUID) -> InfoBlobInDB:
+    async def update_size(self, info_blob_id: UUID) -> InfoBlobInDB | None:
         chunks_size_subquery = (
             sa.select(sa.func.coalesce(sa.func.sum(InfoBlobChunks.size), 0))
             .where(InfoBlobChunks.info_blob_id == info_blob_id)
@@ -212,7 +215,7 @@ class InfoBlobRepository:
         items = await self.delegate.get_records_from_query(query)
         return [InfoBlobInDBNoText.model_validate(record) for record in items]
 
-    async def get(self, id: UUID) -> InfoBlobInDB:
+    async def get(self, id: UUID) -> InfoBlobInDB | None:
         return await self.delegate.get(id)
 
     async def get_by_title_and_group(self, title: str, group_id: UUID):
@@ -222,14 +225,14 @@ class InfoBlobRepository:
 
     async def delete_by_title_and_group(
         self, title: str, group_id: UUID
-    ) -> InfoBlobInDB:
+    ) -> InfoBlobInDB | None:
         return await self.delegate.delete_by(
             conditions={InfoBlobs.title: title, InfoBlobs.group_id: group_id}
         )
 
     async def delete_by_title_and_website(
         self, title: str, website_id: UUID
-    ) -> InfoBlobInDB:
+    ) -> InfoBlobInDB | None:
         return await self.delegate.delete_by(
             conditions={InfoBlobs.title: title, InfoBlobs.website_id: website_id}
         )
@@ -292,7 +295,7 @@ class InfoBlobRepository:
 
     async def get_by_title_and_integration_knowledge(
         self, title: str, integration_knowledge_id: UUID
-    ) -> InfoBlobInDB:
+    ) -> InfoBlobInDB | None:
         """Get an info_blob by title and integration_knowledge_id."""
         return await self.delegate.get_by(
             conditions={
@@ -305,7 +308,7 @@ class InfoBlobRepository:
         self,
         sharepoint_item_id: str,
         integration_knowledge_id: UUID,
-    ) -> InfoBlobInDB:
+    ) -> InfoBlobInDB | None:
         """Get an info_blob by sharepoint_item_id and integration_knowledge_id."""
         return await self.delegate.get_by(
             conditions={
@@ -329,7 +332,7 @@ class InfoBlobRepository:
             conditions={InfoBlobs.website_id: website_id}
         )
 
-    async def delete(self, id: int) -> InfoBlobInDB:
+    async def delete(self, id: int) -> InfoBlobInDB | None:
         return await self.delegate.delete(id)
 
     async def get_count_of_group(self, group_id: UUID):
@@ -401,7 +404,7 @@ class InfoBlobRepository:
     async def get_titles_of_website(self, website_id: UUID) -> list[str]:
         stmt = sa.select(InfoBlobs.title).where(InfoBlobs.website_id == website_id)
         result = await self.session.scalars(stmt)
-        return list(result)
+        return list(result)  # type: ignore[return-value]
 
     async def batch_delete_by_titles_and_website(
         self, titles: list[str], website_id: UUID

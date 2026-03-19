@@ -25,5 +25,5 @@ class OauthTokenMapper(EntityMapper[OauthToken, OauthTokenDBModel]):
 
     def to_entities(
         self, db_models: List[OauthTokenDBModel]
-    ) -> List[OauthToken]:
+    ) -> List[OauthToken] | None:
         pass

@@ -172,7 +172,7 @@ class AssistantUpdatePublic(AssistantCreatePublic):
     prompt: Optional[PromptCreate] = None
     attachments: Optional[list[ModelId]] = None
     mcp_tools: Optional[list[MCPToolSetting]] = None
-    description: Optional[str] = Field(
+    description: Optional[str] = Field(  # type: ignore[call-overload]
         default=NOT_PROVIDED,
         description=(
             "A description of the assitant that will be used as "
@@ -188,7 +188,7 @@ class AssistantUpdatePublic(AssistantCreatePublic):
         ),
     )
     data_retention_days: Optional[int] = None
-    metadata_json: Optional[dict] = Field(
+    metadata_json: Optional[dict] = Field(  # type: ignore[assignment]
         default=NOT_PROVIDED,
         description="Metadata for the assistant",
     )
@@ -290,7 +290,7 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     tools: UseTools
     type: AssistantType
     model_info: Optional[ModelInfo] = None
-    description: Optional[str] = Field(
+    description: Optional[str] = Field(  # type: ignore[call-overload]
         default=None,
         description=(
             "A description of the assitant that will be used "
