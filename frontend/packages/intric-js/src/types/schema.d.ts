@@ -363,6 +363,25 @@ export interface paths {
      */
     post: operations["estimate_tokens_api_v1_assistants__id__token_estimate_post"];
   };
+  "/api/v1/assistants/{id}/mcp-servers/": {
+    /**
+     * Get Assistant Mcp Servers
+     * @description Get all MCP servers associated with an assistant.
+     */
+    get: operations["get_assistant_mcp_servers_api_v1_assistants__id__mcp_servers__get"];
+  };
+  "/api/v1/assistants/{id}/mcp-servers/{mcp_server_id}/": {
+    /**
+     * Add Mcp To Assistant
+     * @description Add an MCP server to an assistant.
+     */
+    post: operations["add_mcp_to_assistant_api_v1_assistants__id__mcp_servers__mcp_server_id___post"];
+    /**
+     * Remove Mcp From Assistant
+     * @description Remove an MCP server from an assistant.
+     */
+    delete: operations["remove_mcp_from_assistant_api_v1_assistants__id__mcp_servers__mcp_server_id___delete"];
+  };
   "/api/v1/group-chats/{id}/": {
     /**
      * Get Group Chat
@@ -448,6 +467,20 @@ export interface paths {
      * @description Set the title of a conversation
      */
     post: operations["set_title_of_conversation_api_v1_conversations__session_id__title__post"];
+  };
+  "/api/v1/conversations/approve-tools/": {
+    /**
+     * Approve Tools
+     * @description Submit approval decisions for pending tool calls.
+     *
+     * When a chat request is made with require_tool_approval=true, the stream will emit
+     * a tool_approval_required event with an approval_id and list of pending tools.
+     * Use this endpoint to approve or reject each tool call.
+     *
+     * The decisions list should contain one entry per tool_call_id from the event.
+     * If a tool_call_id is omitted, it will be treated as rejected.
+     */
+    post: operations["approve_tools_api_v1_conversations_approve_tools__post"];
   };
   "/api/v1/services/": {
     /** Get Services */
@@ -570,6 +603,15 @@ export interface paths {
      *     with their original question.
      */
     post: operations["ask_question_about_questions_api_v1_analysis_assistants__assistant_id___post"];
+  };
+  "/api/v1/analysis/assistants/{assistant_id}/questions/": {
+    /**
+     * Get Most Recent Questions Paginated
+     * @description Get paginated question history for an assistant.
+     *
+     * Optimized for admin insights history view and large datasets.
+     */
+    get: operations["get_most_recent_questions_paginated_api_v1_analysis_assistants__assistant_id__questions__get"];
   };
   "/api/v1/analysis/conversation-insights/": {
     /**
@@ -1166,6 +1208,36 @@ export interface paths {
      */
     post: operations["create_provider_api_v1_admin_model_providers__post"];
   };
+  "/api/v1/admin/model-providers/capabilities/": {
+    /**
+     * Get Provider Capabilities
+     * @description Get supported model types and top models per provider type from LiteLLM.
+     *
+     * Returns a structured response with:
+     * - providers: dict of canonical provider types, each with modes, models, and fields
+     * - default_fields: fallback field definitions for providers without custom fields
+     */
+    get: operations["get_provider_capabilities_api_v1_admin_model_providers_capabilities__get"];
+  };
+  "/api/v1/admin/model-providers/favorites/": {
+    /**
+     * Get Favorite Providers
+     * @description Get the tenant's favorite provider types.
+     */
+    get: operations["get_favorite_providers_api_v1_admin_model_providers_favorites__get"];
+    /**
+     * Set Favorite Providers
+     * @description Set the tenant's favorite provider types.
+     */
+    put: operations["set_favorite_providers_api_v1_admin_model_providers_favorites__put"];
+  };
+  "/api/v1/admin/model-providers/model-defaults/": {
+    /**
+     * Get Model Defaults
+     * @description Look up recommended default values for a model from LiteLLM's model_cost database.
+     */
+    get: operations["get_model_defaults_api_v1_admin_model_providers_model_defaults__get"];
+  };
   "/api/v1/admin/model-providers/{provider_id}/": {
     /**
      * Get Provider
@@ -1184,6 +1256,27 @@ export interface paths {
      * Will fail if the provider has models attached to it.
      */
     delete: operations["delete_provider_api_v1_admin_model_providers__provider_id___delete"];
+  };
+  "/api/v1/admin/model-providers/{provider_id}/models/": {
+    /**
+     * List Provider Models
+     * @description List available models/deployments from the provider's API using its credentials.
+     */
+    get: operations["list_provider_models_api_v1_admin_model_providers__provider_id__models__get"];
+  };
+  "/api/v1/admin/model-providers/{provider_id}/test/": {
+    /**
+     * Test Provider
+     * @description Test connectivity to a model provider.
+     */
+    post: operations["test_provider_api_v1_admin_model_providers__provider_id__test__post"];
+  };
+  "/api/v1/admin/model-providers/{provider_id}/validate-model/": {
+    /**
+     * Validate Model
+     * @description Validate that a model works with this provider by making a minimal API call.
+     */
+    post: operations["validate_model_api_v1_admin_model_providers__provider_id__validate_model__post"];
   };
   "/api/v1/admin/tenant-models/completion/": {
     /**
@@ -1381,19 +1474,23 @@ export interface paths {
     /** Create Space Integration Knowledge Batch */
     post: operations["create_space_integration_knowledge_batch_api_v1_spaces__id__knowledge_integrations_add__user_integration_id__batch__post"];
   };
-  "/api/v1/spaces/{id}/knowledge/integrations/wrappers/{wrapper_id}/": {
-    /** Update Integration Knowledge Wrapper */
-    patch: operations["update_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___patch"];
-    /** Delete Integration Knowledge Wrapper */
-    delete: operations["delete_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___delete"];
-  };
   "/api/v1/spaces/{id}/knowledge/integrations/remove/{integration_knowledge_id}/": {
     /** Delete Space Integration Knowledge */
     delete: operations["delete_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_remove__integration_knowledge_id___delete"];
   };
+  "/api/v1/spaces/{id}/knowledge/integrations/wrappers/{wrapper_id}/": {
+    /** Delete Integration Knowledge Wrapper */
+    delete: operations["delete_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___delete"];
+    /** Update Integration Knowledge Wrapper */
+    patch: operations["update_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___patch"];
+  };
   "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/": {
     /** Update Integration Knowledge */
     patch: operations["update_integration_knowledge_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id___patch"];
+  };
+  "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/sync/": {
+    /** Trigger Integration Full Sync */
+    post: operations["trigger_integration_full_sync_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__sync__post"];
   };
   "/api/v1/spaces/{id}/members/": {
     /** Add Space Member */
@@ -1458,6 +1555,25 @@ export interface paths {
      * @deprecated
      */
     post: operations["create_website_api_v1_websites__post"];
+  };
+  "/api/v1/websites/check-url/": {
+    /**
+     * Check if URL exists on Organization space
+     * @description Check if a website URL already exists on the user's Organization space.
+     *
+     *     **Use case:**
+     *     When creating a new website on a Personal or Shared space, call this endpoint
+     *     to check if the URL is already being crawled on the Organization space.
+     *     This helps avoid duplicate crawls and informs users that the knowledge
+     *     might already be available for import.
+     *
+     *     **Returns:**
+     *     - Website info if URL exists on Organization space
+     *     - `null` if URL not found or user has no Organization space
+     *
+     *     **Note:** This does not block website creation - it's informational only.
+     */
+    get: operations["check_existing_website_url_api_v1_websites_check_url__get"];
   };
   "/api/v1/websites/bulk/run/": {
     /**
@@ -2011,6 +2127,123 @@ export interface paths {
     /** Get Integration By Id */
     get: operations["get_integration_by_id_api_v1_integrations__integration_id___get"];
   };
+  "/api/v1/mcp-servers/": {
+    /**
+     * Get Mcp Servers
+     * @description Get all MCP servers from global catalog with optional tag filtering.
+     */
+    get: operations["get_mcp_servers_api_v1_mcp_servers__get"];
+    /**
+     * Create Mcp Server
+     * @description Create a new MCP server in global catalog (admin only).
+     *
+     * Validates connection before saving. Returns 400 if connection fails.
+     */
+    post: operations["create_mcp_server_api_v1_mcp_servers__post"];
+  };
+  "/api/v1/mcp-servers/settings/": {
+    /**
+     * Get Tenant Mcp Settings
+     * @description Get all available MCP servers with tenant enablement status.
+     */
+    get: operations["get_tenant_mcp_settings_api_v1_mcp_servers_settings__get"];
+  };
+  "/api/v1/mcp-servers/settings/{mcp_server_id}/": {
+    /**
+     * Update Mcp Settings
+     * @description Update MCP server settings for the current tenant.
+     */
+    put: operations["update_mcp_settings_api_v1_mcp_servers_settings__mcp_server_id___put"];
+    /**
+     * Enable Mcp For Tenant
+     * @description Enable an MCP server for the current tenant with optional credentials.
+     */
+    post: operations["enable_mcp_for_tenant_api_v1_mcp_servers_settings__mcp_server_id___post"];
+    /**
+     * Disable Mcp For Tenant
+     * @description Disable an MCP server for the current tenant.
+     */
+    delete: operations["disable_mcp_for_tenant_api_v1_mcp_servers_settings__mcp_server_id___delete"];
+  };
+  "/api/v1/mcp-servers/settings/tools/{tool_id}/": {
+    /**
+     * Update Tenant Tool Enabled
+     * @description Update tenant-level enablement for a tool (admin only).
+     */
+    put: operations["update_tenant_tool_enabled_api_v1_mcp_servers_settings_tools__tool_id___put"];
+  };
+  "/api/v1/mcp-servers/{id}/": {
+    /**
+     * Get Mcp Server
+     * @description Get a single MCP server by ID.
+     */
+    get: operations["get_mcp_server_api_v1_mcp_servers__id___get"];
+    /**
+     * Update Mcp Server
+     * @description Update an MCP server in global catalog (admin only).
+     */
+    post: operations["update_mcp_server_api_v1_mcp_servers__id___post"];
+    /**
+     * Delete Mcp Server
+     * @description Delete an MCP server from global catalog (admin only).
+     */
+    delete: operations["delete_mcp_server_api_v1_mcp_servers__id___delete"];
+  };
+  "/api/v1/mcp-servers/{id}/tools/": {
+    /**
+     * Get Mcp Server Tools
+     * @description Get all tools for an MCP server with tenant-level settings applied.
+     */
+    get: operations["get_mcp_server_tools_api_v1_mcp_servers__id__tools__get"];
+  };
+  "/api/v1/mcp-servers/{id}/tools/sync/": {
+    /**
+     * Sync Mcp Server Tools
+     * @description Sync tools from remote MCP server (admin only).
+     *
+     * Detects new, changed, and removed tools. Changes are stored as pending
+     * and require explicit approval before becoming active. This prevents a
+     * compromised MCP server from injecting malicious tool definitions.
+     *
+     * Returns 400 if connection to the MCP server fails.
+     */
+    post: operations["sync_mcp_server_tools_api_v1_mcp_servers__id__tools_sync__post"];
+  };
+  "/api/v1/mcp-servers/{id}/tools/review/approve/": {
+    /**
+     * Approve Tool Changes
+     * @description Approve pending tool changes (admin only).
+     *
+     * For new/changed tools: pending values become active.
+     * For removed tools: tool is deleted from database.
+     */
+    post: operations["approve_tool_changes_api_v1_mcp_servers__id__tools_review_approve__post"];
+  };
+  "/api/v1/mcp-servers/{id}/tools/review/reject/": {
+    /**
+     * Reject Tool Changes
+     * @description Reject pending tool changes (admin only).
+     *
+     * For new tools: tool is deleted (never activated).
+     * For changed tools: pending values are cleared, active values kept.
+     * For removed tools: removed flag is cleared, tool stays active.
+     */
+    post: operations["reject_tool_changes_api_v1_mcp_servers__id__tools_review_reject__post"];
+  };
+  "/api/v1/mcp-servers/{id}/tools/review/approve-all/": {
+    /**
+     * Approve All Tool Changes
+     * @description Approve all pending tool changes for an MCP server (admin only).
+     */
+    post: operations["approve_all_tool_changes_api_v1_mcp_servers__id__tools_review_approve_all__post"];
+  };
+  "/api/v1/mcp-servers/{id}/tools/{tool_id}/": {
+    /**
+     * Update Tool Default Enabled
+     * @description Update global default enabled status for a tool (admin only).
+     */
+    put: operations["update_tool_default_enabled_api_v1_mcp_servers__id__tools__tool_id___put"];
+  };
   "/api/v1/integrations/sharepoint/webhook/": {
     /** Sharepoint Webhook Validation */
     get: operations["sharepoint_webhook_validation_api_v1_integrations_sharepoint_webhook__get"];
@@ -2025,7 +2258,7 @@ export interface paths {
     get: operations["get_sharepoint_app_api_v1_admin_sharepoint_app_get"];
     /**
      * Configure tenant SharePoint app
-     * @description Configure Azure AD application credentials for organization-wide SharePoint access. This eliminates person-dependency for shared and organization spaces by using application permissions instead of delegated user permissions. Requires admin role.
+     * @description Configure Microsoft Entra ID application credentials for organization-wide SharePoint access. This eliminates person-dependency for shared and organization spaces by using application permissions instead of delegated user permissions. Requires admin role.
      */
     post: operations["configure_sharepoint_app_api_v1_admin_sharepoint_app_post"];
     /**
@@ -2248,7 +2481,7 @@ export interface paths {
      * Create Completion Model
      * @description Create a new completion model (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * This creates the model metadata only. To enable it for a tenant,
      * use POST /api/v1/completion-models/{id}/ with tenant credentials.
@@ -2260,7 +2493,7 @@ export interface paths {
      * Update Completion Model Metadata
      * @description Update completion model metadata (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * Updates global model metadata. Does not affect tenant-specific settings.
      */
@@ -2271,7 +2504,7 @@ export interface paths {
      * Delete Completion Model
      * @description Delete a completion model (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * WARNING: Deletion affects all tenants. Use with caution.
      * Set force=true to delete even if model is in use (may break references).
@@ -2283,7 +2516,7 @@ export interface paths {
      * Create Embedding Model
      * @description Create a new embedding model (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * This creates the model metadata only. To enable it for a tenant,
      * use POST /api/v1/embedding-models/{id}/ with tenant credentials.
@@ -2295,7 +2528,7 @@ export interface paths {
      * Update Embedding Model Metadata
      * @description Update embedding model metadata (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * Updates global model metadata. Does not affect tenant-specific settings.
      */
@@ -2306,7 +2539,7 @@ export interface paths {
      * Delete Embedding Model
      * @description Delete an embedding model (system-wide operation).
      *
-     * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+     * Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      * WARNING: Deletion affects all tenants. Use with caution.
      */
@@ -2692,6 +2925,7 @@ export interface components {
       | "integration_disconnected"
       | "integration_knowledge_created"
       | "integration_knowledge_deleted"
+      | "integration_knowledge_synced"
       | "completion_model_updated"
       | "embedding_model_updated"
       | "transcription_model_updated"
@@ -2704,6 +2938,13 @@ export interface components {
       | "security_classification_levels_updated"
       | "security_classification_enabled"
       | "security_classification_disabled"
+      | "mcp_server_created"
+      | "mcp_server_updated"
+      | "mcp_server_deleted"
+      | "mcp_server_enabled"
+      | "mcp_server_disabled"
+      | "mcp_server_tool_enabled"
+      | "mcp_server_tool_disabled"
       | "retention_policy_applied"
       | "encryption_key_rotated"
       | "system_maintenance"
@@ -3002,7 +3243,7 @@ export interface components {
       /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
-      } | null;
+      };
       wizard?: components["schemas"]["AppTemplateWizard"] | null;
       /** Input Type */
       input_type: string;
@@ -3042,7 +3283,7 @@ export interface components {
       /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
-      } | null;
+      };
       /** Completion Model Id */
       completion_model_id?: string | null;
       /** Completion Model Name */
@@ -3330,6 +3571,13 @@ export interface components {
        */
       integration_knowledge_list?: components["schemas"]["ModelId"][];
       /**
+       * Mcp Servers
+       * @deprecated
+       * @description This field is deprecated and will be ignored
+       * @default []
+       */
+      mcp_servers?: components["schemas"]["ModelId"][];
+      /**
        * @deprecated
        * @description This field is deprecated and will be ignored
        */
@@ -3368,6 +3616,26 @@ export interface components {
         [key: string]: unknown;
       };
       prompt: components["schemas"]["PromptPublicAssistantTemplate"] | null;
+    };
+    /** AssistantInsightQuestion */
+    AssistantInsightQuestion: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Question */
+      question: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
     };
     /** AssistantMetadata */
     AssistantMetadata: {
@@ -3418,6 +3686,12 @@ export interface components {
       websites: components["schemas"]["WebsitePublic"][];
       /** Integration Knowledge List */
       integration_knowledge_list: components["schemas"]["IntegrationKnowledgePublic"][];
+      /** Mcp Servers */
+      mcp_servers: {
+        [key: string]: unknown;
+      }[];
+      /** Mcp Tools */
+      mcp_tools?: components["schemas"]["MCPToolSetting"][];
       completion_model?: components["schemas"]["CompletionModelSparse"] | null;
       /**
        * Published
@@ -3528,7 +3802,7 @@ export interface components {
       /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
-      } | null;
+      };
       wizard?: components["schemas"]["AssistantTemplateWizard"] | null;
       /** Icon Name */
       icon_name?: string | null;
@@ -3564,7 +3838,7 @@ export interface components {
       /** Completion Model Kwargs */
       completion_model_kwargs?: {
         [key: string]: unknown;
-      } | null;
+      };
       /** Completion Model Id */
       completion_model_id?: string | null;
       /** Completion Model Name */
@@ -4065,9 +4339,11 @@ export interface components {
       /** Nickname */
       nickname: string;
       /** Family */
-      family: components["schemas"]["ModelFamily"] | string;
-      /** Token Limit */
-      token_limit: number;
+      family?: string | null;
+      /** Max Input Tokens */
+      max_input_tokens: number;
+      /** Max Output Tokens */
+      max_output_tokens: number;
       /** Is Deprecated */
       is_deprecated: boolean;
       /** Nr Billion Parameters */
@@ -4075,9 +4351,9 @@ export interface components {
       /** Hf Link */
       hf_link?: string | null;
       /** Stability */
-      stability: components["schemas"]["ModelStability"] | string;
+      stability?: string | null;
       /** Hosting */
-      hosting: components["schemas"]["ModelHostingLocation"] | string;
+      hosting?: string | null;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
@@ -4085,11 +4361,16 @@ export interface components {
       /** Deployment Name */
       deployment_name?: string | null;
       /** Org */
-      org?: components["schemas"]["ModelOrg"] | string | null;
+      org?: string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
       reasoning: boolean;
+      /**
+       * Supports Tool Calling
+       * @default false
+       */
+      supports_tool_calling?: boolean;
       /** Base Url */
       base_url?: string | null;
       /** Litellm Model Name */
@@ -4108,6 +4389,11 @@ export interface components {
       tenant_id?: string | null;
       /** Provider Id */
       provider_id?: string | null;
+      /**
+       * Token Limit
+       * @description Backward-compat: exposed in JSON responses for frontend.
+       */
+      token_limit: number;
     };
     /** CompletionModelCreate */
     CompletionModelCreate: {
@@ -4116,9 +4402,11 @@ export interface components {
       /** Nickname */
       nickname: string;
       /** Family */
-      family: components["schemas"]["ModelFamily"] | string;
-      /** Token Limit */
-      token_limit: number;
+      family?: string | null;
+      /** Max Input Tokens */
+      max_input_tokens: number;
+      /** Max Output Tokens */
+      max_output_tokens: number;
       /** Is Deprecated */
       is_deprecated: boolean;
       /** Nr Billion Parameters */
@@ -4126,9 +4414,9 @@ export interface components {
       /** Hf Link */
       hf_link?: string | null;
       /** Stability */
-      stability: components["schemas"]["ModelStability"] | string;
+      stability?: string | null;
       /** Hosting */
-      hosting: components["schemas"]["ModelHostingLocation"] | string;
+      hosting?: string | null;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
@@ -4136,11 +4424,16 @@ export interface components {
       /** Deployment Name */
       deployment_name?: string | null;
       /** Org */
-      org?: components["schemas"]["ModelOrg"] | string | null;
+      org?: string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
       reasoning: boolean;
+      /**
+       * Supports Tool Calling
+       * @default false
+       */
+      supports_tool_calling?: boolean;
       /** Base Url */
       base_url?: string | null;
       /** Litellm Model Name */
@@ -4162,9 +4455,11 @@ export interface components {
       /** Nickname */
       nickname: string;
       /** Family */
-      family: components["schemas"]["ModelFamily"] | string;
-      /** Token Limit */
-      token_limit: number;
+      family?: string | null;
+      /** Max Input Tokens */
+      max_input_tokens: number;
+      /** Max Output Tokens */
+      max_output_tokens: number;
       /** Is Deprecated */
       is_deprecated: boolean;
       /** Nr Billion Parameters */
@@ -4172,9 +4467,9 @@ export interface components {
       /** Hf Link */
       hf_link?: string | null;
       /** Stability */
-      stability: components["schemas"]["ModelStability"] | string;
+      stability?: string | null;
       /** Hosting */
-      hosting: components["schemas"]["ModelHostingLocation"] | string;
+      hosting?: string | null;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
@@ -4182,7 +4477,7 @@ export interface components {
       /** Deployment Name */
       deployment_name?: string | null;
       /** Org */
-      org?: components["schemas"]["ModelOrg"] | string | null;
+      org?: string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
@@ -4225,6 +4520,15 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
+      /**
+       * Token Limit
+       * @description Backward-compat: exposed in JSON responses for frontend.
+       */
+      token_limit: number;
     };
     /** CompletionModelPublicAppTemplate */
     CompletionModelPublicAppTemplate: {
@@ -4258,9 +4562,11 @@ export interface components {
       /** Nickname */
       nickname: string;
       /** Family */
-      family: components["schemas"]["ModelFamily"] | string;
-      /** Token Limit */
-      token_limit: number;
+      family?: string | null;
+      /** Max Input Tokens */
+      max_input_tokens: number;
+      /** Max Output Tokens */
+      max_output_tokens: number;
       /** Is Deprecated */
       is_deprecated: boolean;
       /** Nr Billion Parameters */
@@ -4268,9 +4574,9 @@ export interface components {
       /** Hf Link */
       hf_link?: string | null;
       /** Stability */
-      stability: components["schemas"]["ModelStability"] | string;
+      stability?: string | null;
       /** Hosting */
-      hosting: components["schemas"]["ModelHostingLocation"] | string;
+      hosting?: string | null;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
@@ -4278,11 +4584,16 @@ export interface components {
       /** Deployment Name */
       deployment_name?: string | null;
       /** Org */
-      org?: components["schemas"]["ModelOrg"] | string | null;
+      org?: string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
       reasoning: boolean;
+      /**
+       * Supports Tool Calling
+       * @default false
+       */
+      supports_tool_calling?: boolean;
       /** Base Url */
       base_url?: string | null;
       /** Litellm Model Name */
@@ -4316,8 +4627,17 @@ export interface components {
       /** Credential Provider */
       credential_provider?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
+      /**
+       * Token Limit
+       * @description Backward-compat: exposed in JSON responses for frontend.
+       */
+      token_limit: number;
     };
     /** CompletionModelSparse */
     CompletionModelSparse: {
@@ -4335,9 +4655,11 @@ export interface components {
       /** Nickname */
       nickname: string;
       /** Family */
-      family: components["schemas"]["ModelFamily"] | string;
-      /** Token Limit */
-      token_limit: number;
+      family?: string | null;
+      /** Max Input Tokens */
+      max_input_tokens: number;
+      /** Max Output Tokens */
+      max_output_tokens: number;
       /** Is Deprecated */
       is_deprecated: boolean;
       /** Nr Billion Parameters */
@@ -4345,9 +4667,9 @@ export interface components {
       /** Hf Link */
       hf_link?: string | null;
       /** Stability */
-      stability: components["schemas"]["ModelStability"] | string;
+      stability?: string | null;
       /** Hosting */
-      hosting: components["schemas"]["ModelHostingLocation"] | string;
+      hosting?: string | null;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
@@ -4355,15 +4677,25 @@ export interface components {
       /** Deployment Name */
       deployment_name?: string | null;
       /** Org */
-      org?: components["schemas"]["ModelOrg"] | string | null;
+      org?: string | null;
       /** Vision */
       vision: boolean;
       /** Reasoning */
       reasoning: boolean;
+      /**
+       * Supports Tool Calling
+       * @default false
+       */
+      supports_tool_calling?: boolean;
       /** Base Url */
       base_url?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /**
+       * Token Limit
+       * @description Backward-compat: exposed in JSON responses for frontend.
+       */
+      token_limit: number;
     };
     /** CompletionModelUpdateFlags */
     CompletionModelUpdateFlags: {
@@ -4423,6 +4755,11 @@ export interface components {
        * @default false
        */
       use_web_search?: boolean;
+      /**
+       * Require Tool Approval
+       * @default false
+       */
+      require_tool_approval?: boolean;
     };
     /** Counts */
     Counts: {
@@ -4768,6 +5105,15 @@ export interface components {
       /** Items */
       items: components["schemas"]["CreateSpaceIntegrationKnowledgeBatchItem"][];
     };
+    /** CreateSpaceIntegrationKnowledgeBatchResponse */
+    CreateSpaceIntegrationKnowledgeBatchResponse: {
+      /** Items */
+      items: components["schemas"]["CreateSpaceIntegrationKnowledgeBatchResult"][];
+      /** Created Count */
+      created_count: number;
+      /** Failed Count */
+      failed_count: number;
+    };
     /** CreateSpaceIntegrationKnowledgeBatchResult */
     CreateSpaceIntegrationKnowledgeBatchResult: {
       /** Index */
@@ -4779,28 +5125,11 @@ export interface components {
        * @enum {string}
        */
       status: "created" | "failed";
-      /**
-       * Integration Knowledge Id
-       * Format: uuid
-       */
+      /** Integration Knowledge Id */
       integration_knowledge_id?: string | null;
       job?: components["schemas"]["JobPublic"] | null;
       /** Error */
       error?: string | null;
-    };
-    /** CreateSpaceIntegrationKnowledgeBatchResponse */
-    CreateSpaceIntegrationKnowledgeBatchResponse: {
-      /** Items */
-      items: components["schemas"]["CreateSpaceIntegrationKnowledgeBatchResult"][];
-      /** Created Count */
-      created_count: number;
-      /** Failed Count */
-      failed_count: number;
-    };
-    /** UpdateIntegrationKnowledgeWrapperRequest */
-    UpdateIntegrationKnowledgeWrapperRequest: {
-      /** Name */
-      name: string;
     };
     /** CreateSpaceRequest */
     CreateSpaceRequest: {
@@ -4848,6 +5177,27 @@ export interface components {
        */
       published?: boolean;
       user: components["schemas"]["UserSparse"];
+    };
+    /** CursorPaginatedResponse[AssistantInsightQuestion] */
+    CursorPaginatedResponse_AssistantInsightQuestion_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["AssistantInsightQuestion"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
     };
     /** CursorPaginatedResponse[SessionMetadataPublic] */
     CursorPaginatedResponse_SessionMetadataPublic_: {
@@ -4953,6 +5303,12 @@ export interface components {
       websites: components["schemas"]["WebsitePublic"][];
       /** Integration Knowledge List */
       integration_knowledge_list: components["schemas"]["IntegrationKnowledgePublic"][];
+      /** Mcp Servers */
+      mcp_servers: {
+        [key: string]: unknown;
+      }[];
+      /** Mcp Tools */
+      mcp_tools?: components["schemas"]["MCPToolSetting"][];
       completion_model?: components["schemas"]["CompletionModelSparse"] | null;
       /**
        * Published
@@ -5065,7 +5421,8 @@ export interface components {
     EmbeddingModelCreate: {
       /** Name */
       name: string;
-      family: components["schemas"]["EmbeddingModelFamily"];
+      /** Family */
+      family?: string | null;
       /** Is Deprecated */
       is_deprecated: boolean;
       /** Open Source */
@@ -5078,19 +5435,17 @@ export interface components {
       max_batch_size?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability?: string | null;
+      /** Hosting */
+      hosting?: string | null;
       /** Description */
       description?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
     };
-    /**
-     * EmbeddingModelFamily
-     * @enum {string}
-     */
-    EmbeddingModelFamily: "openai" | "mini_lm" | "e5";
     /** EmbeddingModelLegacy */
     EmbeddingModelLegacy: {
       /** Created At */
@@ -5104,7 +5459,8 @@ export interface components {
       id: string;
       /** Name */
       name: string;
-      family: components["schemas"]["EmbeddingModelFamily"];
+      /** Family */
+      family?: string | null;
       /** Is Deprecated */
       is_deprecated: boolean;
       /** Open Source */
@@ -5117,11 +5473,14 @@ export interface components {
       max_batch_size?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability?: string | null;
+      /** Hosting */
+      hosting?: string | null;
       /** Description */
       description?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       /**
@@ -5143,7 +5502,8 @@ export interface components {
       id: string;
       /** Name */
       name: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family?: string | null;
       /** Is Deprecated */
       is_deprecated: boolean;
       /** Open Source */
@@ -5154,11 +5514,14 @@ export interface components {
       max_input?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability?: string | null;
+      /** Hosting */
+      hosting?: string | null;
       /** Description */
       description?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       /**
@@ -5185,6 +5548,10 @@ export interface components {
       tenant_id?: string | null;
       /** Provider Id */
       provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
     };
     /** EmbeddingModelPublicLegacy */
     EmbeddingModelPublicLegacy: {
@@ -5199,7 +5566,8 @@ export interface components {
       id: string;
       /** Name */
       name: string;
-      family: components["schemas"]["EmbeddingModelFamily"];
+      /** Family */
+      family?: string | null;
       /** Is Deprecated */
       is_deprecated: boolean;
       /** Open Source */
@@ -5212,11 +5580,14 @@ export interface components {
       max_batch_size?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability?: string | null;
+      /** Hosting */
+      hosting?: string | null;
       /** Description */
       description?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       /**
@@ -5250,7 +5621,8 @@ export interface components {
       id: string;
       /** Name */
       name: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family?: string | null;
       /** Is Deprecated */
       is_deprecated: boolean;
       /** Open Source */
@@ -5261,11 +5633,14 @@ export interface components {
       max_input?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability?: string | null;
+      /** Hosting */
+      hosting?: string | null;
       /** Description */
       description?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       /**
@@ -5292,6 +5667,10 @@ export interface components {
       tenant_id?: string | null;
       /** Provider Id */
       provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -5308,7 +5687,8 @@ export interface components {
       id: string;
       /** Name */
       name: string;
-      family: components["schemas"]["EmbeddingModelFamily"];
+      /** Family */
+      family?: string | null;
       /** Is Deprecated */
       is_deprecated: boolean;
       /** Open Source */
@@ -5321,11 +5701,14 @@ export interface components {
       max_batch_size?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability?: string | null;
+      /** Hosting */
+      hosting?: string | null;
       /** Description */
       description?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
     };
@@ -5372,7 +5755,9 @@ export interface components {
       | "completion_model"
       | "embedding_model"
       | "transcription_model"
-      | "audit_log";
+      | "audit_log"
+      | "mcp_server"
+      | "mcp_server_tool";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -5408,7 +5793,9 @@ export interface components {
       | 9027
       | 9028
       | 9029
-      | 9030;
+      | 9030
+      | 9031
+      | 9032;
     /**
      * ExportJobRequest
      * @description Schema for requesting async audit log export.
@@ -5535,6 +5922,17 @@ export interface components {
       expires_at: string;
     };
     /**
+     * FavoriteProvidersUpdate
+     * @description Request model for updating tenant's favorite provider types.
+     */
+    FavoriteProvidersUpdate: {
+      /**
+       * Providers
+       * @description Ordered list of provider type strings to pin as favorites
+       */
+      providers: string[];
+    };
+    /**
      * FederationInfo
      * @description Information about configured federation.
      */
@@ -5639,6 +6037,10 @@ export interface components {
       /** Message */
       message: string;
       intric_error_code: components["schemas"]["ErrorCodes"];
+      /** Details */
+      details?: {
+        [key: string]: unknown;
+      } | null;
     };
     /** GetModelsResponse */
     GetModelsResponse: {
@@ -6067,7 +6469,7 @@ export interface components {
       size: number;
       /** Last Sync Summary */
       last_sync_summary?: {
-        [key: string]: number;
+        [key: string]: unknown;
       } | null;
       /** Last Synced At */
       last_synced_at?: string | null;
@@ -6120,10 +6522,7 @@ export interface components {
       folder_path?: string | null;
       /** Selected Item Type */
       selected_item_type?: string | null;
-      /**
-       * Wrapper Id
-       * Format: uuid
-       */
+      /** Wrapper Id */
       wrapper_id?: string | null;
       /** Wrapper Name */
       wrapper_name?: string | null;
@@ -6197,6 +6596,8 @@ export interface components {
       name: string;
       /** Url */
       url: string;
+      /** Category */
+      category?: string | null;
     };
     /** IntegrationPreviewDataList */
     IntegrationPreviewDataList: {
@@ -6259,6 +6660,290 @@ export interface components {
       /** Json Body */
       json_body: unknown;
     };
+    /**
+     * MCPConnectionStatus
+     * @description Status of MCP server connection attempt.
+     */
+    MCPConnectionStatus: {
+      /** Success */
+      success: boolean;
+      /**
+       * Tools Discovered
+       * @default 0
+       */
+      tools_discovered?: number;
+      /** Error Message */
+      error_message?: string | null;
+    };
+    /**
+     * MCPServerCreate
+     * @description DTO for creating an MCP server (admin only, uses Streamable HTTP transport).
+     */
+    MCPServerCreate: {
+      /** Name */
+      name: string;
+      /**
+       * Http Url
+       * Format: uri
+       */
+      http_url: string;
+      /**
+       * Http Auth Type
+       * @default none
+       * @enum {string}
+       */
+      http_auth_type?: "none" | "bearer";
+      /** Description */
+      description?: string | null;
+      /** Http Auth Config Schema */
+      http_auth_config_schema?: {
+        [key: string]: unknown;
+      } | null;
+      /** Tags */
+      tags?: string[] | null;
+      /** Icon Url */
+      icon_url?: string | null;
+      /** Documentation Url */
+      documentation_url?: string | null;
+      security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /**
+     * MCPServerCreateResponse
+     * @description Response for MCP server creation including connection status.
+     */
+    MCPServerCreateResponse: {
+      server: components["schemas"]["MCPServerPublic"];
+      connection: components["schemas"]["MCPConnectionStatus"];
+    };
+    /**
+     * MCPServerPublic
+     * @description Public DTO for MCP server (HTTP-only, uses Streamable HTTP transport).
+     */
+    MCPServerPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Http Url */
+      http_url: string;
+      /** Http Auth Type */
+      http_auth_type: string;
+      /** Has Credentials */
+      has_credentials: boolean;
+      /** Credential Preview */
+      credential_preview?: string | null;
+      /** Tags */
+      tags: string[] | null;
+      /** Icon Url */
+      icon_url: string | null;
+      /** Documentation Url */
+      documentation_url: string | null;
+      security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+    };
+    /**
+     * MCPServerSettingsCreate
+     * @description DTO for enabling an MCP server for tenant.
+     */
+    MCPServerSettingsCreate: {
+      /** Env Vars */
+      env_vars?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /**
+     * MCPServerSettingsPublic
+     * @description DTO for MCP server with tenant settings.
+     */
+    MCPServerSettingsPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Http Url */
+      http_url: string;
+      /** Http Auth Type */
+      http_auth_type: string;
+      /** Has Credentials */
+      has_credentials: boolean;
+      /** Credential Preview */
+      credential_preview?: string | null;
+      /** Tags */
+      tags: string[] | null;
+      /** Icon Url */
+      icon_url: string | null;
+      /** Documentation Url */
+      documentation_url: string | null;
+      security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       */
+      mcp_server_id: string;
+      /** Is Org Enabled */
+      is_org_enabled: boolean;
+      /**
+       * Tools
+       * @default []
+       */
+      tools?: components["schemas"]["MCPServerToolPublic"][];
+      /**
+       * Tools Count
+       * @description Number of tools available on this server.
+       */
+      tools_count: number;
+      /**
+       * Is Available
+       * @description Whether this MCP is enabled and available for use.
+       */
+      is_available: boolean;
+    };
+    /**
+     * MCPServerSettingsUpdate
+     * @description DTO for updating MCP server settings.
+     */
+    MCPServerSettingsUpdate: {
+      /** Is Org Enabled */
+      is_org_enabled?: boolean | null;
+      /** Env Vars */
+      env_vars?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /** MCPServerToolList */
+    MCPServerToolList: {
+      /** Items */
+      items: components["schemas"]["MCPServerToolPublic"][];
+      /** Count */
+      count: number;
+    };
+    /**
+     * MCPServerToolPublic
+     * @description DTO for MCP server tool.
+     */
+    MCPServerToolPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       */
+      mcp_server_id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Input Schema */
+      input_schema: {
+        [key: string]: unknown;
+      } | null;
+      /** Is Enabled By Default */
+      is_enabled_by_default: boolean;
+      /** Pending Description */
+      pending_description?: string | null;
+      /** Pending Input Schema */
+      pending_input_schema?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Requires Approval
+       * @default false
+       */
+      requires_approval?: boolean;
+      /**
+       * Removed From Remote
+       * @default false
+       */
+      removed_from_remote?: boolean;
+    };
+    /**
+     * MCPServerToolSyncResponse
+     * @description Response for tool sync operation with changeset for review.
+     */
+    MCPServerToolSyncResponse: {
+      connection: components["schemas"]["MCPConnectionStatus"];
+      /**
+       * New Tools
+       * @default []
+       */
+      new_tools?: components["schemas"]["ToolChangePublic"][];
+      /**
+       * Changed Tools
+       * @default []
+       */
+      changed_tools?: components["schemas"]["ToolChangePublic"][];
+      /**
+       * Removed Tools
+       * @default []
+       */
+      removed_tools?: components["schemas"]["ToolChangePublic"][];
+      /**
+       * Unchanged Count
+       * @default 0
+       */
+      unchanged_count?: number;
+      /** Has Pending Changes */
+      has_pending_changes: boolean;
+    };
+    /**
+     * MCPServerToolUpdate
+     * @description DTO for updating tenant-level tool settings.
+     */
+    MCPServerToolUpdate: {
+      /** Is Enabled */
+      is_enabled: boolean;
+    };
+    /**
+     * MCPServerUpdate
+     * @description DTO for updating an MCP server (admin only, uses Streamable HTTP transport).
+     */
+    MCPServerUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Http Url */
+      http_url?: string | null;
+      /** Http Auth Type */
+      http_auth_type?: ("none" | "bearer") | null;
+      /** Description */
+      description?: string | null;
+      /** Http Auth Config Schema */
+      http_auth_config_schema?: {
+        [key: string]: unknown;
+      } | null;
+      /** Tags */
+      tags?: string[] | null;
+      /** Icon Url */
+      icon_url?: string | null;
+      /** Documentation Url */
+      documentation_url?: string | null;
+      /** Security Classification */
+      security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /**
+     * MCPToolSetting
+     * @description MCP server tool enablement setting.
+     */
+    MCPToolSetting: {
+      /**
+       * Tool Id
+       * Format: uuid
+       */
+      tool_id: string;
+      /** Is Enabled */
+      is_enabled: boolean;
+    };
     /** Message */
     Message: {
       /** Created At */
@@ -6281,6 +6966,11 @@ export interface components {
       generated_files: components["schemas"]["FilePublic"][];
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
+      /**
+       * Tool Calls
+       * @default []
+       */
+      tool_calls?: components["schemas"]["ToolCallInfo"][];
     };
     /** MessageLogging */
     MessageLogging: {
@@ -6304,6 +6994,11 @@ export interface components {
       generated_files: components["schemas"]["FilePublic"][];
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
+      /**
+       * Tool Calls
+       * @default []
+       */
+      tool_calls?: components["schemas"]["ToolCallInfo"][];
       logging_details: components["schemas"]["LoggingDetailsPublic"];
     };
     /** MetadataCount */
@@ -6372,16 +7067,6 @@ export interface components {
        */
       requires_manual_recalculation?: boolean;
     };
-    /**
-     * ModelFamily
-     * @enum {string}
-     */
-    ModelFamily: "openai" | "mistral" | "vllm" | "claude" | "azure" | "ovhcloud" | "e5";
-    /**
-     * ModelHostingLocation
-     * @enum {string}
-     */
-    ModelHostingLocation: "usa" | "eu" | "swe";
     /** ModelId */
     ModelId: {
       /**
@@ -6397,10 +7082,17 @@ export interface components {
     ModelInfo: {
       /** Name */
       name: string;
-      /** Token Limit */
-      token_limit: number;
+      /** Max Input Tokens */
+      max_input_tokens: number;
+      /** Max Output Tokens */
+      max_output_tokens: number;
       /** Prompt Tokens */
       prompt_tokens?: number | null;
+      /**
+       * Token Limit
+       * @description Backward-compat: exposed in JSON responses for frontend.
+       */
+      token_limit: number;
     };
     /** ModelKwargs */
     ModelKwargs: {
@@ -6486,20 +7178,6 @@ export interface components {
       confirm_migration?: boolean;
     };
     /**
-     * ModelOrg
-     * @enum {string}
-     */
-    ModelOrg:
-      | "OpenAI"
-      | "Meta"
-      | "Microsoft"
-      | "Anthropic"
-      | "Mistral"
-      | "KBLab"
-      | "Google"
-      | "Berget"
-      | "GDM";
-    /**
      * ModelProviderCreate
      * @description Request model for creating a model provider.
      */
@@ -6584,11 +7262,6 @@ export interface components {
        */
       name?: string | null;
       /**
-       * Provider Type
-       * @description Provider type: openai, azure, or anthropic
-       */
-      provider_type?: string | null;
-      /**
        * Credentials
        * @description Provider credentials (will be encrypted)
        */
@@ -6608,11 +7281,6 @@ export interface components {
        */
       is_active?: boolean | null;
     };
-    /**
-     * ModelStability
-     * @enum {string}
-     */
-    ModelStability: "stable" | "experimental";
     /** ModelUsage */
     ModelUsage: {
       /**
@@ -7193,6 +7861,32 @@ export interface components {
        */
       count: number;
     };
+    /** PaginatedResponse[MCPServerPublic] */
+    PaginatedResponse_MCPServerPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["MCPServerPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
+    /** PaginatedResponse[MCPServerSettingsPublic] */
+    PaginatedResponse_MCPServerSettingsPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["MCPServerSettingsPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      count: number;
+    };
     /** PaginatedResponse[Message] */
     PaginatedResponse_Message_: {
       /**
@@ -7543,6 +8237,12 @@ export interface components {
        */
       integration_knowledge_list?: components["schemas"]["ModelId"][] | null;
       /**
+       * Mcp Servers
+       * @deprecated
+       * @description This field is deprecated and will be ignored
+       */
+      mcp_servers?: components["schemas"]["ModelId"][] | null;
+      /**
        * @deprecated
        * @description This field is deprecated and will be ignored
        */
@@ -7554,6 +8254,8 @@ export interface components {
       completion_model?: components["schemas"]["ModelId"] | null;
       /** Attachments */
       attachments?: components["schemas"]["ModelId"][] | null;
+      /** Mcp Tools */
+      mcp_tools?: components["schemas"]["MCPToolSetting"][] | null;
       /**
        * Description
        * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic
@@ -7587,9 +8289,11 @@ export interface components {
       /** Nickname */
       nickname?: string | null;
       /** Family */
-      family?: components["schemas"]["ModelFamily"] | string | null;
-      /** Token Limit */
-      token_limit?: number | null;
+      family?: string | null;
+      /** Max Input Tokens */
+      max_input_tokens?: number | null;
+      /** Max Output Tokens */
+      max_output_tokens?: number | null;
       /** Is Deprecated */
       is_deprecated?: boolean | null;
       /** Nr Billion Parameters */
@@ -7597,9 +8301,9 @@ export interface components {
       /** Hf Link */
       hf_link?: string | null;
       /** Stability */
-      stability?: components["schemas"]["ModelStability"] | string | null;
+      stability?: string | null;
       /** Hosting */
-      hosting?: components["schemas"]["ModelHostingLocation"] | string | null;
+      hosting?: string | null;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
@@ -7607,11 +8311,13 @@ export interface components {
       /** Deployment Name */
       deployment_name?: string | null;
       /** Org */
-      org?: components["schemas"]["ModelOrg"] | string | null;
+      org?: string | null;
       /** Vision */
       vision?: boolean | null;
       /** Reasoning */
       reasoning?: boolean | null;
+      /** Supports Tool Calling */
+      supports_tool_calling?: boolean | null;
       /** Base Url */
       base_url?: string | null;
       /** Litellm Model Name */
@@ -7623,7 +8329,8 @@ export interface components {
     PartialEmbeddingModelUpdate: {
       /** Name */
       name?: string | null;
-      family?: components["schemas"]["EmbeddingModelFamily"] | null;
+      /** Family */
+      family?: string | null;
       /** Is Deprecated */
       is_deprecated?: boolean | null;
       /** Open Source */
@@ -7636,11 +8343,14 @@ export interface components {
       max_batch_size?: number | null;
       /** Hf Link */
       hf_link?: string | null;
-      stability?: components["schemas"]["ModelStability"] | null;
-      hosting?: components["schemas"]["ModelHostingLocation"] | null;
+      /** Stability */
+      stability?: string | null;
+      /** Hosting */
+      hosting?: string | null;
       /** Description */
       description?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       /** Id */
@@ -7680,6 +8390,10 @@ export interface components {
       completion_models?: components["schemas"]["ModelId"][] | null;
       /** Transcription Models */
       transcription_models?: components["schemas"]["ModelId"][] | null;
+      /** Mcp Servers */
+      mcp_servers?: components["schemas"]["ModelId"][] | null;
+      /** Mcp Tools */
+      mcp_tools?: components["schemas"]["MCPToolSetting"][] | null;
       /**
        * Security Classification
        * @description ID of the security classification to apply to this space. Set to null to remove the security classification. Omit to keep the current security classification unchanged.
@@ -7734,7 +8448,7 @@ export interface components {
       | "editor"
       | "admin"
       | "websites"
-      | "integration_knowledge_list";
+      | "integrations";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
@@ -8174,21 +8888,6 @@ export interface components {
        * @description OAuth state parameter for verification
        */
       state: string;
-      /**
-       * Client Id
-       * @description Azure AD Application (Client) ID (must match auth/start)
-       */
-      client_id: string;
-      /**
-       * Client Secret
-       * @description Azure AD Application Client Secret (must match auth/start)
-       */
-      client_secret: string;
-      /**
-       * Tenant Domain
-       * @description Azure AD Tenant Domain (must match auth/start)
-       */
-      tenant_domain: string;
     };
     /**
      * ServiceAccountAuthStart
@@ -8197,19 +8896,19 @@ export interface components {
     ServiceAccountAuthStart: {
       /**
        * Client Id
-       * @description Azure AD Application (Client) ID
+       * @description Microsoft Entra ID Application (Client) ID
        * @example 12345678-1234-1234-1234-123456789012
        */
       client_id: string;
       /**
        * Client Secret
-       * @description Azure AD Application Client Secret
+       * @description Microsoft Entra ID Application Client Secret
        * @example abc123~xyz789
        */
       client_secret: string;
       /**
        * Tenant Domain
-       * @description Azure AD Tenant Domain (e.g., contoso.onmicrosoft.com)
+       * @description Microsoft Entra ID Tenant Domain (e.g., contoso.onmicrosoft.com)
        * @example contoso.onmicrosoft.com
        */
       tenant_domain: string;
@@ -8242,7 +8941,7 @@ export interface components {
       name: string;
       /** Prompt */
       prompt: string;
-      completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
+      completion_model_kwargs?: components["schemas"]["ModelKwargs"];
       /**
        * Groups
        * @default []
@@ -8335,7 +9034,7 @@ export interface components {
       name: string;
       /** Prompt */
       prompt: string;
-      completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
+      completion_model_kwargs?: components["schemas"]["ModelKwargs"];
       /**
        * Permissions
        * @default []
@@ -8722,6 +9421,10 @@ export interface components {
       completion_models: components["schemas"]["CompletionModelPublic"][];
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelPublic"][];
+      /** Mcp Servers */
+      mcp_servers: {
+        [key: string]: unknown;
+      }[];
       knowledge: components["schemas"]["Knowledge"];
       members: components["schemas"]["PaginatedPermissions_SpaceMember_"];
       group_members: components["schemas"]["PaginatedPermissions_SpaceGroupMember_"];
@@ -8945,6 +9648,13 @@ export interface components {
        */
       skipped_items: number;
       /**
+       * Skipped Details
+       * @description Get skipped file details from metadata.
+       */
+      skipped_details: readonly {
+        [key: string]: unknown;
+      }[];
+      /**
        * Duration Seconds
        * @description Calculate sync duration in seconds.
        */
@@ -9073,16 +9783,14 @@ export interface components {
       display_name: string;
       /**
        * Max Input Tokens
-       * @description Maximum tokens the model accepts as input (context window)
-       * @default 128000
+       * @description Maximum input context tokens
        */
-      max_input_tokens?: number;
+      max_input_tokens: number;
       /**
        * Max Output Tokens
-       * @description Maximum tokens the model can generate per response
-       * @default 4096
+       * @description Maximum output tokens
        */
-      max_output_tokens?: number;
+      max_output_tokens: number;
       /**
        * Vision
        * @description Supports vision/image inputs
@@ -9096,17 +9804,23 @@ export interface components {
        */
       reasoning?: boolean;
       /**
+       * Supports Tool Calling
+       * @description Supports function/tool calling
+       * @default false
+       */
+      supports_tool_calling?: boolean;
+      /**
        * Hosting
        * @description Hosting location (swe, eu, usa)
        * @default swe
        */
       hosting?: string;
       /**
-       * Supports Tool Calling
-       * @description Supports function/tool calling
-       * @default false
+       * Family
+       * @description Model family (e.g., 'openai', 'anthropic', 'deepseek')
+       * @default openai
        */
-      supports_tool_calling?: boolean;
+      family?: string;
       /**
        * Is Active
        * @description Enable in organization
@@ -9139,12 +9853,12 @@ export interface components {
       description?: string | null;
       /**
        * Max Input Tokens
-       * @description Maximum tokens the model accepts as input (context window)
+       * @description Maximum input context tokens
        */
       max_input_tokens?: number | null;
       /**
        * Max Output Tokens
-       * @description Maximum tokens the model can generate per response
+       * @description Maximum output tokens
        */
       max_output_tokens?: number | null;
       /**
@@ -9328,6 +10042,8 @@ export interface components {
       crawler_settings?: {
         [key: string]: unknown;
       };
+      /** Favorite Providers */
+      favorite_providers?: string[];
     };
     /**
      * TenantInfo
@@ -9436,19 +10152,19 @@ export interface components {
     TenantSharePointAppCreate: {
       /**
        * Client Id
-       * @description Azure AD Application (Client) ID
+       * @description Microsoft Entra ID Application (Client) ID
        * @example 12345678-1234-1234-1234-123456789012
        */
       client_id: string;
       /**
        * Client Secret
-       * @description Azure AD Application Client Secret
+       * @description Microsoft Entra ID Application Client Secret
        * @example abc123~xyz789
        */
       client_secret: string;
       /**
        * Tenant Domain
-       * @description Azure AD Tenant Domain (e.g., contoso.onmicrosoft.com)
+       * @description Microsoft Entra ID Tenant Domain (e.g., contoso.onmicrosoft.com)
        * @example contoso.onmicrosoft.com
        */
       tenant_domain: string;
@@ -9540,6 +10256,12 @@ export interface components {
        * @default swe
        */
       hosting?: string;
+      /**
+       * Family
+       * @description Model family (e.g., 'openai', 'anthropic', 'deepseek')
+       * @default openai
+       */
+      family?: string;
       /**
        * Is Active
        * @description Enable in organization
@@ -9662,6 +10384,8 @@ export interface components {
       crawler_settings?: {
         [key: string]: unknown;
       };
+      /** Favorite Providers */
+      favorite_providers?: string[];
     };
     /**
      * TokenEstimateBreakdown
@@ -9761,6 +10485,16 @@ export interface components {
        */
       total_token_usage: number;
     };
+    /**
+     * ToolApprovalDecision
+     * @description Decision for a single tool call.
+     */
+    ToolApprovalDecision: {
+      /** Tool Call Id */
+      tool_call_id: string;
+      /** Approved */
+      approved: boolean;
+    };
     /** ToolAssistant */
     ToolAssistant: {
       /**
@@ -9770,6 +10504,74 @@ export interface components {
       id: string;
       /** Handle */
       handle: string;
+    };
+    /**
+     * ToolCallInfo
+     * @description Info about a single tool being called.
+     */
+    ToolCallInfo: {
+      /** Server Name */
+      server_name: string;
+      /** Tool Name */
+      tool_name: string;
+      /** Arguments */
+      arguments?: {
+        [key: string]: unknown;
+      } | null;
+      /** Tool Call Id */
+      tool_call_id?: string | null;
+      /** Approved */
+      approved?: boolean | null;
+    };
+    /**
+     * ToolChangePublic
+     * @description DTO for a tool change detected during sync.
+     */
+    ToolChangePublic: {
+      tool: components["schemas"]["MCPServerToolPublic"];
+      /** Change Type */
+      change_type: string;
+      /** Current Description */
+      current_description?: string | null;
+      /** Current Input Schema */
+      current_input_schema?: {
+        [key: string]: unknown;
+      } | null;
+      /** Pending Description */
+      pending_description?: string | null;
+      /** Pending Input Schema */
+      pending_input_schema?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /**
+     * ToolReviewRequest
+     * @description DTO for reviewing (approving/rejecting) tool changes.
+     */
+    ToolReviewRequest: {
+      /** Tool Ids */
+      tool_ids: string[];
+    };
+    /**
+     * ToolReviewResponse
+     * @description Response after reviewing tool changes.
+     */
+    ToolReviewResponse: {
+      /**
+       * Approved Tools
+       * @default []
+       */
+      approved_tools?: components["schemas"]["MCPServerToolPublic"][];
+      /**
+       * Rejected Tools
+       * @default []
+       */
+      rejected_tools?: components["schemas"]["MCPServerToolPublic"][];
+      /**
+       * Deleted Count
+       * @default 0
+       */
+      deleted_count?: number;
     };
     /** TranscriptionModelPublic */
     TranscriptionModelPublic: {
@@ -9782,18 +10584,22 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family?: string | null;
       /** Is Deprecated */
       is_deprecated: boolean;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability?: string | null;
+      /** Hosting */
+      hosting?: string | null;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Hf Link */
       hf_link?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: string | null;
       /**
        * Can Access
        * @default false
@@ -9823,6 +10629,10 @@ export interface components {
       tenant_id?: string | null;
       /** Provider Id */
       provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
     };
     /** TranscriptionModelSecurityStatus */
     TranscriptionModelSecurityStatus: {
@@ -9835,18 +10645,22 @@ export interface components {
       name: string;
       /** Nickname */
       nickname: string;
-      family: components["schemas"]["ModelFamily"];
+      /** Family */
+      family?: string | null;
       /** Is Deprecated */
       is_deprecated: boolean;
-      stability: components["schemas"]["ModelStability"];
-      hosting: components["schemas"]["ModelHostingLocation"];
+      /** Stability */
+      stability?: string | null;
+      /** Hosting */
+      hosting?: string | null;
       /** Open Source */
       open_source?: boolean | null;
       /** Description */
       description?: string | null;
       /** Hf Link */
       hf_link?: string | null;
-      org?: components["schemas"]["ModelOrg"] | null;
+      /** Org */
+      org?: string | null;
       /**
        * Can Access
        * @default false
@@ -9876,6 +10690,10 @@ export interface components {
       tenant_id?: string | null;
       /** Provider Id */
       provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -9914,6 +10732,11 @@ export interface components {
       /** Name */
       name: string;
     };
+    /** UpdateIntegrationKnowledgeWrapperRequest */
+    UpdateIntegrationKnowledgeWrapperRequest: {
+      /** Name */
+      name: string;
+    };
     /**
      * UpdateInterval
      * @description Defines how frequently a website should be crawled.
@@ -9938,6 +10761,13 @@ export interface components {
       embedding_models: components["schemas"]["EmbeddingModelPublic"][];
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelPublic"][];
+      /**
+       * Mcp Servers
+       * @default []
+       */
+      mcp_servers?: {
+        [key: string]: unknown;
+      }[];
     };
     /** UpdateSpaceGroupMemberRequest */
     UpdateSpaceGroupMemberRequest: {
@@ -10658,6 +11488,23 @@ export interface components {
       /** @description User state (invited/active/inactive) */
       state?: components["schemas"]["UserState"] | null;
     };
+    /**
+     * ValidateModelRequest
+     * @description Request model for validating a model against a provider.
+     */
+    ValidateModelRequest: {
+      /**
+       * Model Name
+       * @description Model name to validate
+       */
+      model_name: string;
+      /**
+       * Model Type
+       * @description Model type: completion, embedding, or transcription
+       * @default completion
+       */
+      model_type?: string;
+    };
     /** ValidationError */
     ValidationError: {
       /** Location */
@@ -10765,6 +11612,41 @@ export interface components {
       /** @default never */
       update_interval?: components["schemas"]["UpdateInterval"];
       embedding_model: components["schemas"]["ModelId"];
+    };
+    /**
+     * WebsiteExistsResponse
+     * @description Response model for checking if a website URL exists on the Organization space.
+     */
+    WebsiteExistsResponse: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Space Name */
+      space_name: string;
+      /** Url */
+      url: string;
+      /** Name */
+      name: string | null;
+      update_interval: components["schemas"]["UpdateInterval"];
+      /** Last Crawled At */
+      last_crawled_at: string | null;
+      /** Pages Crawled */
+      pages_crawled?: number | null;
+      /** Pages Failed */
+      pages_failed?: number | null;
+      /** Files Downloaded */
+      files_downloaded?: number | null;
+      /** Files Failed */
+      files_failed?: number | null;
+      /** Crawl Status */
+      crawl_status?: string | null;
     };
     /** WebsiteMetadata */
     WebsiteMetadata: {
@@ -10938,7 +11820,7 @@ export interface components {
      * @description Request model for setting tenant API credentials.
      *
      * Provider-specific field requirements:
-     * - OpenAI, Anthropic, Mistral, Berget, GDM, OVHCloud: api_key only
+     * - OpenAI, Anthropic, Mistral, OVHCloud: api_key only
      * - vLLM: api_key + endpoint (required)
      * - Azure: api_key + endpoint + api_version (required)
      *
@@ -11109,6 +11991,10 @@ export interface components {
       pages_failed?: number | null;
       /** Files Failed */
       files_failed?: number | null;
+      /** Failure Summary */
+      failure_summary?: {
+        [key: string]: number;
+      } | null;
       /** @default queued */
       status?: components["schemas"]["Status"] | null;
       /** Result Location */
@@ -11135,6 +12021,10 @@ export interface components {
       pages_failed: number | null;
       /** Files Failed */
       files_failed: number | null;
+      /** Failure Summary */
+      failure_summary?: {
+        [key: string]: number;
+      } | null;
       status: components["schemas"]["Status"];
       /** Result Location */
       result_location: string | null;
@@ -11142,7 +12032,384 @@ export interface components {
       finished_at: string | null;
     };
     /** @enum {string} */
-    IntricEventType: "generating_image";
+    IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
+    /** SSEText */
+    SSEText: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Answer */
+      answer: string;
+      /** References */
+      references: $defs["InfoBlobAskAssistantPublic"][];
+      $defs: {
+        /** InfoBlobAskAssistantPublic */
+        InfoBlobAskAssistantPublic: {
+          /**
+           * Created At
+           * @default null
+           */
+          created_at?: string | null;
+          /**
+           * Updated At
+           * @default null
+           */
+          updated_at?: string | null;
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          metadata: $defs["InfoBlobMetadata"];
+          /**
+           * Group Id
+           * @default null
+           */
+          group_id?: string | null;
+          /**
+           * Website Id
+           * @default null
+           */
+          website_id?: string | null;
+          /** Score */
+          score: number;
+        };
+        /** InfoBlobMetadata */
+        InfoBlobMetadata: {
+          /**
+           * Url
+           * @default null
+           */
+          url?: string | null;
+          /**
+           * Title
+           * @default null
+           */
+          title?: string | null;
+          /**
+           * Embedding Model Id
+           * Format: uuid
+           */
+          embedding_model_id: string;
+          /** Size */
+          size: number;
+        };
+      };
+    };
+    /** SSEIntricEvent */
+    SSEIntricEvent: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      intric_event_type: $defs["IntricEventType"];
+      $defs: {
+        /**
+         * IntricEventType
+         * @enum {string}
+         */
+        IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
+      };
+    };
+    /**
+     * SSEToolCall
+     * @description Event emitted when MCP tools are being executed.
+     */
+    SSEToolCall: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** @default tool_call */
+      intric_event_type?: $defs["IntricEventType"];
+      /** Tools */
+      tools: $defs["ToolCallInfo"][];
+      $defs: {
+        /**
+         * IntricEventType
+         * @enum {string}
+         */
+        IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
+        /**
+         * ToolCallInfo
+         * @description Info about a single tool being called.
+         */
+        ToolCallInfo: {
+          /** Server Name */
+          server_name: string;
+          /** Tool Name */
+          tool_name: string;
+          /**
+           * Arguments
+           * @default null
+           */
+          arguments?: {
+            [key: string]: unknown;
+          } | null;
+          /**
+           * Tool Call Id
+           * @default null
+           */
+          tool_call_id?: string | null;
+          /**
+           * Approved
+           * @default null
+           */
+          approved?: boolean | null;
+        };
+      };
+    };
+    /**
+     * SSEToolApprovalRequired
+     * @description Event emitted when MCP tools require user approval before execution.
+     */
+    SSEToolApprovalRequired: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** @default tool_approval_required */
+      intric_event_type?: $defs["IntricEventType"];
+      /** Approval Id */
+      approval_id: string;
+      /** Tools */
+      tools: $defs["ToolCallInfo"][];
+      $defs: {
+        /**
+         * IntricEventType
+         * @enum {string}
+         */
+        IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
+        /**
+         * ToolCallInfo
+         * @description Info about a single tool being called.
+         */
+        ToolCallInfo: {
+          /** Server Name */
+          server_name: string;
+          /** Tool Name */
+          tool_name: string;
+          /**
+           * Arguments
+           * @default null
+           */
+          arguments?: {
+            [key: string]: unknown;
+          } | null;
+          /**
+           * Tool Call Id
+           * @default null
+           */
+          tool_call_id?: string | null;
+          /**
+           * Approved
+           * @default null
+           */
+          approved?: boolean | null;
+        };
+      };
+    };
+    /** SSEFiles */
+    SSEFiles: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Generated Files */
+      generated_files: $defs["FilePublic"][];
+      $defs: {
+        /** FilePublic */
+        FilePublic: {
+          /**
+           * Created At
+           * @default null
+           */
+          created_at?: string | null;
+          /**
+           * Updated At
+           * @default null
+           */
+          updated_at?: string | null;
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          /** Name */
+          name: string;
+          /** Mimetype */
+          mimetype: string;
+          /** Size */
+          size: number;
+          /**
+           * Transcription
+           * @default null
+           */
+          transcription?: string | null;
+          /**
+           * Token Count
+           * @default null
+           */
+          token_count?: number | null;
+        };
+      };
+    };
+    /** SSEFirstChunk */
+    SSEFirstChunk: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Question */
+      question: string;
+      /** Answer */
+      answer: string;
+      /** Files */
+      files: $defs["FilePublic"][];
+      /** Generated Files */
+      generated_files: $defs["FilePublic"][];
+      /** References */
+      references: $defs["InfoBlobAskAssistantPublic"][];
+      tools: $defs["UseTools"];
+      /** Web Search References */
+      web_search_references: $defs["WebSearchResultPublic"][];
+      $defs: {
+        /** FilePublic */
+        FilePublic: {
+          /**
+           * Created At
+           * @default null
+           */
+          created_at?: string | null;
+          /**
+           * Updated At
+           * @default null
+           */
+          updated_at?: string | null;
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          /** Name */
+          name: string;
+          /** Mimetype */
+          mimetype: string;
+          /** Size */
+          size: number;
+          /**
+           * Transcription
+           * @default null
+           */
+          transcription?: string | null;
+          /**
+           * Token Count
+           * @default null
+           */
+          token_count?: number | null;
+        };
+        /** InfoBlobAskAssistantPublic */
+        InfoBlobAskAssistantPublic: {
+          /**
+           * Created At
+           * @default null
+           */
+          created_at?: string | null;
+          /**
+           * Updated At
+           * @default null
+           */
+          updated_at?: string | null;
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          metadata: $defs["InfoBlobMetadata"];
+          /**
+           * Group Id
+           * @default null
+           */
+          group_id?: string | null;
+          /**
+           * Website Id
+           * @default null
+           */
+          website_id?: string | null;
+          /** Score */
+          score: number;
+        };
+        /** InfoBlobMetadata */
+        InfoBlobMetadata: {
+          /**
+           * Url
+           * @default null
+           */
+          url?: string | null;
+          /**
+           * Title
+           * @default null
+           */
+          title?: string | null;
+          /**
+           * Embedding Model Id
+           * Format: uuid
+           */
+          embedding_model_id: string;
+          /** Size */
+          size: number;
+        };
+        /** ToolAssistant */
+        ToolAssistant: {
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          /** Handle */
+          handle: string;
+        };
+        /** UseTools */
+        UseTools: {
+          /** Assistants */
+          assistants: $defs["ToolAssistant"][];
+        };
+        /** WebSearchResultPublic */
+        WebSearchResultPublic: {
+          /**
+           * Id
+           * Format: uuid
+           */
+          id: string;
+          /** Title */
+          title: string;
+          /** Url */
+          url: string;
+        };
+      };
+    };
+    /** SSEError */
+    SSEError: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Error */
+      error: string;
+      /**
+       * Error Code
+       * @default null
+       */
+      error_code?: number | null;
+    };
   };
   responses: never;
   parameters: never;
@@ -12119,6 +13386,18 @@ export interface operations {
           "application/json": components["schemas"]["JobPublic"];
         };
       };
+      /** @description Request Entity Too Large */
+      413: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         content: {
@@ -12656,9 +13935,11 @@ export interface operations {
                 /** Nickname */
                 nickname: string;
                 /** Family */
-                family: components["schemas"]["ModelFamily"] | string;
-                /** Token Limit */
-                token_limit: number;
+                family?: string | null;
+                /** Max Input Tokens */
+                max_input_tokens: number;
+                /** Max Output Tokens */
+                max_output_tokens: number;
                 /** Is Deprecated */
                 is_deprecated: boolean;
                 /** Nr Billion Parameters */
@@ -12666,9 +13947,9 @@ export interface operations {
                 /** Hf Link */
                 hf_link?: string | null;
                 /** Stability */
-                stability: components["schemas"]["ModelStability"] | string;
+                stability?: string | null;
                 /** Hosting */
-                hosting: components["schemas"]["ModelHostingLocation"] | string;
+                hosting?: string | null;
                 /** Open Source */
                 open_source?: boolean | null;
                 /** Description */
@@ -12676,7 +13957,7 @@ export interface operations {
                 /** Deployment Name */
                 deployment_name?: string | null;
                 /** Org */
-                org?: components["schemas"]["ModelOrg"] | string | null;
+                org?: string | null;
                 /** Vision */
                 vision: boolean;
                 /** Reasoning */
@@ -12721,6 +14002,10 @@ export interface operations {
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
+                /** Provider Name */
+                provider_name?: string | null;
+                /** Provider Type */
+                provider_type?: string | null;
               };
               /** FilePublic */
               FilePublic: {
@@ -12777,35 +14062,6 @@ export interface operations {
                 /** Size */
                 size: number;
               };
-              /**
-               * ModelFamily
-               * @enum {string}
-               */
-              ModelFamily: "openai" | "mistral" | "vllm" | "claude" | "azure" | "ovhcloud" | "e5";
-              /**
-               * ModelHostingLocation
-               * @enum {string}
-               */
-              ModelHostingLocation: "usa" | "eu" | "swe";
-              /**
-               * ModelOrg
-               * @enum {string}
-               */
-              ModelOrg:
-                | "OpenAI"
-                | "Meta"
-                | "Microsoft"
-                | "Anthropic"
-                | "Mistral"
-                | "KBLab"
-                | "Google"
-                | "Berget"
-                | "GDM";
-              /**
-               * ModelStability
-               * @enum {string}
-               */
-              ModelStability: "stable" | "experimental";
               /**
                * SecurityClassificationPublic
                * @description Basic security classification information.
@@ -12974,9 +14230,11 @@ export interface operations {
                 /** Nickname */
                 nickname: string;
                 /** Family */
-                family: components["schemas"]["ModelFamily"] | string;
-                /** Token Limit */
-                token_limit: number;
+                family?: string | null;
+                /** Max Input Tokens */
+                max_input_tokens: number;
+                /** Max Output Tokens */
+                max_output_tokens: number;
                 /** Is Deprecated */
                 is_deprecated: boolean;
                 /** Nr Billion Parameters */
@@ -12984,9 +14242,9 @@ export interface operations {
                 /** Hf Link */
                 hf_link?: string | null;
                 /** Stability */
-                stability: components["schemas"]["ModelStability"] | string;
+                stability?: string | null;
                 /** Hosting */
-                hosting: components["schemas"]["ModelHostingLocation"] | string;
+                hosting?: string | null;
                 /** Open Source */
                 open_source?: boolean | null;
                 /** Description */
@@ -12994,7 +14252,7 @@ export interface operations {
                 /** Deployment Name */
                 deployment_name?: string | null;
                 /** Org */
-                org?: components["schemas"]["ModelOrg"] | string | null;
+                org?: string | null;
                 /** Vision */
                 vision: boolean;
                 /** Reasoning */
@@ -13039,6 +14297,10 @@ export interface operations {
                 security_classification?:
                   | components["schemas"]["SecurityClassificationPublic"]
                   | null;
+                /** Provider Name */
+                provider_name?: string | null;
+                /** Provider Type */
+                provider_type?: string | null;
               };
               /** FilePublic */
               FilePublic: {
@@ -13095,35 +14357,6 @@ export interface operations {
                 /** Size */
                 size: number;
               };
-              /**
-               * ModelFamily
-               * @enum {string}
-               */
-              ModelFamily: "openai" | "mistral" | "vllm" | "claude" | "azure" | "ovhcloud" | "e5";
-              /**
-               * ModelHostingLocation
-               * @enum {string}
-               */
-              ModelHostingLocation: "usa" | "eu" | "swe";
-              /**
-               * ModelOrg
-               * @enum {string}
-               */
-              ModelOrg:
-                | "OpenAI"
-                | "Meta"
-                | "Microsoft"
-                | "Anthropic"
-                | "Mistral"
-                | "KBLab"
-                | "Google"
-                | "Berget"
-                | "GDM";
-              /**
-               * ModelStability
-               * @enum {string}
-               */
-              ModelStability: "stable" | "experimental";
               /**
                * SecurityClassificationPublic
                * @description Basic security classification information.
@@ -13392,6 +14625,105 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Assistant Mcp Servers
+   * @description Get all MCP servers associated with an assistant.
+   */
+  get_assistant_mcp_servers_api_v1_assistants__id__mcp_servers__get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Add Mcp To Assistant
+   * @description Add an MCP server to an assistant.
+   */
+  add_mcp_to_assistant_api_v1_assistants__id__mcp_servers__mcp_server_id___post: {
+    parameters: {
+      path: {
+        id: string;
+        mcp_server_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Remove Mcp From Assistant
+   * @description Remove an MCP server from an assistant.
+   */
+  remove_mcp_from_assistant_api_v1_assistants__id__mcp_servers__mcp_server_id___delete: {
+    parameters: {
+      path: {
+        id: string;
+        mcp_server_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
       };
       /** @description Not Found */
       404: {
@@ -13708,7 +15040,7 @@ export interface operations {
                    * IntricEventType
                    * @enum {string}
                    */
-                  IntricEventType: "generating_image";
+                  IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
                 };
               },
               {
@@ -14015,6 +15347,56 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["SessionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Approve Tools
+   * @description Submit approval decisions for pending tool calls.
+   *
+   * When a chat request is made with require_tool_approval=true, the stream will emit
+   * a tool_approval_required event with an approval_id and list of pending tools.
+   * Use this endpoint to approve or reject each tool call.
+   *
+   * The decisions list should contain one entry per tool_call_id from the event.
+   * If a tool_call_id is omitted, it will be treated as rejected.
+   */
+  approve_tools_api_v1_conversations_approve_tools__post: {
+    parameters: {
+      query: {
+        /** @description The approval ID from the tool_approval_required event */
+        approval_id: string;
+      };
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ToolApprovalDecision"][];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
         };
       };
       /** @description Bad Request */
@@ -14503,6 +15885,42 @@ export interface operations {
       200: {
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Most Recent Questions Paginated
+   * @description Get paginated question history for an assistant.
+   *
+   * Optimized for admin insights history view and large datasets.
+   */
+  get_most_recent_questions_paginated_api_v1_analysis_assistants__assistant_id__questions__get: {
+    parameters: {
+      query?: {
+        days_since?: number;
+        from_date?: string | null;
+        to_date?: string | null;
+        include_followups?: boolean;
+        limit?: number;
+        cursor?: string | null;
+        q?: string | null;
+      };
+      path: {
+        assistant_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_AssistantInsightQuestion_"];
         };
       };
       /** @description Validation Error */
@@ -15196,16 +16614,7 @@ export interface operations {
   set_credential_api_v1_admin_credentials__provider__put: {
     parameters: {
       path: {
-        provider:
-          | "openai"
-          | "anthropic"
-          | "azure"
-          | "berget"
-          | "gdm"
-          | "mistral"
-          | "ovhcloud"
-          | "gemini"
-          | "cohere";
+        provider: "openai" | "anthropic" | "azure" | "mistral" | "ovhcloud" | "gemini" | "cohere";
       };
     };
     requestBody: {
@@ -16848,6 +18257,88 @@ export interface operations {
     };
   };
   /**
+   * Get Provider Capabilities
+   * @description Get supported model types and top models per provider type from LiteLLM.
+   *
+   * Returns a structured response with:
+   * - providers: dict of canonical provider types, each with modes, models, and fields
+   * - default_fields: fallback field definitions for providers without custom fields
+   */
+  get_provider_capabilities_api_v1_admin_model_providers_capabilities__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  /**
+   * Get Favorite Providers
+   * @description Get the tenant's favorite provider types.
+   */
+  get_favorite_providers_api_v1_admin_model_providers_favorites__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
+  /**
+   * Set Favorite Providers
+   * @description Set the tenant's favorite provider types.
+   */
+  set_favorite_providers_api_v1_admin_model_providers_favorites__put: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FavoriteProvidersUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Model Defaults
+   * @description Look up recommended default values for a model from LiteLLM's model_cost database.
+   */
+  get_model_defaults_api_v1_admin_model_providers_model_defaults__get: {
+    parameters: {
+      query: {
+        model_name: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Get Provider
    * @description Get a specific model provider.
    */
@@ -16930,6 +18421,104 @@ export interface operations {
     parameters: {
       path: {
         provider_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List Provider Models
+   * @description List available models/deployments from the provider's API using its credentials.
+   */
+  list_provider_models_api_v1_admin_model_providers__provider_id__models__get: {
+    parameters: {
+      path: {
+        provider_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Test Provider
+   * @description Test connectivity to a model provider.
+   */
+  test_provider_api_v1_admin_model_providers__provider_id__test__post: {
+    parameters: {
+      path: {
+        provider_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Validate Model
+   * @description Validate that a model works with this provider by making a minimal API call.
+   */
+  validate_model_api_v1_admin_model_providers__provider_id__validate_model__post: {
+    parameters: {
+      path: {
+        provider_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ValidateModelRequest"];
       };
     };
     responses: {
@@ -18139,6 +19728,34 @@ export interface operations {
       };
     };
   };
+  /** Create Space Integration Knowledge Batch */
+  create_space_integration_knowledge_batch_api_v1_spaces__id__knowledge_integrations_add__user_integration_id__batch__post: {
+    parameters: {
+      path: {
+        id: string;
+        user_integration_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateSpaceIntegrationKnowledgeBatchRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        content: {
+          "application/json": components["schemas"]["CreateSpaceIntegrationKnowledgeBatchResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Delete Space Integration Knowledge */
   delete_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_remove__integration_knowledge_id___delete: {
     parameters: {
@@ -18160,53 +19777,18 @@ export interface operations {
       };
     };
   };
-  /** Update Integration Knowledge */
-  update_integration_knowledge_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id___patch: {
+  /** Delete Integration Knowledge Wrapper */
+  delete_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___delete: {
     parameters: {
       path: {
         id: string;
-        integration_knowledge_id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["UpdateIntegrationKnowledgeRequest"];
+        wrapper_id: string;
       };
     };
     responses: {
       /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["IntegrationKnowledgePublic"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /** Create Space Integration Knowledge Batch */
-  create_space_integration_knowledge_batch_api_v1_spaces__id__knowledge_integrations_add__user_integration_id__batch__post: {
-    parameters: {
-      path: {
-        id: string;
-        user_integration_id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["CreateSpaceIntegrationKnowledgeBatchRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      202: {
-        content: {
-          "application/json": components["schemas"]["CreateSpaceIntegrationKnowledgeBatchResponse"];
-        };
+      204: {
+        content: never;
       };
       /** @description Validation Error */
       422: {
@@ -18244,18 +19826,48 @@ export interface operations {
       };
     };
   };
-  /** Delete Integration Knowledge Wrapper */
-  delete_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___delete: {
+  /** Update Integration Knowledge */
+  update_integration_knowledge_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id___patch: {
     parameters: {
       path: {
         id: string;
-        wrapper_id: string;
+        integration_knowledge_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateIntegrationKnowledgeRequest"];
       };
     };
     responses: {
       /** @description Successful Response */
-      204: {
-        content: never;
+      200: {
+        content: {
+          "application/json": components["schemas"]["IntegrationKnowledgePublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Trigger Integration Full Sync */
+  trigger_integration_full_sync_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__sync__post: {
+    parameters: {
+      path: {
+        id: string;
+        integration_knowledge_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        content: {
+          "application/json": components["schemas"]["JobPublic"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -18656,6 +20268,44 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["WebsitePublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Check if URL exists on Organization space
+   * @description Check if a website URL already exists on the user's Organization space.
+   *
+   *     **Use case:**
+   *     When creating a new website on a Personal or Shared space, call this endpoint
+   *     to check if the URL is already being crawled on the Organization space.
+   *     This helps avoid duplicate crawls and informs users that the knowledge
+   *     might already be available for import.
+   *
+   *     **Returns:**
+   *     - Website info if URL exists on Organization space
+   *     - `null` if URL not found or user has no Organization space
+   *
+   *     **Note:** This does not block website creation - it's informational only.
+   */
+  check_existing_website_url_api_v1_websites_check_url__get: {
+    parameters: {
+      query: {
+        /** @description The website URL to check */
+        url: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WebsiteExistsResponse"] | null;
         };
       };
       /** @description Validation Error */
@@ -20361,6 +22011,646 @@ export interface operations {
       };
     };
   };
+  /**
+   * Get Mcp Servers
+   * @description Get all MCP servers from global catalog with optional tag filtering.
+   */
+  get_mcp_servers_api_v1_mcp_servers__get: {
+    parameters: {
+      query?: {
+        tags?: string[] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_MCPServerPublic_"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Mcp Server
+   * @description Create a new MCP server in global catalog (admin only).
+   *
+   * Validates connection before saving. Returns 400 if connection fails.
+   */
+  create_mcp_server_api_v1_mcp_servers__post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerCreateResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Tenant Mcp Settings
+   * @description Get all available MCP servers with tenant enablement status.
+   */
+  get_tenant_mcp_settings_api_v1_mcp_servers_settings__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_MCPServerSettingsPublic_"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Mcp Settings
+   * @description Update MCP server settings for the current tenant.
+   */
+  update_mcp_settings_api_v1_mcp_servers_settings__mcp_server_id___put: {
+    parameters: {
+      path: {
+        mcp_server_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerSettingsUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerSettingsPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Enable Mcp For Tenant
+   * @description Enable an MCP server for the current tenant with optional credentials.
+   */
+  enable_mcp_for_tenant_api_v1_mcp_servers_settings__mcp_server_id___post: {
+    parameters: {
+      path: {
+        mcp_server_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerSettingsCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerSettingsPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Disable Mcp For Tenant
+   * @description Disable an MCP server for the current tenant.
+   */
+  disable_mcp_for_tenant_api_v1_mcp_servers_settings__mcp_server_id___delete: {
+    parameters: {
+      path: {
+        mcp_server_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Tenant Tool Enabled
+   * @description Update tenant-level enablement for a tool (admin only).
+   */
+  update_tenant_tool_enabled_api_v1_mcp_servers_settings_tools__tool_id___put: {
+    parameters: {
+      path: {
+        tool_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerToolUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerToolPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Mcp Server
+   * @description Get a single MCP server by ID.
+   */
+  get_mcp_server_api_v1_mcp_servers__id___get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Mcp Server
+   * @description Update an MCP server in global catalog (admin only).
+   */
+  update_mcp_server_api_v1_mcp_servers__id___post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete Mcp Server
+   * @description Delete an MCP server from global catalog (admin only).
+   */
+  delete_mcp_server_api_v1_mcp_servers__id___delete: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Mcp Server Tools
+   * @description Get all tools for an MCP server with tenant-level settings applied.
+   */
+  get_mcp_server_tools_api_v1_mcp_servers__id__tools__get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerToolList"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Sync Mcp Server Tools
+   * @description Sync tools from remote MCP server (admin only).
+   *
+   * Detects new, changed, and removed tools. Changes are stored as pending
+   * and require explicit approval before becoming active. This prevents a
+   * compromised MCP server from injecting malicious tool definitions.
+   *
+   * Returns 400 if connection to the MCP server fails.
+   */
+  sync_mcp_server_tools_api_v1_mcp_servers__id__tools_sync__post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerToolSyncResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Approve Tool Changes
+   * @description Approve pending tool changes (admin only).
+   *
+   * For new/changed tools: pending values become active.
+   * For removed tools: tool is deleted from database.
+   */
+  approve_tool_changes_api_v1_mcp_servers__id__tools_review_approve__post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToolReviewRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ToolReviewResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Reject Tool Changes
+   * @description Reject pending tool changes (admin only).
+   *
+   * For new tools: tool is deleted (never activated).
+   * For changed tools: pending values are cleared, active values kept.
+   * For removed tools: removed flag is cleared, tool stays active.
+   */
+  reject_tool_changes_api_v1_mcp_servers__id__tools_review_reject__post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToolReviewRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ToolReviewResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Approve All Tool Changes
+   * @description Approve all pending tool changes for an MCP server (admin only).
+   */
+  approve_all_tool_changes_api_v1_mcp_servers__id__tools_review_approve_all__post: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ToolReviewResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update Tool Default Enabled
+   * @description Update global default enabled status for a tool (admin only).
+   */
+  update_tool_default_enabled_api_v1_mcp_servers__id__tools__tool_id___put: {
+    parameters: {
+      path: {
+        id: string;
+        tool_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerToolUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MCPServerToolPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   /** Sharepoint Webhook Validation */
   sharepoint_webhook_validation_api_v1_integrations_sharepoint_webhook__get: {
     parameters: {
@@ -20429,7 +22719,7 @@ export interface operations {
   };
   /**
    * Configure tenant SharePoint app
-   * @description Configure Azure AD application credentials for organization-wide SharePoint access. This eliminates person-dependency for shared and organization spaces by using application permissions instead of delegated user permissions. Requires admin role.
+   * @description Configure Microsoft Entra ID application credentials for organization-wide SharePoint access. This eliminates person-dependency for shared and organization spaces by using application permissions instead of delegated user permissions. Requires admin role.
    */
   configure_sharepoint_app_api_v1_admin_sharepoint_app_post: {
     requestBody: {
@@ -21441,7 +23731,7 @@ export interface operations {
    * Create Completion Model
    * @description Create a new completion model (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * This creates the model metadata only. To enable it for a tenant,
    * use POST /api/v1/completion-models/{id}/ with tenant credentials.
@@ -21483,7 +23773,7 @@ export interface operations {
    * Update Completion Model Metadata
    * @description Update completion model metadata (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * Updates global model metadata. Does not affect tenant-specific settings.
    */
@@ -21529,7 +23819,7 @@ export interface operations {
    * Delete Completion Model
    * @description Delete a completion model (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * WARNING: Deletion affects all tenants. Use with caution.
    * Set force=true to delete even if model is in use (may break references).
@@ -21581,7 +23871,7 @@ export interface operations {
    * Create Embedding Model
    * @description Create a new embedding model (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * This creates the model metadata only. To enable it for a tenant,
    * use POST /api/v1/embedding-models/{id}/ with tenant credentials.
@@ -21623,7 +23913,7 @@ export interface operations {
    * Update Embedding Model Metadata
    * @description Update embedding model metadata (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * Updates global model metadata. Does not affect tenant-specific settings.
    */
@@ -21669,7 +23959,7 @@ export interface operations {
    * Delete Embedding Model
    * @description Delete an embedding model (system-wide operation).
    *
-   * Requires: X-API-Key header with INTRIC_SUPER_API_KEY
+   * Requires: X-API-Key header with ENEO_SUPER_API_KEY
    *
    * WARNING: Deletion affects all tenants. Use with caution.
    */
@@ -21724,16 +24014,7 @@ export interface operations {
     parameters: {
       path: {
         tenant_id: string;
-        provider:
-          | "openai"
-          | "anthropic"
-          | "azure"
-          | "berget"
-          | "gdm"
-          | "mistral"
-          | "ovhcloud"
-          | "gemini"
-          | "cohere";
+        provider: "openai" | "anthropic" | "azure" | "mistral" | "ovhcloud" | "gemini" | "cohere";
       };
     };
     requestBody: {
@@ -21764,16 +24045,7 @@ export interface operations {
     parameters: {
       path: {
         tenant_id: string;
-        provider:
-          | "openai"
-          | "anthropic"
-          | "azure"
-          | "berget"
-          | "gdm"
-          | "mistral"
-          | "ovhcloud"
-          | "gemini"
-          | "cohere";
+        provider: "openai" | "anthropic" | "azure" | "mistral" | "ovhcloud" | "gemini" | "cohere";
       };
     };
     responses: {
