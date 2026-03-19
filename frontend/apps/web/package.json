@@ -19,6 +19,7 @@
     "i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide"
   },
   "devDependencies": {
+    "@eslint/js": "^9.24.0",
     "@internationalized/date": "^3.7.0",
     "@intric/eslint-plugin": "workspace:*",
     "@intric/intric-js": "workspace:*",
