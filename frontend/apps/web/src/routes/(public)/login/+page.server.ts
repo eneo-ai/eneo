@@ -77,7 +77,7 @@ export const load = async (event) => {
     federationStatus.has_global_oidc_config;
 
   if (hasSingleTenantOidc) {
-    singleTenantOidcLink = await getSingleTenantOidcLink(getBackendUrl(), event.fetch);
+    singleTenantOidcLink = await getSingleTenantOidcLink(getBackendUrl() ?? "", event.fetch);
   }
 
   return {

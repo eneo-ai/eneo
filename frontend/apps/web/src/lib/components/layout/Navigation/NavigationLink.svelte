@@ -1,10 +1,11 @@
 <script lang="ts">
   import type { Icon } from "@intric/icons";
+  import type { ComponentType } from "svelte";
   import { cva } from "class-variance-authority";
 
   export let href: string;
   export let isActive: boolean;
-  export let icon: Icon;
+  export let icon: Icon | ComponentType;
   export let label: string;
 
   const link = cva(

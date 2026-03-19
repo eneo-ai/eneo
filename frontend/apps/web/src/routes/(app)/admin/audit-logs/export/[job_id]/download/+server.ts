@@ -10,7 +10,7 @@ export const GET: RequestHandler = async (event) => {
     const { id_token, environment } = event.locals;
 
     if (!id_token || !environment.baseUrl) {
-      throw error(401, new Error("Unauthorized"));
+      throw error(401);
     }
 
     const jobId = event.params.job_id;
@@ -29,7 +29,7 @@ export const GET: RequestHandler = async (event) => {
     if (!response.ok) {
       const errorText = await response.text();
       console.error("Export download failed:", response.status, errorText);
-      throw error(response.status, new Error(`Failed to download export: ${response.statusText}`));
+      throw error(response.status);
     }
 
     // Get content type and filename from backend response
@@ -51,6 +51,6 @@ export const GET: RequestHandler = async (event) => {
     if (err instanceof Response) {
       throw err;
     }
-    throw error(500, new Error("Failed to download export"));
+    throw error(500);
   }
 };

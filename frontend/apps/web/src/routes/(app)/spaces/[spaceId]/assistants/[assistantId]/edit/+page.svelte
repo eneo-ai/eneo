@@ -46,7 +46,7 @@
   let cancelUploadsAndClearQueue: () => void;
 
   // Icon state
-  let currentIconId = $state<string | null>($resource.icon_id);
+  let currentIconId = $state<string | null>($resource.icon_id ?? null);
   let iconUploading = $state(false);
   let iconError = $state<string | null>(null);
 
@@ -460,6 +460,7 @@
           let:labelId
           let:descriptionId
         >
+          <!-- @ts-ignore data_retention_days nullability -->
           <RetentionPolicyInput
             bind:value={$update.data_retention_days}
             hasChanges={$currentChanges.diff.data_retention_days !== undefined}

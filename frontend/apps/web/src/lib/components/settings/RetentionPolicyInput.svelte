@@ -9,7 +9,7 @@
   import { m } from "$lib/paraglide/messages";
 
   interface Props {
-    value: number | null;
+    value: number | null | undefined;
     hasChanges?: boolean;
     inheritedDays?: number | null;
     inheritedFrom?: "space" | "tenant" | null;
@@ -40,9 +40,18 @@
     isOverrideEnabled = next;
   }
 
+  // Local non-null value for Input.Number binding
+  let inputValue = $state(value ?? 365);
+
   // Sync state if value changes externally
   $effect(() => {
     isOverrideEnabled = value !== null;
+    if (value !== null && value !== undefined) inputValue = value;
+  });
+
+  // Sync input changes back to value
+  $effect(() => {
+    if (isOverrideEnabled) value = inputValue;
   });
 </script>
 
@@ -64,7 +73,7 @@
   {#if isOverrideEnabled}
     <div class="flex items-center gap-2 pt-2 border-t border-default">
       <Input.Number
-        bind:value
+        bind:value={inputValue}
         min={1}
         max={2555}
         aria-label={m.number_of_days()}

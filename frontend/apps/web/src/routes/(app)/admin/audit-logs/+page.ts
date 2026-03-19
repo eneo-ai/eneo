@@ -27,7 +27,7 @@ export const load = async (event) => {
         page_size,
         from_date,
         to_date,
-        action: action !== "all" ? action : undefined,  // Legacy single-action support
+        action: action !== "all" ? action as any : undefined,  // Legacy single-action support
         actions: actionsArray,  // Multi-action support
         actor_id,
         search,

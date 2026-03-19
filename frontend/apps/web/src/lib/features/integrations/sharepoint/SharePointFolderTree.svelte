@@ -86,14 +86,14 @@
         }
 
         const response = await intric.client.fetch(
-          `/api/v1/integrations/${userIntegrationId}/sharepoint/tree/`,
+          `/api/v1/integrations/${userIntegrationId}/sharepoint/tree/` as any,
           {
             method: "get",
             params: {
               query: queryParams
             }
-          }
-        );
+          } as any
+        ) as { items?: TreeItem[] };
 
         // Ignore stale responses from earlier navigations
         if (thisRequest !== requestId) return;

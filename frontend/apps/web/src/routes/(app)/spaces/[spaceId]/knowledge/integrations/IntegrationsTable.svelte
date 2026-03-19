@@ -210,14 +210,14 @@
       cell: (displayItem) => {
         const di = displayItem.value;
         if (di.kind === "wrapper") {
-          return createRender(WrapperNameCell, {
+          return Table.renderComponent(WrapperNameCell, {
             name: di.wrapperName,
             link: `/spaces/${$currentSpace.routeId}/knowledge/integrations/wrapper/${di.wrapperId}`,
             itemCount: di.itemCount,
             subtitle: getCountSubtitle(di.counts)
           });
         }
-        return createRender(IntegrationNameCell, {
+        return Table.renderComponent(IntegrationNameCell, {
           knowledge: di.item
         });
       }
@@ -234,7 +234,7 @@
             : m.wrapper_items_count_other({ count: di.itemCount });
           return createRender(Table.FormattedCell, { value: countLabel });
         }
-        return createRender(IntegrationSyncStatusCell, {
+        return Table.renderComponent(IntegrationSyncStatusCell, {
           knowledge: di.item,
           onShowSyncHistory: onSelectIntegrationForSyncHistory
             ? () => onSelectIntegrationForSyncHistory(di.item)
@@ -252,7 +252,7 @@
           return createRender(Table.FormattedCell, { value: "" });
         }
         const labelKey = integrationData[di.item.integration_type].previewLinkLabel;
-        const translatedLabel = m[labelKey as keyof typeof m]?.() ?? labelKey;
+        const translatedLabel = (m as Record<string, ((...args: unknown[]) => string) | undefined>)[labelKey]?.() ?? labelKey;
         return createRender(Table.ButtonCell, {
           link: di.item.url ?? "",
           label: translatedLabel,
@@ -265,7 +265,7 @@
       cell: (displayItem) => {
         const di = displayItem.value;
         if (di.kind === "wrapper") {
-          return createRender(SharePointWrapperActions, {
+          return Table.renderComponent(SharePointWrapperActions, {
             wrapperId: di.wrapperId,
             wrapperName: di.wrapperName,
             itemCount: di.itemCount,

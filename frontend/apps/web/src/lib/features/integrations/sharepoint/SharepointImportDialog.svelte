@@ -277,24 +277,26 @@
     const { id } = integration;
     if (!id) return;
 
+    const site = selectedSite;
+
     try {
-      const resourceType = selectedSite.type === "onedrive" ? "onedrive" : "site";
+      const resourceType = site.type === "onedrive" ? "onedrive" : "site";
       const batchItems = dedupedSelection.effectiveEntries.map((entry) => {
         const trimmedName = entry.importName.trim();
         const name = trimmedName.length > 0 ? trimmedName : getDefaultImportName(entry.item);
 
         if (entry.item.type === "site_root") {
           return {
-            key: selectedSite.key,
+            key: site.key,
             name,
-            url: selectedSite.url ?? "",
+            url: site.url ?? "",
             type: "site_root",
             resource_type: resourceType
           };
         }
 
         return {
-          key: selectedSite.key,
+          key: site.key,
           name,
           url: entry.item.web_url ?? "",
           folder_id: entry.item.id,

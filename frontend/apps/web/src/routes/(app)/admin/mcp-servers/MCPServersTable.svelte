@@ -78,7 +78,7 @@
           <tr class="group relative transition-colors duration-150 {expanded ? 'bg-secondary/30' : 'hover:bg-hover-dimmer'}">
             <td class="border-b border-dimmer px-2 py-3 align-top">
               <Button
-                variant="ghost"
+                variant="simple"
                 padding="icon"
                 onclick={() => toggleExpanded(server.mcp_server_id)}
                 disabled={!hasTools}

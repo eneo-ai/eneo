@@ -40,7 +40,7 @@
   let cancelUploadsAndClearQueue: () => void;
 
   // Icon state
-  let currentIconId = $state<string | null>($resource.icon_id);
+  let currentIconId = $state<string | null>($resource.icon_id ?? null);
   let iconUploading = $state(false);
   let iconError = $state<string | null>(null);
 

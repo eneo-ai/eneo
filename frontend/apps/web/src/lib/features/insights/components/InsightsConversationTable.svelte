@@ -44,7 +44,7 @@
       accessor: (item) => item,
       cell: (item) => {
         return createRender(Table.FormattedCell, {
-          value: formatDate(item.value.created_at),
+          value: formatDate(item.value.created_at ?? ""),
           monospaced: true
         });
       },

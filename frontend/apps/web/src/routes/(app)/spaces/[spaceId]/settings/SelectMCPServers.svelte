@@ -11,6 +11,26 @@
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight } from "lucide-svelte";
+  import type { components } from "@intric/intric-js";
+
+  type MCPTool = components["schemas"]["MCPServerToolPublic"];
+
+  interface SelectableMCPServer {
+    id: string;
+    name: string;
+    description?: string | null;
+    tags?: string[] | null;
+    security_classification?: { security_level: number; name?: string } | null;
+    tools: MCPTool[];
+  }
+
+  /** Tool as seen on a space MCP server (uses is_enabled instead of is_enabled_by_default) */
+  interface SpaceMCPTool {
+    id: string;
+    name: string;
+    description?: string | null;
+    is_enabled: boolean;
+  }
 
   function meetsSecurityClassification(
     server: { security_classification?: { security_level: number } | null },
@@ -22,7 +42,7 @@
   }
 
   type Props = {
-    selectableServers: any[];
+    selectableServers: SelectableMCPServer[];
   };
 
   const { selectableServers }: Props = $props();
@@ -45,20 +65,32 @@
     updateSpace
   } = getSpacesManager();
 
+  /** Cast untyped space MCP servers to a usable shape */
+  interface SpaceMCPServer {
+    id: string;
+    name: string;
+    tools?: SpaceMCPTool[];
+  }
+
+  function getSpaceMCPServers(): SpaceMCPServer[] {
+    return ($currentSpace.mcp_servers ?? []) as unknown as SpaceMCPServer[];
+  }
+
   const currentlySelectedServers = derived(
     currentSpace,
-    ($currentSpace) => $currentSpace.mcp_servers?.map((server) => server.id) ?? []
+    ($currentSpace) => (($currentSpace.mcp_servers ?? []) as unknown as SpaceMCPServer[]).map((server) => server.id)
   );
 
   // Get tools for a specific server from current space
-  function getServerTools(serverId: string) {
-    const server = $currentSpace.mcp_servers?.find((s) => s.id === serverId);
+  function getServerTools(serverId: string): SpaceMCPTool[] {
+    const servers = getSpaceMCPServers();
+    const server = servers.find((s) => s.id === serverId);
     return server?.tools ?? [];
   }
 
   let loading = $state(new Set<string>());
 
-  async function toggleServer(server: any) {
+  async function toggleServer(server: SelectableMCPServer) {
     const newLoading = new Set(loading);
     newLoading.add(server.id);
     loading = newLoading;
@@ -73,14 +105,15 @@
         const newServers = [...$currentlySelectedServers, server.id].map((id) => ({ id }));
 
         // When adding a server, enable all its tools for convenience
+        const spaceServers = getSpaceMCPServers();
         const existingTools =
-          $currentSpace.mcp_servers?.flatMap(
+          spaceServers.flatMap(
             (s) => s.tools?.map((t) => ({ tool_id: t.id, is_enabled: t.is_enabled })) ?? []
-          ) ?? [];
+          );
 
         // Add all tools from the new server as enabled
         const newServerTools =
-          server.tools?.map((t: any) => ({ tool_id: t.id, is_enabled: true })) ?? [];
+          server.tools?.map((t) => ({ tool_id: t.id, is_enabled: true })) ?? [];
 
         await updateSpace({
           mcp_servers: newServers,
@@ -96,13 +129,14 @@
     loading = updatedLoading;
   }
 
-  async function toggleTool(tool: any) {
+  async function toggleTool(tool: SpaceMCPTool) {
     try {
       // Get current tool settings from space
+      const spaceServers = getSpaceMCPServers();
       const currentTools =
-        $currentSpace.mcp_servers?.flatMap(
+        spaceServers.flatMap(
           (server) => server.tools?.map((t) => ({ tool_id: t.id, is_enabled: t.is_enabled })) ?? []
-        ) ?? [];
+        );
 
       // Toggle this tool
       const toolExists = currentTools.find((t) => t.tool_id === tool.id);

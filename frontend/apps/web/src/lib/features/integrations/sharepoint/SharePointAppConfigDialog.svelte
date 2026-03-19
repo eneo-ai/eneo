@@ -67,15 +67,14 @@
   const loadConfig = createAsyncState(async () => {
     try {
       const data = await intric.client.fetch("/api/v1/admin/sharepoint/app", {
-        method: "get",
-        params: {}
-      });
+        method: "get"
+      } as any) as TenantSharePointAppPublic | null;
 
       if (data) {
-        existingConfig = data as TenantSharePointAppPublic;
+        existingConfig = data;
         clientId = data.client_id;
         tenantDomain = data.tenant_domain;
-        authMethod = data.auth_method || "tenant_app";
+        authMethod = (data.auth_method || "tenant_app") as AuthMethod;
         // Don't populate secret - require user to re-enter if updating
       }
     } catch (error) {
@@ -101,7 +100,6 @@
 
       const result = await intric.client.fetch("/api/v1/admin/sharepoint/app/test", {
         method: "post",
-        params: {},
         requestBody: {
           "application/json": payload
         }
@@ -141,7 +139,6 @@
 
       const result = await intric.client.fetch("/api/v1/admin/sharepoint/app", {
         method: "post",
-        params: {},
         requestBody: {
           "application/json": payload
         }
@@ -172,7 +169,6 @@
 
       const result = await intric.client.fetch("/api/v1/admin/sharepoint/app", {
         method: "post",
-        params: {},
         requestBody: {
           "application/json": payload
         }
@@ -204,7 +200,6 @@
 
       const result = await intric.client.fetch("/api/v1/admin/sharepoint/service-account/auth/start", {
         method: "post",
-        params: {},
         requestBody: {
           "application/json": payload
         }
@@ -454,7 +449,7 @@
       {#if existingConfig && isUpdatingSecret}
         <!-- Update secret mode buttons -->
         <Button
-          variant="secondary"
+          variant="outlined"
           onclick={() => {
             isUpdatingSecret = false;
             newClientSecret = "";
@@ -472,7 +467,7 @@
       {:else if existingConfig}
         <!-- Normal view buttons when config exists -->
         <Button
-          variant="secondary"
+          variant="outlined"
           onclick={() => {
             isUpdatingSecret = true;
           }}
@@ -490,7 +485,7 @@
       {:else if authMethod === "tenant_app"}
         <!-- Tenant App: Test + Save flow -->
         <Button
-          variant="secondary"
+          variant="outlined"
           disabled={testCredentials.isLoading ||
             !clientId ||
             !clientSecret ||

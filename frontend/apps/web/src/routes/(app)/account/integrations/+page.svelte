@@ -73,7 +73,7 @@
                   {#snippet action()}
                     {#if integration.tenant_app_configured === false}
                       <div class="flex flex-col gap-1">
-                        <Button disabled variant="secondary">{m.not_available()}</Button>
+                        <Button disabled variant="outlined">{m.not_available()}</Button>
                         <p class="text-secondary text-xs">
                           {m.contact_admin_to_configure()}
                         </p>

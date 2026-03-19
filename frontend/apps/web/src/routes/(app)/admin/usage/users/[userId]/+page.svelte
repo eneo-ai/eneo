@@ -333,7 +333,7 @@
             >
               <div class="flex flex-col gap-4">
                 <div class="bg-secondary flex h-4 w-full overflow-clip rounded-full">
-                  {#each modelsByProvider.filter((org) => org.tokenCount > 0) as org (org.org)}
+                  {#each modelsByProvider.filter((org) => org.tokenCount > 0) as org (org.provider)}
                     <div
                       class="last-of-type:!border-none"
                       style="width: {formatPercent(
@@ -343,7 +343,7 @@
                   {/each}
                 </div>
                 <div class="flex flex-wrap gap-x-6">
-                  {#each modelsByProvider as org (org.org)}
+                  {#each modelsByProvider as org (org.provider)}
                     <div class="flex items-center gap-2">
                       <div
                         style="background: var(--{org.colour})"

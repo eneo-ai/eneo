@@ -17,7 +17,8 @@ import { env } from "$env/dynamic/private";
  * @throws Error if PUBLIC_ORIGIN is not configured
  */
 function getPublicOrigin(): string {
-  if (!env.PUBLIC_ORIGIN) {
+  const publicOrigin = (env as Record<string, string | undefined>).PUBLIC_ORIGIN;
+  if (!publicOrigin) {
     throw new Error(
       '[OIDC] PUBLIC_ORIGIN environment variable is required for OIDC authentication. ' +
       'Set it to the externally-reachable URL for this application. ' +
@@ -26,15 +27,15 @@ function getPublicOrigin(): string {
   }
 
   // Validate format (basic check)
-  if (!env.PUBLIC_ORIGIN.startsWith('https://')) {
+  if (!publicOrigin.startsWith('https://')) {
     throw new Error(
       '[OIDC] PUBLIC_ORIGIN must be an https:// URL for security. ' +
-      `Got: ${env.PUBLIC_ORIGIN}`
+      `Got: ${publicOrigin}`
     );
   }
 
   // Remove trailing slash if present
-  return env.PUBLIC_ORIGIN.replace(/\/$/, '');
+  return publicOrigin.replace(/\/$/, '');
 }
 
 export const load = async (event) => {

@@ -18,7 +18,7 @@
 
 	let { value = $bindable(''), type }: Props = $props();
 
-	const predefinedCategories =
+	const predefinedCategories: Record<string, { title: string; description: string }> =
 		type === 'assistant' ? assistantTemplateCategories : appTemplateCategories;
 	const categoryKeys = Object.keys(predefinedCategories);
 

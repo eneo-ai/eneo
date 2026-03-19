@@ -7,7 +7,6 @@
 <script lang="ts">
   import type { components } from "@intric/intric-js";
   import { Table } from "@intric/ui";
-  import { createRender } from "svelte-headless-table";
   import { m } from "$lib/paraglide/messages";
   import TemplateDeletedActions from "./TemplateDeletedActions.svelte";
   import TemplateNameCell from "./TemplateNameCell.svelte";
@@ -31,10 +30,11 @@
       accessor: "name",
       header: m.template_name(),
       cell: (item) => {
-        return createRender(TemplateNameCell, {
+        const row = item.row as import("svelte-headless-table").DataBodyRow<Template>;
+        return Table.renderComponent(TemplateNameCell, {
           name: item.value,
-          description: item.row.original.description,
-          iconName: item.row.original.icon_name
+          description: row.original.description,
+          iconName: row.original.icon_name
         });
       },
       plugins: {
@@ -72,8 +72,9 @@
       accessor: "category",
       header: m.category(),
       cell: (item) => {
-        const type = isAppTemplate(item.row.original) ? "app" : "assistant";
-        return createRender(TemplateCategoryBadge, {
+        const row = item.row as import("svelte-headless-table").DataBodyRow<Template>;
+        const type = isAppTemplate(row.original) ? "app" : "assistant";
+        return Table.renderComponent(TemplateCategoryBadge, {
           category: item.value,
           type: type
         });
@@ -111,7 +112,7 @@
     table.columnActions({
       cell: (item) => {
         const type = isAppTemplate(item.value) ? "app" : "assistant";
-        return createRender(TemplateDeletedActions, { template: item.value, type });
+        return Table.renderComponent(TemplateDeletedActions, { template: item.value, type });
       }
     })
   ]);

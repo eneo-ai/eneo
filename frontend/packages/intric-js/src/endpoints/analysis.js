@@ -317,15 +317,17 @@ export function initAnalytics(client) {
             requestBody: { "application/json": { question, stream: false } }
           });
 
-          if (response?.is_async && response?.job_id) {
-            return { answer: "", isAsync: true, jobId: response.job_id, status: response.status };
+          /** @type {any} */
+          const res = response;
+          if (res?.is_async && res?.job_id) {
+            return { answer: "", isAsync: true, jobId: res.job_id, status: res.status };
           }
 
           return {
-            answer: response?.answer ?? "",
+            answer: res?.answer ?? "",
             isAsync: false,
             jobId: null,
-            status: response?.status ?? "completed"
+            status: res?.status ?? "completed"
           };
         }
 

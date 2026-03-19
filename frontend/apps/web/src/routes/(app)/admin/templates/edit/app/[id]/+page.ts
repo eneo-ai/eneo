@@ -9,7 +9,7 @@ export const load = async (event) => {
   const template = templates.items?.find((t: any) => t.id === event.params.id);
 
   if (!template) {
-    throw error(404, 'Template not found');
+    throw error(404);
   }
 
   // Load available models (tenant-wide, no space required)

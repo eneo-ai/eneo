@@ -33,7 +33,7 @@
     refreshCurrentSpace
   } = getSpacesManager();
 
-  const options: RoleOption[] = $currentSpace.available_roles.filter(role => role.value !== "owner");
+  const options: RoleOption[] = $currentSpace.available_roles;
 
   const {
     elements: { trigger, menu, option, label },

@@ -204,9 +204,12 @@ export function initConversations(client) {
      * @throws {IntricError}
      * */
     approveTools: async ({ approvalId, decisions }) => {
+      /** @type {{status: string}} */
+      // @ts-ignore - response type is unknown in schema
       const res = await client.fetch("/api/v1/conversations/approve-tools/", {
         method: "post",
         params: { query: { approval_id: approvalId } },
+        // @ts-ignore - requestBody is optional in schema but we always send decisions
         requestBody: {
           "application/json": decisions
         }

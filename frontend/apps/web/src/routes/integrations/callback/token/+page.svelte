@@ -275,7 +275,7 @@
         return async ({ result }) => {
           if (result.type === "success" && result.data?.success) {
             status = "service_success";
-            serviceAccountEmail = result.data.service_account_email || null;
+            serviceAccountEmail = (result.data.service_account_email as string) || null;
             setTimeout(() => {
               goto("/admin/integrations?sharepoint_configured=true");
             }, 2000);

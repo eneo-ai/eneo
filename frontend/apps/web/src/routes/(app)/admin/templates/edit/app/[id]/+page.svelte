@@ -40,7 +40,7 @@
 
   // Input field configuration from template
   let inputDescription = $state(data.template.input_description || "");
-  let inputType = $state<"text-upload" | "text-field" | "audio-upload" | "audio-recorder" | "image-upload">(data.template.input_type || "text-field");
+  let inputType = $state<"text-upload" | "text-field" | "audio-upload" | "audio-recorder" | "image-upload">((data.template.input_type || "text-field") as "text-upload" | "text-field" | "audio-upload" | "audio-recorder" | "image-upload");
 
   const inputTypes = {
     "text-upload": { icon: IconFileText, label: m.upload_text_document() },
@@ -75,7 +75,7 @@
   });
 
   // Parse wizard configuration from template
-  const wizardConfig = data.template.wizard_config || [];
+  const wizardConfig = (data.template as any).wizard_config || [];
   const attachmentsConfig = wizardConfig.find((c: any) => c.type === "attachments");
   const collectionsConfig = wizardConfig.find((c: any) => c.type === "collections");
 
@@ -146,7 +146,7 @@
   <Page.Header>
     <Page.Title
       title={m.edit_app_template()}
-      parent={{ href: "/admin/templates", label: m.templates() }}
+      parent={{ href: "/admin/templates", title: m.templates() }}
     />
 
     <Page.Flex>

@@ -43,7 +43,7 @@
       });
     }
 
-    if (model.hosting !== null) {
+    if (model.hosting != null) {
       const hostingColorMap: Record<string, Label.LabelColor> = {
         usa: "orange",
         eu: "green",

@@ -9,17 +9,20 @@
   import { RefreshCw, AlertTriangle, Trash2, Check, X, ShieldAlert } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { invalidate } from "$app/navigation";
+  import type { components } from "@intric/intric-js";
+
+  type MCPTool = components["schemas"]["MCPServerToolPublic"];
 
   type Props = {
     mcpServerId: string;
     serverName: string;
-    tools: any[];
+    tools: MCPTool[];
     intricClient: any;
   };
 
   const { mcpServerId, serverName, tools: initialTools, intricClient }: Props = $props();
 
-  let tools = $state(initialTools);
+  let tools: MCPTool[] = $state(initialTools);
   let syncing = $state(false);
   let bulkUpdating = $state(false);
   let reviewingToolId = $state<string | null>(null);
@@ -42,7 +45,7 @@
     }
   }
 
-  async function toggleToolEnabled(tool: any) {
+  async function toggleToolEnabled(tool: MCPTool) {
     try {
       const updated = await intricClient.mcpServers.updateTenantToolEnabled({
         tool_id: tool.id,
@@ -57,7 +60,7 @@
   }
 
   // Helper: update tool without invalidating (for bulk operations)
-  async function updateToolEnabled(tool: any, enabled: boolean) {
+  async function updateToolEnabled(tool: MCPTool, enabled: boolean) {
     const updated = await intricClient.mcpServers.updateTenantToolEnabled({
       tool_id: tool.id,
       is_enabled: enabled
@@ -156,7 +159,7 @@
   async function rejectAll() {
     bulkUpdating = true;
     try {
-      const ids = pendingTools.map((t: any) => t.id);
+      const ids = pendingTools.map((t) => t.id);
       await intricClient.mcpServers.rejectToolChanges({
         mcp_server_id: mcpServerId,
         tool_ids: ids
@@ -193,7 +196,7 @@
         {/if}
       </div>
     </div>
-    <Button variant="secondary" size="sm" onclick={syncTools} disabled={syncing} class="gap-1.5">
+    <Button variant="outlined" size="sm" onclick={syncTools} disabled={syncing} class="gap-1.5">
       <RefreshCw class="h-3.5 w-3.5 {syncing ? 'animate-spin' : ''}" aria-hidden="true" />
       <span>{syncing ? m.syncing() : m.sync_tools()}</span>
     </Button>
@@ -210,11 +213,11 @@
           </span>
         </div>
         <div class="flex items-center gap-1.5">
-          <Button variant="secondary" size="sm" onclick={approveAll} disabled={bulkUpdating} class="gap-1 text-xs">
+          <Button variant="outlined" size="sm" onclick={approveAll} disabled={bulkUpdating} class="gap-1 text-xs">
             <Check class="h-3 w-3" />
             {m.approve_all()}
           </Button>
-          <Button variant="secondary" size="sm" onclick={rejectAll} disabled={bulkUpdating} class="gap-1 text-xs">
+          <Button variant="outlined" size="sm" onclick={rejectAll} disabled={bulkUpdating} class="gap-1 text-xs">
             <X class="h-3 w-3" />
             {m.reject_all()}
           </Button>
@@ -351,8 +354,7 @@
                   <Input.Switch
                     value={tool.is_enabled_by_default}
                     sideEffect={() => toggleToolEnabled(tool)}
-                    aria-label="Aktivera {tool.name}"
-                  />
+                  ><span class="sr-only">Aktivera {tool.name}</span></Input.Switch>
                 </div>
               {/if}
             {/each}

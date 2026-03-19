@@ -414,7 +414,7 @@ export class ChatService {
                 ref.mcp_tool_calls = [];
               }
               // Update existing tool calls or add new ones (avoid duplicates from approval flow)
-              for (const tool of event.tools) {
+              for (const tool of event.tools as Array<{ tool_call_id?: string; [key: string]: unknown }>) {
                 // @ts-expect-error
                 const existingIndex = ref.mcp_tool_calls.findIndex(
                   (t: { tool_call_id?: string }) => t.tool_call_id && t.tool_call_id === tool.tool_call_id

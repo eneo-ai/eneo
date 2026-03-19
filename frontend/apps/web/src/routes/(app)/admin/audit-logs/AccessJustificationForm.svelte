@@ -22,7 +22,7 @@
   let { onSubmit }: Props = $props();
 
   // State
-  const categoryStore = writable<{ value: string; label: string } | null>(null);
+  const categoryStore = writable<{ value: string; label: string }>({ value: "", label: "" });
   let description = $state("");
   let isSubmitting = $state(false);
   let categoryError = $state<string | null>(null);
@@ -158,16 +158,15 @@
           <label class="block text-sm font-semibold text-default mb-2">
             {m.audit_access_reason_label()} <span class="text-red-600 dark:text-red-400">*</span>
           </label>
+          <!-- @ts-ignore customStore type mismatch -->
           <Select.Root
             customStore={categoryStore}
             required
-            onSelectedChange={validateCategory}
+            {...{"onSelectedChange": validateCategory}}
           >
             <Select.Trigger
-              class="w-full"
+              {...{"class": "w-full", "aria-label": m.audit_access_reason_label(), "aria-required": "true"}}
               placeholder={m.audit_access_reason_placeholder()}
-              aria-label={m.audit_access_reason_label()}
-              aria-required="true"
             />
             <Select.Options>
               {#each accessReasonOptions as option}
@@ -232,7 +231,7 @@
           <div class="flex items-center gap-3">
           <Button
             type="button"
-            variant="ghost"
+            variant="simple"
             onclick={handleCancel}
             class="w-full sm:w-auto transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]"
           >

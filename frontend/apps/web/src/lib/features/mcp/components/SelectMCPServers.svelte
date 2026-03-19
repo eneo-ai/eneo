@@ -59,12 +59,16 @@
     expandedServers = newExpanded;
   }
 
+  function getServerTools(server: MCPServer): MCPTool[] {
+    return server.tools ?? [];
+  }
+
   // Load available MCP servers from space
   async function loadAvailableServers() {
     loading = true;
     try {
       // Get servers enabled for this space, and filter to only show enabled tools
-      const spaceServers = $currentSpace.mcp_servers || [];
+      const spaceServers = ($currentSpace.mcp_servers || []) as unknown as MCPServer[];
       availableServers = spaceServers.map((server) => ({
         ...server,
         // Only include tools that are enabled at the space level
@@ -311,7 +315,7 @@
               <!-- Scrollable tools list -->
               <div class="max-h-[240px] overflow-y-auto">
                 <div class="divide-y divide-dimmer">
-                  {#each server.tools as tool (tool.id)}
+                  {#each getServerTools(server) as tool (tool.id)}
                     {@const toolEnabled = isToolEnabled(server, tool.id)}
                     <div class="flex items-center gap-3 px-3 py-2.5 transition-all hover:bg-hover-dimmer {toolEnabled ? '' : 'opacity-40 grayscale-[30%]'}">
                       <div class="flex-1 min-w-0">
@@ -325,7 +329,6 @@
                       <Input.Switch
                         value={toolEnabled}
                         sideEffect={() => toggleTool(server, tool)}
-                        aria-label="Aktivera {tool.name}"
                       />
                     </div>
                   {/each}

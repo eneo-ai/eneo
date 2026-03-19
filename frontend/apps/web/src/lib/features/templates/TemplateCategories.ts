@@ -1,6 +1,6 @@
 // Predefined category types - kept for backward compatibility
-type PredefinedAssistantCategory = "communication" | "q&a" | "misc" | "advice";
-type PredefinedAppCategory = "transcription" | "misc";
+export type PredefinedAssistantCategory = "communication" | "q&a" | "misc" | "advice";
+export type PredefinedAppCategory = "transcription" | "misc";
 
 // Predefined categories with localized titles and descriptions
 export const assistantTemplateCategories: Record<

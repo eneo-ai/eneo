@@ -241,8 +241,8 @@
         <div class="flex flex-col items-center justify-center gap-4 py-8">
           <span class="text-secondary">{m.app_run_failed_files_list()}</span>
           {#each result.input.files as file (file.id)}
-            {#await intric.files.url({ id: file.id, download: true }) then fileUrl}
-              <Button href={fileUrl} variant="outlined">
+            {#await intric.files.generateSignedUrl({ fileId: file.id, expiresIn: 3600, contentDisposition: "attachment" }) then signedFile}
+              <Button href={signedFile.url} variant="outlined">
                 <IconDownload />
                 {m.download()} "{file.name}"
               </Button>

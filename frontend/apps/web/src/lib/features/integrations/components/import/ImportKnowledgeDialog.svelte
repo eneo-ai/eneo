@@ -42,7 +42,7 @@
   $effect(() => {
     // Find first connected integration when space or integrations change
     const firstConnected = availableIntegrations.find(({ connected }) => connected) ?? null;
-    if (!selectedIntegration || !availableIntegrations.some(i => i.id === selectedIntegration.id)) {
+    if (!selectedIntegration || !availableIntegrations.some(i => i.id === selectedIntegration?.id)) {
       selectedIntegration = firstConnected;
     }
   });

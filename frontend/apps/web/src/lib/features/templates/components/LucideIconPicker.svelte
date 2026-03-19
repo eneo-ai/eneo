@@ -101,7 +101,7 @@
       </button>
 
       {#if value}
-        <Button variant="outlined" padding="icon-only" onclick={handleClear}>
+        <Button variant="outlined" padding="icon" onclick={handleClear}>
           <X class="h-4 w-4" />
         </Button>
       {/if}
@@ -110,7 +110,7 @@
 {/if}
 
 <Dialog.Root openController={dialogOpen}>
-  <Dialog.Content width="medium" class="max-w-2xl">
+  <Dialog.Content width="medium" {...{"class": "max-w-2xl"}}>
     <Dialog.Title>{m.choose_an_icon()}</Dialog.Title>
     <Dialog.Description>
       {searchQuery

@@ -6,7 +6,7 @@ export const GET: RequestHandler = async (event) => {
     const { id_token, environment } = event.locals;
 
     if (!id_token || !environment.baseUrl) {
-      throw error(401, new Error("Unauthorized"));
+      throw error(401);
     }
 
     // Build query params from URL
@@ -37,7 +37,7 @@ export const GET: RequestHandler = async (event) => {
     });
 
     if (!response.ok) {
-      throw error(response.status, new Error(`Failed to export audit logs: ${response.statusText}`));
+      throw error(response.status);
     }
 
     // Get the CSV content
@@ -53,6 +53,6 @@ export const GET: RequestHandler = async (event) => {
     });
   } catch (err) {
     console.error("CSV export failed:", err);
-    throw error(500, new Error("Failed to export audit logs"));
+    throw error(500);
   }
 };

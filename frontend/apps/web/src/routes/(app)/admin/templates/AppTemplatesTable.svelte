@@ -7,7 +7,6 @@
 <script lang="ts">
   import type { components } from "@intric/intric-js";
   import { Table } from "@intric/ui";
-  import { createRender } from "svelte-headless-table";
   import { m } from "$lib/paraglide/messages";
   import TemplateActions from "./TemplateActions.svelte";
   import TemplateNameCell from "./TemplateNameCell.svelte";
@@ -25,11 +24,12 @@
       accessor: "name",
       header: m.template_name(),
       cell: (item) => {
-        return createRender(TemplateNameCell, {
+        const row = item.row as import("svelte-headless-table").DataBodyRow<AppTemplate>;
+        return Table.renderComponent(TemplateNameCell, {
           name: item.value,
-          description: item.row.original.description,
-          isDefault: item.row.original.is_default,
-          iconName: item.row.original.icon_name
+          description: row.original.description,
+          isDefault: row.original.is_default,
+          iconName: row.original.icon_name
         });
       },
       plugins: {
@@ -50,7 +50,7 @@
       accessor: "category",
       header: m.category(),
       cell: (item) => {
-        return createRender(TemplateCategoryBadge, {
+        return Table.renderComponent(TemplateCategoryBadge, {
           category: item.value,
           type: "app"
         });
@@ -118,7 +118,7 @@
 
     table.columnActions({
       cell: (item) => {
-        return createRender(TemplateActions, { template: item.value, type: "app" });
+        return Table.renderComponent(TemplateActions, { template: item.value, type: "app" });
       }
     })
   ]);

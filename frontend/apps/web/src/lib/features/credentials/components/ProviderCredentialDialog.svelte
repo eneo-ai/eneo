@@ -167,7 +167,7 @@
 		</Dialog.Section>
 
 		<Dialog.Controls let:close>
-			<Button is={close} variant="secondary" disabled={isSubmitting}>{m.cancel()}</Button>
+			<Button is={close} variant="outlined" disabled={isSubmitting}>{m.cancel()}</Button>
 			<Button on:click={handleSubmit} variant="primary" disabled={isSubmitting}>
 				{isSubmitting ? m.saving() : m.save_credentials()}
 			</Button>

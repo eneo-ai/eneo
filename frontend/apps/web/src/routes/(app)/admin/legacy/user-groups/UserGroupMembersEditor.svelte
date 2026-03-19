@@ -193,7 +193,7 @@
                 class="border-default hover:bg-hover-dimmer flex items-center justify-between gap-4 border-b px-4 py-3 last:border-b-0"
               >
                 <div class="flex items-center gap-3">
-                  <MemberChip member={{ ...user, role: "member" }}></MemberChip>
+                  <MemberChip member={{ id: user.id, email: user.email }}></MemberChip>
                   <div class="flex flex-col">
                     <span class="text-primary">{user.email}</span>
                     {#if user.username}

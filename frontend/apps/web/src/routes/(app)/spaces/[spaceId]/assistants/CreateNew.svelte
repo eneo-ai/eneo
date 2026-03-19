@@ -51,11 +51,12 @@
 </script>
 
 <div class="flex gap-[1px]">
-  <TemplateCreateAssistant settings={data.settings} let:trigger={createAssistantTrigger}>
+  {#snippet triggerSnippet(createAssistantTrigger: any)}
     <Button variant="primary" is={createAssistantTrigger} class="!rounded-r-none"
       >{m.create_assistant()}</Button
-    ></TemplateCreateAssistant
-  >
+    >
+  {/snippet}
+  <TemplateCreateAssistant settings={data.settings} {triggerSnippet} />
   <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
     <Dropdown.Trigger asFragment let:trigger>
       <Button padding="icon" variant="primary" is={trigger} class="!rounded-l-none"

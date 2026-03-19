@@ -84,7 +84,7 @@
     duplicateCheckPending = true;
     try {
       console.log("Checking URL:", editableWebsite.url);
-      existingOnOrg = await intric.websites.checkUrl(editableWebsite.url);
+      existingOnOrg = await intric.websites.checkUrl(editableWebsite.url) as unknown as ExistingWebsite | null;
       console.log("Check result:", existingOnOrg);
       if (existingOnOrg) {
         // Show warning modal on top of the main dialog
@@ -184,15 +184,16 @@
       edits.name = websiteName === "" ? null : websiteName;
 
       // Handle HTTP auth fields
+      const editsAny = edits as Record<string, unknown>;
       if (httpAuthEnabled && httpAuthUsername) {
-        edits.http_auth_username = httpAuthUsername;
+        editsAny.http_auth_username = httpAuthUsername;
         if (httpAuthPassword) {
-          edits.http_auth_password = httpAuthPassword;
+          editsAny.http_auth_password = httpAuthPassword;
         }
       } else if (!httpAuthEnabled && website?.requires_http_auth) {
         // Remove auth if it was previously enabled
-        edits.http_auth_username = null;
-        edits.http_auth_password = null;
+        editsAny.http_auth_username = null;
+        editsAny.http_auth_password = null;
       }
 
       const updated = await intric.websites.update({ website: { id: website.id }, update: edits });

@@ -23,6 +23,6 @@ export const load = async (event) => {
 
   // Otherwise show the deactivated page
   return {
-    salesEmail: event.locals.environment.salesEmail
+    salesEmail: (event.locals.environment as Record<string, unknown>).salesEmail as string | undefined
   };
 };

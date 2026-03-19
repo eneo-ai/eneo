@@ -295,7 +295,7 @@
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      <Button is={close} variant="secondary">
+      <Button is={close} variant="outlined">
         {m.cancel()}
       </Button>
       <Button

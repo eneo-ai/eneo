@@ -173,7 +173,7 @@
 	const historyTokens = $derived(chat.historyTokens);
 	const promptTokens = $derived(chat.promptTokens);
 	const newTokens = $derived(chat.newPromptTokens);
-	const modelInfo = $derived(chat.partner?.model_info || null);
+	const modelInfo = $derived((chat.partner as { model_info?: { max_input_tokens?: number | null } } | null)?.model_info || null);
 	const tokenLimit = $derived(chat.effectiveTokenLimit);
 	const isApproximate = $derived($question.length > 0);
 

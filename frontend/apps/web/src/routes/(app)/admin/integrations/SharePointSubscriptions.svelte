@@ -3,7 +3,7 @@
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import type { IntricClient } from "@intric/intric-js";
+  import type { Intric } from "@intric/intric-js";
   import dayjs from "dayjs";
 
   interface SharePointSubscription {
@@ -16,20 +16,20 @@
     created_at: string;
     is_expired: boolean;
     expires_in_hours: number;
-    owner_email: string | null;
-    owner_type: "user" | "organization";
+    owner_email?: string | null;
+    owner_type: string;
   }
 
   interface SubscriptionRenewalResult {
     total_subscriptions: number;
     expired_count: number;
-    recreated: number;
-    failed: number;
-    errors: string[];
+    recreated?: number;
+    failed?: number;
+    errors?: string[];
   }
 
   interface Props {
-    intric: IntricClient;
+    intric: Intric;
   }
 
   const { intric }: Props = $props();
@@ -66,17 +66,17 @@
     try {
       const result: SubscriptionRenewalResult = await intric.integrations.admin.sharepoint.renewExpiredSubscriptions();
 
-      if (result.recreated > 0 && result.failed === 0) {
+      if ((result.recreated ?? 0) > 0 && (result.failed ?? 0) === 0) {
         toast.success(
           m.sharepoint_subscriptions_renewed_success({
-            count: result.recreated
+            count: result.recreated ?? 0
           })
         );
-      } else if (result.failed > 0) {
+      } else if ((result.failed ?? 0) > 0) {
         toast.error(
           m.sharepoint_subscriptions_renewed_partial({
-            failed: result.failed,
-            errors: result.errors.join(", ")
+            failed: result.failed ?? 0,
+            errors: (result.errors ?? []).join(", ")
           })
         );
       } else if (result.expired_count === 0) {
@@ -262,7 +262,7 @@
               </td>
               <td class="sticky right-0 bg-background whitespace-nowrap px-3 py-3 text-right">
                 <Button
-                  variant="secondary"
+                  variant="outlined"
                   size="sm"
                   onclick={() => renewSubscription(subscription)}
                   disabled={renewingSubscriptionIds.has(subscription.id) || renewingAll}

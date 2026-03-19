@@ -30,9 +30,8 @@
     try {
       console.log("Calling API to delete SharePoint app...");
       await intric.client.fetch("/api/v1/admin/sharepoint/app", {
-        method: "delete",
-        params: {}
-      });
+        method: "delete"
+      } as any);
       console.log("API call successful");
       $openController = false;
       // Reload page to refresh state

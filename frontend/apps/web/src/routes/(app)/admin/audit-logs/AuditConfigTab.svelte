@@ -8,17 +8,34 @@
 
   const intric = getIntric();
 
+  // Types for audit config
+  type CategoryConfigItem = {
+    category: string;
+    enabled: boolean;
+    description: string;
+    action_count: number;
+    example_actions: string[];
+  };
+
+  type ActionConfigItem = {
+    action: string;
+    enabled: boolean;
+    category: string;
+    name_sv: string;
+    description_sv: string;
+  };
+
   // State
-  let categoryConfig = $state([]);
-  let actionConfig = $state([]);
-  let expandedCategories = $state(new Set());
+  let categoryConfig = $state<CategoryConfigItem[]>([]);
+  let actionConfig = $state<ActionConfigItem[]>([]);
+  let expandedCategories = $state(new Set<string>());
   let searchQuery = $state("");
   let isLoading = $state(true);
   let showLoading = $state(false); // Only show loading spinner after 200ms delay
   let isSaving = $state(false);
   let hasChanges = $state(false);
-  let originalCategoryConfig = [];
-  let originalActionConfig = [];
+  let originalCategoryConfig: CategoryConfigItem[] = [];
+  let originalActionConfig: ActionConfigItem[] = [];
 
   // Show loading indicator only after 200ms delay (prevents flash for fast loads)
   $effect(() => {
@@ -49,8 +66,8 @@
   });
 
   // Group actions by category
-  function groupActionsByCategory(actions) {
-    const grouped = {};
+  function groupActionsByCategory(actions: ActionConfigItem[]): Record<string, ActionConfigItem[]> {
+    const grouped: Record<string, ActionConfigItem[]> = {};
     for (const action of actions) {
       if (!grouped[action.category]) {
         grouped[action.category] = [];
@@ -61,19 +78,19 @@
   }
 
   // Get category display name
-  function getCategoryName(category) {
+  function getCategoryName(category: string): string {
     const key = `audit_category_${category}`;
-    return (m)[key]?.() || category;
+    return (m as unknown as Record<string, (() => string) | undefined>)[key]?.() || category;
   }
 
   // Get category description from config
-  function getCategoryDescription(category) {
+  function getCategoryDescription(category: string): string {
     const cat = categoryConfig.find(c => c.category === category);
     return cat?.description || "";
   }
 
   // Toggle category expansion
-  function toggleCategory(category) {
+  function toggleCategory(category: string) {
     if (expandedCategories.has(category)) {
       expandedCategories.delete(category);
     } else {
@@ -83,7 +100,7 @@
   }
 
   // Toggle all actions in a category with proper Svelte 5 reactivity
-  function toggleAllInCategory(category, enabled) {
+  function toggleAllInCategory(category: string, enabled: boolean) {
     // Create new array with updated actions
     actionConfig = actionConfig.map(action => {
       if (action.category === category) {
@@ -104,7 +121,7 @@
   }
 
   // Toggle individual action with proper Svelte 5 reactivity
-  function toggleAction(actionId, categoryId) {
+  function toggleAction(actionId: string, categoryId: string) {
     // Find the current action to get its state
     const currentAction = actionConfig.find(a => a.action === actionId);
     if (!currentAction) return;
@@ -148,7 +165,7 @@
   }
 
   // Count enabled actions in a category
-  function countEnabledInCategory(category) {
+  function countEnabledInCategory(category: string) {
     const actions = actionConfig.filter(a => a.category === category);
     const enabled = actions.filter(a => a.enabled).length;
     return { enabled, total: actions.length };
@@ -287,10 +304,10 @@
         />
       </div>
       <div class="flex gap-2">
-        <Button variant="ghost" onclick={expandAll} size="sm" class="h-11 px-4 text-sm font-medium">
+        <Button variant="simple" onclick={expandAll} size="sm" class="h-11 px-4 text-sm font-medium">
           {m.audit_config_expand_all()}
         </Button>
-        <Button variant="ghost" onclick={collapseAll} size="sm" class="h-11 px-4 text-sm font-medium">
+        <Button variant="simple" onclick={collapseAll} size="sm" class="h-11 px-4 text-sm font-medium">
           {m.audit_config_collapse_all()}
         </Button>
       </div>
@@ -397,7 +414,7 @@
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <Button variant="ghost" onclick={resetChanges} size="sm" class="h-10 px-4 text-sm font-medium">
+            <Button variant="simple" onclick={resetChanges} size="sm" class="h-10 px-4 text-sm font-medium">
               {m.audit_config_reset()}
             </Button>
             <Button variant="primary" onclick={saveConfig} disabled={isSaving} size="sm" class="h-10 px-5 text-sm font-semibold">

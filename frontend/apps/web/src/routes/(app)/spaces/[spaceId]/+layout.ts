@@ -32,7 +32,7 @@ export const load: LayoutLoad = async (event) => {
     currentSpace =
       loadDelta < 1500 && organizationSpace
         ? organizationSpace
-        : isAdmin ? await intric.spaces.getOrganizationSpace() : null;
+        : isAdmin ? await intric.spaces.getOrganizationSpace() : parentSpace;
   } else {
     currentSpace = await intric.spaces.get({ id: spaceId });
   }

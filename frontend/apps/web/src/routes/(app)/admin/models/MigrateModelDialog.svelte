@@ -104,7 +104,7 @@
           options={targetOptions}
           bind:value={targetModelId}
           resourceName={m.resource_model()}
-          placeholder={m.migrate_model_target_placeholder()}
+          {...{"placeholder": m.migrate_model_target_placeholder()}}
           fitViewport={true}
           class="border-default hover:bg-hover-dimmer rounded-t-md border-b px-4 py-4"
         >

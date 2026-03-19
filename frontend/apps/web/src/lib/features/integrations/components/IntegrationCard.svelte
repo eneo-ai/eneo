@@ -13,7 +13,7 @@
   let { integration, action }: Props = $props();
 
   const descriptionKey = $derived(integrationData[integration.integration_type].descriptionKey);
-  const description = $derived(m[descriptionKey as keyof typeof m]?.() ?? descriptionKey);
+  const description = $derived((m as Record<string, ((...args: unknown[]) => string) | undefined>)[descriptionKey]?.() ?? descriptionKey);
   const name = $derived(integrationData[integration.integration_type].displayName);
 
   // Check if integration has auth_type property (UserIntegration)

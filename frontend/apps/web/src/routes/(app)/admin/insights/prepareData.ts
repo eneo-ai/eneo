@@ -392,7 +392,7 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
         containLabel: true
       },
       xAxis: {
-        ...data.xAxis,
+        ...(data.xAxis as object),
         // Subtle baseline at y=0 for grounding
         axisLine: {
           show: true,
@@ -403,7 +403,7 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
         },
         axisTick: { show: false },
         axisLabel: {
-          ...data.xAxis?.axisLabel,
+          ...((data.xAxis as Record<string, unknown>)?.axisLabel as object ?? {}),
           // Use actual color value - ECharts canvas doesn't support CSS variables
           // #9CA3AF (gray-400) is visible on both light and dark backgrounds
           color: "#9CA3AF",
@@ -413,7 +413,7 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
         }
       },
       yAxis: {
-        ...data.yAxis,
+        ...(data.yAxis as object),
         // Remove Y-axis left line for cleaner minimal look
         axisLine: { show: false },
         axisTick: { show: false },
@@ -444,7 +444,6 @@ export function getConfig(data: PreparedData, filter: "sessions" | "questions"):
           fontSize: 13
         },
         extraCssText: "box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25); backdrop-filter: blur(8px);",
-        // @ts-expect-error formatter typing
         formatter: (params: { name: string; value: number; data: { count?: number } }[]) => {
           const item = Array.isArray(params) ? params[0] : params;
           const value = item.data?.count ?? item.value;

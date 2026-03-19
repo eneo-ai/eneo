@@ -5,8 +5,7 @@
   import { Page } from "$lib/components/layout";
   import { Button, Input, Select, Dropdown, ProgressBar } from "@intric/ui";
   import * as m from "$lib/paraglide/messages";
-  import type { components } from "@intric/intric-js/types/schema";
-  import type { UserSparse } from "@intric/intric-js";
+  import type { components, UserSparse } from "@intric/intric-js";
   import type { CalendarDate } from "@internationalized/date";
   import { parseDate, today, getLocalTimeZone } from "@internationalized/date";
   import { IconChevronDown } from "@intric/icons/chevron-down";
@@ -129,9 +128,9 @@
   let searchScope = $state<'entity' | 'user'>('entity');
   let searchQuery = $state("");
   let showScopeDropdown = $state(false);
-  let debounceTimer: ReturnType<typeof setTimeout>;
-  let userSearchTimer: ReturnType<typeof setTimeout>;
-  let entitySearchTimer: ReturnType<typeof setTimeout>;  // Debounce for entity search
+  let debounceTimer: ReturnType<typeof setTimeout> = undefined!;
+  let userSearchTimer: ReturnType<typeof setTimeout> = undefined!;
+  let entitySearchTimer: ReturnType<typeof setTimeout> = undefined!;  // Debounce for entity search
   let isExporting = $state(false);
   let exportProgress = $state(0);
   let exportJobId = $state<string | null>(null);
@@ -145,7 +144,8 @@
   // Retention policy state - initialize from server data
   let retentionDays = $state<number>(data.retentionPolicy?.retention_days ?? 365);
   let isEditingRetention = $state(false);
-  let retentionInputValue = $state<number>(data.retentionPolicy?.retention_days ?? 365);
+  let retentionInputValue = $state<string>(String(data.retentionPolicy?.retention_days ?? 365));
+  let retentionInputNum = $derived(parseInt(retentionInputValue) || 0);
   let isSavingRetention = $state(false);
   let retentionError = $state<string | null>(null);
 
@@ -154,7 +154,7 @@
 
   // Get translated label for action type
   function getActionLabel(action: ActionType | "all"): string {
-    const labels: Record<ActionType | "all", () => string> = {
+    const labels: Partial<Record<ActionType | "all", () => string>> = {
       all: m.audit_all_actions,
       user_created: m.audit_action_user_created,
       user_updated: m.audit_action_user_updated,
@@ -906,13 +906,14 @@
       isSavingRetention = true;
       retentionError = null;
 
-      if (retentionInputValue < 1 || retentionInputValue > 2555) {
+      const retentionDaysNum = parseInt(retentionInputValue) || 0;
+      if (retentionDaysNum < 1 || retentionDaysNum > 2555) {
         retentionError = "Retention period must be between 1 and 2555 days";
         return;
       }
 
       const updated = await intric.audit.updateRetentionPolicy({
-        retention_days: retentionInputValue
+        retention_days: retentionDaysNum
       });
 
       retentionDays = updated.retention_days;
@@ -926,7 +927,7 @@
   }
 
   function cancelRetentionEdit() {
-    retentionInputValue = retentionDays;
+    retentionInputValue = String(retentionDays);
     isEditingRetention = false;
     retentionError = null;
   }
@@ -968,7 +969,7 @@
               </span>
             {/if}
           </div>
-          <Button variant="ghost" onclick={cancelExport} class="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-950">
+          <Button variant="simple" onclick={cancelExport} class="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-950">
             <IconXMark class="h-4 w-4" />
             {m.audit_cancel()}
           </Button>
@@ -980,7 +981,7 @@
             <IconInfo class="h-4 w-4" />
             <span>{exportError}</span>
           </div>
-          <Button variant="ghost" onclick={resetExportState}>
+          <Button variant="simple" onclick={resetExportState}>
             <IconXMark class="h-4 w-4" />
           </Button>
         </div>
@@ -1071,7 +1072,7 @@
               </div>
             </div>
             {#if !isEditingRetention}
-              <Button onclick={() => (isEditingRetention = true)} variant="ghost" size="sm" class="min-w-[80px]">
+              <Button onclick={() => (isEditingRetention = true)} variant="simple" size="sm" class="min-w-[80px]">
                 {m.audit_retention_edit()}
               </Button>
             {/if}
@@ -1107,6 +1108,7 @@
                   <label class="text-xs font-semibold text-default block mb-2">{m.audit_retention_period_label()}</label>
                   <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 mb-4">
                     <div class="flex items-center gap-2">
+                      <!-- @ts-ignore Input.Text type="number" binding -->
                       <Input.Text
                         bind:value={retentionInputValue}
                         type="number"
@@ -1120,37 +1122,37 @@
                       </span>
                     </div>
                     <div class="text-xs text-muted">
-                      {retentionInputValue === 365 ? `(1 ${m.audit_retention_year()})` : retentionInputValue === 730 ? `(2 ${m.audit_retention_years()})` : retentionInputValue === 90 ? `(3 ${m.audit_retention_months()})` : retentionInputValue === 2555 ? `(7 ${m.audit_retention_years()})` : ''}
+                      {retentionInputNum === 365 ? `(1 ${m.audit_retention_year()})` : retentionInputNum === 730 ? `(2 ${m.audit_retention_years()})` : retentionInputNum === 90 ? `(3 ${m.audit_retention_months()})` : retentionInputNum === 2555 ? `(7 ${m.audit_retention_years()})` : ''}
                     </div>
                   </div>
                   <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
                     <Button
-                      onclick={() => (retentionInputValue = 90)}
-                      variant={retentionInputValue === 90 ? "primary" : "ghost"}
+                      onclick={() => (retentionInputValue = "90")}
+                      variant={retentionInputNum === 90 ? "primary" : "simple"}
                       size="sm"
                       class="w-full text-sm font-medium"
                     >
                       3 mån
                     </Button>
                     <Button
-                      onclick={() => (retentionInputValue = 365)}
-                      variant={retentionInputValue === 365 ? "primary" : "ghost"}
+                      onclick={() => (retentionInputValue = "365")}
+                      variant={retentionInputNum === 365 ? "primary" : "simple"}
                       size="sm"
                       class="w-full text-sm font-medium"
                     >
                       1 år
                     </Button>
                     <Button
-                      onclick={() => (retentionInputValue = 730)}
-                      variant={retentionInputValue === 730 ? "primary" : "ghost"}
+                      onclick={() => (retentionInputValue = "730")}
+                      variant={retentionInputNum === 730 ? "primary" : "simple"}
                       size="sm"
                       class="w-full text-sm font-medium"
                     >
                       2 år
                     </Button>
                     <Button
-                      onclick={() => (retentionInputValue = 2555)}
-                      variant={retentionInputValue === 2555 ? "primary" : "ghost"}
+                      onclick={() => (retentionInputValue = "2555")}
+                      variant={retentionInputNum === 2555 ? "primary" : "simple"}
                       size="sm"
                       class="w-full text-sm font-medium"
                     >
@@ -1160,13 +1162,13 @@
                 </div>
               </div>
 
-              {#if retentionInputValue !== retentionDays}
+              {#if retentionInputNum !== retentionDays}
                 <div class={`rounded-lg p-2.5 text-xs transition-all border-l-4 ${
-                  retentionInputValue < retentionDays
+                  retentionInputNum < retentionDays
                     ? 'border-l-red-500 border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/50'
                     : 'border-l-blue-500 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/50'
                 }`}>
-                  {#if retentionInputValue < retentionDays}
+                  {#if retentionInputNum < retentionDays}
                     <div class="flex items-start gap-2.5">
                       <div class="rounded-full bg-red-100 dark:bg-red-900 p-1.5">
                         <IconInfo class="h-4 w-4 text-red-600 dark:text-red-400" />
@@ -1174,7 +1176,7 @@
                       <div class="flex-1 space-y-1">
                         <p class="font-semibold text-red-900 dark:text-red-200 text-xs">{m.audit_retention_warning_title()}</p>
                         <p class="text-red-800 dark:text-red-300 text-xs leading-[1.4]">
-                          {m.audit_retention_warning_desc({ date: getRetentionCutoffDate(retentionInputValue) })}
+                          {m.audit_retention_warning_desc({ date: getRetentionCutoffDate(retentionInputNum) })}
                         </p>
                       </div>
                     </div>
@@ -1205,10 +1207,10 @@
                   {m.audit_retention_range()}
                 </p>
                 <div class="flex items-center justify-end gap-2">
-                  <Button onclick={cancelRetentionEdit} variant="ghost" disabled={isSavingRetention} class="min-w-[80px] text-sm font-medium">
+                  <Button onclick={cancelRetentionEdit} variant="simple" disabled={isSavingRetention} class="min-w-[80px] text-sm font-medium">
                     {m.audit_retention_cancel()}
                   </Button>
-                  <Button onclick={saveRetentionPolicy} variant="primary" disabled={isSavingRetention || retentionInputValue === retentionDays} class="min-w-[120px] text-sm font-medium">
+                  <Button onclick={saveRetentionPolicy} variant="primary" disabled={isSavingRetention || retentionInputNum === retentionDays} class="min-w-[120px] text-sm font-medium">
                     {#if isSavingRetention}
                       <div class="flex items-center gap-2">
                         <div class="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
@@ -1416,11 +1418,11 @@
 
               <!-- Action Multi-Select -->
               <div class="min-w-[200px] sm:min-w-[220px] relative">
-                <Dropdown.Root bind:open={showActionDropdown} gutter={4} placement="bottom-start">
+                <Dropdown.Root {...{"open": showActionDropdown}} gutter={4} placement="bottom-start">
                   <Dropdown.Trigger asFragment let:trigger>
                     <Button
                       is={trigger}
-                      variant="outline"
+                      variant="outlined"
                       class="w-full justify-between"
                       aria-haspopup="listbox"
                       aria-expanded={showActionDropdown}
@@ -1448,7 +1450,7 @@
                         <input
                           type="text"
                           bind:value={actionSearchQuery}
-                          placeholder={m.audit_search_actions?.() ?? "Sök åtgärder..."}
+                          placeholder={"Sök åtgärder..."}
                           class="w-full h-8 px-3 rounded-md border border-default bg-subtle text-sm text-default placeholder:text-muted
                             focus:outline-none focus:ring-2 focus:ring-accent-default/30 focus:border-accent-default transition-all duration-150"
                           onclick={(e) => e.stopPropagation()}
@@ -1479,7 +1481,7 @@
                         <!-- Items list -->
                         {#if filteredActionOptions.length === 0}
                           <div class="px-3 py-4 text-center text-sm text-muted">
-                            {m.audit_no_actions_found?.() ?? "Inga åtgärder hittades"}
+                            {"Inga åtgärder hittades"}
                           </div>
                         {:else}
                           {#each filteredActionOptions as option, index}
@@ -1539,10 +1541,10 @@
                 {#if isFiltering}
                   <div class="flex items-center gap-2">
                     <div class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
-                    {m.audit_applying?.() ?? "Tillämpar..."}
+                    {"Tillämpar..."}
                   </div>
                 {:else}
-                  {m.audit_apply?.() ?? "Tillämpa"}
+                  {"Tillämpa"}
                 {/if}
               </Button>
             </div>
@@ -1730,11 +1732,11 @@
                       <td class="px-4 py-3">
                         <div class="flex flex-col">
                           <span class="text-sm text-default truncate">
-                            {log.metadata?.actor?.name || "System"}
+                            {(log.metadata as Record<string, any>)?.actor?.name || "System"}
                           </span>
-                          {#if log.metadata?.actor?.email}
+                          {#if (log.metadata as Record<string, any>)?.actor?.email}
                             <span class="text-xs text-muted truncate">
-                              {log.metadata.actor.email}
+                              {(log.metadata as Record<string, any>).actor.email}
                             </span>
                           {/if}
                         </div>

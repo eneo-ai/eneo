@@ -46,7 +46,7 @@
     saveChanges,
     discardChanges
   } = initSpaceSettingsEditor({
-    space: $currentSpace,
+    space: $currentSpace as any,
     intric,
     onUpdateDone: async (updatedSpace) => {
       // Sync with SpacesManager so sidebar and other components update

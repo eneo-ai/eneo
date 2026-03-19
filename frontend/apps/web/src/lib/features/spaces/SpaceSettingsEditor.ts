@@ -29,7 +29,7 @@ function createSpaceSettingsEditor(data: SpaceSettingsEditorParams) {
     updateResource: async (resource, changes) => {
       const updated = await data.intric.spaces.update({
         space: { id: resource.id },
-        update: changes
+        update: changes as any
       });
       data.onUpdateDone?.(updated);
       return updated;

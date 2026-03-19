@@ -34,7 +34,7 @@
   // Parse wizard configuration from template
   // Handle both object format {attachments: {...}, collections: {...}}
   // and array format [{type: "attachments", ...}, {type: "collections", ...}]
-  const wizard = data.template.wizard_config || data.template.wizard || {};
+  const wizard = (data.template as any).wizard_config || (data.template as any).wizard || {};
 
   let attachmentsConfig, collectionsConfig;
 
@@ -111,7 +111,7 @@
   <Page.Header>
     <Page.Title
       title={m.edit_assistant_template()}
-      parent={{ href: "/admin/templates", label: m.templates() }}
+      parent={{ href: "/admin/templates", title: m.templates() }}
     />
 
     <Page.Flex>

@@ -1,10 +1,14 @@
 import type { CompletionModel, TranscriptionModel, EmbeddingModel } from "@intric/intric-js";
 
-// Model with provider info
-type ModelWithProvider = (CompletionModel | TranscriptionModel | EmbeddingModel) & {
+// Model with provider info - uses Record intersection to ensure all fields accessible on all union members
+type ModelWithProvider = {
+  id: string;
+  name: string;
+  nickname?: string | null;
   provider_id?: string | null;
   provider_name?: string | null;
   provider_type?: string | null;
+  [key: string]: unknown;
 };
 
 export type ModelGroup<T extends ModelWithProvider = ModelWithProvider> = {

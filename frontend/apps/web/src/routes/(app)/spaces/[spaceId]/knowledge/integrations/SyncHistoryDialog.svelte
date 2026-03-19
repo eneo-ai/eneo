@@ -90,7 +90,7 @@
 
       console.log("Sync logs response:", response);
 
-      syncLogs = response.items || [];
+      syncLogs = (response.items || []) as unknown as SyncLog[];
       totalCount = response.total_count || 0;
       totalPages = response.total_pages || 1;
       currentPage = page;

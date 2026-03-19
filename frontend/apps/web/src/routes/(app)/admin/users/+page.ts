@@ -22,8 +22,8 @@ export const load = async (event) => {
 
   // Extract items, pagination, and state counts from response
   const users = response.items || [];
-  const pagination = response.metadata || null;
-  const counts = response.metadata?.counts || null;
+  const pagination = (response as unknown as Record<string, unknown>).metadata as { page?: number; total_pages?: number; total_count?: number } | null ?? null;
+  const counts = ((response as unknown as Record<string, unknown>).metadata as Record<string, unknown> | undefined)?.counts as { active?: number; inactive?: number } | null ?? null;
 
   return {
     users,

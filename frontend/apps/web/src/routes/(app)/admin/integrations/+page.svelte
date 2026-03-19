@@ -30,9 +30,8 @@
   const loadSharePointStatus = createAsyncState(async () => {
     try {
       const config = await data.intric.client.fetch("/api/v1/admin/sharepoint/app", {
-        method: "get",
-        params: {}
-      });
+        method: "get"
+      } as any);
       sharePointConfigStatus = config ? "configured" : "not_configured";
     } catch (error) {
       console.error("Failed to load SharePoint config status:", error);
@@ -95,7 +94,7 @@
                       {/if}
 
                       <Button
-                        variant={sharePointConfigStatus === "configured" ? "secondary" : "primary"}
+                        variant={sharePointConfigStatus === "configured" ? "outlined" : "primary"}
                         onclick={() => $showSharePointConfigDialog = true}
                       >
                         {sharePointConfigStatus === "configured" ? m.update_configuration() : m.configure_sharepoint_app()}
@@ -103,7 +102,7 @@
 
                       {#if sharePointConfigStatus === "configured"}
                         <Button
-                          variant="secondary"
+                          variant="outlined"
                           onclick={() => showWebhookManagement = !showWebhookManagement}
                         >
                           {showWebhookManagement ? m.hide_webhooks() : m.manage_webhooks()}

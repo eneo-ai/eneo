@@ -299,7 +299,7 @@ export class IntricError extends Error {
         error.message,
         error.stage,
         error.status,
-        error.code,
+        /** @type {import("../types/resources").IntricErrorCode | 0} */ (error.code),
         error.detail,
         requestInfo,
         error.headers

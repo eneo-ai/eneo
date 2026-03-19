@@ -93,9 +93,9 @@
       }
     }),
     table.columnActions({
-      header: m.actions(),  // Add "Åtgärder" header for clarity
+      header: m.actions() as any,  // Add "Åtgärder" header for clarity
       cell: (item) => {
-        return createRender(UserActions, { user: item.value });
+        return Table.renderComponent(UserActions, { user: item.value });
       }
     })
   ]);

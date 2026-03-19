@@ -37,13 +37,6 @@
             description: ""
           }
         });
-      },
-      plugins: {
-        sort: {
-          getSortValue(item) {
-            return item.model_nickname ?? "";
-          }
-        }
       }
     }),
 

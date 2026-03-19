@@ -122,9 +122,9 @@
     if (!providerId || liveModelsLoaded) return;
     liveModelsError = "";
     try {
-      const result = await intric.modelProviders.listModels({ id: providerId });
-      if (result && Array.isArray(result) && result.length > 0 && result[0]?.error) {
-        liveModelsError = result[0].error;
+      const result = await intric.modelProviders.listModels({ id: providerId }) as unknown as Record<string, unknown>[];
+      if (result && Array.isArray(result) && result.length > 0 && (result[0] as Record<string, unknown>)?.error) {
+        liveModelsError = (result[0] as Record<string, unknown>).error as string;
       } else if (result && Array.isArray(result)) {
         liveModels = result.map((m: any) => ({
           name: m.model ? `${m.name} (${m.model})` : m.name,
@@ -174,14 +174,14 @@
     currentModel.name = info.name;
     currentModel.displayName = info.name;
     if (modelType === "completion") {
-      currentModel.maxInputTokens = info.max_input_tokens;
-      currentModel.maxOutputTokens = info.max_output_tokens;
+      currentModel.maxInputTokensStr = info.max_input_tokens != null ? String(info.max_input_tokens) : "";
+      currentModel.maxOutputTokensStr = info.max_output_tokens != null ? String(info.max_output_tokens) : "";
       currentModel.vision = info.supports_vision ?? false;
       currentModel.reasoning = info.supports_reasoning ?? false;
       currentModel.supportsToolCalling = info.supports_function_calling ?? false;
     } else if (modelType === "embedding") {
-      currentModel.dimensions = info.output_vector_size;
-      currentModel.maxInput = info.max_input_tokens;
+      currentModel.dimensionsStr = info.output_vector_size != null ? String(info.output_vector_size) : "";
+      currentModel.maxInputStr = info.max_input_tokens != null ? String(info.max_input_tokens) : "";
     }
   }
 
@@ -192,14 +192,14 @@
     return {
       name: "",
       displayName: "",
-      maxInputTokens: undefined as number | undefined,
-      maxOutputTokens: undefined as number | undefined,
+      maxInputTokensStr: "",
+      maxOutputTokensStr: "",
       vision: false,
       reasoning: false,
       supportsToolCalling: false,
       family: modelType === "embedding" ? "openai" : (providerType || "openai"),
-      dimensions: undefined as number | undefined,
-      maxInput: undefined as number | undefined,
+      dimensionsStr: "",
+      maxInputStr: "",
       hosting: providerDefaultHosting[providerType] ?? "swe"
     };
   }
@@ -207,7 +207,24 @@
   function addModel() {
     if (!currentModel.name.trim() || !currentModel.displayName.trim()) return;
 
-    models = [...models, { ...currentModel }];
+    const maxInputTokens = currentModel.maxInputTokensStr ? parseInt(currentModel.maxInputTokensStr, 10) : undefined;
+    const maxOutputTokens = currentModel.maxOutputTokensStr ? parseInt(currentModel.maxOutputTokensStr, 10) : undefined;
+    const dimensions = currentModel.dimensionsStr ? parseInt(currentModel.dimensionsStr, 10) : undefined;
+    const maxInput = currentModel.maxInputStr ? parseInt(currentModel.maxInputStr, 10) : undefined;
+
+    models = [...models, {
+      name: currentModel.name,
+      displayName: currentModel.displayName,
+      maxInputTokens,
+      maxOutputTokens,
+      vision: currentModel.vision,
+      reasoning: currentModel.reasoning,
+      supportsToolCalling: currentModel.supportsToolCalling,
+      family: currentModel.family,
+      dimensions,
+      maxInput,
+      hosting: currentModel.hosting
+    }];
     currentModel = createEmptyModel();
   }
 
@@ -251,18 +268,18 @@
     validationStates = newStates;
   }
 
-  function useSuggestion(suggestion: typeof suggestions[0]) {
+  function useSuggestion(suggestion: ModelInfo) {
     currentModel = {
       name: suggestion.name,
-      displayName: suggestion.displayName,
-      maxInputTokens: suggestion.maxInputTokens,
-      maxOutputTokens: suggestion.maxOutputTokens,
-      vision: suggestion.vision ?? false,
-      reasoning: suggestion.reasoning ?? false,
-      supportsToolCalling: suggestion.supportsToolCalling ?? false,
+      displayName: suggestion.name,
+      maxInputTokensStr: suggestion.max_input_tokens != null ? String(suggestion.max_input_tokens) : "",
+      maxOutputTokensStr: suggestion.max_output_tokens != null ? String(suggestion.max_output_tokens) : "",
+      vision: suggestion.supports_vision ?? false,
+      reasoning: suggestion.supports_reasoning ?? false,
+      supportsToolCalling: suggestion.supports_function_calling ?? false,
       family: modelType === "embedding" ? "openai" : (providerType || "openai"),
-      dimensions: undefined,
-      maxInput: undefined,
+      dimensionsStr: suggestion.output_vector_size != null ? String(suggestion.output_vector_size) : "",
+      maxInputStr: "",
       hosting: providerDefaultHosting[providerType] ?? "swe"
     };
   }
@@ -282,8 +299,8 @@
     try {
       const result = await intric.modelProviders.getModelDefaults(currentModel.name.trim());
       if (result.found) {
-        if (result.max_input_tokens != null) currentModel.maxInputTokens = result.max_input_tokens;
-        if (result.max_output_tokens != null) currentModel.maxOutputTokens = result.max_output_tokens;
+        if (result.max_input_tokens != null) currentModel.maxInputTokensStr = String(result.max_input_tokens);
+        if (result.max_output_tokens != null) currentModel.maxOutputTokensStr = String(result.max_output_tokens);
         currentModel.vision = result.supports_vision ?? false;
         currentModel.reasoning = result.supports_reasoning ?? false;
         currentModel.supportsToolCalling = result.supports_function_calling ?? false;
@@ -300,7 +317,7 @@
 
   $: canAddModel = currentModel.name.trim() !== ""
     && currentModel.displayName.trim() !== ""
-    && (modelType !== "completion" || (currentModel.maxInputTokens != null && currentModel.maxInputTokens > 0 && currentModel.maxOutputTokens != null && currentModel.maxOutputTokens > 0));
+    && (modelType !== "completion" || (currentModel.maxInputTokensStr !== "" && parseInt(currentModel.maxInputTokensStr, 10) > 0 && currentModel.maxOutputTokensStr !== "" && parseInt(currentModel.maxOutputTokensStr, 10) > 0));
 
   function formatTokenLimit(limit: number): string {
     if (limit >= 1_000_000) return `${(limit / 1_000_000).toFixed(limit % 1_000_000 === 0 ? 0 : 1)}M`;
@@ -485,7 +502,7 @@
           <Input.Text
             id="max-input-tokens"
             type="number"
-            bind:value={currentModel.maxInputTokens}
+            bind:value={currentModel.maxInputTokensStr}
             placeholder={m.max_input_tokens()}
             min="1024"
             max="10000000"
@@ -501,7 +518,7 @@
           <Input.Text
             id="max-output-tokens"
             type="number"
-            bind:value={currentModel.maxOutputTokens}
+            bind:value={currentModel.maxOutputTokensStr}
             placeholder={m.max_output_tokens()}
             min="1"
             max="10000000"
@@ -578,7 +595,7 @@
           <Input.Text
             id="dimensions"
             type="number"
-            bind:value={currentModel.dimensions}
+            bind:value={currentModel.dimensionsStr}
             placeholder="1536"
           />
         </div>
@@ -588,7 +605,7 @@
           <Input.Text
             id="max-input"
             type="number"
-            bind:value={currentModel.maxInput}
+            bind:value={currentModel.maxInputStr}
             placeholder="8191"
           />
         </div>
@@ -615,7 +632,7 @@
       <div class="flex items-center gap-3">
         <Button
           type="submit"
-          variant="ghost"
+          variant="simple"
           class="gap-2 text-muted hover:text-primary focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
           disabled={!canAddModel}
         >
@@ -666,7 +683,7 @@
               {/if}
 
               <Button
-                variant="ghost"
+                variant="simple"
                 padding="icon"
                 on:click={() => testModel(index)}
                 disabled={vs.status === "testing" || !providerId}
@@ -677,7 +694,7 @@
               </Button>
 
               <Button
-                variant="ghost"
+                variant="simple"
                 padding="icon"
                 on:click={() => removeModel(index)}
                 class="text-muted hover:text-negative-default focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-negative-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
@@ -694,7 +711,7 @@
   <!-- Navigation -->
   <div class="flex items-center justify-between border-t border-dimmer pt-4">
     <div class="flex items-center gap-4">
-      <Button variant="ghost" on:click={handleBack} class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface">
+      <Button variant="simple" on:click={handleBack} class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface">
         <ArrowLeft class="h-4 w-4" />
         {m.back()}
       </Button>

@@ -17,7 +17,7 @@
     tenantFederationEnabled?: boolean;
   }
 
-  const { tenantFederationEnabled = false } = $props<Props>();
+  const { tenantFederationEnabled = false }: Props = $props();
 
   function handleSwitchOrganisation() {
     // Clear client-side tenant storage

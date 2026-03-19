@@ -83,7 +83,7 @@
       reasoning = model.reasoning;
     }
     if ("supports_tool_calling" in model) {
-      supportsToolCalling = model.supports_tool_calling;
+      supportsToolCalling = model.supports_tool_calling ?? false;
     }
     if ("family" in model) {
       family = model.family || "";

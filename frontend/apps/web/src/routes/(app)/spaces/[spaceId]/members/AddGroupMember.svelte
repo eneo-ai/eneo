@@ -14,7 +14,7 @@
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte.ts";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  import { IconGroup } from "@intric/icons/group";
+  import { IconPeople } from "@intric/icons/people";
 
   const {
     refreshCurrentSpace,
@@ -40,7 +40,7 @@
     )
   );
   let selectedRole = $state.raw(
-    $currentSpace.available_roles.find(r => r.value !== "owner") ?? $currentSpace.available_roles[0]
+    $currentSpace.available_roles[0]
   );
   const existingGroupIds = $derived($currentSpace.group_members?.items?.map((g) => g.id) ?? []);
   const intric = getIntric();
@@ -141,7 +141,7 @@
                     class:opacity-70={isMember}
                   >
                     <div class="flex w-full items-center gap-2 px-2 py-1">
-                      <IconGroup class="h-5 w-5 text-secondary" />
+                      <IconPeople class="h-5 w-5 text-secondary" />
                       <span class="text-primary truncate">
                         {group.name}
                       </span>
@@ -163,7 +163,6 @@
           fitViewport={true}
           class="w-1/3 p-4 pl-2"
           options={$currentSpace.available_roles
-            .filter(role => role.value !== "owner")
             .map((role) => {
               return { label: role.label, value: role };
             })}

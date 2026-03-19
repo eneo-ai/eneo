@@ -7,6 +7,7 @@
 <script lang="ts">
   import { Page } from "$lib/components/layout/index.js";
   import { setSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
+  // @ts-ignore - Svelte component default export
   import CompletionModelsTable from "./CompletionModelsTable.svelte";
   import EmbeddingModelsTable from "./EmbeddingModelsTable.svelte";
   import TranscriptionModelsTable from "./TranscriptionModelsTable.svelte";

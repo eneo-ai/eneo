@@ -196,7 +196,7 @@
           <!-- Approval actions -->
           {#if isPendingTool && toolCall.tool_call_id}
             <div class="flex items-center gap-2 border-t border-dimmer px-3 py-2.5">
-              <span class="mr-auto text-xs text-muted">{m.tool_waiting_approval?.({ tool: '', server: '' }) ?? 'Väntar på godkännande'}</span>
+              <span class="mr-auto text-xs text-muted">{'Väntar på godkännande'}</span>
               <button
                 type="button"
                 class="inline-flex items-center gap-1.5 rounded-md bg-positive-default px-3 py-1.5 text-xs font-medium text-on-fill shadow-sm transition-colors hover:bg-positive-stronger disabled:opacity-50"

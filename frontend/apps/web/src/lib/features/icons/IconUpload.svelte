@@ -96,7 +96,7 @@
       </Dialog.Section>
 
       <Dialog.Controls let:close>
-        <Button is={close} variant="secondary">{m.close?.() || "Close"}</Button>
+        <Button is={close} variant="outlined">{m.close?.() || "Close"}</Button>
         <Button variant="primary" on:click={downloadAvatar}>
           <IconDownload />
           {m.download?.() || "Download"}

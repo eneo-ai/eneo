@@ -21,7 +21,6 @@ export const load = async (event) => {
     name: server.name, // Use server.name instead of server.mcp_server_name
     description: server.description,
     http_url: server.http_url,
-    transport_type: server.transport_type,
     http_auth_type: server.http_auth_type,
     tags: server.tags,
     icon_url: server.icon_url,

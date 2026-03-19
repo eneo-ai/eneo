@@ -523,7 +523,7 @@
                 <button
                   type="button"
                   class="p-2 rounded bg-red-50 text-red-800 hover:bg-red-100 hover:border hover:border-red-300 transition-colors flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-900 focus-visible:ring-offset-2"
-                  onclick={() => copyToClipboard(oidcCorrelationId)}
+                  onclick={() => copyToClipboard(oidcCorrelationId!)}
                   aria-label={copied ? m.copied_to_clipboard() : m.copy_correlation_id()}>
                   {#if copied}
                     <!-- Check Icon (copied state) -->
@@ -640,7 +640,7 @@
                 loginFailed = true;
                 // Capture correlation ID from form action result
                 if (result.type === "failure" && result.data) {
-                  upLoginCorrelationId = result.data.correlationId || null;
+                  upLoginCorrelationId = (result.data.correlationId as string) || null;
                 }
               }
             };
@@ -669,7 +669,7 @@
                     <button
                       type="button"
                       class="p-1.5 rounded bg-red-100 hover:bg-red-200 transition-colors flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
-                      onclick={() => copyToClipboard(upLoginCorrelationId)}
+                      onclick={() => copyToClipboard(upLoginCorrelationId!)}
                       aria-label={copied ? m.copied_to_clipboard() : m.copy_correlation_id()}>
                       {#if copied}
                         <!-- Check Icon (copied state) -->
