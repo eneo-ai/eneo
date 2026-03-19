@@ -100,7 +100,8 @@ async def create_tenant_embedding_model(
         org=None,
         stability="stable",
         open_source=False,
-        description=f"Tenant model: {model_create.display_name}",
+        nickname=model_create.display_name,
+        description=None,
         hf_link=None,
         is_deprecated=False,
         max_batch_size=None,
@@ -152,7 +153,7 @@ async def update_tenant_embedding_model(
 
     # Update fields that were provided
     if model_update.display_name is not None:
-        model.description = f"Tenant model: {model_update.display_name}"
+        model.nickname = model_update.display_name
     if model_update.description is not None:
         model.description = model_update.description
     if model_update.family is not None:

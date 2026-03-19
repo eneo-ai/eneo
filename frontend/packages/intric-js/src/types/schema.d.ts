@@ -5502,6 +5502,8 @@ export interface components {
       id: string;
       /** Name */
       name: string;
+      /** Nickname */
+      nickname?: string | null;
       /** Family */
       family?: string | null;
       /** Is Deprecated */
@@ -5621,6 +5623,8 @@ export interface components {
       id: string;
       /** Name */
       name: string;
+      /** Nickname */
+      nickname?: string | null;
       /** Family */
       family?: string | null;
       /** Is Deprecated */

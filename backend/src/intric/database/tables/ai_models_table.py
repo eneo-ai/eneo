@@ -101,6 +101,7 @@ class TranscriptionModels(BasePublic):
 
 class EmbeddingModels(BasePublic):
     name: Mapped[str] = mapped_column()
+    nickname: Mapped[Optional[str]] = mapped_column()
     open_source: Mapped[bool] = mapped_column()
     dimensions: Mapped[Optional[int]] = mapped_column()
     max_input: Mapped[Optional[int]] = mapped_column()
