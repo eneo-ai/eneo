@@ -31,22 +31,21 @@ function getPublicOrigin(): string {
   const publicOrigin = (env as Record<string, string | undefined>).PUBLIC_ORIGIN;
   if (!publicOrigin) {
     throw new Error(
-      '[OIDC] PUBLIC_ORIGIN environment variable is required for OIDC authentication. ' +
-      'Set it to the externally-reachable URL for this application. ' +
-      'Example: PUBLIC_ORIGIN=https://eneo.sundsvall.se'
+      "[OIDC] PUBLIC_ORIGIN environment variable is required for OIDC authentication. " +
+        "Set it to the externally-reachable URL for this application. " +
+        "Example: PUBLIC_ORIGIN=https://eneo.sundsvall.se"
     );
   }
 
   // Validate format (basic check)
-  if (!publicOrigin.startsWith('https://')) {
+  if (!publicOrigin.startsWith("https://")) {
     throw new Error(
-      '[OIDC] PUBLIC_ORIGIN must be an https:// URL for security. ' +
-      `Got: ${publicOrigin}`
+      "[OIDC] PUBLIC_ORIGIN must be an https:// URL for security. " + `Got: ${publicOrigin}`
     );
   }
 
   // Remove trailing slash if present
-  return publicOrigin.replace(/\/$/, '');
+  return publicOrigin.replace(/\/$/, "");
 }
 
 export async function getMobilityguardLink(event: { url: URL; cookies: Cookies }) {

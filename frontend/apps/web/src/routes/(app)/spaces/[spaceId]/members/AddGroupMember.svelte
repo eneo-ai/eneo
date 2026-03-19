@@ -35,13 +35,9 @@
 
   let userGroups = $state<UserGroup[]>([]);
   let filteredGroups = $derived(
-    userGroups.filter((group) =>
-      group.name.toLowerCase().includes($inputValue.toLowerCase())
-    )
+    userGroups.filter((group) => group.name.toLowerCase().includes($inputValue.toLowerCase()))
   );
-  let selectedRole = $state.raw(
-    $currentSpace.available_roles[0]
-  );
+  let selectedRole = $state.raw($currentSpace.available_roles[0]);
   const existingGroupIds = $derived($currentSpace.group_members?.items?.map((g) => g.id) ?? []);
   const intric = getIntric();
   let inputElement: HTMLInputElement;
@@ -141,7 +137,7 @@
                     class:opacity-70={isMember}
                   >
                     <div class="flex w-full items-center gap-2 px-2 py-1">
-                      <IconPeople class="h-5 w-5 text-secondary" />
+                      <IconPeople class="text-secondary h-5 w-5" />
                       <span class="text-primary truncate">
                         {group.name}
                       </span>
@@ -162,10 +158,9 @@
         <Select.Simple
           fitViewport={true}
           class="w-1/3 p-4 pl-2"
-          options={$currentSpace.available_roles
-            .map((role) => {
-              return { label: role.label, value: role };
-            })}
+          options={$currentSpace.available_roles.map((role) => {
+            return { label: role.label, value: role };
+          })}
           bind:value={selectedRole}>{m.role()}</Select.Simple
         >
       </div>

@@ -9,10 +9,13 @@
   import { m } from "$lib/paraglide/messages";
   import { AlertTriangle } from "lucide-svelte";
   import type { Writable } from "svelte/store";
+  import type { components } from "@intric/intric-js";
+
+  type MCPServerSettings = components["schemas"]["MCPServerSettingsPublic"];
 
   type Props = {
     openController: Writable<boolean>;
-    mcpServer: any;
+    mcpServer: MCPServerSettings;
     onDelete: (id: string) => Promise<void>;
   };
 
@@ -28,9 +31,10 @@
     try {
       await onDelete(mcpServer.mcp_server_id);
       $openController = false;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error deleting MCP server:", error);
-      errorMessage = error?.message || error?.body?.message || "Failed to delete MCP server";
+      const err = error as { message?: string; body?: { message?: string } };
+      errorMessage = err?.message || err?.body?.message || "Failed to delete MCP server";
     } finally {
       isLoading = false;
     }
@@ -46,18 +50,18 @@
 
     <Dialog.Section>
       <div class="flex flex-col gap-4">
-        <div class="rounded-lg border border-warning-default bg-warning-default/15 px-4 py-3">
+        <div class="border-warning-default bg-warning-default/15 rounded-lg border px-4 py-3">
           <div class="flex items-start gap-3">
             <AlertTriangle class="text-warning-default shrink-0" size={20} />
             <div class="flex flex-col gap-1">
-              <div class="font-semibold text-default">{mcpServer.name}</div>
-              <div class="text-sm text-dimmer">{m.permanent_action()}</div>
+              <div class="text-default font-semibold">{mcpServer.name}</div>
+              <div class="text-dimmer text-sm">{m.permanent_action()}</div>
             </div>
           </div>
         </div>
 
         {#if errorMessage}
-          <div class="rounded-lg bg-negative-default/10 px-3 py-2 text-sm text-negative-default">
+          <div class="bg-negative-default/10 text-negative-default rounded-lg px-3 py-2 text-sm">
             {errorMessage}
           </div>
         {/if}

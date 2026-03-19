@@ -32,8 +32,8 @@ export const GET: RequestHandler = async (event) => {
     const response = await event.fetch(backendUrl.toString(), {
       method: "GET",
       headers: {
-        Authorization: `Bearer ${id_token}`,
-      },
+        Authorization: `Bearer ${id_token}`
+      }
     });
 
     if (!response.ok) {
@@ -48,8 +48,8 @@ export const GET: RequestHandler = async (event) => {
       status: 200,
       headers: {
         "Content-Type": "text/csv;charset=utf-8",
-        "Content-Disposition": `attachment; filename=tenant_audit_logs_${new Date().toISOString()}.csv`,
-      },
+        "Content-Disposition": `attachment; filename=tenant_audit_logs_${new Date().toISOString()}.csv`
+      }
     });
   } catch (err) {
     console.error("CSV export failed:", err);

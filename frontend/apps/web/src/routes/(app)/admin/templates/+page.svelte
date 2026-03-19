@@ -38,11 +38,7 @@
   <Page.Header>
     <Page.Title title={m.templates()}></Page.Title>
 
-    <Button
-      variant="primary"
-      padding="icon-leading"
-      onclick={handleCreateTemplate}
-    >
+    <Button variant="primary" padding="icon-leading" onclick={handleCreateTemplate}>
       <LayoutTemplate size={16} />
       {m.create_template()}
     </Button>
@@ -57,15 +53,15 @@
     <Page.Tab id="assistant_templates">
       {#if data.assistantTemplates.length === 0}
         <div class="flex flex-col items-center justify-center gap-4 py-24">
-          <div class="rounded-full bg-accent-dimmer p-6">
+          <div class="bg-accent-dimmer rounded-full p-6">
             <LayoutTemplate size={48} class="text-accent-default" />
           </div>
 
           <div class="flex flex-col items-center gap-2 text-center">
-            <h3 class="text-lg font-semibold text-default">
+            <h3 class="text-default text-lg font-semibold">
               {m.no_templates_yet()}
             </h3>
-            <p class="max-w-md text-sm text-dimmer">
+            <p class="text-dimmer max-w-md text-sm">
               {m.templates_empty_state_description()}
             </p>
           </div>
@@ -86,15 +82,15 @@
     <Page.Tab id="app_templates">
       {#if data.appTemplates.length === 0}
         <div class="flex flex-col items-center justify-center gap-4 py-24">
-          <div class="rounded-full bg-accent-dimmer p-6">
+          <div class="bg-accent-dimmer rounded-full p-6">
             <LayoutTemplate size={48} class="text-accent-default" />
           </div>
 
           <div class="flex flex-col items-center gap-2 text-center">
-            <h3 class="text-lg font-semibold text-default">
+            <h3 class="text-default text-lg font-semibold">
               {m.no_templates_yet()}
             </h3>
-            <p class="max-w-md text-sm text-dimmer">
+            <p class="text-dimmer max-w-md text-sm">
               {m.templates_empty_state_description()}
             </p>
           </div>
@@ -115,15 +111,15 @@
     <Page.Tab id="deleted_templates">
       {#if data.deletedTemplates.length === 0}
         <div class="flex flex-col items-center justify-center gap-4 py-24">
-          <div class="rounded-full bg-accent-dimmer p-6">
+          <div class="bg-accent-dimmer rounded-full p-6">
             <LayoutTemplate size={48} class="text-accent-default" />
           </div>
 
           <div class="flex flex-col items-center gap-2 text-center">
-            <h3 class="text-lg font-semibold text-default">
+            <h3 class="text-default text-lg font-semibold">
               {m.no_templates_yet()}
             </h3>
-            <p class="max-w-md text-sm text-dimmer">
+            <p class="text-dimmer max-w-md text-sm">
               {m.templates_empty_state_description()}
             </p>
           </div>

@@ -4,7 +4,18 @@
   import { Button, Input } from "@intric/ui";
   import { createEventDispatcher, onMount } from "svelte";
   import { m } from "$lib/paraglide/messages";
-  import { ArrowLeft, Plus, Trash2, Sparkles, Check, ListPlus, TriangleAlert, Search, Loader2, CircleCheck, CircleX, Zap } from "lucide-svelte";
+  import {
+    ArrowLeft,
+    Trash2,
+    Sparkles,
+    ListPlus,
+    TriangleAlert,
+    Search,
+    Loader2,
+    CircleCheck,
+    CircleX,
+    Zap
+  } from "lucide-svelte";
   import HelpTooltip from "../components/HelpTooltip.svelte";
   import { getIntric } from "$lib/core/Intric";
   import { toast } from "$lib/components/toast";
@@ -47,7 +58,7 @@
     zhipuai: "chn",
     moonshot: "chn",
     baidu: "chn",
-    volcengine: "chn",
+    volcengine: "chn"
   };
 
   // Auto-focus first input on mount
@@ -84,7 +95,7 @@
   const modeMap: Record<string, string> = {
     completion: "completion",
     embedding: "embedding",
-    transcription: "transcription",
+    transcription: "transcription"
   };
 
   // Model info from capabilities API
@@ -99,7 +110,10 @@
   }
 
   // Extract provider map from capabilities for model lookups
-  $: capabilityProviders = (capabilities?.providers ?? {}) as Record<string, { modes: string[], models: Record<string, ModelInfo[]> }>;
+  $: capabilityProviders = (capabilities?.providers ?? {}) as Record<
+    string,
+    { modes: string[]; models: Record<string, ModelInfo[]> }
+  >;
 
   function formatTokens(limit: number): string {
     if (limit >= 1_000_000 || (limit >= 1_000 && Math.round(limit / 1_000) >= 1_000)) {
@@ -124,8 +138,15 @@
     if (!providerId || liveModelsLoaded) return;
     liveModelsError = "";
     try {
-      const result = await intric.modelProviders.listModels({ id: providerId }) as unknown as Record<string, unknown>[];
-      if (result && Array.isArray(result) && result.length > 0 && (result[0] as Record<string, unknown>)?.error) {
+      const result = (await intric.modelProviders.listModels({
+        id: providerId
+      })) as unknown as Record<string, unknown>[];
+      if (
+        result &&
+        Array.isArray(result) &&
+        result.length > 0 &&
+        (result[0] as Record<string, unknown>)?.error
+      ) {
         liveModelsError = (result[0] as Record<string, unknown>).error as string;
       } else if (result && Array.isArray(result)) {
         liveModels = result.map((item: Record<string, unknown>) => ({
@@ -133,7 +154,7 @@
           max_input_tokens: undefined,
           max_output_tokens: undefined,
           supports_vision: false,
-          supports_reasoning: false,
+          supports_reasoning: false
         }));
       }
     } catch {
@@ -148,41 +169,46 @@
     ? []
     : liveListProviders.has(providerType)
       ? liveModels
-      : (capabilityProviders[providerType]?.models?.[modeMap[modelType]] ?? []) as ModelInfo[];
+      : ((capabilityProviders[providerType]?.models?.[modeMap[modelType]] ?? []) as ModelInfo[]);
 
   // Top 4 as quick suggestions (leaving room for "Browse all" chip)
   $: suggestions = allModels.slice(0, 4);
 
   // Self-hosted providers have no static model list — LiteLLM can't provide defaults
-  $: isSelfHostedProvider = providerType !== ""
-    && providerType in capabilityProviders
-    && Object.keys(capabilityProviders[providerType]?.models ?? {}).length === 0;
+  $: isSelfHostedProvider =
+    providerType !== "" &&
+    providerType in capabilityProviders &&
+    Object.keys(capabilityProviders[providerType]?.models ?? {}).length === 0;
 
   // Check if provider is known in LiteLLM but doesn't support this model type.
   // Unknown providers (e.g. vLLM, self-hosted) are not flagged — they can host any model type.
-  $: providerHasNoSupport = providerType !== ""
-    && Object.keys(capabilityProviders).length > 0
-    && providerType in capabilityProviders
-    && !capabilityProviders[providerType]?.modes?.includes(modeMap[modelType]);
+  $: providerHasNoSupport =
+    providerType !== "" &&
+    Object.keys(capabilityProviders).length > 0 &&
+    providerType in capabilityProviders &&
+    !capabilityProviders[providerType]?.modes?.includes(modeMap[modelType]);
 
   // Browse all models
   let showAllModels = false;
   let modelSearch = "";
   $: filteredModels = modelSearch
-    ? allModels.filter(m => m.name.toLowerCase().includes(modelSearch.toLowerCase()))
+    ? allModels.filter((m) => m.name.toLowerCase().includes(modelSearch.toLowerCase()))
     : allModels;
 
   function selectModelInfo(info: ModelInfo) {
     currentModel.name = info.name;
     currentModel.displayName = info.name;
     if (modelType === "completion") {
-      currentModel.maxInputTokensStr = info.max_input_tokens != null ? String(info.max_input_tokens) : "";
-      currentModel.maxOutputTokensStr = info.max_output_tokens != null ? String(info.max_output_tokens) : "";
+      currentModel.maxInputTokensStr =
+        info.max_input_tokens != null ? String(info.max_input_tokens) : "";
+      currentModel.maxOutputTokensStr =
+        info.max_output_tokens != null ? String(info.max_output_tokens) : "";
       currentModel.vision = info.supports_vision ?? false;
       currentModel.reasoning = info.supports_reasoning ?? false;
       currentModel.supportsToolCalling = info.supports_function_calling ?? false;
     } else if (modelType === "embedding") {
-      currentModel.dimensionsStr = info.output_vector_size != null ? String(info.output_vector_size) : "";
+      currentModel.dimensionsStr =
+        info.output_vector_size != null ? String(info.output_vector_size) : "";
       currentModel.maxInputStr = info.max_input_tokens != null ? String(info.max_input_tokens) : "";
     }
   }
@@ -199,7 +225,7 @@
       vision: false,
       reasoning: false,
       supportsToolCalling: false,
-      family: modelType === "embedding" ? "openai" : (providerType || "openai"),
+      family: modelType === "embedding" ? "openai" : providerType || "openai",
       dimensionsStr: "",
       maxInputStr: "",
       hosting: providerDefaultHosting[providerType] ?? "swe"
@@ -209,24 +235,33 @@
   function addModel() {
     if (!currentModel.name.trim() || !currentModel.displayName.trim()) return;
 
-    const maxInputTokens = currentModel.maxInputTokensStr ? parseInt(currentModel.maxInputTokensStr, 10) : undefined;
-    const maxOutputTokens = currentModel.maxOutputTokensStr ? parseInt(currentModel.maxOutputTokensStr, 10) : undefined;
-    const dimensions = currentModel.dimensionsStr ? parseInt(currentModel.dimensionsStr, 10) : undefined;
+    const maxInputTokens = currentModel.maxInputTokensStr
+      ? parseInt(currentModel.maxInputTokensStr, 10)
+      : undefined;
+    const maxOutputTokens = currentModel.maxOutputTokensStr
+      ? parseInt(currentModel.maxOutputTokensStr, 10)
+      : undefined;
+    const dimensions = currentModel.dimensionsStr
+      ? parseInt(currentModel.dimensionsStr, 10)
+      : undefined;
     const maxInput = currentModel.maxInputStr ? parseInt(currentModel.maxInputStr, 10) : undefined;
 
-    models = [...models, {
-      name: currentModel.name,
-      displayName: currentModel.displayName,
-      maxInputTokens,
-      maxOutputTokens,
-      vision: currentModel.vision,
-      reasoning: currentModel.reasoning,
-      supportsToolCalling: currentModel.supportsToolCalling,
-      family: currentModel.family,
-      dimensions,
-      maxInput,
-      hosting: currentModel.hosting
-    }];
+    models = [
+      ...models,
+      {
+        name: currentModel.name,
+        displayName: currentModel.displayName,
+        maxInputTokens,
+        maxOutputTokens,
+        vision: currentModel.vision,
+        reasoning: currentModel.reasoning,
+        supportsToolCalling: currentModel.supportsToolCalling,
+        family: currentModel.family,
+        dimensions,
+        maxInput,
+        hosting: currentModel.hosting
+      }
+    ];
     currentModel = createEmptyModel();
   }
 
@@ -250,7 +285,10 @@
       if (result.success) {
         validationStates[index] = { status: "success", message: m.model_test_success() };
       } else {
-        validationStates[index] = { status: "error", message: result.error || m.model_test_failed() };
+        validationStates[index] = {
+          status: "error",
+          message: result.error || m.model_test_failed()
+        };
       }
     } catch {
       validationStates[index] = { status: "error", message: m.model_test_connection_error() };
@@ -270,22 +308,6 @@
     validationStates = newStates;
   }
 
-  function useSuggestion(suggestion: ModelInfo) {
-    currentModel = {
-      name: suggestion.name,
-      displayName: suggestion.name,
-      maxInputTokensStr: suggestion.max_input_tokens != null ? String(suggestion.max_input_tokens) : "",
-      maxOutputTokensStr: suggestion.max_output_tokens != null ? String(suggestion.max_output_tokens) : "",
-      vision: suggestion.supports_vision ?? false,
-      reasoning: suggestion.supports_reasoning ?? false,
-      supportsToolCalling: suggestion.supports_function_calling ?? false,
-      family: modelType === "embedding" ? "openai" : (providerType || "openai"),
-      dimensionsStr: suggestion.output_vector_size != null ? String(suggestion.output_vector_size) : "",
-      maxInputStr: "",
-      hosting: providerDefaultHosting[providerType] ?? "swe"
-    };
-  }
-
   function handleSkip() {
     dispatch("complete", { skip: true });
   }
@@ -301,8 +323,10 @@
     try {
       const result = await intric.modelProviders.getModelDefaults(currentModel.name.trim());
       if (result.found) {
-        if (result.max_input_tokens != null) currentModel.maxInputTokensStr = String(result.max_input_tokens);
-        if (result.max_output_tokens != null) currentModel.maxOutputTokensStr = String(result.max_output_tokens);
+        if (result.max_input_tokens != null)
+          currentModel.maxInputTokensStr = String(result.max_input_tokens);
+        if (result.max_output_tokens != null)
+          currentModel.maxOutputTokensStr = String(result.max_output_tokens);
         currentModel.vision = result.supports_vision ?? false;
         currentModel.reasoning = result.supports_reasoning ?? false;
         currentModel.supportsToolCalling = result.supports_function_calling ?? false;
@@ -317,15 +341,14 @@
     }
   }
 
-  $: canAddModel = currentModel.name.trim() !== ""
-    && currentModel.displayName.trim() !== ""
-    && (modelType !== "completion" || (currentModel.maxInputTokensStr !== "" && parseInt(currentModel.maxInputTokensStr, 10) > 0 && currentModel.maxOutputTokensStr !== "" && parseInt(currentModel.maxOutputTokensStr, 10) > 0));
-
-  function formatTokenLimit(limit: number): string {
-    if (limit >= 1_000_000) return `${(limit / 1_000_000).toFixed(limit % 1_000_000 === 0 ? 0 : 1)}M`;
-    if (limit >= 1_000) return `${Math.round(limit / 1_000)}K`;
-    return limit.toString();
-  }
+  $: canAddModel =
+    currentModel.name.trim() !== "" &&
+    currentModel.displayName.trim() !== "" &&
+    (modelType !== "completion" ||
+      (currentModel.maxInputTokensStr !== "" &&
+        parseInt(currentModel.maxInputTokensStr, 10) > 0 &&
+        currentModel.maxOutputTokensStr !== "" &&
+        parseInt(currentModel.maxOutputTokensStr, 10) > 0));
 
   // Export for parent to bind and track
   export let canFinish = false;
@@ -343,16 +366,20 @@
 <div class="flex flex-col gap-6">
   <!-- Header -->
   <div>
-    <h3 class="font-medium text-primary">{m.add_models()}</h3>
-    <p class="text-sm text-muted">{m.add_models_description()}</p>
+    <h3 class="text-primary font-medium">{m.add_models()}</h3>
+    <p class="text-muted text-sm">{m.add_models_description()}</p>
   </div>
 
   <!-- Warning when provider doesn't support this model type -->
   {#if providerHasNoSupport}
-    <div class="flex items-start gap-3 rounded-lg border border-label-default bg-label-dimmer px-4 py-3 text-sm label-warning">
-      <TriangleAlert class="h-5 w-5 flex-shrink-0 text-label-stronger mt-0.5" />
+    <div
+      class="border-label-default bg-label-dimmer label-warning flex items-start gap-3 rounded-lg border px-4 py-3 text-sm"
+    >
+      <TriangleAlert class="text-label-stronger mt-0.5 h-5 w-5 flex-shrink-0" />
       <div>
-        <p class="font-medium text-label-stronger">{m.provider_no_support_title({ providerType, modelType })}</p>
+        <p class="text-label-stronger font-medium">
+          {m.provider_no_support_title({ providerType, modelType })}
+        </p>
         <p class="text-label-default mt-0.5">{m.provider_no_support_description()}</p>
       </div>
     </div>
@@ -360,7 +387,7 @@
 
   <!-- Error fetching live models -->
   {#if liveModelsError}
-    <div class="rounded-lg border border-dimmer bg-surface-dimmer px-4 py-3 text-sm text-muted">
+    <div class="border-dimmer bg-surface-dimmer text-muted rounded-lg border px-4 py-3 text-sm">
       <p>{liveModelsError}</p>
       <p class="mt-1">{m.enter_model_manually()}</p>
     </div>
@@ -369,20 +396,20 @@
   <!-- Suggestions (if available) -->
   {#if suggestions.length > 0}
     <div class="flex flex-col gap-3">
-      <div class="flex items-center gap-2 text-sm text-muted">
+      <div class="text-muted flex items-center gap-2 text-sm">
         <Sparkles class="h-4 w-4" />
         <span>{m.suggested_models()}</span>
       </div>
 
       <div class="flex flex-wrap gap-2">
-        {#each suggestions as suggestion}
+        {#each suggestions as suggestion (suggestion.name)}
           <button
             type="button"
             class="rounded-full border px-3 py-1.5 text-sm transition-all duration-150
               {currentModel.name === suggestion.name
-                ? 'border-accent-default bg-accent-dimmer text-accent-stronger'
-                : 'border-dimmer hover:border-accent-default hover:bg-accent-dimmer'}
-              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default/60 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
+              ? 'border-accent-default bg-accent-dimmer text-accent-stronger'
+              : 'border-dimmer hover:border-accent-default hover:bg-accent-dimmer'}
+              focus-visible:ring-accent-default/60 focus-visible:ring-offset-surface focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
             on:click={() => selectModelInfo(suggestion)}
           >
             {suggestion.name}
@@ -391,11 +418,14 @@
         {#if allModels.length > 4}
           <button
             type="button"
-            class="rounded-full border border-dimmer px-3 py-1.5 text-sm transition-all duration-150
-              hover:border-accent-default hover:bg-accent-dimmer
-              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default/60 focus-visible:ring-offset-1 focus-visible:ring-offset-surface
-              flex items-center gap-1.5"
-            on:click={() => { showAllModels = !showAllModels; modelSearch = ""; }}
+            class="border-dimmer hover:border-accent-default hover:bg-accent-dimmer focus-visible:ring-accent-default/60 focus-visible:ring-offset-surface flex items-center gap-1.5
+              rounded-full border
+              px-3 py-1.5 text-sm transition-all duration-150
+              focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
+            on:click={() => {
+              showAllModels = !showAllModels;
+              modelSearch = "";
+            }}
           >
             <Search class="h-3.5 w-3.5" />
             {showAllModels ? m.close() : m.browse_all()}
@@ -404,27 +434,30 @@
       </div>
 
       {#if showAllModels}
-        <div class="rounded-lg border border-dimmer bg-surface-dimmer p-3 flex flex-col gap-2">
+        <div class="border-dimmer bg-surface-dimmer flex flex-col gap-2 rounded-lg border p-3">
           <input
             type="text"
             bind:value={modelSearch}
             placeholder={m.search_models()}
-            class="w-full rounded-md border border-dimmer bg-surface px-3 py-2 text-sm text-primary
-              placeholder:text-muted focus:border-accent-default focus:outline-none focus:ring-1 focus:ring-accent-default"
+            class="border-dimmer bg-surface text-primary placeholder:text-muted focus:border-accent-default focus:ring-accent-default w-full rounded-md border
+              px-3 py-2 text-sm focus:ring-1 focus:outline-none"
           />
-          <div class="max-h-48 overflow-y-auto flex flex-col gap-1">
-            {#each filteredModels as model}
+          <div class="flex max-h-48 flex-col gap-1 overflow-y-auto">
+            {#each filteredModels as model (model.name)}
               <button
                 type="button"
-                class="w-full text-left rounded-md px-3 py-2 text-sm transition-all duration-100
+                class="w-full rounded-md px-3 py-2 text-left text-sm transition-all duration-100
                   {currentModel.name === model.name
-                    ? 'bg-accent-dimmer text-accent-stronger'
-                    : 'text-primary hover:bg-hover'}
-                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default/60"
-                on:click={() => { selectModelInfo(model); showAllModels = false; }}
+                  ? 'bg-accent-dimmer text-accent-stronger'
+                  : 'text-primary hover:bg-hover'}
+                  focus-visible:ring-accent-default/60 focus-visible:ring-2 focus-visible:outline-none"
+                on:click={() => {
+                  selectModelInfo(model);
+                  showAllModels = false;
+                }}
               >
                 <span class="font-medium">{model.name}</span>
-                <span class="flex gap-3 text-xs text-muted mt-0.5">
+                <span class="text-muted mt-0.5 flex gap-3 text-xs">
                   {#if model.max_input_tokens}
                     <span>{formatTokens(model.max_input_tokens)} context</span>
                   {/if}
@@ -441,7 +474,7 @@
               </button>
             {/each}
             {#if filteredModels.length === 0}
-              <p class="text-sm text-muted px-3 py-2">{m.no_models_found()}</p>
+              <p class="text-muted px-3 py-2 text-sm">{m.no_models_found()}</p>
             {/if}
           </div>
         </div>
@@ -451,10 +484,10 @@
 
   <!-- Model Form -->
   <form on:submit|preventDefault={addModel} class="flex flex-col gap-4">
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <!-- Model Identifier -->
       <div class="flex flex-col gap-2">
-        <label for="model-name" class="text-sm font-medium flex items-center gap-1.5">
+        <label for="model-name" class="flex items-center gap-1.5 text-sm font-medium">
           {m.model_identifier()}
           <HelpTooltip text={m.model_identifier_help()} />
         </label>
@@ -470,12 +503,12 @@
         {#if modelType === "completion" && currentModel.name.trim() && !isSelfHostedProvider}
           <button
             type="button"
-            class="text-xs text-accent-default hover:text-accent-stronger transition-colors underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 self-start"
+            class="text-accent-default hover:text-accent-stronger flex items-center gap-1 self-start text-xs underline underline-offset-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             disabled={isLookingUpDefaults}
             on:click={lookupDefaults}
           >
             {#if isLookingUpDefaults}
-              <Loader2 class="w-3 h-3 animate-spin" />
+              <Loader2 class="h-3 w-3 animate-spin" />
             {/if}
             {m.lookup_defaults()}
           </button>
@@ -495,9 +528,9 @@
 
     <!-- Completion-specific fields -->
     {#if modelType === "completion"}
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div class="flex flex-col gap-2">
-          <label for="max-input-tokens" class="text-sm font-medium flex items-center gap-1.5">
+          <label for="max-input-tokens" class="flex items-center gap-1.5 text-sm font-medium">
             {m.max_input_tokens()}
             <HelpTooltip text={m.max_input_tokens_help()} />
           </label>
@@ -509,11 +542,11 @@
             min="1024"
             max="10000000"
           />
-          <p class="text-xs text-muted">{m.token_reference_input()}</p>
+          <p class="text-muted text-xs">{m.token_reference_input()}</p>
         </div>
 
         <div class="flex flex-col gap-2">
-          <label for="max-output-tokens" class="text-sm font-medium flex items-center gap-1.5">
+          <label for="max-output-tokens" class="flex items-center gap-1.5 text-sm font-medium">
             {m.max_output_tokens()}
             <HelpTooltip text={m.max_output_tokens_help()} />
           </label>
@@ -525,17 +558,17 @@
             min="1"
             max="10000000"
           />
-          <p class="text-xs text-muted">{m.token_reference_output()}</p>
+          <p class="text-muted text-xs">{m.token_reference_output()}</p>
         </div>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div class="flex items-center gap-6 col-span-3">
-          <label class="flex items-center gap-2 text-sm cursor-pointer">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div class="col-span-3 flex items-center gap-6">
+          <label class="flex cursor-pointer items-center gap-2 text-sm">
             <input
               type="checkbox"
               bind:checked={currentModel.vision}
-              class="rounded accent-accent-default h-4 w-4"
+              class="accent-accent-default h-4 w-4 rounded"
             />
             <span class="flex items-center gap-1">
               {m.vision_support()}
@@ -543,11 +576,11 @@
             </span>
           </label>
 
-          <label class="flex items-center gap-2 text-sm cursor-pointer">
+          <label class="flex cursor-pointer items-center gap-2 text-sm">
             <input
               type="checkbox"
               bind:checked={currentModel.reasoning}
-              class="rounded accent-accent-default h-4 w-4"
+              class="accent-accent-default h-4 w-4 rounded"
             />
             <span class="flex items-center gap-1">
               {m.reasoning_support()}
@@ -555,11 +588,11 @@
             </span>
           </label>
 
-          <label class="flex items-center gap-2 text-sm cursor-pointer">
+          <label class="flex cursor-pointer items-center gap-2 text-sm">
             <input
               type="checkbox"
               bind:checked={currentModel.supportsToolCalling}
-              class="rounded accent-accent-default h-4 w-4"
+              class="accent-accent-default h-4 w-4 rounded"
             />
             <span class="flex items-center gap-1">
               {m.tool_calling_support()}
@@ -572,17 +605,17 @@
 
     <!-- Embedding-specific fields -->
     {#if modelType === "embedding"}
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div class="flex flex-col gap-2">
-          <label for="model-family" class="text-sm font-medium flex items-center gap-1.5">
+          <label for="model-family" class="flex items-center gap-1.5 text-sm font-medium">
             {m.model_family()}
             <HelpTooltip text={m.model_family_help()} />
           </label>
           <select
             id="model-family"
             bind:value={currentModel.family}
-            class="h-10 rounded-md border border-dimmer bg-surface px-3 text-sm text-primary
-              focus:border-accent-default focus:outline-none focus:ring-1 focus:ring-accent-default"
+            class="border-dimmer bg-surface text-primary focus:border-accent-default focus:ring-accent-default h-10 rounded-md border
+              px-3 text-sm focus:ring-1 focus:outline-none"
           >
             <option value="openai">OpenAI (Standard)</option>
             <option value="e5">E5 (HuggingFace)</option>
@@ -590,7 +623,7 @@
         </div>
 
         <div class="flex flex-col gap-2">
-          <label for="dimensions" class="text-sm font-medium flex items-center gap-1.5">
+          <label for="dimensions" class="flex items-center gap-1.5 text-sm font-medium">
             {m.dimensions()}
             <HelpTooltip text={m.dimensions_help()} />
           </label>
@@ -620,29 +653,29 @@
       <select
         id="hosting"
         bind:value={currentModel.hosting}
-        class="h-10 rounded-md border border-dimmer bg-surface px-3 text-sm text-primary
-          focus:border-accent-default focus:outline-none focus:ring-1 focus:ring-accent-default"
+        class="border-dimmer bg-surface text-primary focus:border-accent-default focus:ring-accent-default h-10 rounded-md border
+          px-3 text-sm focus:ring-1 focus:outline-none"
       >
-        {#each hostingOptions as option}
+        {#each hostingOptions as option (option.value)}
           <option value={option.value}>{option.label}</option>
         {/each}
       </select>
     </div>
 
     <!-- Action Buttons -->
-    <div class="border-t border-dimmer/40 pt-4 mt-2">
+    <div class="border-dimmer/40 mt-2 border-t pt-4">
       <div class="flex items-center gap-3">
         <Button
           type="submit"
           variant="simple"
-          class="gap-2 text-muted hover:text-primary focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
+          class="text-muted hover:text-primary focus-visible:ring-accent-default/70 focus-visible:ring-offset-surface gap-2 focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:!outline-none"
           disabled={!canAddModel}
         >
           <ListPlus class="h-4 w-4" />
           {m.add_another_model()}
         </Button>
         {#if canAddModel && models.length === 0}
-          <span class="text-xs text-muted">
+          <span class="text-muted text-xs">
             {m.or_click_finish_directly()}
           </span>
         {/if}
@@ -653,33 +686,37 @@
   <!-- Added Models List -->
   {#if models.length > 0}
     <div class="flex flex-col gap-2">
-      <h4 class="text-sm font-medium text-muted">
-        {models.length === 1 ? m.models_to_add_one({ count: models.length }) : m.models_to_add_other({ count: models.length })}
+      <h4 class="text-muted text-sm font-medium">
+        {models.length === 1
+          ? m.models_to_add_one({ count: models.length })
+          : m.models_to_add_other({ count: models.length })}
       </h4>
 
       <div class="flex flex-col gap-2">
-        {#each models as model, index}
+        {#each models as model, index (index)}
           {@const vs = validationStates[index] ?? { status: "idle" }}
-          <div class="flex items-center justify-between rounded-lg border border-dimmer bg-surface p-3">
-            <div class="flex flex-col min-w-0 flex-1">
-              <span class="font-medium text-primary">{model.displayName}</span>
-              <span class="text-sm text-muted">{model.name}</span>
+          <div
+            class="border-dimmer bg-surface flex items-center justify-between rounded-lg border p-3"
+          >
+            <div class="flex min-w-0 flex-1 flex-col">
+              <span class="text-primary font-medium">{model.displayName}</span>
+              <span class="text-muted text-sm">{model.name}</span>
               {#if vs.status === "error" && vs.message}
-                <span class="text-xs text-negative-default mt-1">{vs.message}</span>
+                <span class="text-negative-default mt-1 text-xs">{vs.message}</span>
               {/if}
             </div>
 
-            <div class="flex items-center gap-1 flex-shrink-0 ml-2">
+            <div class="ml-2 flex flex-shrink-0 items-center gap-1">
               {#if vs.status === "testing"}
-                <div class="p-2 text-muted">
+                <div class="text-muted p-2">
                   <Loader2 class="h-4 w-4 animate-spin" />
                 </div>
               {:else if vs.status === "success"}
-                <div class="p-2 text-positive-default" title={vs.message}>
+                <div class="text-positive-default p-2" title={vs.message}>
                   <CircleCheck class="h-4 w-4" />
                 </div>
               {:else if vs.status === "error"}
-                <div class="p-2 text-negative-default" title={vs.message}>
+                <div class="text-negative-default p-2" title={vs.message}>
                   <CircleX class="h-4 w-4" />
                 </div>
               {/if}
@@ -689,7 +726,7 @@
                 padding="icon"
                 on:click={() => testModel(index)}
                 disabled={vs.status === "testing" || !providerId}
-                class="text-muted hover:text-accent-default focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
+                class="text-muted hover:text-accent-default focus-visible:ring-accent-default/70 focus-visible:ring-offset-surface focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:!outline-none"
                 title={m.test_model()}
               >
                 <Zap class="h-4 w-4" />
@@ -699,7 +736,7 @@
                 variant="simple"
                 padding="icon"
                 on:click={() => removeModel(index)}
-                class="text-muted hover:text-negative-default focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-negative-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
+                class="text-muted hover:text-negative-default focus-visible:ring-negative-default/70 focus-visible:ring-offset-surface focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:!outline-none"
               >
                 <Trash2 class="h-4 w-4" />
               </Button>
@@ -711,28 +748,34 @@
   {/if}
 
   <!-- Navigation -->
-  <div class="flex items-center justify-between border-t border-dimmer pt-4">
+  <div class="border-dimmer flex items-center justify-between border-t pt-4">
     <div class="flex items-center gap-4">
-      <Button variant="simple" on:click={handleBack} class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface">
+      <Button
+        variant="simple"
+        on:click={handleBack}
+        class="focus-visible:ring-accent-default/70 focus-visible:ring-offset-surface gap-2 focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:!outline-none"
+      >
         <ArrowLeft class="h-4 w-4" />
         {m.back()}
       </Button>
 
-      <span class="text-sm text-muted/70">
+      <span class="text-muted/70 text-sm">
         {#if models.length === 0 && !canAddModel}
           {m.add_at_least_one_model()}
         {:else if models.length === 0 && canAddModel}
           <span class="text-positive-default">{m.model_ready_to_add()}</span>
         {:else}
-          {models.length === 1 ? m.models_ready_one({ count: models.length }) : m.models_ready_other({ count: models.length })}
+          {models.length === 1
+            ? m.models_ready_one({ count: models.length })
+            : m.models_ready_other({ count: models.length })}
         {/if}
       </span>
     </div>
 
     <button
       type="button"
-      class="text-sm text-muted hover:text-primary transition-colors duration-150 underline decoration-muted/50 underline-offset-2 rounded-sm
-        focus-visible:outline-none focus-visible:text-primary focus-visible:ring-2 focus-visible:ring-accent-default/60 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
+      class="text-muted hover:text-primary decoration-muted/50 focus-visible:text-primary focus-visible:ring-accent-default/60 focus-visible:ring-offset-surface rounded-sm text-sm underline
+        underline-offset-2 transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
       on:click={handleSkip}
     >
       {m.skip_for_now()}

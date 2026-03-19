@@ -1,4 +1,4 @@
-import { error, redirect } from "@sveltejs/kit";
+import { error } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
 
 /**
@@ -22,8 +22,8 @@ export const GET: RequestHandler = async (event) => {
     const response = await event.fetch(backendUrl.toString(), {
       method: "GET",
       headers: {
-        Authorization: `Bearer ${id_token}`,
-      },
+        Authorization: `Bearer ${id_token}`
+      }
     });
 
     if (!response.ok) {
@@ -43,8 +43,8 @@ export const GET: RequestHandler = async (event) => {
       status: 200,
       headers: {
         "Content-Type": contentType,
-        ...(contentDisposition && { "Content-Disposition": contentDisposition }),
-      },
+        ...(contentDisposition && { "Content-Disposition": contentDisposition })
+      }
     });
   } catch (err) {
     console.error("Export download failed:", err);

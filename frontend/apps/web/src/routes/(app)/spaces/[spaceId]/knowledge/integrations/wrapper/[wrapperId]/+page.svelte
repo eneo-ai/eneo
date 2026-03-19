@@ -92,7 +92,9 @@
       header: m.link(),
       cell: (item) => {
         const labelKey = integrationData[item.value.integration_type].previewLinkLabel;
-        const translatedLabel = (m as Record<string, ((...args: unknown[]) => string) | undefined>)[labelKey]?.() ?? labelKey;
+        const translatedLabel =
+          (m as Record<string, ((...args: unknown[]) => string) | undefined>)[labelKey]?.() ??
+          labelKey;
         return createRender(Table.ButtonCell, {
           link: item.value.url ?? "",
           label: translatedLabel,

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { SvelteHTMLElements } from "svelte/elements";
   import { m } from "$lib/paraglide/messages";
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- $$Props is a Svelte compiler convention for typing $$restProps
   type $$Props = SvelteHTMLElements["div"];
 </script>
 

@@ -206,8 +206,10 @@
   });
 
   function getUsageIntensity(tokens: number) {
-    if (tokens > thresholds.high) return { label: m.usage_level_high(), class: "bg-secondary text-error" };
-    if (tokens > thresholds.medium) return { label: m.usage_level_medium(), class: "bg-secondary text-warning" };
+    if (tokens > thresholds.high)
+      return { label: m.usage_level_high(), class: "bg-secondary text-error" };
+    if (tokens > thresholds.medium)
+      return { label: m.usage_level_medium(), class: "bg-secondary text-warning" };
     return { label: m.usage_level_low(), class: "bg-secondary text-success" };
   }
 
@@ -413,7 +415,9 @@
                           topModels.length > 0
                             ? (model.total_token_usage / topModels[0].total_token_usage) * 100
                             : 0
-                        )}%; background: var(--{getChartColour(model.model_provider ?? model.model_org)})"
+                        )}%; background: var(--{getChartColour(
+                          model.model_provider ?? model.model_org
+                        )})"
                       ></div>
                     </div>
                   </div>

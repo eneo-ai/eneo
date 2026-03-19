@@ -71,7 +71,7 @@
         {$currentSpace.name}
       </span>
     {/if}
-    {#if (!$currentSpace.organization)}
+    {#if !$currentSpace.organization}
       <IconChevronUpDown class="text-muted group-hover:text-accent-stronger min-w-6" />
     {/if}
   </Button>
@@ -98,7 +98,7 @@
       <a href={localizeHref("/spaces/list")} class="hover:underline">{m.your_spaces()}</a>
     </div>
 
-   <div class="relative max-h-[50vh] overflow-y-auto">
+    <div class="relative max-h-[50vh] overflow-y-auto">
       {#each $accessibleSpaces.filter((s) => !s.personal && !s.organization) as space (space.id)}
         <Button
           unstyled

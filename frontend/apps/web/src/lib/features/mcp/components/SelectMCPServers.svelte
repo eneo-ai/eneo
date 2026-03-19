@@ -36,7 +36,11 @@
     selectedModel?: { supports_tool_calling?: boolean } | null;
   };
 
-  let { selectedMCPServers = $bindable([]), selectedMCPTools = $bindable([]), selectedModel = null }: Props = $props();
+  let {
+    selectedMCPServers = $bindable([]),
+    selectedMCPTools = $bindable([]),
+    selectedModel = null
+  }: Props = $props();
 
   /** Type-safe view of selectedMCPServers */
   let servers = $derived(selectedMCPServers as unknown as MCPServer[]);
@@ -214,43 +218,69 @@
     </p>
   {/if}
   {#if loading}
-    <div class="flex items-center gap-3 rounded-lg border border-dashed border-dimmer bg-secondary/30 px-4 py-6">
-      <svg class="h-5 w-5 animate-spin text-muted" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    <div
+      class="border-dimmer bg-secondary/30 flex items-center gap-3 rounded-lg border border-dashed px-4 py-6"
+    >
+      <svg
+        class="text-muted h-5 w-5 animate-spin"
+        fill="none"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+      >
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"
+        ></circle>
+        <path
+          class="opacity-75"
+          fill="currentColor"
+          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+        ></path>
       </svg>
-      <span class="text-sm text-muted">{m.loading()}...</span>
+      <span class="text-muted text-sm">{m.loading()}...</span>
     </div>
   {:else if availableServers.length === 0}
-    <div class="flex flex-col items-center gap-3 rounded-lg border border-dashed border-dimmer bg-secondary/30 px-6 py-8 text-center">
-      <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-secondary">
-        <svg class="h-6 w-6 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z" />
+    <div
+      class="border-dimmer bg-secondary/30 flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-8 text-center"
+    >
+      <div class="bg-secondary flex h-12 w-12 items-center justify-center rounded-xl">
+        <svg
+          class="text-muted h-6 w-6"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          stroke-width="1.5"
+          aria-hidden="true"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z"
+          />
         </svg>
       </div>
       <div>
-        <p class="text-sm font-medium text-default">{m.no_mcp_servers_available()}</p>
-        <p class="mt-1 text-xs text-muted">{m.enable_mcp_in_space_settings()}</p>
+        <p class="text-default text-sm font-medium">{m.no_mcp_servers_available()}</p>
+        <p class="text-muted mt-1 text-xs">{m.enable_mcp_in_space_settings()}</p>
       </div>
     </div>
   {:else}
-    <div class="divide-y divide-dimmer rounded-xl border border-default overflow-hidden">
+    <div class="divide-dimmer border-default divide-y overflow-hidden rounded-xl border">
       {#each availableServers as server (server.id)}
         {@const isSelected = isServerSelected(server.id)}
         {@const hasTools = isSelected && server.tools && server.tools.length > 0}
         {@const isExpanded = expandedServers.has(server.id)}
         {@const toolCount = server.tools?.length ?? 0}
-        {@const enabledToolCount = server.tools?.filter(t => isToolEnabled(server, t.id)).length ?? 0}
+        {@const enabledToolCount =
+          server.tools?.filter((t) => isToolEnabled(server, t.id)).length ?? 0}
         <div class="transition-colors {isSelected ? 'bg-accent-dimmer/20' : ''}">
           <!-- Server Row -->
           <div class="flex items-center">
             <!-- Expand Button -->
             <button
               type="button"
-              class="flex h-full w-10 shrink-0 items-center justify-center p-2.5 text-muted transition-colors hover:text-default disabled:opacity-20 disabled:hover:text-muted"
+              class="text-muted hover:text-default disabled:hover:text-muted flex h-full w-10 shrink-0 items-center justify-center p-2.5 transition-colors disabled:opacity-20"
               disabled={!hasTools}
               onclick={() => toggleExpanded(server.id)}
-              aria-label={isExpanded ? 'Dölj verktyg' : 'Visa verktyg'}
+              aria-label={isExpanded ? "Dölj verktyg" : "Visa verktyg"}
               aria-expanded={isExpanded}
             >
               <ChevronRight
@@ -260,15 +290,14 @@
 
             <!-- Server Toggle -->
             <div class="flex-1 py-2.5 pr-4">
-              <Input.Switch
-                value={isSelected}
-                sideEffect={() => toggleServer(server)}
-              >
+              <Input.Switch value={isSelected} sideEffect={() => toggleServer(server)}>
                 <div class="flex flex-col gap-0.5">
                   <div class="flex items-center gap-2">
-                    <span class="font-medium text-default">{server.name}</span>
+                    <span class="text-default font-medium">{server.name}</span>
                     {#if hasTools}
-                      <span class="inline-flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted">
+                      <span
+                        class="bg-secondary text-muted inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
+                      >
                         <span class="text-positive-default">{enabledToolCount}</span>
                         <span class="text-dimmer">/</span>
                         <span>{toolCount}</span>
@@ -276,7 +305,7 @@
                     {/if}
                   </div>
                   {#if server.description}
-                    <p class="text-xs text-muted leading-snug line-clamp-1">{server.description}</p>
+                    <p class="text-muted line-clamp-1 text-xs leading-snug">{server.description}</p>
                   {/if}
                 </div>
               </Input.Switch>
@@ -285,16 +314,22 @@
 
           <!-- Tools List (only show if expanded) -->
           {#if hasTools && isExpanded}
-            <div class="border-t border-dimmer bg-secondary/20 ml-10 mr-3 mb-2 rounded-lg border-l-[3px] border-l-accent-default/70" role="group" aria-label="Verktyg för {server.name}">
+            <div
+              class="border-dimmer bg-secondary/20 border-l-accent-default/70 mr-3 mb-2 ml-10 rounded-lg border-t border-l-[3px]"
+              role="group"
+              aria-label="Verktyg för {server.name}"
+            >
               <!-- Tools header with bulk actions -->
-              <div class="flex items-center justify-between px-3 py-1.5 border-b border-dimmer/50">
-                <span class="text-[11px] font-medium uppercase tracking-wider text-muted">{m.tools()} ({toolCount})</span>
+              <div class="border-dimmer/50 flex items-center justify-between border-b px-3 py-1.5">
+                <span class="text-muted text-[11px] font-medium tracking-wider uppercase"
+                  >{m.tools()} ({toolCount})</span
+                >
                 <div class="flex items-center gap-1">
                   <button
                     type="button"
-                    class="px-2 py-1 text-[10px] font-medium text-muted hover:text-default hover:bg-hover-dimmer rounded transition-colors"
+                    class="text-muted hover:text-default hover:bg-hover-dimmer rounded px-2 py-1 text-[10px] font-medium transition-colors"
                     onclick={() => {
-                      server.tools?.forEach(tool => {
+                      server.tools?.forEach((tool) => {
                         if (!isToolEnabled(server, tool.id)) toggleTool(server, tool);
                       });
                     }}
@@ -304,9 +339,9 @@
                   <span class="text-dimmer">|</span>
                   <button
                     type="button"
-                    class="px-2 py-1 text-[10px] font-medium text-muted hover:text-default hover:bg-hover-dimmer rounded transition-colors"
+                    class="text-muted hover:text-default hover:bg-hover-dimmer rounded px-2 py-1 text-[10px] font-medium transition-colors"
                     onclick={() => {
-                      server.tools?.forEach(tool => {
+                      server.tools?.forEach((tool) => {
                         if (isToolEnabled(server, tool.id)) toggleTool(server, tool);
                       });
                     }}
@@ -318,15 +353,23 @@
 
               <!-- Scrollable tools list -->
               <div class="max-h-[240px] overflow-y-auto">
-                <div class="divide-y divide-dimmer">
+                <div class="divide-dimmer divide-y">
                   {#each getServerTools(server) as tool (tool.id)}
                     {@const toolEnabled = isToolEnabled(server, tool.id)}
-                    <div class="flex items-center gap-3 px-3 py-2.5 transition-all hover:bg-hover-dimmer {toolEnabled ? '' : 'opacity-40 grayscale-[30%]'}">
-                      <div class="flex-1 min-w-0">
-                        <span class="text-xs font-medium font-mono text-default block truncate">{tool.name}</span>
+                    <div
+                      class="hover:bg-hover-dimmer flex items-center gap-3 px-3 py-2.5 transition-all {toolEnabled
+                        ? ''
+                        : 'opacity-40 grayscale-[30%]'}"
+                    >
+                      <div class="min-w-0 flex-1">
+                        <span class="text-default block truncate font-mono text-xs font-medium"
+                          >{tool.name}</span
+                        >
                         {#if tool.description}
                           <Tooltip text={tool.description} placement="bottom">
-                            <p class="text-xs text-muted leading-snug truncate cursor-help">{tool.description}</p>
+                            <p class="text-muted cursor-help truncate text-xs leading-snug">
+                              {tool.description}
+                            </p>
                           </Tooltip>
                         {/if}
                       </div>

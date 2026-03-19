@@ -33,7 +33,7 @@
 
   type Props = {
     mode?: "update" | "create";
-    hideTrigger?: boolean;  // Hide built-in trigger when controlled externally
+    hideTrigger?: boolean; // Hide built-in trigger when controlled externally
     user?: {
       id: string;
       username?: string | null | undefined;
@@ -42,7 +42,7 @@
       roles: Role[];
       user_groups: UserGroup[];
     };
-    showDialog?: Dialog.OpenState;  // For parent component control (used in UserActions dropdown)
+    showDialog?: Dialog.OpenState; // For parent component control (used in UserActions dropdown)
   };
 
   let {

@@ -71,9 +71,11 @@
 
       await invalidate("admin:templates:load");
       openController.set(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error permanently deleting template:", error);
-      errorMessage = error.message || "Failed to permanently delete template";
+      errorMessage =
+        (error instanceof Error ? error.message : String(error)) ||
+        "Failed to permanently delete template";
     } finally {
       isLoading = false;
     }
@@ -90,12 +92,12 @@
     <Dialog.Section>
       <div class="flex flex-col gap-4 py-4">
         <!-- Warning box with template name -->
-        <div class="rounded-lg border border-negative-default bg-negative-default/15 px-4 py-3">
+        <div class="border-negative-default bg-negative-default/15 rounded-lg border px-4 py-3">
           <div class="flex items-start gap-3">
             <AlertTriangle class="text-negative-default shrink-0" size={20} />
             <div class="flex flex-col gap-1.5">
-              <div class="font-semibold text-default">{template.name}</div>
-              <div class="text-sm text-secondary">
+              <div class="text-default font-semibold">{template.name}</div>
+              <div class="text-secondary text-sm">
                 {m.permanent_delete_cannot_undo()}
               </div>
             </div>
@@ -115,7 +117,7 @@
         />
 
         {#if errorMessage}
-          <div class="rounded-lg bg-negative-default/10 px-3 py-2 text-sm text-negative-default">
+          <div class="bg-negative-default/10 text-negative-default rounded-lg px-3 py-2 text-sm">
             {errorMessage}
           </div>
         {/if}

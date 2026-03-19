@@ -27,7 +27,10 @@
 
   // Group models by provider if they have provider info
   $: modelGroups = hasProviderInfo(availableModels)
-    ? groupModelsByProvider(availableModels as any, m.model_group_system())
+    ? groupModelsByProvider(
+        availableModels as unknown as Parameters<typeof groupModelsByProvider>[0],
+        m.model_group_system()
+      )
     : null;
 
   const {
@@ -97,7 +100,7 @@
   {#if modelGroups}
     {#each modelGroups as group (group.id ?? "system")}
       <div
-        class="bg-surface-dimmer border-default sticky top-10 flex items-center gap-2 border-b px-4 py-2 font-mono text-xs uppercase tracking-wide"
+        class="bg-surface-dimmer border-default sticky top-10 flex items-center gap-2 border-b px-4 py-2 font-mono text-xs tracking-wide uppercase"
       >
         {#if group.providerType}
           <ProviderGlyph providerType={group.providerType} size="sm" />
@@ -110,7 +113,7 @@
           {...$option({ value: model, label: model.nickname ?? undefined })}
           use:option
         >
-          <ModelNameAndVendor model={model as any}></ModelNameAndVendor>
+          <ModelNameAndVendor model={model as T}></ModelNameAndVendor>
           <div class="check {$isSelected(model) ? 'block' : 'hidden'}">
             <IconCheck class="text-positive-default" />
           </div>

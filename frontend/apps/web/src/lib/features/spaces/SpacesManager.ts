@@ -42,10 +42,7 @@ function SpacesManager(data: SpacesManagerParams) {
     return $spaces.find((s) => isOrganizationSpace(s))?.id ?? null;
   });
 
-  const organizationSpaceId = derived(
-    [organizationSpaceIdFromList],
-    ([$listId]) => $listId
-  );
+  const organizationSpaceId = derived([organizationSpaceIdFromList], ([$listId]) => $listId);
 
   const nonOrgSpaces = derived(userSpaces, ($spaces) =>
     $spaces.filter((s) => !isOrganizationSpace(s))
@@ -170,7 +167,7 @@ function SpacesManager(data: SpacesManagerParams) {
       accessibleSpaces: { subscribe: nonOrgSpaces.subscribe },
       nonOrgSpaces,
       currentSpace: derivedCurrentSpace(currentSpace),
-      organizationSpaceId,
+      organizationSpaceId
     },
     refreshSpaces,
     refreshCurrentSpace,
@@ -199,12 +196,11 @@ function derivedCurrentSpace(space: Readable<Space>) {
     return {
       ...$space,
       organization: isOrganizationSpace($space),
-      routeId: 
-        $space.personal 
-          ? "personal" 
-          : isOrganizationSpace($space) 
-            ? "organization"
-            : $space.id,
+      routeId: $space.personal
+        ? "personal"
+        : isOrganizationSpace($space)
+          ? "organization"
+          : $space.id,
       members: $space.members.items,
       applications: {
         assistants: $space.applications.assistants.items,

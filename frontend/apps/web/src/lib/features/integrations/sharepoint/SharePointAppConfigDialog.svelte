@@ -57,8 +57,6 @@
   let tenantDomain = $state("");
   let existingConfig = $state<TenantSharePointAppPublic | null>(null);
   let testResult = $state<TenantAppTestResult | null>(null);
-  let oauthState = $state<string | null>(null);
-  let isOAuthInProgress = $state(false);
   const deleteDialogOpen = writable(false);
   let isUpdatingSecret = $state(false);
   let newClientSecret = $state("");
@@ -66,9 +64,14 @@
   // Load existing configuration
   const loadConfig = createAsyncState(async () => {
     try {
-      const data = await intric.client.fetch("/api/v1/admin/sharepoint/app", {
-        method: "get"
-      } as any) as TenantSharePointAppPublic | null;
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      const data = (await intric.client.fetch(
+        "/api/v1/admin/sharepoint/app" as any,
+        {
+          method: "get"
+        } as any
+      )) as TenantSharePointAppPublic | null;
+      /* eslint-enable @typescript-eslint/no-explicit-any */
 
       if (data) {
         existingConfig = data;
@@ -95,30 +98,30 @@
       const payload: TenantSharePointAppCreate = {
         client_id: clientId,
         client_secret: clientSecret,
-        tenant_domain: tenantDomain,
+        tenant_domain: tenantDomain
       };
 
-      const result = await intric.client.fetch("/api/v1/admin/sharepoint/app/test", {
+      const result = (await intric.client.fetch("/api/v1/admin/sharepoint/app/test", {
         method: "post",
         requestBody: {
           "application/json": payload
         }
-      }) as TenantAppTestResult;
+      })) as TenantAppTestResult;
 
       testResult = result;
 
-        if (!result.success) {
-          toast.error(
+      if (!result.success) {
+        toast.error(
           m.connection_test_failed({ message: result.error_message || m.unknown_error() })
-          );
-        }
+        );
+      }
     } catch (error) {
       const errorMessage =
         error instanceof IntricError ? error.getReadableMessage() : String(error);
       toast.error(m.failed_to_test_credentials({ message: errorMessage }));
       testResult = {
         success: false,
-        error_message: errorMessage,
+        error_message: errorMessage
       };
     }
   });
@@ -134,15 +137,15 @@
       const payload: TenantSharePointAppCreate = {
         client_id: clientId,
         client_secret: clientSecret,
-        tenant_domain: tenantDomain,
+        tenant_domain: tenantDomain
       };
 
-      const result = await intric.client.fetch("/api/v1/admin/sharepoint/app", {
+      const result = (await intric.client.fetch("/api/v1/admin/sharepoint/app", {
         method: "post",
         requestBody: {
           "application/json": payload
         }
-      }) as TenantSharePointAppPublic;
+      })) as TenantSharePointAppPublic;
 
       existingConfig = result;
       $openController = false;
@@ -164,15 +167,15 @@
       const payload: TenantSharePointAppCreate = {
         client_id: existingConfig.client_id,
         client_secret: newClientSecret,
-        tenant_domain: existingConfig.tenant_domain,
+        tenant_domain: existingConfig.tenant_domain
       };
 
-      const result = await intric.client.fetch("/api/v1/admin/sharepoint/app", {
+      const result = (await intric.client.fetch("/api/v1/admin/sharepoint/app", {
         method: "post",
         requestBody: {
           "application/json": payload
         }
-      }) as TenantSharePointAppPublic;
+      })) as TenantSharePointAppPublic;
 
       existingConfig = result;
       isUpdatingSecret = false;
@@ -195,24 +198,26 @@
       const payload = {
         client_id: clientId,
         client_secret: clientSecret,
-        tenant_domain: tenantDomain,
+        tenant_domain: tenantDomain
       };
 
-      const result = await intric.client.fetch("/api/v1/admin/sharepoint/service-account/auth/start", {
-        method: "post",
-        requestBody: {
-          "application/json": payload
+      const result = (await intric.client.fetch(
+        "/api/v1/admin/sharepoint/service-account/auth/start",
+        {
+          method: "post",
+          requestBody: {
+            "application/json": payload
+          }
         }
-      }) as ServiceAccountAuthStartResponse;
-
-      // Store state for callback verification
-      oauthState = result.state;
-      isOAuthInProgress = true;
+      )) as ServiceAccountAuthStartResponse;
 
       // Store state in sessionStorage for callback verification
-      sessionStorage.setItem("sharepoint_service_account_oauth", JSON.stringify({
-        state: result.state,
-      }));
+      sessionStorage.setItem(
+        "sharepoint_service_account_oauth",
+        JSON.stringify({
+          state: result.state
+        })
+      );
 
       // Redirect to Microsoft OAuth
       window.location.href = result.auth_url;
@@ -258,9 +263,9 @@
       {:else if existingConfig}
         <!-- Read-only view when integration exists -->
         <div class="space-y-4 p-4">
-          <div class="rounded-md border border-default bg-secondary p-4">
-            <div class="text-sm font-medium text-primary mb-3">{m.current_configuration()}</div>
-            <div class="space-y-2 text-sm text-secondary">
+          <div class="border-default bg-secondary rounded-md border p-4">
+            <div class="text-primary mb-3 text-sm font-medium">{m.current_configuration()}</div>
+            <div class="text-secondary space-y-2 text-sm">
               <div>
                 <span class="font-medium">{m.auth_method()}:</span>
                 {existingConfig.auth_method === "service_account"
@@ -287,7 +292,11 @@
               {/if}
               <div>
                 <span class="font-medium">{m.status()}:</span>
-                <span class={existingConfig.is_active ? "text-positive-default" : "text-negative-default"}>
+                <span
+                  class={existingConfig.is_active
+                    ? "text-positive-default"
+                    : "text-negative-default"}
+                >
                   {existingConfig.is_active ? m.active() : m.inactive()}
                 </span>
               </div>
@@ -296,24 +305,26 @@
 
           {#if isUpdatingSecret}
             <!-- Update secret form -->
-            <div class="rounded-md border border-accent-default bg-accent-dimmer p-4">
-              <div class="text-sm font-medium text-accent-stronger mb-3">{m.update_client_secret()}</div>
-                <Input.Text
-                  label={m.new_client_secret()}
-                  bind:value={newClientSecret}
-                  required
-                  type="password"
-                  placeholder={m.enter_new_client_secret()}
-                  description={m.new_client_secret_description()}
-                  autocomplete="off"
-                />
+            <div class="border-accent-default bg-accent-dimmer rounded-md border p-4">
+              <div class="text-accent-stronger mb-3 text-sm font-medium">
+                {m.update_client_secret()}
+              </div>
+              <Input.Text
+                label={m.new_client_secret()}
+                bind:value={newClientSecret}
+                required
+                type="password"
+                placeholder={m.enter_new_client_secret()}
+                description={m.new_client_secret_description()}
+                autocomplete="off"
+              />
             </div>
           {:else}
             <!-- Warning about changing auth method -->
-            <div class="rounded-lg border border-warning-default bg-warning-dimmer px-4 py-3">
+            <div class="border-warning-default bg-warning-dimmer rounded-lg border px-4 py-3">
               <div class="flex items-start gap-3">
-                <AlertTriangle class="text-warning-stronger shrink-0 mt-0.5" size={18} />
-                <p class="text-sm text-warning-stronger">
+                <AlertTriangle class="text-warning-stronger mt-0.5 shrink-0" size={18} />
+                <p class="text-warning-stronger text-sm">
                   {m.sharepoint_change_auth_warning()}
                 </p>
               </div>
@@ -325,7 +336,7 @@
         <div class="space-y-4 p-4">
           <!-- Auth Method Selector -->
           <div class="space-y-3">
-            <div class="text-sm font-medium text-primary">
+            <div class="text-primary text-sm font-medium">
               {m.choose_auth_method()}
             </div>
 
@@ -333,8 +344,8 @@
             <label
               class="flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors
                 {authMethod === 'service_account'
-                  ? 'border-accent-default bg-accent-dimmer'
-                  : 'border-default hover:border-stronger'}"
+                ? 'border-accent-default bg-accent-dimmer'
+                : 'border-default hover:border-stronger'}"
             >
               <input
                 type="radio"
@@ -345,14 +356,16 @@
               />
               <div class="flex-1">
                 <div class="flex items-center gap-2">
-                  <span class="font-medium text-primary">
+                  <span class="text-primary font-medium">
                     {m.service_account_option()}
                   </span>
-                  <span class="rounded bg-accent-dimmer px-2 py-0.5 text-xs font-medium text-accent-stronger">
+                  <span
+                    class="bg-accent-dimmer text-accent-stronger rounded px-2 py-0.5 text-xs font-medium"
+                  >
                     {m.recommended()}
                   </span>
                 </div>
-                <p class="mt-1 text-sm text-secondary">
+                <p class="text-secondary mt-1 text-sm">
                   {m.service_account_description()}
                 </p>
               </div>
@@ -362,8 +375,8 @@
             <label
               class="flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors
                 {authMethod === 'tenant_app'
-                  ? 'border-accent-default bg-accent-dimmer'
-                  : 'border-default hover:border-stronger'}"
+                ? 'border-accent-default bg-accent-dimmer'
+                : 'border-default hover:border-stronger'}"
             >
               <input
                 type="radio"
@@ -373,20 +386,20 @@
                 class="mt-1"
               />
               <div class="flex-1">
-                <span class="font-medium text-primary">
+                <span class="text-primary font-medium">
                   {m.tenant_app_option()}
                 </span>
-                <p class="mt-1 text-sm text-secondary">
+                <p class="text-secondary mt-1 text-sm">
                   {m.tenant_app_description()}
                 </p>
               </div>
             </label>
           </div>
 
-          <hr class="my-4 border-default" />
+          <hr class="border-default my-4" />
 
           <!-- Credentials Form (same for both) -->
-          <p class="text-sm text-secondary">
+          <p class="text-secondary text-sm">
             {m.sharepoint_app_config_description()}
           </p>
 
@@ -486,20 +499,14 @@
         <!-- Tenant App: Test + Save flow -->
         <Button
           variant="outlined"
-          disabled={testCredentials.isLoading ||
-            !clientId ||
-            !clientSecret ||
-            !tenantDomain}
+          disabled={testCredentials.isLoading || !clientId || !clientSecret || !tenantDomain}
           onclick={testCredentials}
         >
           {testCredentials.isLoading ? m.testing() : m.test_connection()}
         </Button>
         <Button
           variant="primary"
-          disabled={saveConfig.isLoading ||
-            !clientId ||
-            !clientSecret ||
-            !tenantDomain}
+          disabled={saveConfig.isLoading || !clientId || !clientSecret || !tenantDomain}
           onclick={saveConfig}
         >
           {saveConfig.isLoading ? m.saving() : m.save()}
@@ -514,9 +521,7 @@
             !tenantDomain}
           onclick={startServiceAccountOAuth}
         >
-          {startServiceAccountOAuth.isLoading
-            ? m.redirecting()
-            : m.sign_in_with_microsoft()}
+          {startServiceAccountOAuth.isLoading ? m.redirecting() : m.sign_in_with_microsoft()}
         </Button>
       {/if}
     </Dialog.Controls>

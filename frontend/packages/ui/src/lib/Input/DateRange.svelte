@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createDateRangePicker } from "@melt-ui/svelte";
+  import { createDateRangePicker, type DateRange } from "@melt-ui/svelte";
   import { CalendarDate, type DateValue } from "@internationalized/date";
   import Button from "$lib/Button/Button.svelte";
   import { Tooltip } from "$lib/Tooltip/index.js";
@@ -52,7 +52,7 @@
     defaultValue: value,
     weekdayFormat: "short",
     locale: "en-GB",
-    onValueChange: ({ next }: { next: any }) => {
+    onValueChange: ({ next }: { next: DateRange }) => {
       value = next;
       if (onValueCommit && next.start && next.end) {
         onValueCommit({ start: next.start, end: next.end });

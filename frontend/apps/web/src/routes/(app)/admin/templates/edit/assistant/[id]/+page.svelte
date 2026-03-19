@@ -23,10 +23,12 @@
   let iconName = $state<string | null>(data.template.icon_name || null);
   let promptText = $state(data.template.prompt_text || "");
   let completionModel = $state(
-    data.completionModels?.find(m =>
-      m.id === data.template.completion_model_id ||
-      m.name === data.template.completion_model_name
-    ) || data.completionModels?.[0] || null
+    data.completionModels?.find(
+      (m) =>
+        m.id === data.template.completion_model_id || m.name === data.template.completion_model_name
+    ) ||
+      data.completionModels?.[0] ||
+      null
   );
   let completionModelKwargs = $state(data.template.completion_model_kwargs || {});
   let isSaving = $state(false);
@@ -34,29 +36,33 @@
   // Parse wizard configuration from template
   // Handle both object format {attachments: {...}, collections: {...}}
   // and array format [{type: "attachments", ...}, {type: "collections", ...}]
-  const wizard = (data.template as any).wizard_config || (data.template as any).wizard || {};
+  const templateRecord = data.template as Record<string, unknown>;
+  const wizard = (templateRecord.wizard_config || templateRecord.wizard || {}) as
+    | Record<string, unknown>
+    | Array<Record<string, unknown>>;
 
-  let attachmentsConfig, collectionsConfig;
+  let attachmentsConfig: Record<string, unknown> | undefined;
+  let collectionsConfig: Record<string, unknown> | undefined;
 
   if (Array.isArray(wizard)) {
     // Array format: [{type: "attachments", ...}, {type: "collections", ...}]
-    attachmentsConfig = wizard.find((c: any) => c.type === "attachments");
-    collectionsConfig = wizard.find((c: any) => c.type === "collections");
+    attachmentsConfig = wizard.find((c) => c.type === "attachments");
+    collectionsConfig = wizard.find((c) => c.type === "collections");
   } else {
     // Object format: {attachments: {...}, collections: {...}}
-    attachmentsConfig = wizard.attachments;
-    collectionsConfig = wizard.collections;
+    attachmentsConfig = wizard.attachments as Record<string, unknown> | undefined;
+    collectionsConfig = wizard.collections as Record<string, unknown> | undefined;
   }
 
   let wizardAttachmentsEnabled = $state(!!attachmentsConfig);
-  let wizardAttachmentsRequired = $state(attachmentsConfig?.required || false);
-  let wizardAttachmentsTitle = $state(attachmentsConfig?.title || "");
-  let wizardAttachmentsDescription = $state(attachmentsConfig?.description || "");
+  let wizardAttachmentsRequired = $state(Boolean(attachmentsConfig?.required));
+  let wizardAttachmentsTitle = $state(String(attachmentsConfig?.title || ""));
+  let wizardAttachmentsDescription = $state(String(attachmentsConfig?.description || ""));
 
   let wizardCollectionsEnabled = $state(!!collectionsConfig);
-  let wizardCollectionsRequired = $state(collectionsConfig?.required || false);
-  let wizardCollectionsTitle = $state(collectionsConfig?.title || "");
-  let wizardCollectionsDescription = $state(collectionsConfig?.description || "");
+  let wizardCollectionsRequired = $state(Boolean(collectionsConfig?.required));
+  let wizardCollectionsTitle = $state(String(collectionsConfig?.title || ""));
+  let wizardCollectionsDescription = $state(String(collectionsConfig?.description || ""));
 
   async function handleUpdateTemplate() {
     if (!name || !category) {
@@ -69,27 +75,31 @@
       // Transform wizard configuration to backend format
       // IMPORTANT: Always send wizard object with both properties (backend requires non-null wizard)
       const wizard = {
-        attachments: wizardAttachmentsEnabled ? {
-          required: wizardAttachmentsRequired,
-          title: wizardAttachmentsTitle || undefined,
-          description: wizardAttachmentsDescription || undefined
-        } : null,
-        collections: wizardCollectionsEnabled ? {
-          required: wizardCollectionsRequired,
-          title: wizardCollectionsTitle || undefined,
-          description: wizardCollectionsDescription || undefined
-        } : null
+        attachments: wizardAttachmentsEnabled
+          ? {
+              required: wizardAttachmentsRequired,
+              title: wizardAttachmentsTitle || undefined,
+              description: wizardAttachmentsDescription || undefined
+            }
+          : null,
+        collections: wizardCollectionsEnabled
+          ? {
+              required: wizardCollectionsRequired,
+              title: wizardCollectionsTitle || undefined,
+              description: wizardCollectionsDescription || undefined
+            }
+          : null
       };
 
       const templateData = {
         name,
         description,
         category,
-        prompt: promptText,  // Backend expects string, not object
+        prompt: promptText, // Backend expects string, not object
         completion_model_id: completionModel?.id,
         completion_model_kwargs: completionModelKwargs,
-        wizard,  // Always send wizard object, never undefined
-        icon_name: iconName || undefined  // Include icon if selected
+        wizard, // Always send wizard object, never undefined
+        icon_name: iconName || undefined // Include icon if selected
       };
 
       await intric.templates.admin.updateAssistant(data.template.id, templateData);
@@ -116,12 +126,7 @@
 
     <Page.Flex>
       <Button variant="outlined" href={localizeHref("/admin/templates")}>{m.cancel()}</Button>
-      <Button
-        variant="positive"
-        class="w-32"
-        onclick={handleUpdateTemplate}
-        disabled={isSaving}
-      >
+      <Button variant="positive" class="w-32" onclick={handleUpdateTemplate} disabled={isSaving}>
         {isSaving ? m.loading() : m.save_changes()}
       </Button>
     </Page.Flex>
@@ -245,10 +250,14 @@
             />
 
             {#if wizardAttachmentsEnabled}
-              <div class="flex flex-col gap-4 rounded-lg border border-default bg-hover-default p-4">
+              <div
+                class="border-default bg-hover-default flex flex-col gap-4 rounded-lg border p-4"
+              >
                 <label class="flex items-center gap-2">
                   <input type="checkbox" bind:checked={wizardAttachmentsRequired} />
-                  <span class="text-sm text-default">{m.wizard_attachments_required_description()}</span>
+                  <span class="text-default text-sm"
+                    >{m.wizard_attachments_required_description()}</span
+                  >
                 </label>
 
                 <Input.Text
@@ -258,7 +267,10 @@
                 />
 
                 <div class="flex flex-col gap-1">
-                  <label for="wizard-attachments-description" class="text-sm font-medium text-default">{m.description()}</label>
+                  <label
+                    for="wizard-attachments-description"
+                    class="text-default text-sm font-medium">{m.description()}</label
+                  >
                   <textarea
                     id="wizard-attachments-description"
                     bind:value={wizardAttachmentsDescription}
@@ -285,10 +297,14 @@
             />
 
             {#if wizardCollectionsEnabled}
-              <div class="flex flex-col gap-4 rounded-lg border border-default bg-hover-default p-4">
+              <div
+                class="border-default bg-hover-default flex flex-col gap-4 rounded-lg border p-4"
+              >
                 <label class="flex items-center gap-2">
                   <input type="checkbox" bind:checked={wizardCollectionsRequired} />
-                  <span class="text-sm text-default">{m.wizard_collections_required_description()}</span>
+                  <span class="text-default text-sm"
+                    >{m.wizard_collections_required_description()}</span
+                  >
                 </label>
 
                 <Input.Text
@@ -298,7 +314,10 @@
                 />
 
                 <div class="flex flex-col gap-1">
-                  <label for="wizard-collections-description" class="text-sm font-medium text-default">{m.description()}</label>
+                  <label
+                    for="wizard-collections-description"
+                    class="text-default text-sm font-medium">{m.description()}</label
+                  >
                   <textarea
                     id="wizard-collections-description"
                     bind:value={wizardCollectionsDescription}

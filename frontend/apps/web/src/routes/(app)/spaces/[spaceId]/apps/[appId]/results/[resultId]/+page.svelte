@@ -2,7 +2,6 @@
   import { Page } from "$lib/components/layout";
   import { IconCopy } from "@intric/icons/copy";
   import { IconDownload } from "@intric/icons/download";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconPrint } from "@intric/icons/print";
   import { Button, Markdown, Tooltip } from "@intric/ui";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -167,13 +166,15 @@
     ></Page.Title>
 
     <Page.Flex>
-      <Button href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}/edit`)} class="!line-clamp-1"
-        >{m.edit()}</Button
+      <Button
+        href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}/edit`)}
+        class="!line-clamp-1">{m.edit()}</Button
       >
       <Button
         variant="primary"
         class="!line-clamp-1"
-        href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}`)}>{m.new_run()}</Button
+        href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${data.app.id}`)}
+        >{m.new_run()}</Button
       >
     </Page.Flex>
   </Page.Header>
@@ -240,7 +241,7 @@
                 </span>
 
                 {#each result.input.files as file (file.id)}
-                  {#await intric.files.generateSignedUrl({ fileId: file.id, contentDisposition: "attachment" }) then { url }}
+                  {#await intric.files.generateSignedUrl( { fileId: file.id, contentDisposition: "attachment" } ) then { url }}
                     <Button href={url} class="outlined no-underline"
                       ><IconDownload></IconDownload>{m.download()} "{file.name}"</Button
                     >

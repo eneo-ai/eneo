@@ -22,8 +22,8 @@ export const POST: RequestHandler = async (event) => {
     const response = await event.fetch(backendUrl.toString(), {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${id_token}`,
-      },
+        Authorization: `Bearer ${id_token}`
+      }
     });
 
     if (!response.ok) {

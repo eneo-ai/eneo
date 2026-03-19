@@ -1,4 +1,5 @@
-import type { CompletionModel, TranscriptionModel, EmbeddingModel } from "@intric/intric-js";
+// Types CompletionModel, TranscriptionModel, EmbeddingModel are available from @intric/intric-js
+// but not imported here since groupModelsByProvider uses a local ModelWithProvider type constraint
 
 // Model with provider info - uses Record intersection to ensure all fields accessible on all union members
 type ModelWithProvider = {

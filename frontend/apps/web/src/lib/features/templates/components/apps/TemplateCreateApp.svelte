@@ -21,7 +21,9 @@
     resetForm
   } = getTemplateController();
 
-  let { settings, triggerSnippet }: { settings: Settings; triggerSnippet?: Snippet<[any]> } = $props();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let { settings, triggerSnippet }: { settings: Settings; triggerSnippet?: Snippet<[any]> } =
+    $props();
 
   let openAppAfterCreation = $state(false);
   let userTouchedToggle = $state(false);
@@ -69,7 +71,6 @@
       </p>
       <div class="border-dimmer border-b"></div>
     {/if}
-
 
     <Dialog.Section class="relative mt-2 -mb-0.5">
       {#if $currentStep === "wizard"}

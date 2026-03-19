@@ -9,7 +9,6 @@
   import { fly, fade } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import SelectLanguage from "$lib/components/SelectLanguage.svelte";
   import { goto } from "$app/navigation";
   import { browser } from "$app/environment";
 
@@ -22,12 +21,12 @@
   function handleSwitchOrganisation() {
     // Clear client-side tenant storage
     if (browser) {
-      sessionStorage.removeItem('eneo-last-tenant-slug');
-      localStorage.removeItem('eneo:last-tenant');
+      sessionStorage.removeItem("eneo-last-tenant-slug");
+      localStorage.removeItem("eneo:last-tenant");
     }
 
     // Navigate to endpoint
-    goto('/login/switch-organisation');
+    goto("/login/switch-organisation");
   }
 
   const {

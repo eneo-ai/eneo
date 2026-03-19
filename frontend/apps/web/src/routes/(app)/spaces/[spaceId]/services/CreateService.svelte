@@ -64,10 +64,7 @@
       >
       <div class="flex-grow"></div>
       <Button is={close}>{m.cancel()}</Button>
-      <Button
-        variant="primary"
-        on:click={createService}
-        disabled={isProcessing}
+      <Button variant="primary" on:click={createService} disabled={isProcessing}
         >{isProcessing ? m.creating() : m.create_service()}</Button
       >
     </Dialog.Controls>

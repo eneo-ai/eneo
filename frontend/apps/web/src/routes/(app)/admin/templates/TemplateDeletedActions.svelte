@@ -25,21 +25,13 @@
 
 <Dropdown.Root>
   <Dropdown.Trigger asFragment let:trigger>
-    <Button
-      is={trigger}
-      padding="icon"
-      aria-label={m.actions()}
-    >
+    <Button is={trigger} padding="icon" aria-label={m.actions()}>
       <MoreVertical size={16} />
     </Button>
   </Dropdown.Trigger>
 
   <Dropdown.Menu let:item>
-    <Button
-      is={item}
-      padding="icon-leading"
-      onclick={() => isRestoreOpen.set(true)}
-    >
+    <Button is={item} padding="icon-leading" onclick={() => isRestoreOpen.set(true)}>
       <Undo size={16} />
       {m.restore()}
     </Button>

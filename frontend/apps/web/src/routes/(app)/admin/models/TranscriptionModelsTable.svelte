@@ -39,7 +39,7 @@
 
   // Backend returns both global and tenant models
   // Filter to show only tenant models in UI
-  $: filteredModels = transcriptionModels.filter(m => m.provider_id != null);
+  $: filteredModels = transcriptionModels.filter((m) => m.provider_id != null);
 
   const table = Table.createWithResource(filteredModels);
 
@@ -132,12 +132,14 @@
     };
   }
 
-  function listGroups(providerList: ModelProviderPublic[]): Array<{ key: string; name: string; modelCount: number }> {
+  function listGroups(
+    providerList: ModelProviderPublic[]
+  ): Array<{ key: string; name: string; modelCount: number }> {
     // Show all providers, including those without models
-    return providerList.map(provider => ({
+    return providerList.map((provider) => ({
       key: provider.id,
       name: provider.name,
-      modelCount: filteredModels.filter(model => model.provider_id === provider.id).length
+      modelCount: filteredModels.filter((model) => model.provider_id === provider.id).length
     }));
   }
 
@@ -145,14 +147,14 @@
    * Get the full provider object for a given group.
    */
   function getProviderForGroup(groupKey: string): ModelProviderPublic | undefined {
-    return providers.find(p => p.id === groupKey);
+    return providers.find((p) => p.id === groupKey);
   }
 
   /**
    * Get the model count for a given provider.
    */
   function getModelCountForProvider(providerId: string): number {
-    return filteredModels.filter(model => model.provider_id === providerId).length;
+    return filteredModels.filter((model) => model.provider_id === providerId).length;
   }
 
   /**
@@ -187,88 +189,112 @@
 </script>
 
 {#if providers.length === 0}
-  <PageEmptyState on:addProvider={() => { wizardPreSelectedProviderId = null; addWizardOpen.set(true); }} />
+  <PageEmptyState
+    on:addProvider={() => {
+      wizardPreSelectedProviderId = null;
+      addWizardOpen.set(true);
+    }}
+  />
 {:else}
-<div class="flex flex-col gap-4">
-  <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list" showEmptyGroups>
-    {#each groups as group (group.key)}
-      {@const provider = getProviderForGroup(group.key)}
-      <Table.Group filterFn={createGroupFilter(group.key)} title=" " open={groupOpenState[group.key] ?? true} on:openChange={(e) => { groupOpenState[group.key] = e.detail.open; }}>
-        <svelte:fragment slot="title-prefix">
-          {#if provider}
-            <!-- Glyph + Name as unified clickable button to edit provider -->
-            <button
-              class="flex items-center gap-3 mr-1 group cursor-pointer rounded-lg transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-accent-default focus:ring-offset-2"
-              on:click|stopPropagation={() => handleEditProvider(provider)}
-              title={m.edit_provider()}
-            >
-              <span class="transition-transform duration-150 group-hover:scale-105">
-                <ProviderGlyph providerType={provider.provider_type} size="md" />
-              </span>
-              <span class="font-medium text-primary group-hover:text-accent-default group-hover:underline underline-offset-2 decoration-accent-default/50 transition-colors">
-                {provider.name}
-              </span>
-            </button>
-          {:else}
-            <div class="flex items-center gap-2 mr-2">
-              <div
-                class="h-3 w-3 rounded-full border border-stronger"
-                style="background: var(--{getChartColour(group.name)})"
-              ></div>
-              <span class="font-medium text-primary">{group.name}</span>
-            </div>
-          {/if}
-        </svelte:fragment>
-        <svelte:fragment slot="title-suffix">
-          <div class="flex items-center gap-2">
+  <div class="flex flex-col gap-4">
+    <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list" showEmptyGroups>
+      {#each groups as group (group.key)}
+        {@const provider = getProviderForGroup(group.key)}
+        <Table.Group
+          filterFn={createGroupFilter(group.key)}
+          title=" "
+          open={groupOpenState[group.key] ?? true}
+          on:openChange={(e) => {
+            groupOpenState[group.key] = e.detail.open;
+          }}
+        >
+          <svelte:fragment slot="title-prefix">
             {#if provider}
-              {@const modelCount = getModelCountForProvider(provider.id)}
-              <!-- Model count with bullet separator -->
-              <span class="text-xs text-muted tabular-nums opacity-70">
-                •  {modelCount === 1 ? m.provider_model_count_one({ count: modelCount }) : m.provider_model_count_other({ count: modelCount })}
-              </span>
-              <!-- Visual separator between info and actions -->
-              <span class="w-px h-4 bg-border-dimmer"></span>
-              <ProviderStatusBadge {provider} />
+              <!-- Glyph + Name as unified clickable button to edit provider -->
               <button
-                class="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors duration-150 hover:bg-hover-dimmer hover:text-primary focus:outline-none focus:ring-1 focus:ring-accent-default"
-                on:click|stopPropagation={() => handleAddModelToProvider(provider.id)}
-                title={m.add_model()}
+                class="group focus:ring-accent-default mr-1 flex cursor-pointer items-center gap-3 rounded-lg transition-colors duration-150 focus:ring-2 focus:ring-offset-2 focus:outline-none"
+                on:click|stopPropagation={() => handleEditProvider(provider)}
+                title={m.edit_provider()}
               >
-                <Plus class="h-3.5 w-3.5" />
-                {m.add_model()}
+                <span class="transition-transform duration-150 group-hover:scale-105">
+                  <ProviderGlyph providerType={provider.provider_type} size="md" />
+                </span>
+                <span
+                  class="text-primary group-hover:text-accent-default decoration-accent-default/50 font-medium underline-offset-2 transition-colors group-hover:underline"
+                >
+                  {provider.name}
+                </span>
               </button>
-              <ProviderActions
-                {provider}
-                onAddModel={handleAddModelToProvider}
-                onEditProvider={handleEditProvider}
-              />
+            {:else}
+              <div class="mr-2 flex items-center gap-2">
+                <div
+                  class="border-stronger h-3 w-3 rounded-full border"
+                  style="background: var(--{getChartColour(group.name)})"
+                ></div>
+                <span class="text-primary font-medium">{group.name}</span>
+              </div>
             {/if}
-          </div>
-        </svelte:fragment>
-        <svelte:fragment slot="empty">
-          {#if provider}
-            <ProviderEmptyState
-              providerId={provider.id}
-              on:addModel={(e) => handleAddModelToProvider(e.detail.providerId)}
-            />
-          {:else}
-            <div class="text-sm text-muted/80 py-3 px-4 bg-surface-dimmer/50 rounded-lg border border-dashed border-dimmer">
-              {m.no_models_in_provider()}
+          </svelte:fragment>
+          <svelte:fragment slot="title-suffix">
+            <div class="flex items-center gap-2">
+              {#if provider}
+                {@const modelCount = getModelCountForProvider(provider.id)}
+                <!-- Model count with bullet separator -->
+                <span class="text-muted text-xs tabular-nums opacity-70">
+                  • {modelCount === 1
+                    ? m.provider_model_count_one({ count: modelCount })
+                    : m.provider_model_count_other({ count: modelCount })}
+                </span>
+                <!-- Visual separator between info and actions -->
+                <span class="bg-border-dimmer h-4 w-px"></span>
+                <ProviderStatusBadge {provider} />
+                <button
+                  class="text-muted hover:bg-hover-dimmer hover:text-primary focus:ring-accent-default flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors duration-150 focus:ring-1 focus:outline-none"
+                  on:click|stopPropagation={() => handleAddModelToProvider(provider.id)}
+                  title={m.add_model()}
+                >
+                  <Plus class="h-3.5 w-3.5" />
+                  {m.add_model()}
+                </button>
+                <ProviderActions
+                  {provider}
+                  onAddModel={handleAddModelToProvider}
+                  onEditProvider={handleEditProvider}
+                />
+              {/if}
             </div>
-          {/if}
-        </svelte:fragment>
-      </Table.Group>
-    {/each}
-  </Table.Root>
+          </svelte:fragment>
+          <svelte:fragment slot="empty">
+            {#if provider}
+              <ProviderEmptyState
+                providerId={provider.id}
+                on:addModel={(e) => handleAddModelToProvider(e.detail.providerId)}
+              />
+            {:else}
+              <div
+                class="text-muted/80 bg-surface-dimmer/50 border-dimmer rounded-lg border border-dashed px-4 py-3 text-sm"
+              >
+                {m.no_models_in_provider()}
+              </div>
+            {/if}
+          </svelte:fragment>
+        </Table.Group>
+      {/each}
+    </Table.Root>
 
-  <div class="flex justify-center pt-8 pb-6 mt-4 border-t border-dimmer">
-    <Button variant="outlined" on:click={() => { wizardPreSelectedProviderId = null; addWizardOpen.set(true); }}>
-      <Plus class="w-4 h-4 mr-2" />
-      {m.add_provider()}
-    </Button>
+    <div class="border-dimmer mt-4 flex justify-center border-t pt-8 pb-6">
+      <Button
+        variant="outlined"
+        on:click={() => {
+          wizardPreSelectedProviderId = null;
+          addWizardOpen.set(true);
+        }}
+      >
+        <Plus class="mr-2 h-4 w-4" />
+        {m.add_provider()}
+      </Button>
+    </div>
   </div>
-</div>
 {/if}
 
 <!-- Add Provider & Models Wizard -->

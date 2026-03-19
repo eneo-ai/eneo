@@ -51,6 +51,7 @@
 </script>
 
 <div class="flex gap-[1px]">
+  <!-- eslint-disable-next-line @typescript-eslint/no-explicit-any -->
   {#snippet triggerSnippet(createAssistantTrigger: any)}
     <Button variant="primary" is={createAssistantTrigger} class="!rounded-r-none"
       >{m.create_assistant()}</Button

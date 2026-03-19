@@ -101,16 +101,16 @@
   <div
     class="
       inline-flex items-center gap-1.5
-      px-2 py-1
-      text-xs font-medium
-      rounded-full
+      rounded-full px-2
+      py-1 text-xs
+      font-medium
       {color.bg}
       {color.border}
       border
       transition-colors duration-150
     "
   >
-    <svelte:component this={Icon} class="w-3.5 h-3.5 {color.text}" />
+    <svelte:component this={Icon} class="h-3.5 w-3.5 {color.text}" />
     <span class={color.text}>{label}</span>
   </div>
 </Tooltip>

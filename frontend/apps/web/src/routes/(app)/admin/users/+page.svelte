@@ -4,18 +4,18 @@
   import UserEditor from "./editor/UserEditor.svelte";
   import UserTable from "./UserTable.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { goto, invalidate } from "$app/navigation";
+  import { goto } from "$app/navigation";
   import { page } from "$app/stores";
 
   // Svelte 5 runes mode: use $props() instead of export let
   let { data } = $props();
 
   // Get search value and tab from URL params
-  const searchValue = $derived($page.url.searchParams.get('search') || '');
-  const currentTab = $derived($page.url.searchParams.get('tab') || 'active');
+  const searchValue = $derived($page.url.searchParams.get("search") || "");
+  const currentTab = $derived($page.url.searchParams.get("tab") || "active");
 
   // Swedish number formatting for counts (e.g., 2828 → "2 828", 50000 → "50 000")
-  const numberFormatter = new Intl.NumberFormat('sv-SE');
+  const numberFormatter = new Intl.NumberFormat("sv-SE");
 
   setAdminUserCtx({
     customRoles: data.customRoles,
@@ -24,7 +24,7 @@
   });
 
   // Reference to UserTable component to access filterValue
-  let userTableRef: any;
+  let userTableRef: UserTable;
 
   // Watch built-in table filter and trigger server-side search with debouncing
   let debounceTimer: ReturnType<typeof setTimeout>;
@@ -42,13 +42,13 @@
 
           // Only trigger search if empty OR >= 3 characters (matches backend validation)
           // Prevents unnecessary network requests and 400 errors for short searches
-          if (trimmed === '' || trimmed.length >= 3) {
+          if (trimmed === "" || trimmed.length >= 3) {
             // Preserve current tab when searching
             const params = new URLSearchParams();
-            if (currentTab) params.set('tab', currentTab);
-            if (trimmed) params.set('search', trimmed);
+            if (currentTab) params.set("tab", currentTab);
+            if (trimmed) params.set("search", trimmed);
 
-            const url = params.toString() ? `/admin/users?${params.toString()}` : '/admin/users';
+            const url = params.toString() ? `/admin/users?${params.toString()}` : "/admin/users";
 
             goto(url, { noScroll: true, keepFocus: true, replaceState: true });
           }
@@ -103,7 +103,8 @@
     {#if data.pagination}
       <div class="mt-4 text-sm text-gray-600">
         Showing page {data.pagination.page} of {data.pagination.total_pages}
-        ({data.pagination.total_count} total users{searchValue ? ` matching "${searchValue}"` : ''}, {data.users.length} on this page)
+        ({data.pagination.total_count} total users{searchValue ? ` matching "${searchValue}"` : ""}, {data
+          .users.length} on this page)
       </div>
     {/if}
   </Page.Main>

@@ -14,7 +14,7 @@
   <hr class="border-white/20" />
   <p class="leading-snug text-slate-300">
     You are over the limit by
-    <strong class="font-bold text-negative-default">{formattedOverflow}</strong>
+    <strong class="text-negative-default font-bold">{formattedOverflow}</strong>
     tokens. Older messages or file content may be truncated.
   </p>
 </div>

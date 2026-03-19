@@ -25,7 +25,7 @@
     try {
       await intric.users.invite({
         email: userEmail,
-        predefined_role: userRole[0]  // Get first role from array
+        predefined_role: userRole[0] // Get first role from array
       });
       invalidate("admin:users:load");
       $showDialog = false;

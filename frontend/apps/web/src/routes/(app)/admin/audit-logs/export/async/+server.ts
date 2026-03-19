@@ -24,9 +24,9 @@ export const POST: RequestHandler = async (event) => {
       method: "POST",
       headers: {
         Authorization: `Bearer ${id_token}`,
-        "Content-Type": "application/json",
+        "Content-Type": "application/json"
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(body)
     });
 
     if (!response.ok) {

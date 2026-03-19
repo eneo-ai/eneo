@@ -47,6 +47,7 @@
   });
   let affectedMcpServers = $derived.by(() => {
     if (!result) return [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (result.mcp_servers ?? []).map((s: any) => ({ name: s.name }));
   });
   let hasAnyImpact = $derived(affectedModels.length > 0 || affectedMcpServers.length > 0);

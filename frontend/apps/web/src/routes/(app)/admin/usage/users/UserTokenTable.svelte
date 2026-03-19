@@ -26,7 +26,16 @@
     onSortChange: (sortBy: UserSortBy, sortOrder: "asc" | "desc") => void;
   }
 
-  const { users, totalUsers, page, perPage, highThreshold, mediumThreshold, onUserClick, onPageChange }: Props = $props();
+  const {
+    users,
+    totalUsers,
+    page,
+    perPage,
+    highThreshold,
+    mediumThreshold,
+    onUserClick,
+    onPageChange
+  }: Props = $props();
 
   const table = Table.createWithResource<UserTokenUsage>([]);
 

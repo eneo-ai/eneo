@@ -16,6 +16,7 @@
   export let kwArgs: ModelKwArgs;
   export let isDisabled: boolean;
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   export let selectedModel: any = null; // CompletionModel from the parent
   export let aria: AriaProps = { "aria-label": m.select_model_behaviour() };
 

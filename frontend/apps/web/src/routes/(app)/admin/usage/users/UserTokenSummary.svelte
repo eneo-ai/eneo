@@ -164,7 +164,11 @@
         <div class="text-red-500">{error}</div>
       </div>
     {:else if userStats && userStats.users.length > 0}
-      <UserOverviewBar {userStats} highThreshold={thresholds.high} mediumThreshold={thresholds.medium}></UserOverviewBar>
+      <UserOverviewBar
+        {userStats}
+        highThreshold={thresholds.high}
+        mediumThreshold={thresholds.medium}
+      ></UserOverviewBar>
       <div class="mt-4">
         <UserTokenTable
           users={userStats.users}

@@ -84,11 +84,7 @@
     </Dropdown.Trigger>
     <Dropdown.Menu let:item>
       {#if canEdit}
-        <Button
-          is={item}
-          on:click={openRenameDialog}
-          padding="icon-leading"
-        >
+        <Button is={item} on:click={openRenameDialog} padding="icon-leading">
           <IconEdit size="sm" />{m.rename_wrapper()}
         </Button>
       {/if}
@@ -112,7 +108,11 @@
   <Dialog.Content width="small">
     <Dialog.Title>{m.rename_wrapper()}</Dialog.Title>
     <Dialog.Section scrollable={false}>
-      <Input.Text bind:value={newWrapperName} label={m.sharepoint_wrapper_name_label()} class="px-4 py-4" />
+      <Input.Text
+        bind:value={newWrapperName}
+        label={m.sharepoint_wrapper_name_label()}
+        class="px-4 py-4"
+      />
     </Dialog.Section>
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>

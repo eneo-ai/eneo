@@ -16,7 +16,7 @@
   let loadedBlobText: string | undefined = blob.text;
   let loadingBlob = false;
   let loadError = false;
-  
+
   async function loadBlob() {
     if (!loadedBlobText) {
       loadingBlob = true;

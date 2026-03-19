@@ -30,11 +30,10 @@ export class ChatService {
   partner = $derived(this.#chatPartner);
   hasCompletionModel = $derived(
     this.#chatPartner &&
-    ('completion_model' in this.#chatPartner
-      ? this.#chatPartner.completion_model !== null &&
-        this.#chatPartner.completion_model !== undefined
-      : 'tools' in this.#chatPartner &&
-        this.#chatPartner.tools?.assistants?.length > 0)
+      ("completion_model" in this.#chatPartner
+        ? this.#chatPartner.completion_model !== null &&
+          this.#chatPartner.completion_model !== undefined
+        : "tools" in this.#chatPartner && this.#chatPartner.tools?.assistants?.length > 0)
   );
   #intric: Intric;
   currentConversation = $state<Conversation>(emptyConversation());
@@ -58,7 +57,6 @@ export class ChatService {
   // Separate tracking for text and file tokens to prevent race conditions
   #textTokensApprox = $state<number>(0);
   #fileTokensCache = $state<number>(0);
-  #lastCalculatedText = "";
   #lastCalculatedAttachmentIds = new Set<string>();
 
   // Track current state to avoid closure issues
@@ -125,8 +123,9 @@ export class ChatService {
 
         // Initialize token count if the conversation has a total_history_tokens field
         // This would come from backend when loading existing conversations
-        if ((initialConversation as any)?.total_history_tokens) {
-          this.historyTokens = (initialConversation as any).total_history_tokens;
+        if ((initialConversation as Record<string, unknown>)?.total_history_tokens) {
+          this.historyTokens = (initialConversation as Record<string, unknown>)
+            .total_history_tokens as number;
         } else {
           // Calculate tokens for the loaded conversation
           this.calculateHistoryTokens();
@@ -255,8 +254,8 @@ export class ChatService {
 
       // Initialize token count if the conversation has a total_history_tokens field
       // This would come from backend when loading existing conversations
-      if ((loaded as any)?.total_history_tokens) {
-        this.historyTokens = (loaded as any).total_history_tokens;
+      if ((loaded as Record<string, unknown>)?.total_history_tokens) {
+        this.historyTokens = (loaded as Record<string, unknown>).total_history_tokens as number;
       } else {
         // Calculate tokens for the loaded conversation using the token-estimate endpoint
         this.calculateHistoryTokens();
@@ -296,8 +295,7 @@ export class ChatService {
       this.#finalizeStream();
       const streamGen = ++this.#streamGen;
       let inrefBuffer = "";
-      const ref =
-        this.currentConversation.messages[this.currentConversation.messages?.length - 1];
+      const ref = this.currentConversation.messages[this.currentConversation.messages?.length - 1];
       const isStale = () => this.#streamGen !== streamGen;
 
       const ensureCurrentSession = (event: { session_id: string }) => {
@@ -376,11 +374,13 @@ export class ChatService {
               if (!ensureCurrentSession(event)) return;
 
               // Debug logging for token-related events only
-              if ((event as any).usage || event.intric_event_type === "token_usage") {
-                console.log('[ChatService] Received potential token event:', {
+              const eventRecord = event as Record<string, unknown>;
+              const eventUsage = eventRecord.usage as Record<string, unknown> | undefined;
+              if (eventUsage || event.intric_event_type === "token_usage") {
+                console.log("[ChatService] Received potential token event:", {
                   eventType: event.intric_event_type,
-                  hasUsage: !!(event as any).usage,
-                  turnTokens: (event as any).usage?.turn_tokens,
+                  hasUsage: !!eventUsage,
+                  turnTokens: eventUsage?.turn_tokens,
                   fullEvent: event
                 });
               }
@@ -391,18 +391,21 @@ export class ChatService {
 
               // Handle token usage events from backend
               // The backend should send token count for this conversational turn
-              if ((event as any).usage?.turn_tokens) {
-                const turnTokens = (event as any).usage.turn_tokens;
+              if (eventUsage?.turn_tokens) {
+                const turnTokens = eventUsage.turn_tokens as number;
                 const oldTokens = this.historyTokens;
                 this.historyTokens += turnTokens;
-                console.log('[ChatService] ✅ TOKEN UPDATE RECEIVED:', {
+                console.log("[ChatService] ✅ TOKEN UPDATE RECEIVED:", {
                   turnTokens,
                   oldTotal: oldTokens,
                   newTotal: this.historyTokens
                 });
               } else if (event.intric_event_type === "token_usage") {
                 // Also check for a dedicated token_usage event type
-                console.log('[ChatService] Received token_usage event but no turn_tokens found:', event);
+                console.log(
+                  "[ChatService] Received token_usage event but no turn_tokens found:",
+                  event
+                );
               }
             },
             onToolCall: (event) => {
@@ -410,21 +413,29 @@ export class ChatService {
               // Store tool calls for rendering with translations
               // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
               if (!ref.mcp_tool_calls) {
-                // @ts-expect-error
+                // @ts-expect-error - mcp_tool_calls is not in the static type
                 ref.mcp_tool_calls = [];
               }
               // Update existing tool calls or add new ones (avoid duplicates from approval flow)
-              for (const tool of event.tools as Array<{ tool_call_id?: string; [key: string]: unknown }>) {
-                // @ts-expect-error
+              for (const tool of event.tools as Array<{
+                tool_call_id?: string;
+                [key: string]: unknown;
+              }>) {
+                // @ts-expect-error - mcp_tool_calls is a runtime property
                 const existingIndex = ref.mcp_tool_calls.findIndex(
-                  (t: { tool_call_id?: string }) => t.tool_call_id && t.tool_call_id === tool.tool_call_id
+                  (t: { tool_call_id?: string }) =>
+                    t.tool_call_id && t.tool_call_id === tool.tool_call_id
                 );
                 if (existingIndex >= 0) {
                   // Update existing entry with approval status
-                  // @ts-expect-error
-                  ref.mcp_tool_calls[existingIndex] = { ...ref.mcp_tool_calls[existingIndex], ...tool };
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const mcpCalls = (ref as any).mcp_tool_calls;
+                  mcpCalls[existingIndex] = {
+                    ...mcpCalls[existingIndex],
+                    ...tool
+                  };
                 } else {
-                  // @ts-expect-error
+                  // @ts-expect-error - mcp_tool_calls is a runtime property
                   ref.mcp_tool_calls.push(tool);
                 }
               }
@@ -434,10 +445,10 @@ export class ChatService {
               // Add tools to the message so they display in the UI
               // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
               if (!ref.mcp_tool_calls) {
-                // @ts-expect-error
+                // @ts-expect-error - mcp_tool_calls is not in the static type
                 ref.mcp_tool_calls = [];
               }
-              // @ts-expect-error
+              // @ts-expect-error - mcp_tool_calls is a runtime property
               ref.mcp_tool_calls.push(...event.tools);
               // Set pending approval state - UI will show inline approval buttons
               this.pendingToolApproval = {
@@ -513,20 +524,19 @@ export class ChatService {
       try {
         // Combine all message content (questions and answers)
         const fullText = this.currentConversation.messages
-          .map(msg => {
-            let text = '';
-            if (msg.question) text += msg.question + '\n';
-            if (msg.answer) text += msg.answer + '\n';
+          .map((msg) => {
+            let text = "";
+            if (msg.question) text += msg.question + "\n";
+            if (msg.answer) text += msg.answer + "\n";
             return text;
           })
-          .join('\n');
+          .join("\n");
 
         // Get file IDs from all messages
         const fileIds = this.currentConversation.messages
-          .flatMap(msg => msg.files || [])
-          .filter(file => file.id)
-          .map(file => file.id);
-
+          .flatMap((msg) => msg.files || [])
+          .filter((file) => file.id)
+          .map((file) => file.id);
 
         // Use the token-estimate endpoint
         const response = await this.#intric.client.fetch("/api/v1/assistants/{id}/token-estimate", {
@@ -556,15 +566,15 @@ export class ChatService {
 
           console.log(
             `[ChatService] Token usage: ${(promptTokens + historyTokens).toLocaleString()} tokens ` +
-            `(text: ${breakdown.text || 0}, files: ${breakdown.files || 0}, prompt: ${promptTokens})`
+              `(text: ${breakdown.text || 0}, files: ${breakdown.files || 0}, prompt: ${promptTokens})`
           );
         }
       } catch (error) {
-        console.error('[ChatService] Token calculation failed, using fallback');
+        console.error("[ChatService] Token calculation failed, using fallback");
         // Fallback to character-based approximation
         const fallbackTokens = Math.ceil(
           this.currentConversation.messages
-            .map(msg => (msg.question || '').length + (msg.answer || '').length)
+            .map((msg) => (msg.question || "").length + (msg.answer || "").length)
             .reduce((a, b) => a + b, 0) / 4
         );
         this.historyTokens = fallbackTokens;
@@ -589,8 +599,8 @@ export class ChatService {
     this.#textTokensApprox = Math.ceil(text.length / this.#learnedCharsPerToken);
 
     // Create a stable string representation of attachment IDs for comparison
-    const attachmentIds = attachments.map(a => a.id).filter(Boolean);
-    const attachmentIdString = attachmentIds.sort().join(',');
+    const attachmentIds = attachments.map((a) => a.id).filter(Boolean);
+    const attachmentIdString = attachmentIds.sort().join(",");
 
     // Check if attachments have actually changed based on ID string
     const attachmentsChanged = attachmentIdString !== this.#currentAttachmentIdString;
@@ -612,7 +622,7 @@ export class ChatService {
           totalFileTokens += this.#fileTokenMap.get(fileId)!;
         } else {
           // Rough estimate for new files (will be updated by API)
-          const attachment = attachments.find(file => file.id === fileId);
+          const attachment = attachments.find((file) => file.id === fileId);
           const roughEstimate = estimateTokensFromSize(attachment?.size);
           this.#fileTokenMap.set(fileId, roughEstimate);
           totalFileTokens += roughEstimate;
@@ -641,7 +651,6 @@ export class ChatService {
       this.#textTokensApprox = 0;
       this.#fileTokensCache = 0;
       this.#fileTokenMap.clear();
-      this.#lastCalculatedText = "";
       this.#lastCalculatedAttachmentIds.clear();
       return;
     }
@@ -658,12 +667,15 @@ export class ChatService {
     this.#newPromptTokenTimer = setTimeout(async () => {
       try {
         // Check if this request is stale by comparing with CURRENT state (not closure)
-        if (this.#currentText !== requestText || this.#currentAttachmentIdString !== requestAttachmentIdString) {
+        if (
+          this.#currentText !== requestText ||
+          this.#currentAttachmentIdString !== requestAttachmentIdString
+        ) {
           return; // Silently skip stale requests
         }
 
         // Use the request attachment IDs that were captured at the time of the request
-        const fileIds = requestAttachmentIdString.split(',').filter(Boolean);
+        const fileIds = requestAttachmentIdString.split(",").filter(Boolean);
 
         const response = await this.#intric.client.fetch("/api/v1/assistants/{id}/token-estimate", {
           method: "post",
@@ -689,7 +701,10 @@ export class ChatService {
         }
 
         // Double-check staleness after API returns using CURRENT state
-        if (this.#currentText !== requestText || this.#currentAttachmentIdString !== requestAttachmentIdString) {
+        if (
+          this.#currentText !== requestText ||
+          this.#currentAttachmentIdString !== requestAttachmentIdString
+        ) {
           return; // Silently skip stale responses
         }
 
@@ -699,7 +714,6 @@ export class ChatService {
 
         const breakdown = response?.breakdown;
         if (breakdown) {
-
           // Update per-file token cache with accurate values from API
           if (response?.breakdown?.file_details) {
             for (const [fileId, tokenCount] of Object.entries(response.breakdown.file_details)) {
@@ -719,12 +733,9 @@ export class ChatService {
 
           // Update the total with accurate API result
           this.newPromptTokens = totalNewTokens;
-
-          // Store the text that was calculated
-          this.#lastCalculatedText = requestText;
         }
       } catch (error) {
-        console.error('[ChatService] Token calculation failed, keeping approximation:', error);
+        console.error("[ChatService] Token calculation failed, keeping approximation:", error);
         // Keep the current approximation on error
       }
     }, 300); // 300ms debounce for API accuracy
@@ -736,7 +747,6 @@ export class ChatService {
     this.#textTokensApprox = 0;
     this.#fileTokensCache = 0;
     this.#fileTokenMap.clear();
-    this.#lastCalculatedText = "";
     this.#lastCalculatedAttachmentIds.clear();
     this.#currentText = "";
     this.#currentAttachmentIdString = "";
@@ -752,7 +762,7 @@ export class ChatService {
   // Submit approval decisions for pending tool calls
   async submitToolApproval(decisions: Array<{ tool_call_id: string; approved: boolean }>) {
     if (!this.pendingToolApproval) {
-      console.warn('[ChatService] No pending tool approval to submit');
+      console.warn("[ChatService] No pending tool approval to submit");
       return;
     }
 
@@ -762,7 +772,7 @@ export class ChatService {
         decisions
       });
     } catch (error) {
-      console.error('[ChatService] Failed to submit tool approval:', error);
+      console.error("[ChatService] Failed to submit tool approval:", error);
       throw error;
     } finally {
       // Clear pending approval regardless of success/failure
@@ -774,7 +784,7 @@ export class ChatService {
   async approveAllTools() {
     if (!this.pendingToolApproval) return;
 
-    const decisions = this.pendingToolApproval.tools.map(tool => ({
+    const decisions = this.pendingToolApproval.tools.map((tool) => ({
       tool_call_id: tool.tool_call_id!,
       approved: true
     }));
@@ -786,7 +796,7 @@ export class ChatService {
   async rejectAllTools() {
     if (!this.pendingToolApproval) return;
 
-    const decisions = this.pendingToolApproval.tools.map(tool => ({
+    const decisions = this.pendingToolApproval.tools.map((tool) => ({
       tool_call_id: tool.tool_call_id!,
       approved: false
     }));
@@ -806,7 +816,7 @@ export class ChatService {
 
     // Remove the approved tool from pending list
     const remainingTools = this.pendingToolApproval.tools.filter(
-      t => t.tool_call_id !== toolCallId
+      (t) => t.tool_call_id !== toolCallId
     );
 
     if (remainingTools.length === 0) {
@@ -833,7 +843,7 @@ export class ChatService {
 
     // Remove the denied tool from pending list
     const remainingTools = this.pendingToolApproval.tools.filter(
-      t => t.tool_call_id !== toolCallId
+      (t) => t.tool_call_id !== toolCallId
     );
 
     if (remainingTools.length === 0) {

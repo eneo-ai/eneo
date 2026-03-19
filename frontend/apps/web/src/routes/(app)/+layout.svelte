@@ -48,7 +48,6 @@
   $: isPersonal = currentRoute.startsWith("/spaces/personal");
   $: isOrganization = currentRoute.startsWith("/spaces/organization");
   $: isSpacesGeneric = currentRoute.startsWith("/spaces") && !isPersonal && !isOrganization;
-
 </script>
 
 <a
@@ -97,24 +96,36 @@
       </Button>
     </div>
     <nav class="flex h-[3.25rem] w-full overflow-x-auto">
-      <a href={localizeHref("/spaces/personal/chat")} data-current={isPersonal ? "page" : undefined}>{m.personal()}</a>
-      <a href={localizeHref("/spaces/list")} data-current={isSpacesGeneric ? "page" : undefined}>{m.spaces()}</a>
+      <a href={localizeHref("/spaces/personal/chat")} data-current={isPersonal ? "page" : undefined}
+        >{m.personal()}</a
+      >
+      <a href={localizeHref("/spaces/list")} data-current={isSpacesGeneric ? "page" : undefined}
+        >{m.spaces()}</a
+      >
       {#if user.hasPermission("admin")}
-        <a href={localizeHref("/spaces/organization/knowledge")} data-current={isOrganization ? "page" : undefined}>{m.organization()}</a>
+        <a
+          href={localizeHref("/spaces/organization/knowledge")}
+          data-current={isOrganization ? "page" : undefined}>{m.organization()}</a
+        >
       {/if}
 
       <div aria-hidden="true" class="flex-grow"></div>
 
       <!-- Toggle -->
       {#if user.hasPermission("admin")}
-        <a href={localizeHref("/admin")} data-current={currentRoute.startsWith("/admin") ? "page" : undefined}
-          >{m.admin()}</a
+        <a
+          href={localizeHref("/admin")}
+          data-current={currentRoute.startsWith("/admin") ? "page" : undefined}>{m.admin()}</a
         >
       {/if}
 
       <JobManagerDropdown></JobManagerDropdown>
       <div class="subtle-border h-[3.25rem] w-[0.5px]"></div>
-      <ProfileMenu tenantFederationEnabled={Boolean(data.featureFlags?.federationStatus?.has_multi_tenant_federation)}></ProfileMenu>
+      <ProfileMenu
+        tenantFederationEnabled={Boolean(
+          data.featureFlags?.federationStatus?.has_multi_tenant_federation
+        )}
+      ></ProfileMenu>
     </nav>
   </header>
 

@@ -12,9 +12,7 @@ import { getIntric } from "$lib/core/Intric";
 import { CalendarDate } from "@internationalized/date";
 import type { ChatPartner, Conversation, ConversationSparse, Intric } from "@intric/intric-js";
 
-type InsightStatistics = Awaited<
-  ReturnType<Intric["analytics"]["insights"]["statistics"]>
->;
+type InsightStatistics = Awaited<ReturnType<Intric["analytics"]["insights"]["statistics"]>>;
 
 class InsightsService {
   #intric: Intric;

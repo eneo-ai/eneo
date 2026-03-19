@@ -107,4 +107,3 @@
 {#if isDragging}
   <AttachmentDropArea bind:isDragging label={m.drop_files_here_upload({ appName: $app.name })} />
 {/if}
-

@@ -8,7 +8,11 @@ import {
 
 type CommonKeys = keyof AssistantTemplate & keyof AppTemplate;
 type RequiredKeys = {
-  [K in CommonKeys]: undefined extends AssistantTemplate[K] ? never : undefined extends AppTemplate[K] ? never : K;
+  [K in CommonKeys]: undefined extends AssistantTemplate[K]
+    ? never
+    : undefined extends AppTemplate[K]
+      ? never
+      : K;
 }[CommonKeys];
 type OptionalKeys = Exclude<CommonKeys, RequiredKeys>;
 

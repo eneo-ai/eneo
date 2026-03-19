@@ -58,9 +58,7 @@
 
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>
-      <Button
-        variant="primary"
-        on:click={createSpace}
+      <Button variant="primary" on:click={createSpace}
         >{isCreatingSpace ? m.creating() : m.create_space()}</Button
       >
     </Dialog.Controls>

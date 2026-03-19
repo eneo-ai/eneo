@@ -17,6 +17,7 @@
     descriptionId?: string;
   }
 
+  /* eslint-disable @typescript-eslint/no-unused-vars -- props are part of component's public API */
   let {
     value = $bindable(),
     hasChanges = false,
@@ -25,6 +26,7 @@
     labelId,
     descriptionId
   }: Props = $props();
+  /* eslint-enable @typescript-eslint/no-unused-vars */
 
   // Track if override is enabled
   let isOverrideEnabled = $state(value !== null);
@@ -55,12 +57,9 @@
   });
 </script>
 
-<div class="rounded-lg border border-default p-4 flex flex-col gap-3">
+<div class="border-default flex flex-col gap-3 rounded-lg border p-4">
   <!-- Switch to enable override -->
-  <Input.Switch
-    value={isOverrideEnabled}
-    sideEffect={handleSwitchChange}
-  >
+  <Input.Switch value={isOverrideEnabled} sideEffect={handleSwitchChange}>
     <span class="text-sm">
       {m.conversation_retention_override_label()}
       {#if inheritedDays !== null}
@@ -71,7 +70,7 @@
 
   <!-- Input field (only shown when override is enabled) -->
   {#if isOverrideEnabled}
-    <div class="flex items-center gap-2 pt-2 border-t border-default">
+    <div class="border-default flex items-center gap-2 border-t pt-2">
       <Input.Number
         bind:value={inputValue}
         min={1}

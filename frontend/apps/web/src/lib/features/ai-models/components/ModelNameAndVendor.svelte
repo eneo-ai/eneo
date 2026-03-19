@@ -67,12 +67,12 @@
       </h4>
     </Tooltip>
     {#if "nickname" in model && model.name !== model.nickname}
-      <span class="text-xs text-muted leading-tight truncate max-w-48" title={model.name}>
+      <span class="text-muted max-w-48 truncate text-xs leading-tight" title={model.name}>
         {model.name}
       </span>
     {/if}
     {#if showTokenLimit && "token_limit" in model && model.token_limit}
-      <span class="text-[11px] text-muted/70 tabular-nums leading-none">
+      <span class="text-muted/70 text-[11px] leading-none tabular-nums">
         {m.token_limit_context({ limit: formatTokenLimit(model.token_limit) })}
       </span>
     {/if}

@@ -15,9 +15,7 @@
   const { environment } = getAppContext();
 
   // Generate icon URL from icon_id
-  $: iconUrl = space.icon_id
-    ? `${environment.baseUrl}/api/v1/icons/${space.icon_id}/`
-    : null;
+  $: iconUrl = space.icon_id ? `${environment.baseUrl}/api/v1/icons/${space.icon_id}/` : null;
 </script>
 
 <a

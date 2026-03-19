@@ -23,13 +23,16 @@ export interface ModelProviderCapabilities {
 let capabilitiesCache: ModelProviderCapabilities | null = null;
 let capabilitiesPromise: Promise<ModelProviderCapabilities> | null = null;
 
-export async function getModelProviderCapabilities(intric: Intric): Promise<ModelProviderCapabilities> {
+export async function getModelProviderCapabilities(
+  intric: Intric
+): Promise<ModelProviderCapabilities> {
   if (capabilitiesCache) {
     return capabilitiesCache;
   }
 
   if (!capabilitiesPromise) {
-    capabilitiesPromise = intric.modelProviders.getCapabilities()
+    capabilitiesPromise = intric.modelProviders
+      .getCapabilities()
       .then((capabilities) => {
         capabilitiesCache = capabilities as ModelProviderCapabilities;
         return capabilitiesCache;

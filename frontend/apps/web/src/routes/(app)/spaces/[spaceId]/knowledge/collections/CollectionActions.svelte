@@ -95,7 +95,7 @@
           <IconMove size="sm" />Move</Button
         >
       {/if}
-      
+
       <Button
         is={item}
         variant="destructive"

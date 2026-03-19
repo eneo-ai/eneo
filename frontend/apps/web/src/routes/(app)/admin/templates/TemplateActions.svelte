@@ -7,7 +7,14 @@
 <script lang="ts">
   import type { components } from "@intric/intric-js";
   import { Button, Dropdown } from "@intric/ui";
-  import { MoreVertical, Edit, Trash2, RotateCcw, ArrowUpToLine, ArrowDownToLine } from "lucide-svelte";
+  import {
+    MoreVertical,
+    Edit,
+    Trash2,
+    RotateCcw,
+    ArrowUpToLine,
+    ArrowDownToLine
+  } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { writable } from "svelte/store";
@@ -51,11 +58,7 @@
 
 <Dropdown.Root>
   <Dropdown.Trigger asFragment let:trigger>
-    <Button
-      is={trigger}
-      padding="icon"
-      aria-label={m.actions()}
-    >
+    <Button is={trigger} padding="icon" aria-label={m.actions()}>
       <MoreVertical size={16} />
     </Button>
   </Dropdown.Trigger>
@@ -83,7 +86,12 @@
       </Button>
     {/if}
 
-    <Button is={item} padding="icon-leading" onclick={() => isDeleteOpen.set(true)} variant="destructive">
+    <Button
+      is={item}
+      padding="icon-leading"
+      onclick={() => isDeleteOpen.set(true)}
+      variant="destructive"
+    >
       <Trash2 size={16} />
       {m.delete()}
     </Button>

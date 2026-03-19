@@ -91,11 +91,13 @@
     <Dialog.Section>
       <div class="flex flex-col gap-4 p-4">
         {#if error}
-          <div class="border-error bg-error-dimmer text-error-stronger border-l-2 px-4 py-2 text-sm">
+          <div
+            class="border-error bg-error-dimmer text-error-stronger border-l-2 px-4 py-2 text-sm"
+          >
             {error}
           </div>
         {/if}
-        <p class="text-sm text-muted-foreground">
+        <p class="text-muted-foreground text-sm">
           {m.migrate_model_description({
             name: sourceModel.nickname ? sourceModel.nickname : sourceModel.name
           })}
@@ -104,26 +106,26 @@
           options={targetOptions}
           bind:value={targetModelId}
           resourceName={m.resource_model()}
-          {...{"placeholder": m.migrate_model_target_placeholder()}}
+          {...{ placeholder: m.migrate_model_target_placeholder() }}
           fitViewport={true}
           class="border-default hover:bg-hover-dimmer rounded-t-md border-b px-4 py-4"
         >
           {m.migrate_model_target_label()}
         </Select.Simple>
         {#if targetOptions.length === 0}
-          <p class="text-sm text-muted-foreground">
+          <p class="text-muted-foreground text-sm">
             {m.migrate_model_no_targets()}
           </p>
         {/if}
-        <label class="flex items-start gap-3 text-sm text-muted-foreground">
+        <label class="text-muted-foreground flex items-start gap-3 text-sm">
           <input
             type="checkbox"
             bind:checked={confirmMigration}
-            class="mt-0.5 h-4 w-4 rounded border-stronger accent-accent-default"
+            class="border-stronger accent-accent-default mt-0.5 h-4 w-4 rounded"
           />
           <span>{m.migrate_model_confirm_label()}</span>
         </label>
-        <p class="text-xs text-muted-foreground">
+        <p class="text-muted-foreground text-xs">
           {m.migrate_model_warning()}
         </p>
       </div>

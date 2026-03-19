@@ -68,6 +68,7 @@
 
         <Dialog.Content>
           <Dialog.Title>{m.generate_new_api_key_title()}</Dialog.Title>
+          <!-- eslint-disable-next-line svelte/no-at-html-tags -->
           <Dialog.Description>{@html m.generate_api_key_warning()}</Dialog.Description>
 
           <Dialog.Controls let:close>

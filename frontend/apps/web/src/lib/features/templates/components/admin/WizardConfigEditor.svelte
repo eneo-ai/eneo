@@ -114,14 +114,20 @@
           <span class="text-dimmer text-sm">{m.wizard_attachments_description()}</span>
         </div>
       </div>
-      <Input.Switch bind:value={attachmentsEnabled}><span class="sr-only">{m.enable_attachments()}</span></Input.Switch>
+      <Input.Switch bind:value={attachmentsEnabled}
+        ><span class="sr-only">{m.enable_attachments()}</span></Input.Switch
+      >
     </div>
 
     {#if attachmentsEnabled && attachmentsExpanded}
       <div class="border-default flex flex-col gap-3 border-t p-4">
-        <Input.Switch
-          bind:value={attachmentsRequired}
-        ><div><span>{m.required()}</span><span class="text-dimmer text-sm block">{m.wizard_attachments_required_description()}</span></div></Input.Switch>
+        <Input.Switch bind:value={attachmentsRequired}
+          ><div>
+            <span>{m.required()}</span><span class="text-dimmer block text-sm"
+              >{m.wizard_attachments_required_description()}</span
+            >
+          </div></Input.Switch
+        >
         <Input.Text
           bind:value={attachmentsTitle}
           label={m.custom_title()}
@@ -158,14 +164,20 @@
           <span class="text-dimmer text-sm">{m.wizard_collections_description()}</span>
         </div>
       </div>
-      <Input.Switch bind:value={collectionsEnabled}><span class="sr-only">{m.enable_collections()}</span></Input.Switch>
+      <Input.Switch bind:value={collectionsEnabled}
+        ><span class="sr-only">{m.enable_collections()}</span></Input.Switch
+      >
     </div>
 
     {#if collectionsEnabled && collectionsExpanded}
       <div class="border-default flex flex-col gap-3 border-t p-4">
-        <Input.Switch
-          bind:value={collectionsRequired}
-        ><div><span>{m.required()}</span><span class="text-dimmer text-sm block">{m.wizard_collections_required_description()}</span></div></Input.Switch>
+        <Input.Switch bind:value={collectionsRequired}
+          ><div>
+            <span>{m.required()}</span><span class="text-dimmer block text-sm"
+              >{m.wizard_collections_required_description()}</span
+            >
+          </div></Input.Switch
+        >
         <Input.Text
           bind:value={collectionsTitle}
           label={m.custom_title()}

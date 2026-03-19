@@ -15,6 +15,7 @@
   dayjs.extend(utc);
 
   // Set dayjs locale based on paraglide locale
+  // eslint-disable-next-line svelte/no-immutable-reactive-statements
   $: dayjs.locale(getLocale());
 
   const SKIPPED_PREFIX = "skipped";

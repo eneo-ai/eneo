@@ -78,7 +78,7 @@ export function createWithStore<Resource extends Record<string, unknown>>(
   pageSize = 999999,
   options: CreateTableOptions = {}
 ) {
-  const plugins: any = {
+  const plugins: Partial<Plugins<Resource>> = {
     select: addSelectedRows(),
     sort: addSortBy({ disableMultiSort: true }),
     page: addPagination({ initialPageSize: pageSize })
@@ -102,7 +102,7 @@ export function createWithStore<Resource extends Record<string, unknown>>(
     }
   }
 
-  const table: Table<Resource, Plugins<Resource>> = createTable(data, plugins);
+  const table: Table<Resource, Plugins<Resource>> = createTable(data, plugins as Plugins<Resource>);
 
   return {
     column: table.column,
@@ -194,7 +194,7 @@ export function createWithStore<Resource extends Record<string, unknown>>(
     createViewModel(columns: Column<Resource, Plugins<Resource>>[]) {
       const dataCols = table.createColumns(columns);
       return table.createViewModel(dataCols, {
-        rowDataId: (item) => String((item as any).id)
+        rowDataId: (item) => String((item as Record<string, unknown>).id)
       });
     }
   };

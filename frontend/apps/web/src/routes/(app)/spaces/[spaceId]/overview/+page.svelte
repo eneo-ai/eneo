@@ -19,6 +19,7 @@
     state: { userInfo }
   } = getAppContext();
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function ownerSpaceId(item: any): string | undefined {
     return (
       item?.space_id ??
@@ -30,14 +31,12 @@
   }
 
   $: localCollections = ($currentSpace?.knowledge?.groups ?? []).filter(
-    (g: any) => ownerSpaceId(g) === $currentSpace?.id
+    (g) => ownerSpaceId(g) === $currentSpace?.id
   );
   $: localWebsites = ($currentSpace?.knowledge?.websites ?? []).filter(
-    (w: any) => ownerSpaceId(w) === $currentSpace?.id
+    (w) => ownerSpaceId(w) === $currentSpace?.id
   );
-
 </script>
-
 
 <svelte:head>
   <title

@@ -21,7 +21,9 @@
     state: { currentStep, createButtonLabel, creationMode, showCreateDialog }
   } = getTemplateController();
 
-  let { settings, triggerSnippet }: { settings: Settings; triggerSnippet?: Snippet<[any]> } = $props();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let { settings, triggerSnippet }: { settings: Settings; triggerSnippet?: Snippet<[any]> } =
+    $props();
 
   let openAssistantAfterCreation = $state(true);
   let userTouchedToggle = $state(false);

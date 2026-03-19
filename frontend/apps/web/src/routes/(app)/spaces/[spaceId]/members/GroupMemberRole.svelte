@@ -148,7 +148,9 @@
 <Dialog.Root alert bind:isOpen={showRemoveDialog}>
   <Dialog.Content width="small">
     <Dialog.Title>{m.remove_group()}</Dialog.Title>
-    <Dialog.Description>{m.confirm_remove_group({ groupName: groupMember.name })}</Dialog.Description>
+    <Dialog.Description
+      >{m.confirm_remove_group({ groupName: groupMember.name })}</Dialog.Description
+    >
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={removeGroupMember}

@@ -55,7 +55,7 @@
         can: "blue",
         isr: "blue",
         kor: "blue",
-        jpn: "blue",
+        jpn: "blue"
       };
       const hostingNameMap: Record<string, () => string> = {
         usa: m.hosting_usa,
@@ -68,7 +68,7 @@
         kor: m.hosting_kor,
         deu: m.hosting_deu,
         fra: m.hosting_fra,
-        jpn: m.hosting_jpn,
+        jpn: m.hosting_jpn
       };
       const hostingName = hostingNameMap[model.hosting]?.() ?? model.hosting.toUpperCase();
       labels.push({

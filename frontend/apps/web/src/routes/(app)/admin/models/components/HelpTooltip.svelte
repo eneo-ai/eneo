@@ -10,13 +10,13 @@
 <Tooltip {text}>
   <button
     type="button"
-    class="inline-flex items-center justify-center w-4 h-4 rounded-full -mt-px
-      text-muted/60 hover:text-muted
-      hover:bg-surface-dimmer/80
-      transition-colors duration-150
-      focus:outline-none focus-visible:text-accent-default focus-visible:bg-accent-dimmer/40"
+    class="text-muted/60 hover:text-muted hover:bg-surface-dimmer/80 focus-visible:text-accent-default focus-visible:bg-accent-dimmer/40 -mt-px inline-flex
+      h-4 w-4
+      items-center
+      justify-center rounded-full
+      transition-colors duration-150 focus:outline-none"
     tabindex="-1"
   >
-    <HelpCircle class="w-3.5 h-3.5" strokeWidth={2} />
+    <HelpCircle class="h-3.5 w-3.5" strokeWidth={2} />
   </button>
 </Tooltip>

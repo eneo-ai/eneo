@@ -20,8 +20,6 @@
   } = getSpacesManager();
 
   const intric = getIntric();
-  $: isOrgSpace = $currentSpace.organization === true;
-
   async function deleteService() {
     isProcessing = true;
     try {

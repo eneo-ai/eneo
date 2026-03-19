@@ -10,11 +10,7 @@
   import { IconCheck } from "@intric/icons/check";
   import { Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
-  import {
-    assistantTemplateCategories,
-    appTemplateCategories,
-    formatCategoryTitle
-  } from "../../TemplateCategories";
+  import { assistantTemplateCategories, appTemplateCategories } from "../../TemplateCategories";
 
   let {
     value = $bindable(""),
@@ -113,7 +109,7 @@
     </div>
     {#each categoryOptions as categoryKey (categoryKey)}
       <div
-        class="border-default hover:bg-hover-default flex min-h-10 items-center justify-between border-b px-3 hover:cursor-pointer last:border-b-0"
+        class="border-default hover:bg-hover-default flex min-h-10 items-center justify-between border-b px-3 last:border-b-0 hover:cursor-pointer"
         {...$option({ value: categoryKey })}
         use:option
       >

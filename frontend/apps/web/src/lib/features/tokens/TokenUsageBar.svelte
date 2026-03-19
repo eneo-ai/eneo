@@ -39,18 +39,18 @@
   // Color logic for the NEW prompt segment based on total usage
   const newSegmentColorClass = $derived(
     isOverflow
-      ? 'bg-negative-stronger'
+      ? "bg-negative-stronger"
       : totalPercentage < 70
-        ? 'bg-positive-stronger'
+        ? "bg-positive-stronger"
         : totalPercentage < 85
-          ? 'bg-warning-stronger'
-        : totalPercentage < 95
-            ? 'bg-warning-stronger'
-            : 'bg-negative-stronger'
+          ? "bg-warning-stronger"
+          : totalPercentage < 95
+            ? "bg-warning-stronger"
+            : "bg-negative-stronger"
   );
 
   // History segment always has a neutral color
-  const historySegmentColorClass = 'bg-slate-400';
+  const historySegmentColorClass = "bg-slate-400";
 
   // --- Formatting ---
   const formattedGrandTotal = $derived(grandTotalTokens.toLocaleString());
@@ -62,7 +62,7 @@
 
 <div class="token-usage-bar w-full">
   <!-- Stacked progress bar -->
-  <div class="relative mb-1 h-1.5 w-full overflow-hidden rounded-full bg-tertiary">
+  <div class="bg-tertiary relative mb-1 h-1.5 w-full overflow-hidden rounded-full">
     <!-- History segment (left) -->
     {#if combinedHistoryTokens > 0}
       <Tooltip
@@ -74,7 +74,7 @@
         <Button
           unstyled
           is={trigger}
-          class="absolute left-0 top-0 h-full cursor-help transition-all duration-300 ease-out {historySegmentColorClass}"
+          class="absolute top-0 left-0 h-full cursor-help transition-all duration-300 ease-out {historySegmentColorClass}"
           style="width: {historyDisplayPercentage}%"
         />
       </Tooltip>
@@ -96,7 +96,7 @@
         >
           <!-- Vertical separator line between segments -->
           {#if combinedHistoryTokens > 0 && historyDisplayPercentage < 100}
-            <div class="absolute left-0 top-0 h-full w-px bg-primary/30"></div>
+            <div class="bg-primary/30 absolute top-0 left-0 h-full w-px"></div>
           {/if}
         </Button>
       </Tooltip>
@@ -105,33 +105,33 @@
     <!-- Overflow section (beyond 100%) -->
     {#if isOverflow}
       <div
-        class="absolute left-0 top-0 h-full rounded-full bg-negative-stronger opacity-80 transition-all duration-300 ease-out"
+        class="bg-negative-stronger absolute top-0 left-0 h-full rounded-full opacity-80 transition-all duration-300 ease-out"
         style="width: {Math.min(totalPercentage, 120)}%"
       ></div>
     {/if}
   </div>
 
   <!-- Text display -->
-    <div class="flex items-center justify-between text-xs text-secondary">
-      <div class="flex items-center gap-1.5">
-        {#if isApproximate && !isOverflow}
-          <span class="text-tertiary">≈</span>
-        {/if}
-        <span>{formattedGrandTotal} / {formattedLimit} {m.tokens().toLowerCase()}</span>
+  <div class="text-secondary flex items-center justify-between text-xs">
+    <div class="flex items-center gap-1.5">
+      {#if isApproximate && !isOverflow}
+        <span class="text-tertiary">≈</span>
+      {/if}
+      <span>{formattedGrandTotal} / {formattedLimit} {m.tokens().toLowerCase()}</span>
 
-        <!-- Legend indicators for segments -->
-        {#if combinedHistoryTokens > 0 || tokens > 0}
-          <div class="flex items-center gap-2 ml-2">
+      <!-- Legend indicators for segments -->
+      {#if combinedHistoryTokens > 0 || tokens > 0}
+        <div class="ml-2 flex items-center gap-2">
           {#if combinedHistoryTokens > 0}
             <div class="flex items-center gap-1">
-              <div class="w-2 h-2 rounded-full {historySegmentColorClass}"></div>
-              <span class="text-[10px] text-tertiary">{m.history_label()}</span>
+              <div class="h-2 w-2 rounded-full {historySegmentColorClass}"></div>
+              <span class="text-tertiary text-[10px]">{m.history_label()}</span>
             </div>
           {/if}
           {#if tokens > 0}
             <div class="flex items-center gap-1">
-              <div class="w-2 h-2 rounded-full {newSegmentColorClass}"></div>
-              <span class="text-[10px] text-tertiary">{m.new_label()}</span>
+              <div class="h-2 w-2 rounded-full {newSegmentColorClass}"></div>
+              <span class="text-tertiary text-[10px]">{m.new_label()}</span>
             </div>
           {/if}
         </div>
@@ -140,29 +140,24 @@
 
     <div class="flex items-center gap-3">
       {#if isOverflow}
-        <Tooltip
-          text={m.context_limit_exceeded()}
-          placement="top"
-          let:trigger
-          asFragment
-        >
+        <Tooltip text={m.context_limit_exceeded()} placement="top" let:trigger asFragment>
           <Button
             unstyled
             is={trigger}
-            class="flex cursor-help items-center gap-1 rounded-md p-1 transition-colors duration-200 hover:bg-negative-dimmer/60 -m-1"
+            class="hover:bg-negative-dimmer/60 -m-1 flex cursor-help items-center gap-1 rounded-md p-1 transition-colors duration-200"
           >
-            <AlertTriangle class="h-4 w-4 flex-shrink-0 text-negative-stronger" />
-            <span class="font-medium text-negative-stronger">({formattedOverflow} {m.over()})</span>
+            <AlertTriangle class="text-negative-stronger h-4 w-4 flex-shrink-0" />
+            <span class="text-negative-stronger font-medium">({formattedOverflow} {m.over()})</span>
           </Button>
         </Tooltip>
       {/if}
 
       <span
-        class="{isOverflow
-          ? 'font-bold text-negative-stronger'
+        class={isOverflow
+          ? "text-negative-stronger font-bold"
           : totalPercentage > 85
-            ? 'font-medium text-warning'
-            : ''}">{totalPercentage.toFixed(1)}%</span
+            ? "text-warning font-medium"
+            : ""}>{totalPercentage.toFixed(1)}%</span
       >
     </div>
   </div>

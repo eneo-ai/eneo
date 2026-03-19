@@ -91,8 +91,10 @@
       {#if chat.partner.type === "default-assistant"}
         <DefaultAssistantModelSwitcher></DefaultAssistantModelSwitcher>
       {:else if chat.partner.permissions?.includes("edit")}
-        <Button href={localizeHref(`/spaces/${$currentSpace.routeId}/${chat.partner.type}s/${chat.partner.id}/edit`)}
-          >{m.edit()}</Button
+        <Button
+          href={localizeHref(
+            `/spaces/${$currentSpace.routeId}/${chat.partner.type}s/${chat.partner.id}/edit`
+          )}>{m.edit()}</Button
         >
       {/if}
       <Button

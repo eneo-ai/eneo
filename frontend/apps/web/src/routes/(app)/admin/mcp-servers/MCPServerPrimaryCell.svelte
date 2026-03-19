@@ -11,7 +11,7 @@
   type Props = {
     mcpServer: {
       name: string;
-      description?: string;
+      description?: string | null;
       http_url: string;
       http_auth_type: string;
       security_classification?: { name: string } | null;
@@ -47,9 +47,9 @@
   const authConfig = $derived(getAuthConfig(mcpServer.http_auth_type));
 </script>
 
-<div class="flex flex-col gap-1 py-0.5 min-w-0">
+<div class="flex min-w-0 flex-col gap-1 py-0.5">
   <div class="flex items-center gap-2.5">
-    <span class="font-medium text-default truncate leading-tight">{mcpServer.name}</span>
+    <span class="text-default truncate leading-tight font-medium">{mcpServer.name}</span>
     <span
       class="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium {authConfig.classes}"
       role="status"
@@ -60,7 +60,7 @@
     </span>
     {#if mcpServer.security_classification}
       <span
-        class="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium bg-amethyst-100 text-amethyst-700 dark:bg-amethyst-900/50 dark:text-amethyst-300"
+        class="bg-amethyst-100 text-amethyst-700 dark:bg-amethyst-900/50 dark:text-amethyst-300 inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium"
         role="status"
         aria-label="{m.security_classification()}: {mcpServer.security_classification.name}"
       >
@@ -70,10 +70,16 @@
     {/if}
   </div>
   {#if mcpServer.description}
-    <p class="text-sm text-muted line-clamp-1 leading-snug">{mcpServer.description}</p>
+    <p class="text-muted line-clamp-1 text-sm leading-snug">{mcpServer.description}</p>
   {/if}
-  <span class="inline-flex items-center gap-1.5 text-xs text-dimmer truncate font-mono" aria-label="Server URL">
-    <span class="inline-block h-1.5 w-1.5 rounded-full bg-positive-default animate-pulse" aria-hidden="true"></span>
+  <span
+    class="text-dimmer inline-flex items-center gap-1.5 truncate font-mono text-xs"
+    aria-label="Server URL"
+  >
+    <span
+      class="bg-positive-default inline-block h-1.5 w-1.5 animate-pulse rounded-full"
+      aria-hidden="true"
+    ></span>
     {mcpServer.http_url}
   </span>
 </div>

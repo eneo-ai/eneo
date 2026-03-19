@@ -61,7 +61,7 @@
   </Page.Header>
 
   <div
-    class="filter-bar mx-6 mt-3 mb-1 flex flex-wrap items-center justify-between gap-4 rounded-lg border-default bg-primary border px-4 py-2.5"
+    class="filter-bar border-default bg-primary mx-6 mt-3 mb-1 flex flex-wrap items-center justify-between gap-4 rounded-lg border px-4 py-2.5"
     style="--delay: 0ms"
   >
     <Input.DateRange bind:value={timeframe} class="border-0 p-0"

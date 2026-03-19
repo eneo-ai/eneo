@@ -5,7 +5,8 @@
   export let checked = false;
   export let indeterminate = false;
   export let disabled = false;
-  export let onCheckedChange: ((checked: boolean | "indeterminate") => void) | undefined = undefined;
+  export let onCheckedChange: ((checked: boolean | "indeterminate") => void) | undefined =
+    undefined;
   export let ariaLabel: string | undefined = undefined;
 
   // Create controlled checked store
@@ -34,10 +35,10 @@
 <button
   {...$root}
   use:root
-  class="flex h-4 w-4 items-center justify-center rounded border-2 transition-colors
-         border-default bg-default hover:border-dimmer
-         data-[state=checked]:border-accent-default data-[state=checked]:bg-accent-default
-         data-[state=indeterminate]:border-accent-default data-[state=indeterminate]:bg-accent-default
+  class="border-default bg-default hover:border-dimmer data-[state=checked]:border-accent-default data-[state=checked]:bg-accent-default data-[state=indeterminate]:border-accent-default data-[state=indeterminate]:bg-accent-default flex
+         h-4 w-4 items-center
+         justify-center rounded
+         border-2 transition-colors
          data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50"
   type="button"
   aria-label={ariaLabel}
@@ -45,7 +46,7 @@
   {#if $isIndeterminate}
     <!-- Indeterminate dash -->
     <svg
-      class="h-3 w-3 text-on-fill"
+      class="text-on-fill h-3 w-3"
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
@@ -56,7 +57,7 @@
   {:else if $isChecked}
     <!-- Check icon -->
     <svg
-      class="h-3 w-3 text-on-fill"
+      class="text-on-fill h-3 w-3"
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"

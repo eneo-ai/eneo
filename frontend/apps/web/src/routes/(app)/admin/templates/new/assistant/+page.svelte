@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
-  import { Button, Input, Tooltip } from "@intric/ui";
+  import { Button, Input } from "@intric/ui";
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -48,26 +48,30 @@
       // Transform wizard configuration to backend format
       // IMPORTANT: Always send wizard object with both properties (backend requires non-null wizard)
       const wizard = {
-        attachments: wizardAttachmentsEnabled ? {
-          required: wizardAttachmentsRequired,
-          title: wizardAttachmentsTitle || undefined,
-          description: wizardAttachmentsDescription || undefined
-        } : null,
-        collections: wizardCollectionsEnabled ? {
-          required: wizardCollectionsRequired,
-          title: wizardCollectionsTitle || undefined,
-          description: wizardCollectionsDescription || undefined
-        } : null
+        attachments: wizardAttachmentsEnabled
+          ? {
+              required: wizardAttachmentsRequired,
+              title: wizardAttachmentsTitle || undefined,
+              description: wizardAttachmentsDescription || undefined
+            }
+          : null,
+        collections: wizardCollectionsEnabled
+          ? {
+              required: wizardCollectionsRequired,
+              title: wizardCollectionsTitle || undefined,
+              description: wizardCollectionsDescription || undefined
+            }
+          : null
       };
 
       const templateData = {
         name,
         description,
         category,
-        prompt: promptText,  // Backend expects string, not object
+        prompt: promptText, // Backend expects string, not object
         completion_model_kwargs: completionModelKwargs,
-        wizard,  // Always send wizard object, never undefined
-        icon_name: iconName || undefined  // Include icon if selected
+        wizard, // Always send wizard object, never undefined
+        icon_name: iconName || undefined // Include icon if selected
       };
 
       await intric.templates.admin.createAssistant(templateData);
@@ -94,12 +98,7 @@
 
     <Page.Flex>
       <Button variant="outlined" href={localizeHref("/admin/templates")}>{m.cancel()}</Button>
-      <Button
-        variant="positive"
-        class="w-32"
-        onclick={handleCreateTemplate}
-        disabled={isSaving}
-      >
+      <Button variant="positive" class="w-32" onclick={handleCreateTemplate} disabled={isSaving}>
         {isSaving ? m.loading() : m.create_template()}
       </Button>
     </Page.Flex>
@@ -223,10 +222,14 @@
             />
 
             {#if wizardAttachmentsEnabled}
-              <div class="flex flex-col gap-4 rounded-lg border border-default bg-hover-default p-4">
+              <div
+                class="border-default bg-hover-default flex flex-col gap-4 rounded-lg border p-4"
+              >
                 <label class="flex items-center gap-2">
                   <input type="checkbox" bind:checked={wizardAttachmentsRequired} />
-                  <span class="text-sm text-default">{m.wizard_attachments_required_description()}</span>
+                  <span class="text-default text-sm"
+                    >{m.wizard_attachments_required_description()}</span
+                  >
                 </label>
 
                 <Input.Text
@@ -236,7 +239,10 @@
                 />
 
                 <div class="flex flex-col gap-1">
-                  <label for="wizard-attachments-description" class="text-sm font-medium text-default">{m.description()}</label>
+                  <label
+                    for="wizard-attachments-description"
+                    class="text-default text-sm font-medium">{m.description()}</label
+                  >
                   <textarea
                     id="wizard-attachments-description"
                     bind:value={wizardAttachmentsDescription}
@@ -263,10 +269,14 @@
             />
 
             {#if wizardCollectionsEnabled}
-              <div class="flex flex-col gap-4 rounded-lg border border-default bg-hover-default p-4">
+              <div
+                class="border-default bg-hover-default flex flex-col gap-4 rounded-lg border p-4"
+              >
                 <label class="flex items-center gap-2">
                   <input type="checkbox" bind:checked={wizardCollectionsRequired} />
-                  <span class="text-sm text-default">{m.wizard_collections_required_description()}</span>
+                  <span class="text-default text-sm"
+                    >{m.wizard_collections_required_description()}</span
+                  >
                 </label>
 
                 <Input.Text
@@ -276,7 +286,10 @@
                 />
 
                 <div class="flex flex-col gap-1">
-                  <label for="wizard-collections-description" class="text-sm font-medium text-default">{m.description()}</label>
+                  <label
+                    for="wizard-collections-description"
+                    class="text-default text-sm font-medium">{m.description()}</label
+                  >
                   <textarea
                     id="wizard-collections-description"
                     bind:value={wizardCollectionsDescription}

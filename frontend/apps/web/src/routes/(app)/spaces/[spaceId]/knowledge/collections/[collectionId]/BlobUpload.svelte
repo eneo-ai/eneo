@@ -16,7 +16,9 @@
     state: { showHeader }
   } = getAppContext();
   const acceptedMimeTypes = limits.info_blobs.formats.map((format) => format.mimetype);
-  const formatLimitByType = new Map(limits.info_blobs.formats.map((format) => [format.mimetype, format.size]));
+  const formatLimitByType = new Map(
+    limits.info_blobs.formats.map((format) => [format.mimetype, format.size])
+  );
 
   const {
     queueUploads,
@@ -81,8 +83,7 @@
     if (tenantQuotaLimit != null) {
       remainingCandidates.push(tenantQuotaLimit - tenantQuotaUsed);
     }
-    quotaRemaining =
-      remainingCandidates.length > 0 ? Math.min(...remainingCandidates) : null;
+    quotaRemaining = remainingCandidates.length > 0 ? Math.min(...remainingCandidates) : null;
   }
 
   $: {
@@ -157,7 +158,11 @@
     <Dialog.Title>{m.upload_files()}</Dialog.Title>
     <Dialog.Description hidden></Dialog.Description>
 
-    <Input.Files bind:files {acceptedMimeTypes} on:showsupportedtypes={(e) => toast.info(e.detail.message)}></Input.Files>
+    <Input.Files
+      bind:files
+      {acceptedMimeTypes}
+      on:showsupportedtypes={(e) => toast.info(e.detail.message)}
+    ></Input.Files>
 
     {#if validationErrors.length > 0}
       <FileSizeValidationPanel errors={validationErrors} />

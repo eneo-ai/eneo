@@ -102,19 +102,11 @@
         <td colspan="99" class={tableCell({ groupHeader: true })}>
           <div class="flex w-full items-center justify-between">
             <div class="flex items-center gap-2">
-              <Button
-                on:click={toggleOpen}
-                padding="icon-leading"
-                class="font-mono font-medium"
-              >
+              <Button on:click={toggleOpen} padding="icon-leading" class="font-mono font-medium">
                 <IconChevronDown class="{isOpen ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
               </Button>
               <slot name="title-prefix" />
-              <Button
-                on:click={toggleOpen}
-                padding="text"
-                class="font-mono font-medium -ml-2"
-              >
+              <Button on:click={toggleOpen} padding="text" class="-ml-2 font-mono font-medium">
                 <span>{title}</span>
               </Button>
             </div>
@@ -127,7 +119,10 @@
       {#if $filteredRows.length > 0}
         {#each $filteredRows as row (row.id)}
           <Subscribe rowAttrs={row.attrs()} let:rowAttrs>
-            <tr {...rowAttrs} class="hover:bg-hover-dimmer relative h-16 transition-colors duration-150">
+            <tr
+              {...rowAttrs}
+              class="hover:bg-hover-dimmer relative h-16 transition-colors duration-150"
+            >
               {#each row.cells as cell (cell.id)}
                 {#if cell.id !== "table-card-key"}
                   <Subscribe attrs={cell.attrs()} let:attrs>
@@ -152,25 +147,21 @@
             </tr>
           </Subscribe>
         {/each}
-      {:else}
-        {#if showEmptyRow}
-          <tr>
-            <td colspan="99" class="px-4 py-3">
-              <slot name="empty" />
-            </td>
-          </tr>
-        {/if}
+      {:else if showEmptyRow}
+        <tr>
+          <td colspan="99" class="px-4 py-3">
+            <slot name="empty" />
+          </td>
+        </tr>
       {/if}
     {/if}
   </tbody>
 {:else}
   {#if title}
-    <div class="!border-b-default flex w-full items-center justify-between border-b pt-4 pb-2 !pl-2.5 pr-4">
-      <Button
-        on:click={toggleOpen}
-        padding="icon-leading"
-        class="font-mono font-medium"
-      >
+    <div
+      class="!border-b-default flex w-full items-center justify-between border-b pt-4 pr-4 pb-2 !pl-2.5"
+    >
+      <Button on:click={toggleOpen} padding="icon-leading" class="font-mono font-medium">
         <div class="flex items-center gap-2">
           <IconChevronDown class="{isOpen ? 'rotate-0' : '-rotate-90'} w-5 transition-all" />
           <slot name="title-prefix" />
@@ -190,12 +181,10 @@
           {/if}
         {/each}
       </div>
-    {:else}
-      {#if showEmptyRow}
-        <div class="px-4 py-3">
-          <slot name="empty" />
-        </div>
-      {/if}
+    {:else if showEmptyRow}
+      <div class="px-4 py-3">
+        <slot name="empty" />
+      </div>
     {/if}
   {/if}
 {/if}
@@ -217,8 +206,7 @@
       </span>
     </div>
 
-    <Button on:click={() => ($pageIndex += 1)} disabled={!$hasNextPage} variant="outlined"
-      >→</Button
+    <Button on:click={() => ($pageIndex += 1)} disabled={!$hasNextPage} variant="outlined">→</Button
     >
   </div>
 {:else if title}

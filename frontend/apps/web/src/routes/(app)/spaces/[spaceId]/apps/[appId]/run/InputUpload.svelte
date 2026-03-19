@@ -103,14 +103,13 @@
   }
 
   // Format accepted types for display with friendly names
-  $: acceptedTypesLabel = attachmentRules.acceptString
+  const acceptedTypesLabel = attachmentRules.acceptString
     ? attachmentRules.acceptString
         .split(",")
         .map((t) => formatMimeType(t))
         .filter((v, i, a) => a.indexOf(v) === i) // Remove duplicates
         .slice(0, 6)
-        .join(", ") +
-      (attachmentRules.acceptString.split(",").length > 6 ? ", ..." : "")
+        .join(", ") + (attachmentRules.acceptString.split(",").length > 6 ? ", ..." : "")
     : null;
 </script>
 

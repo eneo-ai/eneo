@@ -32,7 +32,9 @@ export type CompareOptions<T> = {
         : never)
 
     // For nested objects: recursive structure
-    | (StripNullish<T[K]> extends Record<string, unknown> ? CompareOptions<StripNullish<T[K]>> : never);
+    | (StripNullish<T[K]> extends Record<string, unknown>
+        ? CompareOptions<StripNullish<T[K]>>
+        : never);
 };
 
 /**

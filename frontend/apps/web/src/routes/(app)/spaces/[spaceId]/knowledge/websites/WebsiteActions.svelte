@@ -21,7 +21,7 @@
   } = getSpacesManager();
 
   $: isOrgSpace = $currentSpace.organization === true;
-  
+
   async function deleteWebsite() {
     isProcessing = true;
     try {

@@ -64,7 +64,8 @@
   async function renewAllExpired() {
     renewingAll = true;
     try {
-      const result: SubscriptionRenewalResult = await intric.integrations.admin.sharepoint.renewExpiredSubscriptions();
+      const result: SubscriptionRenewalResult =
+        await intric.integrations.admin.sharepoint.renewExpiredSubscriptions();
 
       if ((result.recreated ?? 0) > 0 && (result.failed ?? 0) === 0) {
         toast.success(
@@ -158,7 +159,7 @@
   }
 
   // Count expired subscriptions
-  let expiredCount = $derived(subscriptions.filter(s => s.is_expired).length);
+  let expiredCount = $derived(subscriptions.filter((s) => s.is_expired).length);
 </script>
 
 <div class="space-y-4">
@@ -169,105 +170,135 @@
     </h3>
 
     {#if expiredCount > 0}
-      <Button
-        variant="primary"
-        onclick={renewAllExpired}
-        disabled={renewingAll || loading}
-      >
-        {renewingAll ? m.sharepoint_subscriptions_renewing() : m.sharepoint_subscriptions_renew_all_expired({ count: expiredCount })}
+      <Button variant="primary" onclick={renewAllExpired} disabled={renewingAll || loading}>
+        {renewingAll
+          ? m.sharepoint_subscriptions_renewing()
+          : m.sharepoint_subscriptions_renew_all_expired({ count: expiredCount })}
       </Button>
     {/if}
   </div>
 
   <!-- Description -->
-  <p class="text-sm text-secondary">
+  <p class="text-secondary text-sm">
     {m.sharepoint_subscriptions_description()}
   </p>
 
   <!-- Loading state -->
   {#if loading && subscriptions.length === 0}
-    <div class="rounded-lg border border-border bg-background p-8 text-center">
-      <p class="text-sm text-secondary">{m.loading()}</p>
+    <div class="border-border bg-background rounded-lg border p-8 text-center">
+      <p class="text-secondary text-sm">{m.loading()}</p>
     </div>
   {:else if subscriptions.length === 0}
     <!-- Empty state -->
-    <div class="rounded-lg border border-border bg-background p-8 text-center">
-      <p class="text-sm text-secondary">
+    <div class="border-border bg-background rounded-lg border p-8 text-center">
+      <p class="text-secondary text-sm">
         {m.sharepoint_subscriptions_empty()}
       </p>
     </div>
   {:else}
     <!-- Subscriptions table -->
-    <div class="overflow-x-auto rounded-lg border border-border">
-      <table class="w-full divide-y divide-border">
+    <div class="border-border overflow-x-auto rounded-lg border">
+      <table class="divide-border w-full divide-y">
         <thead class="bg-muted">
           <tr>
-            <th scope="col" class="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-foreground">
+            <th
+              scope="col"
+              class="text-foreground px-3 py-2 text-left text-xs font-medium tracking-wider uppercase"
+            >
               {m.sharepoint_subscription_status()}
             </th>
-            <th scope="col" class="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-foreground">
+            <th
+              scope="col"
+              class="text-foreground px-3 py-2 text-left text-xs font-medium tracking-wider uppercase"
+            >
               {m.sharepoint_subscription_owner()}
             </th>
-            <th scope="col" class="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-foreground">
+            <th
+              scope="col"
+              class="text-foreground px-3 py-2 text-left text-xs font-medium tracking-wider uppercase"
+            >
               {m.sharepoint_subscription_site()}
             </th>
-            <th scope="col" class="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-foreground">
+            <th
+              scope="col"
+              class="text-foreground px-3 py-2 text-left text-xs font-medium tracking-wider uppercase"
+            >
               {m.sharepoint_subscription_expires()}
             </th>
-            <th scope="col" class="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-foreground">
+            <th
+              scope="col"
+              class="text-foreground px-3 py-2 text-left text-xs font-medium tracking-wider uppercase"
+            >
               {m.sharepoint_subscription_created()}
             </th>
-            <th scope="col" class="sticky right-0 bg-muted px-3 py-2">
+            <th scope="col" class="bg-muted sticky right-0 px-3 py-2">
               <span class="sr-only">{m.actions()}</span>
             </th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-border bg-background">
+        <tbody class="divide-border bg-background divide-y">
           {#each subscriptions as subscription (subscription.id)}
             <tr class="hover:bg-muted/50 transition-colors">
-              <td class="whitespace-nowrap px-3 py-3">
+              <td class="px-3 py-3 whitespace-nowrap">
                 <div class="flex items-center gap-1">
-                  <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {getStatusBadgeClass(subscription)}">
+                  <span
+                    class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {getStatusBadgeClass(
+                      subscription
+                    )}"
+                  >
                     {getStatusLabel(subscription)}
                   </span>
-                  <span class="text-xs text-secondary">
+                  <span class="text-secondary text-xs">
                     ({formatTimeDuration(subscription.expires_in_hours)})
                   </span>
                 </div>
               </td>
-              <td class="whitespace-nowrap px-3 py-3">
+              <td class="px-3 py-3 whitespace-nowrap">
                 {#if subscription.owner_type === "organization"}
-                  <span class="inline-flex items-center rounded-full bg-accent-dimmer px-2 py-0.5 text-xs font-medium text-accent-stronger">
+                  <span
+                    class="bg-accent-dimmer text-accent-stronger inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"
+                  >
                     {m.sharepoint_subscription_owner_organization()}
                   </span>
                 {:else}
-                  <span class="max-w-[150px] truncate text-sm text-foreground block" title={subscription.owner_email || ""}>
+                  <span
+                    class="text-foreground block max-w-[150px] truncate text-sm"
+                    title={subscription.owner_email || ""}
+                  >
                     {subscription.owner_email || m.sharepoint_subscription_owner_unknown()}
                   </span>
                 {/if}
               </td>
               <td class="px-3 py-3">
-                <div class="max-w-[200px] truncate text-sm text-foreground" title={subscription.site_id}>
+                <div
+                  class="text-foreground max-w-[200px] truncate text-sm"
+                  title={subscription.site_id}
+                >
                   {subscription.site_id}
                 </div>
-                <div class="max-w-[200px] truncate text-xs text-secondary" title={subscription.drive_id}>
+                <div
+                  class="text-secondary max-w-[200px] truncate text-xs"
+                  title={subscription.drive_id}
+                >
                   {m.sharepoint_drive_label()}: {subscription.drive_id}
                 </div>
               </td>
-              <td class="whitespace-nowrap px-3 py-3 text-xs text-secondary">
+              <td class="text-secondary px-3 py-3 text-xs whitespace-nowrap">
                 {formatDate(subscription.expires_at)}
               </td>
-              <td class="whitespace-nowrap px-3 py-3 text-xs text-secondary">
+              <td class="text-secondary px-3 py-3 text-xs whitespace-nowrap">
                 {formatDate(subscription.created_at)}
               </td>
-              <td class="sticky right-0 bg-background whitespace-nowrap px-3 py-3 text-right">
+              <td class="bg-background sticky right-0 px-3 py-3 text-right whitespace-nowrap">
                 <Button
                   variant="outlined"
                   size="sm"
                   onclick={() => renewSubscription(subscription)}
                   disabled={renewingSubscriptionIds.has(subscription.id) || renewingAll}
                 >
-                  {renewingSubscriptionIds.has(subscription.id) ? m.sharepoint_subscription_renewing() : m.sharepoint_subscription_renew()}
+                  {renewingSubscriptionIds.has(subscription.id)
+                    ? m.sharepoint_subscription_renewing()
+                    : m.sharepoint_subscription_renew()}
                 </Button>
               </td>
             </tr>
@@ -277,7 +308,7 @@
     </div>
 
     <!-- Summary -->
-    <div class="text-sm text-secondary">
+    <div class="text-secondary text-sm">
       {m.sharepoint_subscriptions_summary({
         total: subscriptions.length,
         expired: expiredCount,

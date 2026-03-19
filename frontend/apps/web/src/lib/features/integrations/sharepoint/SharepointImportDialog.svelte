@@ -92,7 +92,6 @@
     }
   }
 
-
   let filteredResources = $derived.by(() => {
     const search = $inputValue.toLowerCase();
     return (availableResources ?? [])
@@ -314,9 +313,12 @@
         space: $currentSpace
       });
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const createdItems = response.items.filter((item: any) => item.status === "created");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const failedItems = response.items.filter((item: any) => item.status === "failed");
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       createdItems.forEach((item: any) => {
         if (item.job) {
           addJob(item.job);
@@ -505,7 +507,9 @@
                 <label class="text-secondary mb-1 block text-xs">
                   {m.sharepoint_wrapper_name_label()} <span class="text-label-stronger">*</span>
                 </label>
-                <p class="text-secondary mb-1 text-xs">{m.sharepoint_wrapper_name_required_hint()}</p>
+                <p class="text-secondary mb-1 text-xs">
+                  {m.sharepoint_wrapper_name_required_hint()}
+                </p>
                 <input
                   class="border-default bg-primary w-full rounded border px-2 py-1 text-sm"
                   class:border-label-default={wrapperNameMissing}
@@ -517,7 +521,9 @@
                   }}
                 />
                 {#if wrapperNameMissing}
-                  <p class="text-label-stronger mt-1 text-xs">{m.sharepoint_wrapper_name_missing_hint()}</p>
+                  <p class="text-label-stronger mt-1 text-xs">
+                    {m.sharepoint_wrapper_name_missing_hint()}
+                  </p>
                 {/if}
               </div>
             {/if}
@@ -572,7 +578,9 @@
 
     <Dialog.Controls>
       {#if wrapperNameMissing}
-        <span class="text-secondary mr-auto text-xs">{m.sharepoint_wrapper_name_missing_hint()}</span>
+        <span class="text-secondary mr-auto text-xs"
+          >{m.sharepoint_wrapper_name_missing_hint()}</span
+        >
       {/if}
       <Button
         onclick={() => {
