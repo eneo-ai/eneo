@@ -4341,6 +4341,22 @@
     {
       "file": "src/intric/embedding_models/presentation/tenant_embedding_models_router.py",
       "rule": "reportCallIssue",
+      "message": "No parameter named \"nickname\"",
+      "severity": "error",
+      "range": {
+        "start": {
+          "line": 102,
+          "character": 8
+        },
+        "end": {
+          "line": 102,
+          "character": 16
+        }
+      }
+    },
+    {
+      "file": "src/intric/embedding_models/presentation/tenant_embedding_models_router.py",
+      "rule": "reportCallIssue",
       "message": "No parameter named \"description\"",
       "severity": "error",
       "range": {
