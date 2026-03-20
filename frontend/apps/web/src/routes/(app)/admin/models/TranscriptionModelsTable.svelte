@@ -48,7 +48,7 @@
       accessor: (model) => model,
       header: m.name(),
       cell: (item) => {
-        return createRender(ModelNameCell, { model: item.value });
+        return createRender(ModelNameCell, { model: item.value, type: "transcriptionModel" });
       },
       plugins: {
         sort: {
