@@ -12,8 +12,10 @@ import type {
   AIBuilderStatusEventData,
   AIBuilderStreamEvent,
   AIBuilderTextEventData,
+  ApplyError,
   ApplyResult,
   ChatMessage,
+  PlanRevisionType,
   PlanStatus,
   ProposedPlan,
   RequirementsSummary,
@@ -42,6 +44,7 @@ export interface FlowAIBuilderState {
   isStreaming: boolean;
   isInitializing: boolean;
   error: string | null;
+  applyError: ApplyError | null;
   applyResult: ApplyResult | null;
   isConflict: boolean;
   statusMessage: string | null;
@@ -59,6 +62,7 @@ export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
     isStreaming: false,
     isInitializing: false,
     error: null,
+    applyError: null,
     applyResult: null,
     isConflict: false,
     statusMessage: null,
@@ -137,12 +141,14 @@ export class FlowAIBuilderDriver {
 
   dismissConflict(): void {
     this.#state.isConflict = false;
+    this.#state.applyError = null;
     this.#notify();
   }
 
   dismissPlanPane(): void {
     this.#state.currentPlan = null;
     this.#state.isConflict = false;
+    this.#state.applyError = null;
     this.#state.error = null;
     this.#state.statusMessage = null;
     this.#state.applyResult = null;
@@ -488,12 +494,10 @@ export class FlowAIBuilderDriver {
       await this.refreshSession();
       return result;
     } catch (e: unknown) {
-      const status =
-        typeof e === "object" && e !== null && "status" in e
-          ? (e as { status?: number }).status
-          : undefined;
-      if (status === 409) {
-        this.#state.isConflict = true;
+      const parsed = this.#parseApplyError(e);
+      if (parsed) {
+        this.#state.applyError = parsed;
+        this.#state.isConflict = parsed.code === "stale_revision";
         this.#state.error = null;
       } else {
         this.#state.error = e instanceof Error ? e.message : "Failed to apply plan";
@@ -502,6 +506,66 @@ export class FlowAIBuilderDriver {
       await this.refreshSession();
       throw e;
     }
+  }
+
+  #parseApplyError(e: unknown): ApplyError | null {
+    if (typeof e !== "object" || e === null) return null;
+
+    // Check for response body with error code
+    const body = "body" in e ? (e as { body?: unknown }).body : null;
+    if (typeof body === "object" && body !== null && "code" in body) {
+      const parsed = body as { code?: string; message?: string; context?: Record<string, unknown> };
+      if (parsed.code) {
+        return {
+          code: parsed.code,
+          message: parsed.message ?? "Unknown error",
+          context: parsed.context ?? {},
+        };
+      }
+    }
+
+    // Fallback: check HTTP status for known codes
+    const status = "status" in e ? (e as { status?: number }).status : undefined;
+    if (status === 409) {
+      return { code: "stale_revision", message: "Flow was modified", context: {} };
+    }
+
+    return null;
+  }
+
+  async revisePlan(type: PlanRevisionType): Promise<void> {
+    if (!this.#state.currentPlan) return;
+
+    try {
+      const result = (await this.#transport.fetch(
+        `/api/v1/flows/ai-builder/plans/${this.#state.currentPlan.plan_id}/revise`,
+        {
+          method: "post",
+          body: JSON.stringify({ type }),
+          headers: { "Content-Type": "application/json" },
+        }
+      )) as ProposedPlan;
+
+      this.#state.currentPlan = {
+        plan_id: result.plan_id,
+        status: result.status,
+        envelope: result.envelope,
+        edit_diff: result.edit_diff,
+        edit_confidence: result.edit_confidence,
+        edit_warnings: result.edit_warnings,
+        edit_advisories: result.edit_advisories,
+        edit_risk_flags: result.edit_risk_flags,
+      };
+      this.#notify();
+    } catch (e) {
+      this.#state.error = e instanceof Error ? e.message : "Failed to revise plan";
+      this.#notify();
+    }
+  }
+
+  dismissApplyError(): void {
+    this.#state.applyError = null;
+    this.#notify();
   }
 
   async confirmRequirements(): Promise<void> {

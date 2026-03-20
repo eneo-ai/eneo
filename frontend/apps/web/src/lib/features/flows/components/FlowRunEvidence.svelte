@@ -40,6 +40,7 @@
   let loading = true;
   let loadError = false;
   let expandedSteps: number[] = [];
+  let expandedInputSteps: number[] = [];
   let hasAutoExpanded = false;
   let copiedKey: string | null = null;
   let copiedTimer: ReturnType<typeof setTimeout> | null = null;
@@ -102,6 +103,15 @@
       expandedSteps = expandedSteps.filter((item) => item !== order);
     } else {
       expandedSteps = [...expandedSteps, order];
+    }
+  }
+
+  function toggleInputExpand(order: number) {
+    const hasOrder = expandedInputSteps.includes(order);
+    if (hasOrder) {
+      expandedInputSteps = expandedInputSteps.filter((item) => item !== order);
+    } else {
+      expandedInputSteps = [...expandedInputSteps, order];
     }
   }
 
@@ -394,106 +404,6 @@
                 </div>
               {/if}
 
-              {#if result.input_payload_json}
-                <div>
-                  <div class="flex items-center justify-between">
-                    <h4 class="text-muted text-xs font-semibold">{m.flow_run_input()}</h4>
-                    <button
-                      class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                      aria-label={m.copy()}
-                      on:click={() =>
-                        copyPayload(
-                          `step-${result.step_order}-input`,
-                          result.input_payload_json,
-                          m.flow_run_copy_failed()
-                        )}
-                    >
-                      {#if copiedKey === `step-${result.step_order}-input`}
-                        <IconCheck class="text-positive-default size-3.5" />
-                      {:else}
-                        <IconCopy class="size-3.5" />
-                      {/if}
-                    </button>
-                  </div>
-                  <pre
-                    class="json-hl bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{@html highlightJson(
-                      JSON.stringify(result.input_payload_json, null, 2)
-                    )}</pre>
-                </div>
-              {/if}
-
-              {#if runtimeInput}
-                <div class="border-default bg-hover-dimmer rounded-lg border p-3">
-                  <h4 class="text-muted text-xs font-semibold">Körningsindata</h4>
-                  <div class="text-secondary mt-2 flex flex-wrap gap-2 text-[11px]">
-                    <span class="border-default bg-primary rounded-md border px-2 py-1">
-                      {getRuntimeInputSummaryLabel(runtimeInput.fileCount)}
-                    </span>
-                    {#if runtimeInput.inputFormat}
-                      <span class="border-default bg-primary rounded-md border px-2 py-1">
-                        Format: {runtimeInput.inputFormat}
-                      </span>
-                    {/if}
-                    {#if runtimeInput.extractedTextLength != null}
-                      <span class="border-default bg-primary rounded-md border px-2 py-1">
-                        Extraherad text: {runtimeInput.extractedTextLength} tecken
-                      </span>
-                    {/if}
-                  </div>
-                </div>
-              {/if}
-
-              {#if transcription}
-                <div class="border-default bg-hover-dimmer rounded-lg border p-3">
-                  <h4 class="text-muted text-xs font-semibold">
-                    {m.flow_run_transcription_label()}
-                  </h4>
-                  <div class="text-secondary mt-2 flex flex-wrap gap-2 text-[11px]">
-                    <span class="border-default bg-primary rounded-md border px-2 py-1">
-                      {m.flow_run_transcription_model({ model: transcription.model ?? "—" })}
-                    </span>
-                    <span class="border-default bg-primary rounded-md border px-2 py-1">
-                      {m.flow_run_transcription_language({
-                        language: transcription.language ?? "—"
-                      })}
-                    </span>
-                    <span class="border-default bg-primary rounded-md border px-2 py-1">
-                      {m.flow_run_transcription_files({
-                        count: String(transcription.files_count ?? 0)
-                      })}
-                    </span>
-                    <span class="border-default bg-primary rounded-md border px-2 py-1">
-                      {m.flow_run_transcription_duration({
-                        duration: formatElapsedMs(transcription.elapsed_ms)
-                      })}
-                    </span>
-                    <span class="border-default bg-primary rounded-md border px-2 py-1">
-                      {m.flow_run_transcription_size({
-                        size: formatBytes(transcription.transcript_bytes)
-                      })}
-                    </span>
-                    <span class="border-default bg-primary rounded-md border px-2 py-1">
-                      {m.flow_run_transcription_estimated_tokens({
-                        tokens: String(transcription.estimated_tokens ?? 0)
-                      })}
-                    </span>
-                    <span class="border-default bg-primary rounded-md border px-2 py-1">
-                      {m.flow_run_transcription_cache({
-                        status: getCacheStatusLabel(
-                          transcription.used_cache,
-                          transcription.cached_files_count,
-                          transcription.files_count
-                        )
-                      })}
-                    </span>
-                  </div>
-                </div>
-              {/if}
-
-              {#if stepRag}
-                <FlowRunKnowledgeTrace rag={stepRag} stepOrder={result.step_order} {intric} />
-              {/if}
-
               {#if result.output_payload_json}
                 <div>
                   <div class="flex items-center justify-between">
@@ -568,6 +478,121 @@
                       )}</pre>
                   {/if}
                 </div>
+              {/if}
+
+              {#if result.input_payload_json}
+                {@const inputExpanded = expandedInputSteps.includes(result.step_order)}
+                <div>
+                  <div class="flex items-center justify-between">
+                    <button
+                      class="text-muted hover:text-secondary focus-visible:ring-accent-default -ml-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                      on:click={() => toggleInputExpand(result.step_order)}
+                      aria-expanded={inputExpanded}
+                      aria-controls="step-{result.step_order}-input-panel"
+                    >
+                      <IconChevronDown
+                        class="size-3 transition-transform duration-200 {inputExpanded ? '' : '-rotate-90'}"
+                      />
+                      {m.flow_run_input()}
+                    </button>
+                    <button
+                      class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                      aria-label={m.copy()}
+                      on:click={() =>
+                        copyPayload(
+                          `step-${result.step_order}-input`,
+                          result.input_payload_json,
+                          m.flow_run_copy_failed()
+                        )}
+                    >
+                      {#if copiedKey === `step-${result.step_order}-input`}
+                        <IconCheck class="text-positive-default size-3.5" />
+                      {:else}
+                        <IconCopy class="size-3.5" />
+                      {/if}
+                    </button>
+                  </div>
+                  {#if inputExpanded}
+                    <pre
+                      id="step-{result.step_order}-input-panel"
+                      transition:slide={{ duration: 200 }}
+                      class="json-hl bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{@html highlightJson(
+                        JSON.stringify(result.input_payload_json, null, 2)
+                      )}</pre>
+                  {/if}
+                </div>
+              {/if}
+
+              {#if runtimeInput}
+                <div class="border-default bg-hover-dimmer rounded-lg border p-3">
+                  <h4 class="text-muted text-xs font-semibold">Körningsindata</h4>
+                  <div class="text-secondary mt-2 flex flex-wrap gap-2 text-[11px]">
+                    <span class="border-default bg-primary rounded-md border px-2 py-1">
+                      {getRuntimeInputSummaryLabel(runtimeInput.fileCount)}
+                    </span>
+                    {#if runtimeInput.inputFormat}
+                      <span class="border-default bg-primary rounded-md border px-2 py-1">
+                        Format: {runtimeInput.inputFormat}
+                      </span>
+                    {/if}
+                    {#if runtimeInput.extractedTextLength != null}
+                      <span class="border-default bg-primary rounded-md border px-2 py-1">
+                        Extraherad text: {runtimeInput.extractedTextLength} tecken
+                      </span>
+                    {/if}
+                  </div>
+                </div>
+              {/if}
+
+              {#if transcription}
+                <div class="border-default bg-hover-dimmer rounded-lg border p-3">
+                  <h4 class="text-muted text-xs font-semibold">
+                    {m.flow_run_transcription_label()}
+                  </h4>
+                  <div class="text-secondary mt-2 flex flex-wrap gap-2 text-[11px]">
+                    <span class="border-default bg-primary rounded-md border px-2 py-1">
+                      {m.flow_run_transcription_model({ model: transcription.model ?? "—" })}
+                    </span>
+                    <span class="border-default bg-primary rounded-md border px-2 py-1">
+                      {m.flow_run_transcription_language({
+                        language: transcription.language ?? "—"
+                      })}
+                    </span>
+                    <span class="border-default bg-primary rounded-md border px-2 py-1">
+                      {m.flow_run_transcription_files({
+                        count: String(transcription.files_count ?? 0)
+                      })}
+                    </span>
+                    <span class="border-default bg-primary rounded-md border px-2 py-1">
+                      {m.flow_run_transcription_duration({
+                        duration: formatElapsedMs(transcription.elapsed_ms)
+                      })}
+                    </span>
+                    <span class="border-default bg-primary rounded-md border px-2 py-1">
+                      {m.flow_run_transcription_size({
+                        size: formatBytes(transcription.transcript_bytes)
+                      })}
+                    </span>
+                    <span class="border-default bg-primary rounded-md border px-2 py-1">
+                      {m.flow_run_transcription_estimated_tokens({
+                        tokens: String(transcription.estimated_tokens ?? 0)
+                      })}
+                    </span>
+                    <span class="border-default bg-primary rounded-md border px-2 py-1">
+                      {m.flow_run_transcription_cache({
+                        status: getCacheStatusLabel(
+                          transcription.used_cache,
+                          transcription.cached_files_count,
+                          transcription.files_count
+                        )
+                      })}
+                    </span>
+                  </div>
+                </div>
+              {/if}
+
+              {#if stepRag}
+                <FlowRunKnowledgeTrace rag={stepRag} stepOrder={result.step_order} {intric} />
               {/if}
 
               {#if templateProvenance}

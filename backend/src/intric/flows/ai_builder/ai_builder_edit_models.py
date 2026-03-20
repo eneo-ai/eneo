@@ -188,6 +188,15 @@ class FlowEditDiff(BaseModel):
 EditConfidence = Literal["ready", "needs_review", "low_confidence"]
 
 
+class EditAdvisory(BaseModel):
+    """Structured advisory for the user about an edit result."""
+
+    code: str
+    message: str
+    severity: Literal["info", "warning", "error"]
+    field: str | None = None
+
+
 class CompiledEditResult(BaseModel):
     """Backend-compiled concrete result. This is what the user approves."""
 
@@ -196,5 +205,6 @@ class CompiledEditResult(BaseModel):
     original_draft: FlowEditDraft
     base_flow_revision: int  # Stale-plan protection
     warnings: list[str] = Field(default_factory=list)
+    advisories: list[EditAdvisory] = Field(default_factory=list)
     risk_flags: list[str] = Field(default_factory=list)  # "type_downgrade", etc.
     confidence: EditConfidence = "ready"

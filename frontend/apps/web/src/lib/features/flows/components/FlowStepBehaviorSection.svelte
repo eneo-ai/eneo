@@ -117,16 +117,16 @@
       </svelte:fragment>
       <div class="flex flex-col gap-2">
         <div class="grid gap-3 md:grid-cols-2">
-          <div class="bg-secondary/30 border-l-accent-default/40 rounded-lg border-l-[3px] px-3.5 py-3">
-            <p class="text-primary text-sm font-semibold">
+          <div class="border-default bg-hover-dimmer rounded-lg border px-3.5 py-3">
+            <p class="text-accent-stronger text-sm font-semibold">
               {m.flow_step_instructions_compare_title()}
             </p>
             <p class="text-secondary mt-1 text-xs leading-relaxed">
               {m.flow_step_instructions_compare_body()}
             </p>
           </div>
-          <div class="bg-secondary/30 border-l-stronger rounded-lg border-l-[3px] px-3.5 py-3">
-            <p class="text-primary text-sm font-semibold">
+          <div class="border-default bg-hover-dimmer rounded-lg border px-3.5 py-3">
+            <p class="text-accent-stronger text-sm font-semibold">
               {m.flow_step_input_template_compare_title()}
             </p>
             <p class="text-secondary mt-1 text-xs leading-relaxed">

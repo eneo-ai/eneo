@@ -13,11 +13,12 @@
 </script>
 
 <Settings.Group title={m.flow_step_security_classification()}>
-  <Settings.Row title="" description="">
+  <div class="px-4 lg:pr-6">
     <select
       class="border-default bg-primary w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:border-accent-default focus-within:ring-2 focus-within:ring-accent-default/20 hover:border-stronger focus-visible:outline-none disabled:opacity-50"
       value={step.output_classification_override ?? ""}
       disabled={isPublished}
+      aria-label={m.flow_step_security_classification()}
       on:change={(e) => {
         const val = e.currentTarget.value === "" ? null : Number(e.currentTarget.value);
         dispatch("classificationChange", { value: val });
@@ -29,5 +30,5 @@
       <option value="3">K3</option>
       <option value="4">K4</option>
     </select>
-  </Settings.Row>
+  </div>
 </Settings.Group>

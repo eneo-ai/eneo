@@ -12,8 +12,10 @@ import type {
   AIBuilderModel,
   AIBuilderPhase,
   AIBuilderSession,
+  ApplyError,
   ApplyResult,
   ChatMessage,
+  PlanRevisionType,
   ProposedPlan,
   RequirementsSummary,
   SessionStatus,
@@ -30,6 +32,7 @@ export class FlowAIBuilderService {
   #isStreaming = $state(false);
   #isInitializing = $state(false);
   #error = $state<string | null>(null);
+  #applyError = $state<ApplyError | null>(null);
   #applyResult = $state<ApplyResult | null>(null);
   #isConflict = $state(false);
   #statusMessage = $state<string | null>(null);
@@ -87,6 +90,10 @@ export class FlowAIBuilderService {
 
   get error(): string | null {
     return this.#error;
+  }
+
+  get applyError(): ApplyError | null {
+    return this.#applyError;
   }
 
   get applyResult(): ApplyResult | null {
@@ -227,6 +234,14 @@ export class FlowAIBuilderService {
     this.#driver.dismissPlanPane();
   }
 
+  async revisePlan(type: PlanRevisionType): Promise<void> {
+    await this.#driver.revisePlan(type);
+  }
+
+  dismissApplyError(): void {
+    this.#driver.dismissApplyError();
+  }
+
   abort(): void {
     this.#driver.abort();
   }
@@ -242,6 +257,7 @@ export class FlowAIBuilderService {
     this.#isStreaming = state.isStreaming;
     this.#isInitializing = state.isInitializing;
     this.#error = state.error;
+    this.#applyError = state.applyError;
     this.#applyResult = state.applyResult;
     this.#isConflict = state.isConflict;
     this.#statusMessage = state.statusMessage;

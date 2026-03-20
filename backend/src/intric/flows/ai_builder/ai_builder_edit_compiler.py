@@ -12,9 +12,13 @@ import re
 from typing import Any
 from uuid import UUID
 
+from intric.flows.ai_builder.ai_builder_description_semantics import (
+    FlowSemanticSignature,
+)
 from intric.flows.ai_builder.ai_builder_edit_models import (
     AddStepPayload,
     CompiledEditResult,
+    EditAdvisory,
     EditConfidence,
     FlowEditDiff,
     FlowEditDraft,
@@ -38,46 +42,6 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.flow import FlowStep
 
 _RUNTIME_STEP_ALIAS_PATTERN = re.compile(r"\{\{\s*step_(\d+)(\.[^{}]+?)\s*\}\}")
-
-_OUTPUT_DESCRIPTION_LABELS: dict[OutputType, str] = {
-    OutputType.TEXT: "textformat",
-    OutputType.JSON: "JSON-format",
-    OutputType.PDF: "PDF-format",
-    OutputType.DOCX: "DOCX-format",
-}
-
-_OUTPUT_DESCRIPTION_MARKERS: dict[OutputType, tuple[re.Pattern[str], ...]] = {
-    OutputType.TEXT: (
-        re.compile(r"\btextformat\b", re.IGNORECASE),
-        re.compile(r"\btext format\b", re.IGNORECASE),
-        re.compile(r"\btextsvar\b", re.IGNORECASE),
-        re.compile(r"\btextutdata\b", re.IGNORECASE),
-        re.compile(r"\btext output\b", re.IGNORECASE),
-    ),
-    OutputType.JSON: (
-        re.compile(r"\bjson-format\b", re.IGNORECASE),
-        re.compile(r"\bjson format\b", re.IGNORECASE),
-        re.compile(r"\bjson-utdata\b", re.IGNORECASE),
-        re.compile(r"\bjson output\b", re.IGNORECASE),
-    ),
-    OutputType.PDF: (
-        re.compile(r"\bpdf-format\b", re.IGNORECASE),
-        re.compile(r"\bpdf format\b", re.IGNORECASE),
-        re.compile(r"\bpdf-dokument\b", re.IGNORECASE),
-        re.compile(r"\bpdf dokument\b", re.IGNORECASE),
-        re.compile(r"\bpdf\b", re.IGNORECASE),
-    ),
-    OutputType.DOCX: (
-        re.compile(r"\bdocx-format\b", re.IGNORECASE),
-        re.compile(r"\bdocx format\b", re.IGNORECASE),
-        re.compile(r"\bdocx-dokument\b", re.IGNORECASE),
-        re.compile(r"\bdocx dokument\b", re.IGNORECASE),
-        re.compile(r"\bword-dokument\b", re.IGNORECASE),
-        re.compile(r"\bword dokument\b", re.IGNORECASE),
-        re.compile(r"\bword document\b", re.IGNORECASE),
-        re.compile(r"\bdocx\b", re.IGNORECASE),
-    ),
-}
 
 
 def compile_edit_draft(
@@ -162,12 +126,10 @@ def compile_edit_draft(
         current_metadata_json=current_metadata_json,
     )
 
-    # Resolve flow name/description
+    # Resolve flow name/description — no regex mutation, just pass-through
     final_name = edit_draft.flow_name or flow_name or "Unnamed Flow"
     final_description = _resolve_flow_description(
         edit_draft=edit_draft,
-        current_steps=current_steps,
-        compiled_steps=compiled_steps,
         current_description=flow_description,
     )
 
@@ -176,6 +138,14 @@ def compile_edit_draft(
         flow_description=final_description,
         steps=compiled_steps,
         form_fields=compiled_form_fields,
+    )
+
+    # Build advisories from semantic signature comparison
+    advisories: list[EditAdvisory] = _build_description_advisories(
+        edit_draft=edit_draft,
+        current_steps=current_steps,
+        compiled_steps=compiled_steps,
+        current_description=flow_description,
     )
 
     # Build diff
@@ -211,6 +181,7 @@ def compile_edit_draft(
         original_draft=edit_draft,
         base_flow_revision=base_flow_revision,
         warnings=warnings,
+        advisories=advisories,
         risk_flags=risk_flags,
         confidence=confidence,
     )
@@ -442,47 +413,60 @@ def _compute_confidence(
 def _resolve_flow_description(
     *,
     edit_draft: FlowEditDraft,
+    current_description: str | None,
+) -> str:
+    """Resolve description: use draft's if provided, otherwise preserve current."""
+    if edit_draft.flow_description is not None:
+        return edit_draft.flow_description
+    return current_description or ""
+
+
+def _build_description_advisories(
+    *,
+    edit_draft: FlowEditDraft,
     current_steps: list[FlowStep],
     compiled_steps: list[StepSpec],
     current_description: str | None,
-) -> str:
+) -> list[EditAdvisory]:
+    """Emit advisory when semantic signature changed but description wasn't updated."""
     if edit_draft.flow_description is not None:
-        return edit_draft.flow_description
+        return []
+    if not current_steps or not compiled_steps or not current_description:
+        return []
 
-    preserved_description = current_description or ""
-    if not preserved_description or not current_steps or not compiled_steps:
-        return preserved_description
+    old_sig = FlowSemanticSignature.from_steps(_flow_steps_to_step_specs(current_steps))
+    new_sig = FlowSemanticSignature.from_steps(compiled_steps)
 
-    previous_terminal_output = OutputType(current_steps[-1].output_type)
-    next_terminal_output = compiled_steps[-1].output_type
-    if previous_terminal_output == next_terminal_output:
-        return preserved_description
+    if not old_sig.has_semantic_change(new_sig):
+        return []
 
-    return _retarget_terminal_output_marker(
-        description=preserved_description,
-        previous_output=previous_terminal_output,
-        next_output=next_terminal_output,
-    )
-
-
-def _retarget_terminal_output_marker(
-    *,
-    description: str,
-    previous_output: OutputType,
-    next_output: OutputType,
-) -> str:
-    replacement = _OUTPUT_DESCRIPTION_LABELS[next_output]
-    for pattern in _OUTPUT_DESCRIPTION_MARKERS[previous_output]:
-        matches = list(pattern.finditer(description))
-        if not matches:
-            continue
-        match = matches[-1]
-        return (
-            description[: match.start()]
-            + replacement
-            + description[match.end():]
+    return [
+        EditAdvisory(
+            code="flow_description_update_required",
+            message=(
+                "Flow inputs or outputs changed but the description was not updated. "
+                "Consider updating the description to reflect the new behavior."
+            ),
+            severity="warning",
+            field="flow_description",
         )
-    return description
+    ]
+
+
+def _flow_steps_to_step_specs(steps: list[FlowStep]) -> list[StepSpec]:
+    """Convert FlowSteps to minimal StepSpecs for signature extraction."""
+    return [
+        StepSpec(
+            plan_step_ref=f"existing_step_{s.step_order}",
+            name=s.user_description or f"Step {s.step_order}",
+            assistant_spec=AssistantSpec(instructions=""),
+            input_source=InputSource(s.input_source),
+            input_type=InputType(s.input_type),
+            output_mode=OutputMode(s.output_mode),
+            output_type=OutputType(s.output_type),
+        )
+        for s in steps
+    ]
 
 
 def _compile_form_fields(

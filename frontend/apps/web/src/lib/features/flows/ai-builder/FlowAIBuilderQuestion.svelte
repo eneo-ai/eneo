@@ -156,7 +156,7 @@
     gap: 0.625rem;
     padding: 0.875rem 1rem;
     border-radius: 0.625rem;
-    border: 1px solid var(--border-default);
+    border: 1px solid var(--border-stronger);
     background: var(--bg-primary);
     cursor: pointer;
     transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
@@ -198,7 +198,7 @@
     height: 1.125rem;
     margin-top: 0.0625rem;
     border-radius: 0.25rem;
-    border: 1.5px solid var(--border-stronger);
+    border: 1.5px solid var(--border-strongest);
     flex-shrink: 0;
     transition: border-color 0.15s ease, background 0.15s ease;
   }
@@ -225,7 +225,7 @@
 
   .option-label {
     font-size: 0.8125rem;
-    font-weight: 550;
+    font-weight: 600;
     color: var(--text-primary);
     line-height: 1.3;
   }
@@ -234,7 +234,7 @@
     font-size: 0.75rem;
     color: var(--text-secondary);
     line-height: 1.4;
-    margin-top: 0.125rem;
+    margin-top: 0.1875rem;
   }
 
   .custom-card {
@@ -243,7 +243,7 @@
     width: 100%;
     padding: 0.75rem 1rem;
     border-radius: 0.625rem;
-    border: 1px dashed var(--border-default);
+    border: 1px dashed var(--border-stronger);
     background: transparent;
     cursor: pointer;
     font-size: 0.8125rem;

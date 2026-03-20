@@ -100,6 +100,17 @@ class AIBuilderPlanLifecycle:
             current_flow=current_flow,
         )
 
+        # Published flows cannot be mutated — require explicit unpublish first
+        if current_flow is not None and current_flow.published_version is not None:
+            raise BadRequestException(
+                "Flow is currently published. Unpublish the flow before applying changes.",
+                code="flow_is_published",
+                context={
+                    "flow_id": str(current_flow.id),
+                    "published_version": current_flow.published_version,
+                },
+            )
+
         await self.repo.update_session_status(
             session_id=session.id,
             tenant_id=self.user.tenant_id,

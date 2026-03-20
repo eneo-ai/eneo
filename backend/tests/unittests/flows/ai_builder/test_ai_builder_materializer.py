@@ -350,13 +350,15 @@ class TestCompileCreateFlow:
             default_transcription_model_id=model_id,
         )
 
-        assert changeset.metadata_json == {
-            "wizard": {
-                "transcription_enabled": True,
-                "transcription_model": {"id": str(model_id)},
-                "transcription_language": "auto",
-            }
+        assert changeset.metadata_json is not None
+        wizard = changeset.metadata_json["wizard"]
+        assert wizard == {
+            "transcription_enabled": True,
+            "transcription_model": {"id": str(model_id)},
+            "transcription_language": "auto",
         }
+        # Provenance is also stamped
+        assert changeset.metadata_json["ai_builder"]["description"]["mode"] == "builder_managed"
 
     def test_audio_flow_input_preserves_existing_transcription_metadata(self) -> None:
         existing_model_id = uuid4()
@@ -394,12 +396,12 @@ class TestCompileCreateFlow:
 
         changeset = compile_changeset(spec, current_flow=current_flow)
 
-        assert changeset.metadata_json == {
-            "wizard": {
-                "transcription_enabled": True,
-                "transcription_model": {"id": str(existing_model_id)},
-                "transcription_language": "tr",
-            }
+        assert changeset.metadata_json is not None
+        wizard = changeset.metadata_json["wizard"]
+        assert wizard == {
+            "transcription_enabled": True,
+            "transcription_model": {"id": str(existing_model_id)},
+            "transcription_language": "tr",
         }
 
 
@@ -623,6 +625,77 @@ class TestCompileEditFlow:
         assert changeset.compiled_steps[1].step_order == 2
         assert changeset.compiled_steps[1].assistant_id == step1.assistant_id
 
+    def test_output_mode_change_clears_stale_output_config(self) -> None:
+        """When output_mode changes, stale output_config from existing step must be cleared."""
+        existing_step = _make_flow_step(
+            step_order=1,
+            output_mode="template_fill",
+            output_config={"template_asset_id": "old-template-uuid"},
+        )
+        flow = _make_flow(steps=[existing_step])
+
+        spec = _make_spec(
+            steps=[
+                _make_step_spec(
+                    plan_step_ref="step_a",
+                    existing_step_ref="existing_step_1",
+                    name="Updated",
+                    output_mode=OutputMode.PASS_THROUGH,  # changed from template_fill
+                ),
+            ],
+        )
+        changeset = compile_changeset(spec, current_flow=flow)
+        step = changeset.compiled_steps[0]
+        # output_config should be cleared because output_mode changed
+        assert step.output_config is None
+
+    def test_same_output_mode_preserves_output_config(self) -> None:
+        """When output_mode is unchanged, existing output_config is preserved."""
+        existing_step = _make_flow_step(
+            step_order=1,
+            output_mode="template_fill",
+            output_config={"template_asset_id": "keep-me"},
+        )
+        flow = _make_flow(steps=[existing_step])
+
+        spec = _make_spec(
+            steps=[
+                _make_step_spec(
+                    plan_step_ref="step_a",
+                    existing_step_ref="existing_step_1",
+                    name="Updated",
+                    output_mode=OutputMode.TEMPLATE_FILL,  # same mode
+                ),
+            ],
+        )
+        changeset = compile_changeset(spec, current_flow=flow)
+        step = changeset.compiled_steps[0]
+        assert step.output_config == {"template_asset_id": "keep-me"}
+
+    def test_output_mode_change_with_new_output_config_uses_new(self) -> None:
+        """When output_mode changes AND spec provides new output_config, use the new one."""
+        existing_step = _make_flow_step(
+            step_order=1,
+            output_mode="template_fill",
+            output_config={"template_asset_id": "old-template"},
+        )
+        flow = _make_flow(steps=[existing_step])
+
+        spec = _make_spec(
+            steps=[
+                _make_step_spec(
+                    plan_step_ref="step_a",
+                    existing_step_ref="existing_step_1",
+                    name="Updated",
+                    output_mode=OutputMode.PASS_THROUGH,
+                    output_config={"new_key": "new_value"},
+                ),
+            ],
+        )
+        changeset = compile_changeset(spec, current_flow=flow)
+        step = changeset.compiled_steps[0]
+        assert step.output_config == {"new_key": "new_value"}
+
 
 # ---------------------------------------------------------------------------
 # Compiler: metadata and form fields
@@ -630,10 +703,13 @@ class TestCompileEditFlow:
 
 
 class TestCompileMetadata:
-    def test_form_fields_none_no_metadata(self) -> None:
+    def test_form_fields_none_still_has_provenance(self) -> None:
+        """Even without form fields, provenance is stamped."""
         spec = _make_spec(steps=[_make_step_spec(plan_step_ref="step_a")])
         changeset = compile_changeset(spec, current_flow=None)
-        assert changeset.metadata_json is None
+        assert changeset.metadata_json is not None
+        assert "ai_builder" in changeset.metadata_json
+        assert "form_schema" not in changeset.metadata_json
 
     def test_preserves_existing_metadata_when_no_form_fields(self) -> None:
         """When editing, preserve existing metadata if spec has no form_fields."""
@@ -669,6 +745,74 @@ class TestCompileMetadata:
         fields = changeset.metadata_json["form_schema"]["fields"]
         assert len(fields) == 1
         assert fields[0]["name"] == "New field"
+
+
+# ---------------------------------------------------------------------------
+# Compiler: description provenance
+# ---------------------------------------------------------------------------
+
+
+class TestDescriptionProvenance:
+    def test_create_mode_stamps_builder_managed_provenance(self) -> None:
+        """New flow gets builder_managed provenance with signature and hash."""
+        spec = _make_spec(
+            flow_description="Tar emot dokument och analyserar dem.",
+            steps=[
+                _make_step_spec(
+                    plan_step_ref="step_a",
+                    input_source=InputSource.FLOW_INPUT,
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.PDF,
+                ),
+            ],
+        )
+        changeset = compile_changeset(spec, current_flow=None)
+        assert changeset.metadata_json is not None
+        ai_builder = changeset.metadata_json.get("ai_builder", {})
+        desc_prov = ai_builder.get("description", {})
+        assert desc_prov["mode"] == "builder_managed"
+        assert desc_prov["semantic_signature"]["entry_input_type"] == "document"
+        assert desc_prov["semantic_signature"]["terminal_output_type"] == "pdf"
+        assert desc_prov["last_generated_hash"] is not None
+
+    def test_description_override_manual_stamps_manual_provenance(self) -> None:
+        """When description_override_manual=True is passed, stamp manual provenance."""
+        spec = _make_spec(
+            flow_description="User wrote this.",
+            steps=[_make_step_spec(plan_step_ref="step_a")],
+        )
+        changeset = compile_changeset(
+            spec,
+            current_flow=None,
+            description_override_manual=True,
+        )
+        assert changeset.metadata_json is not None
+        ai_builder = changeset.metadata_json.get("ai_builder", {})
+        desc_prov = ai_builder.get("description", {})
+        assert desc_prov["mode"] == "manual"
+
+    def test_edit_mode_preserves_existing_ai_builder_metadata(self) -> None:
+        """Provenance update should preserve other ai_builder metadata keys."""
+        flow = _make_flow(
+            metadata_json={
+                "ai_builder": {"other_key": "preserve_me"},
+                "custom": "data",
+            }
+        )
+        spec = _make_spec(
+            flow_description="Updated description.",
+            steps=[_make_step_spec(
+                plan_step_ref="step_a",
+                existing_step_ref="existing_step_1",
+            )],
+        )
+        flow.steps = [_make_flow_step(step_order=1)]
+        changeset = compile_changeset(spec, current_flow=flow)
+        assert changeset.metadata_json is not None
+        assert changeset.metadata_json.get("custom") == "data"
+        ai_builder = changeset.metadata_json["ai_builder"]
+        assert ai_builder.get("other_key") == "preserve_me"
+        assert "description" in ai_builder
 
 
 # ---------------------------------------------------------------------------

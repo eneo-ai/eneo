@@ -21,6 +21,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     CreateSessionRequest,
     PlanResponse,
     PlanApprovalResponse,
+    RevisePlanRequest,
     SessionModelOption,
     SessionListResponse,
     SessionModelsResponse,
@@ -228,6 +229,7 @@ def _to_plan_response(plan) -> PlanResponse:
         status=plan.status,
         spec_hash=plan.spec_hash,
         envelope=public_envelope,
+        edit_result_json=plan.edit_result_json,
         created_at=plan.created_at,
         updated_at=plan.updated_at,
     )
@@ -921,3 +923,54 @@ async def apply_plan(
     )
 
     return result
+
+
+@router.post(
+    "/plans/{plan_id}/revise",
+    response_model=PlanResponse,
+    operation_id="revise_ai_builder_plan",
+    summary="Revise AI Builder Plan",
+    description=(
+        "Create a new plan revision with a structured change. "
+        "Supports 'keep_current_description' (marks description as manually owned) "
+        "and 'regenerate_description' (constrained description-only retry)."
+    ),
+    responses={
+        200: {"description": "New plan revision created."},
+        400: _ai_builder_error_response(
+            description="Invalid revision request.",
+            message="Can only revise proposed plans.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="plan_not_proposed",
+        ),
+        403: _ai_builder_error_response(
+            description="Caller lacks permission.",
+            message="Only the session creator can revise plans.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="session_creator_required",
+        ),
+    },
+)
+async def revise_plan(
+    request: Request,
+    plan_id: Annotated[
+        UUID,
+        Path(description="Identifier of the proposed AI Builder plan to revise."),
+    ],
+    body: RevisePlanRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    service = container.ai_builder_service()
+
+    # Verify plan exists and get session for permission check
+    plan = await service.get_plan(plan_id)
+    session = await service.get_session(plan.session_id)
+    _require_ai_builder_scope(request, space_id=session.space_id)
+    await _require_flow_edit_permission(container, session.space_id)
+
+    new_plan = await service.revise_plan(
+        plan_id=plan_id,
+        revision_type=body.type,
+    )
+
+    return _to_plan_response(new_plan)

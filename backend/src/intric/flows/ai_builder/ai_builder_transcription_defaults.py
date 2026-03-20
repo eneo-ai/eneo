@@ -26,7 +26,7 @@ def apply_audio_transcription_defaults(
     """
 
     if not _uses_audio_flow_input(spec):
-        return metadata
+        return _cleanup_transcription_metadata(metadata)
 
     updated_metadata = dict(metadata or {})
     wizard = updated_metadata.get("wizard")
@@ -55,3 +55,34 @@ def _uses_audio_flow_input(spec: FlowDraftSpecCore) -> bool:
         step.input_source == InputSource.FLOW_INPUT and step.input_type == InputType.AUDIO
         for step in spec.steps
     )
+
+
+_TRANSCRIPTION_WIZARD_KEYS = {
+    "transcription_enabled",
+    "transcription_model",
+    "transcription_language",
+}
+
+
+def _cleanup_transcription_metadata(metadata: JsonObject | None) -> JsonObject | None:
+    """Remove stale wizard transcription keys when no audio flow_input remains."""
+    if not isinstance(metadata, dict):
+        return metadata
+
+    wizard = metadata.get("wizard")
+    if not isinstance(wizard, dict):
+        return metadata
+
+    has_transcription_keys = any(key in wizard for key in _TRANSCRIPTION_WIZARD_KEYS)
+    if not has_transcription_keys:
+        return metadata
+
+    updated_metadata = dict(metadata)
+    updated_wizard = {k: v for k, v in wizard.items() if k not in _TRANSCRIPTION_WIZARD_KEYS}
+
+    if updated_wizard:
+        updated_metadata["wizard"] = updated_wizard
+    else:
+        del updated_metadata["wizard"]
+
+    return updated_metadata or None

@@ -32,6 +32,7 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
 )
 from intric.flows.ai_builder.ai_builder_models import (
     ConversationMessage,
+    FlowDraftSpecCore,
     RequirementsSummaryPayload,
 )
 from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
@@ -67,8 +68,15 @@ from intric.flows.ai_builder.ai_builder_tools import (
     parse_propose_flow_arguments,
     parse_structured_question,
 )
+from intric.flows.ai_builder.ai_builder_description_semantics import (
+    DescriptionProvenance,
+)
 from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
 from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
+from intric.flows.ai_builder.ai_builder_edit_repair import (
+    should_attempt_description_repair,
+    validate_repair_invariance,
+)
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_edit_validator import validate_edit_draft
 from intric.flows.ai_builder.ai_builder_session_spec_validator import (
@@ -1104,8 +1112,37 @@ class AIBuilderProposalProcessor:
             )
             return
 
+        # Attempt constrained description repair if applicable
+        current_provenance = _extract_description_provenance(flow.metadata_json)
+        if should_attempt_description_repair(
+            advisories=edit_result.advisories,
+            current_description=flow.description,
+            current_provenance=current_provenance,
+        ):
+            yield build_status_event("repairing")
+            repaired_spec = await self._attempt_description_repair(
+                compiled_spec=compiled_spec,
+                flow=flow,
+                llm_messages=llm_messages,
+                tool_schemas=tool_schemas,
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                max_output_tokens=max_output_tokens,
+            )
+            if repaired_spec is not None:
+                compiled_spec = repaired_spec
+                # Clear the advisory since description was repaired
+                edit_result = edit_result.model_copy(update={
+                    "compiled_spec": compiled_spec,
+                    "advisories": [
+                        a for a in edit_result.advisories
+                        if a.code != "flow_description_update_required"
+                    ],
+                })
+
         # Store plan with the compiled spec (not the raw draft)
         assumptions = list(draft.assumptions) if draft.assumptions else []
+        serialized_edit_result = edit_result.model_dump(mode="json")
         plan, envelope = await store_plan_and_update_conversation(
             repo=self.repo,
             tenant_id=self.user.tenant_id,
@@ -1120,6 +1157,7 @@ class AIBuilderProposalProcessor:
             plan_rationale=draft.plan_rationale,
             reasoning=None,
             validation=validation,
+            edit_result_json=serialized_edit_result,
         )
 
         yield build_plan_event(
@@ -1127,6 +1165,57 @@ class AIBuilderProposalProcessor:
             envelope=envelope,
             edit_result=edit_result,
         )
+
+    async def _attempt_description_repair(
+        self,
+        *,
+        compiled_spec: "FlowDraftSpecCore",
+        flow: "Flow",
+        llm_messages: list[dict[str, Any]],
+        tool_schemas: list[dict[str, Any]],
+        litellm_model: str,
+        litellm_kwargs: dict[str, Any],
+        max_output_tokens: int,
+    ) -> "FlowDraftSpecCore | None":
+        """Ask the LLM to generate ONLY a new flow description. Max 1 attempt.
+
+        Returns the repaired spec if successful (only description changed),
+        or None if the repair failed or changed non-description fields.
+        """
+
+        repair_prompt = (
+            "The flow's input or output type changed but the description was not updated. "
+            "Generate ONLY a new flow_description that accurately reflects the current flow. "
+            f"Current flow name: {compiled_spec.flow_name}\n"
+            f"Current description (stale): {compiled_spec.flow_description}\n"
+            f"Steps: {', '.join(s.name for s in compiled_spec.steps)}\n"
+            f"Entry input: {compiled_spec.steps[0].input_type.value if compiled_spec.steps else 'none'}\n"
+            f"Terminal output: {compiled_spec.steps[-1].output_type.value if compiled_spec.steps else 'none'}\n"
+            "Respond with ONLY the new description text, nothing else."
+        )
+
+        try:
+            response = await self._call_repair_completion(
+                messages=[{"role": "user", "content": repair_prompt}],
+                tool_schemas=[],
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                max_output_tokens=256,
+                temperature=0.3,
+            )
+            new_description = (response.choices[0].message.content or "").strip()
+            if not new_description:
+                return None
+
+            repaired = compiled_spec.model_copy(update={"flow_description": new_description})
+            if not validate_repair_invariance(compiled_spec, repaired):
+                logger.warning("Description repair changed non-description fields, rejecting")
+                return None
+
+            return repaired
+        except Exception as exc:
+            logger.warning("Description repair failed: %s", exc)
+            return None
 
     async def emit_discovery_followup_if_needed(
         self,
@@ -1151,3 +1240,21 @@ class AIBuilderProposalProcessor:
             litellm_kwargs=litellm_kwargs,
             ui_language=ui_language,
         )
+
+
+def _extract_description_provenance(
+    metadata_json: dict[str, Any] | None,
+) -> DescriptionProvenance | None:
+    """Extract description provenance from flow metadata, if present."""
+    if not isinstance(metadata_json, dict):
+        return None
+    ai_builder = metadata_json.get("ai_builder")
+    if not isinstance(ai_builder, dict):
+        return None
+    desc_raw = ai_builder.get("description")
+    if not isinstance(desc_raw, dict):
+        return None
+    try:
+        return DescriptionProvenance.model_validate(desc_raw)
+    except Exception:
+        return None

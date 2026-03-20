@@ -12,6 +12,8 @@ _FILE_BASED_INPUT_TYPES = {
     InputType.FILE,
 }
 
+_FORMAT_TO_INPUT_TYPE: dict[str, InputType] = {t.value: t for t in _FILE_BASED_INPUT_TYPES}
+
 _DEFAULT_RUNTIME_INPUT_DESCRIPTIONS: dict[InputType, str] = {
     InputType.AUDIO: "Ladda upp ljudfiler som detta steg ska transkribera eller analysera.",
     InputType.DOCUMENT: "Ladda upp dokument som detta steg ska analysera.",
@@ -57,11 +59,21 @@ def resolve_runtime_input_config(
         else {}
     )
     runtime_input_config["enabled"] = True
-    runtime_input_config.setdefault("input_format", step_spec.input_type.value)
-    runtime_input_config.setdefault(
-        "description",
-        _DEFAULT_RUNTIME_INPUT_DESCRIPTIONS[step_spec.input_type],
-    )
+
+    previous_format = runtime_input_config.get("input_format")
+    runtime_input_config["input_format"] = step_spec.input_type.value
+
+    if previous_format is not None and previous_format != step_spec.input_type.value:
+        _sync_description_after_type_change(
+            runtime_input_config, previous_format, step_spec.input_type
+        )
+        # Stale mimetype constraints from the old format are invalid for the new type
+        runtime_input_config.pop("accepted_mimetypes_override", None)
+    else:
+        runtime_input_config.setdefault(
+            "description",
+            _DEFAULT_RUNTIME_INPUT_DESCRIPTIONS[step_spec.input_type],
+        )
     effective_config["runtime_input"] = runtime_input_config
     return effective_config
 
@@ -77,6 +89,26 @@ def _clone_json_object(value: JsonObject | None) -> JsonObject | None:
     if isinstance(value, dict):
         return dict(value)
     return None
+
+
+def _sync_description_after_type_change(
+    runtime_input_config: dict[str, Any],
+    previous_format: str,
+    new_input_type: InputType,
+) -> None:
+    """Update description when input_format changes, but only if it's a default."""
+    current_description = runtime_input_config.get("description")
+
+    # Check if current description is a known default for the *old* format
+    old_input_type = _FORMAT_TO_INPUT_TYPE.get(previous_format)
+    old_default = (
+        _DEFAULT_RUNTIME_INPUT_DESCRIPTIONS.get(old_input_type)
+        if old_input_type is not None
+        else None
+    )
+
+    if current_description is None or current_description == old_default:
+        runtime_input_config["description"] = _DEFAULT_RUNTIME_INPUT_DESCRIPTIONS[new_input_type]
 
 
 def _remove_runtime_input_config(value: JsonObject | None) -> JsonObject | None:

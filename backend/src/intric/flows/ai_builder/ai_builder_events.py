@@ -138,6 +138,10 @@ def build_plan_event(
         edit_kwargs["edit_diff"] = edit_result.diff.model_dump(mode="json")
         edit_kwargs["edit_confidence"] = edit_result.confidence
         edit_kwargs["edit_warnings"] = edit_result.warnings
+        if edit_result.advisories:
+            edit_kwargs["edit_advisories"] = [
+                a.model_dump(mode="json") for a in edit_result.advisories
+            ]
         edit_kwargs["edit_risk_flags"] = edit_result.risk_flags
 
     return {

@@ -310,6 +310,7 @@ class FlowChangeSet(BaseModel):
 
     flow_name: str
     flow_description: str
+    description_override_manual: bool = False
     assistants_to_create: list[AssistantToCreate] = Field(default_factory=list)
     assistants_to_update: list[AssistantToUpdate] = Field(default_factory=list)
     assistants_to_delete: list[AssistantToDelete] = Field(default_factory=list)
@@ -552,6 +553,18 @@ class ApplyPlanRequest(BaseModel):
     expected_revision: int | None = None  # Required for edit sessions
 
 
+class RevisePlanRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "type": "keep_current_description",
+            }
+        }
+    )
+
+    type: Literal["keep_current_description", "regenerate_description"]
+
+
 class SessionResponse(BaseModel):
     model_config = ConfigDict(json_schema_extra={"example": AI_BUILDER_SESSION_RESPONSE_EXAMPLE})
 
@@ -604,6 +617,7 @@ class PlanResponse(BaseModel):
     status: PlanStatus
     spec_hash: str
     envelope: PlannerPlanEnvelope
+    edit_result_json: JsonObject | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -689,4 +703,5 @@ class AIBuilderPlanEventData(BaseModel):
     edit_diff: JsonObject | None = None  # FlowEditDiff for edit-mode plans
     edit_confidence: str | None = None  # EditConfidence for edit-mode plans
     edit_warnings: list[str] | None = None
+    edit_advisories: list[JsonObject] | None = None
     edit_risk_flags: list[str] | None = None

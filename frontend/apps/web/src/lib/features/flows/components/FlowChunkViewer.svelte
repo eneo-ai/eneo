@@ -63,10 +63,16 @@
     }
   }
 
-  function scoreColorClass(score: number): string {
-    if (score >= 0.5) return "text-positive-stronger";
-    if (score >= 0.3) return "text-warning-stronger";
-    return "text-negative-stronger";
+  function scoreBadgeClass(score: number): string {
+    if (score >= 0.5) return "bg-positive-dimmer text-positive-stronger";
+    if (score >= 0.3) return "bg-warning-dimmer text-warning-stronger";
+    return "bg-negative-dimmer text-negative-stronger";
+  }
+
+  function scoreLabel(score: number): string {
+    if (score >= 0.5) return m.flow_run_knowledge_relevance_high();
+    if (score >= 0.3) return m.flow_run_knowledge_relevance_moderate();
+    return m.flow_run_knowledge_relevance_low();
   }
 
   async function loadDocument() {
@@ -196,18 +202,20 @@
               <div class="max-h-[44vh] space-y-1.5 overflow-auto pr-1">
                 {#each chunkItems as chunk, index (`${chunk.chunk_no ?? 0}-${index}`)}
                   <button
-                    class="w-full rounded-md border border-default px-2.5 py-2 text-left text-xs transition-colors hover:bg-hover-default"
+                    class="w-full rounded-md border border-default border-l-[3px] border-l-transparent px-2.5 py-2 text-left text-xs transition-colors hover:bg-hover-default"
                     class:bg-accent-dimmer={activeChunkIndex === index}
-                    style:border-left={activeChunkIndex === index ? "3px solid var(--accent-default)" : undefined}
+                    style:border-left-color={activeChunkIndex === index ? "var(--accent-default)" : undefined}
                     on:click={() => activateChunk(index)}
                   >
                     <div class="flex items-center justify-between gap-2">
                       <span class="font-semibold text-secondary">
                         {m.flow_run_knowledge_chunk_label({ chunk: String(chunk.chunk_no ?? 0) })}
                       </span>
-                      <span class={["rounded-full bg-hover-dimmer px-1.5 py-0.5 font-mono text-[11px]", scoreColorClass(Number(chunk.score ?? 0))]}>
-                        {Number(chunk.score ?? 0).toFixed(3)}
-                      </span>
+                      <Tooltip text={Number(chunk.score ?? 0).toFixed(2)}>
+                        <span class={["rounded-full px-1.5 py-0.5 text-[10px] font-medium", scoreBadgeClass(Number(chunk.score ?? 0))]}>
+                          {scoreLabel(Number(chunk.score ?? 0))}
+                        </span>
+                      </Tooltip>
                     </div>
                     <p class="mt-1 line-clamp-3 text-[11px] leading-relaxed text-muted">{chunk.snippet}</p>
                   </button>
@@ -235,25 +243,25 @@
               class="knowledge-document h-[52vh] overflow-auto px-4 py-3"
               style="content-visibility: auto;"
             >
-              <pre class="whitespace-pre-wrap break-words font-sans text-sm leading-7">{documentText}</pre>
+              <pre class="whitespace-pre-wrap break-words font-sans text-[15px] leading-relaxed">{documentText}</pre>
             </div>
-            <div class="flex items-center justify-between border-t border-default bg-hover-dimmer px-4 py-3">
-              <div class="inline-flex items-center gap-2 text-xs text-secondary">
+            <div class="flex items-center justify-between border-t border-default bg-hover-dimmer px-4 py-2.5">
+              <div class="inline-flex items-center gap-2 text-[11px] text-muted">
                 <span class="legend-swatch"></span>
                 <span>{m.flow_run_knowledge_highlight_legend()}</span>
               </div>
-              <div class="inline-flex items-center gap-1.5">
-                <Button variant="outlined" on:click={previousChunk}>
+              <div class="inline-flex items-center gap-1">
+                <Button variant="outlined" class="text-xs" on:click={previousChunk}>
                   {m.flow_run_knowledge_prev_match()}
                 </Button>
-                <span class="rounded-full border border-default bg-primary px-3 py-1 text-xs font-medium text-secondary">
+                <span class="px-2 text-[11px] tabular-nums text-muted">
                   {#if activeChunkIndex !== null}
                     {m.flow_run_knowledge_chunk_position({ current: String(activeChunkIndex + 1), total: String(chunkItems.length) })}
                   {:else}
                     {m.flow_run_knowledge_chunk_count({ count: String(chunkItems.length) })}
                   {/if}
                 </span>
-                <Button variant="outlined" on:click={nextChunk}>
+                <Button variant="outlined" class="text-xs" on:click={nextChunk}>
                   {m.flow_run_knowledge_next_match()}
                 </Button>
               </div>
@@ -271,21 +279,27 @@
 
 <style>
   :global(::highlight(chunk-match)) {
-    background-color: color-mix(in srgb, var(--warning-stronger) 20%, transparent);
+    background-color: color-mix(in srgb, var(--warning-stronger) 30%, transparent);
   }
 
   :global(::highlight(chunk-active)) {
-    background-color: color-mix(in srgb, var(--warning-stronger) 34%, transparent);
+    background-color: color-mix(in srgb, var(--warning-stronger) 50%, transparent);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--warning-stronger) 70%, transparent);
+    text-decoration-thickness: 2px;
+    text-decoration-skip-ink: none;
+    text-underline-offset: 4px;
   }
 
   :global(.knowledge-document .flow-highlight) {
     border-radius: 2px;
     padding: 0 1px;
-    background-color: color-mix(in srgb, var(--warning-stronger) 22%, transparent);
+    background-color: color-mix(in srgb, var(--warning-stronger) 30%, transparent);
   }
 
   :global(.knowledge-document .flow-highlight--chunk-active) {
-    background-color: color-mix(in srgb, var(--warning-stronger) 34%, transparent);
+    background-color: color-mix(in srgb, var(--warning-stronger) 50%, transparent);
+    box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--warning-stronger) 70%, transparent);
   }
 
   .legend-swatch {
@@ -293,7 +307,7 @@
     height: 12px;
     width: 18px;
     border-radius: 3px;
-    border: 1px solid color-mix(in srgb, var(--warning-stronger) 44%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning-stronger) 50%, transparent);
     background-color: color-mix(in srgb, var(--warning-stronger) 30%, transparent);
   }
 </style>

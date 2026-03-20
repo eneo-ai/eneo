@@ -35,7 +35,7 @@
     requirementsActive = true,
     onQuestionAnswer = undefined,
     onRequirementsConfirm = undefined,
-    onRequirementsChange = undefined
+    onRequirementsChange = undefined,
   }: Props = $props();
 </script>
 

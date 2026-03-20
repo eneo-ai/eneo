@@ -962,7 +962,7 @@
     class:pointer-events-none={isPublished}
     class:opacity-60={isPublished}
   >
-    <div class="flow-step-editor [&_section>div:last-child]:gap-6 [&_section>div:last-child]:pb-6">
+    <div class="flow-step-editor [&_section>h2]:font-sans [&_section>h2]:uppercase [&_section>h2]:tracking-[0.04em] [&_section>div:last-child]:gap-6 [&_section>div:last-child]:pb-6">
       <Settings.Page>
         {#if stepSummaryModel}
           <FlowStepSummaryCard

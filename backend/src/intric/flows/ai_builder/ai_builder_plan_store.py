@@ -129,6 +129,7 @@ async def store_plan_and_update_conversation(
     plan_rationale: str | None,
     reasoning: str | None,
     validation: Any,
+    edit_result_json: dict[str, Any] | None = None,
 ) -> tuple[BuilderPlan, PlannerPlanEnvelope]:
     envelope = build_plan_envelope(
         spec=spec,
@@ -143,6 +144,7 @@ async def store_plan_and_update_conversation(
         session_id=session_id,
         spec=spec,
         envelope=envelope,
+        edit_result_json=edit_result_json,
     )
     append_plan_messages(
         conversation=conversation,
@@ -169,6 +171,7 @@ async def persist_plan(
     session_id: UUID,
     spec: FlowDraftSpecCore,
     envelope: PlannerPlanEnvelope,
+    edit_result_json: dict[str, Any] | None = None,
 ) -> BuilderPlan:
     await repo.supersede_existing_plans(
         session_id=session_id,
@@ -179,6 +182,7 @@ async def persist_plan(
         tenant_id=tenant_id,
         spec=spec,
         envelope=envelope,
+        edit_result_json=edit_result_json,
     )
     await repo.update_session_latest_plan(
         session_id=session_id,

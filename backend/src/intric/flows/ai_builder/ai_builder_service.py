@@ -25,6 +25,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     ApplyResultResponse,
     BuilderPlan,
     BuilderSession,
+    PlanStatus,
     SessionListItemResponse,
     TargetKind,
 )
@@ -238,6 +239,69 @@ class AIBuilderService:
             expected_revision=expected_revision,
         )
 
+    async def revise_plan(
+        self,
+        *,
+        plan_id: UUID,
+        revision_type: str,
+    ) -> BuilderPlan:
+        """Create a new plan version with a structured revision.
+
+        - keep_current_description: copies spec with description_override_manual=True
+        - regenerate_description: placeholder for constrained LLM description retry
+        """
+        from intric.flows.ai_builder.ai_builder_plan_store import persist_plan
+        from intric.flows.ai_builder.ai_builder_plan_store import build_plan_envelope
+
+        plan = await self.repo.get_plan(
+            plan_id=plan_id,
+            tenant_id=self.user.tenant_id,
+        )
+        if plan.status != PlanStatus.PROPOSED:
+            raise BadRequestException(
+                "Can only revise proposed plans.",
+                code="plan_not_proposed",
+            )
+
+        session = await self.repo.get_session(
+            session_id=plan.session_id,
+            tenant_id=self.user.tenant_id,
+        )
+        if session.actor_user_id != self.user.id:
+            from intric.main.exceptions import UnauthorizedException
+            raise UnauthorizedException(
+                "Only the session creator can revise plans.",
+                code="session_creator_required",
+            )
+
+        if revision_type == "keep_current_description":
+            # Create new plan version with description_override_manual flag
+            # The spec stays the same — the flag is stored in edit_result_json
+            revised_edit_result = dict(plan.edit_result_json or {})
+            revised_edit_result["description_override_manual"] = True
+
+            envelope = build_plan_envelope(
+                spec=plan.spec,
+                assumptions=plan.envelope.assumptions,
+                plan_rationale=plan.envelope.plan_rationale,
+                reasoning=None,
+                validation=_empty_validation(),
+            )
+            new_plan = await persist_plan(
+                repo=self.repo,
+                tenant_id=self.user.tenant_id,
+                session_id=plan.session_id,
+                spec=plan.spec,
+                envelope=envelope,
+                edit_result_json=revised_edit_result,
+            )
+            return new_plan
+
+        raise BadRequestException(
+            f"Unsupported revision type: {revision_type}",
+            code="unsupported_revision_type",
+        )
+
     def _build_planner(self) -> AIBuilderPlanner:
         return AIBuilderPlanner(
             user=self.user,
@@ -257,3 +321,13 @@ class AIBuilderService:
             flow_service=self.flow_service,
             space_service=self.space_service,
         )
+
+
+class _EmptyValidation:
+    """Stub validation result with no warnings/errors for plan revisions."""
+    warnings: list = []
+    errors: list = []
+
+
+def _empty_validation() -> _EmptyValidation:
+    return _EmptyValidation()

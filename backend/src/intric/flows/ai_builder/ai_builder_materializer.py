@@ -15,6 +15,11 @@ import re
 from typing import Any
 from uuid import UUID, uuid4
 
+from intric.flows.ai_builder.ai_builder_description_semantics import (
+    DescriptionProvenance,
+    FlowSemanticSignature,
+    _description_hash,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     ApplyResultResponse,
     AssistantSpec,
@@ -52,6 +57,7 @@ def compile_changeset(
     current_flow: Flow | None,
     *,
     default_transcription_model_id: UUID | None = None,
+    description_override_manual: bool = False,
 ) -> FlowChangeSet:
     """Compile a FlowDraftSpecCore into a FlowChangeSet.
 
@@ -138,11 +144,13 @@ def compile_changeset(
         spec,
         current_flow,
         default_transcription_model_id=default_transcription_model_id,
+        description_override_manual=description_override_manual,
     )
 
     return FlowChangeSet(
         flow_name=spec.flow_name,
         flow_description=spec.flow_description,
+        description_override_manual=description_override_manual,
         assistants_to_create=assistants_to_create,
         assistants_to_update=assistants_to_update,
         assistants_to_delete=assistants_to_delete,
@@ -390,8 +398,24 @@ def _compile_modified_step(
             step_spec=step_spec,
             existing_input_config=existing_step.input_config,
         ),
-        output_config=step_spec.output_config if step_spec.output_config is not None else existing_step.output_config,
+        output_config=_resolve_output_config(step_spec, existing_step),
     )
+
+
+def _resolve_output_config(
+    step_spec: StepSpec,
+    existing_step: FlowStep,
+) -> dict[str, Any] | None:
+    """Resolve output_config for a modified step.
+
+    If the spec provides output_config, use it. Otherwise, preserve the existing
+    config only if output_mode hasn't changed — a mode change invalidates the old config.
+    """
+    if step_spec.output_config is not None:
+        return step_spec.output_config
+    if step_spec.output_mode.value != existing_step.output_mode:
+        return None
+    return existing_step.output_config
 
 
 def _build_metadata_json(
@@ -399,6 +423,7 @@ def _build_metadata_json(
     current_flow: Flow | None,
     *,
     default_transcription_model_id: UUID | None = None,
+    description_override_manual: bool = False,
 ) -> dict[str, Any] | None:
     """Build metadata_json from spec form_fields, preserving existing metadata."""
     # Start with existing metadata or empty dict
@@ -426,7 +451,40 @@ def _build_metadata_json(
         spec=spec,
         default_transcription_model_id=default_transcription_model_id,
     )
+
+    # Stamp description provenance
+    metadata = _stamp_description_provenance(
+        metadata=metadata,
+        spec=spec,
+        description_override_manual=description_override_manual,
+    )
+
     return metadata if metadata else None
+
+
+def _stamp_description_provenance(
+    *,
+    metadata: dict[str, Any] | None,
+    spec: FlowDraftSpecCore,
+    description_override_manual: bool,
+) -> dict[str, Any]:
+    """Stamp ai_builder.description provenance into metadata."""
+    result = dict(metadata or {})
+    ai_builder = dict(result.get("ai_builder", {}))
+
+    if description_override_manual:
+        provenance = DescriptionProvenance(mode="manual")
+    else:
+        sig = FlowSemanticSignature.from_steps(spec.steps)
+        provenance = DescriptionProvenance(
+            mode="builder_managed",
+            semantic_signature=sig,
+            last_generated_hash=_description_hash(spec.flow_description),
+        )
+
+    ai_builder["description"] = provenance.model_dump(mode="json")
+    result["ai_builder"] = ai_builder
+    return result
 
 
 async def _configure_assistant(

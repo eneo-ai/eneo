@@ -42,10 +42,25 @@
       : httpInputConfig
         ? getHttpSummaryText(httpInputConfig, httpMethod)
         : "";
+
+  $: summaryKey = `${getSummarySourceText(step, summaryModel, previousStep)}|${getInputTypeLabel(step.input_type)}|${getOutputTypeLabel(step.output_type)}|${getSummaryNextChannelText(step, summaryModel)}`;
+
+  let prevSummaryKey = "";
+  let gridPulse = false;
+  let pulseTimer: ReturnType<typeof setTimeout> | null = null;
+
+  $: if (summaryKey !== prevSummaryKey) {
+    if (prevSummaryKey) {
+      gridPulse = true;
+      if (pulseTimer) clearTimeout(pulseTimer);
+      pulseTimer = setTimeout(() => { gridPulse = false; }, 700);
+    }
+    prevSummaryKey = summaryKey;
+  }
 </script>
 
 <div
-  class="border-accent-default/18 bg-primary/75 mb-6 rounded-2xl border px-4 py-4 shadow-sm sm:px-5"
+  class="border-accent-default/18 bg-primary/75 mb-4 rounded-2xl border px-4 py-4 shadow-sm sm:px-5"
 >
   <div class="flex flex-wrap items-center gap-2">
     <span class="text-base font-semibold tracking-tight"
@@ -83,6 +98,7 @@
 
   <div
     class="border-default/70 bg-secondary/15 mt-4 grid overflow-hidden rounded-2xl border sm:grid-cols-2 xl:grid-cols-4"
+    class:summary-grid-pulse={gridPulse}
   >
     <div class="border-default/70 min-w-0 border-b px-4 py-3 sm:border-r xl:border-b-0">
       <p class="text-muted text-[10px] font-semibold tracking-[0.07em] uppercase">
@@ -117,3 +133,22 @@
     <p class="text-muted mt-2 truncate px-1 font-mono text-xs">{httpSummary}</p>
   {/if}
 </div>
+
+<style>
+  @media (prefers-reduced-motion: no-preference) {
+    .summary-grid-pulse {
+      animation: summary-pulse 700ms ease-out;
+    }
+  }
+
+  @keyframes summary-pulse {
+    0%, 12% {
+      border-color: var(--accent-default);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-default) 20%, transparent);
+    }
+    100% {
+      border-color: color-mix(in srgb, var(--border-default) 70%, transparent);
+      box-shadow: none;
+    }
+  }
+</style>

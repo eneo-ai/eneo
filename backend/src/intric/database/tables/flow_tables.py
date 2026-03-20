@@ -592,6 +592,7 @@ class BuilderPlans(BasePublic):
     spec_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     spec_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     envelope_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    edit_result_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
         CheckConstraint(

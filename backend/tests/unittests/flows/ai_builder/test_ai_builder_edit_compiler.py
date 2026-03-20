@@ -225,7 +225,8 @@ class TestCompiledResultApproval:
         assert old == "Old Name"
         assert new == "Renamed Flow"
 
-    def test_output_only_edit_resyncs_stale_description_with_terminal_artifact(self):
+    def test_output_only_edit_preserves_description_and_emits_advisory(self):
+        """Output type change preserves description verbatim, emits advisory."""
         existing = [
             _make_flow_step(
                 step_order=1,
@@ -246,27 +247,22 @@ class TestCompiledResultApproval:
             ],
         )
 
+        original_desc = (
+            "Tar emot uppladdade ärendedokument vid körning och skapar ett kort "
+            "svenskt beslutsunderlag i textformat."
+        )
         result = compile_edit_draft(
             draft,
             existing,
             base_flow_revision=5,
             flow_name="Beslutsunderlag",
-            flow_description=(
-                "Tar emot uppladdade ärendedokument vid körning och skapar ett kort "
-                "svenskt beslutsunderlag i textformat."
-            ),
+            flow_description=original_desc,
         )
 
-        assert result.compiled_spec.flow_description == (
-            "Tar emot uppladdade ärendedokument vid körning och skapar ett kort "
-            "svenskt beslutsunderlag i DOCX-format."
-        )
-        assert result.diff.flow_property_changes["flow_description"] == (
-            "Tar emot uppladdade ärendedokument vid körning och skapar ett kort "
-            "svenskt beslutsunderlag i textformat.",
-            "Tar emot uppladdade ärendedokument vid körning och skapar ett kort "
-            "svenskt beslutsunderlag i DOCX-format.",
-        )
+        # Description is NOT mutated — advisory instead
+        assert result.compiled_spec.flow_description == original_desc
+        assert "flow_description" not in result.diff.flow_property_changes
+        assert any(a.code == "flow_description_update_required" for a in result.advisories)
 
     def test_preserves_existing_form_fields_in_compiled_preview(self):
         existing = [
@@ -620,3 +616,168 @@ class TestAssistantSnapshotPreservation:
         assert assistant_spec.instructions == "Uppdaterad prompt för IBIC-analys."
         assert assistant_spec.model_ref == assistant_snapshots[existing[0].assistant_id]["model_ref"]
         assert assistant_spec.knowledge_refs == ["kb-1"]
+
+
+class TestFlowDescriptionSemantics:
+    """Description is never mutated by regex. Semantic changes produce advisories."""
+
+    def test_semantic_change_without_description_produces_advisory(self):
+        """Audio→document with no new description → advisory, description preserved."""
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                user_description="Transkribera",
+                input_source="flow_input",
+                input_type="audio",
+            ),
+        ]
+
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_1",
+                    patch=StepPatch(
+                        name="Analysera dokument",
+                        input_type=InputType.DOCUMENT,
+                    ),
+                ),
+            ],
+        )
+
+        result = compile_edit_draft(
+            draft,
+            existing,
+            base_flow_revision=1,
+            flow_name="Transkribering",
+            flow_description="Tar emot ljudfiler och transkriberar dem till text.",
+        )
+
+        # Description is NOT mutated — no regex replacement
+        assert result.compiled_spec.flow_description == "Tar emot ljudfiler och transkriberar dem till text."
+        # Advisory tells the user the description may be stale
+        assert any(a.code == "flow_description_update_required" for a in result.advisories)
+
+    def test_semantic_change_with_description_no_advisory(self):
+        """When the LLM provides a new description, no advisory needed."""
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                input_source="flow_input",
+                input_type="audio",
+            ),
+        ]
+
+        draft = FlowEditDraft(
+            flow_description="Tar emot dokument och analyserar dem.",
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_1",
+                    patch=StepPatch(input_type=InputType.DOCUMENT),
+                ),
+            ],
+        )
+
+        result = compile_edit_draft(
+            draft,
+            existing,
+            base_flow_revision=1,
+            flow_description="Tar emot ljudfiler och transkriberar dem till text.",
+        )
+
+        assert result.compiled_spec.flow_description == "Tar emot dokument och analyserar dem."
+        assert not any(a.code == "flow_description_update_required" for a in result.advisories)
+
+    def test_preserves_description_when_no_semantic_change(self):
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                user_description="Analysera",
+                input_source="flow_input",
+                input_type="document",
+            ),
+        ]
+
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_1",
+                    patch=StepPatch(name="Bättre namn"),
+                ),
+            ],
+        )
+
+        original_desc = "Tar emot dokument och analyserar dem."
+        result = compile_edit_draft(
+            draft,
+            existing,
+            base_flow_revision=1,
+            flow_description=original_desc,
+        )
+
+        assert result.compiled_spec.flow_description == original_desc
+        assert not any(a.code == "flow_description_update_required" for a in result.advisories)
+
+    def test_explicit_flow_description_in_draft_takes_precedence(self):
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                input_source="flow_input",
+                input_type="audio",
+            ),
+        ]
+
+        draft = FlowEditDraft(
+            flow_description="Helt ny beskrivning från AI.",
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_1",
+                    patch=StepPatch(input_type=InputType.DOCUMENT),
+                ),
+            ],
+        )
+
+        result = compile_edit_draft(
+            draft,
+            existing,
+            base_flow_revision=1,
+            flow_description="Gamla beskrivningen med ljudfiler.",
+        )
+
+        assert result.compiled_spec.flow_description == "Helt ny beskrivning från AI."
+
+    def test_output_type_change_without_description_produces_advisory(self):
+        """Terminal output type change → advisory when no description provided."""
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                user_description="Skriv beslutsunderlag",
+                output_type="text",
+            ),
+        ]
+
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_1",
+                    patch=StepPatch(output_type=OutputType.DOCX),
+                ),
+            ],
+        )
+
+        result = compile_edit_draft(
+            draft,
+            existing,
+            base_flow_revision=5,
+            flow_name="Beslutsunderlag",
+            flow_description="Skapar beslutsunderlag i textformat.",
+        )
+
+        # Description NOT mutated
+        assert result.compiled_spec.flow_description == "Skapar beslutsunderlag i textformat."
+        # Advisory present
+        assert any(a.code == "flow_description_update_required" for a in result.advisories)

@@ -3,6 +3,7 @@
   import { Button } from "@intric/ui";
   import FlowAIBuilderStepCard from "./FlowAIBuilderStepCard.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
+  import type { EditAdvisory } from "./protocol";
   interface Props {
     onapplied?: (detail: { flow_id: string }) => void;
     onsuggestchange?: (prefill: string) => void;
@@ -12,6 +13,31 @@
 
   const service = getAIBuilderService();
 
+  // Description diff helpers
+  let descriptionDiff = $derived.by(() => {
+    const plan = service.currentPlan;
+    if (!plan?.edit_diff?.flow_property_changes) return null;
+    const change = plan.edit_diff.flow_property_changes["flow_description"];
+    if (!change) return null;
+    return { previous: String(change[0] ?? ""), proposed: String(change[1] ?? "") };
+  });
+
+  let advisories = $derived<EditAdvisory[]>(
+    service.currentPlan?.edit_advisories ?? []
+  );
+
+  let hasDescriptionAdvisory = $derived(
+    advisories.some((a) => a.code === "flow_description_update_required")
+  );
+
+  let isPublishedError = $derived(
+    service.applyError?.code === "flow_is_published"
+  );
+
+  let publishedVersion = $derived(
+    isPublishedError ? (service.applyError?.context?.published_version as number | null) : null
+  );
+
   function resolveModelName(ref: string | null): string | null {
     if (!ref) return null;
     return service.availableModels.find((m) => m.id === ref)?.name ?? ref;
@@ -19,15 +45,12 @@
 
   let isApproving = $state(false);
   let isApplying = $state(false);
-  let planRevisionRequested = $state(false);
 
   // Track whether a plan existed before streaming started (for context-aware progress text)
   let hadPlanBefore = $state(false);
 
-  // Reset muted state when a new plan arrives
   $effect(() => {
     if (service.currentPlan) {
-      planRevisionRequested = false;
       hadPlanBefore = true;
     }
     if (!service.hasSession) {
@@ -65,7 +88,6 @@
   }
 
   function handleModify() {
-    planRevisionRequested = true;
     service.changeRequirements();
   }
 
@@ -75,16 +97,6 @@
 </script>
 
 <div class="plan-pane">
-  {#if planRevisionRequested}
-    <div class="revision-overlay">
-      <div class="revision-overlay-content">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="size-5 animate-spin-slow">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
-        </svg>
-        <span>{m.ai_builder_modifying_plan()}</span>
-      </div>
-    </div>
-  {/if}
   {#if service.currentPlan}
     {@const plan = service.currentPlan}
     {@const spec = plan.envelope.spec}
@@ -116,10 +128,51 @@
         <!-- Header -->
         <div class="plan-header">
           <h3 class="text-primary text-lg font-semibold tracking-tight">{spec.flow_name}</h3>
-          {#if spec.flow_description}
-            <p class="text-secondary mt-1.5 text-[0.8125rem] leading-relaxed">{spec.flow_description}</p>
+          {#if spec.flow_description && !descriptionDiff && !hasDescriptionAdvisory}
+            <p class="plan-header-description">{spec.flow_description}</p>
           {/if}
         </div>
+
+        <!-- Description diff — flat layout, no nested cards -->
+        {#if descriptionDiff || hasDescriptionAdvisory}
+          <div class="description-diff-section" aria-live="polite">
+            <p class="description-diff-title">{m.ai_builder_description_diff_title()}</p>
+            {#if descriptionDiff}
+              <div class="description-diff-flat">
+                <p class="description-diff-old" aria-label={m.ai_builder_description_current()}>
+                  {descriptionDiff.previous}
+                </p>
+                <p class="description-diff-new" aria-label={m.ai_builder_description_proposed()}>
+                  {descriptionDiff.proposed}
+                </p>
+              </div>
+            {:else if hasDescriptionAdvisory}
+              <p class="description-diff-advisory-text">
+                {advisories.find((a) => a.code === "flow_description_update_required")?.message}
+              </p>
+              <div class="description-diff-actions">
+                <Button variant="outlined" size="small" onclick={() => service.revisePlan("keep_current_description")}>
+                  {m.ai_builder_description_keep_current()}
+                </Button>
+                <Button variant="outlined" size="small" onclick={() => service.revisePlan("regenerate_description")}>
+                  {m.ai_builder_description_regenerate()}
+                </Button>
+              </div>
+            {/if}
+          </div>
+        {/if}
+
+        <!-- Edit advisories (non-description) -->
+        {#if advisories.filter((a) => a.code !== "flow_description_update_required").length > 0}
+          <div class="advisories-section" aria-live="polite">
+            <p class="advisories-title">{m.ai_builder_advisory_section_title()}</p>
+            {#each advisories.filter((a) => a.code !== "flow_description_update_required") as advisory (advisory.code)}
+              <div class="advisory-item advisory-item--{advisory.severity}">
+                <span>{advisory.message}</span>
+              </div>
+            {/each}
+          </div>
+        {/if}
 
         <!-- Assumptions -->
         {#if plan.envelope.assumptions.length > 0}
@@ -238,6 +291,21 @@
       {/if}
     </div>
 
+    <!-- Published flow banner — near actions where the error originated -->
+    {#if isPublishedError}
+      <div class="published-banner" aria-live="polite">
+        <h4 class="published-banner-title">{m.ai_builder_published_flow_title()}</h4>
+        <p class="published-banner-description">
+          {m.ai_builder_published_flow_description({ version: String(publishedVersion ?? "") })}
+        </p>
+        <div class="mt-2">
+          <Button variant="outlined" size="small" onclick={() => service.dismissApplyError()}>
+            {m.ai_builder_conflict_cancel()}
+          </Button>
+        </div>
+      </div>
+    {/if}
+
     <!-- Action buttons — pinned at bottom, always visible -->
     <div class="plan-actions">
       {#if service.canApprove}
@@ -330,33 +398,6 @@
     flex: 1;
     min-height: 0;
     position: relative;
-  }
-
-  .revision-overlay {
-    position: absolute;
-    inset: 0;
-    z-index: 10;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: oklch(from var(--bg-primary) l c h / 0.75);
-    backdrop-filter: blur(2px);
-    pointer-events: auto;
-    animation: overlay-fade-in 0.25s ease;
-  }
-
-  .revision-overlay-content {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-    font-weight: 500;
-  }
-
-  @keyframes overlay-fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
   }
 
   .plan-scroll {
@@ -462,6 +503,14 @@
 
   .plan-header {
     padding: 1.5rem 1.5rem 1.25rem;
+  }
+
+  .plan-header-description {
+    margin-top: 0.375rem;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    overflow-wrap: break-word;
   }
 
   .assumptions-section {
@@ -620,13 +669,129 @@
     to { transform: rotate(360deg); }
   }
 
+  /* Description diff — flat layout, no nested cards */
+  .description-diff-section {
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--border-default);
+    animation: section-enter 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .description-diff-title {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+  }
+
+  .description-diff-flat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .description-diff-old {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+    text-decoration: line-through;
+    text-decoration-color: oklch(from var(--text-muted) l c h / 0.4);
+    overflow-wrap: break-word;
+  }
+
+  .description-diff-new {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--text-primary);
+    padding-left: 0.75rem;
+    border-left: 3px solid var(--accent-default);
+    overflow-wrap: break-word;
+  }
+
+  .description-diff-advisory-text {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+  }
+
+  .description-diff-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  @keyframes section-enter {
+    from { opacity: 0; transform: translateY(0.5rem); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Advisories section — matches lint-section treatment */
+  .advisories-section {
+    margin: 0 1.5rem 0.75rem;
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border-warning-default);
+    background: var(--bg-warning-dimmer);
+  }
+
+  .advisories-title {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-warning-stronger);
+    margin-bottom: 0.375rem;
+  }
+
+  .advisory-item {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    padding: 0.375rem 0.625rem;
+    border-radius: 0.375rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .advisory-item--info {
+    color: var(--text-info-default);
+    background: var(--bg-info-dimmer);
+  }
+
+  .advisory-item--warning {
+    color: var(--text-warning-stronger);
+    background: var(--bg-warning-dimmer);
+  }
+
+  .advisory-item--error {
+    color: var(--text-negative-default);
+    background: var(--bg-negative-dimmer);
+  }
+
+  /* Published flow banner — positioned near action bar */
+  .published-banner {
+    padding: 0.75rem 1rem;
+    flex-shrink: 0;
+    border-top: 1px solid var(--border-warning-default);
+    background: var(--bg-warning-dimmer);
+  }
+
+  .published-banner-title {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-warning-stronger);
+  }
+
+  .published-banner-description {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--text-warning-default);
+    margin-top: 0.25rem;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     :global(.animate-spin-slow) {
       animation: none;
     }
 
     .plan-card,
-    .revision-overlay {
+    .description-diff-section {
       animation: none;
     }
   }

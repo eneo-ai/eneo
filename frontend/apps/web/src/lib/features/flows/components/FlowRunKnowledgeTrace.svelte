@@ -63,10 +63,16 @@
     return `${value}ms`;
   }
 
-  function scoreColorClass(score: number): string {
-    if (score >= 0.5) return "text-positive-stronger";
-    if (score >= 0.3) return "text-warning-stronger";
-    return "text-negative-stronger";
+  function scoreBadgeClass(score: number): string {
+    if (score >= 0.5) return "bg-positive-dimmer text-positive-stronger";
+    if (score >= 0.3) return "bg-warning-dimmer text-warning-stronger";
+    return "bg-negative-dimmer text-negative-stronger";
+  }
+
+  function scoreLabel(score: number): string {
+    if (score >= 0.5) return m.flow_run_knowledge_relevance_high();
+    if (score >= 0.3) return m.flow_run_knowledge_relevance_moderate();
+    return m.flow_run_knowledge_relevance_low();
   }
 
   function cleanTitle(title: string | null | undefined): string {
@@ -162,18 +168,18 @@
                       </div>
                       <div class="mt-1">
                         <Tooltip text={reference.id}>
-                          <span class="font-mono text-[10px] text-muted opacity-60">{reference.id_short ?? reference.id.slice(0, 8)}</span>
+                          <span class="font-mono text-[10px] text-muted">{reference.id_short ?? reference.id.slice(0, 8)}</span>
                         </Tooltip>
                       </div>
                     </div>
 
-                    <div class="shrink-0 text-right text-xs text-muted">
-                      <p class={["font-medium", scoreColorClass(Number(reference.best_score ?? 0))]}>
-                        {m.flow_run_knowledge_best_score_label({
-                          score: String(Number(reference.best_score ?? 0).toFixed(3)),
-                        })}
-                      </p>
-                      <p>
+                    <div class="shrink-0 text-right text-xs">
+                      <Tooltip text={Number(reference.best_score ?? 0).toFixed(2)}>
+                        <span class={["inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium", scoreBadgeClass(Number(reference.best_score ?? 0))]}>
+                          {scoreLabel(Number(reference.best_score ?? 0))}
+                        </span>
+                      </Tooltip>
+                      <p class="mt-0.5 text-muted">
                         {m.flow_run_knowledge_chunks_matched({
                           count: String(reference.hit_count ?? reference.chunks?.length ?? 0),
                         })}
@@ -190,7 +196,11 @@
                         <div class="rounded-md border border-default bg-hover-dimmer px-2.5 py-2 text-xs">
                           <div class="flex items-center justify-between text-muted">
                             <span>{m.flow_run_knowledge_chunk_label({ chunk: String(chunk.chunk_no) })}</span>
-                            <span class={scoreColorClass(Number(chunk.score ?? 0))}>{m.flow_run_knowledge_score_label({ score: String(Number(chunk.score).toFixed(3)) })}</span>
+                            <Tooltip text={Number(chunk.score ?? 0).toFixed(2)}>
+                              <span class={["rounded-full px-1.5 py-0.5 text-[10px] font-medium", scoreBadgeClass(Number(chunk.score ?? 0))]}>
+                                {scoreLabel(Number(chunk.score ?? 0))}
+                              </span>
+                            </Tooltip>
                           </div>
                           <p class="mt-1 line-clamp-2 text-secondary">{chunk.snippet}</p>
                         </div>
@@ -204,7 +214,7 @@
                   {/if}
 
                   <div class="mt-2 flex items-center justify-end gap-1 text-xs text-muted
-                              opacity-0 transition-opacity group-hover:opacity-100">
+                              opacity-40 transition-opacity group-hover:opacity-100">
                     <span>{m.flow_run_knowledge_open_viewer()}</span>
                     <IconChevronRight class="size-3" />
                   </div>

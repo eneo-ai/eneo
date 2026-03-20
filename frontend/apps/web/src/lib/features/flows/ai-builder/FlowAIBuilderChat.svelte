@@ -29,7 +29,6 @@
   }
 
   let inputRef: FlowAIBuilderInput;
-  let isEditingRequirements = $state(false);
 
   // Track if a plan existed before (for context-aware generating text)
   let hadPlanBefore = $state(false);
@@ -46,12 +45,10 @@
   }
 
   function handleRequirementsConfirm() {
-    isEditingRequirements = false;
     service.confirmRequirements();
   }
 
   function handleRequirementsChange() {
-    isEditingRequirements = true;
     inputRef?.focus({ placeholder: m.ai_builder_requirements_change_hint() });
   }
 
@@ -85,12 +82,6 @@
     scrollToBottom();
   });
 
-  // Clear editing state when a message is sent
-  $effect(() => {
-    if (service.isStreaming) {
-      isEditingRequirements = false;
-    }
-  });
 </script>
 
 <div class="chat-shell" class:chat-shell-empty={showEmptyState}>
@@ -168,26 +159,6 @@
       <span class="text-negative-stronger">{service.error}</span>
       <button class="text-negative-default ml-2 underline" onclick={() => service.clearError()}>
         {m.ai_builder_dismiss()}
-      </button>
-    </div>
-  {/if}
-
-  <!-- Editing requirements hint -->
-  {#if isEditingRequirements}
-    <div class="editing-hint">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3.5 shrink-0">
-        <path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L6.75 6.774a2.75 2.75 0 0 0-.596.892l-.848 2.047a.75.75 0 0 0 .98.98l2.047-.848a2.75 2.75 0 0 0 .892-.596l4.261-4.262a1.75 1.75 0 0 0 0-2.474Z" />
-        <path d="M4.75 3.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h6.5c.69 0 1.25-.56 1.25-1.25V9A.75.75 0 0 1 14 9v2.25A2.75 2.75 0 0 1 11.25 14h-6.5A2.75 2.75 0 0 1 2 11.25v-6.5A2.75 2.75 0 0 1 4.75 2H7a.75.75 0 0 1 0 1.5H4.75Z" />
-      </svg>
-      <span>{m.ai_builder_requirements_editing_hint()}</span>
-      <button
-        class="editing-hint-dismiss"
-        onclick={() => { isEditingRequirements = false; }}
-        aria-label={m.ai_builder_dismiss()}
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3">
-          <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
-        </svg>
       </button>
     </div>
   {/if}
@@ -270,40 +241,6 @@
       opacity: 1;
       transform: translateY(0);
     }
-  }
-
-  .editing-hint {
-    display: flex;
-    align-items: center;
-    gap: 0.375rem;
-    margin: 0 1rem;
-    padding: 0.4375rem 0.75rem;
-    border-radius: 0.5rem 0.5rem 0 0;
-    background: oklch(from var(--accent-default) l c h / 0.06);
-    border: 1px solid oklch(from var(--accent-default) l c h / 0.12);
-    border-bottom: none;
-    color: var(--accent-stronger);
-    font-size: 0.75rem;
-    font-weight: 500;
-  }
-
-  .editing-hint-dismiss {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.25rem;
-    height: 1.25rem;
-    border-radius: 0.25rem;
-    color: var(--text-muted);
-    cursor: pointer;
-    background: none;
-    border: none;
-    transition: color 0.1s ease;
-  }
-
-  .editing-hint-dismiss:hover {
-    color: var(--text-primary);
   }
 
   .generating-badge {

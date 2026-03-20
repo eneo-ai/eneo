@@ -118,6 +118,13 @@ export interface FlowEditDiff {
 
 export type EditConfidence = "ready" | "needs_review" | "low_confidence";
 
+export interface EditAdvisory {
+  code: string;
+  message: string;
+  severity: "info" | "warning" | "error";
+  field: string | null;
+}
+
 export interface ProposedPlan {
   plan_id: string;
   status: PlanStatus;
@@ -125,8 +132,17 @@ export interface ProposedPlan {
   edit_diff?: FlowEditDiff | null;
   edit_confidence?: EditConfidence | null;
   edit_warnings?: string[] | null;
+  edit_advisories?: EditAdvisory[] | null;
   edit_risk_flags?: string[] | null;
 }
+
+export interface ApplyError {
+  code: string;
+  message: string;
+  context: Record<string, unknown>;
+}
+
+export type PlanRevisionType = "keep_current_description" | "regenerate_description";
 
 export interface ApplyResult {
   flow_id: string;

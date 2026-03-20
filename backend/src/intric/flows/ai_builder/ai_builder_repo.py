@@ -320,19 +320,23 @@ class AIBuilderRepository:
         tenant_id: UUID,
         spec: FlowDraftSpecCore,
         envelope: PlannerPlanEnvelope,
+        edit_result_json: dict | None = None,
     ) -> BuilderPlan:
         async with self._transaction():
             spec_hash = spec.spec_hash()
+            values: dict = {
+                "session_id": session_id,
+                "tenant_id": tenant_id,
+                "status": PlanStatus.PROPOSED.value,
+                "spec_json": spec.model_dump(mode="json"),
+                "spec_hash": spec_hash,
+                "envelope_json": envelope.model_dump(mode="json"),
+            }
+            if edit_result_json is not None:
+                values["edit_result_json"] = edit_result_json
             stmt = (
                 BuilderPlans.__table__.insert()
-                .values(
-                    session_id=session_id,
-                    tenant_id=tenant_id,
-                    status=PlanStatus.PROPOSED.value,
-                    spec_json=spec.model_dump(mode="json"),
-                    spec_hash=spec_hash,
-                    envelope_json=envelope.model_dump(mode="json"),
-                )
+                .values(**values)
                 .returning(BuilderPlans.__table__)
             )
             row = (await self.session.execute(stmt)).mappings().one()
@@ -475,6 +479,7 @@ def _plan_from_row(row: Any) -> BuilderPlan:
             "spec_json": row.spec_json,
             "spec_hash": row.spec_hash,
             "envelope_json": row.envelope_json,
+            "edit_result_json": getattr(row, "edit_result_json", None),
             "created_at": row.created_at,
             "updated_at": row.updated_at,
         }
@@ -490,6 +495,7 @@ def _plan_from_row(row: Any) -> BuilderPlan:
         spec=spec,
         spec_hash=data["spec_hash"],
         envelope=envelope,
+        edit_result_json=data.get("edit_result_json"),
         created_at=data.get("created_at"),
         updated_at=data.get("updated_at"),
     )

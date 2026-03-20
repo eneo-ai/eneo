@@ -16,7 +16,7 @@
 </script>
 
 {#if !isPublished}
-  <div class="border-default mt-8 border-t pt-4">
+  <div class="border-default mt-4 border-t pt-4">
     <Button
       variant="destructive"
       class="w-full justify-center rounded-lg"

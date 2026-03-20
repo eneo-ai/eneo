@@ -2284,6 +2284,7 @@ class TestApplyPlan:
         flow = MagicMock()
         flow.draft_revision = 7
         flow.space_id = session.space_id
+        flow.published_version = None
         flow_service.get_flow.return_value = flow
 
         mock_compile.return_value = MagicMock()
@@ -2473,6 +2474,7 @@ class TestApplyPlan:
         flow = MagicMock()
         flow.draft_revision = 1
         flow.space_id = session.space_id
+        flow.published_version = None
         flow_service.get_flow.return_value = flow
 
         result = ApplyResultResponse(
@@ -2557,6 +2559,7 @@ class TestApplyPlan:
         flow = MagicMock()
         flow.draft_revision = 7
         flow.space_id = session.space_id
+        flow.published_version = None
         flow_service.get_flow.return_value = flow
 
         result = ApplyResultResponse(
@@ -2576,6 +2579,45 @@ class TestApplyPlan:
         apply_result = await service.apply_plan(plan_id=plan.id, expected_revision=7)
 
         assert apply_result.steps_updated == 1
+
+    @pytest.mark.anyio
+    async def test_apply_published_flow_raises_flow_is_published(self):
+        """Published flows must NOT be auto-unpublished. Raise typed error instead."""
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+
+        flow_id = uuid4()
+        plan = _make_plan(
+            status=PlanStatus.APPROVED,
+            tenant_id=user.tenant_id,
+        )
+        session = _make_session(
+            session_id=plan.session_id,
+            actor_user_id=user.id,
+            tenant_id=user.tenant_id,
+            target_kind=TargetKind.EDIT,
+            flow_id=flow_id,
+        )
+
+        flow = MagicMock()
+        flow.draft_revision = 1
+        flow.space_id = session.space_id
+        flow.published_version = 3
+        flow.id = flow_id
+        flow.steps = []
+        flow_service.get_flow.return_value = flow
+
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+
+        service = _make_service(user=user, repo=repo, flow_service=flow_service)
+        with pytest.raises(BadRequestException) as exc_info:
+            await service.apply_plan(plan_id=plan.id, expected_revision=1)
+
+        assert exc_info.value.code == "flow_is_published"
+        # unpublish_flow must NOT have been called
+        flow_service.unpublish_flow.assert_not_awaited()
 
 
 class TestSendMessageStructuredQuestion:
