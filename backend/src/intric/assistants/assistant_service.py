@@ -39,12 +39,10 @@ from intric.workflows.step_repo import StepRepository
 
 if TYPE_CHECKING:
     from intric.actors import ActorManager
-    from intric.ai_models.completion_models.completion_model import (
-        CompletionModel,
-        CompletionModelResponse,
-    )
+    from intric.ai_models.completion_models.completion_model import CompletionModelResponse
     from intric.assistants.references import ReferencesService
     from intric.completion_models.application import CompletionModelCRUDService
+    from intric.completion_models.domain.completion_model import CompletionModel
     from intric.completion_models.infrastructure.completion_service import (
         CompletionService,
     )
