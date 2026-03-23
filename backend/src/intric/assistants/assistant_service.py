@@ -218,6 +218,13 @@ class AssistantService:
             assistant_template_id=template_data.id
         )
 
+        if (
+            template.completion_model
+            and template.completion_model.id
+            and space.is_completion_model_in_space(template.completion_model.id)
+        ):
+            completion_model = space.get_completion_model(template.completion_model.id)
+
         # Validate incoming data
         template.validate_assistant_wizard_data(template_data=template_data)
 

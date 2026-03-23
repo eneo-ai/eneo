@@ -10,6 +10,7 @@
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import ImprovedCategorySelector from "$lib/features/templates/components/admin/ImprovedCategorySelector.svelte";
   import LucideIconPicker from "$lib/features/templates/components/LucideIconPicker.svelte";
+  import HelpTooltip from "../../../../models/components/HelpTooltip.svelte";
   import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
 
   let { data } = $props();
@@ -118,7 +119,7 @@
       <Button variant="outlined" href={localizeHref("/admin/templates")}>{m.cancel()}</Button>
       <Button
         variant="positive"
-        class="w-32"
+        class="w-fit"
         onclick={handleUpdateTemplate}
         disabled={isSaving}
       >
@@ -237,6 +238,7 @@
           hasChanges={false}
           fullWidth
         >
+          <HelpTooltip slot="title" text={m.wizard_attachments_help()} />
           <div class="flex flex-col gap-4">
             <Input.RadioSwitch
               bind:value={wizardAttachmentsEnabled}
@@ -277,6 +279,7 @@
           hasChanges={false}
           fullWidth
         >
+          <HelpTooltip slot="title" text={m.wizard_collections_help()} />
           <div class="flex flex-col gap-4">
             <Input.RadioSwitch
               bind:value={wizardCollectionsEnabled}

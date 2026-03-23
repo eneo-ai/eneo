@@ -10,6 +10,7 @@
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import ImprovedCategorySelector from "$lib/features/templates/components/admin/ImprovedCategorySelector.svelte";
   import LucideIconPicker from "$lib/features/templates/components/LucideIconPicker.svelte";
+  import HelpTooltip from "../../../models/components/HelpTooltip.svelte";
   import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
 
   let { data } = $props();
@@ -65,6 +66,7 @@
         description,
         category,
         prompt: promptText,  // Backend expects string, not object
+        completion_model_id: completionModel?.id,
         completion_model_kwargs: completionModelKwargs,
         wizard,  // Always send wizard object, never undefined
         icon_name: iconName || undefined  // Include icon if selected
@@ -215,6 +217,7 @@
           hasChanges={false}
           fullWidth
         >
+          <HelpTooltip slot="title" text={m.wizard_attachments_help()} />
           <div class="flex flex-col gap-4">
             <Input.RadioSwitch
               bind:value={wizardAttachmentsEnabled}
@@ -255,6 +258,7 @@
           hasChanges={false}
           fullWidth
         >
+          <HelpTooltip slot="title" text={m.wizard_collections_help()} />
           <div class="flex flex-col gap-4">
             <Input.RadioSwitch
               bind:value={wizardCollectionsEnabled}

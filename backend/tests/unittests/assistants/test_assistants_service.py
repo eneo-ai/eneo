@@ -191,6 +191,83 @@ async def test_update_assistant_completion_model_in_space(setup: Setup):
     await setup.service.update_assistant(TEST_UUID)
 
 
+@pytest.mark.parametrize("template_in_space", [True, False])
+async def test_create_from_template_prefers_template_model_when_available(
+    setup: Setup,
+    template_in_space: bool,
+):
+    fallback_model = MagicMock(id=uuid4())
+    template_model = MagicMock(id=uuid4())
+    template = MagicMock(
+        completion_model=template_model,
+        completion_model_kwargs={},
+        prompt_text=None,
+        name="Template",
+        description="Description",
+    )
+    template.validate_assistant_wizard_data = MagicMock()
+
+    template_data = MagicMock(id=uuid4())
+    template_data.get_ids_by_type.return_value = []
+
+    space = MagicMock()
+    space.id = uuid4()
+    space.is_completion_model_in_space.return_value = template_in_space
+    space.get_completion_model.return_value = template_model
+
+    created_assistant = MagicMock(id=uuid4())
+    refreshed_space = MagicMock()
+    refreshed_space.get_assistant.return_value = created_assistant
+
+    setup.service.assistant_template_service.get_assistant_template.return_value = template
+    setup.service.file_service.get_file_infos.return_value = []
+    setup.service.factory.create_assistant.return_value = created_assistant
+    setup.service.space_repo.update.return_value = refreshed_space
+
+    await setup.service._create_from_template(
+        space=space,
+        template_data=template_data,
+        completion_model=fallback_model,
+    )
+
+    expected_model = template_model if template_in_space else fallback_model
+    assert setup.service.factory.create_assistant.call_args.kwargs["completion_model"] == expected_model
+
+
+async def test_create_from_template_keeps_fallback_when_template_has_no_model(
+    setup: Setup,
+):
+    fallback_model = MagicMock(id=uuid4())
+    template = MagicMock(
+        completion_model=None,
+        completion_model_kwargs={},
+        prompt_text=None,
+        name="Template",
+        description="Description",
+    )
+    template.validate_assistant_wizard_data = MagicMock()
+
+    template_data = MagicMock(id=uuid4())
+    template_data.get_ids_by_type.return_value = []
+
+    created_assistant = MagicMock(id=uuid4())
+    refreshed_space = MagicMock()
+    refreshed_space.get_assistant.return_value = created_assistant
+
+    setup.service.assistant_template_service.get_assistant_template.return_value = template
+    setup.service.file_service.get_file_infos.return_value = []
+    setup.service.factory.create_assistant.return_value = created_assistant
+    setup.service.space_repo.update.return_value = refreshed_space
+
+    await setup.service._create_from_template(
+        space=MagicMock(id=uuid4()),
+        template_data=template_data,
+        completion_model=fallback_model,
+    )
+
+    assert setup.service.factory.create_assistant.call_args.kwargs["completion_model"] == fallback_model
+
+
 async def test_update_rejects_adding_mcp_when_knowledge_exists(setup: Setup):
     """Cannot add MCP servers when assistant already has knowledge."""
     assistant = MagicMock()

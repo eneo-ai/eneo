@@ -42,6 +42,7 @@ def mock_session():
     """Mock database session."""
     session = AsyncMock()
     session.execute = AsyncMock()
+    session.refresh = AsyncMock()
     session.scalar = AsyncMock()
     return session
 
@@ -249,6 +250,84 @@ async def test_rollback_template_validates_snapshot_exists(service, mock_repo):
         )
 
     assert "snapshot not found" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_create_template_persists_completion_model_id_and_snapshot(
+    service,
+    mock_feature_flag_service,
+    mock_repo,
+    mock_session,
+    mock_factory,
+):
+    tenant_id = uuid4()
+    completion_model_id = uuid4()
+
+    mock_feature_flag_service.check_is_feature_enabled.return_value = True
+    mock_repo.check_duplicate_name.return_value = False
+
+    template_record = Mock()
+    template_record.completion_model = None
+    result = Mock()
+    result.scalar_one.return_value = template_record
+    mock_session.execute.return_value = result
+    mock_factory.create_assistant_template.return_value = Mock()
+
+    data = AssistantTemplateCreate(
+        name="Support",
+        description="Description",
+        category="Support",
+        prompt="Prompt",
+        completion_model_kwargs={"verbosity": "low"},
+        completion_model_id=completion_model_id,
+        wizard=AssistantTemplateWizard(attachments=None, collections=None),
+    )
+
+    await service.create_template(data=data, tenant_id=tenant_id)
+
+    stmt = mock_session.execute.call_args.args[0]
+    params = stmt.compile().params
+
+    assert params["completion_model_id"] == completion_model_id
+    assert params["original_snapshot"]["completion_model_id"] == str(completion_model_id)
+
+
+@pytest.mark.asyncio
+async def test_rollback_template_restores_completion_model_id(
+    service,
+    mock_repo,
+    mock_session,
+    mock_factory,
+):
+    template_id = uuid4()
+    tenant_id = uuid4()
+    completion_model_id = uuid4()
+
+    template = Mock()
+    template.original_snapshot = {
+        "name": "Original",
+        "description": "Description",
+        "category": "Support",
+        "prompt_text": "Prompt",
+        "completion_model_kwargs": {"verbosity": "medium"},
+        "completion_model_id": str(completion_model_id),
+        "wizard": {"attachments": None, "collections": None},
+    }
+    mock_repo.get_by_id.return_value = template
+
+    restored_record = Mock()
+    restored_record.completion_model = None
+    result = Mock()
+    result.scalar_one.return_value = restored_record
+    mock_session.execute.return_value = result
+    mock_factory.create_assistant_template.return_value = Mock()
+
+    await service.rollback_template(template_id=template_id, tenant_id=tenant_id)
+
+    stmt = mock_session.execute.call_args.args[0]
+    params = stmt.compile().params
+
+    assert params["completion_model_id"] == completion_model_id
 
 
 @pytest.mark.asyncio
