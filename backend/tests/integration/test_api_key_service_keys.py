@@ -162,7 +162,7 @@ async def test_service_key_creation_rejected_for_non_admin(
         permission="read",
     )
     assert resp.status_code == 403, resp.text
-    assert "admin" in resp.json()["detail"]["message"].lower()
+    assert "admin" in resp.json()["message"].lower()
 
 
 @pytest.mark.integration
@@ -178,8 +178,7 @@ async def test_service_key_tenant_write_requires_guardrails(
         permission="write",
     )
     assert resp.status_code == 400, resp.text
-    detail = resp.json()["detail"]
-    assert "IP allowlist or expiration" in detail["message"]
+    assert "IP allowlist or expiration" in resp.json()["message"]
 
 
 @pytest.mark.integration
@@ -238,7 +237,7 @@ async def test_service_key_survives_owner_deactivation(
     # Verify key works
     probe = await client.get(
         _AUTH_ENDPOINT,
-        headers={"Authorization": f"Bearer {secret}"},
+        headers={"X-API-Key": secret},
     )
     assert probe.status_code == 200, probe.text
 
@@ -248,7 +247,7 @@ async def test_service_key_survives_owner_deactivation(
     # Service key should still work
     probe2 = await client.get(
         _AUTH_ENDPOINT,
-        headers={"Authorization": f"Bearer {secret}"},
+        headers={"X-API-Key": secret},
     )
     assert probe2.status_code == 200, f"Service key should survive owner deactivation: {probe2.text}"
 
@@ -283,14 +282,16 @@ async def test_service_key_survives_owner_deletion(
         session = container.session()
         await session.execute(
             sa.text(
-                "INSERT INTO users_roles (user_id, role_id) "
-                "SELECT :uid, id FROM predefined_roles WHERE name = 'admin' LIMIT 1"
+                "INSERT INTO users_predefined_roles (user_id, predefined_role_id) "
+                "SELECT :uid, id FROM predefined_roles WHERE name = 'Owner' LIMIT 1"
             ),
             {"uid": str(creator.id)},
         )
-        await session.commit()
 
+    # Re-fetch creator so permissions include the admin role
     async with db_container() as container:
+        user_repo = container.user_repo()
+        creator = await user_repo.get_user_by_id(creator.id)
         auth_service = container.auth_service()
         creator_token = auth_service.create_access_token_for_user(creator)
 
@@ -301,13 +302,13 @@ async def test_service_key_survives_owner_deletion(
         scope_type="tenant",
         permission="read",
     )
-    assert resp.status_code == 201
+    assert resp.status_code == 201, f"Creator failed to create service key: {resp.text}"
     secret = resp.json()["secret"]
 
     # Verify it works
     probe = await client.get(
         _AUTH_ENDPOINT,
-        headers={"Authorization": f"Bearer {secret}"},
+        headers={"X-API-Key": secret},
     )
     assert probe.status_code == 200
 
@@ -317,7 +318,7 @@ async def test_service_key_survives_owner_deletion(
     # Service key should still work
     probe2 = await client.get(
         _AUTH_ENDPOINT,
-        headers={"Authorization": f"Bearer {secret}"},
+        headers={"X-API-Key": secret},
     )
     assert probe2.status_code == 200, f"Service key should survive owner deletion: {probe2.text}"
 
@@ -355,8 +356,8 @@ async def test_service_key_still_enforces_scope(
 
     # Access with service key scoped to first space — should fail
     probe = await client.get(
-        f"/api/v1/assistants/{other_assistant_id}",
-        headers={"Authorization": f"Bearer {secret}"},
+        f"/api/v1/assistants/{other_assistant_id}/",
+        headers={"X-API-Key": secret},
     )
     # Should be denied (403 scope mismatch or similar)
     assert probe.status_code in (401, 403), f"Scope enforcement failed: {probe.status_code} {probe.text}"
@@ -382,7 +383,7 @@ async def test_service_key_space_scoped_can_read_space(
 
     probe = await client.get(
         f"/api/v1/spaces/{space_id}/",
-        headers={"Authorization": f"Bearer {secret}"},
+        headers={"X-API-Key": secret},
     )
     assert probe.status_code == 200, f"Space-scoped read key should access its own space: {probe.text}"
 
@@ -408,7 +409,7 @@ async def test_service_key_space_scoped_read_cannot_patch_space(
     probe = await client.patch(
         f"/api/v1/spaces/{space_id}/",
         json={"name": "should-fail"},
-        headers={"Authorization": f"Bearer {secret}"},
+        headers={"X-API-Key": secret},
     )
     assert probe.status_code == 403, f"Read key should not be able to PATCH space: {probe.status_code}"
 
@@ -434,7 +435,7 @@ async def test_service_key_space_scoped_write_cannot_patch_space(
     probe = await client.patch(
         f"/api/v1/spaces/{space_id}/",
         json={"name": "should-fail"},
-        headers={"Authorization": f"Bearer {secret}"},
+        headers={"X-API-Key": secret},
     )
     assert probe.status_code == 403, f"Write key (EDITOR) should not be able to PATCH space: {probe.status_code}"
 
@@ -461,7 +462,7 @@ async def test_service_key_space_scoped_admin_can_patch_space(
     probe = await client.patch(
         f"/api/v1/spaces/{space_id}/",
         json={"name": new_name},
-        headers={"Authorization": f"Bearer {secret}"},
+        headers={"X-API-Key": secret},
     )
     assert probe.status_code == 200, f"Admin key should be able to PATCH space: {probe.text}"
     assert probe.json()["name"] == new_name
@@ -488,7 +489,7 @@ async def test_service_key_survives_member_removal(
     # Verify key works
     probe = await client.get(
         f"/api/v1/spaces/{space_id}/",
-        headers={"Authorization": f"Bearer {secret}"},
+        headers={"X-API-Key": secret},
     )
     assert probe.status_code == 200
 
@@ -498,7 +499,7 @@ async def test_service_key_survives_member_removal(
     # Service key should still work — it's not tied to the user's membership
     probe2 = await client.get(
         f"/api/v1/spaces/{space_id}/",
-        headers={"Authorization": f"Bearer {secret}"},
+        headers={"X-API-Key": secret},
     )
     assert probe2.status_code == 200, f"Service key should survive member removal: {probe2.text}"
 

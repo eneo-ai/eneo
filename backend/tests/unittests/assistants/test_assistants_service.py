@@ -36,6 +36,11 @@ class Setup:
 @pytest.fixture(name="setup")
 def setup_fixture():
     repo = AsyncMock()
+    # repo.session.execute() is used by MCP validation; return an object whose
+    # fetchall() yields an empty list so the set comprehension works.
+    mock_db_result = MagicMock()
+    mock_db_result.fetchall.return_value = []
+    repo.session.execute = AsyncMock(return_value=mock_db_result)
     user = TEST_USER
     auth_service = MagicMock()
     assistant = AssistantCreatePublic(
@@ -202,10 +207,16 @@ async def test_update_rejects_adding_mcp_when_knowledge_exists(setup: Setup):
     space.get_assistant.return_value = assistant
     setup.service.space_repo.get_space_by_assistant.return_value = space
 
+    mcp_id = uuid4()
+    # Mock DB to return the MCP server as tenant-enabled and space-assigned
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = [(mcp_id,)]
+    setup.service.repo.session.execute = AsyncMock(return_value=mock_result)
+
     with pytest.raises(BadRequestException, match="Knowledge and MCP servers cannot both be active"):
         await setup.service.update_assistant(
             assistant_id=TEST_UUID,
-            mcp_server_ids=[uuid4()],
+            mcp_server_ids=[mcp_id],
         )
 
 
@@ -243,10 +254,15 @@ async def test_update_rejects_keeping_both_when_legacy_assistant(setup: Setup):
     space.get_assistant.return_value = assistant
     setup.service.space_repo.get_space_by_assistant.return_value = space
 
+    mcp_id = uuid4()
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = [(mcp_id,)]
+    setup.service.repo.session.execute = AsyncMock(return_value=mock_result)
+
     with pytest.raises(BadRequestException, match="Knowledge and MCP servers cannot both be active"):
         await setup.service.update_assistant(
             assistant_id=TEST_UUID,
-            mcp_server_ids=[uuid4()],
+            mcp_server_ids=[mcp_id],
         )
 
 

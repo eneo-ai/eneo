@@ -27,6 +27,7 @@ from intric.authentication.auth_models import (
 )
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.roles.permissions import Permission
+from intric.users.user import UserState
 from intric.conversations.conversations_router import _validate_conversation_scope
 from tests.unit.api_key_test_utils import make_api_key
 
@@ -840,12 +841,14 @@ class TestResolveApiKeyStrictModeWiring:
                     id=key.owner_user_id,
                     tenant_id=key.tenant_id,
                     permissions={Permission.ADMIN},
+                    state=UserState.ACTIVE,
                 )
             )
         )
         svc.allowed_origin_repo = AsyncMock()
         svc.space_service = AsyncMock()
         svc.api_key_rate_limiter = None
+        svc._session = None
         svc.api_key_v2_repo = SimpleNamespace(update_last_used_at=AsyncMock())
         svc._log_api_key_auth_failed = AsyncMock()
         svc._maybe_log_api_key_used = AsyncMock()
@@ -1912,12 +1915,14 @@ class TestTenantScopeForDeleteEnforcement:
                     id=key.owner_user_id,
                     tenant_id=key.tenant_id,
                     permissions={Permission.ADMIN},
+                    state=UserState.ACTIVE,
                 )
             )
         )
         svc.allowed_origin_repo = AsyncMock()
         svc.space_service = AsyncMock()
         svc.api_key_rate_limiter = None
+        svc._session = None
         svc.api_key_v2_repo = SimpleNamespace(update_last_used_at=AsyncMock())
         svc._log_api_key_auth_failed = AsyncMock()
         svc._maybe_log_api_key_used = AsyncMock()
