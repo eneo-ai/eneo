@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
@@ -50,6 +52,8 @@ def _exception_context(
 
     return result or None
 
+logger = logging.getLogger(__name__)
+
 
 def add_exception_handlers(app: FastAPI):
     for exception, (status_code, error_message, error_code) in EXCEPTION_MAP.items():
@@ -66,6 +70,22 @@ def add_exception_handlers(app: FastAPI):
                 message = _default_message_for_status(status_code)
             request_id = _extract_request_id(request)
             context = _exception_context(status_code=status_code, exc=exc)
+            details = getattr(exc, "details", None)
+            if not isinstance(details, dict) or len(details) == 0:
+                details = None
+
+            if status_code >= 400:
+                log_level = logging.WARNING if status_code < 500 else logging.ERROR
+                logger.log(
+                    log_level,
+                    "%s %s → %d: %s",
+                    request.method,
+                    request.url.path,
+                    status_code,
+                    message,
+                    extra={"details": details, "error_code": error_code},
+                )
+
             return JSONResponse(
                 status_code=status_code,
                 content=GeneralError(
@@ -74,6 +94,7 @@ def add_exception_handlers(app: FastAPI):
                     code=getattr(exc, "code", None),
                     context=context,
                     request_id=request_id,
+                    details=details,
                 ).model_dump(exclude_none=True),
             )
 

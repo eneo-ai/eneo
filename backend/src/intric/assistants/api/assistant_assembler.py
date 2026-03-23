@@ -111,7 +111,8 @@ class AssistantAssembler:
 
             model_info = ModelInfo(
                 name=assistant.completion_model.name,
-                token_limit=assistant.completion_model.token_limit,
+                max_input_tokens=assistant.completion_model.max_input_tokens,
+                max_output_tokens=assistant.completion_model.max_output_tokens,
                 prompt_tokens=prompt_tokens,
             )
 

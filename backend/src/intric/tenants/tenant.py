@@ -61,6 +61,18 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     federation_config: dict[str, Any] = Field(default_factory=dict)
     crawler_settings: dict[str, Any] = Field(default_factory=dict)
     api_key_policy: dict[str, Any] = Field(default_factory=dict)
+    favorite_providers: list[str] = Field(default_factory=list)
+
+    @field_validator("favorite_providers")
+    @classmethod
+    def validate_favorite_providers(cls, v: list[str]) -> list[str]:
+        """Validate that favorite_providers is a list of strings."""
+        if not isinstance(v, list):
+            raise ValueError("favorite_providers must be a list")
+        for item in v:
+            if not isinstance(item, str):
+                raise ValueError("Each favorite provider must be a string")
+        return v
 
     @field_validator("slug")
     @classmethod
@@ -90,27 +102,11 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     def validate_api_credentials(cls, v: dict[str, Any]) -> dict[str, Any]:
         """Validate JSONB structure for API credentials.
 
-        Ensures provider keys are valid and credentials have required fields.
-        Azure provider requires additional fields beyond api_key.
+        Ensures credentials have required fields. Provider keys are not
+        restricted to a fixed set since providers are managed dynamically
+        via the LiteLLM provider system.
         """
-        valid_providers = {
-            "openai",
-            "azure",
-            "anthropic",
-            "berget",
-            "gdm",
-            "mistral",
-            "ovhcloud",
-            "gemini",
-            "cohere",
-        }
-
         for provider, cred in v.items():
-            if provider not in valid_providers:
-                raise ValueError(
-                    f"Invalid provider: {provider}. Must be one of: {valid_providers}"
-                )
-
             if not isinstance(cred, dict):
                 raise ValueError(f"Provider {provider} credentials must be a dict")
 

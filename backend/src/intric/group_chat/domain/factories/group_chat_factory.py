@@ -46,6 +46,7 @@ class GroupChatFactory:
             show_response_label=group_chat.show_response_label,
             published=group_chat.published,
             insight_enabled=group_chat.insight_enabled,
+            icon_id=group_chat.icon_id,
         )
 
     @classmethod
@@ -83,4 +84,5 @@ class GroupChatFactory:
             published=group_chat_db.published,
             insight_enabled=group_chat_db.insight_enabled,
             metadata_json=group_chat_db.metadata_json,
+            icon_id=group_chat_db.icon_id,
         )

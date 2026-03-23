@@ -7,6 +7,7 @@ from intric.ai_models.completion_models.completion_model import (
     ModelKwargs,
     ResponseType,
 )
+from intric.main.logging import get_logger
 from intric.assistants.api.assistant_models import AssistantResponse
 from intric.assistants.assistant import Assistant
 from intric.assistants.assistant_factory import AssistantFactory
@@ -17,7 +18,6 @@ from intric.completion_models.infrastructure.web_search import WebSearch
 from intric.files.file_service import FileService
 from intric.icons.icon_repo import IconRepository
 from intric.main.exceptions import BadRequestException, UnauthorizedException
-from intric.main.logging import get_logger
 from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 from intric.prompts.api.prompt_models import PromptCreate
 from intric.prompts.prompt import Prompt
@@ -66,6 +66,8 @@ if TYPE_CHECKING:
     from intric.spaces.api.space_models import TemplateCreate
     from intric.spaces.space import Space
     from intric.spaces.space_repo import SpaceRepository
+
+logger = get_logger(__name__)
 
 AT_TAG_PATTERN = r"<intric-at-tag: @[^>]+>"
 REFERENCE_PATTERN = r'<inref id="([0-9a-f]{8})"/>'  # noqa
@@ -144,21 +146,27 @@ class AssistantService:
     async def web_search(self):
         return WebSearch()
 
-    def validate_space_assistant(self, space: "Space", assistant: Assistant):
-        # validate completion model
-        if assistant.completion_model is not None:
+    def validate_space_assistant(
+        self,
+        space: "Space",
+        assistant: Assistant,
+        completion_model_changing: bool = True,
+        knowledge_changing: bool = True,
+    ):
+        # validate completion model only if it was actually updated
+        if completion_model_changing and assistant.completion_model is not None:
             if not space.is_completion_model_in_space(assistant.completion_model.id):
                 raise BadRequestException("Completion model is not in space.")
 
-        # validate groups
-        for group in assistant.collections:
-            if not space.is_group_in_space(group.id):
-                raise BadRequestException("Group is not in space.")
+        # validate groups and websites only if knowledge is changing
+        if knowledge_changing:
+            for group in assistant.collections:
+                if not space.is_group_in_space(group.id):
+                    raise BadRequestException("Group is not in space.")
 
-        # validate websites
-        for website in assistant.websites:
-            if not space.is_website_in_space(website.id):
-                raise BadRequestException("Website is not in space.")
+            for website in assistant.websites:
+                if not space.is_website_in_space(website.id):
+                    raise BadRequestException("Website is not in space.")
 
         for integration_knowledge in assistant.integration_knowledge_list:
             if not space.is_integration_knowledge_in_space(
@@ -432,7 +440,30 @@ class AssistantService:
             icon_id=icon_id,
         )
 
-        self.validate_space_assistant(space=space, assistant=assistant)
+        # Validate mutual exclusivity: knowledge and MCP servers cannot both be active.
+        # Only check when either side is being updated to avoid false positives on
+        # unrelated updates (e.g. renaming an assistant).
+        knowledge_changing = (
+            groups is not None or websites is not None or integration_knowledge_ids is not None
+        )
+        mcp_changing = mcp_server_ids is not None
+        if knowledge_changing or mcp_changing:
+            will_have_mcp = (
+                mcp_server_ids is not None and len(mcp_server_ids) > 0
+            ) or (mcp_server_ids is None and assistant.has_mcp())
+            if assistant.has_knowledge() and will_have_mcp:
+                raise BadRequestException(
+                    "Knowledge and MCP servers cannot both be active on an assistant. "
+                    "Remove one before enabling the other."
+                )
+
+        # Only validate space references when the relevant fields are actually changing
+        self.validate_space_assistant(
+            space=space,
+            assistant=assistant,
+            completion_model_changing=completion_model is not None,
+            knowledge_changing=knowledge_changing,
+        )
 
         refreshed_space = await self.space_repo.update(space)
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
@@ -593,9 +624,12 @@ class AssistantService:
                 response_string = ""
                 generated_files = []
                 tool_calls = []
+                stream_usage = None
 
                 async for chunk in response.completion:
                     reasoning_token_count = chunk.reasoning_token_count
+                    if chunk.usage:
+                        stream_usage = chunk.usage
 
                     if chunk.response_type == ResponseType.TEXT:
                         response_string = f"{response_string}{chunk.text}"
@@ -694,15 +728,32 @@ class AssistantService:
                     version=version,
                     get_id_func=lambda chunk: chunk.info_blob_id,
                 )
-                total_response_tokens = (
-                    count_tokens(response_string) + reasoning_token_count
+                # Prefer actual provider token counts, fall back to tiktoken estimates
+                if stream_usage and stream_usage.prompt_tokens is not None:
+                    num_tokens_question = stream_usage.prompt_tokens + assistant_selector_tokens
+                    input_source = "provider"
+                else:
+                    num_tokens_question = response.total_token_count + assistant_selector_tokens
+                    input_source = "tiktoken"
+
+                if stream_usage and stream_usage.completion_tokens is not None:
+                    num_tokens_answer = stream_usage.completion_tokens
+                    output_source = "provider"
+                else:
+                    num_tokens_answer = count_tokens(response_string) + reasoning_token_count
+                    output_source = "tiktoken"
+
+                logger.info(
+                    f"[TokenUsage] assistant={assistant_id} streaming — "
+                    f"input={num_tokens_question} ({input_source}), "
+                    f"output={num_tokens_answer} ({output_source})"
                 )
+
                 await self.session_service.add_question_to_session(
                     question=question,
                     answer=response_string,
-                    num_tokens_question=response.total_token_count
-                    + assistant_selector_tokens,
-                    num_tokens_answer=total_response_tokens,
+                    num_tokens_question=num_tokens_question,
+                    num_tokens_answer=num_tokens_answer,
                     session=session,
                     completion_model=completion_model,
                     info_blob_chunks=reference_chunks,
@@ -734,13 +785,32 @@ class AssistantService:
                 version=version,
                 get_id_func=lambda chunk: chunk.info_blob_id,
             )
-            total_response_tokens = count_tokens(final_answer) + reasoning_token_count
+            # Prefer actual provider token counts, fall back to tiktoken estimates
+            if response.usage and response.usage.prompt_tokens is not None:
+                num_tokens_question = response.usage.prompt_tokens + assistant_selector_tokens
+                input_source = "provider"
+            else:
+                num_tokens_question = response.total_token_count + assistant_selector_tokens
+                input_source = "tiktoken"
+
+            if response.usage and response.usage.completion_tokens is not None:
+                num_tokens_answer = response.usage.completion_tokens
+                output_source = "provider"
+            else:
+                num_tokens_answer = count_tokens(final_answer) + reasoning_token_count
+                output_source = "tiktoken"
+
+            logger.info(
+                f"[TokenUsage] assistant={assistant_id} non-streaming — "
+                f"input={num_tokens_question} ({input_source}), "
+                f"output={num_tokens_answer} ({output_source})"
+            )
+
             await self.session_service.add_question_to_session(
                 question=question,
                 answer=final_answer,
-                num_tokens_question=response.total_token_count
-                + assistant_selector_tokens,
-                num_tokens_answer=total_response_tokens,
+                num_tokens_question=num_tokens_question,
+                num_tokens_answer=num_tokens_answer,
                 files=files,
                 generated_files=generated_files,
                 completion_model=completion_model,

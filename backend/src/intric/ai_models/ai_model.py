@@ -1,11 +1,5 @@
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional
 
-from intric.ai_models.model_enums import (
-    ModelFamily,
-    ModelHostingLocation,
-    ModelOrg,
-    ModelStability,
-)
 from intric.base.base_entity import Entity
 from intric.main.config import get_settings
 
@@ -26,10 +20,10 @@ class AIModel(Entity):
         user: "UserInDB",
         nickname: Optional[str],
         name: str,
-        family: Union[ModelFamily, str],
-        hosting: Union[ModelHostingLocation, str],
-        org: Optional[Union[ModelOrg, str]],
-        stability: Union[ModelStability, str],
+        family: Optional[str],
+        hosting: Optional[str],
+        org: Optional[str],
+        stability: Optional[str],
         open_source: bool,
         description: Optional[str],
         hf_link: Optional[str],
@@ -44,11 +38,10 @@ class AIModel(Entity):
         self.user = user
         self.nickname = nickname
         self.name = name
-        # Allow both enum and string values for tenant model flexibility
-        self.family = self._to_enum_or_str(family, ModelFamily)
-        self.hosting = self._to_enum_or_str(hosting, ModelHostingLocation)
-        self.org = self._to_enum_or_str(org, ModelOrg) if org else None
-        self.stability = self._to_enum_or_str(stability, ModelStability)
+        self.family = family
+        self.hosting = hosting
+        self.org = org
+        self.stability = stability
         self.open_source = open_source
         self.description = description
         self.hf_link = hf_link
@@ -56,30 +49,15 @@ class AIModel(Entity):
         self.is_org_enabled = is_org_enabled
         self.security_classification = security_classification
 
-    @staticmethod
-    def _to_enum_or_str(value, enum_class):
-        """Convert to enum if valid, otherwise keep as string for tenant models."""
-        if value is None:
-            return None
-        if isinstance(value, enum_class):
-            return value
-        try:
-            return enum_class(value)
-        except (ValueError, KeyError):
-            # For tenant models with dynamic values, keep as string
-            return value
-
     def get_credential_provider_name(self) -> str:
         """
         Get the credential provider name for this model.
         Base implementation uses family value with special handling for Claude.
         Subclasses can override to check litellm_model_name prefix.
         """
-        # Claude models use 'anthropic' credentials
-        if self.family == ModelFamily.CLAUDE or self.family == "claude":
+        if self.family == "claude":
             return "anthropic"
-        # Handle both enum and string values
-        return self.family.value if isinstance(self.family, ModelFamily) else self.family
+        return self.family or ""
 
     @property
     def is_locked(self):

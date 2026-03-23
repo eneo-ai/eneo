@@ -3,6 +3,7 @@
   import { Button, Input } from "@intric/ui";
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   import { localizeHref } from "$lib/paraglide/runtime";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
@@ -59,7 +60,7 @@
 
   async function handleUpdateTemplate() {
     if (!name || !category) {
-      alert(m.category_required());
+      toast.warning(m.category_required());
       return;
     }
 
@@ -95,7 +96,7 @@
       goto("/admin/templates?success=template_updated");
     } catch (error) {
       console.error("Failed to update template:", error);
-      alert("Failed to update template");
+      toast.error("Failed to update template");
     } finally {
       isSaving = false;
     }

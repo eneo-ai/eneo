@@ -9,7 +9,8 @@
   import type { TokenUsageSummary } from "@intric/intric-js";
   import TokenOverviewBar from "./TokenOverviewBar.svelte";
   import TokenOverviewTable from "./TokenOverviewTable.svelte";
-  import { CalendarDate } from "@internationalized/date";
+  import UserTokenSummary from "../users/UserTokenSummary.svelte";
+  import { CalendarDate, type DateValue } from "@internationalized/date";
   import { getIntric } from "$lib/core/Intric";
   import { Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
@@ -24,7 +25,7 @@
   const intric = getIntric();
 
   const now = new Date();
-  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getUTCDate());
+  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
   let dateRange = $state({
     start: today.subtract({ days: 30 }),
     end: today
@@ -38,11 +39,10 @@
     });
   }
 
-  $effect(() => {
-    if (dateRange.start && dateRange.end) {
-      update(dateRange);
-    }
-  });
+  function handleDateChange(range: { start: DateValue; end: DateValue }) {
+    dateRange = range as { start: CalendarDate; end: CalendarDate };
+    update(dateRange);
+  }
 </script>
 
 <Settings.Page>
@@ -52,9 +52,10 @@
   <Settings.Group title={m.details()}>
     <Settings.Row title={m.usage_by_model()} description={m.see_token_usage_by_model()} fullWidth>
       <div slot="toolbar">
-        <Input.DateRange bind:value={dateRange}></Input.DateRange>
+        <Input.DateRange bind:value={dateRange} onValueCommit={handleDateChange}></Input.DateRange>
       </div>
       <TokenOverviewTable tokenStats={detailedStats}></TokenOverviewTable>
     </Settings.Row>
   </Settings.Group>
+  <UserTokenSummary />
 </Settings.Page>

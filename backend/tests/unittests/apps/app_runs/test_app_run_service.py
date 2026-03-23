@@ -16,7 +16,7 @@ async def test_update_tokens_in_run():
 
     completion = Completion(text="This is the output!")
     app_run_service.app_service.run_app.return_value = MagicMock(
-        completion=completion, total_token_count=10
+        completion=completion, total_token_count=10, usage=None
     )
 
     # Execute

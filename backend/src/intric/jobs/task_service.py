@@ -1,4 +1,6 @@
 import asyncio
+import contextlib
+import os
 from tempfile import SpooledTemporaryFile
 from uuid import UUID
 
@@ -42,17 +44,25 @@ class TaskService:
     def get_max_size(task: Task):
         match task:
             case Task.UPLOAD_FILE:
-                return get_settings().upload_max_file_size
+                return get_settings().upload_max_file_size, "UPLOAD_MAX_FILE_SIZE"
             case Task.TRANSCRIPTION:
-                return get_settings().transcription_max_file_size
+                return (
+                    get_settings().transcription_max_file_size,
+                    "TRANSCRIPTION_MAX_FILE_SIZE",
+                )
             case _:
-                return 0
+                return 0, None
 
     async def validate_file_size(self, file: SpooledTemporaryFile, task: Task):
-        max_size = self.get_max_size(task)
+        max_size, setting_name = self.get_max_size(task)
+        file_size = await asyncio.to_thread(self.file_size_service.get_file_size, file)
 
-        if await asyncio.to_thread(self.file_size_service.is_too_large, file, max_size):
-            raise FileTooLargeException("File too large.")
+        if file_size > max_size:
+            raise FileTooLargeException(
+                file_size=file_size,
+                max_size=max_size,
+                setting_name=setting_name,
+            )
 
     async def ensure_quota(self, file: SpooledTemporaryFile, task: Task):
         if task not in (Task.UPLOAD_FILE, Task.TRANSCRIPTION):
@@ -76,27 +86,32 @@ class TaskService:
 
         filepath = await self.file_size_service.save_file_to_disk(file)
 
-        if task_type == Task.UPLOAD_FILE:
-            params = UploadInfoBlob(
-                filepath=filepath,
-                filename=filename,
-                user_id=self.user.id,
-                group_id=group_id,
-                space_id=space_id,
-                mimetype=mimetype,
-            )
-        elif task_type == Task.TRANSCRIPTION:
-            params = Transcription(
-                filepath=filepath,
-                filename=filename,
-                user_id=self.user.id,
-                group_id=group_id,
-                space_id=space_id,
-                mimetype=mimetype,
-            )
+        try:
+            if task_type == Task.UPLOAD_FILE:
+                params = UploadInfoBlob(
+                    filepath=filepath,
+                    filename=filename,
+                    user_id=self.user.id,
+                    group_id=group_id,
+                    space_id=space_id,
+                    mimetype=mimetype,
+                )
+            elif task_type == Task.TRANSCRIPTION:
+                params = Transcription(
+                    filepath=filepath,
+                    filename=filename,
+                    user_id=self.user.id,
+                    group_id=group_id,
+                    space_id=space_id,
+                    mimetype=mimetype,
+                )
 
-        # Set name of the job to the filename being processed
-        job = await self.job_service.queue_job(task_type, name=filename, task_params=params)
+            # Set name of the job to the filename being processed
+            job = await self.job_service.queue_job(task_type, name=filename, task_params=params)
+        except BaseException:
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(filepath)
+            raise
 
         return job
 

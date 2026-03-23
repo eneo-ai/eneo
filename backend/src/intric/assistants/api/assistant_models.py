@@ -11,6 +11,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    computed_field,
     field_validator,
 )
 
@@ -52,8 +53,15 @@ class ModelInfo(BaseModel):
     """Information about the model used by the assistant."""
 
     name: str
-    token_limit: int
+    max_input_tokens: int
+    max_output_tokens: int
     prompt_tokens: Optional[int] = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def token_limit(self) -> int:
+        """Backward-compat: exposed in JSON responses for frontend."""
+        return self.max_input_tokens
 
 
 class TokenEstimateRequest(BaseModel):

@@ -9,8 +9,6 @@
   import { Input } from "@intric/ui";
   import { getAppContext } from "$lib/core/AppContext.js";
   import { getIntric } from "$lib/core/Intric.js";
-  import StorageOverviewBar from "./usage/storage/StorageOverviewBar.svelte";
-  import TokenOverviewBar from "./usage/tokens/TokenOverviewBar.svelte";
   import { m } from "$lib/paraglide/messages";
   import { invalidate, invalidateAll } from "$app/navigation";
 
@@ -106,11 +104,6 @@
   </Page.Header>
   <Page.Main>
     <Settings.Page>
-      <Settings.Group title={m.usage()}>
-        <StorageOverviewBar storageStats={data.storageStats}></StorageOverviewBar>
-        <TokenOverviewBar tokenStats={data.tokenStats}></TokenOverviewBar>
-      </Settings.Group>
-
       <Settings.Group title={m.features()}>
         <Settings.Row title={m.enable_templates()} description={m.enable_templates_description()}>
           <Input.Switch bind:value={usingTemplates} sideEffect={handleToggleTemplates} />

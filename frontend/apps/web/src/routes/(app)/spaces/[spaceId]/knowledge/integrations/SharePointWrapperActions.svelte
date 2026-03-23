@@ -2,6 +2,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   import { IconEdit } from "@intric/icons/edit";
   import { IconEllipsis } from "@intric/icons/ellipsis";
   import { IconTrash } from "@intric/icons/trash";
@@ -45,7 +46,7 @@
       $showRenameDialog = false;
     } catch (error) {
       console.error(error);
-      alert(m.integration_rename_error());
+      toast.error(m.integration_rename_error());
     } finally {
       isRenaming = false;
     }
@@ -62,7 +63,7 @@
       $showDeleteDialog = false;
     } catch (error) {
       console.error(error);
-      alert(m.integration_delete_error());
+      toast.error(m.integration_delete_error());
     } finally {
       isDeleting = false;
     }

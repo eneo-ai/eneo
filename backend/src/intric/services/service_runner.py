@@ -66,16 +66,35 @@ class ServiceRunner:
         except pydantic.ValidationError as e:
             raise PydanticParseError("Error parsing output.") from e
 
-        # Count tokens
+        # Prefer actual provider token counts, fall back to tiktoken estimates
         answer = output.to_string()
-        num_tokens_answer = count_tokens(answer)
+
+        if ai_response.usage and ai_response.usage.prompt_tokens is not None:
+            num_tokens_question = ai_response.usage.prompt_tokens
+            input_source = "provider"
+        else:
+            num_tokens_question = ai_response.total_token_count
+            input_source = "tiktoken"
+
+        if ai_response.usage and ai_response.usage.completion_tokens is not None:
+            num_tokens_answer = ai_response.usage.completion_tokens
+            output_source = "provider"
+        else:
+            num_tokens_answer = count_tokens(answer)
+            output_source = "tiktoken"
+
+        logger.info(
+            f"[TokenUsage] service={self.service.id} — "
+            f"input={num_tokens_question} ({input_source}), "
+            f"output={num_tokens_answer} ({output_source})"
+        )
 
         # Save
         question = QuestionAdd(
             tenant_id=self.user.tenant_id,
             question=input,
             answer=answer,
-            num_tokens_question=ai_response.total_token_count,
+            num_tokens_question=num_tokens_question,
             num_tokens_answer=num_tokens_answer,
             completion_model_id=self.service.completion_model.id,
             service_id=self.service.id,

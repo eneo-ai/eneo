@@ -422,7 +422,7 @@ curl -X PUT https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federati
 
 **Documentation:**
 - [Federation Per Tenant](./FEDERATION_PER_TENANT.md) - Architecture and setup
-- [Multi-Tenant Credentials](./MULTI_TENANT_CREDENTIALS.md) - Credential management
+- [AI Providers](https://docs.eneo.ai/guides/ai-providers) - Provider configuration & credential management
 - [Multi-Tenant OIDC Setup](./MULTITENANT_OIDC_SETUP_GUIDE.md) - Step-by-step guide
 
 ## 🔧 Troubleshooting

@@ -11,6 +11,7 @@
   import { createCombobox } from "@melt-ui/svelte";
   import type { IntegrationImportDialogProps } from "../IntegrationData";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   type PreviewOption = {
     label: string;
@@ -39,7 +40,7 @@
     const { id } = integration;
 
     if (!id) {
-      alert(m.you_need_to_configure_this_integration_before_using_it());
+      toast.warning(m.you_need_to_configure_this_integration_before_using_it());
       goBack();
       return;
     }
@@ -89,7 +90,7 @@
     } catch (error) {
       const errorMessage =
         error instanceof IntricError ? error.getReadableMessage() : String(error);
-      alert(errorMessage);
+      toast.error(errorMessage);
     }
   });
 

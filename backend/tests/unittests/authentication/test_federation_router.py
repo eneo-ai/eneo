@@ -30,7 +30,6 @@ class DummySettings(SimpleNamespace):
             "openai_api_key": None,
             "anthropic_api_key": None,
             "azure_api_key": None,
-            "berget_api_key": None,
             "mistral_api_key": None,
             "ovhcloud_api_key": None,
             "vllm_api_key": None,

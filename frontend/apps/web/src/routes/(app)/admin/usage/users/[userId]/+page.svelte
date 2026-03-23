@@ -17,6 +17,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { createRender } from "svelte-headless-table";
   import { CalendarDate } from "@internationalized/date";
+  import { m } from "$lib/paraglide/messages";
   import {
     IntricError,
     type ModelUsage,
@@ -29,7 +30,7 @@
 
   // Get date range from URL params or default to last 30 days
   const now = new Date();
-  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getUTCDate());
+  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
   let dateRange = $state({
     start: today.subtract({ days: 30 }),
     end: today
@@ -185,11 +186,29 @@
     }
   });
 
-  // Get usage intensity based on requests - using semantic classes
-  function getUsageIntensity(requests: number) {
-    if (requests > 100) return { label: "High Usage", class: "bg-secondary text-error" };
-    if (requests > 20) return { label: "Medium Usage", class: "bg-secondary text-warning" };
-    return { label: "Low Usage", class: "bg-secondary text-success" };
+  // Scale usage thresholds proportionally to the selected date range
+  const BASE_DAYS = 30;
+  const BASE_HIGH_THRESHOLD = 500_000;
+  const BASE_MEDIUM_THRESHOLD = 50_000;
+
+  const thresholds = $derived.by(() => {
+    if (!dateRange.start || !dateRange.end) {
+      return { high: BASE_HIGH_THRESHOLD, medium: BASE_MEDIUM_THRESHOLD };
+    }
+    const startMs = new Date(dateRange.start.toString()).getTime();
+    const endMs = new Date(dateRange.end.toString()).getTime();
+    const days = Math.max(1, Math.round((endMs - startMs) / (1000 * 60 * 60 * 24)));
+    const scale = days / BASE_DAYS;
+    return {
+      high: Math.round(BASE_HIGH_THRESHOLD * scale),
+      medium: Math.round(BASE_MEDIUM_THRESHOLD * scale)
+    };
+  });
+
+  function getUsageIntensity(tokens: number) {
+    if (tokens > thresholds.high) return { label: m.usage_level_high(), class: "bg-secondary text-error" };
+    if (tokens > thresholds.medium) return { label: m.usage_level_medium(), class: "bg-secondary text-warning" };
+    return { label: m.usage_level_low(), class: "bg-secondary text-success" };
   }
 
   // Get top 5 models by token usage
@@ -255,10 +274,10 @@
                 <div class="mt-2">
                   <span
                     class="inline-flex items-center rounded-full px-3 py-1.5 text-sm font-medium {getUsageIntensity(
-                      user.total_requests
+                      user.total_tokens
                     ).class}"
                   >
-                    {getUsageIntensity(user.total_requests).label}
+                    {getUsageIntensity(user.total_tokens).label}
                   </span>
                 </div>
               </div>

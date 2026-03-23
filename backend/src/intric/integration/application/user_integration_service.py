@@ -201,7 +201,8 @@ class UserIntegrationService:
         """Get available integrations filtered by space type and tenant configuration.
 
         - Personal spaces: Only user_oauth integrations IF tenant has SharePoint app configured
-        - Shared/Organization spaces: Only authenticated tenant_app integrations (admin-only)
+        - Shared/Organization spaces: Only authenticated tenant_app integrations (admin-only).
+          This allows admins to import organization-wide knowledge into both org and shared spaces.
         """
         all_integrations = await self.get_my_integrations(
             user_id=self.user.id,

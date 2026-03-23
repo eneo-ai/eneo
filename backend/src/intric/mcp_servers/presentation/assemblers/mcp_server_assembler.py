@@ -8,6 +8,9 @@ from intric.mcp_servers.presentation.models import (
     MCPServerSettingsPublic,
     MCPServerToolPublic,
 )
+from intric.security_classifications.presentation.security_classification_models import (
+    SecurityClassificationPublic,
+)
 
 if TYPE_CHECKING:
     from intric.settings.encryption_service import EncryptionService
@@ -57,6 +60,14 @@ class MCPServerAssembler:
         """Convert MCPServer with tools to dict format (for assistant/space responses)."""
         # Sort tools by name for consistent ordering
         sorted_tools = sorted(mcp_server.tools, key=lambda t: t.name)
+
+        sc = mcp_server.security_classification
+        sc_dict = None
+        if sc is not None:
+            sc_public = SecurityClassificationPublic.from_domain(sc)
+            if sc_public is not None:
+                sc_dict = sc_public.model_dump(mode="json")
+
         return {
             "id": str(mcp_server.id),
             "name": mcp_server.name,
@@ -65,6 +76,7 @@ class MCPServerAssembler:
             "http_auth_type": mcp_server.http_auth_type,
             "tags": mcp_server.tags,
             "icon_url": mcp_server.icon_url,
+            "security_classification": sc_dict,
             "tools": [
                 {
                     "id": str(tool.id),
@@ -92,6 +104,9 @@ class MCPServerAssembler:
             tags=mcp_server.tags,
             icon_url=mcp_server.icon_url,
             documentation_url=mcp_server.documentation_url,
+            security_classification=SecurityClassificationPublic.from_domain(
+                mcp_server.security_classification,
+            ),
         )
 
     def to_paginated_response(self, mcp_servers: list[MCPServer]) -> MCPServerList:
@@ -121,6 +136,10 @@ class MCPServerSettingsAssembler:
                 description=tool.description,
                 input_schema=tool.input_schema,
                 is_enabled_by_default=tool.is_enabled_by_default,
+                pending_description=tool.pending_description,
+                pending_input_schema=tool.pending_input_schema,
+                requires_approval=tool.requires_approval,
+                removed_from_remote=tool.removed_from_remote,
             )
             for tool in sorted_tools
         ]
@@ -141,6 +160,9 @@ class MCPServerSettingsAssembler:
             documentation_url=mcp_server.documentation_url,
             is_org_enabled=mcp_server.is_enabled,
             tools=tools,
+            security_classification=SecurityClassificationPublic.from_domain(
+                mcp_server.security_classification,
+            ),
         )
 
     def to_paginated_response(

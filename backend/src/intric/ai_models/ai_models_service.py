@@ -2,7 +2,6 @@ from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import (
     CompletionModel,
-    CompletionModelFamily,
     CompletionModelPublic,
 )
 from intric.ai_models.completion_models.completion_models_repo import (
@@ -112,7 +111,7 @@ class AIModelsService:
         models = []
         for model in completion_models:
             if (
-                model.family == CompletionModelFamily.AZURE
+                model.family == "azure"
                 and not get_settings().using_azure_models
             ):
                 continue

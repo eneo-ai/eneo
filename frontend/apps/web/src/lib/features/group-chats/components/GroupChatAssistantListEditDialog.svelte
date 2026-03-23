@@ -10,6 +10,7 @@
   import { Button, Dialog, Input } from "@intric/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   type AssistantTool = GroupChat["tools"]["assistants"][number];
   type Props = {
@@ -59,7 +60,7 @@
           const user_description =
             descriptionProxy.value.trim() === "" ? null : descriptionProxy.value;
           if (!user_description && !assistant.default_description) {
-            alert(m.description_required_for_assistant());
+            toast.warning(m.description_required_for_assistant());
             return;
           }
           updateAssistant({ ...assistant, user_description });

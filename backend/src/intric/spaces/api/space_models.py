@@ -144,6 +144,7 @@ class UpdateSpaceDryRunResponse(BaseModel):
     completion_models: list[CompletionModelPublic]
     embedding_models: list[EmbeddingModelPublic]
     transcription_models: list[TranscriptionModelPublic]
+    mcp_servers: list[dict] = []
 
     model_config = ConfigDict(from_attributes=True)
 

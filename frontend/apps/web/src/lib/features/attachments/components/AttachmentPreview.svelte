@@ -5,6 +5,7 @@
   import { Button, Dialog, Markdown } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   import type { Snippet } from "svelte";
 
@@ -58,7 +59,7 @@
     } catch (e) {
       loadError = true;
       console.error("Error loading file:", e);
-      alert(m.error_loading_file());
+      toast.error(m.error_loading_file());
     } finally {
       loadingFile = false;
     }
@@ -80,7 +81,7 @@
       window.open(response.url, "_blank");
     } catch (e) {
       console.error("Error generating download URL:", e);
-      alert(m.error_downloading_file());
+      toast.error(m.error_downloading_file());
     }
   }
 

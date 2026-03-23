@@ -94,8 +94,7 @@ export function initAnalytics(client) {
     listQuestionsPaginated: async ({ assistant, options }) => {
       const include_followups = options?.includeFollowups ?? false;
       const { id } = assistant;
-      const endpoint =
-        /** @type {any} */ ("/api/v1/analysis/assistants/{assistant_id}/questions/");
+      const endpoint = /** @type {any} */ ("/api/v1/analysis/assistants/{assistant_id}/questions/");
       const res = await client.fetch(endpoint, {
         method: "get",
         params: {

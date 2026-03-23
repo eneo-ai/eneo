@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { AttachmentValidationError } from "$lib/features/attachments/AttachmentManager";
   import { IconTrash } from "@intric/icons/trash";
   import { IconDownload } from "@intric/icons/download";
   import { IconInfo } from "@intric/icons/info";
@@ -7,16 +8,18 @@
   import { onDestroy, onMount } from "svelte";
   import { browser } from "$app/environment";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
+  import FileSizeValidationPanel from "$lib/features/attachments/components/FileSizeValidationPanel.svelte";
   import dayjs from "dayjs";
   import AudioRecorder from "./AudioRecorder.svelte";
   import AttachmentItem from "$lib/features/attachments/components/AttachmentItem.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   import { fade } from "svelte/transition";
 
   export let description = m.record_audio_device();
 
   const {
-    queueValidUploads,
+    queueValidUploadsDetailed,
     state: { attachments, attachmentRules, isUploading }
   } = getAttachmentManager();
 
@@ -28,6 +31,7 @@
   let recordingQueued = false;
   let shouldWarnOnNavigate = false;
   let showSuccess = false;
+  let validationErrors: AttachmentValidationError[] = [];
 
   $: maxRecordingBytes = $attachmentRules.maxTotalSize ?? null;
   $: recordingQueued = audioFile
@@ -37,6 +41,7 @@
     isRecording || (!!audioFile && !recordingQueued) || $isUploading;
   $: if (!audioFile) {
     recordingWarning = null;
+    validationErrors = [];
   }
 
   const beforeUnloadHandler = (event: BeforeUnloadEvent) => {
@@ -57,7 +62,7 @@
 
   async function saveAudioFile() {
     if (!audioFile) {
-      alert(m.recording_not_found());
+      toast.error(m.recording_not_found());
       return;
     }
     const suggestedName = audioFile.name;
@@ -72,7 +77,7 @@
           return;
         }
         console.error("Failed to save recording:", error);
-        alert(m.recording_save_failed());
+        toast.error(m.recording_save_failed());
       }
     } else {
       const a = document.createElement("a");
@@ -122,12 +127,13 @@
         variant="primary"
         on:click={() => {
           if (!audioFile) {
-            alert(m.recording_not_found());
+            toast.error(m.recording_not_found());
             return;
           }
-          const errors = queueValidUploads([audioFile]);
+          const errors = queueValidUploadsDetailed([audioFile]);
+          validationErrors = errors ?? [];
           if (errors) {
-            alert(errors);
+            return;
           } else {
             showSuccess = true;
             setTimeout(() => (showSuccess = false), 1500);
@@ -158,6 +164,8 @@
       {/if}
     </div>
   </div>
+
+  <FileSizeValidationPanel errors={validationErrors} />
 {:else}
   <AudioRecorder
     maxBytes={maxRecordingBytes}

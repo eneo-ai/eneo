@@ -1,6 +1,7 @@
 <script lang="ts">
   import { IconCheck } from "@intric/icons/check";
   import { IconChevronUpDown } from "@intric/icons/chevron-up-down";
+  import { IconPeople } from "@intric/icons/people";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { createSelect } from "@melt-ui/svelte";
   import SpaceChip from "$lib/features/spaces/components/SpaceChip.svelte";
@@ -18,7 +19,7 @@
 
   // Helper function to get icon URL from icon_id
   function getIconUrl(partner: AssistantSparse | GroupChatSparse): string | null {
-    if (partner.type === "assistant" && partner.icon_id) {
+    if (partner.icon_id) {
       return `${environment.baseUrl}/api/v1/icons/${partner.icon_id}/`;
     }
     return null;
@@ -79,13 +80,24 @@
       {...$option({ value: partner, label: partner.name, disabled: false })}
       use:option
     >
-      {#if partner.type === "assistant" && getIconUrl(partner)}
-        <div class="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg">
-          <img src={getIconUrl(partner)} alt={partner.name} class="h-full w-full object-cover" />
-        </div>
-      {:else}
-        <SpaceChip space={{ ...partner, personal: false }}></SpaceChip>
-      {/if}
+      <div class="relative flex-shrink-0">
+        {#if getIconUrl(partner)}
+          <div class="h-10 w-10 overflow-hidden rounded-lg">
+            <img src={getIconUrl(partner)} alt={partner.name} class="h-full w-full object-cover" />
+          </div>
+          {#if partner.type === "group-chat"}
+            <div class="group-chat-badge">
+              <IconPeople class="!h-3 !w-3" />
+            </div>
+          {/if}
+        {:else if partner.type === "group-chat"}
+          <div class="bg-hover-default text-secondary flex h-10 w-10 items-center justify-center rounded-lg">
+            <IconPeople class="!h-5 !w-5" />
+          </div>
+        {:else}
+          <SpaceChip space={{ ...partner, personal: false }}></SpaceChip>
+        {/if}
+      </div>
       <span class="flex-grow truncate">{formatEmojiTitle(partner.name)}</span>
       <div class="check {$selected?.value.id === partner.id ? 'block' : 'hidden'}">
         <IconCheck class="text-positive-stronger !size-8"></IconCheck>
@@ -104,5 +116,9 @@
 
   div[data-disabled] {
     @apply opacity-30 hover:bg-transparent;
+  }
+
+  .group-chat-badge {
+    @apply bg-primary border-default text-secondary absolute -right-1.5 -bottom-1.5 flex h-5 w-5 items-center justify-center rounded-full border shadow-sm;
   }
 </style>

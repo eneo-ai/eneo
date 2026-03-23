@@ -11,6 +11,7 @@
   import { Dialog, Button } from "@intric/ui";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte.ts";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   import { IconSearch } from "@intric/icons/search";
   import { IconTrash } from "@intric/icons/trash";
   import { IconCheck } from "@intric/icons/check";
@@ -65,7 +66,7 @@
       selectedUsers = [];
       searchQuery = "";
     } catch (e) {
-      alert(m.could_not_add_user_to_group());
+      toast.error(m.could_not_add_user_to_group());
       console.error(e);
     }
   });
@@ -75,7 +76,7 @@
       await intric.userGroups.removeUser({ userGroup, user });
       invalidate("admin:user-groups:load");
     } catch (e) {
-      alert(m.could_not_remove_user_from_group());
+      toast.error(m.could_not_remove_user_from_group());
       console.error(e);
     }
   });

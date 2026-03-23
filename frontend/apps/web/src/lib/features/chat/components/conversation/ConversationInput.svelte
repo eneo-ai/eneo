@@ -149,13 +149,6 @@
 		focusMentionInput();
 	});
 
-	const isAskingDisabled = $derived(
-		chat.askQuestion.isLoading ||
-			$isUploading ||
-			($question === '' && $attachments.length === 0) ||
-			!chat.hasCompletionModel
-	);
-
 	let useWebSearch = $state(false);
 
 	const shouldShowMentionButton = $derived.by(() => {
@@ -181,8 +174,20 @@
 	const promptTokens = $derived(chat.promptTokens);
 	const newTokens = $derived(chat.newPromptTokens);
 	const modelInfo = $derived(chat.partner?.model_info || null);
-	const tokenLimit = $derived(modelInfo?.token_limit || 0);
+	const tokenLimit = $derived(chat.effectiveTokenLimit);
 	const isApproximate = $derived($question.length > 0);
+
+	const isOverTokenLimit = $derived(
+		tokenLimit > 0 && newTokens + historyTokens + promptTokens > tokenLimit
+	);
+
+	const isAskingDisabled = $derived(
+		chat.askQuestion.isLoading ||
+			$isUploading ||
+			($question === '' && $attachments.length === 0) ||
+			!chat.hasCompletionModel ||
+			isOverTokenLimit
+	);
 
 	$effect(() => {
 		const currentAttachments = $attachments

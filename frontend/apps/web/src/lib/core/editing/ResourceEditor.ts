@@ -3,6 +3,7 @@ import { derived, get, readonly, writable } from "svelte/store";
 import { getAddedItems, getRemovedItems } from "./getChangedItems";
 import { getDiff, type CompareOptions, type Diff } from "./getDiff";
 import { applyDefaults, type AppliedDefaults, type Defaults } from "./applyDefaults";
+import { toast } from "$lib/components/toast";
 
 type Resource = Record<string, unknown> & { id: string };
 
@@ -86,7 +87,7 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
         });
       }
     } catch (e) {
-      alert("Error while trying to update!");
+      toast.error("Error while trying to update!");
       if (e instanceof IntricError) {
         console.error(e.getReadableMessage());
       }

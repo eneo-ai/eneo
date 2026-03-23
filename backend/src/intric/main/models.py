@@ -139,6 +139,7 @@ class GeneralError(BaseModel):
     code: str | None = None
     context: dict[str, object] | None = None
     request_id: str | None = None
+    details: dict[str, Any] | None = None
 
 
 class DeleteResponse(BaseModel):

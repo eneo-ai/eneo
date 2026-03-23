@@ -7,6 +7,7 @@
   import { getAppContext } from "$lib/core/AppContext";
   import InviteLinkDialog from "./InviteLinkDialog.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   const intric = getIntric();
   const { defaultRoles } = getAdminUserCtx();
@@ -30,7 +31,7 @@
       $showDialog = false;
       $showInviteLink = true;
     } catch (e) {
-      alert(e);
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   }
 </script>

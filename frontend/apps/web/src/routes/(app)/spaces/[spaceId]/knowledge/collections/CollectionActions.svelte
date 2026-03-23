@@ -10,6 +10,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { derived } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   const {
     refreshCurrentSpace,
@@ -27,7 +28,7 @@
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
-      alert(m.could_not_delete_collection());
+      toast.error(m.could_not_delete_collection());
       console.error(e);
     }
   }
@@ -40,7 +41,7 @@
       refreshCurrentSpace();
       $showMoveDialog = false;
     } catch (e) {
-      alert(e);
+      toast.error(e instanceof Error ? e.message : String(e));
       console.error(e);
     }
     isProcessing = false;

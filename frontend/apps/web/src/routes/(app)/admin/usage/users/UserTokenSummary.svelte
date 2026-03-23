@@ -14,7 +14,7 @@
   } from "@intric/intric-js";
   import UserOverviewBar from "./UserOverviewBar.svelte";
   import UserTokenTable from "./UserTokenTable.svelte";
-  import { CalendarDate } from "@internationalized/date";
+  import { CalendarDate, type DateValue } from "@internationalized/date";
   import { getIntric } from "$lib/core/Intric";
   import { Input } from "@intric/ui";
   import { goto } from "$app/navigation";
@@ -24,6 +24,7 @@
   let userStats = $state<UserTokenUsageSummary | null>(null);
   let isLoading = $state(false);
   let error = $state<string | null>(null);
+  let fetchId = 0;
 
   // Reactive pagination state derived from URL search parameters
   const paginationState = $derived.by(() => {
@@ -39,10 +40,29 @@
   const intric = getIntric();
 
   const now = new Date();
-  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getUTCDate());
+  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
+  const BASE_DAYS = 30;
+  const BASE_HIGH_THRESHOLD = 500_000;
+  const BASE_MEDIUM_THRESHOLD = 50_000;
+
   let dateRange = $state({
     start: today.subtract({ days: 30 }),
     end: today
+  });
+
+  // Scale thresholds proportionally to the selected date range
+  const thresholds = $derived.by(() => {
+    if (!dateRange.start || !dateRange.end) {
+      return { high: BASE_HIGH_THRESHOLD, medium: BASE_MEDIUM_THRESHOLD };
+    }
+    const startMs = new Date(dateRange.start.toString()).getTime();
+    const endMs = new Date(dateRange.end.toString()).getTime();
+    const days = Math.max(1, Math.round((endMs - startMs) / (1000 * 60 * 60 * 24)));
+    const scale = days / BASE_DAYS;
+    return {
+      high: Math.round(BASE_HIGH_THRESHOLD * scale),
+      medium: Math.round(BASE_MEDIUM_THRESHOLD * scale)
+    };
   });
 
   async function updateUserStats(
@@ -52,10 +72,11 @@
     sortBy: UserSortBy,
     sortOrder: string
   ) {
+    const id = ++fetchId;
     isLoading = true;
     error = null;
     try {
-      userStats = await intric.usage.tokens.getUsersSummary({
+      const result = await intric.usage.tokens.getUsersSummary({
         startDate: timeframe.start.toString(),
         // We add one day so the end day includes the whole day. otherwise this would be interpreted as 00:00
         endDate: timeframe.end.add({ days: 1 }).toString(),
@@ -64,23 +85,34 @@
         sortBy: sortBy,
         sortOrder: sortOrder
       });
+      if (id !== fetchId) return; // Stale response, discard
+      userStats = result;
     } catch (err: unknown) {
+      if (id !== fetchId) return;
       error = err instanceof IntricError ? err.message : "unknown error";
       console.error("Failed to load user token usage:", err);
     } finally {
-      isLoading = false;
+      if (id === fetchId) {
+        isLoading = false;
+      }
     }
   }
 
+  function handleDateChange(range: { start: DateValue; end: DateValue }) {
+    dateRange = range as { start: CalendarDate; end: CalendarDate };
+    // Reset to page 1 when date range changes to avoid empty pages
+    const url = new URL($page.url);
+    if (url.searchParams.has("page")) {
+      url.searchParams.set("page", "1");
+      goto(url, { replaceState: true });
+    }
+  }
+
+  // Single effect handles all data fetching — triggered by dateRange or pagination changes
   $effect(() => {
+    const { page, perPage, sortBy, sortOrder } = paginationState;
     if (dateRange.start && dateRange.end) {
-      updateUserStats(
-        dateRange,
-        paginationState.page,
-        paginationState.perPage,
-        paginationState.sortBy,
-        paginationState.sortOrder
-      );
+      updateUserStats(dateRange, page, perPage, sortBy, sortOrder);
     }
   });
 
@@ -117,45 +149,41 @@
   }
 </script>
 
-<Settings.Page>
-  <Settings.Group title={m.overview()}>
-    {#if userStats}
-      <UserOverviewBar {userStats}></UserOverviewBar>
-    {/if}
-  </Settings.Group>
-  <Settings.Group title={m.details()}>
-    <Settings.Row title={m.usage_by_user()} description={m.usage_by_user_description()} fullWidth>
-      <div slot="toolbar" class="mb-4">
-        <Input.DateRange bind:value={dateRange}></Input.DateRange>
-      </div>
+<Settings.Group title={m.usage_by_user()}>
+  <Settings.Row title={m.usage_by_user_description()} description="" fullWidth>
+    <div slot="toolbar" class="mb-4">
+      <Input.DateRange bind:value={dateRange} onValueCommit={handleDateChange}></Input.DateRange>
+    </div>
 
-      {#if isLoading}
-        <div class="flex justify-center p-8">
-          <div class="text-gray-500">{m.loading_user_token_usage()}</div>
-        </div>
-      {:else if error}
-        <div class="flex justify-center p-8">
-          <div class="text-red-500">{error}</div>
-        </div>
-      {:else if userStats}
-        <div class="space-y-4">
-          <UserTokenTable
-            users={userStats.users}
-            totalUsers={userStats.total_users}
-            page={paginationState.page}
-            perPage={paginationState.perPage}
-            sortBy={paginationState.sortBy}
-            sortOrder={paginationState.sortOrder}
-            {onUserClick}
-            {onPageChange}
-            {onSortChange}
-          />
-        </div>
-      {:else}
-        <div class="flex justify-center p-8">
-          <div class="text-gray-500">{m.no_user_token_usage_data()}</div>
-        </div>
-      {/if}
-    </Settings.Row>
-  </Settings.Group>
-</Settings.Page>
+    {#if isLoading}
+      <div class="flex justify-center p-8">
+        <div class="text-gray-500">{m.loading_user_token_usage()}</div>
+      </div>
+    {:else if error}
+      <div class="flex justify-center p-8">
+        <div class="text-red-500">{error}</div>
+      </div>
+    {:else if userStats && userStats.users.length > 0}
+      <UserOverviewBar {userStats} highThreshold={thresholds.high} mediumThreshold={thresholds.medium}></UserOverviewBar>
+      <div class="mt-4">
+        <UserTokenTable
+          users={userStats.users}
+          totalUsers={userStats.total_users}
+          page={paginationState.page}
+          perPage={paginationState.perPage}
+          sortBy={paginationState.sortBy}
+          sortOrder={paginationState.sortOrder}
+          highThreshold={thresholds.high}
+          mediumThreshold={thresholds.medium}
+          {onUserClick}
+          {onPageChange}
+          {onSortChange}
+        />
+      </div>
+    {:else}
+      <div class="flex justify-center p-8">
+        <div class="text-gray-500">{m.no_user_token_usage_data()}</div>
+      </div>
+    {/if}
+  </Settings.Row>
+</Settings.Group>

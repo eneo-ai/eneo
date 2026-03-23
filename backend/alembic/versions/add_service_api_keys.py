@@ -10,7 +10,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "svc_api_keys_001"
-down_revision = "847ef045f3c1"
+down_revision = "202602131000"
 branch_labels = None
 depends_on = None
 

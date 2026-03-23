@@ -6,6 +6,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { getResultTitle } from "$lib/features/apps/getResultTitle";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   export let result: Pick<AppRun, "id" | "input">;
   export let onResultDeleted: ((result: Pick<AppRun, "id" | "input">) => void) | undefined =
@@ -21,7 +22,7 @@
       onResultDeleted?.(result);
       $showDeleteDialog = false;
     } catch (e) {
-      alert(m.could_not_delete_result());
+      toast.error(m.could_not_delete_result());
       console.error(e);
     }
     isProcessing = false;

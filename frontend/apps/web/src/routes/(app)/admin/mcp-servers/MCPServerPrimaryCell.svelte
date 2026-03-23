@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Globe, Shield } from "lucide-svelte";
+  import { Globe, Shield, ShieldCheck } from "lucide-svelte";
 
   type Props = {
     mcpServer: {
@@ -14,6 +14,7 @@
       description?: string;
       http_url: string;
       http_auth_type: string;
+      security_classification?: { name: string } | null;
     };
   };
 
@@ -57,6 +58,16 @@
       <svelte:component this={authConfig.icon} class="h-3 w-3" aria-hidden="true" />
       {authConfig.label}
     </span>
+    {#if mcpServer.security_classification}
+      <span
+        class="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium bg-amethyst-100 text-amethyst-700 dark:bg-amethyst-900/50 dark:text-amethyst-300"
+        role="status"
+        aria-label="{m.security_classification()}: {mcpServer.security_classification.name}"
+      >
+        <ShieldCheck class="h-3 w-3" aria-hidden="true" />
+        {mcpServer.security_classification.name}
+      </span>
+    {/if}
   </div>
   {#if mcpServer.description}
     <p class="text-sm text-muted line-clamp-1 leading-snug">{mcpServer.description}</p>

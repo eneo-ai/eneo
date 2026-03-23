@@ -5,6 +5,7 @@
   import { IntricError } from "@intric/intric-js";
   import { Button, Dialog, Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   import { writable, type Writable } from "svelte/store";
   import { AlertTriangle } from "lucide-svelte";
   import SharePointAppDeleteDialog from "./SharePointAppDeleteDialog.svelte";
@@ -87,7 +88,7 @@
     testResult = null;
 
     if (!clientId || !clientSecret || !tenantDomain) {
-      alert(m.fill_required_fields());
+      toast.warning(m.fill_required_fields());
       return;
     }
 
@@ -109,14 +110,14 @@
       testResult = result;
 
         if (!result.success) {
-          alert(
+          toast.error(
           m.connection_test_failed({ message: result.error_message || m.unknown_error() })
           );
         }
     } catch (error) {
       const errorMessage =
         error instanceof IntricError ? error.getReadableMessage() : String(error);
-      alert(m.failed_to_test_credentials({ message: errorMessage }));
+      toast.error(m.failed_to_test_credentials({ message: errorMessage }));
       testResult = {
         success: false,
         error_message: errorMessage,
@@ -127,7 +128,7 @@
   // Save configuration
   const saveConfig = createAsyncState(async () => {
     if (!clientId || !clientSecret || !tenantDomain) {
-      alert(m.fill_required_fields());
+      toast.warning(m.fill_required_fields());
       return;
     }
 
@@ -151,14 +152,14 @@
     } catch (error) {
       const errorMessage =
         error instanceof IntricError ? error.getReadableMessage() : String(error);
-      alert(m.failed_to_save_configuration({ message: errorMessage }));
+      toast.error(m.failed_to_save_configuration({ message: errorMessage }));
     }
   });
 
   // Update client secret only
   const updateSecret = createAsyncState(async () => {
     if (!existingConfig || !newClientSecret) {
-      alert(m.fill_required_fields());
+      toast.warning(m.fill_required_fields());
       return;
     }
 
@@ -183,14 +184,14 @@
     } catch (error) {
       const errorMessage =
         error instanceof IntricError ? error.getReadableMessage() : String(error);
-      alert(m.failed_to_save_configuration({ message: errorMessage }));
+      toast.error(m.failed_to_save_configuration({ message: errorMessage }));
     }
   });
 
   // Start service account OAuth flow
   const startServiceAccountOAuth = createAsyncState(async () => {
     if (!clientId || !clientSecret || !tenantDomain) {
-      alert(m.fill_required_fields());
+      toast.warning(m.fill_required_fields());
       return;
     }
 
@@ -223,7 +224,7 @@
     } catch (error) {
       const errorMessage =
         error instanceof IntricError ? error.getReadableMessage() : String(error);
-      alert(m.failed_to_start_oauth({ message: errorMessage }));
+      toast.error(m.failed_to_start_oauth({ message: errorMessage }));
     }
   });
 
