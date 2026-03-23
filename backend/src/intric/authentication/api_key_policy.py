@@ -95,18 +95,15 @@ class ApiKeyPolicyService:
                     code="insufficient_permission",
                     message="Only tenant admins can create service keys.",
                 )
-            # Extra guardrail: service tenant write/admin keys need IP allowlist or expiration
-            if (
-                request.scope_type == ApiKeyScopeType.TENANT
-                and request.permission in (ApiKeyPermission.WRITE, ApiKeyPermission.ADMIN)
-            ):
+            # Extra guardrail: service write/admin keys need IP allowlist or expiration
+            if request.permission in (ApiKeyPermission.WRITE, ApiKeyPermission.ADMIN):
                 has_ip = request.allowed_ips is not None and len(request.allowed_ips) > 0
                 has_expiry = request.expires_at is not None
                 if not has_ip and not has_expiry:
                     raise ApiKeyValidationError(
                         status_code=400,
                         code="invalid_request",
-                        message="Service keys with tenant write/admin scope require an IP allowlist or expiration.",
+                        message="Service keys with write/admin permission require an IP allowlist or expiration.",
                     )
 
         if request.key_type == ApiKeyType.PK:
@@ -416,6 +413,7 @@ class ApiKeyPolicyService:
             revoked_at=key.revoked_at,
             suspended_at=key.suspended_at,
             expires_at=key.expires_at,
+            rotation_grace_until=getattr(key, "rotation_grace_until", None),
         )
         if effective_state != ApiKeyState.ACTIVE:
             raise ApiKeyValidationError(

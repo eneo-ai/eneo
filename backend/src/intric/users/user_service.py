@@ -715,7 +715,7 @@ class UserService:
         from intric.users.user import UserInDB as UserInDBModel
 
         tenant = await self.tenant_repo.get(key.tenant_id)
-        synthetic_id = uuid5(NAMESPACE_URL, f"service-key:{key.tenant_id}")
+        synthetic_id = uuid5(NAMESPACE_URL, f"service-key:{key.id}")
 
         key_suffix = key.key_suffix or key.id.hex[:8]
         return UserInDBModel(
@@ -755,13 +755,13 @@ class UserService:
                 raise ApiKeyValidationError(
                     status_code=401,
                     code="invalid_api_key",
-                    message="API key owner not found.",
+                    message="API key is invalid.",
                 )
             if user.tenant_id != resolved.key.tenant_id:
                 raise ApiKeyValidationError(
                     status_code=401,
                     code="invalid_api_key",
-                    message="API key tenant mismatch.",
+                    message="API key is invalid.",
                 )
 
             if user.state != UserState.ACTIVE:
@@ -1189,6 +1189,10 @@ class UserService:
             )
             return await session.scalar(stmt)
         else:
+            logger.warning(
+                "Scope enforcement: unhandled resource_type=%s, denying access",
+                resource_type,
+            )
             return None
 
     async def _resolve_app_run_space_id(self, app_run_id: UUID) -> UUID | None:

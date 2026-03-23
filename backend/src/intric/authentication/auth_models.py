@@ -155,18 +155,24 @@ def compute_effective_state(
     revoked_at: Optional[datetime],
     suspended_at: Optional[datetime],
     expires_at: Optional[datetime],
+    rotation_grace_until: Optional[datetime] = None,
     now: Optional[datetime] = None,
 ) -> ApiKeyState:
     if revoked_at is not None:
         return ApiKeyState.REVOKED
+    comparison_time = now or datetime.now(timezone.utc)
+    if comparison_time.tzinfo is None:
+        comparison_time = comparison_time.replace(tzinfo=timezone.utc)
     if expires_at is not None:
-        comparison_time = now or datetime.now(timezone.utc)
-        if comparison_time.tzinfo is None:
-            comparison_time = comparison_time.replace(tzinfo=timezone.utc)
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         if expires_at < comparison_time:
             return ApiKeyState.EXPIRED
+    if rotation_grace_until is not None:
+        if rotation_grace_until.tzinfo is None:
+            rotation_grace_until = rotation_grace_until.replace(tzinfo=timezone.utc)
+        if rotation_grace_until < comparison_time:
+            return ApiKeyState.REVOKED
     if suspended_at is not None:
         return ApiKeyState.SUSPENDED
     return ApiKeyState.ACTIVE

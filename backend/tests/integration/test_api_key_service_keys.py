@@ -422,12 +422,14 @@ async def test_service_key_space_scoped_write_cannot_patch_space(
     """Space-scoped write service key maps to EDITOR — cannot edit space settings."""
     space_id = await _create_space(client, token=default_user_token)
 
+    expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
     resp = await _create_service_key(
         client,
         token=default_user_token,
         scope_type="space",
         scope_id=space_id,
         permission="write",
+        expires_at=expires,
     )
     assert resp.status_code == 201
     secret = resp.json()["secret"]
@@ -448,12 +450,14 @@ async def test_service_key_space_scoped_admin_can_patch_space(
     """Space-scoped admin service key maps to ADMIN — can edit space settings."""
     space_id = await _create_space(client, token=default_user_token)
 
+    expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
     resp = await _create_service_key(
         client,
         token=default_user_token,
         scope_type="space",
         scope_id=space_id,
         permission="admin",
+        expires_at=expires,
     )
     assert resp.status_code == 201
     secret = resp.json()["secret"]

@@ -266,6 +266,7 @@ class ApiKeyLifecycleService:
             revoked_at=key.revoked_at,
             suspended_at=key.suspended_at,
             expires_at=key.expires_at,
+            rotation_grace_until=getattr(key, "rotation_grace_until", None),
         )
         if effective_state in (ApiKeyState.REVOKED, ApiKeyState.EXPIRED):
             metadata_only_fields = {"name", "description"}
@@ -407,6 +408,7 @@ class ApiKeyLifecycleService:
             revoked_at=key.revoked_at,
             suspended_at=key.suspended_at,
             expires_at=key.expires_at,
+            rotation_grace_until=getattr(key, "rotation_grace_until", None),
         )
         if effective_state == ApiKeyState.REVOKED:
             exc = ApiKeyValidationError(
@@ -518,6 +520,7 @@ class ApiKeyLifecycleService:
             revoked_at=key.revoked_at,
             suspended_at=key.suspended_at,
             expires_at=key.expires_at,
+            rotation_grace_until=getattr(key, "rotation_grace_until", None),
         )
         if effective_state == ApiKeyState.REVOKED:
             exc = ApiKeyValidationError(
@@ -624,6 +627,7 @@ class ApiKeyLifecycleService:
             revoked_at=key.revoked_at,
             suspended_at=key.suspended_at,
             expires_at=key.expires_at,
+            rotation_grace_until=getattr(key, "rotation_grace_until", None),
         )
         if effective_state == ApiKeyState.REVOKED:
             return ApiKeyV2.model_validate(key)

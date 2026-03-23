@@ -160,8 +160,8 @@ async def test_service_key_tenant_read_accepted_without_guardrails():
 
 
 @pytest.mark.asyncio
-async def test_service_key_space_scoped_accepted_without_guardrails():
-    """Admin user creating service + space + ADMIN with scope_id (guardrail only for tenant write/admin) passes."""
+async def test_service_key_space_scoped_write_rejected_without_guardrails():
+    """Service + space + ADMIN without IP/expiry is rejected (guardrail applies to all write/admin)."""
     service = _service_with_user([], permissions=[Permission.ADMIN])
     scope_id = uuid4()
 
@@ -169,6 +169,26 @@ async def test_service_key_space_scoped_accepted_without_guardrails():
         name="Service key space",
         key_type=ApiKeyType.SK,
         permission=ApiKeyPermission.ADMIN,
+        scope_type=ApiKeyScopeType.SPACE,
+        scope_id=scope_id,
+        ownership=ApiKeyOwnership.SERVICE,
+    )
+
+    service.ensure_creator_authorized = AsyncMock(return_value=None)
+    with pytest.raises(ApiKeyValidationError, match="IP allowlist or expiration"):
+        await service.validate_create_request(request=request)
+
+
+@pytest.mark.asyncio
+async def test_service_key_space_scoped_read_accepted_without_guardrails():
+    """Service + space + READ (no guardrail needed for read) passes."""
+    service = _service_with_user([], permissions=[Permission.ADMIN])
+    scope_id = uuid4()
+
+    request = ApiKeyCreateRequest(
+        name="Service key space read",
+        key_type=ApiKeyType.SK,
+        permission=ApiKeyPermission.READ,
         scope_type=ApiKeyScopeType.SPACE,
         scope_id=scope_id,
         ownership=ApiKeyOwnership.SERVICE,

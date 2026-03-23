@@ -46,12 +46,12 @@ Service keys are designed for integrations, automated systems, and machine-to-ma
 
 When a service key is used, the system constructs a **synthetic user** instead of looking up a real one:
 
-- **Deterministic ID**: Generated from `uuid5(NAMESPACE_URL, "service-key:{tenant_id}")` so all service keys for a tenant share the same synthetic identity
+- **Unique ID per key**: Generated from `uuid5(NAMESPACE_URL, "service-key:{key_id}")` so each service key gets its own synthetic identity for audit and quota tracking
 - **Always active**: The synthetic user is always in `ACTIVE` state
 - **No real roles**: Space access is derived from the key's permission level, not from membership
 
 <Callout type="warning">
-Only tenant administrators can create service keys. Service keys with tenant-wide write or admin scope require either an **IP allowlist** or an **expiration date** as a guardrail against misuse.
+Only tenant administrators can create service keys. Service keys with write or admin permission require either an **IP allowlist** or an **expiration date** as a guardrail against misuse, regardless of scope.
 </Callout>
 
 **Why service keys exist**: In production environments, integrations should not break when an employee leaves the organization. With user keys, deactivating a departing employee's account would silently break every integration that used their key. Service keys solve this by decoupling key validity from any individual user's lifecycle.
