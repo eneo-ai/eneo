@@ -12,6 +12,7 @@ from intric.authentication.auth_models import (
     ApiKeyState,
     ApiKeyStateReasonCode,
     ApiKeyScopeType,
+    ApiKeyV2InDB,
 )
 from intric.main.logging import get_logger
 
@@ -101,7 +102,7 @@ class ApiKeyScopeRevoker:
 
     async def _revoke_keys(
         self,
-        keys: list,
+        keys: list[ApiKeyV2InDB],
         *,
         reason_code: ApiKeyStateReasonCode,
         reason_text: str | None = None,
@@ -187,7 +188,7 @@ class ApiKeyScopeRevoker:
         reason_text: str | None = None,
     ) -> int:
         """Revoke all keys a user owns that are scoped to a space or its resources."""
-        all_keys: list = []
+        all_keys: list[ApiKeyV2InDB] = []
 
         # Space-scoped keys (user-owned only — service keys survive member removal)
         space_keys = await self.api_key_repo.list_filtered(

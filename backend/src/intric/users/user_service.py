@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from enum import Enum
 import random
 from typing import TYPE_CHECKING, Optional, cast
 from uuid import UUID, uuid5, NAMESPACE_URL
@@ -690,6 +691,7 @@ class UserService:
             query = sa.select(Apps.space_id).where(Apps.id == scope_id)
         else:
             return None
+        assert self._session is not None
         return await self._session.scalar(query)
 
     async def _is_space_member(self, space_id: UUID, user_id: UUID) -> bool:
@@ -701,6 +703,7 @@ class UserService:
             .where(SpacesUsers.space_id == space_id, SpacesUsers.user_id == user_id)
             .limit(1)
         )
+        assert self._session is not None
         return await self._session.scalar(query) is not None
 
     async def _build_service_user(self, key: ApiKeyV2InDB) -> "UserInDB":
@@ -1491,9 +1494,8 @@ class UserService:
         if sample_rate <= 0 or random.random() > sample_rate:
             return
 
-        ownership = getattr(key, "ownership", "user")
-        if hasattr(ownership, "value"):
-            ownership = ownership.value
+        ownership_raw = getattr(key, "ownership", "user")
+        ownership = ownership_raw.value if isinstance(ownership_raw, Enum) else str(ownership_raw)
 
         extra: dict[str, object] = {
             "scope_type": key.scope_type,
@@ -1569,9 +1571,8 @@ class UserService:
             if origin:
                 extra["origin"] = origin
 
-        ownership = getattr(key, "ownership", "user")
-        if hasattr(ownership, "value"):
-            ownership = ownership.value
+        ownership_raw = getattr(key, "ownership", "user")
+        ownership = ownership_raw.value if isinstance(ownership_raw, Enum) else str(ownership_raw)
         is_service = ownership == "service"
 
         if is_service:

@@ -585,7 +585,7 @@ class TenantRepository:
             sa.update(Tenants)
             .where(Tenants.id == tenant_id)
             .values(
-                favorite_providers=cast(favorites, JSONB),
+                favorite_providers=sa_cast(favorites, JSONB),
                 updated_at=datetime.now(timezone.utc),
             )
             .returning(Tenants)

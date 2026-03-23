@@ -419,9 +419,8 @@ class SpaceActor:
 
         # Only service keys need synthetic role derivation —
         # user keys authenticate as a real user who has actual membership.
-        ownership = getattr(key, "ownership", "user")
-        if hasattr(ownership, "value"):
-            ownership = ownership.value
+        ownership_raw = getattr(key, "ownership", "user")
+        ownership = ownership_raw.value if isinstance(ownership_raw, Enum) else str(ownership_raw)
         if ownership != "service":
             return None
 
