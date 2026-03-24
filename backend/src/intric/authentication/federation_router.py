@@ -353,13 +353,13 @@ async def get_federation_status(
     This endpoint helps the login page decide which authentication UI to show:
     - Single-tenant API federation: Exactly 1 active tenant with API-configured federation
     - Multi-tenant federation: Federation per tenant is enabled
-    - Global OIDC: Environment-based OIDC (federation_per_tenant_enabled=false)
+    - Global OIDC: Environment-based OIDC (federation_enabled=false)
     - No federation: Fall back to username/password
 
     Returns:
         FederationStatusResponse with:
         - has_single_tenant_federation: True if exactly 1 active tenant with API federation config
-        - has_multi_tenant_federation: True if federation_per_tenant_enabled with >1 tenants
+        - has_multi_tenant_federation: True if federation_enabled with >1 tenants
         - has_global_oidc_config: True if OIDC_* env vars are configured
         - tenant_count: Number of active tenants
     """
@@ -370,13 +370,13 @@ async def get_federation_status(
     tenants = await tenant_repo.get_all_active()
     tenant_count = len(tenants)
 
-    # Check if global OIDC env vars are configured (used when federation_per_tenant_enabled=false)
+    # Check if global OIDC env vars are configured (used when federation_enabled=false)
     has_global_oidc = bool(
         settings.oidc_discovery_endpoint and settings.oidc_client_secret
     )
 
     # Multi-tenant mode: federation per tenant is enabled with multiple tenants
-    if settings.federation_per_tenant_enabled and tenant_count > 1:
+    if settings.federation_enabled and tenant_count > 1:
         return FederationStatusResponse(
             has_single_tenant_federation=False,
             has_multi_tenant_federation=True,
@@ -388,9 +388,9 @@ async def get_federation_status(
     # - Exactly 1 active tenant
     # - Has API-configured federation (non-empty federation_config JSONB)
     # - Federation config has required fields
-    # - Only applies when federation_per_tenant_enabled=true
+    # - Only applies when federation_enabled=true
     has_single_federation = False
-    if settings.federation_per_tenant_enabled and tenant_count == 1:
+    if settings.federation_enabled and tenant_count == 1:
         tenant = tenants[0]
         # Check if tenant has API-configured federation (non-empty federation_config JSONB)
         if tenant.federation_config and len(tenant.federation_config) > 0:
@@ -531,14 +531,14 @@ async def initiate_auth(
                 detail="No active tenant found",
             )
 
-        # Handle multi-tenant mode with federation_per_tenant_enabled=true
-        if settings.federation_per_tenant_enabled:
+        # Handle multi-tenant mode with federation_enabled=true
+        if settings.federation_enabled:
             # Allow single-tenant flow if exactly 1 active tenant exists
             if len(tenants) != 1:
                 logger.error(
                     "Tenant parameter missing in multi-tenant mode with multiple tenants",
                     extra={
-                        "federation_per_tenant_enabled": True,
+                        "federation_enabled": True,
                         "tenant_count": len(tenants),
                     },
                 )
@@ -553,11 +553,11 @@ async def initiate_auth(
                 extra={
                     "tenant_id": str(tenant_obj.id),
                     "tenant_name": tenant_obj.name,
-                    "federation_per_tenant_enabled": True,
+                    "federation_enabled": True,
                 },
             )
         else:
-            # Global OIDC mode (federation_per_tenant_enabled=false):
+            # Global OIDC mode (federation_enabled=false):
             # Use first active tenant with global OIDC_* env vars
             # All tenants share the same IdP configuration (no per-tenant routing)
             tenant_obj = tenants[0]
@@ -567,7 +567,7 @@ async def initiate_auth(
                     "tenant_id": str(tenant_obj.id),
                     "tenant_name": tenant_obj.name,
                     "tenant_count": len(tenants),
-                    "federation_per_tenant_enabled": False,
+                    "federation_enabled": False,
                 },
             )
     else:

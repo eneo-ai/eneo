@@ -7,7 +7,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 
-from pydantic import computed_field, field_validator, model_validator
+from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Version manifest lookup:
@@ -262,8 +262,12 @@ class Settings(BaseSettings):
     export_max_concurrent_per_tenant: int = 2  # Max concurrent exports per tenant
     export_progress_interval: int = 5000  # Update progress every N records
 
-    # Federation per tenant feature flag
-    federation_per_tenant_enabled: bool = False
+    # Federation feature flag. Supports both single-tenant and multi-tenant setups.
+    federation_enabled: bool = False
+    federation_per_tenant_enabled: Optional[bool] = Field(
+        default=None,
+        description="Deprecated alias for federation_enabled.",
+    )
 
     # OIDC redirect safety controls
     oidc_state_ttl_seconds: int = 600
@@ -381,7 +385,7 @@ class Settings(BaseSettings):
     sharepoint_max_download_bytes: int = 50 * 1024 * 1024
 
     # Generic encryption key for sensitive data (HTTP auth, tenant API keys, etc.)
-    # Required when TENANT_CREDENTIALS_ENABLED=true or FEDERATION_PER_TENANT_ENABLED=true
+    # Required when TENANT_CREDENTIALS_ENABLED=true or FEDERATION_ENABLED=true
     # Also needed for worker/crawler HTTP authentication
     # Generate with: uv run python -m intric.cli.generate_encryption_key
     encryption_key: Optional[str] = None
@@ -411,24 +415,53 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
+    def resolve_deprecated_federation_flag(self):
+        """Support FEDERATION_PER_TENANT_ENABLED as a deprecated fallback alias."""
+        explicit_fields = self.model_fields_set
+        has_primary = "federation_enabled" in explicit_fields
+        has_deprecated = (
+            "federation_per_tenant_enabled" in explicit_fields
+            and self.federation_per_tenant_enabled is not None
+        )
+
+        if not has_deprecated:
+            return self
+
+        logging.warning(
+            "FEDERATION_PER_TENANT_ENABLED is deprecated and will be removed in a future release. "
+            "Use FEDERATION_ENABLED instead."
+        )
+
+        if has_primary:
+            if self.federation_per_tenant_enabled != self.federation_enabled:
+                logging.warning(
+                    "FEDERATION_ENABLED and deprecated FEDERATION_PER_TENANT_ENABLED are both set with "
+                    "different values. Using FEDERATION_ENABLED."
+                )
+            return self
+
+        self.federation_enabled = bool(self.federation_per_tenant_enabled)
+        return self
+
+    @model_validator(mode="after")
     def validate_encryption_key_requirements(self):
         """
         Validate that encryption_key is present and valid when features requiring it are enabled.
 
         Encryption is required for:
         - TENANT_CREDENTIALS_ENABLED=true (tenant-specific API keys)
-        - FEDERATION_PER_TENANT_ENABLED=true (tenant-specific IdPs)
+        - FEDERATION_ENABLED=true (tenant-specific IdPs)
         - Worker/crawler HTTP authentication
         """
         encryption_required = (
-            self.tenant_credentials_enabled or self.federation_per_tenant_enabled
+            self.tenant_credentials_enabled or self.federation_enabled
         )
 
         if encryption_required:
             if not self.encryption_key or not self.encryption_key.strip():
                 logging.error(
                     "ENCRYPTION_KEY is required when TENANT_CREDENTIALS_ENABLED=true "
-                    "or FEDERATION_PER_TENANT_ENABLED=true.\n"
+                    "or FEDERATION_ENABLED=true.\n"
                     "Generate key: uv run python -m intric.cli.generate_encryption_key"
                 )
                 sys.exit(1)

@@ -26,7 +26,7 @@ class DummySettings(SimpleNamespace):
             "oidc_redirect_grace_period_seconds": 900,
             "strict_oidc_redirect_validation": True,
             "tenant_credentials_enabled": False,
-            "federation_per_tenant_enabled": False,
+            "federation_enabled": False,
             "public_origin": "https://global.example.com",
             "openai_api_key": None,
             "anthropic_api_key": None,
@@ -239,7 +239,7 @@ async def test_initiate_auth_uses_additional_redirect_uri_from_query_param(monke
         updated_at=datetime.now(timezone.utc),
     )
 
-    dummy_settings = DummySettings(federation_per_tenant_enabled=True)
+    dummy_settings = DummySettings(federation_enabled=True)
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
 
     container = MockContainer(
@@ -282,7 +282,7 @@ async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
     )
 
     dummy_settings = DummySettings(
-        federation_per_tenant_enabled=False,
+        federation_enabled=False,
         oidc_discovery_endpoint="https://idp.example.com/.well-known/openid-configuration",
         oidc_client_id="client",
         oidc_client_secret="secret",
@@ -318,7 +318,7 @@ async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
-    dummy_settings = DummySettings(federation_per_tenant_enabled=True)
+    dummy_settings = DummySettings(federation_enabled=True)
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
 
     redis_client = FakeRedis()
@@ -426,7 +426,7 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
 @pytest.mark.asyncio
 async def test_auth_callback_accepts_additional_redirect_uri(monkeypatch):
     dummy_settings = DummySettings(
-        federation_per_tenant_enabled=True,
+        federation_enabled=True,
         oidc_redirect_grace_period_seconds=0,
         strict_oidc_redirect_validation=True,
     )
@@ -535,7 +535,7 @@ async def test_auth_callback_accepts_additional_redirect_uri(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bad_email", ["@example.com", "user@@example.com"])
 async def test_auth_callback_rejects_invalid_email_format(monkeypatch, bad_email):
-    dummy_settings = DummySettings(federation_per_tenant_enabled=True)
+    dummy_settings = DummySettings(federation_enabled=True)
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
 
     redis_client = FakeRedis()
@@ -746,7 +746,7 @@ class MockContainerForJIT:
 @pytest.mark.asyncio
 async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
     """Test that JIT provisioning creates a user when enabled and user doesn't exist."""
-    dummy_settings = DummySettings(federation_per_tenant_enabled=True)
+    dummy_settings = DummySettings(federation_enabled=True)
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
 
     redis_client = FakeRedis()
@@ -867,7 +867,7 @@ async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
 @pytest.mark.asyncio
 async def test_jit_provisioning_returns_403_when_disabled(monkeypatch):
     """Test that login fails with 403 when JIT provisioning is disabled and user doesn't exist."""
-    dummy_settings = DummySettings(federation_per_tenant_enabled=True)
+    dummy_settings = DummySettings(federation_enabled=True)
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
 
     redis_client = FakeRedis()

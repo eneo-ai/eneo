@@ -345,14 +345,14 @@ class CredentialResolver:
 
     def get_federation_config(self) -> dict:
         """
-        Get federation config with strict resolution based on federation_per_tenant_enabled flag.
+        Get federation config with strict resolution based on federation_enabled flag.
 
         Resolution logic:
-        - federation_per_tenant_enabled=true (multi-tenant mode):
+        - federation_enabled=true (multi-tenant mode):
           1. Tenant has federation_config in DB? → Use it exclusively (decrypt client_secret)
           2. No tenant federation_config? → ERROR (strict mode, no fallback to env)
 
-        - federation_per_tenant_enabled=false (single-tenant mode):
+        - federation_enabled=false (single-tenant mode):
           1. ONLY use global OIDC_* env vars (ignore DB config even if present)
           2. No env vars? → ERROR
 
@@ -362,9 +362,9 @@ class CredentialResolver:
         Raises:
             ValueError: No IdP configured (strict mode or no env vars in single-tenant mode)
         """
-        # SINGLE-TENANT MODE (federation_per_tenant_enabled=false):
+        # SINGLE-TENANT MODE (federation_enabled=false):
         # ONLY use environment variables, never check database
-        if not self.settings.federation_per_tenant_enabled:
+        if not self.settings.federation_enabled:
             if self.settings.oidc_discovery_endpoint and self.settings.oidc_client_secret:
                 config = {
                     "provider": "mobilityguard",  # Legacy global provider
@@ -380,7 +380,7 @@ class CredentialResolver:
                     extra={
                         "credential_source": "global",
                         "mode": "single-tenant",
-                        "federation_per_tenant_enabled": False,
+                        "federation_enabled": False,
                         "metric_name": "federation.global.resolved",
                         "metric_value": 1,
                     },
@@ -389,7 +389,7 @@ class CredentialResolver:
 
             # No global env vars configured
             logger.error(
-                "No global OIDC configuration found (federation_per_tenant_enabled=false)",
+                "No global OIDC configuration found (federation_enabled=false)",
                 extra={
                     "tenant_id": str(self.tenant.id) if self.tenant else None,
                     "mode": "single-tenant",
@@ -397,11 +397,11 @@ class CredentialResolver:
             )
             raise ValueError(
                 "No identity provider configured. "
-                "federation_per_tenant_enabled is false, so only global OIDC_* environment variables are used. "
+                "federation_enabled is false, so only global OIDC_* environment variables are used. "
                 "Please set OIDC_DISCOVERY_ENDPOINT, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET in your .env file."
             )
 
-        # MULTI-TENANT MODE (federation_per_tenant_enabled=true):
+        # MULTI-TENANT MODE (federation_enabled=true):
         # Check tenant-specific federation config in database
         if self.tenant and self.tenant.federation_config:
             config = self.tenant.federation_config.copy()
@@ -452,27 +452,27 @@ class CredentialResolver:
                     "tenant_name": self.tenant.name,
                     "provider": config.get("provider"),
                     "credential_source": "tenant",
-                    "federation_per_tenant_enabled": True,
+                    "federation_enabled": True,
                     "metric_name": "federation.tenant.resolved",
                     "metric_value": 1,
                 },
             )
             return config
 
-        # Strict mode: When federation_per_tenant_enabled=true, each tenant MUST configure their own
-        if self.settings.federation_per_tenant_enabled and self.tenant:
+        # Strict mode: When federation_enabled=true, each tenant MUST configure their own
+        if self.settings.federation_enabled and self.tenant:
             logger.error(
                 f"No federation config found for tenant {self.tenant.name} (strict mode)",
                 extra={
                     "tenant_id": str(self.tenant.id),
                     "tenant_name": self.tenant.name,
                     "mode": "strict",
-                    "federation_per_tenant_enabled": True,
+                    "federation_enabled": True,
                 },
             )
             raise ValueError(
                 f"No identity provider configured for tenant '{self.tenant.name}'. "
-                f"federation_per_tenant_enabled is true - each tenant must configure their own IdP in the database. "
+                f"federation_enabled is true - each tenant must configure their own IdP in the database. "
                 f"Please configure federation via:\n"
                 f"PUT /api/v1/sysadmin/tenants/{self.tenant.id}/federation"
             )
@@ -482,7 +482,7 @@ class CredentialResolver:
             "No federation config available",
             extra={
                 "tenant_id": str(self.tenant.id) if self.tenant else None,
-                "federation_per_tenant_enabled": self.settings.federation_per_tenant_enabled,
+                "federation_enabled": self.settings.federation_enabled,
             },
         )
         raise ValueError(
@@ -551,7 +551,7 @@ class CredentialResolver:
 
         if not origin:
             # Context-aware error message
-            if self.settings.federation_per_tenant_enabled and self.tenant:
+            if self.settings.federation_enabled and self.tenant:
                 # Strict mode: tenant MUST configure their own origin
                 logger.error(
                     f"No canonical_public_origin configured for tenant {self.tenant.name} (strict mode)",
@@ -563,7 +563,7 @@ class CredentialResolver:
                 )
                 raise ValueError(
                     f"No public origin configured for tenant '{self.tenant.name}'. "
-                    f"Federation per tenant is enabled - each tenant must configure canonical_public_origin. "
+                    f"Federation is enabled - each tenant must configure canonical_public_origin. "
                     f"Please configure via:\n"
                     f"PUT /api/v1/sysadmin/tenants/{self.tenant.id}/federation\n"
                     f'Body: {{"canonical_public_origin": "https://your-tenant.eneo.se"}}'

@@ -1,6 +1,8 @@
 """
 Test to validate that settings can be properly mocked and overridden for integration tests.
 """
+import logging
+
 import pytest
 
 from intric.main.config import Settings, get_settings, reset_settings, set_settings
@@ -144,6 +146,86 @@ def test_settings_database_url_construction():
 
     # Test sync database URL
     assert settings.sync_database_url == "postgresql://myuser:mypassword@myhost:5433/mydb"
+
+
+def _set_minimal_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    values = {
+        "POSTGRES_USER": "test",
+        "POSTGRES_HOST": "localhost",
+        "POSTGRES_PASSWORD": "test",
+        "POSTGRES_PORT": "5432",
+        "POSTGRES_DB": "test",
+        "REDIS_HOST": "localhost",
+        "REDIS_PORT": "6379",
+        "UPLOAD_FILE_TO_SESSION_MAX_SIZE": "1000",
+        "UPLOAD_IMAGE_TO_SESSION_MAX_SIZE": "500",
+        "UPLOAD_MAX_FILE_SIZE": "2000",
+        "TRANSCRIPTION_MAX_FILE_SIZE": "1500",
+        "MAX_IN_QUESTION": "100",
+        "API_PREFIX": "/api",
+        "API_KEY_LENGTH": "32",
+        "API_KEY_HEADER_NAME": "X-API-Key",
+        "JWT_AUDIENCE": "test",
+        "JWT_ISSUER": "test",
+        "JWT_EXPIRY_TIME": "3600",
+        "JWT_ALGORITHM": "HS256",
+        "JWT_SECRET": "test-secret",
+        "JWT_TOKEN_PREFIX": "Bearer",
+        "URL_SIGNING_KEY": "test-signing-key",
+        "ENCRYPTION_KEY": "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=",
+    }
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+
+
+def test_federation_enabled_env_takes_precedence(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):
+    _set_minimal_settings_env(monkeypatch)
+    monkeypatch.setenv("FEDERATION_ENABLED", "false")
+    monkeypatch.setenv("FEDERATION_PER_TENANT_ENABLED", "true")
+
+    with caplog.at_level(logging.WARNING):
+        settings = Settings(_env_file=None)
+
+    assert settings.federation_enabled is False
+    assert settings.federation_per_tenant_enabled is True
+    assert "Using FEDERATION_ENABLED" in caplog.text
+
+
+def test_deprecated_federation_flag_falls_back_when_primary_missing(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):
+    _set_minimal_settings_env(monkeypatch)
+    monkeypatch.delenv("FEDERATION_ENABLED", raising=False)
+    monkeypatch.setenv("FEDERATION_PER_TENANT_ENABLED", "true")
+
+    with caplog.at_level(logging.WARNING):
+        settings = Settings(_env_file=None)
+
+    assert settings.federation_enabled is True
+    assert "deprecated" in caplog.text
+
+
+def test_matching_federation_flags_do_not_override_primary(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):
+    _set_minimal_settings_env(monkeypatch)
+    monkeypatch.setenv("FEDERATION_ENABLED", "true")
+    monkeypatch.setenv("FEDERATION_PER_TENANT_ENABLED", "true")
+
+    with caplog.at_level(logging.WARNING):
+        settings = Settings(_env_file=None)
+
+    assert settings.federation_enabled is True
+    assert "different values" not in caplog.text
+    assert "deprecated" in caplog.text
+
+
+def test_primary_federation_flag_works_without_deprecated_alias(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):
+    _set_minimal_settings_env(monkeypatch)
+    monkeypatch.setenv("FEDERATION_ENABLED", "true")
+    monkeypatch.delenv("FEDERATION_PER_TENANT_ENABLED", raising=False)
+
+    with caplog.at_level(logging.WARNING):
+        settings = Settings(_env_file=None)
+
+    assert settings.federation_enabled is True
+    assert "FEDERATION_PER_TENANT_ENABLED is deprecated" not in caplog.text
 
 
 @pytest.fixture(autouse=True)
