@@ -250,7 +250,8 @@ class GroupChatService:
 
         # create the prompt for assistant selection
         selection_prompt = self._create_assistant_selection_prompt(question, assistants)
-        assistant_selector_tokens = count_tokens(selection_prompt, completion_model.name)
+        model_name = completion_model.name if completion_model else ""
+        assistant_selector_tokens = count_tokens(selection_prompt, model_name)
         # get model's response
         response = await self.completion_service.get_response(
             model=completion_model,
