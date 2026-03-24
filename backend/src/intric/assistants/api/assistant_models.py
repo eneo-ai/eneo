@@ -27,7 +27,6 @@ from intric.files.file_models import File, FilePublic, FileRestrictions
 from intric.groups_legacy.api.group_models import GroupInDBBase
 from intric.info_blobs.info_blob import InfoBlobInDBNoText
 from intric.integration.presentation.models import IntegrationKnowledgePublic
-from intric.main.config import get_settings
 from intric.main.models import (
     NOT_PROVIDED,
     InDB,
@@ -63,36 +62,6 @@ class ModelInfo(BaseModel):
         """Backward-compat: exposed in JSON responses for frontend."""
         return self.max_input_tokens
 
-
-class TokenEstimateRequest(BaseModel):
-    """Request payload for estimating tokens."""
-
-    text: str = Field(default="", description="User input text to evaluate")
-    file_ids: list[UUID] = Field(
-        default_factory=list, description="List of file IDs to include in the estimate"
-    )
-
-
-class TokenEstimateBreakdown(BaseModel):
-    """Breakdown of token usage by source."""
-
-    prompt: int = Field(description="Tokens used by assistant prompt")
-    text: int = Field(description="Tokens used by user input text")
-    files: int = Field(description="Total tokens used by all files")
-    file_details: dict[str, int] = Field(
-        default_factory=dict, description="Per-file token counts"
-    )
-
-
-class TokenEstimateResponse(BaseModel):
-    """Response model for token usage estimation."""
-
-    tokens: int = Field(description="Total token count")
-    percentage: float = Field(description="Percentage of context window used")
-    limit: int = Field(description="Model's context window limit")
-    breakdown: TokenEstimateBreakdown = Field(
-        description="Token usage breakdown by source"
-    )
 
 
 # Relationship models
@@ -228,7 +197,7 @@ class AssistantPublicBase(InDB):
 class AskAssistant(BaseModel):
     question: str
     session_id: Optional[UUID] = None  # Add optional session_id field
-    files: list[ModelId] = Field(max_length=get_settings().max_in_question, default=[])
+    files: list[ModelId] = Field(default=[])
     stream: bool = False
     tools: Optional[UseTools] = None
 

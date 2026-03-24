@@ -115,7 +115,7 @@ class AppRunService:
             output_source = "provider"
         else:
             num_tokens_output = count_tokens(response.completion.text)
-            output_source = "tiktoken"
+            output_source = "litellm"
 
         logger.info(
             f"[TokenUsage] app_run={app_run_id} — "

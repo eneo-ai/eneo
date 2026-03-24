@@ -4,8 +4,10 @@ from typing import TYPE_CHECKING, Optional, Union
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import (
+    Completion,
     ModelKwargs,
     ResponseType,
+    TokenUsage,
 )
 from intric.main.logging import get_logger
 from intric.assistants.api.assistant_models import AssistantResponse
@@ -580,8 +582,8 @@ class AssistantService:
                     num_tokens_answer = stream_usage.completion_tokens
                     output_source = "provider"
                 else:
-                    num_tokens_answer = count_tokens(response_string) + reasoning_token_count
-                    output_source = "tiktoken"
+                    num_tokens_answer = count_tokens(response_string, completion_model.name) + reasoning_token_count
+                    output_source = "litellm"
 
                 logger.info(
                     f"[TokenUsage] assistant={assistant_id} streaming — "
@@ -603,6 +605,16 @@ class AssistantService:
                     assistant_id=assistant_id,
                     web_search_results=web_search_results,
                     tool_calls=tool_calls if tool_calls else None,
+                )
+
+                # Send token usage event to frontend
+                yield Completion(
+                    text="",
+                    response_type=ResponseType.TOKEN_USAGE,
+                    usage=TokenUsage(
+                        prompt_tokens=num_tokens_question,
+                        completion_tokens=num_tokens_answer,
+                    ),
                 )
 
             return response_stream()
@@ -634,8 +646,8 @@ class AssistantService:
                 num_tokens_answer = response.usage.completion_tokens
                 output_source = "provider"
             else:
-                num_tokens_answer = count_tokens(final_answer) + reasoning_token_count
-                output_source = "tiktoken"
+                num_tokens_answer = count_tokens(final_answer, completion_model.name) + reasoning_token_count
+                output_source = "litellm"
 
             logger.info(
                 f"[TokenUsage] assistant={assistant_id} non-streaming — "
