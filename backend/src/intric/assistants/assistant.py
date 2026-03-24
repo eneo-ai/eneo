@@ -69,6 +69,7 @@ class Assistant(Entity):
         data_retention_days: Optional[int] = None,
         metadata_json: Optional[dict] = {},
         icon_id: Optional[UUID] = None,
+        tool_based_knowledge: bool = False,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
 
@@ -96,6 +97,7 @@ class Assistant(Entity):
         self.type = AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
         self._metadata_json = metadata_json
         self.icon_id = icon_id
+        self.tool_based_knowledge = tool_based_knowledge
 
         # Temporary attributes for update flow - not persisted directly
         self._mcp_server_ids: list[UUID] | None = None
@@ -234,6 +236,7 @@ class Assistant(Entity):
         published: bool | None = None,
         description: Union[str, None, NotProvided] = NOT_PROVIDED,
         insight_enabled: bool | None = None,
+        tool_based_knowledge: bool | None = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
@@ -272,6 +275,9 @@ class Assistant(Entity):
 
         if insight_enabled is not None:
             self.insight_enabled = insight_enabled
+
+        if tool_based_knowledge is not None:
+            self.tool_based_knowledge = tool_based_knowledge
 
         if data_retention_days is not NOT_PROVIDED:
             self.data_retention_days = data_retention_days
@@ -316,6 +322,13 @@ class Assistant(Entity):
             model_kwargs=model_kwargs,
         )
 
+    def _get_embedding_model(self):
+        """Get the embedding model from the first knowledge source."""
+        all_sources = list(self.collections) + list(self.websites) + list(self.integration_knowledge_list)
+        if all_sources:
+            return all_sources[0].embedding_model
+        return None
+
     async def ask(
         self,
         question: str,
@@ -340,7 +353,32 @@ class Assistant(Entity):
         # Fill half the context
         num_chunks = self.completion_model.max_input_tokens // 200 // 2 if version == 2 else 30
 
-        if self.has_knowledge():
+        # Determine knowledge retrieval strategy
+        use_tool_knowledge = (
+            self.has_knowledge()
+            and self.tool_based_knowledge
+            and self.completion_model.supports_tool_calling
+        )
+
+        local_tool_executor = None
+        if use_tool_knowledge:
+            from intric.tools.infrastructure.executor import LocalToolExecutor
+            from intric.tools.infrastructure.search_knowledge import SearchKnowledgeTool
+
+            embedding_model = self._get_embedding_model()
+            search_tool = SearchKnowledgeTool(
+                datastore=references_service.datastore,
+                embedding_model=embedding_model,
+                collections=self.collections,
+                websites=self.websites,
+                integration_knowledge_list=self.integration_knowledge_list,
+            )
+            local_tool_executor = LocalToolExecutor([search_tool])
+            datastore_result = DatastoreResult(
+                chunks=[], no_duplicate_chunks=[], info_blobs=[]
+            )
+        elif self.has_knowledge():
+            # Fallback: traditional system-prompt injection
             datastore_result = await references_service.get_references(
                 question=question,
                 session=session,
@@ -369,8 +407,13 @@ class Assistant(Entity):
             version=version,
             use_image_generation=self.is_default,
             web_search_results=web_search_results,
-            mcp_servers=[] if self.has_knowledge() else self.mcp_servers,
+            mcp_servers=self.mcp_servers,  # Always pass — no more exclusivity
             require_tool_approval=require_tool_approval,
+            local_tool_executor=local_tool_executor,
         )
+
+        # Collect accumulated results from tool-based retrieval
+        if local_tool_executor:
+            datastore_result = local_tool_executor.get_accumulated_datastore_result()
 
         return response, datastore_result

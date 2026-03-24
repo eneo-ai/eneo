@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from intric.completion_models.infrastructure.web_search import WebSearchResult
     from intric.database.database import AsyncSession
     from intric.main.container.container import Container
+    from intric.tools.infrastructure.executor import LocalToolExecutor
     from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.settings.encryption_service import EncryptionService
     from intric.tenants.tenant import TenantInDB
@@ -220,6 +221,7 @@ class CompletionService:
         use_image_generation: bool = False,
         mcp_servers: list["MCPServer"] = [],
         require_tool_approval: bool = False,
+        local_tool_executor: "LocalToolExecutor | None" = None,
     ):
         model_adapter = await self._get_adapter(model)
 
@@ -229,6 +231,9 @@ class CompletionService:
         # Image generation only works on streaming for now
         # And only if feature flag is turned on
         use_image_generation = use_image_generation and stream and get_settings().using_image_generation
+
+        # Get local tool definitions if executor is provided
+        local_tools = local_tool_executor.get_tool_definitions() if local_tool_executor else []
 
         context = self.context_builder.build_context(
             input_str=text_input,
@@ -242,6 +247,7 @@ class CompletionService:
             version=version,
             use_image_generation=use_image_generation,
             web_search_results=web_search_results,
+            local_tools=local_tools,
         )
 
         if extended_logging:
@@ -263,6 +269,7 @@ class CompletionService:
                     context=context,
                     model_kwargs=model_kwargs,
                     mcp_proxy=mcp_proxy,
+                    local_tool_executor=local_tool_executor,
                 )
             finally:
                 # Ensure cleanup for non-streaming
@@ -276,6 +283,7 @@ class CompletionService:
                 context=context,
                 model_kwargs=model_kwargs,
                 mcp_proxy=mcp_proxy,
+                local_tool_executor=local_tool_executor,
             )
 
             # Phase 2: Create generator that iterates the pre-created stream

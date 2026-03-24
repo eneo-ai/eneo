@@ -54,12 +54,13 @@ class FunctionCall:
 
 @dataclass
 class ToolCallMetadata:
-    """Metadata for MCP tool calls to be rendered by frontend."""
+    """Metadata for MCP and local tool calls to be rendered by frontend."""
     server_name: str
     tool_name: str
     arguments: Optional[dict] = None  # The input values provided to the tool
     tool_call_id: Optional[str] = None  # The tool call ID for approval flow
     approved: Optional[bool] = None  # True=approved, False=denied, None=pending/auto
+    result: Optional[str] = None  # The tool result text (for persistence)
 
 
 @dataclass
@@ -197,11 +198,21 @@ class CompletionModelResponse(BaseModel):
     usage: Optional[TokenUsage] = None
 
 
+@dataclass
+class MessageToolCall:
+    """Tool call info stored in conversation history messages."""
+    tool_name: str
+    tool_call_id: str
+    arguments: Optional[dict] = None
+    result: Optional[str] = None
+
+
 class Message(BaseModel):
     question: str
     answer: str
     images: list[File] = []
     generated_images: list[File] = []
+    tool_calls: list[MessageToolCall] = []
 
 
 class Context(BaseModel):

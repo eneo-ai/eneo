@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from intric.completion_models.domain.completion_model import CompletionModel
     from intric.mcp_servers.infrastructure.proxy import MCPProxySession
     from intric.mcp_servers.infrastructure.tool_approval import ToolApprovalManager
+    from intric.tools.infrastructure.executor import LocalToolExecutor
 
 
 class TenantModelAdapter(CompletionModelAdapter):
@@ -300,11 +301,42 @@ class TenantModelAdapter(CompletionModelAdapter):
                     images=msg.images + msg.generated_images,
                 ),
             })
-            # Assistant response
-            messages.append({
-                "role": "assistant",
-                "content": msg.answer or "[image generated]",
-            })
+
+            if msg.tool_calls:
+                # Assistant message with tool calls
+                messages.append({
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": tc.tool_call_id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.tool_name,
+                                "arguments": json.dumps(tc.arguments or {}),
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ],
+                })
+                # Tool results
+                for tc in msg.tool_calls:
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.tool_call_id,
+                        "content": tc.result or "",
+                    })
+                # Final assistant answer
+                messages.append({
+                    "role": "assistant",
+                    "content": msg.answer or "[image generated]",
+                })
+            else:
+                # Simple assistant response (no tools)
+                messages.append({
+                    "role": "assistant",
+                    "content": msg.answer or "[image generated]",
+                })
 
         # Add current question with images
         messages.append({
@@ -397,6 +429,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         context: "Context",
         model_kwargs: dict,
         mcp_proxy: "MCPProxySession | None" = None,
+        local_tool_executor: "LocalToolExecutor | None" = None,
         **kwargs,
     ) -> Completion:
         """
@@ -459,13 +492,26 @@ class TenantModelAdapter(CompletionModelAdapter):
                 if hasattr(msg, "reasoning_content"):
                     logger.debug(f"[DEBUG] reasoning_content: {msg.reasoning_content}")
 
-                # Check if model wants to call MCP tools
-                if hasattr(msg, 'tool_calls') and msg.tool_calls and mcp_proxy:
-                    allowed_tools = mcp_proxy.get_allowed_tool_names()
+                # Check if model wants to call tools (MCP or local)
+                has_tools = hasattr(msg, 'tool_calls') and msg.tool_calls
+                can_execute = mcp_proxy or local_tool_executor
+                max_tool_rounds = 10
+                tool_round = 0
+
+                while has_tools and can_execute and tool_round < max_tool_rounds:
+                    tool_round += 1
+
+                    # Build allowed tool names from all executors
+                    allowed_tools = set()
+                    if mcp_proxy:
+                        allowed_tools |= mcp_proxy.get_allowed_tool_names()
+                    if local_tool_executor:
+                        allowed_tools |= local_tool_executor.get_allowed_tool_names()
+
                     for tc in msg.tool_calls:
                         if tc.function.name not in allowed_tools:
                             raise OpenAIException(
-                                f"Unauthorized MCP tool call: {tc.function.name}"
+                                f"Unauthorized tool call: {tc.function.name}"
                             )
 
                     # Add assistant message with tool calls to conversation
@@ -485,48 +531,50 @@ class TenantModelAdapter(CompletionModelAdapter):
                         ],
                     })
 
-                    # Execute tools via proxy
-                    proxy_calls = [
-                        (
-                            tc.function.name,
+                    # Execute each tool call, routing to the correct executor
+                    for tc in msg.tool_calls:
+                        tc_name = tc.function.name
+                        tc_args = (
                             json.loads(tc.function.arguments)
                             if tc.function.arguments
-                            else {},
+                            else {}
                         )
-                        for tc in msg.tool_calls
-                    ]
-                    results = await mcp_proxy.call_tools_parallel(proxy_calls)
 
-                    # Add tool results to messages
-                    for tc, result in zip(msg.tool_calls, results):
-                        result_text = ""
-                        if result.get("content"):
-                            for ci in result["content"]:
-                                if ci.get("type") == "text":
-                                    result_text += ci.get("text", "")
-                        if result.get("is_error"):
-                            result_text = json.dumps(
-                                {"error": result_text or "Tool execution failed"}
-                            )
+                        if local_tool_executor and local_tool_executor.is_local_tool(tc_name):
+                            result_text = await local_tool_executor.call_tool(tc_name, tc_args)
+                        elif mcp_proxy:
+                            result = await mcp_proxy.call_tool(tc_name, tc_args)
+                            result_text = ""
+                            if result.get("content"):
+                                for ci in result["content"]:
+                                    if ci.get("type") == "text":
+                                        result_text += ci.get("text", "")
+                            if result.get("is_error"):
+                                result_text = json.dumps(
+                                    {"error": result_text or "Tool execution failed"}
+                                )
+                        else:
+                            result_text = json.dumps({"error": f"No executor for tool: {tc_name}"})
+
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
                             "content": result_text,
                         })
 
-                    # Follow-up completion without tools
-                    follow_up_kwargs = {
-                        k: v for k, v in litellm_kwargs.items() if k != "tools"
-                    }
+                    # Follow-up completion (keep tools for potential chaining)
                     response = await litellm.acompletion(
                         model=self.litellm_model,
                         messages=messages,
                         stream=False,
                         drop_params=True,
-                        **follow_up_kwargs,
+                        **litellm_kwargs,
                     )
                     usage = self._accumulate_usage(usage, response)
                     msg = response.choices[0].message
+
+                    # Check if model wants more tool calls
+                    has_tools = hasattr(msg, 'tool_calls') and msg.tool_calls
 
                 if hasattr(msg, "content") and msg.content:
                     completion.text = self._strip_thinking_content(msg.content)
@@ -608,6 +656,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         context: "Context",
         model_kwargs: dict,
         mcp_proxy: "MCPProxySession | None" = None,
+        local_tool_executor: "LocalToolExecutor | None" = None,
         **kwargs,
     ) -> AsyncIterator:
         """
@@ -660,12 +709,13 @@ class TenantModelAdapter(CompletionModelAdapter):
                 **litellm_kwargs,
             )
 
-            # Store context for MCP tool execution in iterate_stream
+            # Store context for tool execution in iterate_stream
             setattr(stream, '_eneo_context', {
                 'messages': messages,
                 'kwargs': litellm_kwargs,
                 'has_tools': bool(all_tools),
                 'mcp_proxy': mcp_proxy,
+                'local_tool_executor': local_tool_executor,
             })
 
             logger.info(
@@ -867,18 +917,27 @@ class TenantModelAdapter(CompletionModelAdapter):
             async for comp in _drain_stream(stream, result):
                 yield comp
 
-            # --- MCP tool call loop ---
-            if result.has_tool_calls and mcp_proxy and eneo_ctx and eneo_ctx.get('has_tools'):
+            # --- Tool call loop (MCP + local tools) ---
+            local_executor = eneo_ctx.get('local_tool_executor') if eneo_ctx else None
+            can_execute_tools = mcp_proxy or local_executor
+
+            if result.has_tool_calls and can_execute_tools and eneo_ctx and eneo_ctx.get('has_tools'):
                 messages = eneo_ctx['messages']
                 litellm_kwargs = eneo_ctx['kwargs']
-                allowed_tools = mcp_proxy.get_allowed_tool_names()
+
+                # Build allowed tool names from all executors
+                allowed_tools = set()
+                if mcp_proxy:
+                    allowed_tools |= mcp_proxy.get_allowed_tool_names()
+                if local_executor:
+                    allowed_tools |= local_executor.get_allowed_tool_names()
 
                 max_rounds = 10
                 tool_round = 0
 
                 while result.has_tool_calls and tool_round < max_rounds:
                     tool_round += 1
-                    logger.info(f"[MCP] Tool round {tool_round}")
+                    logger.info(f"[Tools] Tool round {tool_round}")
 
                     # Reconstruct tool calls from accumulator
                     tool_calls = [
@@ -890,7 +949,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     for tc in tool_calls:
                         name = tc['function']['name']
                         if name not in allowed_tools:
-                            raise OpenAIException(f"Unauthorized MCP tool: {name}")
+                            raise OpenAIException(f"Unauthorized tool: {name}")
 
                     # Build tool metadata for frontend
                     tool_metadata = []
@@ -900,20 +959,32 @@ class TenantModelAdapter(CompletionModelAdapter):
                             args = json.loads(tc['function']['arguments']) if tc['function']['arguments'] else None
                         except json.JSONDecodeError:
                             args = None
-                        info = mcp_proxy.get_tool_info(name)
-                        if info:
-                            sname, tname = info
-                        elif "__" in name:
-                            sname, tname = name.split("__", 1)
+
+                        # Determine server/tool name for display
+                        if local_executor and local_executor.is_local_tool(name):
+                            sname, tname = "intric", name
+                        elif mcp_proxy:
+                            info = mcp_proxy.get_tool_info(name)
+                            if info:
+                                sname, tname = info
+                            elif "__" in name:
+                                sname, tname = name.split("__", 1)
+                            else:
+                                sname, tname = "", name
                         else:
                             sname, tname = "", name
+
                         tool_metadata.append(ToolCallMetadata(
                             server_name=sname, tool_name=tname,
                             arguments=args, tool_call_id=tc['id'],
                         ))
 
-                    # Approval flow
-                    if require_tool_approval and approval_manager:
+                    # Approval flow (only for MCP tools, not local tools)
+                    is_any_mcp = mcp_proxy and any(
+                        not (local_executor and local_executor.is_local_tool(tc['function']['name']))
+                        for tc in tool_calls
+                    )
+                    if require_tool_approval and approval_manager and is_any_mcp:
                         approval_id = str(uuid.uuid4())
                         tool_call_ids = [tc['id'] for tc in tool_calls]
                         approval_manager.request_approval(approval_id, tool_call_ids)
@@ -941,6 +1012,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         approved_tcs = [tc for tc in tool_calls if approval_map.get(tc['id'], False)]
                         denied_tcs = [tc for tc in tool_calls if not approval_map.get(tc['id'], False)]
                     else:
+                        # Yield initial tool call event (no results yet — signals to frontend)
                         yield Completion(
                             response_type=ResponseType.TOOL_CALL,
                             tool_calls_metadata=tool_metadata,
@@ -965,31 +1037,39 @@ class TenantModelAdapter(CompletionModelAdapter):
                         ],
                     })
 
-                    # Execute approved tools
-                    if approved_tcs:
-                        proxy_calls = [
-                            (
-                                tc['function']['name'],
-                                json.loads(tc['function']['arguments'])
-                                if tc['function']['arguments']
-                                else {},
-                            )
-                            for tc in approved_tcs
-                        ]
-                        results = await mcp_proxy.call_tools_parallel(proxy_calls)
-                        for tc, res in zip(approved_tcs, results):
-                            text = ""
+                    # Execute approved tools, routing to correct executor
+                    for tc in approved_tcs:
+                        tc_name = tc['function']['name']
+                        tc_args_str = tc['function']['arguments']
+                        try:
+                            tc_args = json.loads(tc_args_str) if tc_args_str else {}
+                        except json.JSONDecodeError:
+                            tc_args = {}
+
+                        if local_executor and local_executor.is_local_tool(tc_name):
+                            result_text = await local_executor.call_tool(tc_name, tc_args)
+                        elif mcp_proxy:
+                            res = await mcp_proxy.call_tool(tc_name, tc_args)
+                            result_text = ""
                             if res.get("content"):
                                 for ci in res["content"]:
                                     if ci.get("type") == "text":
-                                        text += ci.get("text", "")
+                                        result_text += ci.get("text", "")
                             if res.get("is_error"):
-                                text = json.dumps({"error": text or "Tool execution failed"})
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tc['id'],
-                                "content": text,
-                            })
+                                result_text = json.dumps({"error": result_text or "Tool execution failed"})
+                        else:
+                            result_text = json.dumps({"error": f"No executor for tool: {tc_name}"})
+
+                        # Attach result to metadata for persistence
+                        for tm in tool_metadata:
+                            if tm.tool_call_id == tc['id']:
+                                tm.result = result_text
+
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc['id'],
+                            "content": result_text,
+                        })
 
                     # Add denied tool results
                     for tc in denied_tcs:
@@ -998,6 +1078,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                             "tool_call_id": tc['id'],
                             "content": "Tool execution was denied by user.",
                         })
+
+                    # Yield tool call event with results for persistence
+                    yield Completion(
+                        response_type=ResponseType.TOOL_CALL,
+                        tool_calls_metadata=tool_metadata,
+                    )
 
                     # Follow-up streaming request (keep tools for next round)
                     follow_up = await litellm.acompletion(
@@ -1014,7 +1100,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         yield comp
 
                 if tool_round >= max_rounds:
-                    logger.warning(f"[MCP] Reached max tool rounds ({max_rounds})")
+                    logger.warning(f"[Tools] Reached max tool rounds ({max_rounds})")
 
             # Final stop — attach accumulated usage
             yield Completion(text="", stop=True, usage=result.usage)

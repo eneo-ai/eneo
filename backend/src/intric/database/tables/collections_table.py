@@ -15,6 +15,7 @@ class CollectionsTable(BasePublic):
     __tablename__ = "groups"
 
     name: Mapped[str] = mapped_column(nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(nullable=True)
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     # Foreign keys

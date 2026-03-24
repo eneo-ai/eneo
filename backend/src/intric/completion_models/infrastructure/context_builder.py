@@ -9,10 +9,13 @@ from intric.ai_models.completion_models.completion_model import (
     Context,
     FunctionDefinition,
     Message,
+    MessageToolCall,
 )
 from intric.completion_models.infrastructure.static_prompts import (
     HALLUCINATION_GUARD,
     SHOW_REFERENCES_PROMPT,
+    TOOL_BASED_KNOWLEDGE_PROMPT,
+    TOOL_BASED_KNOWLEDGE_PROMPT_V1,
     TRANSCRIPTION_PROMPT,
 )
 from intric.files.file_models import File, FileType
@@ -80,6 +83,7 @@ class _Prompt:
         self.knowledge = None
         self.web_search_result = None
         self.attachments = None
+        self.tool_knowledge_prompt = None
         self._knowledge_tokens = 0
         self.version = version
 
@@ -88,6 +92,10 @@ class _Prompt:
 
         if self.prompt:
             components.append(self.prompt)
+
+        # Tool-based knowledge prompt (mutually exclusive with inline knowledge)
+        if self.tool_knowledge_prompt:
+            components.append(self.tool_knowledge_prompt)
 
         # Add references prompt if either knowledge or web search results exist
         # but only for version 2
@@ -296,6 +304,9 @@ class _Prompt:
     def add_attachments(self, files: list[File]):
         self.attachments = _build_files_string(files=files)
 
+    def add_tool_knowledge_prompt(self, prompt_text: str):
+        self.tool_knowledge_prompt = prompt_text
+
     def get_tokens_of_knowledge(self):
         return self._knowledge_tokens
 
@@ -351,13 +362,15 @@ class ContextBuilder:
     def _build_messages(
         self, session: Optional[SessionInDB], max_tokens: int, min_len: int = 3
     ):
+        KEEP_FULL_RESULTS_TURNS = 3
+
         if session is None:
             return [], 0
 
         messages = []
         total_tokens = 0
 
-        for message in reversed(session.questions):
+        for turns_from_end, message in enumerate(reversed(session.questions)):
             question = self._build_input(
                 message.question,
                 self._get_files_by_type(message.files, FileType.TEXT),
@@ -370,6 +383,27 @@ class ContextBuilder:
 
             message_tokens = count_tokens(question) + count_tokens(answer)
 
+            # Build tool calls for this message (if any)
+            msg_tool_calls = []
+            if message.tool_calls:
+                for tc in message.tool_calls:
+                    if tc.result and turns_from_end < KEEP_FULL_RESULTS_TURNS:
+                        result = tc.result
+                    elif tc.result:
+                        result = "[search results omitted]"
+                    else:
+                        result = None
+
+                    msg_tool_calls.append(MessageToolCall(
+                        tool_name=tc.tool_name,
+                        tool_call_id=tc.tool_call_id or f"tc_{len(msg_tool_calls)}",
+                        arguments=tc.arguments,
+                        result=result,
+                    ))
+                    # Count tool result tokens
+                    if result:
+                        message_tokens += count_tokens(result)
+
             if len(messages) > min_len and total_tokens + message_tokens > max_tokens:
                 break
 
@@ -380,6 +414,7 @@ class ContextBuilder:
                     answer=answer,
                     images=images,
                     generated_images=generated_images,
+                    tool_calls=msg_tool_calls,
                 ),
             )
 
@@ -402,9 +437,11 @@ class ContextBuilder:
         use_image_generation: bool = False,
         web_search_results: list["WebSearchResult"] = [],
         mcp_tools: list[FunctionDefinition] = [],
+        local_tools: list[FunctionDefinition] = [],
     ):
         tokens_used = 0
         max_tokens_usable = max_tokens - CONTEXT_SIZE_BUFFER  # Leave some room.
+        use_tool_based_knowledge = bool(local_tools)
 
         # Create the input, count the tokens.
         _input_string = self._build_input(
@@ -425,14 +462,25 @@ class ContextBuilder:
         _prompt.add_attachments(
             files=self._get_files_by_type(prompt_files, FileType.TEXT)
         )
-        # Add web search results first so references prompt appears before knowledge
-        _prompt.add_web_search_result(web_search_results=web_search_results)
+
+        if use_tool_based_knowledge:
+            # Tool-based knowledge: add instruction to use the search tool.
+            # Knowledge will be retrieved via tool calls, not injected here.
+            tool_prompt = (
+                TOOL_BASED_KNOWLEDGE_PROMPT if version == 2
+                else TOOL_BASED_KNOWLEDGE_PROMPT_V1
+            )
+            _prompt.add_tool_knowledge_prompt(tool_prompt)
+        else:
+            # Add web search results first so references prompt appears before knowledge
+            _prompt.add_web_search_result(web_search_results=web_search_results)
+
         tokens_used += _prompt.num_tokens
 
-        # Create the messages. When knowledge chunks are present, reserve 80%
-        # for knowledge and cap history to 20%. When there are no chunks the
-        # full remaining budget goes to history.
-        if info_blob_chunks:
+        # Create the messages. When knowledge chunks are present (non-tool mode),
+        # reserve 80% for knowledge and cap history to 20%.
+        # When tool-based or no chunks, full remaining budget goes to history.
+        if info_blob_chunks and not use_tool_based_knowledge:
             max_tokens_messages = (
                 int(max_tokens_usable * (1 - MIN_PERCENTAGE_KNOWLEDGE)) - tokens_used
             )
@@ -451,16 +499,19 @@ class ContextBuilder:
         if tokens_used > max_tokens_usable:
             raise QueryException(tokens_used=tokens_used, token_limit=max_tokens_usable)
 
-        # Add the knowledge in all the space that is left.
-        tokens_left = max_tokens_usable - tokens_used
-        _prompt.add_knowledge(chunks=info_blob_chunks, max_tokens=tokens_left)
-        prompt_text = str(_prompt)
-        tokens_used += _prompt.get_tokens_of_knowledge()
+        if not use_tool_based_knowledge:
+            # Add the knowledge in all the space that is left (traditional mode).
+            tokens_left = max_tokens_usable - tokens_used
+            _prompt.add_knowledge(chunks=info_blob_chunks, max_tokens=tokens_left)
+            tokens_used += _prompt.get_tokens_of_knowledge()
 
-        # Combine image generation tools with MCP tools
+        prompt_text = str(_prompt)
+
+        # Combine image generation tools, local tools, and MCP tools
         functions = []
         if use_image_generation:
             functions.extend(self._functions())
+        functions.extend(local_tools)
         functions.extend(mcp_tools)
 
         return Context(

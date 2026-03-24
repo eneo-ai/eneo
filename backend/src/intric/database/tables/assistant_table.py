@@ -29,6 +29,7 @@ class Assistants(BasePublic):
     insight_enabled: Mapped[bool] = mapped_column(default=False)
     data_retention_days: Mapped[Optional[int]] = mapped_column()
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSONB)
+    tool_based_knowledge: Mapped[bool] = mapped_column(default=False, server_default="false")
     # TODO: refactor since this is a somewhat weird solution having a
     # type column. The reason is bc front-end wants a non-nullable
     # "type" field in a bunch of models. Thus a field with a default

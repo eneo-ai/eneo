@@ -57,7 +57,8 @@ class CollectionCRUDService:
     async def update_collection(
         self,
         collection_id: "UUID",
-        name: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
     ) -> Collection:
         space = await self.space_service.get_space_by_collection(collection_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -65,7 +66,7 @@ class CollectionCRUDService:
             raise UnauthorizedException()
 
         collection = space.get_collection(collection_id=collection_id)
-        collection.update(name=name)
+        collection.update(name=name, description=description)
 
         updated_space = await self.space_repo.update(space=space)
         return updated_space.get_collection(collection_id=collection_id)

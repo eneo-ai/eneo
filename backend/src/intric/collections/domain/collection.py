@@ -27,6 +27,7 @@ class Collection(Entity):
         size: int,
         num_info_blobs: int,
         embedding_model: "EmbeddingModel",
+        description: Optional[str] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.space_id = space_id
@@ -36,6 +37,7 @@ class Collection(Entity):
         self.size = size
         self.num_info_blobs = num_info_blobs
         self.embedding_model = embedding_model
+        self.description = description
 
     @classmethod
     def create(
@@ -44,6 +46,7 @@ class Collection(Entity):
         user: "UserInDB",
         name: str,
         embedding_model: "EmbeddingModel",
+        description: Optional[str] = None,
     ) -> "Collection":
         return cls(
             id=None,
@@ -56,6 +59,7 @@ class Collection(Entity):
             size=0,
             num_info_blobs=0,
             embedding_model=embedding_model,
+            description=description,
         )
 
     @classmethod
@@ -76,8 +80,15 @@ class Collection(Entity):
             size=record.size,
             num_info_blobs=num_info_blobs,
             embedding_model=embedding_model,
+            description=record.description,
         )
 
-    def update(self, name: Union[str, NotProvided] = NOT_PROVIDED):
-        if name is not NOT_PROVIDED:
+    def update(
+        self,
+        name: Union[str, None, NotProvided] = NOT_PROVIDED,
+        description: Union[str, None, NotProvided] = NOT_PROVIDED,
+    ):
+        if name is not NOT_PROVIDED and name is not None:
             self.name = name
+        if description is not NOT_PROVIDED:
+            self.description = description

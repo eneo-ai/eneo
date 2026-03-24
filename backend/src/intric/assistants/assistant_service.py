@@ -305,6 +305,7 @@ class AssistantService:
         attachment_ids: list[UUID] | None = None,
         description: Union[str, NotProvided] = NOT_PROVIDED,
         insight_enabled: Optional[bool] = None,
+        tool_based_knowledge: Optional[bool] = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
@@ -368,27 +369,17 @@ class AssistantService:
             integration_knowledge_list=integration_knowledge_list,
             description=description,
             insight_enabled=insight_enabled,
+            tool_based_knowledge=tool_based_knowledge,
             data_retention_days=data_retention_days,
             metadata_json=metadata_json,
             icon_id=icon_id,
         )
 
-        # Validate mutual exclusivity: knowledge and MCP servers cannot both be active.
-        # Only check when either side is being updated to avoid false positives on
-        # unrelated updates (e.g. renaming an assistant).
+        # Knowledge and MCP servers can now coexist (tool-based knowledge uses
+        # the same tool-call mechanism as MCP).
         knowledge_changing = (
             groups is not None or websites is not None or integration_knowledge_ids is not None
         )
-        mcp_changing = mcp_server_ids is not None
-        if knowledge_changing or mcp_changing:
-            will_have_mcp = (
-                mcp_server_ids is not None and len(mcp_server_ids) > 0
-            ) or (mcp_server_ids is None and assistant.has_mcp())
-            if assistant.has_knowledge() and will_have_mcp:
-                raise BadRequestException(
-                    "Knowledge and MCP servers cannot both be active on an assistant. "
-                    "Remove one before enabling the other."
-                )
 
         # Only validate space references when the relevant fields are actually changing
         self.validate_space_assistant(
@@ -531,8 +522,10 @@ class AssistantService:
                                     None
                                 )
                                 if existing:
-                                    # Update existing entry with approval status
+                                    # Update existing entry with approval status and result
                                     existing.approved = tc.approved
+                                    if tc.result is not None:
+                                        existing.result = tc.result
                                 else:
                                     # Add new tool call
                                     tool_calls.append(
@@ -542,6 +535,7 @@ class AssistantService:
                                             arguments=tc.arguments,
                                             tool_call_id=tc.tool_call_id,
                                             approved=tc.approved,
+                                            result=tc.result,
                                         )
                                     )
                         yield chunk

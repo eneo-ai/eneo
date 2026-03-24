@@ -95,7 +95,9 @@ async def update_group(
     current_user = container.user()
 
     # Update collection
-    collection_updated = await service.update_collection(collection_id=id, name=group.name)
+    collection_updated = await service.update_collection(
+        collection_id=id, name=group.name, description=group.description
+    )
 
     # Get space for context
     space = None

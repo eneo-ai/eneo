@@ -187,6 +187,14 @@ class AssistantUpdatePublic(AssistantCreatePublic):
             "appropriate permissions can see all sessions for this assistant."
         ),
     )
+    tool_based_knowledge: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Whether to use tool-based knowledge retrieval. When enabled, the LLM "
+            "decides when to search the knowledge base via a tool call instead of "
+            "always injecting knowledge into the system prompt."
+        ),
+    )
     data_retention_days: Optional[int] = None
     metadata_json: Optional[dict] = Field(
         default=NOT_PROVIDED,
@@ -306,6 +314,13 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
         description=(
             "Whether insights are enabled for this assistant. If enabled, users with "
             "appropriate permissions can see all sessions for this assistant."
+        ),
+    )
+    tool_based_knowledge: bool = Field(
+        default=False,
+        description=(
+            "Whether to use tool-based knowledge retrieval. When enabled, the LLM "
+            "decides when to search the knowledge base via a tool call."
         ),
     )
     data_retention_days: Optional[int] = Field(

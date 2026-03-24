@@ -67,6 +67,7 @@ class ToolCallInfo(BaseModel):
     arguments: Optional[dict] = None
     tool_call_id: Optional[str] = None  # For tool approval flow
     approved: Optional[bool] = None  # True=approved, False=denied, None=auto-approved or pending
+    result: Optional[str] = None  # The tool result text (for conversation history)
 
 
 class QuestionAdd(QuestionBase):

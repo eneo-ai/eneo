@@ -3244,6 +3244,8 @@ export interface components {
       completion_model_kwargs?: {
         [key: string]: unknown;
       };
+      /** Completion Model Id */
+      completion_model_id?: string | null;
       wizard?: components["schemas"]["AppTemplateWizard"] | null;
       /** Input Type */
       input_type: string;
@@ -3719,6 +3721,12 @@ export interface components {
        */
       insight_enabled: boolean;
       /**
+       * Tool Based Knowledge
+       * @description Whether to use tool-based knowledge retrieval. When enabled, the LLM decides when to search the knowledge base via a tool call.
+       * @default false
+       */
+      tool_based_knowledge?: boolean;
+      /**
        * Data Retention Days
        * @description Number of days to retain data for this assistant
        */
@@ -3803,6 +3811,8 @@ export interface components {
       completion_model_kwargs?: {
         [key: string]: unknown;
       };
+      /** Completion Model Id */
+      completion_model_id?: string | null;
       wizard?: components["schemas"]["AssistantTemplateWizard"] | null;
       /** Icon Name */
       icon_name?: string | null;
@@ -4310,6 +4320,8 @@ export interface components {
       permissions?: components["schemas"]["ResourcePermission"][];
       /** Name */
       name: string;
+      /** Description */
+      description?: string | null;
       embedding_model: components["schemas"]["EmbeddingModelPublic"];
       metadata: components["schemas"]["CollectionMetadata"];
       /**
@@ -4321,7 +4333,9 @@ export interface components {
     /** CollectionUpdate */
     CollectionUpdate: {
       /** Name */
-      name: string;
+      name?: string | null;
+      /** Description */
+      description?: string | null;
     };
     /** CompletionModel */
     CompletionModel: {
@@ -5336,6 +5350,12 @@ export interface components {
        */
       insight_enabled?: boolean;
       /**
+       * Tool Based Knowledge
+       * @description Whether to use tool-based knowledge retrieval. When enabled, the LLM decides when to search the knowledge base via a tool call.
+       * @default false
+       */
+      tool_based_knowledge?: boolean;
+      /**
        * Data Retention Days
        * @description Number of days to retain data for this assistant
        */
@@ -6282,6 +6302,8 @@ export interface components {
       permissions?: components["schemas"]["ResourcePermission"][];
       /** Name */
       name: string;
+      /** Description */
+      description?: string | null;
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -8280,6 +8302,11 @@ export interface components {
        * @description Whether insights are enabled for this assistant. If enabled, users with appropriate permissions can see all sessions for this assistant.
        */
       insight_enabled?: boolean | null;
+      /**
+       * Tool Based Knowledge
+       * @description Whether to use tool-based knowledge retrieval. When enabled, the LLM decides when to search the knowledge base via a tool call instead of always injecting knowledge into the system prompt.
+       */
+      tool_based_knowledge?: boolean | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
       /**
@@ -10535,6 +10562,8 @@ export interface components {
       tool_call_id?: string | null;
       /** Approved */
       approved?: boolean | null;
+      /** Result */
+      result?: string | null;
     };
     /**
      * ToolChangePublic
@@ -12173,6 +12202,11 @@ export interface components {
            * @default null
            */
           approved?: boolean | null;
+          /**
+           * Result
+           * @default null
+           */
+          result?: string | null;
         };
       };
     };
@@ -12224,6 +12258,11 @@ export interface components {
            * @default null
            */
           approved?: boolean | null;
+          /**
+           * Result
+           * @default null
+           */
+          result?: string | null;
         };
       };
     };

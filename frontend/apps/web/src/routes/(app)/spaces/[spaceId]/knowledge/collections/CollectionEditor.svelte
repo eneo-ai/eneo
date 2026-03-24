@@ -14,8 +14,9 @@
   } = getSpacesManager();
 
   export let mode: "update" | "create" = "create";
-  export let collection: { id: string; name: string } | undefined;
+  export let collection: { id: string; name: string; description?: string | null } | undefined;
   let collectionName = collection?.name ?? "";
+  let collectionDescription = collection?.description ?? "";
   let embeddingModel: { id: string } | undefined = undefined;
 
   let isProcessing = false;
@@ -25,7 +26,7 @@
     try {
       collection = await intric.groups.update({
         group: { id: collection.id },
-        update: { name: collectionName }
+        update: { name: collectionName, description: collectionDescription || null }
       });
 
       refreshCurrentSpace();
@@ -95,6 +96,11 @@
           required
           class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
         ></Input.Text>
+        <Input.Text
+          bind:value={collectionDescription}
+          label={m.description()}
+          class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
+        ></Input.Text>
         <SelectEmbeddingModel
           hideWhenNoOptions
           bind:value={embeddingModel}
@@ -105,6 +111,11 @@
           bind:value={collectionName}
           label={m.name()}
           required
+          class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
+        ></Input.Text>
+        <Input.Text
+          bind:value={collectionDescription}
+          label={m.description()}
           class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
         ></Input.Text>
       {/if}

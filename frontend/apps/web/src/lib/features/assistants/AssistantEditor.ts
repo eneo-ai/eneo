@@ -20,6 +20,7 @@ function initAssistantEditor(data: {
     defaults: {
       prompt: { description: "", text: "" },
       insight_enabled: false,
+      tool_based_knowledge: false,
       mcp_tools: []
     },
     updateResource: async (resource, changes) => {
@@ -31,6 +32,7 @@ function initAssistantEditor(data: {
       name: true,
       description: true,
       insight_enabled: true,
+      tool_based_knowledge: true,
       completion_model: { id: true },
       completion_model_kwargs: true,
       prompt: { description: true, text: true },

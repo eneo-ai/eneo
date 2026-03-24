@@ -17,6 +17,17 @@ HALLUCINATION_GUARD = (
     " the answer could not be found."
 )
 
+TOOL_BASED_KNOWLEDGE_PROMPT = """You have access to a search_knowledge tool to find information from the knowledge base.
+You MUST use this tool whenever the user asks a question that could be answered using the available knowledge sources.
+Do not answer factual questions from memory — always search first.
+
+""" + SHOW_REFERENCES_PROMPT
+
+TOOL_BASED_KNOWLEDGE_PROMPT_V1 = """You have access to a search_knowledge tool to find information from the knowledge base.
+You MUST use this tool whenever the user asks a question that could be answered using the available knowledge sources.
+Do not answer factual questions from memory — always search first.
+If the answer cannot be found in the search results, respond that the answer could not be found."""
+
 TRANSCRIPTION_PROMPT = """In the input, marked with \"transcription: \"\"<text>\"\"\" is transcribed audio. Please provide a detailed summary of the transcription(s) in the language of the transcribed text."""
 
 ANALYSIS_PROMPT = (
