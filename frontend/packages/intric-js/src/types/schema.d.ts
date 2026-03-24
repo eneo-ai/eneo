@@ -3978,8 +3978,6 @@ export interface components {
     AttachmentLimits: {
       /** Formats */
       formats: components["schemas"]["FormatLimit"][];
-      /** Max In Question */
-      max_in_question: number;
     };
     /**
      * AuditConfigResponse

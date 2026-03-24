@@ -86,7 +86,7 @@
 	}
 
 	let inputError = $state<{ message: string; details?: string } | null>(null);
-	let errorInputSnapshot = { question: '', attachments: 0 };
+	let errorInputSnapshot = { question: '', attachmentIds: '' };
 
 	function parseTokenError(errorMessage: string): { used: number; limit: number } | null {
 		const match = errorMessage.match(/(\d[\d,]*)\s*tokens?\s*used.*?limit\s*(?:is\s*)?(\d[\d,]*)/i);
@@ -122,7 +122,8 @@
 			clearUploads();
 		} catch (error: unknown) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
-			const isContextError = errorMessage.toLowerCase().includes('context') || errorMessage.toLowerCase().includes('token');
+			const lower = errorMessage.toLowerCase();
+			const isContextError = lower.includes('context window') || lower.includes('context length') || lower.includes('tokens used') || lower.includes('too long');
 
 			if (isContextError) {
 				const tokenInfo = parseTokenError(errorMessage);
@@ -138,19 +139,18 @@
 			} else {
 				inputError = { message: m.request_failed() };
 			}
-			errorInputSnapshot = { question: $question, attachments: $attachments.length };
+			errorInputSnapshot = { question: $question, attachmentIds: $attachments.map(a => a.fileRef?.id ?? '').sort().join(',') };
 		}
 	}
 
 	// Clear error when user changes input (text or attachments)
 	$effect(() => {
 		const q = $question;
-		const a = $attachments.length;
-		// Use untrack to avoid re-triggering when inputError itself changes
+		const currentIds = $attachments.map(a => a.fileRef?.id ?? '').sort().join(',');
 		const snap = errorInputSnapshot;
-		if (snap.question && (q !== snap.question || a !== snap.attachments)) {
+		if (snap.question && (q !== snap.question || currentIds !== snap.attachmentIds)) {
 			inputError = null;
-			errorInputSnapshot = { question: '', attachments: 0 };
+			errorInputSnapshot = { question: '', attachmentIds: '' };
 		}
 	});
 
