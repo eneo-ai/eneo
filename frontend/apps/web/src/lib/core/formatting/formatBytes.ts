@@ -1,5 +1,6 @@
 /**
- * Format a size attribute in bytes as human-readable file size, e.g. `1024` will return `"1 KiB"`
+ * Format a size attribute in bytes as human-readable file size.
+ * Uses base-1024 with conventional KB/MB/GB labels.
  * Returns "- Bytes" for negative values
  */
 export function formatBytes(bytes: number, decimals = 0) {
@@ -8,7 +9,7 @@ export function formatBytes(bytes: number, decimals = 0) {
 
   const k = 1024;
   const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ["Bytes", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"];
+  const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
 
   const i = Math.floor(Math.log(bytes) / Math.log(k));
 
