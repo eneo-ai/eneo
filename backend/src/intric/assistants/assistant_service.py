@@ -570,13 +570,13 @@ class AssistantService:
                     version=version,
                     get_id_func=lambda chunk: chunk.info_blob_id,
                 )
-                # Prefer actual provider token counts, fall back to tiktoken estimates
+                # Prefer actual provider token counts, fall back to litellm estimates
                 if stream_usage and stream_usage.prompt_tokens is not None:
                     num_tokens_question = stream_usage.prompt_tokens + assistant_selector_tokens
                     input_source = "provider"
                 else:
                     num_tokens_question = response.total_token_count + assistant_selector_tokens
-                    input_source = "tiktoken"
+                    input_source = "litellm"
 
                 if stream_usage and stream_usage.completion_tokens is not None:
                     num_tokens_answer = stream_usage.completion_tokens
@@ -634,13 +634,13 @@ class AssistantService:
                 version=version,
                 get_id_func=lambda chunk: chunk.info_blob_id,
             )
-            # Prefer actual provider token counts, fall back to tiktoken estimates
+            # Prefer actual provider token counts, fall back to litellm estimates
             if response.usage and response.usage.prompt_tokens is not None:
                 num_tokens_question = response.usage.prompt_tokens + assistant_selector_tokens
                 input_source = "provider"
             else:
                 num_tokens_question = response.total_token_count + assistant_selector_tokens
-                input_source = "tiktoken"
+                input_source = "litellm"
 
             if response.usage and response.usage.completion_tokens is not None:
                 num_tokens_answer = response.usage.completion_tokens
