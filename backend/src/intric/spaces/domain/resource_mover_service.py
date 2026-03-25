@@ -90,7 +90,7 @@ class ResourceMoverService:
                 "User does not have permission to create collections in the space"
             )
 
-        await self.group_service.import_group_to_space(
+        await self.group_service.move_group_owner_to_space(
             group_id=collection_id,
             space_id=space_id,
         )
