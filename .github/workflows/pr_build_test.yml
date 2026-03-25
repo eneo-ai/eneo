@@ -54,9 +54,13 @@ jobs:
       - name: Set up Python
         run: uv python install 3.11
 
+      - name: Verify lockfile consistency
+        working-directory: ./backend
+        run: uv lock --check
+
       - name: Install dependencies
         working-directory: ./backend
-        run: uv sync --all-groups
+        run: uv sync --frozen --all-groups
 
       - name: Run unit tests
         working-directory: ./backend
@@ -89,9 +93,13 @@ jobs:
       - name: Set up Python
         run: uv python install 3.11
 
+      - name: Verify lockfile consistency
+        working-directory: ./backend
+        run: uv lock --check
+
       - name: Install dependencies
         working-directory: ./backend
-        run: uv sync --all-groups
+        run: uv sync --frozen --all-groups
 
       - name: Run integration tests
         working-directory: ./backend
