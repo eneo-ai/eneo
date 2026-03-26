@@ -15,6 +15,7 @@
 	import { getAppContext } from '$lib/core/AppContext';
 	import { m } from '$lib/paraglide/messages';
 	import { Wrench, AlertTriangle } from 'lucide-svelte';
+	import { getErrorMessage } from '$lib/core/errors/getErrorMessage';
 
 	const chat = getChatService();
 	const { featureFlags } = getAppContext();
@@ -137,7 +138,7 @@
 					inputError = { message: m.context_window_exceeded() };
 				}
 			} else {
-				inputError = { message: m.request_failed() };
+				inputError = { message: getErrorMessage(error) };
 			}
 			errorInputSnapshot = { question: $question, attachmentIds: $attachments.map(a => a.fileRef?.id ?? '').sort().join(',') };
 		}
@@ -189,8 +190,16 @@
 
 <form
 	onsubmit={async (e) => { e.preventDefault(); await ask(); }}
-	class="border-default bg-primary ring-dimmer relative flex w-[100%] max-w-[74ch] flex-col border-t p-1.5 shadow-md ring-offset-0 transition-all duration-300 md:w-full md:rounded-xl md:border {chat.hasCompletionModel ? 'focus-within:border-stronger hover:border-stronger focus-within:shadow-lg hover:ring-4' : 'pointer-events-none opacity-50'}"
+	class="border-default bg-primary ring-dimmer relative flex w-[100%] max-w-[74ch] flex-col border-t p-1.5 shadow-md ring-offset-0 transition-all duration-300 md:w-full md:rounded-xl md:border {chat.hasCompletionModel ? 'focus-within:border-stronger hover:border-stronger focus-within:shadow-lg hover:ring-4' : ''}"
 >
+	{#if !chat.hasCompletionModel}
+		<div class="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-primary/80 backdrop-blur-[1px]">
+			<div class="flex items-center gap-2 px-4 text-sm text-secondary">
+				<AlertTriangle class="h-4 w-4 flex-shrink-0" />
+				<p>{m.no_completion_model_description()}</p>
+			</div>
+		</div>
+	{/if}
 	<div class="relative">
 		<MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
 		{#if chat.askQuestion.isLoading}
