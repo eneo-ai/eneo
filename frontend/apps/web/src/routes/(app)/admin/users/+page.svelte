@@ -18,8 +18,7 @@
   const numberFormatter = new Intl.NumberFormat('sv-SE');
 
   setAdminUserCtx({
-    customRoles: data.customRoles,
-    defaultRoles: data.defaultRoles,
+    roles: data.roles,
     userGroups: data.userGroups
   });
 

@@ -17,8 +17,7 @@
       accessor: (user) => user,
       header: m.roles(),  // Changed to plural
       cell: (item) => {
-        // Combine predefined_roles AND custom roles
-        const roles = [...(item.value.predefined_roles || []), ...(item.value.roles || [])];
+        const roles = item.value.roles || [];
         const content: { label: string; color: Label.LabelColor }[] = roles.map((role) => {
           return { label: role.name, color: "blue" };
         });
@@ -30,7 +29,7 @@
         },
         tableFilter: {
           getFilterValue(value) {
-            const roles = [...(value.predefined_roles || []), ...(value.roles || [])];
+            const roles = value.roles || [];
             return roles.map((role: Role) => role.name).join(" ");
           }
         }

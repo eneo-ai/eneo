@@ -144,12 +144,9 @@ async def update_space(
     current_user = container.user()
 
     # Require spaces permission for shared spaces
-    space_check = await service.get_space(id)
-    if not space_check.is_personal():
-        validate_permission(current_user, Permission.SHARED_SPACES)
-
-    # Get old state
     old_space = await service.get_space(id)
+    if not old_space.is_personal():
+        validate_permission(current_user, Permission.SHARED_SPACES)
 
     def _get_model_ids_or_none(models: list[ModelId] | None):
         if models is None:
@@ -288,12 +285,9 @@ async def delete_space(
     user = container.user()
 
     # Require spaces permission for shared spaces
-    space_check = await service.get_space(id)
-    if not space_check.is_personal():
-        validate_permission(user, Permission.SHARED_SPACES)
-
-    # Get space info before deletion (for audit log context)
     space = await service.get_space(id)
+    if not space.is_personal():
+        validate_permission(user, Permission.SHARED_SPACES)
 
     # Delete space
     await service.delete_space(id=id)

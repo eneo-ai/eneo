@@ -14,18 +14,18 @@
 
   export let role: Role;
   export let permissions: Array<{ name: Permission; description: string }>;
-  export let disabled = false;
+  export let isDefault = false;
 
   const intric = getIntric();
 </script>
 
-<RoleEditor {role} {disabled} {permissions} mode="update"></RoleEditor>
+<RoleEditor {role} {permissions} {isDefault} mode="update"></RoleEditor>
 
 <div class="w-2"></div>
 
 <Dialog.Root alert>
   <Dialog.Trigger asFragment let:trigger>
-    <Button is={trigger} label={m.delete_role()} variant="destructive" padding="icon" {disabled}
+    <Button is={trigger} label={m.delete_role()} variant="destructive" padding="icon"
       ><svg
         xmlns="http://www.w3.org/2000/svg"
         fill="none"

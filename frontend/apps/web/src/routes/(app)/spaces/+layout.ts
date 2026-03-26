@@ -8,7 +8,7 @@ export const load = async (event) => {
   const { intric, user } = await event.parent();
 
   // Only fetch org space if user has admin permission
-  const orgPromise = user?.predefined_roles?.some((role) =>
+  const orgPromise = user?.roles?.some((role) =>
     role.permissions?.includes('admin')
   )
     ? intric.spaces

@@ -43,7 +43,7 @@
   let isPersonalSpace = $currentSpace.personal;
 
   // Check if user has admin permission
-  let isAdmin = data.user?.predefined_roles?.some((role: any) =>
+  let isAdmin = data.user?.roles?.some((role: any) =>
     role.permissions?.includes('admin')
   ) ?? false;
 

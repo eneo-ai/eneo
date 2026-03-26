@@ -24,15 +24,23 @@
   export let mode: "update" | "create" = "create";
   export let role: Role = emptyRole;
   export let permissions: Array<{ name: Permission; description: string }>;
-  export let disabled = false;
+  export let isDefault = false;
+  export let templates: Array<{ name: string; permissions: string[] }> = [];
 
   let showDialog: Dialog.OpenState;
+  let showResetConfirm: Dialog.OpenState;
+  let showDefaultConfirm: Dialog.OpenState;
   let isProcessing = false;
 
   const editableRole = makeEditable(role ?? emptyRole);
 
-  // Instead of deleting and re-creating this component, sveltekit will update the role variable
-  // We update this component's view based on the role's value
+  $: hasTemplate = "predefined_source" in role && role.predefined_source;
+
+  function applyTemplate(template: { name: string; permissions: string[] }) {
+    editableRole.name = template.name;
+    editableRole.permissions = [...template.permissions] as Permission[];
+  }
+
   async function watchChanges(role: Role) {
     if (role !== editableRole.getOriginal()) {
       editableRole.updateWithValue(role);
@@ -73,6 +81,29 @@
     isProcessing = false;
   }
 
+  async function resetToTemplate() {
+    isProcessing = true;
+    try {
+      await intric.roles.resetToDefault(role);
+      invalidate("admin:roles:load");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+    isProcessing = false;
+  }
+
+  async function setAsDefault() {
+    isProcessing = true;
+    try {
+      await intric.roles.setAsDefault(role);
+      invalidate("admin:roles:load");
+      window.location.reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+    isProcessing = false;
+  }
+
   function togglePermission(permission: Permission) {
     const index = editableRole.permissions.findIndex((current) => current === permission);
     if (index < 0) {
@@ -83,6 +114,7 @@
   }
 </script>
 
+<!-- Main edit/create dialog -->
 <Dialog.Root bind:isOpen={showDialog}>
   {#if mode === "create"}
     <Dialog.Trigger asFragment let:trigger>
@@ -90,7 +122,7 @@
     </Dialog.Trigger>
   {:else}
     <Dialog.Trigger asFragment let:trigger>
-      <Button is={trigger}>{disabled ? m.view() : m.edit()}</Button>
+      <Button is={trigger}>{m.edit()}</Button>
     </Dialog.Trigger>
   {/if}
 
@@ -102,12 +134,23 @@
     {/if}
 
     <Dialog.Section>
+      {#if mode === "create" && templates.length > 0}
+        <div class="border-default border-b px-4 py-4">
+          <div class="pb-2 pl-3 font-medium">Start from template</div>
+          <div class="flex flex-wrap gap-2 pl-3">
+            {#each templates as template}
+              <Button variant="outlined" on:click={() => applyTemplate(template)}
+                >{template.name}</Button
+              >
+            {/each}
+          </div>
+        </div>
+      {/if}
       <Input.Text
         bind:value={editableRole.name}
         label={m.role_name()}
         description={m.descriptive_name_for_this_role()}
         required
-        {disabled}
         class="border-default hover:bg-hover-stronger border-b px-4 py-4"
       ></Input.Text>
       <div class="px-4 py-4">
@@ -122,7 +165,6 @@
               class="border-default hover:bg-hover-dimmer flex flex-col gap-1 border-b px-4 py-4 last-of-type:border-b-0"
             >
               <Input.Switch
-                {disabled}
                 class="capitalize"
                 value={editableRole.permissions.includes(permission.name)}
                 sideEffect={() => {
@@ -137,20 +179,79 @@
     </Dialog.Section>
 
     <Dialog.Controls let:close>
-      {#if !disabled}
-        <Button is={close}>{m.cancel()}</Button>
-        {#if mode === "create"}
-          <Button variant="primary" on:click={create} type="submit" disabled={isProcessing}
-            >{isProcessing ? m.creating() : m.create_role()}</Button
-          >
-        {:else}
-          <Button variant="primary" on:click={edit} disabled={isProcessing}
-            >{isProcessing ? m.saving() : m.save_changes()}</Button
-          >
-        {/if}
+      {#if mode === "update"}
+        <div class="flex flex-1 gap-2">
+          {#if hasTemplate}
+            <Button
+              variant="outlined"
+              disabled={isProcessing}
+              on:click={() => {
+                $showDialog = false;
+                $showResetConfirm = true;
+              }}
+            >
+              Reset to template
+            </Button>
+          {/if}
+          {#if !isDefault}
+            <Button
+              variant="outlined"
+              disabled={isProcessing}
+              on:click={() => {
+                $showDialog = false;
+                $showDefaultConfirm = true;
+              }}
+            >
+              Set as default
+            </Button>
+          {/if}
+        </div>
+      {/if}
+
+      <Button is={close}>{m.cancel()}</Button>
+      {#if mode === "create"}
+        <Button variant="primary" on:click={create} type="submit" disabled={isProcessing}
+          >{isProcessing ? m.creating() : m.create_role()}</Button
+        >
       {:else}
-        <Button is={close} variant="outlined">{m.done()}</Button>
+        <Button variant="primary" on:click={edit} disabled={isProcessing}
+          >{isProcessing ? m.saving() : m.save_changes()}</Button
+        >
       {/if}
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>
+
+<!-- Reset to template confirmation -->
+{#if mode === "update" && hasTemplate}
+  <Dialog.Root bind:isOpen={showResetConfirm} alert>
+    <Dialog.Content width="small">
+      <Dialog.Title>Reset to template</Dialog.Title>
+      <Dialog.Description>
+        Are you sure you want to reset <span class="italic">{role.name}</span> to its original template?
+        Both the name and permissions will be restored to their defaults.
+      </Dialog.Description>
+      <Dialog.Controls let:close>
+        <Button is={close}>{m.cancel()}</Button>
+        <Button is={close} variant="primary" on:click={resetToTemplate}>Reset</Button>
+      </Dialog.Controls>
+    </Dialog.Content>
+  </Dialog.Root>
+{/if}
+
+<!-- Set as default confirmation -->
+{#if mode === "update" && !isDefault}
+  <Dialog.Root bind:isOpen={showDefaultConfirm} alert>
+    <Dialog.Content width="small">
+      <Dialog.Title>Set as default role</Dialog.Title>
+      <Dialog.Description>
+        Are you sure you want to set <span class="italic">{role.name}</span> as the default role? New
+        users will automatically be assigned this role.
+      </Dialog.Description>
+      <Dialog.Controls let:close>
+        <Button is={close}>{m.cancel()}</Button>
+        <Button is={close} variant="primary" on:click={setAsDefault}>Confirm</Button>
+      </Dialog.Controls>
+    </Dialog.Content>
+  </Dialog.Root>
+{/if}

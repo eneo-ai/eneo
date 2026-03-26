@@ -46,7 +46,7 @@ def _make_space(personal: bool = False):
     return SimpleNamespace(
         id=uuid4(),
         name="Test Space",
-        personal=personal,
+        is_personal=lambda: personal,
     )
 
 

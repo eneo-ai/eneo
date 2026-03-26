@@ -826,8 +826,8 @@ export interface paths {
   };
   "/api/v1/admin/predefined-roles/": {
     /**
-     * Get predefined roles for tenant
-     * @description Retrieves all predefined roles available for the authenticated tenant. Requires tenant admin (owner) permissions. Returns the same structure as the sysadmin endpoint for consistency.
+     * Get default roles for tenant
+     * @description Retrieves all default (predefined-source) roles for the authenticated tenant.
      */
     get: operations["get_predefined_roles_api_v1_admin_predefined_roles__get"];
   };
@@ -2657,6 +2657,10 @@ export interface paths {
     /** Get Permissions */
     get: operations["get_permissions_api_v1_roles_permissions__get"];
   };
+  "/api/v1/roles/templates/": {
+    /** Get Role Templates */
+    get: operations["get_role_templates_api_v1_roles_templates__get"];
+  };
   "/api/v1/roles/": {
     /** Get Roles */
     get: operations["get_roles_api_v1_roles__get"];
@@ -2670,6 +2674,18 @@ export interface paths {
     post: operations["update_role_api_v1_roles__role_id___post"];
     /** Delete Role By Id */
     delete: operations["delete_role_by_id_api_v1_roles__role_id___delete"];
+  };
+  "/api/v1/roles/{role_id}/reset/": {
+    /** Reset Role To Default */
+    post: operations["reset_role_to_default_api_v1_roles__role_id__reset__post"];
+  };
+  "/api/v1/roles/{role_id}/set-default/": {
+    /** Set Default Role */
+    post: operations["set_default_role_api_v1_roles__role_id__set_default__post"];
+  };
+  "/api/v1/roles/clear-default/": {
+    /** Clear Default Role */
+    post: operations["clear_default_role_api_v1_roles_clear_default__post"];
   };
   "/api/healthz": {
     /** Get Healthz */
@@ -3244,6 +3260,8 @@ export interface components {
       completion_model_kwargs?: {
         [key: string]: unknown;
       };
+      /** Completion Model Id */
+      completion_model_id?: string | null;
       wizard?: components["schemas"]["AppTemplateWizard"] | null;
       /** Input Type */
       input_type: string;
@@ -3803,6 +3821,8 @@ export interface components {
       completion_model_kwargs?: {
         [key: string]: unknown;
       };
+      /** Completion Model Id */
+      completion_model_id?: string | null;
       wizard?: components["schemas"]["AssistantTemplateWizard"] | null;
       /** Icon Name */
       icon_name?: string | null;
@@ -7926,19 +7946,6 @@ export interface components {
        */
       count: number;
     };
-    /** PaginatedResponse[PredefinedRolePublic] */
-    PaginatedResponse_PredefinedRolePublic_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["PredefinedRolePublic"][];
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      count: number;
-    };
     /** PaginatedResponse[PromptSparse] */
     PaginatedResponse_PromptSparse_: {
       /**
@@ -8371,7 +8378,7 @@ export interface components {
     };
     /** PartialPropUserUpdate */
     PartialPropUserUpdate: {
-      predefined_role?: components["schemas"]["ModelId"] | null;
+      role?: components["schemas"]["ModelId"] | null;
       state?: components["schemas"]["UserState"] | null;
     };
     /** PartialServiceUpdatePublic */
@@ -8468,38 +8475,6 @@ export interface components {
       /** Description */
       description: string;
     };
-    /** PredefinedRoleInDB */
-    PredefinedRoleInDB: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /** Name */
-      name: string;
-      /** Permissions */
-      permissions: components["schemas"]["Permission"][];
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-    };
-    /** PredefinedRolePublic */
-    PredefinedRolePublic: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /** Name */
-      name: string;
-      /** Permissions */
-      permissions: components["schemas"]["Permission"][];
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-    };
     /** PrivacyPolicy */
     PrivacyPolicy: {
       /** Url */
@@ -8575,7 +8550,7 @@ export interface components {
     };
     /** PropUserInvite */
     PropUserInvite: {
-      predefined_role?: components["schemas"]["ModelId"] | null;
+      role?: components["schemas"]["ModelId"] | null;
       state?: components["schemas"]["UserState"] | null;
       /**
        * Email
@@ -8691,6 +8666,8 @@ export interface components {
        * Format: uuid
        */
       tenant_id: string;
+      /** Predefined Source */
+      predefined_source?: string | null;
     };
     /** RolePublic */
     RolePublic: {
@@ -8707,6 +8684,8 @@ export interface components {
       name: string;
       /** Permissions */
       permissions: components["schemas"]["Permission"][];
+      /** Predefined Source */
+      predefined_source?: string | null;
     };
     /** RoleUpdateRequest */
     RoleUpdateRequest: {
@@ -8718,7 +8697,7 @@ export interface components {
     /** RolesPaginatedResponse */
     RolesPaginatedResponse: {
       roles: components["schemas"]["PaginatedResponse_RolePublic_"];
-      predefined_roles: components["schemas"]["PaginatedResponse_PredefinedRolePublic_"];
+      predefined_roles: components["schemas"]["PaginatedResponse_RolePublic_"];
     };
     /** RunAppRequest */
     RunAppRequest: {
@@ -10038,6 +10017,8 @@ export interface components {
        * @default false
        */
       security_enabled?: boolean;
+      /** Default Role Id */
+      default_role_id?: string | null;
       /**
        * Modules
        * @default []
@@ -10157,6 +10138,8 @@ export interface components {
       security_enabled?: boolean;
       /** Privacy Policy */
       privacy_policy?: string | null;
+      /** Default Role Id */
+      default_role_id?: string | null;
     };
     /**
      * TenantSharePointAppCreate
@@ -10331,6 +10314,8 @@ export interface components {
       state?: components["schemas"]["TenantState"] | null;
       /** Security Enabled */
       security_enabled?: boolean | null;
+      /** Default Role Id */
+      default_role_id?: string | null;
     };
     /**
      * TenantWithMaskedCredentials
@@ -10380,6 +10365,8 @@ export interface components {
        * @default false
        */
       security_enabled?: boolean;
+      /** Default Role Id */
+      default_role_id?: string | null;
       /**
        * Modules
        * @default []
@@ -10820,16 +10807,10 @@ export interface components {
       quota_limit?: number | null;
       /**
        * Roles
-       * @description List of custom role IDs to assign to the user
+       * @description List of role IDs to assign to the user
        * @default []
        */
       roles?: components["schemas"]["ModelId"][];
-      /**
-       * Predefined Roles
-       * @description List of predefined role IDs to assign to the user
-       * @default []
-       */
-      predefined_roles?: components["schemas"]["ModelId"][];
     };
     /** UserAddSuperAdmin */
     UserAddSuperAdmin: {
@@ -10856,16 +10837,10 @@ export interface components {
       quota_limit?: number | null;
       /**
        * Roles
-       * @description List of custom role IDs to assign to the user
+       * @description List of role IDs to assign to the user
        * @default []
        */
       roles?: components["schemas"]["ModelId"][];
-      /**
-       * Predefined Roles
-       * @description List of predefined role IDs to assign to the user
-       * @default []
-       */
-      predefined_roles?: components["schemas"]["ModelId"][];
       /**
        * Tenant Id
        * Format: uuid
@@ -10910,8 +10885,6 @@ export interface components {
       state: components["schemas"]["UserState"];
       /** Roles */
       roles: components["schemas"]["RolePublic"][];
-      /** Predefined Roles */
-      predefined_roles: components["schemas"]["PredefinedRolePublic"][];
       /** User Groups */
       user_groups: components["schemas"]["UserGroupRead"][];
     };
@@ -10965,11 +10938,6 @@ export interface components {
        * @default []
        */
       roles?: components["schemas"]["RoleInDB"][];
-      /**
-       * Predefined Roles
-       * @default []
-       */
-      predefined_roles?: components["schemas"]["PredefinedRoleInDB"][];
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -11037,8 +11005,6 @@ export interface components {
       state: components["schemas"]["UserState"];
       /** Roles */
       roles: components["schemas"]["RolePublic"][];
-      /** Predefined Roles */
-      predefined_roles: components["schemas"]["PredefinedRolePublic"][];
       /** User Groups */
       user_groups: components["schemas"]["UserGroupRead"][];
       api_key: components["schemas"]["ApiKey"];
@@ -11182,11 +11148,6 @@ export interface components {
        * @default []
        */
       roles?: components["schemas"]["RoleInDB"][];
-      /**
-       * Predefined Roles
-       * @default []
-       */
-      predefined_roles?: components["schemas"]["PredefinedRoleInDB"][];
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -11289,8 +11250,6 @@ export interface components {
       quota_limit?: number | null;
       /** Roles */
       roles: components["schemas"]["RolePublic"][];
-      /** Predefined Roles */
-      predefined_roles: components["schemas"]["PredefinedRolePublic"][];
       /** User Groups */
       user_groups: components["schemas"]["UserGroupRead"][];
     };
@@ -11490,14 +11449,9 @@ export interface components {
       quota_limit?: number | null;
       /**
        * Roles
-       * @description List of custom role IDs to assign (replaces existing roles)
+       * @description List of role IDs to assign (replaces existing roles)
        */
       roles?: components["schemas"]["ModelId"][] | null;
-      /**
-       * Predefined Roles
-       * @description List of predefined role IDs to assign (replaces existing predefined roles)
-       */
-      predefined_roles?: components["schemas"]["ModelId"][] | null;
       /** @description User state (invited/active/inactive) */
       state?: components["schemas"]["UserState"] | null;
     };
@@ -16573,27 +16527,23 @@ export interface operations {
     };
   };
   /**
-   * Get predefined roles for tenant
-   * @description Retrieves all predefined roles available for the authenticated tenant. Requires tenant admin (owner) permissions. Returns the same structure as the sysadmin endpoint for consistency.
+   * Get default roles for tenant
+   * @description Retrieves all default (predefined-source) roles for the authenticated tenant.
    */
   get_predefined_roles_api_v1_admin_predefined_roles__get: {
     responses: {
-      /** @description List of predefined roles successfully retrieved */
+      /** @description List of default roles successfully retrieved */
       200: {
         content: {
-          "application/json": components["schemas"]["PredefinedRoleInDB"][];
+          "application/json": components["schemas"]["RolePublic"][];
         };
       };
-      /** @description Authentication required (invalid or missing API key) */
+      /** @description Authentication required */
       401: {
         content: never;
       };
-      /** @description Admin permissions required (owner role) */
+      /** @description Admin permissions required */
       403: {
-        content: never;
-      };
-      /** @description Internal server error while fetching predefined roles */
-      500: {
         content: never;
       };
     };
@@ -24485,6 +24435,17 @@ export interface operations {
       };
     };
   };
+  /** Get Role Templates */
+  get_role_templates_api_v1_roles_templates__get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+    };
+  };
   /** Get Roles */
   get_roles_api_v1_roles__get: {
     responses: {
@@ -24603,6 +24564,79 @@ export interface operations {
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Reset Role To Default */
+  reset_role_to_default_api_v1_roles__role_id__reset__post: {
+    parameters: {
+      path: {
+        role_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RolePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Set Default Role */
+  set_default_role_api_v1_roles__role_id__set_default__post: {
+    parameters: {
+      path: {
+        role_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RolePublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Clear Default Role */
+  clear_default_role_api_v1_roles_clear_default__post: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
         };
       };
     };

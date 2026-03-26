@@ -125,7 +125,8 @@ def downgrade() -> None:
         SELECT DISTINCT ON (predefined_source)
             gen_random_uuid(), predefined_source, permissions, created_at, updated_at
         FROM roles
-        WHERE predefined_source IS NOT NULL;
+        WHERE predefined_source IS NOT NULL
+        ORDER BY predefined_source, updated_at DESC;
         """
     )
 

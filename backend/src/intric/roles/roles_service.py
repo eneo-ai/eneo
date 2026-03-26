@@ -111,6 +111,12 @@ class RolesService:
 
         await self._ensure_admin_survives(role, removing_admin=False, deleting=True)
 
+        # Prevent deleting the tenant's default role
+        if self.user.tenant and self.user.tenant.default_role_id == role_id:
+            raise BadRequestException(
+                "Cannot delete the tenant's default role. Change the default role first."
+            )
+
         return await self.repo.delete_role_by_id(role_id)
 
     @validate_permissions(Permission.ADMIN)
