@@ -4,13 +4,18 @@ import pytest
 
 from intric.actors import SpaceAction, SpaceActor, SpaceResourceType
 from intric.modules.module import Modules
+from intric.roles.permissions import Permission
+
+# All tenant-level permissions — test users should have these by default
+# so tests focus on space-role logic, not tenant-permission blocking
+ALL_PERMISSIONS = set(Permission)
 
 
 # Mocking external dependencies
 class MockUser:
     def __init__(self, id, permissions=None, modules=None, role=None, user_groups_ids=None):
         self.id = id
-        self.permissions = permissions or []
+        self.permissions = permissions if permissions is not None else []
         self.modules = modules or []
         self.role = role
         self.user_groups_ids = user_groups_ids or set()
@@ -64,17 +69,17 @@ def owner_user():
 
 @pytest.fixture
 def viewer_user():
-    return MockUser(id=2, role=MockSpaceRole.VIEWER)
+    return MockUser(id=2, role=MockSpaceRole.VIEWER, permissions=ALL_PERMISSIONS)
 
 
 @pytest.fixture
 def editor_user():
-    return MockUser(id=3, role=MockSpaceRole.EDITOR)
+    return MockUser(id=3, role=MockSpaceRole.EDITOR, permissions=ALL_PERMISSIONS)
 
 
 @pytest.fixture
 def admin_user():
-    return MockUser(id=4, role=MockSpaceRole.ADMIN)
+    return MockUser(id=4, role=MockSpaceRole.ADMIN, permissions=ALL_PERMISSIONS)
 
 @pytest.fixture
 def organization_space():
@@ -270,13 +275,13 @@ def test_viewers_can_only_read_published_resources(
 @pytest.fixture
 def group_member_user():
     """A user who is a member of group 100."""
-    return MockUser(id=10, user_groups_ids={100})
+    return MockUser(id=10, user_groups_ids={100}, permissions=ALL_PERMISSIONS)
 
 
 @pytest.fixture
 def multi_group_user():
     """A user who is a member of multiple groups."""
-    return MockUser(id=11, user_groups_ids={100, 200, 300})
+    return MockUser(id=11, user_groups_ids={100, 200, 300}, permissions=ALL_PERMISSIONS)
 
 
 @pytest.fixture

@@ -161,7 +161,6 @@ async def test_debug_user_permissions(admin_user, db_container):
     print(f"User ID: {admin_user.id}")
     print(f"User email: {admin_user.email}")
     print(f"User roles: {getattr(admin_user, 'roles', 'N/A')}")
-    print(f"User predefined_roles: {getattr(admin_user, 'predefined_roles', 'N/A')}")
     print(f"User permissions: {getattr(admin_user, 'permissions', 'N/A')}")
     print(f"User is_superuser: {getattr(admin_user, 'is_superuser', 'N/A')}")
     

@@ -156,27 +156,28 @@ async def test_user_2(db_container, test_tenant_2, test_settings):
         )
         user_id = cur.fetchone()[0]
 
-        # Get or create Owner role
-        check_role_query = sql.SQL("SELECT id FROM predefined_roles WHERE name = %s")
-        cur.execute(check_role_query, ("Owner",))
+        # Get or create Owner role (tenant-scoped)
+        check_role_query = sql.SQL("SELECT id FROM roles WHERE name = %s AND tenant_id = %s")
+        cur.execute(check_role_query, ("Owner", tenant_id))
         role = cur.fetchone()
 
         if role is None:
             owner_permissions = ["admin", "assistants", "services", "collections",
-                               "insights", "AI", "editor", "websites"]
+                               "insights", "AI", "editor", "websites", "shared_spaces"]
             add_role_query = sql.SQL(
-                "INSERT INTO predefined_roles (name, permissions) VALUES (%s, %s) RETURNING id"
+                "INSERT INTO roles (name, permissions, tenant_id, predefined_source) "
+                "VALUES (%s, %s, %s, %s) RETURNING id"
             )
-            cur.execute(add_role_query, ("Owner", owner_permissions))
-            predefined_role_id = cur.fetchone()[0]
+            cur.execute(add_role_query, ("Owner", owner_permissions, tenant_id, "Owner"))
+            role_id = cur.fetchone()[0]
         else:
-            predefined_role_id = role[0]
+            role_id = role[0]
 
         # Assign Owner role to user
         assign_role_query = sql.SQL(
-            "INSERT INTO users_predefined_roles (user_id, predefined_role_id) VALUES (%s, %s)"
+            "INSERT INTO users_roles (user_id, role_id) VALUES (%s, %s)"
         )
-        cur.execute(assign_role_query, (user_id, predefined_role_id))
+        cur.execute(assign_role_query, (user_id, role_id))
 
         conn.commit()
         cur.close()

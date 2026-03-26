@@ -113,11 +113,10 @@ async def test_register_user_creates_a_user_and_settings(service: UserService):
     )
     expected_user_in_db = UserInDB(
         **expected_user_upsert.model_dump(
-            exclude_none=True, exclude={"predefined_roles"}
+            exclude_none=True, exclude={"roles"}
         ),
         id=uuid4(),
         tenant=TEST_TENANT,
-        predefined_roles=[],
     )
 
     expected_settings = SettingsUpsert(
@@ -176,22 +175,21 @@ async def test_invite_user_creates_user_and_settings(service: UserService):
 
     role_id = uuid4()
     user_invite = PropUserInvite(
-        email="invitee@test.com", predefined_role=ModelId(id=role_id)
+        email="invitee@test.com", role=ModelId(id=role_id)
     )
 
     expected_user_upsert = UserAdd(
         email="invitee@test.com",
         tenant_id=TEST_TENANT.id,
         state=UserState.INVITED,
-        predefined_roles=[ModelId(id=role_id)],
+        roles=[ModelId(id=role_id)],
     )
     expected_user_in_db = UserInDB(
         **expected_user_upsert.model_dump(
-            exclude_none=True, exclude={"predefined_roles"}
+            exclude_none=True, exclude={"roles"}
         ),
         id=uuid4(),
         tenant=TEST_TENANT,
-        predefined_roles=[],
     )
 
     service.repo.add.return_value = expected_user_in_db
