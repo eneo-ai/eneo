@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from pydantic.networks import HttpUrl
 
+from intric.main.config import validate_redirect_path, validate_redirect_uri
 from intric.main.models import InDB
 from intric.modules.module import ModuleInDB
 
@@ -168,11 +169,14 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             redirect_path = v["redirect_path"]
             if not isinstance(redirect_path, str):
                 raise ValueError("redirect_path must be a string")
-            if not redirect_path.startswith("/"):
-                raise ValueError("redirect_path must start with /")
+            try:
+                v["redirect_path"] = validate_redirect_path(redirect_path)
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid redirect_path in federation_config: {e}"
+                )
 
         if "additional_redirect_uris" in v:
-            from intric.main.config import validate_redirect_uri
 
             additional_redirect_uris = v["additional_redirect_uris"]
             if not isinstance(additional_redirect_uris, list):

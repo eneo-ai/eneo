@@ -1,7 +1,11 @@
 """Tests for validate_public_origin() helper."""
 
 import pytest
-from intric.main.config import validate_public_origin
+from intric.main.config import (
+    validate_public_origin,
+    validate_redirect_path,
+    validate_redirect_uri,
+)
 
 
 def test_validates_https_required():
@@ -116,3 +120,15 @@ def test_rejects_whitespace_only():
     """Whitespace-only string is rejected."""
     with pytest.raises(ValueError, match="cannot be an empty string"):
         validate_public_origin("   ")
+
+
+@pytest.mark.parametrize("uri", ["https://example.com/callback?x=1", "https://example.com/callback#frag"])
+def test_redirect_uri_rejects_query_and_fragment(uri):
+    with pytest.raises(ValueError, match="must not include query or fragment"):
+        validate_redirect_uri(uri)
+
+
+@pytest.mark.parametrize("path", ["/auth/callback/", "/auth/callback?x=1", "/auth/callback#frag"])
+def test_redirect_path_rejects_non_canonical_variants(path):
+    with pytest.raises(ValueError):
+        validate_redirect_path(path)

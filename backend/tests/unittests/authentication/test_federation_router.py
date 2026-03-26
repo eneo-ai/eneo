@@ -317,6 +317,59 @@ async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_initiate_auth_rejects_unregistered_redirect_uri(monkeypatch):
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="RejectRedirectTenant",
+        display_name="RejectRedirectTenant",
+        quota_limit=1024**3,
+        slug="reject-redirect-tenant",
+        state=TenantState.ACTIVE,
+        modules=[],
+        api_credentials={},
+        federation_config={
+            "provider": "entra",
+            "client_id": "client",
+            "client_secret": "secret",
+            "authorization_endpoint": "https://idp.example.com/authorize",
+            "token_endpoint": "https://idp.example.com/token",
+            "jwks_uri": "https://idp.example.com/jwks",
+            "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
+            "canonical_public_origin": "https://canonical.example.com",
+            "redirect_path": "/auth/callback",
+            "additional_redirect_uris": [
+                "https://external.example.com/auth/callback"
+            ],
+            "allowed_domains": ["example.com"],
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    dummy_settings = DummySettings(federation_enabled=True)
+    monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
+
+    container = MockContainer(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=None,
+        auth_service=None,
+        redis_client=FakeRedis(),
+        encryption_service=EncryptionService(None),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await federation_router.initiate_auth(
+            tenant=tenant.slug,
+            state=None,
+            redirect_uri_param="https://evil.example.com/auth/callback",
+            container=container,
+        )
+
+    assert exc.value.status_code == 400
+    assert "not registered" in exc.value.detail
+
+
+@pytest.mark.asyncio
 async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
     dummy_settings = DummySettings(federation_enabled=True)
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
@@ -962,3 +1015,114 @@ async def test_jit_provisioning_returns_403_when_disabled(monkeypatch):
 
     # Verify no user was created
     assert user_repo._created_user is None
+
+
+@pytest.mark.asyncio
+async def test_auth_callback_rejects_malformed_state_redirect_uri(monkeypatch):
+    dummy_settings = DummySettings(
+        federation_enabled=True,
+        oidc_redirect_grace_period_seconds=0,
+        strict_oidc_redirect_validation=True,
+    )
+    monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
+
+    redis_client = FakeRedis()
+    tenant_id = uuid4()
+    slug = "tenant-malformed-redirect"
+
+    tenant = TenantInDB(
+        id=tenant_id,
+        name="Tenant Malformed Redirect",
+        display_name="Tenant Malformed Redirect",
+        slug=slug,
+        quota_limit=1024**3,
+        state=TenantState.ACTIVE,
+        modules=[],
+        api_credentials={},
+        federation_config={
+            "provider": "entra",
+            "client_id": "client",
+            "client_secret": "secret",
+            "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
+            "authorization_endpoint": "https://idp.example.com/authorize",
+            "token_endpoint": "https://idp.example.com/token",
+            "jwks_uri": "https://idp.example.com/jwks",
+            "canonical_public_origin": "https://canonical.tenant.example.com",
+            "redirect_path": "/auth/callback",
+            "additional_redirect_uris": [
+                "https://alt.tenant.example.com/auth/callback"
+            ],
+            "allowed_domains": ["example.com"],
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    user = UserInDB(
+        id=uuid4(),
+        username="Tester",
+        email="user@Example.COM",
+        salt="salt",
+        password="hashed123",
+        used_tokens=0,
+        tenant_id=tenant_id,
+        tenant=tenant,
+        quota_limit=1024**3,
+        user_groups=[],
+        roles=[],
+        state="active",
+    )
+
+    container = MockContainer(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=UserRepoStub(user),
+        auth_service=AuthServiceStub(),
+        redis_client=redis_client,
+        encryption_service=EncryptionService(None),
+    )
+
+    issue_time = int(time.time())
+    config_version = datetime.now(timezone.utc).isoformat()
+    state_payload = {
+        "tenant_id": str(tenant_id),
+        "tenant_slug": slug,
+        "frontend_state": "",
+        "nonce": "nonce-malformed-redirect",
+        "redirect_uri": "https://alt.tenant.example.com/auth/callback?x=1",
+        "correlation_id": "corr-malformed-redirect",
+        "exp": issue_time + 600,
+        "iat": issue_time,
+        "config_version": config_version,
+    }
+
+    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+
+    cache_payload = {
+        "tenant_id": str(tenant_id),
+        "tenant_slug": slug,
+        "redirect_uri": state_payload["redirect_uri"],
+        "config_version": config_version,
+        "iat": state_payload["iat"],
+    }
+    await redis_client.setex(
+        f"oidc:state:{state_payload['nonce']}",
+        dummy_settings.oidc_state_ttl_seconds,
+        json.dumps(cache_payload),
+    )
+
+    fake_response = FakeResponse({"id_token": "id", "access_token": "token"})
+    monkeypatch.setattr(
+        federation_router,
+        "aiohttp_client",
+        lambda: FakeAioHttpClient(fake_response),
+    )
+    monkeypatch.setattr(federation_router, "PyJWKClient", FakeJWKClient)
+    monkeypatch.setattr(federation_router, "JWKClient", FakeJWKClient)
+
+    callback = CallbackRequest(code="auth-code", state=signed_state)
+
+    with pytest.raises(HTTPException) as exc:
+        await federation_router.auth_callback(callback, container=container)
+
+    assert exc.value.status_code == 400
+    assert "Redirect URI mismatch" in exc.value.detail

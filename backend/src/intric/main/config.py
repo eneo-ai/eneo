@@ -137,6 +137,32 @@ def validate_redirect_uri(uri: str | None) -> str | None:
     return f"{scheme}://{host}{port}{normalized_path}"
 
 
+def validate_redirect_path(path: str | None) -> str | None:
+    """Validate and normalize a redirect path used to build redirect_uri."""
+    if path is None:
+        return None
+
+    path = path.strip()
+    if not path:
+        raise ValueError("redirect_path cannot be an empty string")
+
+    parsed = urlparse(path)
+    if parsed.scheme or parsed.netloc:
+        raise ValueError(f"redirect_path must be a path only, got: {path}")
+
+    normalized_path = parsed.path or ""
+    if not normalized_path.startswith("/"):
+        raise ValueError("redirect_path must start with /")
+
+    if parsed.query or parsed.fragment:
+        raise ValueError("redirect_path must not include query or fragment")
+
+    if normalized_path != "/" and normalized_path.endswith("/"):
+        raise ValueError("redirect_path must not end with /")
+
+    return normalized_path
+
+
 def _set_app_version():
     # Try Docker path first, then local dev path
     manifest_path = _DOCKER_MANIFEST if _DOCKER_MANIFEST.exists() else _LOCAL_MANIFEST

@@ -12,6 +12,7 @@ from intric.main.config import (
     Settings,
     get_settings,
     validate_public_origin,
+    validate_redirect_path,
     validate_redirect_uri,
 )
 from intric.main.container.container import Container
@@ -119,10 +120,7 @@ class SetFederationRequest(BaseModel):
     def validate_redirect_path(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        value = value.strip()
-        if not value.startswith("/"):
-            raise ValueError("redirect_path must start with /")
-        return value
+        return validate_redirect_path(value)
 
     @field_validator("additional_redirect_uris")
     @classmethod

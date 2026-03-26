@@ -1,6 +1,11 @@
 import os
 from typing import TYPE_CHECKING, Optional
-from intric.main.config import Settings, get_settings
+from intric.main.config import (
+    Settings,
+    get_settings,
+    validate_redirect_path,
+    validate_redirect_uri,
+)
 from intric.tenants.tenant import TenantInDB
 from intric.main.logging import get_logger
 
@@ -602,9 +607,10 @@ class CredentialResolver:
         origin = origin.rstrip("/")
 
         # Get redirect path (support customization per tenant)
-        redirect_path = federation_config.get("redirect_path", "/login/callback")
-
-        redirect_uri = f"{origin}{redirect_path}"
+        redirect_path = validate_redirect_path(
+            federation_config.get("redirect_path", "/login/callback")
+        )
+        redirect_uri = validate_redirect_uri(f"{origin}{redirect_path}")
 
         logger.info(
             "Redirect URI resolved successfully",

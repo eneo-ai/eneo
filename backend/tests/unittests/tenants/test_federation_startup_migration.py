@@ -77,7 +77,7 @@ async def test_startup_migration_encrypts_secret_before_persisting():
         "federation_config"
     ]
     assert stored_config["client_secret"].startswith("enc:fernet:v1:")
-    assert stored_config["provider"] == "mobilityguard"
+    assert stored_config["provider"] == "default"
     assert stored_config["encrypted_at"]
 
 
@@ -252,3 +252,29 @@ async def test_startup_wrapper_opens_explicit_transaction(monkeypatch):
 
     assert result is True
     fake_session.begin.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "settings",
+    [
+        MockSettings(federation_enabled=False),
+        MockSettings(oidc_client_secret=None),
+    ],
+)
+async def test_startup_wrapper_skips_before_building_encryption_service(
+    monkeypatch, settings
+):
+    import intric.tenants.federation_startup_migration as startup_migration
+
+    encryption_ctor = MagicMock(
+        side_effect=AssertionError("EncryptionService should not be constructed")
+    )
+
+    monkeypatch.setattr(startup_migration, "get_settings", lambda: settings)
+    monkeypatch.setattr(startup_migration, "EncryptionService", encryption_ctor)
+
+    result = await startup_migration.migrate_env_oidc_to_tenant_federation_on_startup()
+
+    assert result is False
+    encryption_ctor.assert_not_called()

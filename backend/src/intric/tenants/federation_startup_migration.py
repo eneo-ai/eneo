@@ -120,7 +120,7 @@ class FederationStartupMigrationService:
         now = datetime.now(timezone.utc).isoformat()
 
         config: dict[str, Any] = {
-            "provider": "mobilityguard",
+            "provider": "default",
             "discovery_endpoint": self.settings.oidc_discovery_endpoint,
             "client_id": self.settings.oidc_client_id,
             "client_secret": encrypted_secret,
@@ -156,6 +156,23 @@ class FederationStartupMigrationService:
 
 async def migrate_env_oidc_to_tenant_federation_on_startup() -> bool:
     settings = get_settings()
+
+    if not settings.federation_enabled:
+        logger.debug(
+            "Skipping federation startup migration because federation is disabled"
+        )
+        return False
+
+    if not (
+        settings.oidc_discovery_endpoint
+        and settings.oidc_client_id
+        and settings.oidc_client_secret
+    ):
+        logger.info(
+            "Skipping federation startup migration because OIDC env configuration is incomplete"
+        )
+        return False
+
     encryption_service = EncryptionService(settings)
 
     async with sessionmanager.session() as session, session.begin():
