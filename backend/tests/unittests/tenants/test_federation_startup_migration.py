@@ -23,6 +23,7 @@ class MockSettings:
         oidc_tenant_id: str | None = "tenant-123",
         public_origin: str | None = "https://eneo.example.com",
         strict_oidc_redirect_validation: bool = True,
+        encryption_key: str | None = "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=",
     ):
         self.federation_enabled = federation_enabled
         self.oidc_discovery_endpoint = oidc_discovery_endpoint
@@ -31,6 +32,7 @@ class MockSettings:
         self.oidc_tenant_id = oidc_tenant_id
         self.public_origin = public_origin
         self.strict_oidc_redirect_validation = strict_oidc_redirect_validation
+        self.encryption_key = encryption_key
 
 
 class FailingEncryptionService:
@@ -105,6 +107,27 @@ async def test_startup_migration_preserves_existing_redirect_fields():
     assert stored_config["additional_redirect_uris"] == [
         "https://external.example.com/auth/callback"
     ]
+
+
+def test_tenant_model_canonicalizes_legacy_redirect_path_on_read():
+    tenant = _make_tenant(
+        federation_config={
+            "redirect_path": "/auth/callback?x=1",
+        }
+    )
+
+    assert tenant.federation_config["redirect_path"] == "/auth/callback"
+
+
+def test_startup_migration_normalizes_legacy_redirect_path_when_merging_existing_redirect_fields():
+    service, _, _ = _make_service()
+
+    merged_config = service._merge_with_existing_redirect_config(
+        {"redirect_path": "/auth/callback/"},
+        service._build_env_config(),
+    )
+
+    assert merged_config["redirect_path"] == "/auth/callback"
 
 
 @pytest.mark.asyncio
@@ -222,7 +245,7 @@ def test_credential_resolver_can_decrypt_migrated_federation_config():
 
 
 @pytest.mark.asyncio
-async def test_startup_wrapper_opens_explicit_transaction(monkeypatch):
+async def test_manual_runner_opens_explicit_transaction(monkeypatch):
     import intric.tenants.federation_startup_migration as startup_migration
 
     fake_session = MagicMock()
@@ -248,7 +271,7 @@ async def test_startup_wrapper_opens_explicit_transaction(monkeypatch):
     monkeypatch.setattr(startup_migration, "sessionmanager", fake_session_manager)
     monkeypatch.setattr(startup_migration, "FederationStartupMigrationService", fake_service_cls)
 
-    result = await startup_migration.migrate_env_oidc_to_tenant_federation_on_startup()
+    result = await startup_migration.run_env_oidc_to_tenant_federation_migration()
 
     assert result is True
     fake_session.begin.assert_called_once_with()
@@ -262,7 +285,7 @@ async def test_startup_wrapper_opens_explicit_transaction(monkeypatch):
         MockSettings(oidc_client_secret=None),
     ],
 )
-async def test_startup_wrapper_skips_before_building_encryption_service(
+async def test_manual_runner_skips_before_building_encryption_service(
     monkeypatch, settings
 ):
     import intric.tenants.federation_startup_migration as startup_migration
@@ -274,7 +297,7 @@ async def test_startup_wrapper_skips_before_building_encryption_service(
     monkeypatch.setattr(startup_migration, "get_settings", lambda: settings)
     monkeypatch.setattr(startup_migration, "EncryptionService", encryption_ctor)
 
-    result = await startup_migration.migrate_env_oidc_to_tenant_federation_on_startup()
+    result = await startup_migration.run_env_oidc_to_tenant_federation_migration()
 
     assert result is False
     encryption_ctor.assert_not_called()
