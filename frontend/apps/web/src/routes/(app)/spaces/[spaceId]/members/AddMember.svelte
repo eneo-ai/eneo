@@ -15,7 +15,7 @@
   import { UserList } from "./AddMember.svelte.ts";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte.ts";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   const {
     refreshCurrentSpace,
@@ -60,7 +60,7 @@
       $showDialog = false;
       $selected = undefined;
     } catch (e) {
-      toast.error(m.could_not_add_new_member());
+      toastError(e, m.could_not_add_new_member());
       console.error(e);
     }
   });

@@ -2,6 +2,7 @@
   import { Button } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import type { IntricClient } from "@intric/intric-js";
   import dayjs from "dayjs";
@@ -48,7 +49,7 @@
       subscriptions = Array.isArray(response) ? response : [];
     } catch (error) {
       console.error("Failed to load SharePoint subscriptions:", error);
-      toast.error(m.sharepoint_subscriptions_load_error());
+      toastError(error, m.sharepoint_subscriptions_load_error());
       subscriptions = [];
     } finally {
       loading = false;
@@ -87,7 +88,7 @@
       await loadSubscriptions();
     } catch (error) {
       console.error("Failed to renew expired subscriptions:", error);
-      toast.error(m.sharepoint_subscriptions_renew_error());
+      toastError(error, m.sharepoint_subscriptions_renew_error());
     } finally {
       renewingAll = false;
     }
@@ -106,7 +107,7 @@
       await loadSubscriptions();
     } catch (error) {
       console.error(`Failed to renew subscription ${subscription.id}:`, error);
-      toast.error(m.sharepoint_subscription_renew_error());
+      toastError(error, m.sharepoint_subscription_renew_error());
     } finally {
       renewingSubscriptionIds.delete(subscription.id);
       renewingSubscriptionIds = renewingSubscriptionIds; // Trigger reactivity
