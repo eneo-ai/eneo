@@ -9,7 +9,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
 
   export let service: ServiceSparse;
@@ -29,7 +29,7 @@
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
-      toast.error(m.could_not_delete_service());
+      toastError(e, m.could_not_delete_service());
       console.error(e);
     }
     isProcessing = false;
@@ -47,7 +47,7 @@
       refreshCurrentSpace();
       $showMoveDialog = false;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toastError(e);
       console.error(e);
     }
     isProcessing = false;

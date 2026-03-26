@@ -15,6 +15,7 @@
   import ImportKnowledgeDialog from "$lib/features/integrations/components/import/ImportKnowledgeDialog.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import type { IntegrationKnowledge } from "@intric/intric-js";
   import { jobCompletionEvents } from "$lib/features/jobs/JobManager";
 
@@ -80,7 +81,7 @@
       $selectedWebsiteIds = new Set();
       refreshCurrentSpace();
     } catch (e) {
-      toast.error("Failed to trigger bulk recrawl: " + (e instanceof Error ? e.message : String(e)));
+      toastError(e);
       console.error(e);
     }
     isBulkRecrawling = false;

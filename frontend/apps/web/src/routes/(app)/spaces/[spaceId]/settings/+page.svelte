@@ -22,6 +22,7 @@
   import EditRetentionPolicy from "./EditRetentionPolicy.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
   import { fade } from "svelte/transition";
 
@@ -142,7 +143,7 @@
     try {
       await spaces.deleteSpace($currentSpace);
     } catch (e) {
-      toast.error(m.error_deleting_space());
+      toastError(e, m.error_deleting_space());
       console.error(e);
     }
     clearTimeout(deletionMessageTimeout);
