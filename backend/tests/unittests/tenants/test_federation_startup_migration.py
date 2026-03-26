@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -218,3 +219,36 @@ def test_credential_resolver_can_decrypt_migrated_federation_config():
     assert resolved["client_secret"] == "super-secret-value"
     assert resolved["client_id"] == "client-id"
     assert resolved["discovery_endpoint"] == settings.oidc_discovery_endpoint
+
+
+@pytest.mark.asyncio
+async def test_startup_wrapper_opens_explicit_transaction(monkeypatch):
+    import intric.tenants.federation_startup_migration as startup_migration
+
+    fake_session = MagicMock()
+
+    @asynccontextmanager
+    async def fake_session_cm():
+        yield fake_session
+
+    @asynccontextmanager
+    async def fake_begin_cm():
+        yield None
+
+    fake_session.begin.return_value = fake_begin_cm()
+
+    fake_session_manager = MagicMock()
+    fake_session_manager.session.return_value = fake_session_cm()
+
+    fake_service = AsyncMock()
+    fake_service.migrate_env_oidc_to_tenant_federation.return_value = True
+    fake_service_cls = MagicMock(return_value=fake_service)
+
+    monkeypatch.setattr(startup_migration, "get_settings", lambda: MockSettings())
+    monkeypatch.setattr(startup_migration, "sessionmanager", fake_session_manager)
+    monkeypatch.setattr(startup_migration, "FederationStartupMigrationService", fake_service_cls)
+
+    result = await startup_migration.migrate_env_oidc_to_tenant_federation_on_startup()
+
+    assert result is True
+    fake_session.begin.assert_called_once_with()

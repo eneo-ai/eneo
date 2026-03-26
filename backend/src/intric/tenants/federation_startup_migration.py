@@ -158,7 +158,7 @@ async def migrate_env_oidc_to_tenant_federation_on_startup() -> bool:
     settings = get_settings()
     encryption_service = EncryptionService(settings)
 
-    async with sessionmanager.session() as session:
+    async with sessionmanager.session() as session, session.begin():
         tenant_repo = TenantRepository(
             session=session,
             encryption_service=encryption_service,
