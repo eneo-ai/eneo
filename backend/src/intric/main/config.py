@@ -137,6 +137,31 @@ def validate_redirect_uri(uri: str | None) -> str | None:
     return f"{scheme}://{host}{port}{normalized_path}"
 
 
+def canonicalize_legacy_redirect_path(path: str | None) -> str | None:
+    """Canonicalize legacy redirect paths before strict validation.
+
+    This preserves strict validation for new writes while allowing reads/migrations
+    to normalize old values that previously slipped through, such as trailing slashes
+    or query/fragment suffixes.
+    """
+    if path is None:
+        return None
+
+    path = path.strip()
+    if not path:
+        return path
+
+    parsed = urlparse(path)
+    if parsed.scheme or parsed.netloc:
+        return path
+
+    normalized_path = parsed.path or ""
+    if not normalized_path.startswith("/"):
+        return path
+
+    return normalized_path.rstrip("/") or "/"
+
+
 def validate_redirect_path(path: str | None) -> str | None:
     """Validate and normalize a redirect path used to build redirect_uri."""
     if path is None:

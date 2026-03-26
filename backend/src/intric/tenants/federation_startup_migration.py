@@ -4,7 +4,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from intric.database.database import sessionmanager
-from intric.main.config import Settings, get_settings
+from intric.main.config import (
+    Settings,
+    canonicalize_legacy_redirect_path,
+    get_settings,
+    validate_redirect_path,
+)
 from intric.main.logging import get_logger
 from intric.settings.encryption_service import EncryptionService
 from intric.tenants.tenant_repo import TenantRepository
@@ -114,9 +119,11 @@ class FederationStartupMigrationService:
         )
 
     def _build_env_config(self) -> dict[str, Any]:
-        encrypted_secret = self.encryption_service.encrypt(
-            self.settings.oidc_client_secret
-        )
+        client_secret = self.settings.oidc_client_secret
+        if client_secret is None:
+            raise ValueError("OIDC client secret is required for federation startup migration")
+
+        encrypted_secret = self.encryption_service.encrypt(client_secret)
         now = datetime.now(timezone.utc).isoformat()
 
         config: dict[str, Any] = {
@@ -149,12 +156,18 @@ class FederationStartupMigrationService:
     ) -> dict[str, Any]:
         merged_config = dict(env_config)
         for field in _REDIRECT_ONLY_FIELDS:
-            if field in existing_config:
-                merged_config[field] = existing_config[field]
+            if field not in existing_config:
+                continue
+
+            value = existing_config[field]
+            if field == "redirect_path" and isinstance(value, str):
+                value = validate_redirect_path(canonicalize_legacy_redirect_path(value))
+
+            merged_config[field] = value
         return merged_config
 
 
-async def migrate_env_oidc_to_tenant_federation_on_startup() -> bool:
+async def run_env_oidc_to_tenant_federation_migration() -> bool:
     settings = get_settings()
 
     if not settings.federation_enabled:
