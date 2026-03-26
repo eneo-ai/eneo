@@ -17,8 +17,6 @@ from intric.main.exceptions import (
 )
 from intric.main.logging import get_logger
 from intric.main.models import ModelId
-from intric.predefined_roles.predefined_role import PredefinedRoleName
-from intric.predefined_roles.predefined_roles_repo import PredefinedRolesRepository
 from intric.settings.settings import SettingsUpsert
 from intric.settings.settings_repo import SettingsRepository
 from intric.tenants.tenant import TenantState
@@ -49,13 +47,11 @@ class UserService:
         settings_repo: SettingsRepository,
         tenant_repo: TenantRepository,
         info_blob_repo: InfoBlobRepository,
-        predefined_roles_repo: Optional[PredefinedRolesRepository] = None,
     ):
         self.repo = user_repo
         self.auth_service = auth_service
         self.settings_repo = settings_repo
         self.tenant_repo = tenant_repo
-        self.predefined_roles_repo = predefined_roles_repo
         self.info_blob_repo = info_blob_repo
 
     async def _validate_email(self, user: UserBase):
@@ -348,34 +344,28 @@ class UserService:
                     "System configuration error: Tenant does not exist"
                 )
 
-            # The hack continues
-            if self.predefined_roles_repo is None:
-                logger.error(
-                    "Predefined roles repository is not configured",
+            # Assign default role if configured on tenant
+            roles = []
+            if tenant.default_role_id:
+                roles = [ModelId(id=tenant.default_role_id)]
+                logger.info(
+                    "OIDC: Assigning default role to new user",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "default_role_id": str(tenant.default_role_id),
+                    },
+                )
+            else:
+                logger.info(
+                    "OIDC: No default role configured, creating user without role",
                     extra={"correlation_id": correlation_id},
-                )
-                raise AuthenticationException(
-                    "System configuration error: Predefined roles repository not configured"
-                )
-
-            user_role = await self.predefined_roles_repo.get_predefined_role_by_name(
-                PredefinedRoleName.USER
-            )
-
-            if user_role is None:
-                logger.error(
-                    "Predefined USER role not found in database",
-                    extra={"correlation_id": correlation_id},
-                )
-                raise AuthenticationException(
-                    "System configuration error: User role not found"
                 )
 
             new_user = UserAdd(
                 email=email,
                 username=username.lower(),
                 tenant_id=tenant_id,
-                predefined_roles=[ModelId(id=user_role.id)],
+                roles=roles,
                 state=UserState.ACTIVE,
             )
 
@@ -677,15 +667,13 @@ class UserService:
             raise BadRequestException(f"Tenant {tenant_id} does not exist")
 
         state = user_invite.state or UserState.INVITED
-        predefined_roles = (
-            [user_invite.predefined_role] if user_invite.predefined_role else []
-        )
+        roles = [user_invite.role] if user_invite.role else []
 
         user_add = UserAdd(
             email=user_invite.email,
             tenant_id=tenant_id,
             state=state,
-            predefined_roles=predefined_roles,
+            roles=roles,
         )
 
         user_in_db = await self.repo.add(user_add)
@@ -698,6 +686,65 @@ class UserService:
     async def update_user(self, user_id: UUID, user_update_public: UserUpdatePublic):
         await self._validate_email(user_update_public)
         await self._validate_username(user_update_public)
+
+        # If roles are being changed, check admin safety
+        if user_update_public.roles is not None:
+            from intric.roles.permissions import Permission
+
+            current_user = await self.repo.get_user_by_id(user_id)
+            if current_user is not None:
+                had_admin = Permission.ADMIN in current_user.permissions
+
+                if had_admin:
+                    # Fetch the actual new roles from DB to check their permissions
+                    new_role_ids = {r.id for r in user_update_public.roles}
+                    will_have_admin = False
+
+                    # Check against current roles that are being kept
+                    for role in current_user.roles:
+                        if role.id in new_role_ids and Permission.ADMIN in role.permissions:
+                            will_have_admin = True
+                            break
+
+                    # Also check new roles not in current set (role swap A→B)
+                    if not will_have_admin:
+                        new_ids_not_in_current = new_role_ids - {r.id for r in current_user.roles}
+                        if new_ids_not_in_current:
+                            new_roles = await self.repo._get_roles(
+                                [ModelId(id=rid) for rid in new_ids_not_in_current],
+                                current_user.tenant_id,
+                            )
+                            for role_record in new_roles:
+                                if "admin" in (role_record.permissions or []):
+                                    will_have_admin = True
+                                    break
+
+                    if not will_have_admin:
+                        # This user is losing admin — check if others remain
+                        admin_count = await self.repo.count_users_with_admin_permission(
+                            current_user.tenant_id
+                        )
+                        # admin_count includes this user, so if only 1, this is the last
+                        if admin_count <= 1:
+                            raise BadRequestException(
+                                "Cannot remove admin permissions from the last admin user. "
+                                "At least one user must retain admin access."
+                            )
+
+        # If state is being changed to inactive/deleted, check admin safety
+        if user_update_public.state in (UserState.INACTIVE, UserState.DELETED):
+            from intric.roles.permissions import Permission
+
+            target_user = await self.repo.get_user_by_id(user_id)
+            if target_user is not None and Permission.ADMIN in target_user.permissions:
+                admin_count = await self.repo.count_users_with_admin_permission(
+                    target_user.tenant_id
+                )
+                if admin_count <= 1:
+                    raise BadRequestException(
+                        "Cannot deactivate the last admin user. "
+                        "At least one user must retain admin access."
+                    )
 
         user_update = UserUpdate(
             id=user_id, **user_update_public.model_dump(exclude_unset=True)
@@ -720,6 +767,20 @@ class UserService:
         return user_in_db
 
     async def delete_user(self, user_id: UUID):
+        from intric.roles.permissions import Permission
+
+        # Check if deleting this user would leave tenant without admin
+        user = await self.repo.get_user_by_id(user_id)
+        if user is not None and Permission.ADMIN in user.permissions:
+            admin_count = await self.repo.count_users_with_admin_permission(
+                user.tenant_id
+            )
+            if admin_count <= 1:
+                raise BadRequestException(
+                    "Cannot delete the last admin user. "
+                    "At least one user must retain admin access."
+                )
+
         deleted_user = await self.repo.delete(user_id)
 
         if deleted_user is None:

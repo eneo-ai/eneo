@@ -5,7 +5,6 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from intric.main.models import InDB, PaginatedResponse
-from intric.predefined_roles.predefined_role import PredefinedRolePublic
 from intric.roles.permissions import Permission
 
 
@@ -25,6 +24,7 @@ class RoleCreateRequest(RoleBase):
 
 class RoleCreate(RoleCreateRequest):
     tenant_id: UUID
+    predefined_source: Optional[str] = None
 
 
 class RoleUpdateRequest(RoleBase):
@@ -38,12 +38,13 @@ class RoleUpdate(RoleUpdateRequest):
 
 class RoleInDB(RoleBase, InDB):
     tenant_id: UUID
+    predefined_source: Optional[str] = None
 
 
 class RolePublic(RoleBase, InDB):
-    pass
+    predefined_source: Optional[str] = None
 
 
 class RolesPaginatedResponse(BaseModel):
     roles: PaginatedResponse[RolePublic]
-    predefined_roles: PaginatedResponse[PredefinedRolePublic]
+    predefined_roles: PaginatedResponse[RolePublic]

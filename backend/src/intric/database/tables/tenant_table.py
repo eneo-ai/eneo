@@ -1,4 +1,5 @@
 from typing import TYPE_CHECKING, Any, Optional
+from uuid import UUID
 
 from sqlalchemy import BigInteger, Column, ForeignKey, String, Table
 from sqlalchemy.dialects.postgresql import JSONB
@@ -16,6 +17,9 @@ class Tenants(BasePublic):
     name: Mapped[str] = mapped_column(unique=True)
     display_name: Mapped[Optional[str]] = mapped_column()
     slug: Mapped[Optional[str]] = mapped_column(String(63), unique=True, index=True)
+    default_role_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("roles.id", ondelete="SET NULL"), nullable=True
+    )
     quota_limit: Mapped[int] = mapped_column(BigInteger)
     privacy_policy: Mapped[Optional[str]] = mapped_column()
     domain: Mapped[Optional[str]] = mapped_column()

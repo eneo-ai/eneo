@@ -14,7 +14,9 @@ from pydantic import ValidationError
 from starlette.exceptions import HTTPException
 
 from intric.authentication import auth_dependencies
+from intric.authentication.auth_dependencies import require_permission
 from intric.authentication.auth_models import AccessToken, ApiKey, OpenIdConnectLogin
+from intric.roles.permissions import Permission
 from intric.main import config
 from intric.main.exceptions import AuthenticationException
 from intric.main.aiohttp_client import aiohttp_client
@@ -597,7 +599,12 @@ async def get_current_user_tenant(
     return TenantPublic(**tenant.model_dump())
 
 
-@router.post("/admin/invite/", response_model=UserAdminView, status_code=201)
+@router.post(
+    "/admin/invite/",
+    response_model=UserAdminView,
+    status_code=201,
+    dependencies=[Depends(require_permission(Permission.ADMIN))],
+)
 async def invite_user(
     user_invite: PropUserInvite,
     container: Container = Depends(get_container(with_user=True)),
@@ -622,26 +629,23 @@ async def invite_user(
         else None,
     }
 
-    # Fetch predefined role details if role was assigned
-    if user_invite.predefined_role:
-        from intric.database.tables.roles_table import PredefinedRoles
+    # Fetch role details if role was assigned
+    if user_invite.role:
+        from intric.database.tables.roles_table import Roles
         import sqlalchemy as sa
 
-        # Query for the predefined role details
-        role_query = sa.select(PredefinedRoles).where(
-            PredefinedRoles.id == user_invite.predefined_role.id
+        # Query for the role details
+        role_query = sa.select(Roles).where(
+            Roles.id == user_invite.role.id
         )
         role_result = await session.execute(role_query)
-        predefined_role = role_result.scalar_one_or_none()
+        assigned_role = role_result.scalar_one_or_none()
 
-        if predefined_role:
-            extra["predefined_role"] = predefined_role.name
-            extra["permissions"] = sorted(predefined_role.permissions)
+        if assigned_role:
+            extra["role"] = assigned_role.name
+            extra["permissions"] = sorted(assigned_role.permissions)
 
     # Include role/group information if available
-    if hasattr(new_user, "predefined_roles") and new_user.predefined_roles:
-        extra["predefined_roles"] = [role.name for role in new_user.predefined_roles]
-
     if hasattr(new_user, "roles") and new_user.roles:
         extra["roles"] = [role.name for role in new_user.roles]
 
@@ -670,7 +674,11 @@ async def invite_user(
     return new_user
 
 
-@router.patch("/admin/{id}/", response_model=UserAdminView)
+@router.patch(
+    "/admin/{id}/",
+    response_model=UserAdminView,
+    dependencies=[Depends(require_permission(Permission.ADMIN))],
+)
 async def update_user(
     id: UUID,
     user_update: PropUserUpdate,
@@ -679,12 +687,14 @@ async def update_user(
     user_service = container.user_service()
     current_user = container.user()
 
-    # Get old state for change tracking
+    # Get old state for change tracking — tenant-scoped
     old_user = await user_service.get_user(id)
+    if old_user.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     update_kwargs = {}
-    if user_update.predefined_role:
-        update_kwargs["predefined_roles"] = [user_update.predefined_role]
+    if user_update.role:
+        update_kwargs["roles"] = [user_update.role]
     if user_update.state:
         update_kwargs["state"] = user_update.state
 
@@ -703,19 +713,19 @@ async def update_user(
         if old_state and user_update.state.value != old_state:
             changes["state"] = {"old": old_state, "new": user_update.state.value}
 
-    # Predefined role change (PropUserUpdate has single predefined_role)
-    if user_update.predefined_role:
+    # Role change (PropUserUpdate has single role)
+    if user_update.role:
         old_roles = []
-        if hasattr(old_user, "predefined_roles") and old_user.predefined_roles:
-            old_roles = [role.name for role in old_user.predefined_roles]
+        if hasattr(old_user, "roles") and old_user.roles:
+            old_roles = [role.name for role in old_user.roles]
 
         # After update, get the new roles
         new_roles = []
-        if hasattr(updated_user, "predefined_roles") and updated_user.predefined_roles:
-            new_roles = [role.name for role in updated_user.predefined_roles]
+        if hasattr(updated_user, "roles") and updated_user.roles:
+            new_roles = [role.name for role in updated_user.roles]
 
         if old_roles != new_roles:
-            changes["predefined_roles"] = {"old": old_roles, "new": new_roles}
+            changes["roles"] = {"old": old_roles, "new": new_roles}
 
     # Track permission changes (computed from role changes)
     old_permissions = (
@@ -751,11 +761,6 @@ async def update_user(
     }
 
     # Include current role/group information
-    if hasattr(updated_user, "predefined_roles") and updated_user.predefined_roles:
-        extra["predefined_roles"] = [
-            role.name for role in updated_user.predefined_roles
-        ]
-
     if hasattr(updated_user, "roles") and updated_user.roles:
         extra["roles"] = [role.name for role in updated_user.roles]
 
@@ -789,15 +794,21 @@ async def update_user(
     return updated_user
 
 
-@router.delete("/admin/{id}/", status_code=204)
+@router.delete(
+    "/admin/{id}/",
+    status_code=204,
+    dependencies=[Depends(require_permission(Permission.ADMIN))],
+)
 async def delete_user(
     id: UUID, container: Container = Depends(get_container(with_user=True))
 ):
     user_service = container.user_service()
     current_user = container.user()
 
-    # Get user details BEFORE deletion (snapshot pattern)
+    # Get user details BEFORE deletion (snapshot pattern) — tenant-scoped
     user_to_delete = await user_service.get_user(id)
+    if user_to_delete.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     # Build extra context capturing what was deleted
     extra = {
@@ -816,11 +827,6 @@ async def delete_user(
     }
 
     # Include full context of what was deleted
-    if hasattr(user_to_delete, "predefined_roles") and user_to_delete.predefined_roles:
-        extra["predefined_roles"] = [
-            role.name for role in user_to_delete.predefined_roles
-        ]
-
     if hasattr(user_to_delete, "roles") and user_to_delete.roles:
         extra["roles"] = [role.name for role in user_to_delete.roles]
 

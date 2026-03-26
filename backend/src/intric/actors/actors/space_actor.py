@@ -448,10 +448,8 @@ class SpaceActor:
         role = self._get_role()
         permissions = self._get_permissions(role=role)
 
-        if (
-            self.space.is_personal()
-            and resource_type in PERMISSION_RESOURCES
-        ):
+        # Check tenant-level permissions for all spaces (personal and shared)
+        if resource_type in PERMISSION_RESOURCES:
             permission = self._to_permisson(resource_type=resource_type)
             has_permission = permission in self.user.permissions if permission else False
             if not has_permission and not (

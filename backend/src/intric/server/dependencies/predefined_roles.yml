@@ -5,6 +5,7 @@ roles:
       - group_chats
       - apps
       - collections
+      - shared_spaces
 
   - name: 'AI Configurator'
     permissions:
@@ -16,6 +17,7 @@ roles:
       - AI
       - websites
       - integrations
+      - shared_spaces
 
   - name: 'Owner'
     permissions:
@@ -29,3 +31,4 @@ roles:
       - AI
       - websites
       - integrations
+      - shared_spaces

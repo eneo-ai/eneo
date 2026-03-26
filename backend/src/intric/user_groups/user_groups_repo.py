@@ -36,7 +36,6 @@ class UserGroupsRepository:
     def _get_options(self):
         return [
             selectinload(UserGroups.users).selectinload(Users.roles),
-            selectinload(UserGroups.users).selectinload(Users.predefined_roles),
             selectinload(UserGroups.users)
             .selectinload(Users.tenant)
             .selectinload(Tenants.modules),
@@ -60,7 +59,6 @@ class UserGroupsRepository:
                 table=Users,
                 options=[
                     selectinload(Users.roles),
-                    selectinload(Users.predefined_roles),
                     selectinload(Users.tenant).selectinload(Tenants.modules),
                     selectinload(Users.api_key),
                 ],

@@ -43,7 +43,7 @@ class TenantBase(BaseModel):
 
 
 class TenantPublic(PrivacyPolicyMixin, TenantBase):
-    pass
+    default_role_id: Optional[UUID] = None
 
 
 class TenantInDB(PrivacyPolicyMixin, InDB):
@@ -56,6 +56,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     provisioning: bool = False
     state: TenantState = TenantState.ACTIVE
     security_enabled: bool = False
+    default_role_id: Optional[UUID] = None
     modules: list[ModuleInDB] = []
     api_credentials: dict[str, Any] = Field(default_factory=dict)
     federation_config: dict[str, Any] = Field(default_factory=dict)
@@ -198,6 +199,7 @@ class TenantUpdatePublic(BaseModel):
     provisioning: Optional[bool] = None
     state: Optional[TenantState] = None
     security_enabled: Optional[bool] = None
+    default_role_id: Optional[UUID] = None
 
 
 class TenantUpdate(TenantUpdatePublic):

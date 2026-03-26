@@ -240,8 +240,6 @@ from intric.jobs.task_service import TaskService
 from intric.limits.limit_service import LimitService
 from intric.main.aiohttp_client import aiohttp_client
 from intric.modules.module_repo import ModuleRepository
-from intric.predefined_roles.predefined_role_service import PredefinedRolesService
-from intric.predefined_roles.predefined_roles_repo import PredefinedRolesRepository
 from intric.prompts.api.prompt_assembler import PromptAssembler
 from intric.prompts.prompt_factory import PromptFactory
 from intric.prompts.prompt_repo import PromptRepository
@@ -568,9 +566,6 @@ class Container(containers.DeclarativeContainer):
     info_blob_repo = providers.Factory(InfoBlobRepository, session=session)
     job_repo = providers.Factory(JobRepository, session=session)
     allowed_origin_repo = providers.Factory(AllowedOriginRepository, session=session)
-    predefined_roles_repo = providers.Factory(
-        PredefinedRolesRepository, session=session
-    )
     role_repo = providers.Factory(RolesRepository, session=session)
     completion_model_repo = providers.Factory(
         CompletionModelsRepository, session=session
@@ -806,6 +801,7 @@ class Container(containers.DeclarativeContainer):
         completion_model_repo=completion_model_repo,
         embedding_model_repo=embedding_model_repo,
         transcription_model_enable_service=transcription_model_enable_service,
+        role_repo=role_repo,
     )
     user_service = providers.Factory(
         UserService,
@@ -813,7 +809,6 @@ class Container(containers.DeclarativeContainer):
         auth_service=auth_service,
         settings_repo=settings_repo,
         tenant_repo=tenant_repo,
-        predefined_roles_repo=predefined_roles_repo,
         info_blob_repo=info_blob_repo,
     )
     security_classification_service = providers.Factory(
@@ -913,10 +908,7 @@ class Container(containers.DeclarativeContainer):
         user=user,
         repo=allowed_origin_repo,
     )
-    predefined_role_service = providers.Factory(
-        PredefinedRolesService, repo=predefined_roles_repo
-    )
-    role_service = providers.Factory(RolesService, user=user, repo=role_repo)
+    role_service = providers.Factory(RolesService, user=user, repo=role_repo, user_repo=user_repo)
     settings_service = providers.Factory(
         SettingService,
         user=user,

@@ -8,10 +8,6 @@ from pydantic import EmailStr, Field, computed_field, field_serializer, field_va
 
 from intric.authentication.auth_models import AccessToken, ApiKey, ApiKeyInDB
 from intric.main.models import BaseModel, InDB, ModelId, partial_model
-from intric.predefined_roles.predefined_role import (
-    PredefinedRoleInDB,
-    PredefinedRolePublic,
-)
 from intric.roles.permissions import Permission
 from intric.roles.role import RoleInDB, RolePublic
 from intric.tenants.tenant import TenantInDB
@@ -220,7 +216,6 @@ class UserAdd(UserBase):
     quota_limit: Optional[int] = None
 
     roles: list[ModelId] = []
-    predefined_roles: list[ModelId] = []
 
 
 class UserUpdate(UserBase):
@@ -237,7 +232,6 @@ class UserUpdate(UserBase):
     salt: Optional[str] = None
 
     roles: Optional[list[ModelId]] = None
-    predefined_roles: Optional[list[ModelId]] = None
 
 
 class UserInDBBase(InDB, UserBase):
@@ -257,7 +251,6 @@ class UserInDB(InDB, UserAdd):
     tenant: TenantInDB
     api_key: Optional[ApiKeyInDB] = None
     roles: list[RoleInDB] = []
-    predefined_roles: list[PredefinedRoleInDB] = []
     quota_used: int = 0
     deleted_at: Optional[datetime] = Field(
         default=None,
@@ -279,13 +272,8 @@ class UserInDB(InDB, UserAdd):
     def permissions(self) -> set[Permission]:
         permissions_set = set()
 
-        # Add permissions from roles
         for role in self.roles:
             permissions_set.update(role.permissions)
-
-        # Add permissions from predefined roles
-        for predefined_role in self.predefined_roles:
-            permissions_set.update(predefined_role.permissions)
 
         return permissions_set
 
@@ -294,7 +282,6 @@ class UserCreated(UserInDB):
     access_token: Optional[AccessToken]
     api_key: Optional[ApiKey]
     roles: list[RoleInDB] = []
-    predefined_roles: list[PredefinedRoleInDB] = []
 
 
 class UserPublicBase(InDB, UserBase):
@@ -305,7 +292,6 @@ class UserPublic(UserPublicBase):
     truncated_api_key: Optional[str] = None
     quota_limit: Optional[int] = None
     roles: list[RolePublic]
-    predefined_roles: list[PredefinedRolePublic]
     user_groups: list[UserGroupRead]
 
 
@@ -335,12 +321,7 @@ class UserAddAdmin(UserBase):
 
     roles: list[ModelId] = Field(
         default=[],
-        description="List of custom role IDs to assign to the user",
-        examples=[[]],
-    )
-    predefined_roles: list[ModelId] = Field(
-        default=[],
-        description="List of predefined role IDs to assign to the user",
+        description="List of role IDs to assign to the user",
         examples=[[]],
     )
 
@@ -357,7 +338,6 @@ class UserAdminView(UserPublicBase):
     state: UserState
 
     roles: list[RolePublic]
-    predefined_roles: list[PredefinedRolePublic]
     user_groups: list[UserGroupRead]
 
 
@@ -389,12 +369,7 @@ class UserUpdatePublic(BaseModel):
     )
     roles: Optional[list[ModelId]] = Field(
         default=None,
-        description="List of custom role IDs to assign (replaces existing roles)",
-        examples=[[]],
-    )
-    predefined_roles: Optional[list[ModelId]] = Field(
-        default=None,
-        description="List of predefined role IDs to assign (replaces existing predefined roles)",
+        description="List of role IDs to assign (replaces existing roles)",
         examples=[[]],
     )
     state: Optional[UserState] = Field(
@@ -416,7 +391,7 @@ class UserSparse(InDB):
 if TYPE_CHECKING:
 
     class PropUserUpdate(BaseModel):
-        predefined_role: Optional[ModelId] = None
+        role: Optional[ModelId] = None
         state: Optional[UserState] = None
 
     class PropUserInvite(PropUserUpdate):
@@ -425,7 +400,7 @@ else:
 
     @partial_model
     class PropUserUpdate(BaseModel):
-        predefined_role: ModelId
+        role: ModelId
         state: UserState
 
     class PropUserInvite(PropUserUpdate):

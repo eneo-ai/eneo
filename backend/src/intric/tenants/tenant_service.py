@@ -36,11 +36,13 @@ class TenantService:
         completion_model_repo: "CompletionModelsRepository",
         embedding_model_repo: "AdminEmbeddingModelsService",
         transcription_model_enable_service: "TranscriptionModelEnableService",
+        role_repo=None,
     ):
         self.repo = repo
         self.completion_model_repo = completion_model_repo
         self.embedding_model_repo = embedding_model_repo
         self.transcription_models_enable_service = transcription_model_enable_service
+        self.role_repo = role_repo
 
     @staticmethod
     def _validate(tenant: TenantInDB | None, id: UUID):
@@ -59,8 +61,33 @@ class TenantService:
     async def create_tenant(self, tenant: TenantBase) -> TenantInDB:
         tenant_in_db = await self.repo.add(tenant)
 
-        # Note: Models are now managed via API/UI by admins
-        # New tenants start with no pre-enabled models
+        # Seed default roles from predefined templates
+        if self.role_repo is not None:
+            from intric.server.dependencies.predefined_roles import (
+                load_predefined_roles_from_config,
+            )
+            from intric.roles.role import RoleCreate
+
+            templates = load_predefined_roles_from_config()
+            user_role_id = None
+            for template in templates:
+                role = RoleCreate(
+                    name=template["name"],
+                    permissions=template["permissions"],
+                    tenant_id=tenant_in_db.id,
+                    predefined_source=template["name"],
+                )
+                created = await self.role_repo.create_role(role)
+                if template["name"] == "User":
+                    user_role_id = created.id
+
+            # Set "User" as default role for new tenants
+            if user_role_id:
+                from intric.tenants.tenant import TenantUpdate
+                await self.repo.update_tenant(
+                    TenantUpdate(id=tenant_in_db.id, default_role_id=user_role_id)
+                )
+                tenant_in_db.default_role_id = user_role_id
 
         return tenant_in_db
 

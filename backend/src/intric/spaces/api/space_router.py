@@ -52,7 +52,7 @@ from intric.integration.presentation.assemblers.integration_knowledge_assembler 
 )
 
 from intric.websites.presentation.website_models import WebsiteCreate, WebsitePublic
-from intric.roles.permissions import Permission
+from intric.roles.permissions import Permission, validate_permission
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,12 @@ async def forbid_org_space(
         raise
 
 
-@router.post("/", response_model=SpacePublic, status_code=201)
+@router.post(
+    "/",
+    response_model=SpacePublic,
+    status_code=201,
+    dependencies=[Depends(require_permission(Permission.SHARED_SPACES))],
+)
 async def create_space(
     create_space_req: CreateSpaceRequest,
     container: Container = Depends(get_container(with_user=True)),
@@ -137,6 +142,11 @@ async def update_space(
     service = container.space_service()
     assembler = container.space_assembler()
     current_user = container.user()
+
+    # Require spaces permission for shared spaces
+    space_check = await service.get_space(id)
+    if not space_check.is_personal():
+        validate_permission(current_user, Permission.SHARED_SPACES)
 
     # Get old state
     old_space = await service.get_space(id)
@@ -276,6 +286,11 @@ async def delete_space(
 ):
     service = container.space_service()
     user = container.user()
+
+    # Require spaces permission for shared spaces
+    space_check = await service.get_space(id)
+    if not space_check.is_personal():
+        validate_permission(user, Permission.SHARED_SPACES)
 
     # Get space info before deletion (for audit log context)
     space = await service.get_space(id)

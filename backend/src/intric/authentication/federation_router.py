@@ -32,7 +32,6 @@ from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
 from intric.main.models import ModelId
-from intric.predefined_roles.predefined_role import PredefinedRoleName
 from intric.users.user import UserAdd, UserInDB, UserState
 
 logger = get_logger(__name__)
@@ -133,26 +132,26 @@ async def _jit_provision_user(
     correlation_id: str,
 ) -> UserInDB:
     """Create user via JIT provisioning during SSO login."""
-    predefined_roles_repo = container.predefined_roles_repo()
     user_repo = container.user_repo()
+    tenant_repo = container.tenant_repo()
 
-    user_role = await predefined_roles_repo.get_predefined_role_by_name(
-        PredefinedRoleName.USER
-    )
+    tenant = await tenant_repo.get(tenant_id)
 
-    if user_role is None:
-        logger.error(
-            "JIT provisioning failed: User role not found",
+    # Assign default role if configured on tenant
+    roles = []
+    if tenant and tenant.default_role_id:
+        roles = [ModelId(id=tenant.default_role_id)]
+        logger.info(
+            "JIT provisioning: Assigning default role",
             extra={
                 "correlation_id": correlation_id,
-                "tenant_id": str(tenant_id),
-                "email": email,
+                "default_role_id": str(tenant.default_role_id),
             },
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="System configuration error: User role not found",
-            headers={"X-Correlation-ID": correlation_id},
+    else:
+        logger.info(
+            "JIT provisioning: No default role configured, creating user without role",
+            extra={"correlation_id": correlation_id},
         )
 
     username = email.split("@")[0].lower()
@@ -161,7 +160,7 @@ async def _jit_provision_user(
         email=email,
         username=username,
         tenant_id=tenant_id,
-        predefined_roles=[ModelId(id=user_role.id)],
+        roles=roles,
         state=UserState.ACTIVE,
     )
 

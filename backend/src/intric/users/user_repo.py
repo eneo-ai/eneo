@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
 from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.roles_table import PredefinedRoles, Roles
+from intric.database.tables.roles_table import Roles
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
@@ -32,8 +32,6 @@ from intric.users.user import (
 
 logger = get_logger(__name__)
 
-ORG_SPACE_ROLES = {"owner", "ai configurator"}  # Temp, kan bytas senare.
-
 class UsersRepository:
     def __init__(self, session: AsyncSession):
         self.delegate = BaseRepositoryDelegate(
@@ -47,7 +45,6 @@ class UsersRepository:
     def _get_options(self):
         return [
             selectinload(Users.roles),
-            selectinload(Users.predefined_roles),
             selectinload(Users.tenant).selectinload(Tenants.modules),
             selectinload(Users.api_key),
             selectinload(Users.user_groups),
@@ -175,23 +172,13 @@ class UsersRepository:
 
         return roles.all()
 
-    async def _get_predefined_roles(self, roles: list[ModelId] | None):
-        if roles is None:
-            return []
-
-        roles_ids = [role.id for role in roles]
-        stmt = sa.select(PredefinedRoles).filter(PredefinedRoles.id.in_(roles_ids))
-        roles = await self.session.scalars(stmt)
-
-        return roles.all()
-
     async def add(self, user: UserAdd):
         try:
             stmt = (
                 sa.insert(Users)
                 .values(
                     **user.model_dump(
-                        exclude_none=True, exclude={"roles", "predefined_roles"}
+                        exclude_none=True, exclude={"roles"}
                     )
                 )
                 .returning(Users)
@@ -199,9 +186,6 @@ class UsersRepository:
             entry_in_db = await self.delegate.get_record_from_query(query=stmt)
             # TODO should be refactored when we will remove int id field from tables
             entry_in_db.roles = await self._get_roles(user.roles, user.tenant_id)
-            entry_in_db.predefined_roles = await self._get_predefined_roles(
-                user.predefined_roles
-            )
 
             return UserInDB.model_validate(entry_in_db)
         except IntegrityError as e:
@@ -212,7 +196,7 @@ class UsersRepository:
             sa.update(Users)
             .values(
                 **user.model_dump(
-                    exclude_unset=True, exclude={"id", "roles", "predefined_roles"}
+                    exclude_unset=True, exclude={"id", "roles"}
                 )
             )
             .where(Users.id == user.id)
@@ -226,11 +210,6 @@ class UsersRepository:
         # TODO should be refactored when we will remove int id field from tables
         if "roles" in user.model_dump(exclude_unset=True):
             entry_in_db.roles = await self._get_roles(user.roles, entry_in_db.tenant_id)
-
-        if "predefined_roles" in user.model_dump(exclude_unset=True):
-            entry_in_db.predefined_roles = await self._get_predefined_roles(
-                user.predefined_roles
-            )
 
         return UserInDB.model_validate(entry_in_db)
 
@@ -375,7 +354,6 @@ class UsersRepository:
         # Add eager loading to prevent N+1 queries
         query = query.options(
             selectinload(Users.roles),
-            selectinload(Users.predefined_roles),
             selectinload(Users.tenant).selectinload(Tenants.modules),
             selectinload(Users.api_key),
             selectinload(Users.user_groups),
@@ -409,17 +387,37 @@ class UsersRepository:
         )
         return await self._get_models_from_query(query, with_deleted=False)
 
+    async def count_users_with_admin_permission(
+        self, tenant_id: UUID, exclude_role_id: UUID | None = None
+    ) -> int:
+        """Count active, loginable users in tenant who have 'admin' permission."""
+        q = (
+            sa.select(sa.func.count(sa.distinct(Users.id)))
+            .join(Users.roles)
+            .where(
+                Users.deleted_at.is_(None),
+                Users.state.in_(["active", "invited"]),
+                Users.tenant_id == tenant_id,
+                Roles.permissions.any("admin"),
+            )
+        )
+        if exclude_role_id is not None:
+            q = q.where(Roles.id != exclude_role_id)
+        return await self.session.scalar(q) or 0
+
     async def list_tenant_admins(self, tenant_id: UUID) -> list["UserInDB"]:
         """
-        Returnerar alla users i tenant som har en predefined role som räknas som 'admin'
+        Returns active, loginable users in tenant that have the 'admin' permission
+        via any of their roles. Excludes inactive and deleted users.
         """
         q = (
             sa.select(Users)
-            .join(Users.predefined_roles)
+            .join(Users.roles)
             .where(
                 Users.deleted_at.is_(None),
+                Users.state.in_(["active", "invited"]),
                 Users.tenant_id == tenant_id,
-                sa.func.lower(PredefinedRoles.name).in_(ORG_SPACE_ROLES),
+                Roles.permissions.any("admin"),
             )
         )
         return await self._get_models_from_query(q, with_deleted=False)
