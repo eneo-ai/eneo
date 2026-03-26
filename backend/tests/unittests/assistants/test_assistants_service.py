@@ -6,17 +6,14 @@ from uuid import uuid4
 
 import pytest
 from intric.assistants.api.assistant_models import (
-    AskAssistant,
     AssistantBase,
     AssistantCreatePublic,
     AssistantUpdatePublic,
 )
 from intric.assistants.assistant_service import AssistantService
-from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.main.models import ModelId
 from intric.prompts.api.prompt_models import PromptCreate
-from pydantic import ValidationError
 from tests.fixtures import (
     TEST_ASSISTANT,
     TEST_COLLECTION,
@@ -114,14 +111,6 @@ def with_two_different_groups(setup: Setup, attr: str, value_1: Any, value_2: An
     setup.service.repo.update.return_value = assistant
     setup.service.user.id = 1
     setup.service.user.tenant_id = 1
-
-
-async def test_ask_assistant_model():
-    files_number = get_settings().max_in_question + 1
-    files = [ModelId(id=uuid4()) for _ in range(files_number)]
-
-    with pytest.raises(ValidationError):
-        AskAssistant(question="test", files=files)
 
 
 async def test_update_space_assistant_not_member(setup: Setup):

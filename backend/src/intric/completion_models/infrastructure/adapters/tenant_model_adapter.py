@@ -1037,12 +1037,15 @@ class TenantModelAdapter(CompletionModelAdapter):
 
     def get_token_limit_of_model(self) -> int:
         """
-        Get token limit for tenant model (with reserved space for completion).
+        Get token limit for tenant model.
+
+        Returns max_input_tokens directly, as admins configure this value
+        to represent the actual input budget at model setup time.
 
         Returns:
             int: Maximum tokens available for input context
         """
-        return self.model.max_input_tokens - self.model.max_output_tokens
+        return self.model.max_input_tokens
 
     def get_logging_details(
         self, context: "Context", model_kwargs: dict

@@ -253,7 +253,6 @@ class Settings(BaseSettings):
     upload_image_to_session_max_size: int
     upload_max_file_size: int
     transcription_max_file_size: int
-    max_in_question: int
 
     # Temporary directory for file uploads
     upload_tmp_dir: Path = Path("/tmp")

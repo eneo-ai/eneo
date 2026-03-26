@@ -57,7 +57,6 @@ class LimitService:
 
         return AttachmentLimits(
             formats=formats,
-            max_in_question=get_settings().max_in_question,
         )
 
     def get_limits(self) -> Limits:

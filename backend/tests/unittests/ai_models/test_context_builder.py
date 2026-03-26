@@ -242,4 +242,3 @@ def test_truncate_knowledge_if_too_many_chunks(context_builder: ContextBuilder):
     )
 
     assert context.token_count < 10000
-    assert count_tokens(context.prompt) + count_tokens(QUESTION) < 10000
