@@ -2,7 +2,7 @@
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { getIntric } from "$lib/core/Intric";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { IntricError } from "@intric/intric-js";
+  import { getErrorMessage, toastError } from "$lib/core/errors";
   import { Button, Dialog, Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -115,12 +115,10 @@
           );
         }
     } catch (error) {
-      const errorMessage =
-        error instanceof IntricError ? error.getReadableMessage() : String(error);
-      toast.error(m.failed_to_test_credentials({ message: errorMessage }));
+      toastError(error);
       testResult = {
         success: false,
-        error_message: errorMessage,
+        error_message: getErrorMessage(error),
       };
     }
   });
@@ -150,9 +148,7 @@
       existingConfig = result;
       $openController = false;
     } catch (error) {
-      const errorMessage =
-        error instanceof IntricError ? error.getReadableMessage() : String(error);
-      toast.error(m.failed_to_save_configuration({ message: errorMessage }));
+      toastError(error);
     }
   });
 
@@ -182,9 +178,7 @@
       isUpdatingSecret = false;
       newClientSecret = "";
     } catch (error) {
-      const errorMessage =
-        error instanceof IntricError ? error.getReadableMessage() : String(error);
-      toast.error(m.failed_to_save_configuration({ message: errorMessage }));
+      toastError(error);
     }
   });
 
@@ -222,9 +216,7 @@
       // Redirect to Microsoft OAuth
       window.location.href = result.auth_url;
     } catch (error) {
-      const errorMessage =
-        error instanceof IntricError ? error.getReadableMessage() : String(error);
-      toast.error(m.failed_to_start_oauth({ message: errorMessage }));
+      toastError(error);
     }
   });
 

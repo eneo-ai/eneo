@@ -1,6 +1,5 @@
-import { browser } from "$app/environment";
 import { PAGINATION } from "$lib/core/constants";
-import { toast } from "$lib/components/toast";
+import { toastError } from "$lib/core/errors";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import { waitFor } from "$lib/core/waitFor";
@@ -187,7 +186,7 @@ export class ChatService {
         this.newConversation();
       }
     } catch (e) {
-      if (browser) toast.error(`Error while deleting conversation with id ${conversation.id}`);
+      toastError(e);
       console.error(e);
     }
   }
@@ -198,7 +197,7 @@ export class ChatService {
       this.currentConversation = loaded;
       return loaded;
     } catch (e) {
-      if (browser) toast.error(`Error while loading conversation with id ${conversation.id}`);
+      toastError(e);
       console.error(e);
     }
   }
