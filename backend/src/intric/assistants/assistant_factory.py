@@ -142,7 +142,7 @@ class AssistantFactory:
             description=assistant_in_db.description,
             insight_enabled=assistant_in_db.insight_enabled,
             icon_id=assistant_in_db.icon_id,
-            tool_based_knowledge=assistant_in_db.tool_based_knowledge,
+            knowledge_mode=assistant_in_db.knowledge_mode,
         )
 
     def create_space_assistant_from_db(
@@ -155,10 +155,12 @@ class AssistantFactory:
         user: UserInDB = None,
     ) -> Assistant:
         user = UserSparse.model_validate(user)
-        collection_ids = [
-            assistant_collection.group_id
-            for assistant_collection in assistant_in_db.assistant_groups
-        ]
+        # Build lookup for pinned status from junction table
+        collection_pinned = {
+            ag.group_id: getattr(ag, 'pinned', False)
+            for ag in assistant_in_db.assistant_groups
+        }
+        collection_ids = list(collection_pinned.keys())
         websites_ids = [
             assistant_website.website_id for assistant_website in assistant_in_db.assistant_websites
         ]
@@ -177,7 +179,12 @@ class AssistantFactory:
             File(**attachment.file.to_dict()) for attachment in assistant_in_db.attachments
         ]
 
-        collections = [collection for collection in collections if collection.id in collection_ids]
+        filtered_collections = []
+        for collection in collections:
+            if collection.id in collection_ids:
+                collection.pinned = collection_pinned.get(collection.id, False)
+                filtered_collections.append(collection)
+        collections = filtered_collections
         assistant_websites = [website for website in websites if website.id in websites_ids]
 
         integration_knowledge_list = [
@@ -232,5 +239,5 @@ class AssistantFactory:
             data_retention_days=assistant_in_db.data_retention_days,
             metadata_json=assistant_in_db.metadata_json,
             icon_id=assistant_in_db.icon_id,
-            tool_based_knowledge=assistant_in_db.tool_based_knowledge,
+            knowledge_mode=assistant_in_db.knowledge_mode,
         )

@@ -183,8 +183,10 @@ async def update_assistant(
         attachment_ids = [attachment.id for attachment in assistant.attachments]
 
     groups = None
+    groups_pinned = None
     if assistant.groups is not None:
         groups = [group.id for group in assistant.groups]
+        groups_pinned = {group.id: group.pinned for group in assistant.groups}
 
     websites = None
     if assistant.websites is not None:
@@ -237,13 +239,14 @@ async def update_assistant(
         logging_enabled=assistant.logging_enabled,
         attachment_ids=attachment_ids,
         groups=groups,
+        groups_pinned=groups_pinned,
         websites=websites,
         integration_knowledge_ids=integration_knowledge_ids,
         mcp_server_ids=mcp_server_ids,
         mcp_tools=mcp_tool_settings,
         description=description,
         insight_enabled=assistant.insight_enabled,
-        tool_based_knowledge=assistant.tool_based_knowledge,
+        knowledge_mode=assistant.knowledge_mode,
         data_retention_days=assistant.data_retention_days,
         metadata_json=metadata_json,
         icon_id=icon_id,

@@ -157,3 +157,24 @@ class ReferencesService:
             no_duplicate_chunks=no_duplicate_chunks,
             info_blobs=info_blobs,
         )
+
+    async def get_all_as_full_documents(
+        self,
+        collections: list["Collection"] = [],
+        websites: list["Website"] = [],
+        integration_knowledge_list: list["IntegrationKnowledge"] = [],
+    ) -> "DatastoreResult":
+        """Fetch full info_blob text for pinned knowledge mode (no chunking)."""
+        chunks = await self.datastore.get_all_as_full_documents(
+            collections=collections,
+            websites=websites,
+            integration_knowledge_list=integration_knowledge_list,
+        )
+        no_duplicate_chunks = self._get_info_blob_chunks_without_duplicates(chunks)
+        info_blobs = await self._get_info_blobs_from_chunks(no_duplicate_chunks)
+
+        return DatastoreResult(
+            chunks=chunks,
+            no_duplicate_chunks=no_duplicate_chunks,
+            info_blobs=info_blobs,
+        )

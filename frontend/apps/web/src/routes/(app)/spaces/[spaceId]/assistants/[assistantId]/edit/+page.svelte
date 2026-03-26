@@ -313,6 +313,37 @@
           ></AssistantSettingsAttachments>
         </Settings.Row>
 
+        {#if $update.knowledge_mode === "pinned"}
+          {@const pinnedGroups = ($update.groups ?? []).filter((g) => g.pinned)}
+          {@const estimatedTokens = pinnedGroups.reduce((sum, g) => sum + Math.round((g.metadata?.text_size ?? 0) / 4), 0)}
+          {@const maxTokens = $update.completion_model?.max_input_tokens ?? 0}
+          {@const usagePercent = maxTokens > 0 ? Math.min((estimatedTokens / maxTokens) * 100, 100) : 0}
+          {#if pinnedGroups.length > 0}
+            <div class="border-default bg-primary mx-4 mb-2 rounded-lg border p-3">
+              <div class="mb-1.5 flex items-center justify-between text-sm">
+                <span class="text-label-default font-medium">{m.pinned_token_usage()}</span>
+                <span class="text-label-muted">
+                  ~{estimatedTokens.toLocaleString()} / {maxTokens.toLocaleString()} tokens
+                </span>
+              </div>
+              <div class="bg-primary-hover h-2 w-full overflow-hidden rounded-full">
+                <div
+                  class="h-full rounded-full transition-all duration-300"
+                  class:bg-accent-default={usagePercent < 50}
+                  class:bg-warning={usagePercent >= 50 && usagePercent < 80}
+                  class:bg-destructive={usagePercent >= 80}
+                  style="width: {usagePercent}%"
+                ></div>
+              </div>
+              {#if usagePercent >= 80}
+                <p class="text-destructive mt-1.5 text-xs">
+                  {m.pinned_token_warning()}
+                </p>
+              {/if}
+            </div>
+          {/if}
+        {/if}
+
         <Settings.Row
           title={m.knowledge()}
           description={m.select_additional_knowledge()}
@@ -327,6 +358,7 @@
         >
           <SelectKnowledgeV2
             originMode="personal"
+            showPinned={$update.knowledge_mode === "pinned"}
             bind:selectedWebsites={$update.websites}
             bind:selectedCollections={$update.groups}
             bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
@@ -347,6 +379,7 @@
         >
           <SelectKnowledgeV2
             originMode="organization"
+            showPinned={$update.knowledge_mode === "pinned"}
             bind:selectedWebsites={$update.websites}
             bind:selectedCollections={$update.groups}
             bind:selectedIntegrationKnowledge={$update.integration_knowledge_list}
@@ -404,19 +437,23 @@
           </Settings.Row>
         {/if}
 
+        {@const isPinned = $update.knowledge_mode === "pinned"}
         <Settings.Row
-          hasChanges={$currentChanges.diff.tool_based_knowledge !== undefined}
+          hasChanges={$currentChanges.diff.knowledge_mode !== undefined}
           revertFn={() => {
-            discardChanges("tool_based_knowledge");
+            discardChanges("knowledge_mode");
           }}
-          title={m.tool_based_knowledge()}
-          description={m.tool_based_knowledge_description()}
+          title={m.knowledge_mode()}
+          description={m.knowledge_mode_description()}
         >
           <div class="border-default flex h-14 border-b py-2">
             <Input.RadioSwitch
-              bind:value={$update.tool_based_knowledge}
-              labelTrue={m.enable_tool_based_knowledge()}
-              labelFalse={m.disable_tool_based_knowledge()}
+              value={isPinned}
+              labelTrue={m.knowledge_mode_pinned()}
+              labelFalse={m.knowledge_mode_tool()}
+              sideEffect={({ next }) => {
+                $update.knowledge_mode = next ? "pinned" : "tool";
+              }}
             ></Input.RadioSwitch>
           </div>
         </Settings.Row>

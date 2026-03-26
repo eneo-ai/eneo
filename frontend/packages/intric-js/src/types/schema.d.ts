@@ -3721,11 +3721,11 @@ export interface components {
        */
       insight_enabled: boolean;
       /**
-       * Tool Based Knowledge
-       * @description Whether to use tool-based knowledge retrieval. When enabled, the LLM decides when to search the knowledge base via a tool call.
-       * @default false
+       * Knowledge Mode
+       * @description Knowledge retrieval mode: 'default' (semantic search injected into system prompt), 'tool' (LLM uses search_knowledge tool call), or 'pinned' (all chunks always in context).
+       * @default tool
        */
-      tool_based_knowledge?: boolean;
+      knowledge_mode?: string;
       /**
        * Data Retention Days
        * @description Number of days to retain data for this assistant
@@ -4329,6 +4329,8 @@ export interface components {
        * Format: uuid
        */
       space_id: string;
+      /** Pinned */
+      pinned?: boolean | null;
     };
     /** CollectionUpdate */
     CollectionUpdate: {
@@ -5350,11 +5352,11 @@ export interface components {
        */
       insight_enabled?: boolean;
       /**
-       * Tool Based Knowledge
-       * @description Whether to use tool-based knowledge retrieval. When enabled, the LLM decides when to search the knowledge base via a tool call.
-       * @default false
+       * Knowledge Mode
+       * @description Knowledge retrieval mode: 'default' (semantic search injected into system prompt), 'tool' (LLM uses search_knowledge tool call), or 'pinned' (all chunks always in context).
+       * @default tool
        */
-      tool_based_knowledge?: boolean;
+      knowledge_mode?: string;
       /**
        * Data Retention Days
        * @description Number of days to retain data for this assistant
@@ -6302,8 +6304,6 @@ export interface components {
       permissions?: components["schemas"]["ResourcePermission"][];
       /** Name */
       name: string;
-      /** Description */
-      description?: string | null;
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -6320,6 +6320,22 @@ export interface components {
        */
       space_id: string;
       metadata: components["schemas"]["GroupMetadata"];
+    };
+    /**
+     * GroupReference
+     * @description Reference to a knowledge base (collection) with optional pinned flag.
+     */
+    GroupReference: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Pinned
+       * @default false
+       */
+      pinned?: boolean;
     };
     /** HTTPValidationError */
     HTTPValidationError: {
@@ -8253,12 +8269,8 @@ export interface components {
       /** Space Id */
       space_id?: string | null;
       prompt?: components["schemas"]["PromptCreate"] | null;
-      /**
-       * Groups
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
-      groups?: components["schemas"]["ModelId"][] | null;
+      /** Groups */
+      groups?: components["schemas"]["GroupReference"][] | null;
       /**
        * Websites
        * @deprecated
@@ -8303,10 +8315,10 @@ export interface components {
        */
       insight_enabled?: boolean | null;
       /**
-       * Tool Based Knowledge
-       * @description Whether to use tool-based knowledge retrieval. When enabled, the LLM decides when to search the knowledge base via a tool call instead of always injecting knowledge into the system prompt.
+       * Knowledge Mode
+       * @description Knowledge retrieval mode: 'default' (semantic search injected into system prompt), 'tool' (LLM uses search_knowledge tool call), or 'pinned' (all chunks always in context).
        */
-      tool_based_knowledge?: boolean | null;
+      knowledge_mode?: string | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
       /**

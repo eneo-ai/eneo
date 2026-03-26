@@ -371,6 +371,14 @@ class InfoBlobRepository:
 
         return size
 
+    async def get_total_text_size_of_group(self, group_id: UUID) -> int:
+        """Sum of character lengths of all info_blob texts in a group."""
+        stmt = (
+            sa.select(sa.func.coalesce(sa.func.sum(sa.func.length(InfoBlobs.text)), 0))
+            .where(InfoBlobs.group_id == group_id)
+        )
+        return await self.session.scalar(stmt)
+
     async def get_total_size_of_user(self, user_id: UUID):
         stmt = self._sum_stmt().where(InfoBlobs.user_id == user_id)
 

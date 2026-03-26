@@ -151,10 +151,18 @@ class SpaceRepository:
             .scalar_subquery()
         )
 
+        text_size_sq = (
+            sa.select(sa.func.coalesce(sa.func.sum(sa.func.length(ib.text)), 0))
+            .where(ib.group_id == c.id)
+            .correlate(c)
+            .scalar_subquery()
+        )
+
         stmt = (
             sa.select(
                 c,
                 sa.func.coalesce(ib_count_sq, 0).label("infoblob_count"),
+                text_size_sq.label("text_size"),
             )
             .where(
                 sa.or_(

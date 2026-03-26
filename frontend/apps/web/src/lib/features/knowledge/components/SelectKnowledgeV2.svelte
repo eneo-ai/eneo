@@ -67,6 +67,8 @@
    */
   export let inDialog = false;
   export let originMode: "personal" | "organization" | "both" = "both";
+  /** When true, show a pinned toggle on each collection */
+  export let showPinned = false;
 
   const {
     elements: {
@@ -701,6 +703,29 @@
               {m.empty()}
             </span>
           {/if}
+          {#if showPinned}
+            <label class="flex items-center gap-1.5 rounded border px-2 py-1 text-sm cursor-pointer"
+              class:border-accent-default={collection.pinned}
+              class:bg-accent-dimmer={collection.pinned}
+              class:text-accent-default={collection.pinned}
+              class:border-default={!collection.pinned}
+              class:text-label-muted={!collection.pinned}
+            >
+              <input
+                type="checkbox"
+                checked={collection.pinned ?? false}
+                on:change={(e) => {
+                  if (selectedCollections) {
+                    selectedCollections = selectedCollections.map((c) =>
+                      c.id === collection.id ? { ...c, pinned: e.currentTarget.checked } : c
+                    );
+                  }
+                }}
+                class="sr-only"
+              />
+              {m.knowledge_mode_pinned()}
+            </label>
+          {/if}
           <Button variant="destructive" padding="icon" on:click={() => {
             selectedCollections = selectedCollections?.filter((item) => item.id !== collection.id);
             if ($openPersonal) inputPersonalEl?.focus();
@@ -973,6 +998,29 @@
             <span class="label-neutral border-label-default bg-label-dimmer text-label-stronger rounded-full border px-3 py-1 text-sm">
               {m.empty()}
             </span>
+          {/if}
+          {#if showPinned}
+            <label class="flex items-center gap-1.5 rounded border px-2 py-1 text-sm cursor-pointer"
+              class:border-accent-default={collection.pinned}
+              class:bg-accent-dimmer={collection.pinned}
+              class:text-accent-default={collection.pinned}
+              class:border-default={!collection.pinned}
+              class:text-label-muted={!collection.pinned}
+            >
+              <input
+                type="checkbox"
+                checked={collection.pinned ?? false}
+                on:change={(e) => {
+                  if (selectedCollections) {
+                    selectedCollections = selectedCollections.map((c) =>
+                      c.id === collection.id ? { ...c, pinned: e.currentTarget.checked } : c
+                    );
+                  }
+                }}
+                class="sr-only"
+              />
+              {m.knowledge_mode_pinned()}
+            </label>
           {/if}
           <Button variant="destructive" padding="icon" on:click={() => {
             selectedCollections = selectedCollections?.filter((item) => item.id !== collection.id);

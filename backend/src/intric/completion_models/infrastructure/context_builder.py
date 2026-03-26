@@ -78,7 +78,7 @@ class ChunkGrouping:
 
 
 class _Prompt:
-    def __init__(self, version: int = 1):
+    def __init__(self, version: int = 1, pinned: bool = False):
         self.prompt = None
         self.knowledge = None
         self.web_search_result = None
@@ -86,6 +86,7 @@ class _Prompt:
         self.tool_knowledge_prompt = None
         self._knowledge_tokens = 0
         self.version = version
+        self.pinned = pinned
 
     def __str__(self):
         components = []
@@ -97,13 +98,14 @@ class _Prompt:
         if self.tool_knowledge_prompt:
             components.append(self.tool_knowledge_prompt)
 
-        # Add references prompt if either knowledge or web search results exist
-        # but only for version 2
-        if (self.knowledge or self.web_search_result) and self.version == 2:
+        # Pinned mode: always add hallucination guard + references prompt
+        # Default mode: hallucination guard for v1, references prompt for v2
+        if self.knowledge and self.pinned:
+            components.append(HALLUCINATION_GUARD)
             components.append(SHOW_REFERENCES_PROMPT)
-
-        # Add hallucination guard for version 1 knowledge
-        if self.knowledge and self.version == 1:
+        elif (self.knowledge or self.web_search_result) and self.version == 2:
+            components.append(SHOW_REFERENCES_PROMPT)
+        elif self.knowledge and self.version == 1:
             components.append(HALLUCINATION_GUARD)
 
         if self.knowledge:
@@ -438,10 +440,12 @@ class ContextBuilder:
         web_search_results: list["WebSearchResult"] = [],
         mcp_tools: list[FunctionDefinition] = [],
         local_tools: list[FunctionDefinition] = [],
+        knowledge_mode: str = "tool",
     ):
         tokens_used = 0
         max_tokens_usable = max_tokens - CONTEXT_SIZE_BUFFER  # Leave some room.
         use_tool_based_knowledge = bool(local_tools)
+        is_pinned = knowledge_mode == "pinned"
 
         # Create the input, count the tokens.
         _input_string = self._build_input(
@@ -454,7 +458,7 @@ class ContextBuilder:
 
         # Create the necessary parts of the prompt.
         # Add the tokens used.
-        _prompt = _Prompt(version=version)
+        _prompt = _Prompt(version=version, pinned=is_pinned)
         _prompt.add_prompt(
             prompt=prompt,
             transcription=bool(transcription_inputs),

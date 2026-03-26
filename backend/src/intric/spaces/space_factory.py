@@ -75,7 +75,7 @@ class SpaceFactory:
         self,
         space_in_db: Spaces,
         user: "UserInDB",
-        collections_in_db: list[tuple[CollectionsTable, int]] = [],
+        collections_in_db: list[tuple[CollectionsTable, int, int]] = [],
         websites_in_db: list["Websites"] = [],
         completion_models: list["CompletionModel"] = [],
         embedding_models: list["EmbeddingModel"] = [],
@@ -180,8 +180,9 @@ class SpaceFactory:
                     None,
                 ),
                 num_info_blobs=info_blob_count,
+                text_size=text_size,
             )
-            for collection, info_blob_count in collections_in_db
+            for collection, info_blob_count, text_size in collections_in_db
         ]
         space_websites = [
             Website.to_domain(

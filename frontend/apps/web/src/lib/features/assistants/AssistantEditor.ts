@@ -20,7 +20,7 @@ function initAssistantEditor(data: {
     defaults: {
       prompt: { description: "", text: "" },
       insight_enabled: false,
-      tool_based_knowledge: false,
+      knowledge_mode: "tool",
       mcp_tools: []
     },
     updateResource: async (resource, changes) => {
@@ -32,12 +32,12 @@ function initAssistantEditor(data: {
       name: true,
       description: true,
       insight_enabled: true,
-      tool_based_knowledge: true,
+      knowledge_mode: true,
       completion_model: { id: true },
       completion_model_kwargs: true,
       prompt: { description: true, text: true },
       websites: ["id"],
-      groups: ["id"],
+      groups: ["id", "pinned"],
       integration_knowledge_list: ["id"],
       mcp_servers: ["id"],
       mcp_tools: ["tool_id", "is_enabled"],

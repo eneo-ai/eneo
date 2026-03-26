@@ -298,6 +298,7 @@ class AssistantService:
         completion_model_kwargs: ModelKwargs | None = None,
         logging_enabled: bool | None = None,
         groups: list[UUID] | None = None,
+        groups_pinned: dict[UUID, bool] | None = None,
         websites: list[UUID] | None = None,
         integration_knowledge_ids: list[UUID] | None = None,
         mcp_server_ids: list[UUID] | None = None,
@@ -305,7 +306,7 @@ class AssistantService:
         attachment_ids: list[UUID] | None = None,
         description: Union[str, NotProvided] = NOT_PROVIDED,
         insight_enabled: Optional[bool] = None,
-        tool_based_knowledge: Optional[bool] = None,
+        knowledge_mode: Optional[str] = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
@@ -341,7 +342,13 @@ class AssistantService:
             attachments = await self.file_service.get_file_infos(attachment_ids)
 
         if groups is not None:
-            groups = [space.get_collection(collection_id=group_id) for group_id in groups]
+            collections_list = []
+            for group_id in groups:
+                collection = space.get_collection(collection_id=group_id)
+                if groups_pinned:
+                    collection.pinned = groups_pinned.get(group_id, False)
+                collections_list.append(collection)
+            groups = collections_list
 
         if websites is not None:
             websites = [space.get_website(website_id=website_id) for website_id in websites]
@@ -369,7 +376,7 @@ class AssistantService:
             integration_knowledge_list=integration_knowledge_list,
             description=description,
             insight_enabled=insight_enabled,
-            tool_based_knowledge=tool_based_knowledge,
+            knowledge_mode=knowledge_mode,
             data_retention_days=data_retention_days,
             metadata_json=metadata_json,
             icon_id=icon_id,

@@ -142,7 +142,7 @@ class AssistantAssembler:
             permissions=permissions,
             description=assistant.description,
             insight_enabled=assistant.insight_enabled,
-            tool_based_knowledge=assistant.tool_based_knowledge,
+            knowledge_mode=assistant.knowledge_mode,
             type=assistant.type,
             data_retention_days=assistant.data_retention_days,
             metadata_json=assistant.metadata_json,

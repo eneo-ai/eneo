@@ -114,6 +114,47 @@ class InfoBlobChunkRepo:
 
         return chunks_with_score
 
+    async def get_all_as_full_documents(
+        self,
+        *,
+        group_ids: Optional[list[UUID]] = [],
+        website_ids: Optional[list[UUID]] = [],
+        integration_knowledge_ids: Optional[list[UUID]] = [],
+    ) -> list[InfoBlobChunkInDBWithScore]:
+        """Fetch full info_blob text as synthetic single-chunk entries.
+
+        Used for pinned knowledge mode where all document content is always
+        included in context. Returns one entry per info_blob using the full
+        extracted text (not chunked), avoiding chunk overlap duplication.
+        """
+        stmt = (
+            sa.select(InfoBlobs)
+            .order_by(InfoBlobs.id)
+        )
+
+        stmt = self._filter_on_sources(
+            stmt,
+            group_ids,
+            website_ids,
+            integration_knowledge_ids=integration_knowledge_ids,
+        )
+
+        info_blobs = await self.session.scalars(stmt)
+
+        return [
+            InfoBlobChunkInDBWithScore(
+                id=blob.id,
+                text=blob.text,
+                chunk_no=0,
+                info_blob_id=blob.id,
+                tenant_id=blob.tenant_id,
+                score=1.0,
+                info_blob_title=blob.title,
+            )
+            for blob in info_blobs
+            if blob.text
+        ]
+
     async def keyword_search(
         self,
         search_string: str,

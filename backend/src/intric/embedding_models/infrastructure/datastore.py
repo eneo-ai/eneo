@@ -179,3 +179,20 @@ class Datastore:
             return semantic_results[:cut_point]
 
         return semantic_results
+
+    async def get_all_as_full_documents(
+        self,
+        collections: list["Collection"] = [],
+        websites: list["Website"] = [],
+        integration_knowledge_list: list[IntegrationKnowledge] = [],
+    ) -> list[InfoBlobChunkInDBWithScore]:
+        """Fetch full info_blob text for pinned knowledge mode (no chunking)."""
+        group_ids = [group.id for group in collections]
+        website_ids = [website.id for website in websites]
+        integration_knowledge_ids = [i.id for i in integration_knowledge_list]
+
+        return await self.chunk_repo.get_all_as_full_documents(
+            group_ids=group_ids,
+            website_ids=website_ids,
+            integration_knowledge_ids=integration_knowledge_ids,
+        )

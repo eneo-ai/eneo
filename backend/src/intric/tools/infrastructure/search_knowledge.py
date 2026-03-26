@@ -75,7 +75,7 @@ def _format_chunks(chunks: list[InfoBlobChunkInDBWithScore]) -> str:
 class SearchKnowledgeTool:
     """A local tool that searches the knowledge base via semantic search.
 
-    One instance is created per assistant that has knowledge and tool_based_knowledge=True.
+    One instance is created per assistant that has knowledge and knowledge_mode="tool".
     The tool description is dynamically generated from the assistant's knowledge sources.
     """
 

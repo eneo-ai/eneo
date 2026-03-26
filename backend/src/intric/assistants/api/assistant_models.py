@@ -101,6 +101,11 @@ class GroupWithEmbeddingModel(GroupInDBBase):
 
 
 # Models
+class GroupReference(ModelId):
+    """Reference to a knowledge base (collection) with optional pinned flag."""
+    pinned: bool = False
+
+
 class AssistantGuard(BaseModel):
     guardrail_active: bool = True
     guardrail_string: str = ""
@@ -171,6 +176,7 @@ class AssistantCreatePublic(AssistantBase):
 class AssistantUpdatePublic(AssistantCreatePublic):
     prompt: Optional[PromptCreate] = None
     attachments: Optional[list[ModelId]] = None
+    groups: Optional[list[GroupReference]] = None
     mcp_tools: Optional[list[MCPToolSetting]] = None
     description: Optional[str] = Field(
         default=NOT_PROVIDED,
@@ -187,12 +193,11 @@ class AssistantUpdatePublic(AssistantCreatePublic):
             "appropriate permissions can see all sessions for this assistant."
         ),
     )
-    tool_based_knowledge: Optional[bool] = Field(
+    knowledge_mode: Optional[str] = Field(
         default=None,
         description=(
-            "Whether to use tool-based knowledge retrieval. When enabled, the LLM "
-            "decides when to search the knowledge base via a tool call instead of "
-            "always injecting knowledge into the system prompt."
+            "Knowledge retrieval mode: 'default' (semantic search injected into system prompt), "
+            "'tool' (LLM uses search_knowledge tool call), or 'pinned' (all chunks always in context)."
         ),
     )
     data_retention_days: Optional[int] = None
@@ -316,11 +321,11 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
             "appropriate permissions can see all sessions for this assistant."
         ),
     )
-    tool_based_knowledge: bool = Field(
-        default=False,
+    knowledge_mode: str = Field(
+        default="tool",
         description=(
-            "Whether to use tool-based knowledge retrieval. When enabled, the LLM "
-            "decides when to search the knowledge base via a tool call."
+            "Knowledge retrieval mode: 'default' (semantic search injected into system prompt), "
+            "'tool' (LLM uses search_knowledge tool call), or 'pinned' (all chunks always in context)."
         ),
     )
     data_retention_days: Optional[int] = Field(

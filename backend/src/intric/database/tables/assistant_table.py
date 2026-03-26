@@ -29,7 +29,7 @@ class Assistants(BasePublic):
     insight_enabled: Mapped[bool] = mapped_column(default=False)
     data_retention_days: Mapped[Optional[int]] = mapped_column()
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSONB)
-    tool_based_knowledge: Mapped[bool] = mapped_column(default=False, server_default="false")
+    knowledge_mode: Mapped[str] = mapped_column(default="tool", server_default="tool")
     # TODO: refactor since this is a somewhat weird solution having a
     # type column. The reason is bc front-end wants a non-nullable
     # "type" field in a bunch of models. Thus a field with a default
@@ -92,6 +92,7 @@ class AssistantsGroups(BaseCrossReference):
     group_id: Mapped[UUID] = mapped_column(
         ForeignKey(CollectionsTable.id, ondelete="CASCADE"), primary_key=True
     )
+    pinned: Mapped[bool] = mapped_column(default=False, server_default="false")
 
 
 class AssistantsWebsites(BaseCrossReference):

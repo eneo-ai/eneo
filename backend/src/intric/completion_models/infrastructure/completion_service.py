@@ -222,6 +222,7 @@ class CompletionService:
         mcp_servers: list["MCPServer"] = [],
         require_tool_approval: bool = False,
         local_tool_executor: "LocalToolExecutor | None" = None,
+        knowledge_mode: str = "tool",
     ):
         model_adapter = await self._get_adapter(model)
 
@@ -248,6 +249,7 @@ class CompletionService:
             use_image_generation=use_image_generation,
             web_search_results=web_search_results,
             local_tools=local_tools,
+            knowledge_mode=knowledge_mode,
         )
 
         if extended_logging:

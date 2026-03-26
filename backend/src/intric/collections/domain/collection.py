@@ -28,6 +28,8 @@ class Collection(Entity):
         num_info_blobs: int,
         embedding_model: "EmbeddingModel",
         description: Optional[str] = None,
+        pinned: bool = False,
+        text_size: int = 0,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.space_id = space_id
@@ -38,6 +40,8 @@ class Collection(Entity):
         self.num_info_blobs = num_info_blobs
         self.embedding_model = embedding_model
         self.description = description
+        self.pinned = pinned
+        self.text_size = text_size
 
     @classmethod
     def create(
@@ -68,6 +72,7 @@ class Collection(Entity):
         record: "CollectionsTable",
         embedding_model: "EmbeddingModel",
         num_info_blobs: int,
+        text_size: int = 0,
     ):
         return cls(
             id=record.id,
@@ -81,6 +86,7 @@ class Collection(Entity):
             num_info_blobs=num_info_blobs,
             embedding_model=embedding_model,
             description=record.description,
+            text_size=text_size,
         )
 
     def update(

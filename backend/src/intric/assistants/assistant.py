@@ -69,7 +69,7 @@ class Assistant(Entity):
         data_retention_days: Optional[int] = None,
         metadata_json: Optional[dict] = {},
         icon_id: Optional[UUID] = None,
-        tool_based_knowledge: bool = False,
+        knowledge_mode: str = "tool",
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
 
@@ -97,7 +97,7 @@ class Assistant(Entity):
         self.type = AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
         self._metadata_json = metadata_json
         self.icon_id = icon_id
-        self.tool_based_knowledge = tool_based_knowledge
+        self.knowledge_mode = knowledge_mode
 
         # Temporary attributes for update flow - not persisted directly
         self._mcp_server_ids: list[UUID] | None = None
@@ -236,7 +236,7 @@ class Assistant(Entity):
         published: bool | None = None,
         description: Union[str, None, NotProvided] = NOT_PROVIDED,
         insight_enabled: bool | None = None,
-        tool_based_knowledge: bool | None = None,
+        knowledge_mode: str | None = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
@@ -276,8 +276,8 @@ class Assistant(Entity):
         if insight_enabled is not None:
             self.insight_enabled = insight_enabled
 
-        if tool_based_knowledge is not None:
-            self.tool_based_knowledge = tool_based_knowledge
+        if knowledge_mode is not None:
+            self.knowledge_mode = knowledge_mode
 
         if data_retention_days is not NOT_PROVIDED:
             self.data_retention_days = data_retention_days
@@ -353,11 +353,15 @@ class Assistant(Entity):
         # Fill half the context
         num_chunks = self.completion_model.max_input_tokens // 200 // 2 if version == 2 else 30
 
-        # Determine knowledge retrieval strategy
+        # Determine knowledge retrieval strategy based on knowledge_mode
         use_tool_knowledge = (
             self.has_knowledge()
-            and self.tool_based_knowledge
+            and self.knowledge_mode == "tool"
             and self.completion_model.supports_tool_calling
+        )
+        use_pinned_knowledge = (
+            self.has_knowledge()
+            and self.knowledge_mode == "pinned"
         )
 
         local_tool_executor = None
@@ -377,8 +381,14 @@ class Assistant(Entity):
             datastore_result = DatastoreResult(
                 chunks=[], no_duplicate_chunks=[], info_blobs=[]
             )
+        elif use_pinned_knowledge:
+            # Pinned mode: fetch all chunks from pinned collections only
+            pinned_collections = [c for c in self.collections if getattr(c, 'pinned', False)]
+            datastore_result = await references_service.get_all_as_full_documents(
+                collections=pinned_collections,
+            )
         elif self.has_knowledge():
-            # Fallback: traditional system-prompt injection
+            # Default: traditional system-prompt injection via semantic search
             datastore_result = await references_service.get_references(
                 question=question,
                 session=session,
@@ -410,6 +420,7 @@ class Assistant(Entity):
             mcp_servers=self.mcp_servers,  # Always pass — no more exclusivity
             require_tool_approval=require_tool_approval,
             local_tool_executor=local_tool_executor,
+            knowledge_mode=self.knowledge_mode,
         )
 
         # Collect accumulated results from tool-based retrieval

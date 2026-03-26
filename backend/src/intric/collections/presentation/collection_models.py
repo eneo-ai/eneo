@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 class CollectionMetadata(BaseModel):
     num_info_blobs: int
     size: int
+    text_size: int = 0
 
 
 class CollectionPublic(ResourcePermissionsMixin, BaseResponse):
@@ -23,6 +24,7 @@ class CollectionPublic(ResourcePermissionsMixin, BaseResponse):
     embedding_model: EmbeddingModelPublic
     metadata: CollectionMetadata
     space_id: UUID
+    pinned: Optional[bool] = None
 
     @classmethod
     def from_domain(cls, collection: "Collection"):
@@ -36,9 +38,11 @@ class CollectionPublic(ResourcePermissionsMixin, BaseResponse):
             metadata=CollectionMetadata(
                 num_info_blobs=collection.num_info_blobs,
                 size=collection.size,
+                text_size=getattr(collection, 'text_size', 0),
             ),
             permissions=collection.permissions,
             space_id=collection.space_id,
+            pinned=getattr(collection, 'pinned', None),
         )
 
 

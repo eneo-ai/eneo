@@ -167,7 +167,14 @@ class AssistantRepository:
 
         if collections:
             stmt = sa.insert(AssistantsGroups).values(
-                [dict(group_id=group.id, assistant_id=assistant_in_db.id) for group in collections]
+                [
+                    dict(
+                        group_id=group.id,
+                        assistant_id=assistant_in_db.id,
+                        pinned=getattr(group, 'pinned', False),
+                    )
+                    for group in collections
+                ]
             )
             await self.session.execute(stmt)
 
@@ -411,7 +418,7 @@ class AssistantRepository:
                 description=assistant.description,
                 type=assistant.type,
                 insight_enabled=assistant.insight_enabled,
-                tool_based_knowledge=assistant.tool_based_knowledge,
+                knowledge_mode=assistant.knowledge_mode,
                 data_retention_days=assistant.data_retention_days,
                 metadata_json=assistant.metadata_json,
                 icon_id=assistant.icon_id,
