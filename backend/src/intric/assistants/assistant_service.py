@@ -708,11 +708,7 @@ class AssistantService:
         if not actor.can_read_assistant(assistant=active_assistant):
             raise UnauthorizedException()
 
-        if not space.can_ask_assistant(assistant=active_assistant):
-            raise UnauthorizedException(
-                "This assistant can not be used at this time. "
-                "Please review your assistant settings and try again."
-            )
+        space.can_ask_assistant(assistant=active_assistant)
 
         if tool_assistant_id is not None:
             tool_assistant = space.get_assistant(assistant_id=tool_assistant_id)

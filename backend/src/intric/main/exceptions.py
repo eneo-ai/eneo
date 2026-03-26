@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import Enum, unique
 from typing import Any
 
 from intric.files.text import (
@@ -9,6 +9,7 @@ from intric.files.text import (
 )
 
 
+@unique
 class ErrorCodes(int, Enum):
     NOT_FOUND = 9000
     UNAUTHORIZED = 9001
@@ -45,6 +46,10 @@ class ErrorCodes(int, Enum):
     # Provider errors
     PROVIDER_INACTIVE = 9031
     PROVIDER_NOT_FOUND = 9032
+    # Resource configuration errors
+    MODEL_NOT_AVAILABLE = 9033
+    KNOWLEDGE_MODEL_UNAVAILABLE = 9034
+    SECURITY_CLASSIFICATION_MISMATCH = 9035
 
 
 class NotFoundException(Exception):
@@ -315,6 +320,24 @@ class ProviderNotFoundException(Exception):
     pass
 
 
+class ModelNotAvailableException(Exception):
+    """Raised when a model is assigned to a resource but not available in the space."""
+
+    pass
+
+
+class KnowledgeModelUnavailableException(Exception):
+    """Raised when a knowledge source uses an embedding model that is not available."""
+
+    pass
+
+
+class SecurityClassificationMismatchException(Exception):
+    """Raised when a resource does not meet the space's security classification."""
+
+    pass
+
+
 # Map exceptions to response codes
 # Set message to None to use the internal message
 # Set error codes in the range 9000 - 9999
@@ -370,4 +393,12 @@ EXCEPTION_MAP = {
     # Provider errors - use None to pass through the exception's own message
     ProviderInactiveException: (503, None, ErrorCodes.PROVIDER_INACTIVE),
     ProviderNotFoundException: (404, None, ErrorCodes.PROVIDER_NOT_FOUND),
+    # Resource configuration errors - use None to pass through the exception's own message
+    ModelNotAvailableException: (400, None, ErrorCodes.MODEL_NOT_AVAILABLE),
+    KnowledgeModelUnavailableException: (400, None, ErrorCodes.KNOWLEDGE_MODEL_UNAVAILABLE),
+    SecurityClassificationMismatchException: (
+        400,
+        None,
+        ErrorCodes.SECURITY_CLASSIFICATION_MISMATCH,
+    ),
 }

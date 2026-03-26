@@ -5,7 +5,11 @@ from uuid import UUID
 
 from intric.main.exceptions import (
     BadRequestException,
+    KnowledgeModelUnavailableException,
+    ModelNotAvailableException,
+    NoModelSelectedException,
     NotFoundException,
+    SecurityClassificationMismatchException,
     UnauthorizedException,
 )
 from intric.main.models import NOT_PROVIDED, NotProvided
@@ -529,22 +533,34 @@ class Space:
 
         return True
 
-    def can_ask_assistant(self, assistant: "Assistant") -> bool:
+    def can_ask_assistant(self, assistant: "Assistant"):
+        if assistant.completion_model is None:
+            raise NoModelSelectedException(
+                "No AI model is configured for this assistant. "
+                "Please select a model in the assistant settings."
+            )
         if not self.is_completion_model_available(assistant.completion_model.id):
-            return False
+            raise ModelNotAvailableException(
+                "The selected AI model is not available in this space. "
+                "Please choose a different model or contact your administrator."
+            )
         if not self.can_use_knowledge(
             assistant.collections
             + assistant.websites
             + assistant.integration_knowledge_list
         ):
-            return False
+            raise KnowledgeModelUnavailableException(
+                "This assistant uses knowledge sources with unavailable embedding models. "
+                "Please review the assistant's knowledge settings."
+            )
         if self.security_classification is not None:
             if self.security_classification.is_greater_than(
                 assistant.completion_model.security_classification
             ):
-                return False
-
-        return True
+                raise SecurityClassificationMismatchException(
+                    "The assistant's model does not meet this space's "
+                    "security classification requirements."
+                )
 
     def can_run_app(self, app: "App") -> bool:
         if not self.is_completion_model_available(app.completion_model.id):

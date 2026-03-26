@@ -11,7 +11,11 @@ from intric.assistants.api.assistant_models import (
     AssistantUpdatePublic,
 )
 from intric.assistants.assistant_service import AssistantService
-from intric.main.exceptions import BadRequestException, UnauthorizedException
+from intric.main.exceptions import (
+    BadRequestException,
+    ModelNotAvailableException,
+    UnauthorizedException,
+)
 from intric.main.models import ModelId
 from intric.prompts.api.prompt_models import PromptCreate
 from tests.fixtures import (
@@ -359,8 +363,10 @@ async def test_error_when_assistant_cannot_be_used_in_space(setup: Setup):
     assistant = MagicMock(completion_model_id=uuid4(), space_id=uuid4())
     space = MagicMock()
     space.get_assistant.return_value = assistant
-    space.can_ask_assistant.return_value = False
+    space.can_ask_assistant.side_effect = ModelNotAvailableException(
+        "The selected AI model is not available in this space."
+    )
     setup.service.space_repo.get_space_by_assistant.return_value = space
 
-    with pytest.raises(UnauthorizedException):
+    with pytest.raises(ModelNotAvailableException):
         await setup.service.ask(question="hello", assistant_id=MagicMock())
