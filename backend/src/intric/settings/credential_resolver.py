@@ -610,7 +610,12 @@ class CredentialResolver:
         redirect_path = validate_redirect_path(
             federation_config.get("redirect_path", "/login/callback")
         )
+        if redirect_path is None:
+            raise ValueError("redirect_path must be configured for OIDC redirects")
+
         redirect_uri = validate_redirect_uri(f"{origin}{redirect_path}")
+        if redirect_uri is None:
+            raise ValueError("redirect_uri validation returned no value")
 
         logger.info(
             "Redirect URI resolved successfully",
