@@ -9,6 +9,9 @@ from intric.main.config import get_settings
 from intric.server.dependencies.modules import init_modules
 from intric.server.dependencies.predefined_roles import init_predefined_roles
 from intric.server.websockets.websocket_manager import websocket_manager
+from intric.tenants.federation_startup_migration import (
+    migrate_env_oidc_to_tenant_federation_on_startup,
+)
 
 
 @asynccontextmanager
@@ -33,6 +36,8 @@ async def startup():
 
     # init modules
     await init_modules()
+
+    await migrate_env_oidc_to_tenant_federation_on_startup()
 
 
 async def shutdown():
