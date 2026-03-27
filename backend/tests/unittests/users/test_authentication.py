@@ -159,7 +159,7 @@ def test_validate_openid_jwt(auth_service: AuthService):
         access_token=access_token,
         key=key.key,
         signing_algos=signing_algos,
-        client_id="eneo",
+        client_id="intric",  # matches the aud claim in the hardcoded JWT above
         options={"verify_exp": False},
     )
 
