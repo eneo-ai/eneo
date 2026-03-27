@@ -77,7 +77,7 @@ type EneoStreamingEndpoints =
   | "/api/v1/conversations/"
   | "/api/v1/analysis/conversation-insights/";
 
-type EneoStreamFunction = <Endpoint extends IntricStreamingEndpoints>(
+type EneoStreamFunction = <Endpoint extends EneoStreamingEndpoints>(
   endpoint: Endpoint,
   args: {
     params: EneoParams<Endpoint, "post">;

@@ -1,5 +1,5 @@
-import { createEneo } from "./src/intric";
-export { createEneo } from "./src/intric";
+import { createEneo } from "./src/eneo";
+export { createEneo } from "./src/eneo";
 import { createEneoSocket } from "./src/socket/socket";
 export { createEneoSocket } from "./src/socket/socket";
 export { createClient, EneoError } from "./src/client/client";

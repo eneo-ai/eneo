@@ -8,7 +8,7 @@
 export function initIntegrations(client) {
   return {
     /**
-     * List all integrations available to this intric instance.
+     * List all integrations available to this eneo instance.
      * @throws {EneoError}
      * */
     list: async () => {

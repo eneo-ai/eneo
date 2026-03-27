@@ -30,7 +30,7 @@ function createConfig(params) {
  * Creates a Vite plugin for automatic Svelte icon components
  * @returns {import('vite').Plugin}
  */
-export const intricIcons = () => {
+export const eneoIcons = () => {
   const moduleId = "@eneo/icons/";
   // Resolved import needs to start with "/" otherwise it will not be compiled as svelte code
   const resolvedPrefix = "/";

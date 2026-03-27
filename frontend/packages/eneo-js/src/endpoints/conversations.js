@@ -90,7 +90,7 @@ export function initConversations(client) {
      * @param {(data: import("../types/resources").SSE.FirstChunk) => void} [params.callbacks.onFirstChunk] Callback to run when the first chunk of the answer is received
      * @param {(data: import("../types/resources").SSE.Text) => void} [params.callbacks.onText] Callback to run when a new token/word of the answer is received
      * @param {(data: import("../types/resources").SSE.Files) => void} [params.callbacks.onImage] Callback to run when generated files of the answer is received
-     * @param {(data: import("../types/resources").SSE.Intric) => void} [params.callbacks.onEneoEvent] Callback to run when an intric event is received
+     * @param {(data: import("../types/resources").SSE.Eneo) => void} [params.callbacks.onEneoEvent] Callback to run when an eneo event is received
      * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall] Callback to run when MCP tools are being executed
      * @param {(data: import("../types/resources").SSE.ToolApprovalRequired) => void} [params.callbacks.onToolApprovalRequired] Callback to run when MCP tools require user approval
      * @param {(response: Response) => Promise<void>} [params.callbacks.onOpen] Callback to run once the initial response of the backend is received
@@ -172,7 +172,7 @@ export function initConversations(client) {
                   callbacks?.onImage?.(data);
                   break;
 
-                case "intric_event":
+                case "eneo_event":
                 case "token_usage":
                   callbacks?.onEneoEvent?.(data);
                   break;

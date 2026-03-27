@@ -10,7 +10,7 @@ import { UniversalTransition } from "echarts/features";
 import { CanvasRenderer } from "echarts/renderers";
 
 import type { Action } from "svelte/action";
-import { intricTheme } from "./theme.js";
+import { eneoTheme } from "./theme.js";
 
 use([
   BarChart,
@@ -27,7 +27,7 @@ export type Config = {
   theme?: string | object;
 };
 
-registerTheme("eneo", intricTheme);
+registerTheme("eneo", eneoTheme);
 
 export const chart: Action<HTMLElement, Config> = (node, params) => {
   const { theme = "eneo" } = params;

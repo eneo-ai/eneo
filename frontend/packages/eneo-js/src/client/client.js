@@ -1,8 +1,8 @@
 /**
  * @typedef {Object} Client
- * @property {import('../types/fetch').IntricFetchFunction} fetch Typed fetch function for the Eneo backend.
- * @property {import('../types/fetch').IntricStreamFunction} stream Fetch function specifically for streaming answers from an assistant.
- * @property {import('../types/fetch').IntricXhrFunction} xhr
+ * @property {import('../types/fetch').EneoFetchFunction} fetch Typed fetch function for the Eneo backend.
+ * @property {import('../types/fetch').EneoStreamFunction} stream Fetch function specifically for streaming answers from an assistant.
+ * @property {import('../types/fetch').EneoXhrFunction} xhr
  * @property {URL} baseUrl Base url this client uses
  * @property {string} version Version of the Api this client was created for
  */
@@ -11,7 +11,7 @@ import { readEvents } from "./stream";
 import { xhr } from "./xhr";
 
 /**
- * Creates a client to request intric resources over a typesafe interface.
+ * Creates a client to request eneo resources over a typesafe interface.
  * Requires either an api key or a user token to authenticate requests.
  * @param {Object} args
  * @param  {string} args.baseUrl Base URL of the Eneo backend
@@ -123,7 +123,7 @@ export function createClient(args) {
 
 /**
  * Expand parameters and endpoint into a full url
- * @param baseUrl {string} Base Url of the intric instance
+ * @param baseUrl {string} Base Url of the eneo instance
  * @param endpoint {string} An endpoint with {param} placeholdes
  * @param params {{query?: Record<string, string>, path?: Record<string, string>} | undefined} A dictionary of {params} to replace with their respective values
  * @returns {string} Returns the fully expanded url
@@ -245,7 +245,7 @@ export class PartialError extends Error {
   }
 }
 
-/** An error thrown by the intric.js client */
+/** An error thrown by the eneo.js client */
 export class EneoError extends Error {
   /**
    * Construct a new EneoError

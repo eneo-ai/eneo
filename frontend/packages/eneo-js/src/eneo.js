@@ -34,7 +34,7 @@ import { initModelProviders } from "./endpoints/model-providers";
 import { initTenantModels } from "./endpoints/tenant-models";
 
 /**
- * Create an Intric.js object to interact with the intric backend.
+ * Create an Eneo.js object to interact with the eneo backend.
  * Requires either an api key or a user token to authenticate requests.
  * @param {Object} args
  * @param  {string} [args.apiKey] Eneo API key

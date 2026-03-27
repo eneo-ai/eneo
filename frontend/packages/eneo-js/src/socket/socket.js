@@ -9,7 +9,7 @@ const HEARTBEAT = {
 /** @typedef {import("./types").ClientSubscribableMessageType} ClientSubscribableMessageType*/
 
 /**
- * Create an Intric.js object to interact with the intric backend.
+ * Create an Eneo.js object to interact with the eneo backend.
  * Requires either an api key or a user token to authenticate requests.
  * @param {Object} args
  * @param {string} args.baseUrl Backend base url

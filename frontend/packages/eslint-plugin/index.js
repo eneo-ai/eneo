@@ -24,11 +24,11 @@ Object.assign(plugin.configs, {
   recommended: [
     {
       plugins: {
-        intric: plugin,
+        eneo: plugin,
       },
       rules: {
-        "intric/no-ignored-unsubscriber": "error",
-        "intric/no-ignored-removehandler": "error",
+        "eneo/no-ignored-unsubscriber": "error",
+        "eneo/no-ignored-removehandler": "error",
       },
     },
   ],

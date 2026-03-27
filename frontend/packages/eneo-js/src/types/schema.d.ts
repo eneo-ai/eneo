@@ -424,7 +424,7 @@ export interface paths {
      * Streams the response as Server-Sent Events if stream == true.
      * The following SSE response models are supported in the stream:
      * - SSEText: Text completion chunks
-     * - SSEIntricEvent: Internal events like generating an image
+     * - SSEEneoEvent: Internal events like generating an image
      * - SSEFiles: Generated files/images responses
      * - SSEFirstChunk: Initial response with metadata
      * - SSEError: Error events (API errors, authentication failures, rate limits, etc.)
@@ -7454,7 +7454,7 @@ export interface components {
      * @description Any change to these enums will result in database changes
      * @enum {string}
      */
-    Modules: "intric-applications";
+    Modules: "eneo-applications";
     /** OIDCDebugToggleRequest */
     OIDCDebugToggleRequest: {
       /**
@@ -12034,8 +12034,8 @@ export interface components {
         };
       };
     };
-    /** SSEIntricEvent */
-    SSEIntricEvent: {
+    /** SSEEneoEvent */
+    SSEEneoEvent: {
       /**
        * Session Id
        * Format: uuid
@@ -14861,7 +14861,7 @@ export interface operations {
    * Streams the response as Server-Sent Events if stream == true.
    * The following SSE response models are supported in the stream:
    * - SSEText: Text completion chunks
-   * - SSEIntricEvent: Internal events like generating an image
+   * - SSEEneoEvent: Internal events like generating an image
    * - SSEFiles: Generated files/images responses
    * - SSEFirstChunk: Initial response with metadata
    * - SSEError: Error events (API errors, authentication failures, rate limits, etc.)
