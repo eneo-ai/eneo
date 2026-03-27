@@ -48,9 +48,9 @@ const ERROR_CODE_MESSAGES: Record<number, () => string> = {
  * Get a localized, user-facing error message from any error.
  *
  * Resolution order:
- * 1. IntricError with a mapped error code → localized i18n message
- * 2. IntricError without mapping → backend's readable message (English fallback)
- * 3. Non-IntricError → generic localized fallback ("Something went wrong")
+ * 1. Eneo backend error with a mapped error code → localized i18n message
+ * 2. Eneo backend error without mapping → backend's readable message (English fallback)
+ * 3. Other errors → generic localized fallback ("Something went wrong")
  *
  * Use toastError() to show the message directly as a toast notification.
  */

@@ -1,13 +1,13 @@
 /**
- * Centralized error handling utilities.
+ * Centralized error handling utilities for Eneo.
  *
- * These utilities map backend error codes (IntricError.code) to localized
- * i18n messages, providing consistent error messages across the application.
+ * Maps backend error codes to localized i18n messages, providing
+ * consistent error messages across the entire application.
  *
  * ## How it works
  *
  * 1. Backend raises an exception with a specific ErrorCode (e.g. 9033)
- * 2. Frontend receives it as an IntricError with error.code = 9033
+ * 2. Frontend receives the error with error.code = 9033
  * 3. getErrorMessage() maps 9033 → m.eneo_error_9033() (localized message)
  * 4. If no mapping exists, falls back to the backend's English message
  *

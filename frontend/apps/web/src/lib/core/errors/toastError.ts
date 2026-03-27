@@ -6,7 +6,7 @@ import { getErrorMessage } from './getErrorMessage';
  *
  * Uses the centralized error code → i18n mapping from getErrorMessage().
  *
- * @param error - The caught error (IntricError, Error, or unknown)
+ * @param error - The caught error (backend error, Error, or unknown)
  * @param context - Optional operation context, e.g. m.could_not_delete_assistant()
  *
  * @example
