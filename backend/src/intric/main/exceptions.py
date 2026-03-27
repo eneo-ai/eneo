@@ -172,7 +172,7 @@ class FileTooLargeException(Exception):
             return f"{value} bytes"
 
         size = float(value)
-        units = ("KiB", "MiB", "GiB", "TiB")
+        units = ("KB", "MB", "GB", "TB")
 
         for unit in units:
             size /= 1024

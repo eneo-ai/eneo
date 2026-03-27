@@ -8,8 +8,11 @@
   import { localizeHref } from "$lib/paraglide/runtime";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
+  import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
+  import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
   import ImprovedCategorySelector from "$lib/features/templates/components/admin/ImprovedCategorySelector.svelte";
   import LucideIconPicker from "$lib/features/templates/components/LucideIconPicker.svelte";
+  import HelpTooltip from "../../../../models/components/HelpTooltip.svelte";
   import { createSelect } from "@melt-ui/svelte";
   import { IconCheck } from "@intric/icons/check";
   import { IconChevronDown } from "@intric/icons/chevron-down";
@@ -75,19 +78,20 @@
   });
 
   // Parse wizard configuration from template
-  const wizardConfig = data.template.wizard_config || [];
-  const attachmentsConfig = wizardConfig.find((c: any) => c.type === "attachments");
-  const collectionsConfig = wizardConfig.find((c: any) => c.type === "collections");
+  // Handle both object format {attachments: {...}} and array format [{type: "attachments", ...}]
+  const wizard = data.template.wizard_config || data.template.wizard || {};
+
+  let attachmentsConfig: any;
+  if (Array.isArray(wizard)) {
+    attachmentsConfig = wizard.find((c: any) => c.type === "attachments");
+  } else {
+    attachmentsConfig = wizard.attachments;
+  }
 
   let wizardAttachmentsEnabled = $state(!!attachmentsConfig);
   let wizardAttachmentsRequired = $state(attachmentsConfig?.required || false);
   let wizardAttachmentsTitle = $state(attachmentsConfig?.title || "");
   let wizardAttachmentsDescription = $state(attachmentsConfig?.description || "");
-
-  let wizardCollectionsEnabled = $state(!!collectionsConfig);
-  let wizardCollectionsRequired = $state(collectionsConfig?.required || false);
-  let wizardCollectionsTitle = $state(collectionsConfig?.title || "");
-  let wizardCollectionsDescription = $state(collectionsConfig?.description || "");
 
   async function handleUpdateTemplate() {
     if (!name || !category) {
@@ -103,7 +107,6 @@
     isSaving = true;
     try {
       // Transform wizard configuration to backend format
-      // IMPORTANT: Always send wizard object with both properties (backend requires non-null wizard)
       // NOTE: App templates MUST have collections: null (backend validator enforces this)
       const wizard = {
         attachments: wizardAttachmentsEnabled ? {
@@ -153,7 +156,7 @@
       <Button variant="outlined" href={localizeHref("/admin/templates")}>{m.cancel()}</Button>
       <Button
         variant="positive"
-        class="w-32"
+        class="w-fit"
         onclick={handleUpdateTemplate}
         disabled={isSaving}
       >
@@ -321,10 +324,23 @@
           <SelectBehaviourV2
             bind:kwArgs={completionModelKwargs}
             selectedModel={completionModel}
-            isDisabled={false}
+            isDisabled={!supportsTemperature(completionModel?.name)}
             {aria}
           />
         </Settings.Row>
+
+        {#if completionModel?.reasoning || completionModel?.litellm_model_name}
+          <Settings.Row
+            title="Model settings"
+            description="Configure model-specific parameters for advanced control over the response."
+            hasChanges={false}
+          >
+            <SelectModelSpecificSettings
+              bind:kwArgs={completionModelKwargs}
+              selectedModel={completionModel}
+            />
+          </Settings.Row>
+        {/if}
       </Settings.Group>
 
       <Settings.Group title={m.wizard_configuration()}>
@@ -334,6 +350,7 @@
           hasChanges={false}
           fullWidth
         >
+          <HelpTooltip slot="title" text={m.wizard_attachments_help()} />
           <div class="flex flex-col gap-4">
             <Input.RadioSwitch
               bind:value={wizardAttachmentsEnabled}
@@ -360,46 +377,6 @@
                     id="wizard-attachments-description"
                     bind:value={wizardAttachmentsDescription}
                     placeholder={m.wizard_attachments_description_placeholder()}
-                    class="border-default bg-primary ring-default min-h-20 rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
-                  ></textarea>
-                </div>
-              </div>
-            {/if}
-          </div>
-        </Settings.Row>
-
-        <Settings.Row
-          title={m.wizard_collections_section()}
-          description={m.wizard_collections_description()}
-          hasChanges={false}
-          fullWidth
-        >
-          <div class="flex flex-col gap-4">
-            <Input.RadioSwitch
-              bind:value={wizardCollectionsEnabled}
-              labelTrue={m.enabled()}
-              labelFalse={m.disabled()}
-            />
-
-            {#if wizardCollectionsEnabled}
-              <div class="flex flex-col gap-4 rounded-lg border border-default bg-hover-default p-4">
-                <label class="flex items-center gap-2">
-                  <input type="checkbox" bind:checked={wizardCollectionsRequired} />
-                  <span class="text-sm text-default">{m.wizard_collections_required_description()}</span>
-                </label>
-
-                <Input.Text
-                  bind:value={wizardCollectionsTitle}
-                  placeholder={m.wizard_collections_title_placeholder()}
-                  label={m.title()}
-                />
-
-                <div class="flex flex-col gap-1">
-                  <label for="wizard-collections-description" class="text-sm font-medium text-default">{m.description()}</label>
-                  <textarea
-                    id="wizard-collections-description"
-                    bind:value={wizardCollectionsDescription}
-                    placeholder={m.wizard_collections_description_placeholder()}
                     class="border-default bg-primary ring-default min-h-20 rounded-lg border px-3 py-2 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
                   ></textarea>
                 </div>

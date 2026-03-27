@@ -14,7 +14,6 @@ class InfoBlobLimits(BaseModel):
 
 class AttachmentLimits(BaseModel):
     formats: list[FormatLimit]
-    max_in_question: int
 
 
 class Limits(BaseModel):

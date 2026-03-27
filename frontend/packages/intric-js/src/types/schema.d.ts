@@ -352,17 +352,6 @@ export interface paths {
     /** Publish Assistant */
     post: operations["publish_assistant_api_v1_assistants__id__publish__post"];
   };
-  "/api/v1/assistants/{id}/token-estimate": {
-    /**
-     * Estimate token usage for text and files
-     * @description Estimate token usage for the given text and files for this assistant.
-     *
-     * The Space Actor + FileService stack already enforces tenant and ownership
-     * boundaries; this endpoint adds lightweight guardrails to keep the operation
-     * responsive while supporting large-context models.
-     */
-    post: operations["estimate_tokens_api_v1_assistants__id__token_estimate_post"];
-  };
   "/api/v1/assistants/{id}/mcp-servers/": {
     /**
      * Get Assistant Mcp Servers
@@ -3244,6 +3233,8 @@ export interface components {
       completion_model_kwargs?: {
         [key: string]: unknown;
       };
+      /** Completion Model Id */
+      completion_model_id?: string | null;
       wizard?: components["schemas"]["AppTemplateWizard"] | null;
       /** Input Type */
       input_type: string;
@@ -3803,6 +3794,8 @@ export interface components {
       completion_model_kwargs?: {
         [key: string]: unknown;
       };
+      /** Completion Model Id */
+      completion_model_id?: string | null;
       wizard?: components["schemas"]["AssistantTemplateWizard"] | null;
       /** Icon Name */
       icon_name?: string | null;
@@ -3985,8 +3978,6 @@ export interface components {
     AttachmentLimits: {
       /** Formats */
       formats: components["schemas"]["FormatLimit"][];
-      /** Max In Question */
-      max_in_question: number;
     };
     /**
      * AuditConfigResponse
@@ -10400,74 +10391,6 @@ export interface components {
       /** Favorite Providers */
       favorite_providers?: string[];
     };
-    /**
-     * TokenEstimateBreakdown
-     * @description Breakdown of token usage by source.
-     */
-    TokenEstimateBreakdown: {
-      /**
-       * Prompt
-       * @description Tokens used by assistant prompt
-       */
-      prompt: number;
-      /**
-       * Text
-       * @description Tokens used by user input text
-       */
-      text: number;
-      /**
-       * Files
-       * @description Total tokens used by all files
-       */
-      files: number;
-      /**
-       * File Details
-       * @description Per-file token counts
-       */
-      file_details?: {
-        [key: string]: number;
-      };
-    };
-    /**
-     * TokenEstimateRequest
-     * @description Request payload for estimating tokens.
-     */
-    TokenEstimateRequest: {
-      /**
-       * Text
-       * @description User input text to evaluate
-       * @default
-       */
-      text?: string;
-      /**
-       * File Ids
-       * @description List of file IDs to include in the estimate
-       */
-      file_ids?: string[];
-    };
-    /**
-     * TokenEstimateResponse
-     * @description Response model for token usage estimation.
-     */
-    TokenEstimateResponse: {
-      /**
-       * Tokens
-       * @description Total token count
-       */
-      tokens: number;
-      /**
-       * Percentage
-       * @description Percentage of context window used
-       */
-      percentage: number;
-      /**
-       * Limit
-       * @description Model's context window limit
-       */
-      limit: number;
-      /** @description Token usage breakdown by source */
-      breakdown: components["schemas"]["TokenEstimateBreakdown"];
-    };
     /** TokenUsageSummary */
     TokenUsageSummary: {
       /**
@@ -12045,7 +11968,7 @@ export interface components {
       finished_at: string | null;
     };
     /** @enum {string} */
-    IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
+    IntricEventType: "generating_image" | "tool_call" | "tool_approval_required" | "token_usage";
     /** SSEText */
     SSEText: {
       /**
@@ -12124,7 +12047,11 @@ export interface components {
          * IntricEventType
          * @enum {string}
          */
-        IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
+        IntricEventType:
+          | "generating_image"
+          | "tool_call"
+          | "tool_approval_required"
+          | "token_usage";
       };
     };
     /**
@@ -12146,7 +12073,11 @@ export interface components {
          * IntricEventType
          * @enum {string}
          */
-        IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
+        IntricEventType:
+          | "generating_image"
+          | "tool_call"
+          | "tool_approval_required"
+          | "token_usage";
         /**
          * ToolCallInfo
          * @description Info about a single tool being called.
@@ -12197,7 +12128,11 @@ export interface components {
          * IntricEventType
          * @enum {string}
          */
-        IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
+        IntricEventType:
+          | "generating_image"
+          | "tool_call"
+          | "tool_approval_required"
+          | "token_usage";
         /**
          * ToolCallInfo
          * @description Info about a single tool being called.
@@ -14608,52 +14543,6 @@ export interface operations {
     };
   };
   /**
-   * Estimate token usage for text and files
-   * @description Estimate token usage for the given text and files for this assistant.
-   *
-   * The Space Actor + FileService stack already enforces tenant and ownership
-   * boundaries; this endpoint adds lightweight guardrails to keep the operation
-   * responsive while supporting large-context models.
-   */
-  estimate_tokens_api_v1_assistants__id__token_estimate_post: {
-    parameters: {
-      path: {
-        id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["TokenEstimateRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["TokenEstimateResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /**
    * Get Assistant Mcp Servers
    * @description Get all MCP servers associated with an assistant.
    */
@@ -15053,7 +14942,11 @@ export interface operations {
                    * IntricEventType
                    * @enum {string}
                    */
-                  IntricEventType: "generating_image" | "tool_call" | "tool_approval_required";
+                  IntricEventType:
+                    | "generating_image"
+                    | "tool_call"
+                    | "tool_approval_required"
+                    | "token_usage";
                 };
               },
               {

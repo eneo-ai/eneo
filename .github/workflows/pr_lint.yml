@@ -29,11 +29,11 @@ jobs:
             exit 0
           fi
 
-          VALID_PREFIXES="^(feature|feat|fix|hotfix|chore|docs|test|refactor|ci)/"
+          VALID_PREFIXES="^(feature|feat|fix|hotfix|security|chore|docs|test|refactor|ci)/"
 
           if [[ ! "$BRANCH_NAME" =~ $VALID_PREFIXES ]]; then
             echo "❌ Branch name '$BRANCH_NAME' does not follow naming convention."
-            echo "Branch names should start with: feature/, feat/, fix/, hotfix/, chore/, docs/, test/, refactor/, or ci/"
+            echo "Branch names should start with: feature/, feat/, fix/, hotfix/, security/, chore/, docs/, test/, refactor/, or ci/"
             exit 1
           fi
 
@@ -79,15 +79,19 @@ jobs:
       - name: Set up Python
         run: uv python install 3.11
 
+      - name: Verify lockfile consistency
+        working-directory: ./backend
+        run: uv lock --check
+
       - name: Install dependencies
         working-directory: ./backend
-        run: uv sync
+        run: uv sync --frozen
 
       - name: Get changed Python files
         id: changed-files
         run: |
           # Get changed Python files in backend directory
-          CHANGED_FILES=$(git diff --name-only --diff-filter=AM origin/main...HEAD -- 'backend/**/*.py' | sed 's|^backend/||' | tr '\n' ' ')
+          CHANGED_FILES=$(git diff --name-only --diff-filter=AM ${{ github.event.pull_request.base.sha }}...HEAD -- 'backend/**/*.py' | sed 's|^backend/||' | tr '\n' ' ')
           echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
           echo "Changed Python files: $CHANGED_FILES"
           if [ -z "$CHANGED_FILES" ]; then
@@ -135,9 +139,13 @@ jobs:
       - name: Set up Python
         run: uv python install 3.11
 
+      - name: Verify lockfile consistency
+        working-directory: ./backend
+        run: uv lock --check
+
       - name: Install dependencies
         working-directory: ./backend
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
 
       - name: Run pyright on changed files
         working-directory: ./backend
