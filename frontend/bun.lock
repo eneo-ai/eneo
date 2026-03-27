@@ -27,17 +27,17 @@
       },
     },
     "apps/web": {
-      "name": "@intric/web",
+      "name": "@eneo/web",
       "version": "1.23.1",
       "dependencies": {
+        "@eneo/ui": "workspace:*",
         "@inlang/paraglide-js": "^2.0.13",
-        "@intric/ui": "workspace:*",
         "lucide-svelte": "^0.544.0",
       },
       "devDependencies": {
+        "@eneo/eneo-js": "workspace:*",
+        "@eneo/eslint-plugin": "workspace:*",
         "@internationalized/date": "^3.7.0",
-        "@intric/eslint-plugin": "workspace:*",
-        "@intric/intric-js": "workspace:*",
         "@melt-ui/svelte": "^0.86.5",
         "@playwright/test": "^1.51.1",
         "@sveltejs/adapter-auto": "^6.0.0",
@@ -70,12 +70,8 @@
         "vitest": "^3.1.1",
       },
     },
-    "packages/eslint-plugin": {
-      "name": "@intric/eslint-plugin",
-      "version": "1.15.0",
-    },
-    "packages/intric-js": {
-      "name": "@intric/intric-js",
+    "packages/eneo-js": {
+      "name": "@eneo/eneo-js",
       "version": "1.23.0",
       "devDependencies": {
         "@types/node": "^22.14.0",
@@ -86,12 +82,16 @@
         "prettier": "^3.5.3",
       },
     },
+    "packages/eslint-plugin": {
+      "name": "@eneo/eslint-plugin",
+      "version": "1.15.0",
+    },
     "packages/ui": {
-      "name": "@intric/ui",
+      "name": "@eneo/ui",
       "version": "1.22.0",
       "devDependencies": {
+        "@eneo/eneo-js": "workspace:*",
         "@internationalized/date": "^3.7.0",
-        "@intric/intric-js": "workspace:*",
         "@melt-ui/svelte": "^0.86.5",
         "@playwright/test": "^1.51.1",
         "@sveltejs/adapter-auto": "^6.0.0",
@@ -171,6 +171,14 @@
     "@emnapi/runtime": ["@emnapi/runtime@1.7.1", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-PVtJr5CmLwYAU9PZDMITZoR5iAOShYREoR45EyyLrbntV50mdePTgUn4AmOw90Ifcj+x2kRjdzr1HP3RrNiHGA=="],
 
     "@emnapi/wasi-threads": ["@emnapi/wasi-threads@1.1.0", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-WI0DdZ8xFSbgMjR1sFsKABJ/C5OnRrjT06JXbZKexJGrDuPTzZdDYfFlsgcCXCyf+suG5QU2e/y1Wo2V/OapLQ=="],
+
+    "@eneo/eneo-js": ["@eneo/eneo-js@workspace:packages/eneo-js"],
+
+    "@eneo/eslint-plugin": ["@eneo/eslint-plugin@workspace:packages/eslint-plugin"],
+
+    "@eneo/ui": ["@eneo/ui@workspace:packages/ui"],
+
+    "@eneo/web": ["@eneo/web@workspace:apps/web"],
 
     "@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.25.2", "", { "os": "aix", "cpu": "ppc64" }, "sha512-wCIboOL2yXZym2cgm6mlA742s9QeJ8DjGVaL39dLN4rRwrOgOyYSnOaFPhKZGLb2ngj4EyfAFjsNJwPXZvseag=="],
 
@@ -325,14 +333,6 @@
     "@inlang/sdk": ["@inlang/sdk@2.4.9", "", { "dependencies": { "@lix-js/sdk": "0.4.7", "@sinclair/typebox": "^0.31.17", "kysely": "^0.27.4", "sqlite-wasm-kysely": "0.3.0", "uuid": "^10.0.0" } }, "sha512-cvz/C1rF5WBxzHbEoiBoI6Sz6q6M+TdxfWkEGBYTD77opY8i8WN01prUWXEM87GPF4SZcyIySez9U0Ccm12oFQ=="],
 
     "@internationalized/date": ["@internationalized/date@3.8.0", "", { "dependencies": { "@swc/helpers": "0.5.17" } }, "sha512-J51AJ0fEL68hE4CwGPa6E0PO6JDaVLd8aln48xFCSy7CZkZc96dGEGmLs2OEEbBxcsVZtfrqkXJwI2/MSG8yKw=="],
-
-    "@intric/eslint-plugin": ["@intric/eslint-plugin@workspace:packages/eslint-plugin"],
-
-    "@intric/intric-js": ["@intric/intric-js@workspace:packages/intric-js"],
-
-    "@intric/ui": ["@intric/ui@workspace:packages/ui"],
-
-    "@intric/web": ["@intric/web@workspace:apps/web"],
 
     "@isaacs/balanced-match": ["@isaacs/balanced-match@4.0.1", "", {}, "sha512-yzMTt9lEb8Gv7zRioUilSglI0c0smZ9k5D65677DLWLtWJaXIS3CqcGyUFByYKlnUj6TkjLVs54fBl6+TiGQDQ=="],
 

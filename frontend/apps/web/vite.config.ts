@@ -8,7 +8,7 @@ import { paraglideVitePlugin } from "@inlang/paraglide-js";
 
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
-import { intricIcons } from "@eneo/ui/icons/vite-plugin-intric-icons";
+import { eneoIcons } from "@eneo/ui/icons/vite-plugin-eneo-icons";
 
 const file = fileURLToPath(new URL("package.json", import.meta.url));
 const json = readFileSync(file, "utf8");
@@ -26,7 +26,7 @@ export default defineConfig({
       strategy: ["url", "cookie", "baseLocale"]
     }) as PluginOption,
     tailwindcss() as PluginOption,
-    intricIcons() as PluginOption,
+    eneoIcons() as PluginOption,
     sveltekit() as PluginOption
   ],
   test: {

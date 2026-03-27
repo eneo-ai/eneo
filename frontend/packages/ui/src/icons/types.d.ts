@@ -171,9 +171,6 @@ declare module "@eneo/icons/square" {
 declare module "@eneo/icons/play" {
   export { Icon as IconPlay } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/eneo" {
-  export { Icon as IconEneo } from "@eneo/icons/*";
-}
 declare module "@eneo/icons/notification" {
   export { Icon as IconNotification } from "@eneo/icons/*";
 }
