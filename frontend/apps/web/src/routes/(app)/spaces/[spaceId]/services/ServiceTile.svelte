@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { ServiceSparse } from "@intric/intric-js";
-  import { IconService } from "@intric/icons/service";
+  import type { ServiceSparse } from "@eneo/eneo-js";
+  import { IconService } from "@eneo/icons/service";
   import ServiceActions from "./ServiceActions.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { dynamicColour } from "$lib/core/colours";

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Table } from "@intric/ui";
+  import { Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import HistoryActions from "./HistoryActions.svelte";
   import dayjs from "dayjs";
@@ -8,7 +8,7 @@
   dayjs.extend(relativeTime);
   dayjs.extend(utc);
 
-  import type { Conversation, ConversationSparse } from "@intric/intric-js";
+  import type { Conversation, ConversationSparse } from "@eneo/eneo-js";
   import { getChatService } from "../../ChatService.svelte";
   import { toStore } from "svelte/store";
   import { m } from "$lib/paraglide/messages";

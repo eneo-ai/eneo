@@ -1,4 +1,4 @@
-import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
+import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
 
 type Model = (CompletionModel | EmbeddingModel | TranscriptionModel) & { nickname?: string | null };
 

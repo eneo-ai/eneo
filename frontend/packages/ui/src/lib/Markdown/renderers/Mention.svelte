@@ -1,8 +1,8 @@
 <script lang="ts">
-  import type { IntricMentionToken } from "../CustomComponents";
+  import type { EneoMentionToken } from "../CustomComponents";
 
   type Props = {
-    token: IntricMentionToken;
+    token: EneoMentionToken;
   };
 
   const { token }: Props = $props();

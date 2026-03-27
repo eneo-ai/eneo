@@ -5,17 +5,17 @@
 -->
 
 <script lang="ts">
-  import { IconAssistant } from "@intric/icons/assistant";
-  import { IconAssistants } from "@intric/icons/assistants";
-  import { IconThumb } from "@intric/icons/thumb";
-  import { IconLibrary } from "@intric/icons/library";
-  import { IconCPU } from "@intric/icons/CPU";
-  import { IconBulb } from "@intric/icons/bulb";
-  import { IconHistory } from "@intric/icons/history";
+  import { IconAssistant } from "@eneo/icons/assistant";
+  import { IconAssistants } from "@eneo/icons/assistants";
+  import { IconThumb } from "@eneo/icons/thumb";
+  import { IconLibrary } from "@eneo/icons/library";
+  import { IconCPU } from "@eneo/icons/CPU";
+  import { IconBulb } from "@eneo/icons/bulb";
+  import { IconHistory } from "@eneo/icons/history";
   import { page } from "$app/stores";
   import { Navigation } from "$lib/components/layout";
   import { ChartPie, LayoutTemplate, Cloud, Plug } from "lucide-svelte";
-  import { IconKey } from "@intric/icons/key";
+  import { IconKey } from "@eneo/icons/key";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
   import { getAppContext } from "$lib/core/AppContext.js";

@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { Page } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { onMount } from "svelte";
-  import { getIntricSocket } from "$lib/core/IntricSocket";
+  import { getEneoSocket } from "$lib/core/EneoSocket";
   import AppResultsTable from "./results/AppResultsTable.svelte";
   import AppRunView from "./run/AppRunView.svelte";
   import AppSwitcher from "$lib/features/apps/components/AppSwitcher.svelte";
-  import type { AppRunSparse } from "@intric/intric-js";
+  import type { AppRunSparse } from "@eneo/eneo-js";
   import { fade } from "svelte/transition";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
 
@@ -25,12 +25,12 @@
   }
   $: updateResultsFromPageLoad(data);
 
-  const { subscribe } = getIntricSocket();
+  const { subscribe } = getEneoSocket();
 
   onMount(() => {
     return subscribe("app_run_updates", async (update) => {
       if (update.app_id === data.app.id) {
-        results = await data.intric.apps.runs.list({ app: data.app });
+        results = await data.eneo.apps.runs.list({ app: data.app });
       }
     });
   });

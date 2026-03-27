@@ -5,10 +5,10 @@
 -->
 
 <script lang="ts">
-  import { Button, Dialog, Input } from "@intric/ui";
+  import { Button, Dialog, Input } from "@eneo/ui";
   import { writable } from "svelte/store";
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
-  import { IntricError } from "@intric/intric-js";
+  import { EneoError } from "@eneo/eneo-js";
   import { Settings } from "$lib/components/layout";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
@@ -32,7 +32,7 @@
       await security.enable();
       $showEnableDialog = false;
     } catch (e) {
-      toast.error(e instanceof IntricError ? e.getReadableMessage() : String(e));
+      toast.error(e instanceof EneoError ? e.getReadableMessage() : String(e));
     }
   });
 
@@ -41,7 +41,7 @@
       await security.disable();
       $showDisableDialog = false;
     } catch (e) {
-      toast.error(e instanceof IntricError ? e.getReadableMessage() : String(e));
+      toast.error(e instanceof EneoError ? e.getReadableMessage() : String(e));
     }
   });
 </script>

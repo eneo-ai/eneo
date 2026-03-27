@@ -3,7 +3,7 @@ import type {
   GroupSparse,
   IntegrationKnowledge,
   WebsiteSparse
-} from "@intric/intric-js";
+} from "@eneo/eneo-js";
 
 export type AvailableKnowledge = {
   [id: string]: {

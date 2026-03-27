@@ -7,9 +7,9 @@
 <script lang="ts">
   import { invalidate } from "$app/navigation";
   import { getAppContext } from "$lib/core/AppContext";
-  import { getIntric } from "$lib/core/Intric";
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
-  import { Input, Tooltip } from "@intric/ui";
+  import { getEneo } from "$lib/core/Eneo";
+  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import { Input, Tooltip } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 
@@ -19,12 +19,12 @@
   };
   export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const { environment } = getAppContext();
 
   async function toggleEnabled() {
     try {
-      model = await intric.models.update(
+      model = await eneo.models.update(
         //@ts-expect-error ts doesn't understand this
         {
           [type]: model,

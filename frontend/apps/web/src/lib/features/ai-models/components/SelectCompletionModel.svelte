@@ -1,7 +1,7 @@
 <script lang="ts">
   import { browser } from "$app/environment";
-  import type { CompletionModel } from "@intric/intric-js";
-  import { Select } from "@intric/ui";
+  import type { CompletionModel } from "@eneo/eneo-js";
+  import { Select } from "@eneo/ui";
   import { writable, type Writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";

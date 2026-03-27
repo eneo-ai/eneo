@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Icon } from "@intric/icons";
+  import type { Icon } from "@eneo/icons";
   import { cva } from "class-variance-authority";
 
   export let href: string;

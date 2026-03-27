@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { Input, Tooltip } from "@intric/ui";
+  import { Input, Tooltip } from "@eneo/ui";
   import { derived } from "svelte/store";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";

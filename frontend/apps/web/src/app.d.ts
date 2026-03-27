@@ -8,7 +8,7 @@ declare global {
     interface Error {
       message: string;
       status: number;
-      code: IntricErrorCode;
+      code: EneoErrorCode;
     }
     interface Locals {
       featureFlags: Awaited<ReturnType<typeof getFeatureFlags>>;

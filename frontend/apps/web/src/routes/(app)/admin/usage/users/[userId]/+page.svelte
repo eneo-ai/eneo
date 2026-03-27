@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { page } from "$app/stores";
-  import { Table, Input, Button } from "@intric/ui";
+  import { Table, Input, Button } from "@eneo/ui";
   import { Page } from "$lib/components/layout";
   import SimpleTextCell from "$lib/components/layout/SimpleTextCell.svelte";
   import { Settings } from "$lib/components/layout";
@@ -14,18 +14,18 @@
   import { formatPercent } from "$lib/core/formatting/formatPercent";
   import { dynamicColour } from "$lib/core/colours";
   import { getChartColour } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { createRender } from "svelte-headless-table";
   import { CalendarDate } from "@internationalized/date";
   import { m } from "$lib/paraglide/messages";
   import {
-    IntricError,
+    EneoError,
     type ModelUsage,
     type TokenUsageSummary,
     type UserTokenUsage
-  } from "@intric/intric-js";
+  } from "@eneo/eneo-js";
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const userId = $page.params.userId;
 
   // Get date range from URL params or default to last 30 days
@@ -51,7 +51,7 @@
     userError = null;
     try {
       // Fetch single user data using the new endpoint
-      const userSummary = await intric.usage.tokens.getUserSummary(userId, {
+      const userSummary = await eneo.usage.tokens.getUserSummary(userId, {
         startDate: dateRange.start.toString(),
         endDate: dateRange.end.add({ days: 1 }).toString()
       });
@@ -65,7 +65,7 @@
       }
     } catch (error: unknown) {
       console.error("Failed to load user data:", error);
-      userError = error instanceof IntricError ? error.message : "unknown error";
+      userError = error instanceof EneoError ? error.message : "unknown error";
     } finally {
       isLoadingUser = false;
     }
@@ -77,12 +77,12 @@
     isLoadingBreakdown = true;
     breakdownError = null;
     try {
-      modelBreakdown = await intric.usage.tokens.getUserModelBreakdown(userId, {
+      modelBreakdown = await eneo.usage.tokens.getUserModelBreakdown(userId, {
         startDate: dateRange.start.toString(),
         endDate: dateRange.end.add({ days: 1 }).toString()
       });
     } catch (error: unknown) {
-      breakdownError = error instanceof IntricError ? error.message : "unknown error";
+      breakdownError = error instanceof EneoError ? error.message : "unknown error";
       console.error("Failed to load user model breakdown:", error);
     } finally {
       isLoadingBreakdown = false;

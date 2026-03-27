@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import MemberChip from "$lib/features/spaces/components/MemberChip.svelte";
-  import type { UserSparse } from "@intric/intric-js";
+  import type { UserSparse } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
 
   export let users: UserSparse[] = [];

@@ -1,23 +1,23 @@
 <script lang="ts">
   import { createCombobox } from "@melt-ui/svelte";
-  import { IconCancel } from "@intric/icons/cancel";
-  import { IconCollections } from "@intric/icons/collections";
-  import { IconPlus } from "@intric/icons/plus";
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconWeb } from "@intric/icons/web";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
-  import { IconChevronRight } from "@intric/icons/chevron-right";
-  import { IconFolder } from "@intric/icons/folder";
-  import { IconFile } from "@intric/icons/file";
-  import { Button } from "@intric/ui";
-  import type { GroupSparse, IntegrationKnowledge, WebsiteSparse, InfoBlob } from "@intric/intric-js";
+  import { IconCancel } from "@eneo/icons/cancel";
+  import { IconCollections } from "@eneo/icons/collections";
+  import { IconPlus } from "@eneo/icons/plus";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { IconWeb } from "@eneo/icons/web";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
+  import { IconChevronRight } from "@eneo/icons/chevron-right";
+  import { IconFolder } from "@eneo/icons/folder";
+  import { IconFile } from "@eneo/icons/file";
+  import { Button } from "@eneo/ui";
+  import type { GroupSparse, IntegrationKnowledge, WebsiteSparse, InfoBlob } from "@eneo/eneo-js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getAvailableKnowledge } from "../getAvailableKnowledge";
   import { tick } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import IntegrationVendorIcon from "$lib/features/integrations/components/IntegrationVendorIcon.svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import BlobPreview from "./BlobPreview.svelte";
 
   type IntegrationWrapperOption = {
@@ -138,7 +138,7 @@
     state: { currentSpace, nonOrgSpaces, organizationSpaceId }
   } = getSpacesManager();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let expandedItems = new Set<string>();
   let expandedWrapperSelections = new Set<string>();
@@ -183,9 +183,9 @@
         try {
           let blobs: InfoBlob[];
           if (type === "collection") {
-            blobs = await intric.groups.listInfoBlobs(item as GroupSparse);
+            blobs = await eneo.groups.listInfoBlobs(item as GroupSparse);
           } else if (type === "website") {
-            blobs = await intric.websites.indexedBlobs.list(item as WebsiteSparse);
+            blobs = await eneo.websites.indexedBlobs.list(item as WebsiteSparse);
           } else {
             // Integration knowledge - not yet supported
             blobs = [];
@@ -1521,7 +1521,7 @@
  {/if}
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   p.knowledge-message {
     @apply text-muted flex min-h-16 items-center justify-center px-4 text-center;
   }

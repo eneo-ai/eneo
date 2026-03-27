@@ -6,8 +6,8 @@
 
 <script lang="ts">
   import SpaceChip from "$lib/features/spaces/components/SpaceChip.svelte";
-  import type { SpaceSparse } from "@intric/intric-js";
-  import { Button } from "@intric/ui";
+  import type { SpaceSparse } from "@eneo/eneo-js";
+  import { Button } from "@eneo/ui";
   import { localizeHref } from "$lib/paraglide/runtime";
 
   export let space: SpaceSparse;

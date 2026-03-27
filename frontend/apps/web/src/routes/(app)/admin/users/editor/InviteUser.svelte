@@ -1,15 +1,15 @@
 <script lang="ts">
   import { invalidate } from "$app/navigation";
   import SelectRole from "./SelectRole.svelte";
-  import { Dialog, Button, Input } from "@intric/ui";
-  import { getIntric } from "$lib/core/Intric";
+  import { Dialog, Button, Input } from "@eneo/ui";
+  import { getEneo } from "$lib/core/Eneo";
   import { getAdminUserCtx } from "../ctx";
   import { getAppContext } from "$lib/core/AppContext";
   import InviteLinkDialog from "./InviteLinkDialog.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const { defaultRoles } = getAdminUserCtx();
   const { tenant } = getAppContext();
 
@@ -23,7 +23,7 @@
     if (!userRole[0] || !emailIsValid) return;
 
     try {
-      await intric.users.invite({
+      await eneo.users.invite({
         email: userEmail,
         predefined_role: userRole[0]  // Get first role from array
       });

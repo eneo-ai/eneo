@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { IconDocument } from "@intric/icons/document";
-  import { IconXMark } from "@intric/icons/x-mark";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import { IconDocument } from "@eneo/icons/document";
+  import { IconXMark } from "@eneo/icons/x-mark";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
-  import { Button, Tooltip } from "@intric/ui";
+  import { Button, Tooltip } from "@eneo/ui";
 
   const {
     state: { attachments }

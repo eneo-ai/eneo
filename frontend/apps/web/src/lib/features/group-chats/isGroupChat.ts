@@ -4,7 +4,7 @@
     Licensed under the MIT License.
 */
 
-import type { GroupChat, GroupChatSparse } from "@intric/intric-js";
+import type { GroupChat, GroupChatSparse } from "@eneo/eneo-js";
 
 export function isGroupChat(item: unknown & { type: string }): item is GroupChat {
   return item.type === "assistant";

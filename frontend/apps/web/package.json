@@ -1,5 +1,5 @@
 {
-  "name": "@intric/web",
+  "name": "@eneo/web",
   "version": "1.23.1",
   "private": true,
   "type": "module",
@@ -20,8 +20,8 @@
   },
   "devDependencies": {
     "@internationalized/date": "^3.7.0",
-    "@intric/eslint-plugin": "workspace:*",
-    "@intric/intric-js": "workspace:*",
+    "@eneo/eslint-plugin": "workspace:*",
+    "@eneo/eneo-js": "workspace:*",
     "@melt-ui/svelte": "^0.86.5",
     "@playwright/test": "^1.51.1",
     "@sveltejs/adapter-auto": "^6.0.0",
@@ -55,7 +55,7 @@
   },
   "dependencies": {
     "@inlang/paraglide-js": "^2.0.13",
-    "@intric/ui": "workspace:*",
+    "@eneo/ui": "workspace:*",
     "lucide-svelte": "^0.544.0"
   }
 }

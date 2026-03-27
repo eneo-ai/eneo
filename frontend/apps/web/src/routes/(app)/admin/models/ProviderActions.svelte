@@ -1,10 +1,10 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import type { ModelProviderPublic } from "@intric/intric-js";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { Button, Dropdown, Dialog } from "@intric/ui";
-  import { getIntric } from "$lib/core/Intric";
+  import type { ModelProviderPublic } from "@eneo/eneo-js";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { Button, Dropdown, Dialog } from "@eneo/ui";
+  import { getEneo } from "$lib/core/Eneo";
   import { invalidate } from "$app/navigation";
   import { writable } from "svelte/store";
   import { Pencil, Trash2, AlertTriangle, Loader2, Box, Sparkles, AudioLines } from "lucide-svelte";
@@ -15,7 +15,7 @@
   export let onAddModel: ((providerId: string) => void) | undefined = undefined;
   export let onEditProvider: ((provider: ModelProviderPublic) => void) | undefined = undefined;
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   const showDeleteConfirm = writable(false);
   let isDeleting = false;
@@ -28,7 +28,7 @@
     deleteError = null;
     isDeleting = true;
     try {
-      await intric.modelProviders.delete({ id: provider.id });
+      await eneo.modelProviders.delete({ id: provider.id });
       await invalidate("admin:model-providers:load");
       $showDeleteConfirm = false;
     } catch (e: any) {
@@ -70,7 +70,7 @@
     providerModels = [];
 
     try {
-      const models = await intric.models.list();
+      const models = await eneo.models.list();
 
       providerModels = [
         ...tagModels(models.completionModels, "completion", m.completion_model(), Sparkles),

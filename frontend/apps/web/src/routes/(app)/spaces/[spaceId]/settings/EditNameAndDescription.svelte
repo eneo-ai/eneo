@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { getSpaceSettingsEditor } from "$lib/features/spaces/SpaceSettingsEditor";
-  import { Input } from "@intric/ui";
+  import { Input } from "@eneo/ui";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
 

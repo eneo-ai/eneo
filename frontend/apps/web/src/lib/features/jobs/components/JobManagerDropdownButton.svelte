@@ -1,7 +1,7 @@
 <script>
-  import { IconNotification } from "@intric/icons/notification";
-  import { IconNotificationDot } from "@intric/icons/notification-dot";
-  import { Button } from "@intric/ui";
+  import { IconNotification } from "@eneo/icons/notification";
+  import { IconNotificationDot } from "@eneo/icons/notification-dot";
+  import { Button } from "@eneo/ui";
   import { createDropdownMenu } from "@melt-ui/svelte";
   import { fly, fade } from "svelte/transition";
   import JobManagerDropdownPanel from "./JobManagerDropdownPanel.svelte";
@@ -34,7 +34,7 @@
   is={[$trigger]}
   unstyled
   label={m.notifications()}
-  class="text-secondary hover:bg-accent-dimmer hover:text-brand-intric flex h-[3.25rem] !min-w-[3.5rem] items-center justify-center pt-[0.1rem]"
+  class="text-secondary hover:bg-accent-dimmer hover:text-brand-eneo flex h-[3.25rem] !min-w-[3.5rem] items-center justify-center pt-[0.1rem]"
 >
   {#if $currentlyRunningJobs === 0}
     <IconNotification />

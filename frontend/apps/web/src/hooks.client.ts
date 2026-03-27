@@ -1,9 +1,9 @@
-import { IntricError, type IntricErrorCode } from "@intric/intric-js";
+import { EneoError, type EneoErrorCode } from "@eneo/eneo-js";
 import type { HandleClientError } from "@sveltejs/kit";
 
 export const handleError: HandleClientError = async ({ error, status, message }) => {
-  let code: IntricErrorCode = 0;
-  if (error instanceof IntricError) {
+  let code: EneoErrorCode = 0;
+  if (error instanceof EneoError) {
     status = error.status;
     message = error.getReadableMessage();
     code = error.code;

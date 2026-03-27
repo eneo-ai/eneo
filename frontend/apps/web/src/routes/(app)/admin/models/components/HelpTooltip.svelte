@@ -1,7 +1,7 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import { Tooltip } from "@intric/ui";
+  import { Tooltip } from "@eneo/ui";
   import { HelpCircle } from "lucide-svelte";
 
   export let text: string;

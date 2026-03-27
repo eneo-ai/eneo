@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getAppContext } from "$lib/core/AppContext";
-  import { IconLinkExternal } from "@intric/icons/link-external";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
+  import { IconLinkExternal } from "@eneo/icons/link-external";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { m } from "$lib/paraglide/messages";
 
   const { versions } = getAppContext();

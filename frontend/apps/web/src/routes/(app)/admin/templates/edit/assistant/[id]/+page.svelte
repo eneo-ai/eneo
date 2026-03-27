@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
-  import { Button, Input } from "@intric/ui";
+  import { Button, Input } from "@eneo/ui";
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -15,7 +15,7 @@
 
   let { data } = $props();
 
-  const intric = data.intric;
+  const eneo = data.eneo;
 
   // Initialize from template data
   let name = $state(data.template.name || "");
@@ -93,7 +93,7 @@
         icon_name: iconName || undefined  // Include icon if selected
       };
 
-      await intric.templates.admin.updateAssistant(data.template.id, templateData);
+      await eneo.templates.admin.updateAssistant(data.template.id, templateData);
       goto("/admin/templates?success=template_updated");
     } catch (error) {
       console.error("Failed to update template:", error);

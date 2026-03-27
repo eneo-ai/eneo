@@ -5,13 +5,13 @@
 -->
 
 <script lang="ts">
-  import { Button, Table } from "@intric/ui";
+  import { Button, Table } from "@eneo/ui";
   import dayjs from "dayjs";
   import { m } from "$lib/paraglide/messages";
   import QuestionDetails from "./QuestionDetails.svelte";
   import { createRender } from "svelte-headless-table";
   import type { CalendarDate } from "@internationalized/date";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { onMount } from "svelte";
 
   type QuestionRow = {
@@ -28,7 +28,7 @@
   };
 
   export let assistantId: string;
-  export let intric = getIntric();
+  export let eneo = getEneo();
   export let includeFollowups: boolean;
   export let timeframe: { start: CalendarDate; end: CalendarDate };
   export let active = false;
@@ -95,7 +95,7 @@
 
     try {
       const inclusiveEnd = timeframe.end.add({ days: 1 }).toString();
-      const response = (await intric.analytics.listQuestionsPaginated({
+      const response = (await eneo.analytics.listQuestionsPaginated({
         assistant: { id: assistantId },
         options: {
           start: timeframe.start.toString(),

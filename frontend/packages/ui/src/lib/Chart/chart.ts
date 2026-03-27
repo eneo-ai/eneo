@@ -27,10 +27,10 @@ export type Config = {
   theme?: string | object;
 };
 
-registerTheme("intric", intricTheme);
+registerTheme("eneo", intricTheme);
 
 export const chart: Action<HTMLElement, Config> = (node, params) => {
-  const { theme = "intric" } = params;
+  const { theme = "eneo" } = params;
   const options: EChartsCoreOption = {
     aria: {
       enabled: true

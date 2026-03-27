@@ -1,10 +1,10 @@
 <script lang="ts">
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import { getIntric } from "$lib/core/Intric";
-  import { IconChevronRight } from "@intric/icons/chevron-right";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { IconWeb } from "@intric/icons/web";
-  import { IconUploadCloud } from "@intric/icons/upload-cloud";
+  import { getEneo } from "$lib/core/Eneo";
+  import { IconChevronRight } from "@eneo/icons/chevron-right";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { IconWeb } from "@eneo/icons/web";
+  import { IconUploadCloud } from "@eneo/icons/upload-cloud";
   import SharePointFolderTreeNode from "./SharePointFolderTreeNode.svelte";
   import { m } from "$lib/paraglide/messages";
   import { buildSharePointSelectionKey } from "./selectionKey";
@@ -42,7 +42,7 @@
     onToggleSelect
   }: Props = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let currentItems = $state<TreeItem[]>([]);
   let navigationStack = $state<Array<{ folderId: string | null; path: string; name: string }>>([
@@ -85,7 +85,7 @@
           queryParams.folder_path = folderPath;
         }
 
-        const response = await intric.client.fetch(
+        const response = await eneo.client.fetch(
           `/api/v1/integrations/${userIntegrationId}/sharepoint/tree/`,
           {
             method: "get",

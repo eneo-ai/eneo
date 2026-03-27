@@ -5,16 +5,16 @@
 -->
 
 <script lang="ts">
-  import { IconSearch } from "@intric/icons/search";
-  import { Button, Dialog, Select } from "@intric/ui";
-  import { getIntric } from "$lib/core/Intric";
+  import { IconSearch } from "@eneo/icons/search";
+  import { Button, Dialog, Select } from "@eneo/ui";
+  import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import type { UserGroup } from "@intric/intric-js";
+  import type { UserGroup } from "@eneo/eneo-js";
   import { createCombobox } from "@melt-ui/svelte";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte.ts";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  import { IconGroup } from "@intric/icons/group";
+  import { IconGroup } from "@eneo/icons/group";
 
   const {
     refreshCurrentSpace,
@@ -43,7 +43,7 @@
     $currentSpace.available_roles.find(r => r.value !== "owner") ?? $currentSpace.available_roles[0]
   );
   const existingGroupIds = $derived($currentSpace.group_members?.items?.map((g) => g.id) ?? []);
-  const intric = getIntric();
+  const eneo = getEneo();
   let inputElement: HTMLInputElement;
   let showDialog = $state<Dialog.OpenState>();
 
@@ -61,7 +61,7 @@
 
   async function loadUserGroups() {
     try {
-      userGroups = await intric.userGroups.list();
+      userGroups = await eneo.userGroups.list();
     } catch (e) {
       console.error("Failed to load user groups", e);
       userGroups = [];
@@ -72,7 +72,7 @@
     const id = $selected?.value.id;
     if (!id) return;
     try {
-      await intric.spaces.groupMembers.add({
+      await eneo.spaces.groupMembers.add({
         spaceId: $currentSpace.id,
         group: { id, role: selectedRole.value }
       });

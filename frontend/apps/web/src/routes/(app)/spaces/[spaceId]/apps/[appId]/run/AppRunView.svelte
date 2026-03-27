@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { IconPlay } from "@intric/icons/play";
-  import { Button, Tooltip } from "@intric/ui";
+  import { IconPlay } from "@eneo/icons/play";
+  import { Button, Tooltip } from "@eneo/ui";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
-  import { getIntric } from "$lib/core/Intric";
-  import { IntricError, type App, type AppRunInput } from "@intric/intric-js";
+  import { getEneo } from "$lib/core/Eneo";
+  import { EneoError, type App, type AppRunInput } from "@eneo/eneo-js";
   import AppIcon from "$lib/features/apps/components/AppIcon.svelte";
   import AttachmentDropArea from "$lib/features/attachments/components/AttachmentDropArea.svelte";
   import { getAppAttachmentRulesStore } from "$lib/features/attachments/getAttachmentRules";
@@ -16,7 +16,7 @@
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const {
     state: { currentSpace }
   } = getSpacesManager();
@@ -29,7 +29,7 @@
   const app = derived(page, ($page) => $page.data.app) as Readable<App>;
 
   const { clearUploads } = initAttachmentManager({
-    intric,
+    eneo,
     options: { rules: getAppAttachmentRulesStore(app) }
   });
 
@@ -56,7 +56,7 @@
 
     try {
       isSubmitting = true;
-      const result = await intric.apps.runs.create({
+      const result = await eneo.apps.runs.create({
         app: $app,
         inputs: {
           files: inputs.files.map(({ id }) => {
@@ -72,7 +72,7 @@
       // Forward to the newly created run
       goto(`/spaces/${$currentSpace.routeId}/apps/${$app.id}/results/${result.id}`);
     } catch (err) {
-      const msg = err instanceof IntricError ? err.getReadableMessage() : err;
+      const msg = err instanceof EneoError ? err.getReadableMessage() : err;
       console.error(err);
       toast.error(m.error_running_app({ msg }));
       isSubmitting = false;

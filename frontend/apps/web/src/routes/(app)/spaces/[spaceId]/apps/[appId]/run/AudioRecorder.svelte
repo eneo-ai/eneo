@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { IconMicrophone } from "@intric/icons/microphone";
-  import { IconStop } from "@intric/icons/stop";
-  import { Tooltip } from "@intric/ui";
+  import { IconMicrophone } from "@eneo/icons/microphone";
+  import { IconStop } from "@eneo/icons/stop";
+  import { Tooltip } from "@eneo/ui";
   import { onDestroy, onMount } from "svelte";
 
   import dayjs from "dayjs";
@@ -555,7 +555,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
 
   /* Breathing pulse animation for active recording */
   @keyframes breathe-ring {

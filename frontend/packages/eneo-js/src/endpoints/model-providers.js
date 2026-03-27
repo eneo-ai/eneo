@@ -1,0 +1,205 @@
+/** @typedef {import('../client/client').EneoError} EneoError */
+
+/**
+ * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
+ */
+export function initModelProviders(client) {
+  return {
+    /**
+     * List all Model Providers for the tenant.
+     * @param {Object} [options]
+     * @param {boolean} [options.activeOnly] Only return active providers
+     * @throws {EneoError}
+     * */
+    list: async (options) => {
+      const res = await client.fetch("/api/v1/admin/model-providers/", {
+        method: "get",
+        params: {
+          query: options?.activeOnly ? { active_only: true } : undefined
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Get a single Model Provider by ID.
+     * @param {{id: string}} provider
+     * @throws {EneoError}
+     * */
+    get: async ({ id }) => {
+      const res = await client.fetch("/api/v1/admin/model-providers/{id}/", {
+        method: "get",
+        params: { path: { id } }
+      });
+
+      return res;
+    },
+
+    /**
+     * Create a new Model Provider.
+     * @param {Object} provider
+     * @param {string} provider.name User-defined name
+     * @param {string} provider.provider_type Provider type (e.g., "openai", "vllm")
+     * @param {Object} provider.credentials Provider credentials
+     * @param {Object} [provider.config] Provider configuration
+     * @param {boolean} [provider.is_active] Whether provider is active
+     * @throws {EneoError}
+     * */
+    create: async (provider) => {
+      const res = await client.fetch("/api/v1/admin/model-providers/", {
+        method: "post",
+        requestBody: {
+          "application/json": provider
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Update an existing Model Provider.
+     * @param {{id: string}} provider
+     * @param {Object} update
+     * @param {string} [update.name]
+     * @param {Object} [update.credentials]
+     * @param {Object} [update.config]
+     * @param {boolean} [update.is_active]
+     * @throws {EneoError}
+     * */
+    update: async ({ id }, update) => {
+      const res = await client.fetch("/api/v1/admin/model-providers/{id}/", {
+        method: "put",
+        params: { path: { id } },
+        requestBody: {
+          "application/json": update
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Delete a Model Provider.
+     * @param {{id: string}} provider
+     * @param {Object} [options]
+     * @param {boolean} [options.force] Force delete even if models exist
+     * @throws {EneoError}
+     * */
+    delete: async ({ id }, options) => {
+      await client.fetch("/api/v1/admin/model-providers/{id}/", {
+        method: "delete",
+        params: {
+          path: { id },
+          query: options?.force ? { force: true } : undefined
+        }
+      });
+    },
+
+    /**
+     * List available models/deployments from the provider's own API.
+     * @param {{id: string}} provider
+     * @returns {Promise<Array<{name: string, model?: string, status?: string, owned_by?: string, display_name?: string}>>}
+     * @throws {EneoError}
+     * */
+    listModels: async ({ id }) => {
+      const res = await client.fetch("/api/v1/admin/model-providers/{id}/models/", {
+        method: "get",
+        params: { path: { id } }
+      });
+
+      return res;
+    },
+
+    /**
+     * Get the tenant's favorite provider types.
+     * @returns {Promise<{providers: string[]}>}
+     * @throws {EneoError}
+     * */
+    getFavorites: async () => {
+      const res = await client.fetch("/api/v1/admin/model-providers/favorites/", {
+        method: "get"
+      });
+
+      return res;
+    },
+
+    /**
+     * Set the tenant's favorite provider types.
+     * @param {string[]} providers Ordered list of provider type strings
+     * @returns {Promise<{providers: string[]}>}
+     * @throws {EneoError}
+     * */
+    setFavorites: async (providers) => {
+      const res = await client.fetch("/api/v1/admin/model-providers/favorites/", {
+        method: "put",
+        requestBody: {
+          "application/json": { providers }
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Get supported model types and top models per provider type from LiteLLM.
+     * @returns {Promise<{providers: Record<string, {modes: string[], models: Record<string, object[]>, fields: object[]}>, default_fields: object[]}>}
+     * @throws {EneoError}
+     * */
+    getCapabilities: async () => {
+      const res = await client.fetch("/api/v1/admin/model-providers/capabilities/", {
+        method: "get"
+      });
+
+      return res;
+    },
+
+    /**
+     * Validate that a model works with a provider by making a minimal API call.
+     * @param {{id: string}} provider
+     * @param {{model_name: string, model_type?: string}} body
+     * @returns {Promise<{success: boolean, message?: string, error?: string}>}
+     * @throws {EneoError}
+     * */
+    validateModel: async ({ id }, { model_name, model_type = "completion" }) => {
+      const res = await client.fetch("/api/v1/admin/model-providers/{id}/validate-model/", {
+        method: "post",
+        params: { path: { id } },
+        requestBody: {
+          "application/json": { model_name, model_type }
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Look up recommended default values for a model from LiteLLM.
+     * @param {string} modelName The model identifier to look up
+     * @returns {Promise<{found: boolean, max_input_tokens?: number, max_output_tokens?: number, supports_vision?: boolean, supports_function_calling?: boolean, supports_reasoning?: boolean}>}
+     * @throws {EneoError}
+     * */
+    getModelDefaults: async (modelName) => {
+      const res = await client.fetch("/api/v1/admin/model-providers/model-defaults/", {
+        method: "get",
+        params: { query: { model_name: modelName } }
+      });
+
+      return res;
+    },
+
+    /**
+     * Test provider connection.
+     * @param {{id: string}} provider
+     * @throws {EneoError}
+     * */
+    test: async ({ id }) => {
+      const res = await client.fetch("/api/v1/admin/model-providers/{id}/test/", {
+        method: "post",
+        params: { path: { id } }
+      });
+
+      return res;
+    }
+  };
+}

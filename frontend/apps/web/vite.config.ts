@@ -8,7 +8,7 @@ import { paraglideVitePlugin } from "@inlang/paraglide-js";
 
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
-import { intricIcons } from "@intric/ui/icons/vite-plugin-intric-icons";
+import { intricIcons } from "@eneo/ui/icons/vite-plugin-intric-icons";
 
 const file = fileURLToPath(new URL("package.json", import.meta.url));
 const json = readFileSync(file, "utf8");

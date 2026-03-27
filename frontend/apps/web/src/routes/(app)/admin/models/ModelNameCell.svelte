@@ -1,8 +1,8 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
-  import { Button, Tooltip } from "@intric/ui";
+  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import { Button, Tooltip } from "@eneo/ui";
   import { writable } from "svelte/store";
   import ModelNameAndVendor from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import EditModelDialog from "./EditModelDialog.svelte";

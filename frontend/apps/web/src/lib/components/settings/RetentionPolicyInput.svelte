@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Input } from "@intric/ui";
+  import { Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
 
   interface Props {

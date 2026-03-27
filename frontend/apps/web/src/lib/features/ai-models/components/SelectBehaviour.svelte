@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Select } from "@intric/ui";
+  import { Select } from "@eneo/ui";
   import { behaviourList, type ModelBehaviour } from "../ModelBehaviours";
   import { m } from "$lib/paraglide/messages";
 

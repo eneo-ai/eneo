@@ -1,4 +1,4 @@
-import type { Intric } from "@intric/intric-js";
+import type { Eneo } from "@eneo/eneo-js";
 
 export interface ModelProviderFieldDef {
   name: string;
@@ -23,13 +23,13 @@ export interface ModelProviderCapabilities {
 let capabilitiesCache: ModelProviderCapabilities | null = null;
 let capabilitiesPromise: Promise<ModelProviderCapabilities> | null = null;
 
-export async function getModelProviderCapabilities(intric: Intric): Promise<ModelProviderCapabilities> {
+export async function getModelProviderCapabilities(eneo: Eneo): Promise<ModelProviderCapabilities> {
   if (capabilitiesCache) {
     return capabilitiesCache;
   }
 
   if (!capabilitiesPromise) {
-    capabilitiesPromise = intric.modelProviders.getCapabilities()
+    capabilitiesPromise = eneo.modelProviders.getCapabilities()
       .then((capabilities) => {
         capabilitiesCache = capabilities as ModelProviderCapabilities;
         return capabilitiesCache;

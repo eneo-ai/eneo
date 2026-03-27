@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { Button, Dialog, Label, Tooltip } from "@intric/ui";
+  import { Button, Dialog, Label, Tooltip } from "@eneo/ui";
   import { writable } from "svelte/store";
   import ModelNameAndVendor from "./ModelNameAndVendor.svelte";
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
+  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
 
   /** Pass in a publishable resource. Its state should be maintained from the outside */

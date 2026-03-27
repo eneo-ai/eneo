@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Button, Table } from "@intric/ui";
+  import { Button, Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import { getInsightsService } from "../InsightsService.svelte";
   import { toStore } from "svelte/store";

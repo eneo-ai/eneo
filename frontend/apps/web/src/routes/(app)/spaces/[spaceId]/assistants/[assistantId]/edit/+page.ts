@@ -1,8 +1,8 @@
 export const load = async (event) => {
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
   const [assistant, mcpServers] = await Promise.all([
-    intric.assistants.get({ id: event.params.assistantId }),
-    intric.assistants.listMCPServers({ id: event.params.assistantId })
+    eneo.assistants.get({ id: event.params.assistantId }),
+    eneo.assistants.listMCPServers({ id: event.params.assistantId })
   ]);
 
   return {

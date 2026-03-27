@@ -5,14 +5,14 @@
 -->
 
 <script lang="ts">
-  import { IconAssistants } from "@intric/icons/assistants";
-  import { IconSession } from "@intric/icons/session";
-  import { IconQuestionMark } from "@intric/icons/question-mark";
+  import { IconAssistants } from "@eneo/icons/assistants";
+  import { IconSession } from "@eneo/icons/session";
+  import { IconQuestionMark } from "@eneo/icons/question-mark";
   import { Page, Settings } from "$lib/components/layout";
-  import { Input, Button } from "@intric/ui";
+  import { Input, Button } from "@eneo/ui";
   import { CalendarDate } from "@internationalized/date";
-  import { getIntric } from "$lib/core/Intric";
-  import type { AnalyticsAggregatedData } from "@intric/intric-js";
+  import { getEneo } from "$lib/core/Eneo";
+  import type { AnalyticsAggregatedData } from "@eneo/eneo-js";
   import { ArrowUp, ArrowDown, GitCompare, RefreshCw, Clock, Cpu, ExternalLink, Users, Activity } from "lucide-svelte";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
 
@@ -24,7 +24,7 @@
   // Use $props() for Svelte 5 runes mode
   let { data } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
   let selectedTab = writable<string>();
 
   // Date range state
@@ -302,7 +302,7 @@
         end: toStockholmIso(range.end, 1)
       };
 
-      const result = await intric.analytics.getAggregated(tf);
+      const result = await eneo.analytics.getAggregated(tf);
 
       // Only update if this is still the latest request
       if (fetchId === currentFetchId) {
@@ -416,7 +416,7 @@
         start: previousStart.toString(),
         end: previousEnd.toString()
       };
-      const result = await intric.analytics.getAggregated(tf);
+      const result = await eneo.analytics.getAggregated(tf);
       comparisonData = result;
       comparisonCache.set(cacheKey, result);
     } catch (error) {
@@ -452,7 +452,7 @@
     tokenError = false;
 
     try {
-      const result = await intric.usage.tokens.getSummary({
+      const result = await eneo.usage.tokens.getSummary({
         startDate: dateRange.start.toString(),
         endDate: dateRange.end.add({ days: 1 }).toString()
       });
@@ -481,7 +481,7 @@
     activityError = false;
 
     try {
-      const result = await intric.analytics.getAssistantActivity({
+      const result = await eneo.analytics.getAssistantActivity({
         start: dateRange.start.toString(),
         end: dateRange.end.add({ days: 1 }).toString()
       });

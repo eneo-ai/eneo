@@ -1,20 +1,20 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { Button, Dialog, Dropdown } from "@intric/ui";
-  import { getIntric } from "$lib/core/Intric";
+  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { Button, Dialog, Dropdown } from "@eneo/ui";
+  import { getEneo } from "$lib/core/Eneo";
   import { invalidate } from "$app/navigation";
   import EditModelDialog from "./EditModelDialog.svelte";
   import { writable } from "svelte/store";
   import { Pencil, Trash2, AlertTriangle, Loader2, ArrowRight } from "lucide-svelte";
-  import { IconCancel } from "@intric/icons/cancel";
-  import { IconCheck } from "@intric/icons/check";
-  import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
-  import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
+  import { IconCancel } from "@eneo/icons/cancel";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconArrowUpToLine } from "@eneo/icons/arrow-up-to-line";
+  import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
   import ModelClassificationDialog from "$lib/features/security-classifications/components/ModelClassificationDialog.svelte";
-  import { IconLockClosed } from "@intric/icons/lock-closed";
+  import { IconLockClosed } from "@eneo/icons/lock-closed";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import MigrateModelDialog from "./MigrateModelDialog.svelte";
@@ -23,12 +23,12 @@
   export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
   export let completionModels: CompletionModel[] = [];
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   async function togglePreferred() {
     if (!("is_org_default" in model)) return;
     try {
-      model = await intric.models.update(
+      model = await eneo.models.update(
         //@ts-expect-error ts doesn't understand this
         {
           [type]: model,
@@ -45,7 +45,7 @@
 
   async function toggleEnabled() {
     try {
-      model = await intric.models.update(
+      model = await eneo.models.update(
         //@ts-expect-error ts doesn't understand this
         {
           [type]: model,
@@ -75,11 +75,11 @@
 
     try {
       if (type === "completionModel") {
-        await intric.tenantModels.deleteCompletion({ id: model.id });
+        await eneo.tenantModels.deleteCompletion({ id: model.id });
       } else if (type === "embeddingModel") {
-        await intric.tenantModels.deleteEmbedding({ id: model.id });
+        await eneo.tenantModels.deleteEmbedding({ id: model.id });
       } else {
-        await intric.tenantModels.deleteTranscription({ id: model.id });
+        await eneo.tenantModels.deleteTranscription({ id: model.id });
       }
 
       await invalidate("admin:model-providers:load");

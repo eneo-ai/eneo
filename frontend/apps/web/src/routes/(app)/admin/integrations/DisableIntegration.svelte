@@ -1,8 +1,8 @@
 <script lang="ts">
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import { getIntric } from "$lib/core/Intric";
-  import type { TenantIntegration } from "@intric/intric-js";
-  import { Button, Dialog } from "@intric/ui";
+  import { getEneo } from "$lib/core/Eneo";
+  import type { TenantIntegration } from "@eneo/eneo-js";
+  import { Button, Dialog } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {
@@ -12,13 +12,13 @@
 
   let { integration, update }: Props = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   const disableIntegration = createAsyncState(async () => {
     const { id } = integration;
     if (id == null) return;
     try {
-      await intric.integrations.tenant.disable({ id });
+      await eneo.integrations.tenant.disable({ id });
       $isOpen = false;
 
       setTimeout(() => {

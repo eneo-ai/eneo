@@ -3,7 +3,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { dynamicColour } from "$lib/core/colours";
   import GroupChatActions from "./GroupChatActions.svelte";
-  import type { AssistantSparse, GroupChatSparse } from "@intric/intric-js";
+  import type { AssistantSparse, GroupChatSparse } from "@eneo/eneo-js";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams";
   import { getAppContext } from "$lib/core/AppContext";
 

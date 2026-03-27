@@ -1,8 +1,8 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import type { ModelProviderPublic } from "@intric/intric-js";
-  import { Tooltip } from "@intric/ui";
+  import type { ModelProviderPublic } from "@eneo/eneo-js";
+  import { Tooltip } from "@eneo/ui";
   import { CheckCircle2, AlertCircle, XCircle, CircleOff } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
 

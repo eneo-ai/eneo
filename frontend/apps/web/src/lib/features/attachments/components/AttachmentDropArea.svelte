@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { IconDropFile } from "@intric/icons/drop-file";
+  import { IconDropFile } from "@eneo/icons/drop-file";
   import { getAttachmentManager } from "../AttachmentManager";
 
   export let isDragging: boolean;

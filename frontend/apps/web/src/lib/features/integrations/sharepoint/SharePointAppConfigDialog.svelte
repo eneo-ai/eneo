@@ -1,9 +1,9 @@
 <script lang="ts">
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import { getIntric } from "$lib/core/Intric";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { IntricError } from "@intric/intric-js";
-  import { Button, Dialog, Input } from "@intric/ui";
+  import { getEneo } from "$lib/core/Eneo";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { EneoError } from "@eneo/eneo-js";
+  import { Button, Dialog, Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { writable, type Writable } from "svelte/store";
@@ -48,7 +48,7 @@
 
   let { openController }: { openController: Writable<boolean> } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // Form state
   let authMethod = $state<AuthMethod>("service_account"); // Default to recommended
@@ -66,7 +66,7 @@
   // Load existing configuration
   const loadConfig = createAsyncState(async () => {
     try {
-      const data = await intric.client.fetch("/api/v1/admin/sharepoint/app", {
+      const data = await eneo.client.fetch("/api/v1/admin/sharepoint/app", {
         method: "get",
         params: {}
       });
@@ -99,7 +99,7 @@
         tenant_domain: tenantDomain,
       };
 
-      const result = await intric.client.fetch("/api/v1/admin/sharepoint/app/test", {
+      const result = await eneo.client.fetch("/api/v1/admin/sharepoint/app/test", {
         method: "post",
         params: {},
         requestBody: {
@@ -116,7 +116,7 @@
         }
     } catch (error) {
       const errorMessage =
-        error instanceof IntricError ? error.getReadableMessage() : String(error);
+        error instanceof EneoError ? error.getReadableMessage() : String(error);
       toast.error(m.failed_to_test_credentials({ message: errorMessage }));
       testResult = {
         success: false,
@@ -139,7 +139,7 @@
         tenant_domain: tenantDomain,
       };
 
-      const result = await intric.client.fetch("/api/v1/admin/sharepoint/app", {
+      const result = await eneo.client.fetch("/api/v1/admin/sharepoint/app", {
         method: "post",
         params: {},
         requestBody: {
@@ -151,7 +151,7 @@
       $openController = false;
     } catch (error) {
       const errorMessage =
-        error instanceof IntricError ? error.getReadableMessage() : String(error);
+        error instanceof EneoError ? error.getReadableMessage() : String(error);
       toast.error(m.failed_to_save_configuration({ message: errorMessage }));
     }
   });
@@ -170,7 +170,7 @@
         tenant_domain: existingConfig.tenant_domain,
       };
 
-      const result = await intric.client.fetch("/api/v1/admin/sharepoint/app", {
+      const result = await eneo.client.fetch("/api/v1/admin/sharepoint/app", {
         method: "post",
         params: {},
         requestBody: {
@@ -183,7 +183,7 @@
       newClientSecret = "";
     } catch (error) {
       const errorMessage =
-        error instanceof IntricError ? error.getReadableMessage() : String(error);
+        error instanceof EneoError ? error.getReadableMessage() : String(error);
       toast.error(m.failed_to_save_configuration({ message: errorMessage }));
     }
   });
@@ -202,7 +202,7 @@
         tenant_domain: tenantDomain,
       };
 
-      const result = await intric.client.fetch("/api/v1/admin/sharepoint/service-account/auth/start", {
+      const result = await eneo.client.fetch("/api/v1/admin/sharepoint/service-account/auth/start", {
         method: "post",
         params: {},
         requestBody: {
@@ -223,7 +223,7 @@
       window.location.href = result.auth_url;
     } catch (error) {
       const errorMessage =
-        error instanceof IntricError ? error.getReadableMessage() : String(error);
+        error instanceof EneoError ? error.getReadableMessage() : String(error);
       toast.error(m.failed_to_start_oauth({ message: errorMessage }));
     }
   });

@@ -7,13 +7,13 @@
 <script lang="ts">
   import { invalidate } from "$app/navigation";
   import { makeEditable } from "$lib/core/editable";
-  import { getIntric } from "$lib/core/Intric";
-  import type { Permission, Role } from "@intric/intric-js";
-  import { Dialog, Button, Input } from "@intric/ui";
+  import { getEneo } from "$lib/core/Eneo";
+  import type { Permission, Role } from "@eneo/eneo-js";
+  import { Dialog, Button, Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   const emptyRole: Role = {
     id: "",
@@ -44,7 +44,7 @@
     isProcessing = true;
     try {
       const role = { id: editableRole.id };
-      await intric.roles.update({
+      await eneo.roles.update({
         role,
         update: {
           ...editableRole.getEdits()
@@ -62,7 +62,7 @@
   async function create() {
     isProcessing = true;
     try {
-      await intric.roles.create(editableRole);
+      await eneo.roles.create(editableRole);
       invalidate("admin:roles:load");
       $showDialog = false;
       editableRole.updateWithValue(emptyRole);

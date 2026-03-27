@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { IconQuestionMark } from "@intric/icons/question-mark";
-  import { Input, Tooltip } from "@intric/ui";
-  import type { ModelKwargs } from "@intric/intric-js";
+  import { IconQuestionMark } from "@eneo/icons/question-mark";
+  import { Input, Tooltip } from "@eneo/ui";
+  import type { ModelKwargs } from "@eneo/eneo-js";
 
   export let kwArgs: ModelKwargs;
   export let selectedModel: any = null; // CompletionModel from the parent

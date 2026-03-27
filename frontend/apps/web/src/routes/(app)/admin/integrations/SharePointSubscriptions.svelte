@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import type { IntricClient } from "@intric/intric-js";
+  import type { EneoClient } from "@eneo/eneo-js";
   import dayjs from "dayjs";
 
   interface SharePointSubscription {
@@ -29,10 +29,10 @@
   }
 
   interface Props {
-    intric: IntricClient;
+    eneo: EneoClient;
   }
 
-  const { intric }: Props = $props();
+  const { eneo }: Props = $props();
 
   let subscriptions = $state<SharePointSubscription[]>([]);
   let loading = $state(false);
@@ -43,7 +43,7 @@
   const loadSubscriptions = createAsyncState(async () => {
     loading = true;
     try {
-      const response = await intric.integrations.admin.sharepoint.listSubscriptions();
+      const response = await eneo.integrations.admin.sharepoint.listSubscriptions();
       // Backend returns array directly, not wrapped in object
       subscriptions = Array.isArray(response) ? response : [];
     } catch (error) {
@@ -64,7 +64,7 @@
   async function renewAllExpired() {
     renewingAll = true;
     try {
-      const result: SubscriptionRenewalResult = await intric.integrations.admin.sharepoint.renewExpiredSubscriptions();
+      const result: SubscriptionRenewalResult = await eneo.integrations.admin.sharepoint.renewExpiredSubscriptions();
 
       if (result.recreated > 0 && result.failed === 0) {
         toast.success(
@@ -99,7 +99,7 @@
     renewingSubscriptionIds = renewingSubscriptionIds; // Trigger reactivity
 
     try {
-      await intric.integrations.admin.sharepoint.recreateSubscription({ id: subscription.id });
+      await eneo.integrations.admin.sharepoint.recreateSubscription({ id: subscription.id });
       toast.success(m.sharepoint_subscription_renewed_success());
 
       // Reload subscriptions

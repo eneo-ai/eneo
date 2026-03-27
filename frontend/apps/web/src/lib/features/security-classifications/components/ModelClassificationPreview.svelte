@@ -5,10 +5,10 @@
 -->
 
 <script lang="ts">
-  import { IconCancel } from "@intric/icons/cancel";
-  import { IconCheck } from "@intric/icons/check";
-  import type { SecurityClassification } from "@intric/intric-js";
-  import { Tooltip } from "@intric/ui";
+  import { IconCancel } from "@eneo/icons/cancel";
+  import { IconCheck } from "@eneo/icons/check";
+  import type { SecurityClassification } from "@eneo/eneo-js";
+  import { Tooltip } from "@eneo/ui";
 
   export let model: { security_classification?: SecurityClassification | null | undefined };
 </script>

@@ -1,8 +1,8 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import type { TranscriptionModel, ModelProviderPublic } from "@intric/intric-js";
-  import { Table } from "@intric/ui";
+  import type { TranscriptionModel, ModelProviderPublic } from "@eneo/eneo-js";
+  import { Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import ModelEnableSwitch from "./ModelEnableSwitch.svelte";
   import {
@@ -19,7 +19,7 @@
   import { getChartColour } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { m } from "$lib/paraglide/messages";
   import { writable } from "svelte/store";
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { Plus } from "lucide-svelte";
   import { AddWizard } from "./AddWizard/index.js";
   import PageEmptyState from "./components/PageEmptyState.svelte";

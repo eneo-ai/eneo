@@ -6,21 +6,21 @@
   import WebsiteTable from "./websites/WebsiteTable.svelte";
   import { writable } from "svelte/store";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { getIntric } from "$lib/core/Intric";
-  import { Button } from "@intric/ui";
-  import { IconLinkExternal } from "@intric/icons/link-external";
-  import { IconRefresh } from "@intric/icons/refresh";
+  import { getEneo } from "$lib/core/Eneo";
+  import { Button } from "@eneo/ui";
+  import { IconLinkExternal } from "@eneo/icons/link-external";
+  import { IconRefresh } from "@eneo/icons/refresh";
   import IntegrationsTable from "./integrations/IntegrationsTable.svelte";
   import SyncHistoryDialog from "./integrations/SyncHistoryDialog.svelte";
   import ImportKnowledgeDialog from "$lib/features/integrations/components/import/ImportKnowledgeDialog.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  import type { IntegrationKnowledge } from "@intric/intric-js";
+  import type { IntegrationKnowledge } from "@eneo/eneo-js";
   import { jobCompletionEvents } from "$lib/features/jobs/JobManager";
 
   let { data } = $props<{ data: any }>();
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const {
     state: { currentSpace },
     refreshCurrentSpace
@@ -64,7 +64,7 @@
     try {
       const websiteIds = Array.from($selectedWebsiteIds);
 
-      const response = await intric.websites.bulkRun({
+      const response = await eneo.websites.bulkRun({
         website_ids: websiteIds
       });
 

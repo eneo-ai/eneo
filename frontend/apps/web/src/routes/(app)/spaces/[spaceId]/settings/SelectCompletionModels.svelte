@@ -6,9 +6,9 @@
 
 <script lang="ts">
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import type { CompletionModel } from "@intric/intric-js";
+  import type { CompletionModel } from "@eneo/eneo-js";
   import ModelNameAndVendor from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
-  import { Input, Tooltip } from "@intric/ui";
+  import { Input, Tooltip } from "@eneo/ui";
   import { derived } from "svelte/store";
   import { Settings } from "$lib/components/layout";
   import { sortModels } from "$lib/features/ai-models/sortModels";

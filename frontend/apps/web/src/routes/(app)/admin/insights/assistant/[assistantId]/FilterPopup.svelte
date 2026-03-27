@@ -5,8 +5,8 @@
 -->
 
 <script lang="ts">
-  import { IconFilter } from "@intric/icons/filter";
-  import { Button, Dialog, Input } from "@intric/ui";
+  import { IconFilter } from "@eneo/icons/filter";
+  import { Button, Dialog, Input } from "@eneo/ui";
   import type { CalendarDate } from "@internationalized/date";
   import { m } from "$lib/paraglide/messages";
 

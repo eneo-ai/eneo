@@ -5,17 +5,17 @@
 -->
 
 <script lang="ts">
-  import { Button, Dialog } from "@intric/ui";
+  import { Button, Dialog } from "@eneo/ui";
   import { type Writable } from "svelte/store";
   import {
-    IntricError,
+    EneoError,
     type CompletionModel,
     type EmbeddingModel,
     type TranscriptionModel
-  } from "@intric/intric-js";
+  } from "@eneo/eneo-js";
   import SelectSecurityClassification from "./SelectSecurityClassification.svelte";
   import { getSecurityContext } from "../SecurityContext";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { invalidate } from "$app/navigation";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
@@ -30,13 +30,13 @@
   const { model, type, openController }: Props = $props();
 
   const classifications = getSecurityContext().security_classifications;
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let value = $derived(model.security_classification ?? null);
 
   const update = createAsyncState(async () => {
     try {
-      await intric.models.update(
+      await eneo.models.update(
         //@ts-expect-error ts doesn't understand this
         {
           [type]: model,
@@ -46,7 +46,7 @@
       invalidate("admin:models:load");
       $openController = false;
     } catch (error) {
-      toast.error(error instanceof IntricError ? error.getReadableMessage() : String(error));
+      toast.error(error instanceof EneoError ? error.getReadableMessage() : String(error));
     }
   });
 </script>

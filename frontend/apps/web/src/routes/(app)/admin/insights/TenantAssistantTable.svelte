@@ -5,8 +5,8 @@
 -->
 
 <script lang="ts">
-  import { IconAssistant } from "@intric/icons/assistant";
-  import { Table } from "@intric/ui";
+  import { IconAssistant } from "@eneo/icons/assistant";
+  import { Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import { m } from "$lib/paraglide/messages";
 

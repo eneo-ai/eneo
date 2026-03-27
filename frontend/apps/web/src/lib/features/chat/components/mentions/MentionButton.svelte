@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { Button, Tooltip } from "@intric/ui";
+  import { Button, Tooltip } from "@eneo/ui";
   import { getMentionInput } from "./MentionInput";
-  import { IconAtSymbol } from "@intric/icons/at-symbol";
+  import { IconAtSymbol } from "@eneo/icons/at-symbol";
 
   const {
     showMentionPicker,

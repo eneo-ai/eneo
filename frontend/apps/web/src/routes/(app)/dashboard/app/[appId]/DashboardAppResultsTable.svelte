@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { App, AppRunSparse } from "@intric/intric-js";
+  import type { App, AppRunSparse } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
   import AppResultStatus from "$lib/features/apps/components/AppResultStatus.svelte";

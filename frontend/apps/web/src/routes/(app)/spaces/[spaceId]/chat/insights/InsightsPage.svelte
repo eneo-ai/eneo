@@ -6,19 +6,19 @@
 
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { getChatService } from "$lib/features/chat/ChatService.svelte";
   import InsightsExploreConversationsDialog from "$lib/features/insights/components/InsightsExploreConversationsDialog.svelte";
   import { initInsightsService } from "$lib/features/insights/InsightsService.svelte";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { IconSendArrow } from "@intric/icons/send-arrow";
-  import { IconSparkles } from "@intric/icons/sparkles";
-  import { Button, Input, Markdown } from "@intric/ui";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { IconSendArrow } from "@eneo/icons/send-arrow";
+  import { IconSparkles } from "@eneo/icons/sparkles";
+  import { Button, Input, Markdown } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const chat = getChatService();
-  const insights = initInsightsService(intric, () => chat.partner);
+  const insights = initInsightsService(eneo, () => chat.partner);
 
   let question = $state("");
 </script>

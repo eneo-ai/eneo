@@ -1,4 +1,4 @@
-import type { CompletionModel, TranscriptionModel, EmbeddingModel } from "@intric/intric-js";
+import type { CompletionModel, TranscriptionModel, EmbeddingModel } from "@eneo/eneo-js";
 
 // Model with provider info
 type ModelWithProvider = (CompletionModel | TranscriptionModel | EmbeddingModel) & {

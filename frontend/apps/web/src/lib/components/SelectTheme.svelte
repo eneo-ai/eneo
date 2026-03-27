@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Select } from "@intric/ui";
+  import { Select } from "@eneo/ui";
   import { availableThemes, type Theme } from "../core/theme";
   import { getThemeStore } from "../core/theme";
   import { writable } from "svelte/store";

@@ -3,11 +3,11 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import { m } from "$lib/paraglide/messages";
-  import type { ModelProviderPublic } from "@intric/intric-js";
+  import type { ModelProviderPublic } from "@eneo/eneo-js";
   import ProviderGlyph from "../components/ProviderGlyph.svelte";
   import ProviderStatusBadge from "../components/ProviderStatusBadge.svelte";
   import { ChevronRight, Search, Star } from "lucide-svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
 
   export let providers: ModelProviderPublic[] = [];
   export let favoriteProviders: string[] = [];
@@ -19,7 +19,7 @@
     select: { providerId: string | null; isNew: boolean; providerType: string };
   }>();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   type ViewMode = "select" | "create";
   let viewMode: ViewMode = providers.length > 0 ? "select" : "create";
@@ -103,7 +103,7 @@
     localFavorites = updated;
     // Persist to backend (fire and forget)
     try {
-      await intric.modelProviders.setFavorites(updated);
+      await eneo.modelProviders.setFavorites(updated);
     } catch {
       // Revert on failure
       localFavorites = [...favoriteProviders];

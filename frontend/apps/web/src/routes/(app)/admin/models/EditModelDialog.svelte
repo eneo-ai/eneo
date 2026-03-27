@@ -8,10 +8,10 @@
     TenantCompletionModelUpdate,
     TenantEmbeddingModelUpdate,
     TenantTranscriptionModelUpdate
-  } from "@intric/intric-js";
-  import { Button, Dialog, Input } from "@intric/ui";
+  } from "@eneo/eneo-js";
+  import { Button, Dialog, Input } from "@eneo/ui";
   import { invalidate } from "$app/navigation";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { writable, type Writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { Loader2 } from "lucide-svelte";
@@ -21,7 +21,7 @@
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
   export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // Form state - initialized from model
   let modelIdentifier = "";
@@ -94,7 +94,7 @@
     if (!modelIdentifier.trim()) return;
     isLoadingDefaults = true;
     try {
-      const result = await intric.modelProviders.getModelDefaults(modelIdentifier.trim());
+      const result = await eneo.modelProviders.getModelDefaults(modelIdentifier.trim());
       if (result.found) {
         if (result.max_input_tokens != null) maxInputTokensStr = String(result.max_input_tokens);
         if (result.max_output_tokens != null) maxOutputTokensStr = String(result.max_output_tokens);
@@ -136,7 +136,7 @@
           reasoning,
           supports_tool_calling: supportsToolCalling
         };
-        await intric.tenantModels.updateCompletion({ id: model.id }, update);
+        await eneo.tenantModels.updateCompletion({ id: model.id }, update);
       } else if (type === "embeddingModel") {
         const update: TenantEmbeddingModelUpdate = {
           display_name: displayName.trim(),
@@ -145,7 +145,7 @@
           open_source: openSource,
           family: family.trim() || undefined
         };
-        await intric.tenantModels.updateEmbedding({ id: model.id }, update);
+        await eneo.tenantModels.updateEmbedding({ id: model.id }, update);
       } else if (type === "transcriptionModel") {
         const update: TenantTranscriptionModelUpdate = {
           display_name: displayName.trim(),
@@ -153,7 +153,7 @@
           hosting,
           open_source: openSource
         };
-        await intric.tenantModels.updateTranscription({ id: model.id }, update);
+        await eneo.tenantModels.updateTranscription({ id: model.id }, update);
       }
 
       // Invalidate to reload data

@@ -1,13 +1,13 @@
 <script lang="ts">
-  import { Button, Dialog, Input } from "@intric/ui";
+  import { Button, Dialog, Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { AlertTriangle } from "lucide-svelte";
   import type { Writable } from "svelte/store";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
 
   let { openController }: { openController: Writable<boolean> } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let isLoading = $state(false);
   let errorMessage = $state("");
@@ -29,7 +29,7 @@
 
     try {
       console.log("Calling API to delete SharePoint app...");
-      await intric.client.fetch("/api/v1/admin/sharepoint/app", {
+      await eneo.client.fetch("/api/v1/admin/sharepoint/app", {
         method: "delete",
         params: {}
       });

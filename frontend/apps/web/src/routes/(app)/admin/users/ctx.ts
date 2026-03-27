@@ -1,5 +1,5 @@
 import { createContext } from "$lib/core/context";
-import type { Role, UserGroup } from "@intric/intric-js";
+import type { Role, UserGroup } from "@eneo/eneo-js";
 
 type AdminUserCtx = {
   userGroups: UserGroup[];

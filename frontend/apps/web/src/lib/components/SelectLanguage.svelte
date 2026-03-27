@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Select } from "@intric/ui";
+  import { Select } from "@eneo/ui";
   import { availableLanguages, type Language } from "../core/language";
   import { getLanguageStore } from "../core/language";
   import { writable } from "svelte/store";

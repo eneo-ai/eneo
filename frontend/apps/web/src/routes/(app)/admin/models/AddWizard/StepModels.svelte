@@ -1,15 +1,15 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import { Button, Input } from "@intric/ui";
+  import { Button, Input } from "@eneo/ui";
   import { createEventDispatcher, onMount } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { ArrowLeft, Plus, Trash2, Sparkles, Check, ListPlus, TriangleAlert, Search, Loader2, CircleCheck, CircleX, Zap } from "lucide-svelte";
   import HelpTooltip from "../components/HelpTooltip.svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { toast } from "$lib/components/toast";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   /** Capabilities loaded by parent (AddWizard) */
   export let capabilities: { providers: Record<string, any>; default_fields: any[] } | null = null;
@@ -122,7 +122,7 @@
     if (!providerId || liveModelsLoaded) return;
     liveModelsError = "";
     try {
-      const result = await intric.modelProviders.listModels({ id: providerId });
+      const result = await eneo.modelProviders.listModels({ id: providerId });
       if (result && Array.isArray(result) && result.length > 0 && result[0]?.error) {
         liveModelsError = result[0].error;
       } else if (result && Array.isArray(result)) {
@@ -224,7 +224,7 @@
     validationStates = validationStates;
 
     try {
-      const result = await intric.modelProviders.validateModel(
+      const result = await eneo.modelProviders.validateModel(
         { id: providerId },
         { model_name: model.name, model_type: modelType }
       );
@@ -280,7 +280,7 @@
     if (!currentModel.name.trim()) return;
     isLookingUpDefaults = true;
     try {
-      const result = await intric.modelProviders.getModelDefaults(currentModel.name.trim());
+      const result = await eneo.modelProviders.getModelDefaults(currentModel.name.trim());
       if (result.found) {
         if (result.max_input_tokens != null) currentModel.maxInputTokens = result.max_input_tokens;
         if (result.max_output_tokens != null) currentModel.maxOutputTokens = result.max_output_tokens;

@@ -1,8 +1,8 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import type { CompletionModel, ModelProviderPublic } from "@intric/intric-js";
-  import { Table } from "@intric/ui";
+  import type { CompletionModel, ModelProviderPublic } from "@eneo/eneo-js";
+  import { Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import ModelEnabledSwitch from "./ModelEnableSwitch.svelte";
   import {
@@ -19,7 +19,7 @@
   import { m } from "$lib/paraglide/messages";
 
   import { writable } from "svelte/store";
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { Plus } from "lucide-svelte";
   import ProviderDialog from "./ProviderDialog.svelte";
   import { AddWizard } from "./AddWizard/index.js";

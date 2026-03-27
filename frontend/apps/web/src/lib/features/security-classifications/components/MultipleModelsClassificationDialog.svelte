@@ -6,18 +6,18 @@
 
 <script lang="ts">
   import {
-    IntricError,
+    EneoError,
     type CompletionModel,
     type EmbeddingModel,
     type SecurityClassification,
     type TranscriptionModel
-  } from "@intric/intric-js";
+  } from "@eneo/eneo-js";
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
   import ModelNameAndVendor from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import SelectSecurityClassification from "./SelectSecurityClassification.svelte";
-  import { getIntric } from "$lib/core/Intric";
-  import { Button } from "@intric/ui";
-  import { IconChevronRight } from "@intric/icons/chevron-right";
+  import { getEneo } from "$lib/core/Eneo";
+  import { Button } from "@eneo/ui";
+  import { IconChevronRight } from "@eneo/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 
@@ -37,7 +37,7 @@
 
   const { models, type }: Props = $props();
   const security = getSecurityClassificationService();
-  const intric = getIntric();
+  const eneo = getEneo();
 
   function createOrgFilter(org: string | null | undefined) {
     return function (model: { org?: string | null | undefined }) {
@@ -64,9 +64,9 @@
     if (security_classification === undefined) return;
     try {
       // @ts-expect-error doesnt understand [type]
-      await intric.models.update({ [type]: model, update: { security_classification } });
+      await eneo.models.update({ [type]: model, update: { security_classification } });
     } catch (error) {
-      toast.error(error instanceof IntricError ? error.getReadableMessage() : String(error));
+      toast.error(error instanceof EneoError ? error.getReadableMessage() : String(error));
     }
   }
 

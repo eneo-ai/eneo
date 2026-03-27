@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
-  import { Button, Input, Tooltip } from "@intric/ui";
+  import { Button, Input, Tooltip } from "@eneo/ui";
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -15,7 +15,7 @@
 
   let { data } = $props();
 
-  const intric = data.intric;
+  const eneo = data.eneo;
 
   // Template state
   let name = $state("");
@@ -72,7 +72,7 @@
         icon_name: iconName || undefined  // Include icon if selected
       };
 
-      await intric.templates.admin.createAssistant(templateData);
+      await eneo.templates.admin.createAssistant(templateData);
       goto("/admin/templates?success=template_created");
     } catch (error) {
       console.error("Failed to create template:", error);

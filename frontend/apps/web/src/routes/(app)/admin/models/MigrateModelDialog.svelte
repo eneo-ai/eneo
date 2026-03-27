@@ -1,10 +1,10 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import type { CompletionModel } from "@intric/intric-js";
-  import { Button, Dialog, Select } from "@intric/ui";
+  import type { CompletionModel } from "@eneo/eneo-js";
+  import { Button, Dialog, Select } from "@eneo/ui";
   import { invalidate } from "$app/navigation";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { Loader2 } from "lucide-svelte";
@@ -14,7 +14,7 @@
   export let sourceModel: CompletionModel;
   export let models: CompletionModel[] = [];
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let targetModelId = "";
   let confirmMigration = false;
@@ -50,7 +50,7 @@
     isSubmitting = true;
 
     try {
-      await intric.models.migrateCompletion({
+      await eneo.models.migrateCompletion({
         fromId: sourceModel.id,
         toId: targetModelId,
         confirmMigration: confirmMigration || undefined
@@ -59,7 +59,7 @@
       // Delete the source model after successful migration
       let deleteSucceeded = true;
       try {
-        await intric.tenantModels.deleteCompletion({ id: sourceModel.id });
+        await eneo.tenantModels.deleteCompletion({ id: sourceModel.id });
       } catch {
         deleteSucceeded = false;
       }

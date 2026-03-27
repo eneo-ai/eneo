@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/stores";
   import { getAppContext } from "$lib/core/AppContext";
-  import { Button, Dialog } from "@intric/ui";
+  import { Button, Dialog } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 

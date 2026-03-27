@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Input, Tooltip } from "@intric/ui";
+  import { Input, Tooltip } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
 
   export let kwargs: { temperature: number; top_p: number };

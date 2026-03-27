@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { IconAttachment } from "@intric/icons/attachment";
+  import { IconAttachment } from "@eneo/icons/attachment";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
 
   export let label = m.select_documents_to_attach();

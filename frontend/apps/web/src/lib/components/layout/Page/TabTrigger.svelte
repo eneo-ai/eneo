@@ -3,7 +3,7 @@
   import { replaceState } from "$app/navigation";
   import { page } from "$app/stores";
   import { getContentTabs } from "./ctx";
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
 
   export let tab: string;
   export let padding: "icon-leading" | "text" = "text";

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Button, Dialog, Input } from "@intric/ui";
+	import { Button, Dialog, Input } from "@eneo/ui";
 	import { writable, type Writable } from "svelte/store";
 	import { page } from "$app/stores";
 	import { invalidate } from "$app/navigation";
@@ -79,10 +79,10 @@
 		}
 
 		isSubmitting = true;
-		const { intric } = $page.data;
+		const { eneo } = $page.data;
 
 		try {
-			const response = await intric.credentials.set(provider.toLowerCase(), formData);
+			const response = await eneo.credentials.set(provider.toLowerCase(), formData);
 			openController.set(false);
 			// Reload the page data to reflect new credentials
 			await invalidate("admin:models:load");

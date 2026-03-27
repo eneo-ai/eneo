@@ -1,6 +1,6 @@
 import type { MarkedToken } from "marked";
 import type { Component, Snippet } from "svelte";
-import type { IntricToken } from "../CustomComponents";
+import type { EneoToken } from "../CustomComponents";
 import Heading from "./Heading.svelte";
 import Text from "./Text.svelte";
 import Paragraph from "./Paragraph.svelte";
@@ -26,7 +26,7 @@ import Html from "./Html.svelte";
 type TokenMap = {
   [K in MarkedToken["type"]]: Extract<MarkedToken, { type: K }>;
 } & {
-  [K in IntricToken["type"]]: Extract<IntricToken, { type: K }>;
+  [K in EneoToken["type"]]: Extract<EneoToken, { type: K }>;
 };
 
 export type SupportedToken = TokenMap[keyof TokenMap];
@@ -42,8 +42,8 @@ export type Renderers = {
 
 export const renderers: Renderers = {
   // Custom blocks
-  intricInref: Inref,
-  intricMention: Mention,
+  eneoInref: Inref,
+  eneoMention: Mention,
   // Basic markdown blocks
   heading: Heading,
   text: Text,

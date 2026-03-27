@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { invalidate } from "$app/navigation";
   import { Plus } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
@@ -22,7 +22,7 @@
   let showAddDialog = writable(false);
 
   async function handleAddMCP(mcpData: any) {
-    await data.intric.mcpServers.create(mcpData);
+    await data.eneo.mcpServers.create(mcpData);
     await Promise.all([invalidate("admin:layout"), invalidate("spaces:data")]);
   }
 

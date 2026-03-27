@@ -1,19 +1,19 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import { Button, Dialog } from "@intric/ui";
+  import { Button, Dialog } from "@eneo/ui";
   import { writable, type Writable } from "svelte/store";
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { invalidate } from "$app/navigation";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { Check, Loader2, AlertTriangle } from "lucide-svelte";
   import StepProvider from "./StepProvider.svelte";
   import StepCredentials from "./StepCredentials.svelte";
   import StepModels from "./StepModels.svelte";
-  import type { ModelProviderPublic } from "@intric/intric-js";
+  import type { ModelProviderPublic } from "@eneo/eneo-js";
   import { onMount } from "svelte";
   import {
     getModelProviderCapabilities,
@@ -28,7 +28,7 @@
   /** Model type to add (for when starting from "Add Model" on a specific table) */
   export let modelType: "completion" | "embedding" | "transcription" = "completion";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // --- Capabilities (loaded once, shared across steps) ---
 
@@ -39,7 +39,7 @@
     if (capabilities || capabilitiesLoading) return;
     capabilitiesLoading = true;
     try {
-      capabilities = await getModelProviderCapabilities(intric);
+      capabilities = await getModelProviderCapabilities(eneo);
     } catch {
       // Silently fail — steps will fall back gracefully
     } finally {
@@ -229,7 +229,7 @@
       const validationWarnings: string[] = [];
       for (const model of modelsToCreate) {
         try {
-          const result = await intric.modelProviders.validateModel(
+          const result = await eneo.modelProviders.validateModel(
             { id: providerId },
             { model_name: model.name, model_type: modelType }
           );
@@ -290,7 +290,7 @@
       // Create models based on type
       for (const model of modelsToCreate) {
         if (modelType === "completion") {
-          await intric.tenantModels.createCompletion({
+          await eneo.tenantModels.createCompletion({
             provider_id: providerId,
             name: model.name,
             display_name: model.displayName,
@@ -304,7 +304,7 @@
             is_active: true
           });
         } else if (modelType === "embedding") {
-          await intric.tenantModels.createEmbedding({
+          await eneo.tenantModels.createEmbedding({
             provider_id: providerId,
             name: model.name,
             display_name: model.displayName,
@@ -315,7 +315,7 @@
             is_active: true
           });
         } else if (modelType === "transcription") {
-          await intric.tenantModels.createTranscription({
+          await eneo.tenantModels.createTranscription({
             provider_id: providerId,
             name: model.name,
             display_name: model.displayName,

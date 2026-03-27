@@ -5,18 +5,18 @@
 -->
 
 <script lang="ts">
-  import type { Permission, Role } from "@intric/intric-js";
-  import { Button, Dialog } from "@intric/ui";
+  import type { Permission, Role } from "@eneo/eneo-js";
+  import { Button, Dialog } from "@eneo/ui";
   import RoleEditor from "./RoleEditor.svelte";
   import { invalidate } from "$app/navigation";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
 
   export let role: Role;
   export let permissions: Array<{ name: Permission; description: string }>;
   export let disabled = false;
 
-  const intric = getIntric();
+  const eneo = getEneo();
 </script>
 
 <RoleEditor {role} {disabled} {permissions} mode="update"></RoleEditor>
@@ -56,7 +56,7 @@
         is={close}
         variant="destructive"
         on:click={async () => {
-          await intric.roles.delete(role);
+          await eneo.roles.delete(role);
           invalidate("admin:roles:load");
         }}>{m.delete()}</Button
       >

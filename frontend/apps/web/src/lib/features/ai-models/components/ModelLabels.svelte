@@ -1,8 +1,8 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script context="module" lang="ts">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
-  import { Label } from "@intric/ui";
+  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import { Label } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   export function getLabels(model: CompletionModel | EmbeddingModel | TranscriptionModel) {
     const labels: {

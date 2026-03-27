@@ -8,15 +8,15 @@
   import { invalidate } from "$app/navigation";
   import SelectRole from "./SelectRole.svelte";
   import { makeEditable } from "$lib/core/editable";
-  import { type Role, type UserGroup } from "@intric/intric-js";
-  import { Dialog, Button, Input } from "@intric/ui";
+  import { type Role, type UserGroup } from "@eneo/eneo-js";
+  import { Dialog, Button, Input } from "@eneo/ui";
   import SelectUserGroups from "./SelectUserGroups.svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { getAdminUserCtx } from "../ctx";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   const { defaultRoles, customRoles, userGroups } = getAdminUserCtx();
 
@@ -96,7 +96,7 @@
       ...getRolesUpdate()
     };
     try {
-      await intric.users.update({
+      await eneo.users.update({
         user: { username: user.username },
         update
       });
@@ -121,7 +121,7 @@
       username
     };
     try {
-      await intric.users.create(newUser);
+      await eneo.users.create(newUser);
       editableUser.updateWithValue(createEmptyUser());
       userPassword = "";
       invalidate("admin:users:load");

@@ -1,10 +1,10 @@
 <script lang="ts">
   import { invalidate } from "$app/navigation";
   import SelectCompletionModel from "$lib/features/ai-models/components/SelectCompletionModel.svelte";
-  import { IntricError, type Service } from "@intric/intric-js";
-  import { Button, Input, Select } from "@intric/ui";
+  import { EneoError, type Service } from "@eneo/eneo-js";
+  import { Button, Input, Select } from "@eneo/ui";
   import { makeEditable } from "$lib/core/editable";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import SelectBehaviour from "$lib/features/ai-models/components/SelectBehaviour.svelte";
   import {
@@ -18,7 +18,7 @@
 
   export let service: Service;
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const {
     state: { currentSpace }
   } = getSpacesManager();
@@ -61,13 +61,13 @@
       getKwargs(completion_model_config.behaviour) ?? completion_model_config.custom_kwargs;
 
     try {
-      await intric.services.update({
+      await eneo.services.update({
         service: { id: service.id },
         update
       });
       invalidate("service:get");
     } catch (e) {
-      if (e instanceof IntricError) {
+      if (e instanceof EneoError) {
         toast.error(e.message);
         console.error(e);
       }

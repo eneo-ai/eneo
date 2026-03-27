@@ -1,6 +1,6 @@
 import { sveltekit } from "@sveltejs/kit/vite";
 import { defineConfig, type PluginOption } from "vite";
-import { intricIcons } from "./src/icons/vite-plugin-intric-icons";
+import { intricIcons } from "./src/icons/vite-plugin-eneo-icons";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({

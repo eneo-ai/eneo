@@ -1,20 +1,20 @@
 <script lang="ts">
-  import { IconCancel } from "@intric/icons/cancel";
-  import { IconTrash } from "@intric/icons/trash";
-  import { Button, ProgressBar } from "@intric/ui";
+  import { IconCancel } from "@eneo/icons/cancel";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { Button, ProgressBar } from "@eneo/ui";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { formatFileType } from "$lib/core/formatting/formatFileType";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { getAssistantEditor } from "$lib/features/assistants/AssistantEditor";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import AttachmentUploadTextButton from "$lib/features/attachments/components/AttachmentUploadTextButton.svelte";
   import { getExplicitAttachmentRules } from "$lib/features/attachments/getAttachmentRules";
-  import type { UploadedFile } from "@intric/intric-js";
+  import type { UploadedFile } from "@eneo/eneo-js";
   import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
   import AttachmentPreview from "$lib/features/attachments/components/AttachmentPreview.svelte";
 
   // This is only the new uploads, it is bound to the attachment upload
-  const intric = getIntric();
+  const eneo = getEneo();
   const {
     state: { update }
   } = getAssistantEditor();
@@ -24,7 +24,7 @@
   const {
     state: { attachments: newAttachments },
     clearUploads
-  } = initAttachmentManager({ intric, options: { onFileUploaded, rules: attachmentRules } });
+  } = initAttachmentManager({ eneo, options: { onFileUploaded, rules: attachmentRules } });
 
   function onFileUploaded(newFile: UploadedFile) {
     // After successful upload add the uploaded file ref to attachments
@@ -39,7 +39,7 @@
     if (
       $newAttachments.find((attachment) => attachment.fileRef && attachment.fileRef.id === file.id)
     ) {
-      await intric.files.delete({ fileId: file.id });
+      await eneo.files.delete({ fileId: file.id });
     }
 
     $update.attachments = $update.attachments.toSpliced(

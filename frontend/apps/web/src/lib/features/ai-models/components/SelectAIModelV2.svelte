@@ -1,12 +1,12 @@
 <script lang="ts" generics="T extends TranscriptionModel | CompletionModel">
-  import type { CompletionModel, TranscriptionModel } from "@intric/intric-js";
+  import type { CompletionModel, TranscriptionModel } from "@eneo/eneo-js";
   import ModelNameAndVendor from "./ModelNameAndVendor.svelte";
   import { sortModels } from "../sortModels";
   import { groupModelsByProvider } from "../groupModels";
   import { createSelect } from "@melt-ui/svelte";
-  import { IconCheck } from "@intric/icons/check";
-  import { IconCancel } from "@intric/icons/cancel";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconCancel } from "@eneo/icons/cancel";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { m } from "$lib/paraglide/messages";
   import ProviderGlyph from "../../../../routes/(app)/admin/models/components/ProviderGlyph.svelte";
 
@@ -134,7 +134,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   div[data-highlighted] {
     @apply bg-hover-default;
   }

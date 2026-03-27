@@ -1,10 +1,10 @@
 <script lang="ts">
   import { makeEditable } from "$lib/core/editable";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { type Website } from "@intric/intric-js";
-  import { Dialog, Button, Input, Select, Tooltip } from "@intric/ui";
+  import { type Website } from "@eneo/eneo-js";
+  import { Dialog, Button, Input, Select, Tooltip } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { tick } from "svelte";
@@ -21,7 +21,7 @@
     } as unknown as Website;
   };
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const {
     refreshCurrentSpace,
     state: { currentSpace }
@@ -84,7 +84,7 @@
     duplicateCheckPending = true;
     try {
       console.log("Checking URL:", editableWebsite.url);
-      existingOnOrg = await intric.websites.checkUrl(editableWebsite.url);
+      existingOnOrg = await eneo.websites.checkUrl(editableWebsite.url);
       console.log("Check result:", existingOnOrg);
       if (existingOnOrg) {
         // Show warning modal on top of the main dialog
@@ -195,7 +195,7 @@
         edits.http_auth_password = null;
       }
 
-      const updated = await intric.websites.update({ website: { id: website.id }, update: edits });
+      const updated = await eneo.websites.update({ website: { id: website.id }, update: edits });
       editableWebsite.updateWithValue(updated);
       refreshCurrentSpace();
       $showDialog = false;
@@ -225,7 +225,7 @@
         websiteData.http_auth_password = httpAuthPassword;
       }
 
-      await intric.websites.create(websiteData);
+      await eneo.websites.create(websiteData);
       editableWebsite.updateWithValue(emptyWebsite());
       websiteName = "";
       httpAuthEnabled = false;

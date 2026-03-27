@@ -5,8 +5,8 @@
 -->
 
 <script lang="ts">
-  import { getIntric } from "$lib/core/Intric";
-  import { Button, CodeBlock, Dialog } from "@intric/ui";
+  import { getEneo } from "$lib/core/Eneo";
+  import { Button, CodeBlock, Dialog } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
 
   type InsightMessage = {
@@ -21,7 +21,7 @@
 
   export let message: InsightMessage;
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let loggingDetails = "";
   let copied = false;
@@ -31,7 +31,7 @@
     if (!loggingDetails) {
       loadingLog = true;
       try {
-        const loaded = message.id ? await intric.logging.get({ id: message.id }) : message;
+        const loaded = message.id ? await eneo.logging.get({ id: message.id }) : message;
         loggingDetails = JSON.stringify(loaded, null, 2);
       } catch (e: unknown) {
         loggingDetails = JSON.stringify(message, null, 2);

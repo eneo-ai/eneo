@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { IconTrash } from "@intric/icons/trash";
-  import { Button, Dialog } from "@intric/ui";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { Button, Dialog } from "@eneo/ui";
   import { getChatService } from "../../ChatService.svelte";
-  import type { ConversationSparse } from "@intric/intric-js";
+  import type { ConversationSparse } from "@eneo/eneo-js";
 
   export let conversation: ConversationSparse;
   export let onConversationDeleted: ((conversation: ConversationSparse) => void) | undefined =

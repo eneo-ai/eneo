@@ -1,0 +1,25 @@
+{
+  "name": "@eneo/eneo-js",
+  "version": "1.23.0",
+  "type": "module",
+  "module": "index.js",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "scripts": {
+    "lint": "prettier --check . && eslint .",
+    "format": "prettier --write .",
+    "update": "node update.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "eslint": "^9.24.0",
+    "eslint-config-prettier": "^10.1.2",
+    "globals": "^16.0.0",
+    "openapi-typescript": "^6.7.6",
+    "prettier": "^3.5.3"
+  },
+  "exports": {
+    ".": "./index.js"
+  },
+  "sideEffects": false
+}

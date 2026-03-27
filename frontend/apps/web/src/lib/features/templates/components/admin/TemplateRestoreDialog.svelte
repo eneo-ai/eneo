@@ -5,10 +5,10 @@
 -->
 
 <script lang="ts">
-  import type { components } from "@intric/intric-js";
-  import { Button, Dialog } from "@intric/ui";
+  import type { components } from "@eneo/eneo-js";
+  import { Button, Dialog } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
-  import { getIntric } from "$lib/core/Intric.js";
+  import { getEneo } from "$lib/core/Eneo.js";
   import { invalidate } from "$app/navigation";
   import { Undo } from "lucide-svelte";
   import type { Writable } from "svelte/store";
@@ -27,7 +27,7 @@
     type: "assistant" | "app";
   } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let isLoading = $state(false);
   let errorMessage = $state("");
@@ -38,9 +38,9 @@
 
     try {
       if (type === "assistant") {
-        await intric.templates.admin.restoreAssistant(template.id);
+        await eneo.templates.admin.restoreAssistant(template.id);
       } else {
-        await intric.templates.admin.restoreApp(template.id);
+        await eneo.templates.admin.restoreApp(template.id);
       }
 
       await invalidate("admin:templates:load");

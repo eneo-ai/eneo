@@ -1,6 +1,6 @@
 import { getContext, setContext } from "svelte";
 import { writable, type Writable } from "svelte/store";
-import type { UserIntegration } from "@intric/intric-js";
+import type { UserIntegration } from "@eneo/eneo-js";
 
 const key = Symbol("Integrations context");
 

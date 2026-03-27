@@ -5,9 +5,9 @@
 -->
 
 <script lang="ts">
-  import { IconCog } from "@intric/icons/cog";
-  import type { GroupChat } from "@intric/intric-js";
-  import { Button, Dialog, Input } from "@intric/ui";
+  import { IconCog } from "@eneo/icons/cog";
+  import type { GroupChat } from "@eneo/eneo-js";
+  import { Button, Dialog, Input } from "@eneo/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";

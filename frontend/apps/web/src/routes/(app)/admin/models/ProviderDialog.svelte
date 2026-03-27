@@ -1,11 +1,11 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import { Button, Dialog, Input, Select } from "@intric/ui";
+  import { Button, Dialog, Input, Select } from "@eneo/ui";
   import { invalidate } from "$app/navigation";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { writable, type Writable } from "svelte/store";
-  import type { ModelProviderPublic } from "@intric/intric-js";
+  import type { ModelProviderPublic } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import { Loader2 } from "lucide-svelte";
   import ProviderGlyph from "./components/ProviderGlyph.svelte";
@@ -21,7 +21,7 @@
   /** If provided, dialog is in edit mode. If null/undefined, dialog is in add mode. */
   export let provider: ModelProviderPublic | null = null;
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // --- Capabilities ---
   let capabilities: ModelProviderCapabilities | null = null;
@@ -32,7 +32,7 @@
 
     capabilitiesLoading = true;
     try {
-      capabilities = await getModelProviderCapabilities(intric);
+      capabilities = await getModelProviderCapabilities(eneo);
     } catch {
       // Silently fail — fall back to hardcoded defaults
     } finally {
@@ -244,10 +244,10 @@
           updateData.credentials = credentials;
         }
 
-        await intric.modelProviders.update({ id: provider.id }, updateData);
+        await eneo.modelProviders.update({ id: provider.id }, updateData);
       } else {
         // Create new provider
-        await intric.modelProviders.create({
+        await eneo.modelProviders.create({
           name: providerName,
           provider_type: providerType,
           credentials,

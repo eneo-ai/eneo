@@ -5,13 +5,13 @@
 */
 
 export const load = async (event) => {
-  const { intric, user } = await event.parent();
+  const { eneo, user } = await event.parent();
 
   // Only fetch org space if user has admin permission
   const orgPromise = user?.predefined_roles?.some((role) =>
     role.permissions?.includes('admin')
   )
-    ? intric.spaces
+    ? eneo.spaces
         .getOrganizationSpace()
         .catch((e) => {
           if (e?.status === 403 || e?.response?.status === 403) return null;
@@ -20,8 +20,8 @@ export const load = async (event) => {
     : Promise.resolve(null);
 
   const [spaces, currentSpace, organizationSpace] = await Promise.all([
-    intric.spaces.list(),
-    intric.spaces.getPersonalSpace(),
+    eneo.spaces.list(),
+    eneo.spaces.getPersonalSpace(),
     orgPromise,
   ]);
 

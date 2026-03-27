@@ -2,7 +2,7 @@
   import { Page, Settings } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
 
-  import { Button, Input, Tooltip } from "@intric/ui";
+  import { Button, Input, Tooltip } from "@eneo/ui";
   import { afterNavigate, beforeNavigate } from "$app/navigation";
 
   import { initAssistantEditor } from "$lib/features/assistants/AssistantEditor.js";
@@ -37,7 +37,7 @@
     discardChanges
   } = initAssistantEditor({
     assistant: data.assistant,
-    intric: data.intric,
+    eneo: data.eneo,
     onUpdateDone() {
       refreshCurrentSpace("applications");
     }
@@ -51,7 +51,7 @@
   let iconError = $state<string | null>(null);
 
   function getIconUrl(id: string | null): string | null {
-    return id ? data.intric.icons.url({ id }) : null;
+    return id ? data.eneo.icons.url({ id }) : null;
   }
 
   let iconUrl = $derived(getIconUrl(currentIconId));
@@ -61,8 +61,8 @@
     iconUploading = true;
     iconError = null;
     try {
-      const newIcon = await data.intric.icons.upload({ file });
-      await data.intric.assistants.update({
+      const newIcon = await data.eneo.icons.upload({ file });
+      await data.eneo.assistants.update({
         assistant: { id: $resource.id },
         update: { icon_id: newIcon.id }
       });
@@ -80,9 +80,9 @@
     iconError = null;
     try {
       if (currentIconId) {
-        await data.intric.icons.delete({ id: currentIconId });
+        await data.eneo.icons.delete({ id: currentIconId });
       }
-      await data.intric.assistants.update({
+      await data.eneo.assistants.update({
         assistant: { id: $resource.id },
         update: { icon_id: null }
       });
@@ -280,7 +280,7 @@
             <PromptVersionDialog
               title={m.prompt_history_for({ name: $resource.name })}
               loadPromptVersionHistory={() => {
-                return data.intric.assistants.listPrompts({ id: data.assistant.id });
+                return data.eneo.assistants.listPrompts({ id: data.assistant.id });
               }}
               onPromptSelected={(prompt) => {
                 const restoredDate = dayjs(prompt.created_at).format("YYYY-MM-DD HH:mm");
@@ -476,7 +476,7 @@
           {#if data.assistant.permissions?.includes("publish")}
             <Settings.Row title={m.status()} description={m.publishing_description()}>
               <PublishingSetting
-                endpoints={data.intric.assistants}
+                endpoints={data.eneo.assistants}
                 resource={data.assistant}
                 hasUnsavedChanges={$currentChanges.hasUnsavedChanges}
               />

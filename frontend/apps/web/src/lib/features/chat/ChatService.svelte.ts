@@ -9,14 +9,14 @@ import {
   type Assistant,
   type Conversation,
   type GroupChat,
-  type Intric,
+  type Eneo,
   type Paginated,
   type UploadedFile,
   type ConversationMessage,
-  IntricError,
+  EneoError,
   type ConversationTools,
   type SSE
-} from "@intric/intric-js";
+} from "@eneo/eneo-js";
 
 export type PendingToolApproval = {
   approvalId: string;
@@ -36,7 +36,7 @@ export class ChatService {
       : 'tools' in this.#chatPartner &&
         this.#chatPartner.tools?.assistants?.length > 0)
   );
-  #intric: Intric;
+  #eneo: Eneo;
   currentConversation = $state<Conversation>(emptyConversation());
   totalConversations = $state<number>(0);
   loadedConversations = $state<ConversationSparse[]>([]);
@@ -57,12 +57,12 @@ export class ChatService {
   #producerFlushThreshold = 2048; // Safety flush for background tabs or fast streams
 
   constructor(data: Parameters<typeof this.init>[0]) {
-    this.#intric = data.intric;
+    this.#eneo = data.eneo;
     this.init(data);
   }
 
   init(data: {
-    intric: Intric;
+    eneo: Eneo;
     chatPartner: ChatPartner;
     initialConversation?: Promise<Conversation | null> | Conversation | null;
     initialHistory?: Promise<Paginated<ConversationSparse>> | Paginated<ConversationSparse>;
@@ -147,7 +147,7 @@ export class ChatService {
       if (args?.reset) {
         this.#nextCursor = null;
       }
-      const response = await this.#intric.conversations.list({
+      const response = await this.#eneo.conversations.list({
         chatPartner: this.#chatPartner,
         pagination: {
           limit: args?.limit ?? PAGINATION.PAGE_SIZE,
@@ -179,7 +179,7 @@ export class ChatService {
 
   async deleteConversation(conversation: { id: string }) {
     try {
-      await this.#intric.conversations.delete(conversation);
+      await this.#eneo.conversations.delete(conversation);
       this.loadedConversations = this.loadedConversations.filter(
         ({ id }) => id !== conversation.id
       );
@@ -194,7 +194,7 @@ export class ChatService {
 
   async loadConversation(conversation: { id: string }) {
     try {
-      const loaded = await this.#intric.conversations.get(conversation);
+      const loaded = await this.#eneo.conversations.get(conversation);
       this.currentConversation = loaded;
       return loaded;
     } catch (e) {
@@ -239,7 +239,7 @@ export class ChatService {
       };
 
       try {
-        await this.#intric.conversations.ask({
+        await this.#eneo.conversations.ask({
           question,
           chatPartner: this.#chatPartner,
           conversation: { id: this.currentConversation.id },
@@ -304,11 +304,11 @@ export class ChatService {
               if (!ensureCurrentSession(image)) return;
               Object.assign(ref, image);
             },
-            onIntricEvent: (event) => {
+            onEneoEvent: (event) => {
               if (isStale()) return;
               if (!ensureCurrentSession(event)) return;
 
-              if (event.intric_event_type === "generating_image") {
+              if (event.eneo_event_type === "generating_image") {
                 ref.generated_files.push({ id: "", name: "", mimetype: "", size: 0 });
               }
             },
@@ -372,7 +372,7 @@ export class ChatService {
         }
 
         // If streaming started but no content arrived yet, remove the empty message
-        if (error instanceof IntricError && !ref.answer) {
+        if (error instanceof EneoError && !ref.answer) {
           this.currentConversation.messages.pop();
           console.error(error);
           throw error;
@@ -380,7 +380,7 @@ export class ChatService {
 
         // Error during streaming — show inline in the conversation
         let message = "We encountered an error processing your request.";
-        if (error instanceof IntricError) {
+        if (error instanceof EneoError) {
           message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
         } else if (error instanceof Object && "message" in error && "name" in error) {
           message += `\n\`\`\`\n$"${error.name}: error.message}"\n\`\`\``;
@@ -420,7 +420,7 @@ export class ChatService {
     }
 
     try {
-      await this.#intric.conversations.approveTools({
+      await this.#eneo.conversations.approveTools({
         approvalId: this.pendingToolApproval.approvalId,
         decisions
       });
@@ -462,7 +462,7 @@ export class ChatService {
     if (!this.pendingToolApproval) return;
 
     // Submit approval for this tool
-    await this.#intric.conversations.approveTools({
+    await this.#eneo.conversations.approveTools({
       approvalId: this.pendingToolApproval.approvalId,
       decisions: [{ tool_call_id: toolCallId, approved: true }]
     });
@@ -489,7 +489,7 @@ export class ChatService {
     if (!this.pendingToolApproval) return;
 
     // Submit denial for this tool
-    await this.#intric.conversations.approveTools({
+    await this.#eneo.conversations.approveTools({
       approvalId: this.pendingToolApproval.approvalId,
       decisions: [{ tool_call_id: toolCallId, approved: false }]
     });

@@ -5,8 +5,8 @@
 -->
 
 <script lang="ts">
-  import type { SpaceSparse } from "@intric/intric-js";
-  import { Table } from "@intric/ui";
+  import type { SpaceSparse } from "@eneo/eneo-js";
+  import { Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import SpaceTile from "./SpaceTile.svelte";
   import SpaceActions from "./SpaceActions.svelte";

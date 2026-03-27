@@ -9,7 +9,7 @@
   import { formatNumber } from "$lib/core/formatting/formatNumber";
   import { formatPercent } from "$lib/core/formatting/formatPercent";
   import { m } from "$lib/paraglide/messages";
-  import type { UserTokenUsageSummary } from "@intric/intric-js";
+  import type { UserTokenUsageSummary } from "@eneo/eneo-js";
 
   type Props = {
     userStats: UserTokenUsageSummary;

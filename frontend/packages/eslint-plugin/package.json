@@ -1,5 +1,5 @@
 {
-  "name": "@intric/eslint-plugin",
+  "name": "@eneo/eslint-plugin",
   "version": "1.15.0",
   "type": "module",
   "module": "index.js",

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { dynamicColour } from "$lib/core/colours";
-  import type { AppSparse } from "@intric/intric-js";
+  import type { AppSparse } from "@eneo/eneo-js";
   import AppIcon from "$lib/features/apps/components/AppIcon.svelte";
   import AppActions from "./AppActions.svelte";
   import { localizeHref } from "$lib/paraglide/runtime";

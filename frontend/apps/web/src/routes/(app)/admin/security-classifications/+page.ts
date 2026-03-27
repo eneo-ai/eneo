@@ -1,9 +1,9 @@
 export const load = async (event) => {
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
 
   const [securityClassifications, models] = await Promise.all([
-    intric.securityClassifications.list(),
-    intric.models.list()
+    eneo.securityClassifications.list(),
+    eneo.models.list()
   ]);
 
   return {

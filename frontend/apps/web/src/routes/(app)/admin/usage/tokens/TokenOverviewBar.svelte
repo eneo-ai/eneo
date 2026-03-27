@@ -9,7 +9,7 @@
   import { formatNumber } from "$lib/core/formatting/formatNumber";
   import { formatPercent } from "$lib/core/formatting/formatPercent";
   import { getChartColour } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
-  import type { TokenUsageSummary } from "@intric/intric-js";
+  import type { TokenUsageSummary } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {

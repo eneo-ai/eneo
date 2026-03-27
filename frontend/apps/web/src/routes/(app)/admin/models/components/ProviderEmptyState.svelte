@@ -1,7 +1,7 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { Plus, Layers } from "lucide-svelte";
   import { createEventDispatcher } from "svelte";

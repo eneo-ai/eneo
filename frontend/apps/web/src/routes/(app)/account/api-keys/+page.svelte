@@ -2,8 +2,8 @@
   import { invalidateAll } from "$app/navigation";
   import { Page } from "$lib/components/layout";
   import { getAppContext } from "$lib/core/AppContext.js";
-  import { getIntric } from "$lib/core/Intric";
-  import { Button, Dialog } from "@intric/ui";
+  import { getEneo } from "$lib/core/Eneo";
+  import { Button, Dialog } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 
@@ -11,13 +11,13 @@
     user,
     state: { userInfo }
   } = getAppContext();
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let apiKey: string | null = null;
   let showCopiedMessage = false;
 
   async function generateApiKey() {
-    apiKey = (await intric.users.generateApiKey()).key;
+    apiKey = (await eneo.users.generateApiKey()).key;
     invalidateAll();
   }
 </script>

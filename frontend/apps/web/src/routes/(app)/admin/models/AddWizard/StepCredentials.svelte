@@ -1,9 +1,9 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import { Button, Input } from "@intric/ui";
+  import { Button, Input } from "@eneo/ui";
   import { createEventDispatcher, onMount } from "svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import ProviderGlyph from "../components/ProviderGlyph.svelte";
@@ -24,7 +24,7 @@
     back: void;
   }>();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // Dynamic field values — keyed by field name
   let fieldValues: Record<string, string> = {};
@@ -141,7 +141,7 @@
         }
       }
 
-      const provider = await intric.modelProviders.create({
+      const provider = await eneo.modelProviders.create({
         name: providerName,
         provider_type: providerType,
         credentials,

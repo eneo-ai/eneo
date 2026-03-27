@@ -5,8 +5,8 @@
 -->
 
 <script lang="ts">
-  import type { components } from "@intric/intric-js";
-  import { Button } from "@intric/ui";
+  import type { components } from "@eneo/eneo-js";
+  import { Button } from "@eneo/ui";
   import { RotateCcw } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import TemplateRollbackDialog from "$lib/features/templates/components/admin/TemplateRollbackDialog.svelte";

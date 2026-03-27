@@ -1,18 +1,18 @@
 <script lang="ts">
-  import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
-  import { Button } from "@intric/ui";
+  import { IconArrowUpToLine } from "@eneo/icons/arrow-up-to-line";
+  import { Button } from "@eneo/ui";
   import { page } from "$app/stores";
   import { getAppContext, initAppContext } from "$lib/core/AppContext";
   import JobManagerDropdown from "$lib/features/jobs/components/JobManagerDropdownButton.svelte";
   import { initJobManager } from "$lib/features/jobs/JobManager";
   import ProfileMenu from "./ProfileMenu.svelte";
-  import { initIntric } from "$lib/core/Intric";
-  import { initIntricSocket } from "$lib/core/IntricSocket";
+  import { initEneo } from "$lib/core/Eneo";
+  import { initEneoSocket } from "$lib/core/EneoSocket";
   import { PageLoadBar } from "$lib/components/layout";
   import { browser } from "$app/environment";
   import { onDestroy } from "svelte";
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
-  import { IconEneo } from "@intric/icons/eneo";
+  import { IconEneo } from "@eneo/icons/eneo";
   import { initAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte.js";
   import { initFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte.js";
   import { m } from "$lib/paraglide/messages";
@@ -21,12 +21,12 @@
 
   export let data;
 
-  initIntric(data);
+  initEneo(data);
   initAppContext(data);
   initJobManager(data);
   initAttachmentUrlService(data);
   initFaviconUrlService();
-  const socket = initIntricSocket(data);
+  const socket = initEneoSocket(data);
 
   // Open the socket connection
   // While it would be more intuitive to use onMount to open the socket, onMounts are executed form the bottom up
@@ -82,8 +82,8 @@
       class="border-default hover:bg-accent-dimmer group flex h-[3.25rem] min-w-[3.85rem] items-center justify-between border-r-[0.5px] pr-3 pl-6 md:w-[17rem] md:min-w-[17rem]"
     >
       <a href={localizeHref("/")}>
-        <EneoWordMark class="text-brand-intric hidden h-[3rem] w-[4.5rem] md:block"></EneoWordMark>
-        <IconEneo class="text-brand-intric -ml-0.5 block md:hidden" viewBox="0 0 330 330"
+        <EneoWordMark class="text-brand-eneo hidden h-[3rem] w-[4.5rem] md:block"></EneoWordMark>
+        <IconEneo class="text-brand-eneo -ml-0.5 block md:hidden" viewBox="0 0 330 330"
         ></IconEneo>
       </a>
       <Button
@@ -126,13 +126,13 @@
 <Toaster />
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   nav a {
-    @apply text-secondary hover:bg-accent-dimmer hover:text-brand-intric flex h-[3.25rem] items-center px-8 pt-0.5 text-[0.9rem] tracking-[0.01rem] hover:font-medium hover:tracking-normal;
+    @apply text-secondary hover:bg-accent-dimmer hover:text-brand-eneo flex h-[3.25rem] items-center px-8 pt-0.5 text-[0.9rem] tracking-[0.01rem] hover:font-medium hover:tracking-normal;
   }
 
   nav a[data-current="page"] {
-    @apply text-brand-intric font-medium tracking-normal;
+    @apply text-brand-eneo font-medium tracking-normal;
     background: rgba(from var(--background-hover-default) r g b / 0.1);
   }
 

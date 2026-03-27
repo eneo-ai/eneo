@@ -5,9 +5,9 @@
 -->
 
 <script lang="ts">
-  import { Button, Dialog, Input, Select } from "@intric/ui";
+  import { Button, Dialog, Input, Select } from "@eneo/ui";
   import { invalidate } from "$app/navigation";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { writable, type Writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { TriangleAlert } from "lucide-svelte";
@@ -21,7 +21,7 @@
   export let providers: any[] = [];
   export let preSelectedProviderId: Writable<string | null> | undefined = undefined;
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   const CREATE_NEW_PROVIDER = "__CREATE_NEW__";
 
@@ -126,7 +126,7 @@
       }
     }
 
-    const result = await intric.modelProviders.create(providerData);
+    const result = await eneo.modelProviders.create(providerData);
     return result.id;
   }
 
@@ -162,7 +162,7 @@
 
       isSubmitting = true;
 
-      await intric.tenantModels.createTranscription({
+      await eneo.tenantModels.createTranscription({
         provider_id: actualProviderId,
         name: modelName,
         display_name: displayName,
@@ -219,7 +219,7 @@
 
     capabilitiesLoading = true;
     try {
-      capabilities = await getModelProviderCapabilities(intric);
+      capabilities = await getModelProviderCapabilities(eneo);
     } catch {
       // Silently fail — warning just won't show
     } finally {

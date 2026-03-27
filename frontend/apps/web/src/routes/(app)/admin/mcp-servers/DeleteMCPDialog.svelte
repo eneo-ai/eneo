@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Button, Dialog } from "@intric/ui";
+  import { Button, Dialog } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { AlertTriangle } from "lucide-svelte";
   import type { Writable } from "svelte/store";

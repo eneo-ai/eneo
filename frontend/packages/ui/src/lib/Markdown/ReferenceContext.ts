@@ -1,6 +1,6 @@
 import { getContext, setContext } from "svelte";
 import type { CustomRenderers } from "./CustomComponents";
-import type { InfoBlob } from "@intric/intric-js";
+import type { InfoBlob } from "@eneo/eneo-js";
 
 const ctxKey = Symbol("Message references");
 

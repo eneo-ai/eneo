@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { Table } from "@intric/ui";
-  import type { App, AppRunSparse } from "@intric/intric-js";
+  import { Table } from "@eneo/ui";
+  import type { App, AppRunSparse } from "@eneo/eneo-js";
   import { createRender } from "svelte-headless-table";
   import dayjs from "dayjs";
   import relativeTime from "dayjs/plugin/relativeTime";

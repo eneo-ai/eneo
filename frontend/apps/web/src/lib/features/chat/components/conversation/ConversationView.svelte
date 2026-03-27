@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import AttachmentDropArea from "$lib/features/attachments/components/AttachmentDropArea.svelte";
-  import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
-  import { Markdown } from "@intric/ui";
+  import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
+  import { Markdown } from "@eneo/ui";
   import Message from "./Message.svelte";
   import ConversationAttachments from "./ConversationAttachments.svelte";
   import ConversationInput from "./ConversationInput.svelte";
   import { fade } from "svelte/transition";
   import { browser } from "$app/environment";
-  import { Tooltip } from "@intric/ui";
+  import { Tooltip } from "@eneo/ui";
   import { getChatService } from "../../ChatService.svelte";
   import type { Snippet } from "svelte";
   import { m } from "$lib/paraglide/messages";
@@ -23,7 +23,7 @@
   const chat = getChatService();
 
   const attachmentRules = undefined; // getAttachmentRulesStore(toStore(() => chat.partner));
-  initAttachmentManager({ intric: getIntric(), options: { rules: attachmentRules } });
+  initAttachmentManager({ eneo: getEneo(), options: { rules: attachmentRules } });
 
   let scrollContainer = $state() as HTMLDivElement;
   let showScrollToBottom = $state(false);

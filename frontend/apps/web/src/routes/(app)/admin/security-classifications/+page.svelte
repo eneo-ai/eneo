@@ -14,7 +14,7 @@
 
   const { data } = $props();
 
-  initSecurityClassificationService(data.intric, data.securityClassifications);
+  initSecurityClassificationService(data.eneo, data.securityClassifications);
   // Using a JS string so we can have a newline in this
   const description = m.classify_models_description();
 </script>

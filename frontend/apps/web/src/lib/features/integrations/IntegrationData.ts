@@ -1,7 +1,7 @@
 import type { Component } from "svelte";
 import { ConfluenceIntegrationData } from "./confluence/ConfluenceIntegrationData";
 import { SharepointIntegrationData } from "./sharepoint/SharepointIntegrationData";
-import type { UserIntegration } from "@intric/intric-js";
+import type { UserIntegration } from "@eneo/eneo-js";
 import type { Writable } from "svelte/store";
 
 export type IntegrationData = {

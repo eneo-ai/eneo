@@ -5,9 +5,9 @@
 -->
 
 <script lang="ts">
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { Button, Dropdown } from "@intric/ui";
-  import { getIntric } from "$lib/core/Intric";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { Button, Dropdown } from "@eneo/ui";
+  import { getEneo } from "$lib/core/Eneo";
   import { invalidate } from "$app/navigation";
   import { writable, type Writable } from "svelte/store";
   import { Pencil, Trash2, RefreshCw } from "lucide-svelte";
@@ -21,7 +21,7 @@
 
   const { mcpServer }: Props = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   const showEditDialog: Writable<boolean> = writable(false);
   const showDeleteDialog: Writable<boolean> = writable(false);
@@ -30,20 +30,20 @@
 
   async function handleSave(data: any, id?: string) {
     if (id) {
-      await intric.mcpServers.update({ id, ...data });
+      await eneo.mcpServers.update({ id, ...data });
     }
     await Promise.all([invalidate("admin:layout"), invalidate("spaces:data")]);
   }
 
   async function handleDelete(id: string) {
-    await intric.mcpServers.delete({ id });
+    await eneo.mcpServers.delete({ id });
     await Promise.all([invalidate("admin:layout"), invalidate("spaces:data")]);
   }
 
   async function syncTools() {
     syncing = true;
     try {
-      await intric.mcpServers.syncTools({ mcp_server_id: mcpServer.mcp_server_id });
+      await eneo.mcpServers.syncTools({ mcp_server_id: mcpServer.mcp_server_id });
       await invalidate("spaces:data");
     } catch (error) {
       console.error("Failed to sync tools:", error);

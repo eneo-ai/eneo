@@ -1,16 +1,16 @@
 <script lang="ts">
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import { browser } from "$app/environment";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
-  import type { IntricErrorCode } from "@intric/intric-js";
+  import type { EneoErrorCode } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
 
   type Error = {
     message: string;
     status: number;
-    code: IntricErrorCode;
+    code: EneoErrorCode;
   };
 
   let appError: Error | undefined = undefined;

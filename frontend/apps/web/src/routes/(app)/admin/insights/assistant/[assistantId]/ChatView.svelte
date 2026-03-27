@@ -5,18 +5,18 @@
 -->
 
 <script lang="ts">
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { IconSparkles } from "@intric/icons/sparkles";
-  import { IconSendArrow } from "@intric/icons/send-arrow";
-  import { Button, Markdown } from "@intric/ui";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { IconSparkles } from "@eneo/icons/sparkles";
+  import { IconSendArrow } from "@eneo/icons/send-arrow";
+  import { Button, Markdown } from "@eneo/ui";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
-  import { getIntric } from "$lib/core/Intric";
-  import type { Assistant } from "@intric/intric-js";
+  import { getEneo } from "$lib/core/Eneo";
+  import type { Assistant } from "@eneo/eneo-js";
   import type { CalendarDate } from "@internationalized/date";
   import { m } from "$lib/paraglide/messages";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   export let assistant: Assistant;
   export let includeFollowups: boolean;
@@ -44,7 +44,7 @@
 
     try {
       const inclusiveEnd = timeframe.end.add({ days: 1 }).toString();
-      const { answer } = await intric.analytics.ask({
+      const { answer } = await eneo.analytics.ask({
         assistant: { id: assistant.id },
         options: {
           includeFollowups,

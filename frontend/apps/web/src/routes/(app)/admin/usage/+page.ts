@@ -7,7 +7,7 @@
 import { CalendarDate } from "@internationalized/date";
 
 export const load = async (event) => {
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
 
   const now = new Date();
   const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
@@ -18,9 +18,9 @@ export const load = async (event) => {
   };
 
   const [spaces, storageStats, tokenStats] = await Promise.all([
-    intric.usage.storage.listSpaces().then((s) => s.sort((a, b) => b.size - a.size)),
-    intric.usage.storage.getSummary(),
-    intric.usage.tokens.getSummary(dateRange)
+    eneo.usage.storage.listSpaces().then((s) => s.sort((a, b) => b.size - a.size)),
+    eneo.usage.storage.getSummary(),
+    eneo.usage.tokens.getSummary(dateRange)
   ]);
 
   return { spaces, storageStats, tokenStats };

@@ -5,8 +5,8 @@
 -->
 
 <script lang="ts">
-  import type { components } from "@intric/intric-js";
-  import { Table } from "@intric/ui";
+  import type { components } from "@eneo/eneo-js";
+  import { Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import { m } from "$lib/paraglide/messages";
   import TemplateDeletedActions from "./TemplateDeletedActions.svelte";

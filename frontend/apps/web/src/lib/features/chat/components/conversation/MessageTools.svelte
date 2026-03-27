@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { IconCopy } from "@intric/icons/copy";
-  import { IconChevronRight } from "@intric/icons/chevron-right";
-  import { Button, Tooltip } from "@intric/ui";
+  import { IconCopy } from "@eneo/icons/copy";
+  import { IconChevronRight } from "@eneo/icons/chevron-right";
+  import { Button, Tooltip } from "@eneo/ui";
   import BlobPreview from "$lib/features/knowledge/components/BlobPreview.svelte";
   import LinkReference from "$lib/features/knowledge/components/LinkReference.svelte";
   import { getFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte";

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { IconCollections } from "@intric/icons/collections";
+  import { IconCollections } from "@eneo/icons/collections";
   import { m } from "$lib/paraglide/messages";
 
   interface Props {

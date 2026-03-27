@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { ModelProviderPublic } from "@intric/intric-js";
-	import { Button, Tooltip } from "@intric/ui";
+	import type { ModelProviderPublic } from "@eneo/eneo-js";
+	import { Button, Tooltip } from "@eneo/ui";
 	import { ShieldCheck, TriangleAlert } from "lucide-svelte";
 	import { m } from "$lib/paraglide/messages";
 

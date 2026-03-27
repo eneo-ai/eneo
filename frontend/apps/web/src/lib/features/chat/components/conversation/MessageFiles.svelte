@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { IconAttachment } from "@intric/icons/attachment";
+  import { IconAttachment } from "@eneo/icons/attachment";
   import { getMessageContext } from "../../MessageContext.svelte";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";

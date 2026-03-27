@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { IconStar } from "@intric/icons/star";
+  import { IconStar } from "@eneo/icons/star";
   import { getAppContext } from "$lib/core/AppContext";
   import { dynamicColour } from "$lib/core/colours";
 
@@ -39,7 +39,7 @@
 {/if}
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   .chip {
     @apply bg-dynamic-default text-on-fill flex min-h-[1.6rem] min-w-[1.6rem] items-center justify-center rounded-md;
   }

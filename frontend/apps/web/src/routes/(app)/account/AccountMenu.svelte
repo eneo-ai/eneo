@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { IconAssistant } from "@intric/icons/assistant";
-  import { IconKey } from "@intric/icons/key";
-  import { IconLink } from "@intric/icons/link";
+  import { IconAssistant } from "@eneo/icons/assistant";
+  import { IconKey } from "@eneo/icons/key";
+  import { IconLink } from "@eneo/icons/link";
   import { page } from "$app/stores";
   import type { ComponentType } from "svelte";
   import { Navigation } from "$lib/components/layout";

@@ -11,7 +11,7 @@
     "sourceMap": true,
     "strict": true,
     "moduleResolution": "bundler",
-    "types": ["@types/wicg-file-system-access", "@intric/ui/icons/types"]
+    "types": ["@types/wicg-file-system-access", "@eneo/ui/icons/types"]
   }
   // Path aliases are handled by https://kit.svelte.dev/docs/configuration#alias
   //

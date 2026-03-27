@@ -1,5 +1,5 @@
 {
-  "name": "@intric/ui",
+  "name": "@eneo/ui",
   "sideEffects": false,
   "version": "1.22.0",
   "type": "module",
@@ -29,7 +29,7 @@
     },
     "./styles": "./src/styles/main.css",
     "./styles/prose": "./src/styles/prose.css",
-    "./icons/vite-plugin-intric-icons": "./src/icons/vite-plugin-intric-icons.js",
+    "./icons/vite-plugin-eneo-icons": "./src/icons/vite-plugin-eneo-icons.js",
     "./icons/types": {
       "types": "./src/icons/types.d.ts"
     }
@@ -47,7 +47,7 @@
   },
   "devDependencies": {
     "@internationalized/date": "^3.7.0",
-    "@intric/intric-js": "workspace:*",
+    "@eneo/eneo-js": "workspace:*",
     "@melt-ui/svelte": "^0.86.5",
     "@playwright/test": "^1.51.1",
     "@sveltejs/adapter-auto": "^6.0.0",

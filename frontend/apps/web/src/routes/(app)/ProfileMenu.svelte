@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { IconProfile } from "@intric/icons/profile";
-  import { IconAssistant } from "@intric/icons/assistant";
-  import { IconKey } from "@intric/icons/key";
-  import { IconLogout } from "@intric/icons/logout";
-  import { IconBuilding2 } from "@intric/icons/building-2";
-  import { Button } from "@intric/ui";
+  import { IconProfile } from "@eneo/icons/profile";
+  import { IconAssistant } from "@eneo/icons/assistant";
+  import { IconKey } from "@eneo/icons/key";
+  import { IconLogout } from "@eneo/icons/logout";
+  import { IconBuilding2 } from "@eneo/icons/building-2";
+  import { Button } from "@eneo/ui";
   import { createDropdownMenu } from "@melt-ui/svelte";
   import { fly, fade } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
@@ -51,7 +51,7 @@
   is={[$trigger]}
   unstyled
   label={m.account_and_settings()}
-  class="text-secondary hover:bg-accent-dimmer hover:text-brand-intric relative flex h-[3.25rem] !min-w-[3.5rem] items-center justify-center"
+  class="text-secondary hover:bg-accent-dimmer hover:text-brand-eneo relative flex h-[3.25rem] !min-w-[3.5rem] items-center justify-center"
 >
   <IconProfile class="!h-7 !min-w-7 !stroke-[1.4]" />
 </Button>
