@@ -1387,7 +1387,7 @@
   "personal_spaces": "Personal spaces",
   "statistics": "Statistics",
   "knowledge_providers_description": "Enable an integration to allow your users to connect to external knowledge providers and import information.",
-  "intric": "Eneo",
+  "eneo": "Eneo",
   "this_run_did_not_receive_any_inputs": "This run did not receive any inputs.",
   "role_name": "Role name",
   "descriptive_name_for_this_role": "A descriptive name for this role",
