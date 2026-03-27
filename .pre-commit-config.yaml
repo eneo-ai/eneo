@@ -15,3 +15,13 @@ repos:
     hooks:
       - id: uv-lock
         args: [--directory, backend]
+
+  # Prevent duplicate keys in i18n message files
+  - repo: local
+    hooks:
+      - id: i18n-no-duplicate-keys
+        name: i18n-no-duplicate-keys
+        entry: python3 frontend/apps/web/scripts/check-i18n-duplicates.py
+        language: system
+        files: ^frontend/apps/web/messages/.*\.json$
+        pass_filenames: false
