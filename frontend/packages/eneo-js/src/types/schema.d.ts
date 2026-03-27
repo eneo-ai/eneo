@@ -4192,7 +4192,7 @@ export interface components {
       /** Failed */
       failed: number;
       /** Crawl Runs */
-      crawl_runs: components["schemas"]["intric__websites__presentation__website_models__CrawlRunPublic"][];
+      crawl_runs: components["schemas"]["eneo__websites__presentation__website_models__CrawlRunPublic"][];
       /** Errors */
       errors: {
         [key: string]: string;
@@ -7767,7 +7767,7 @@ export interface components {
        * Items
        * @description List of items returned in the response
        */
-      items: components["schemas"]["intric__websites__presentation__website_models__CrawlRunPublic"][];
+      items: components["schemas"]["eneo__websites__presentation__website_models__CrawlRunPublic"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -11619,7 +11619,7 @@ export interface components {
       crawl_type: components["schemas"]["CrawlType"];
       update_interval: components["schemas"]["UpdateInterval"];
       latest_crawl:
-        | components["schemas"]["intric__websites__presentation__website_models__CrawlRunPublic"]
+        | components["schemas"]["eneo__websites__presentation__website_models__CrawlRunPublic"]
         | null;
       embedding_model: components["schemas"]["EmbeddingModelPublic"];
       metadata: components["schemas"]["WebsiteMetadata"];
@@ -11689,7 +11689,7 @@ export interface components {
      *         }
      *     }
      */
-    intric__tenants__presentation__tenant_credentials_router__CredentialInfo: {
+    eneo__tenants__presentation__tenant_credentials_router__CredentialInfo: {
       /**
        * Provider
        * @description LLM provider name
@@ -11747,9 +11747,9 @@ export interface components {
      *         ]
      *     }
      */
-    intric__tenants__presentation__tenant_credentials_router__ListCredentialsResponse: {
+    eneo__tenants__presentation__tenant_credentials_router__ListCredentialsResponse: {
       /** Credentials */
-      credentials: components["schemas"]["intric__tenants__presentation__tenant_credentials_router__CredentialInfo"][];
+      credentials: components["schemas"]["eneo__tenants__presentation__tenant_credentials_router__CredentialInfo"][];
     };
     /**
      * SetCredentialRequest
@@ -11778,7 +11778,7 @@ export interface components {
      *         "endpoint": "http://tenant-vllm:8000"
      *     }
      */
-    intric__tenants__presentation__tenant_credentials_router__SetCredentialRequest: {
+    eneo__tenants__presentation__tenant_credentials_router__SetCredentialRequest: {
       /**
        * Api Key
        * @description API key for the provider
@@ -11817,7 +11817,7 @@ export interface components {
      *         "set_at": "2025-10-22T10:00:00+00:00"
      *     }
      */
-    intric__tenants__presentation__tenant_credentials_router__SetCredentialResponse: {
+    eneo__tenants__presentation__tenant_credentials_router__SetCredentialResponse: {
       /**
        * Tenant Id
        * Format: uuid
@@ -11836,7 +11836,7 @@ export interface components {
       set_at: string;
     };
     /** CredentialInfo */
-    intric__tenants__presentation__tenant_self_credentials_router__CredentialInfo: {
+    eneo__tenants__presentation__tenant_self_credentials_router__CredentialInfo: {
       /**
        * Provider
        * @description LLM provider name
@@ -11867,12 +11867,12 @@ export interface components {
       };
     };
     /** ListCredentialsResponse */
-    intric__tenants__presentation__tenant_self_credentials_router__ListCredentialsResponse: {
+    eneo__tenants__presentation__tenant_self_credentials_router__ListCredentialsResponse: {
       /** Credentials */
-      credentials: components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__CredentialInfo"][];
+      credentials: components["schemas"]["eneo__tenants__presentation__tenant_self_credentials_router__CredentialInfo"][];
     };
     /** SetCredentialRequest */
-    intric__tenants__presentation__tenant_self_credentials_router__SetCredentialRequest: {
+    eneo__tenants__presentation__tenant_self_credentials_router__SetCredentialRequest: {
       /**
        * Api Key
        * @description API key for the provider
@@ -11895,7 +11895,7 @@ export interface components {
       deployment_name?: string | null;
     };
     /** SetCredentialResponse */
-    intric__tenants__presentation__tenant_self_credentials_router__SetCredentialResponse: {
+    eneo__tenants__presentation__tenant_self_credentials_router__SetCredentialResponse: {
       /** Provider */
       provider: string;
       /** Masked Key */
@@ -11909,7 +11909,7 @@ export interface components {
       set_at: string;
     };
     /** CrawlRunPublic */
-    intric__websites__crawl_dependencies__crawl_models__CrawlRunPublic: {
+    eneo__websites__crawl_dependencies__crawl_models__CrawlRunPublic: {
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -11939,7 +11939,7 @@ export interface components {
       finished_at?: string | null;
     };
     /** CrawlRunPublic */
-    intric__websites__presentation__website_models__CrawlRunPublic: {
+    eneo__websites__presentation__website_models__CrawlRunPublic: {
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -12047,11 +12047,7 @@ export interface components {
          * EneoEventType
          * @enum {string}
          */
-        EneoEventType:
-          | "generating_image"
-          | "tool_call"
-          | "tool_approval_required"
-          | "token_usage";
+        EneoEventType: "generating_image" | "tool_call" | "tool_approval_required" | "token_usage";
       };
     };
     /**
@@ -12073,11 +12069,7 @@ export interface components {
          * EneoEventType
          * @enum {string}
          */
-        EneoEventType:
-          | "generating_image"
-          | "tool_call"
-          | "tool_approval_required"
-          | "token_usage";
+        EneoEventType: "generating_image" | "tool_call" | "tool_approval_required" | "token_usage";
         /**
          * ToolCallInfo
          * @description Info about a single tool being called.
@@ -12128,11 +12120,7 @@ export interface components {
          * EneoEventType
          * @enum {string}
          */
-        EneoEventType:
-          | "generating_image"
-          | "tool_call"
-          | "tool_approval_required"
-          | "token_usage";
+        EneoEventType: "generating_image" | "tool_call" | "tool_approval_required" | "token_usage";
         /**
          * ToolCallInfo
          * @description Info about a single tool being called.
@@ -12383,7 +12371,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["intric__websites__crawl_dependencies__crawl_models__CrawlRunPublic"];
+          "application/json": components["schemas"]["eneo__websites__crawl_dependencies__crawl_models__CrawlRunPublic"];
         };
       };
       /** @description Not Found */
@@ -16525,14 +16513,14 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__SetCredentialRequest"];
+        "application/json": components["schemas"]["eneo__tenants__presentation__tenant_self_credentials_router__SetCredentialRequest"];
       };
     };
     responses: {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__SetCredentialResponse"];
+          "application/json": components["schemas"]["eneo__tenants__presentation__tenant_self_credentials_router__SetCredentialResponse"];
         };
       };
       /** @description Validation Error */
@@ -16552,7 +16540,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__ListCredentialsResponse"];
+          "application/json": components["schemas"]["eneo__tenants__presentation__tenant_self_credentials_router__ListCredentialsResponse"];
         };
       };
     };
@@ -20413,7 +20401,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["intric__websites__presentation__website_models__CrawlRunPublic"];
+          "application/json": components["schemas"]["eneo__websites__presentation__website_models__CrawlRunPublic"];
         };
       };
       /** @description Forbidden */
@@ -23925,14 +23913,14 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__SetCredentialRequest"];
+        "application/json": components["schemas"]["eneo__tenants__presentation__tenant_credentials_router__SetCredentialRequest"];
       };
     };
     responses: {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__SetCredentialResponse"];
+          "application/json": components["schemas"]["eneo__tenants__presentation__tenant_credentials_router__SetCredentialResponse"];
         };
       };
       /** @description Validation Error */
@@ -23983,7 +23971,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__ListCredentialsResponse"];
+          "application/json": components["schemas"]["eneo__tenants__presentation__tenant_credentials_router__ListCredentialsResponse"];
         };
       };
       /** @description Validation Error */
