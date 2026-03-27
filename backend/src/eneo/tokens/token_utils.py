@@ -18,7 +18,7 @@ def count_tokens(text: str, model_name: str = "") -> int:
         return 0
 
     try:
-        return litellm.token_counter(model=model_name, text=text)
+        return litellm.token_counter(model=model_name, text=text)  # type: ignore[reportPrivateImportUsage]
     except Exception as e:
         logger.error(f"Token counting failed for model {model_name}: {e}")
         return len(text) // 4
