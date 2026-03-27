@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.integration.infrastructure.content_service.sharepoint_content_service import (
+from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
     SharePointContentService,
     SimpleSharePointToken,
     _extract_text_from_canvas_layout,
@@ -132,7 +132,7 @@ class TestTokenHandling:
         )
 
         with patch(
-            "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
@@ -168,7 +168,7 @@ class TestTokenHandling:
         )
 
         with patch(
-            "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
@@ -211,7 +211,7 @@ class TestTokenHandling:
         )
 
         with patch(
-            "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
@@ -677,7 +677,7 @@ class TestDeltaChangesProcessing:
         )
 
         with patch(
-            "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
@@ -707,7 +707,7 @@ class TestDeltaChangesProcessing:
         )
 
         with patch(
-            "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
@@ -749,7 +749,7 @@ class TestDeltaChangesProcessing:
         ].repo.delete_by_title_and_integration_knowledge = AsyncMock(return_value=[])
 
         with patch(
-            "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
@@ -811,7 +811,7 @@ class TestDeltaChangesProcessing:
         ].repo.delete_by_title_and_integration_knowledge = AsyncMock(return_value=[])
 
         with patch(
-            "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
@@ -883,7 +883,7 @@ class TestSyncLogging:
         )
 
         with patch(
-            "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
         ) as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client

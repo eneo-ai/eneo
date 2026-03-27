@@ -21,7 +21,7 @@ import pytest
 
 # Import shared fixture modules
 # These fixtures are automatically discovered by pytest
-# Organized to mirror the backend source structure (src/intric/*)
+# Organized to mirror the backend source structure (src/eneo/*)
 pytest_plugins = [
     "tests.integration.fixtures.completion_models",  # Completion model fixtures
     "tests.integration.fixtures.assistants",         # Assistant fixtures

@@ -10,11 +10,11 @@ import jwt
 import pytest
 from fastapi import HTTPException
 
-from intric.authentication import federation_router
-from intric.authentication.federation_router import CallbackRequest
-from intric.settings.encryption_service import EncryptionService
-from intric.tenants.tenant import TenantInDB, TenantState
-from intric.users.user import UserInDB
+from eneo.authentication import federation_router
+from eneo.authentication.federation_router import CallbackRequest
+from eneo.settings.encryption_service import EncryptionService
+from eneo.tenants.tenant import TenantInDB, TenantState
+from eneo.users.user import UserInDB
 
 
 class DummySettings(SimpleNamespace):
@@ -407,7 +407,7 @@ async def test_auth_callback_rejects_invalid_email_format(monkeypatch, bad_email
 
 # --- JIT Provisioning Tests ---
 
-from intric.predefined_roles.predefined_role import PredefinedRoleInDB
+from eneo.predefined_roles.predefined_role import PredefinedRoleInDB
 
 
 class PredefinedRolesRepoStub:

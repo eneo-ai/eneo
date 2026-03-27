@@ -1,0 +1,84 @@
+from uuid import UUID
+
+from fastapi import Depends, HTTPException, Request, Security, status
+
+from eneo.authentication.auth_factory import get_auth_service
+from eneo.authentication.auth_service import AuthService
+from eneo.main.config import get_settings
+from eneo.main.container.container import Container
+from eneo.server.dependencies.auth_definitions import OAUTH2_SCHEME
+from eneo.server.dependencies.container import get_container
+from eneo.users.user import UserInDB
+from eneo.roles.permissions import Permission, validate_permission
+from eneo.main.exceptions import UnauthorizedException
+
+
+async def _get_api_key_from_header(
+    request: Request,
+) -> str | None:
+    """
+    Dynamically get API key from the header specified in settings.
+    """
+    header_name = get_settings().api_key_header_name
+
+    # Get the API key from the dynamically determined header
+    api_key = request.headers.get(header_name)
+
+    return api_key
+
+
+async def get_current_active_user(
+    token: str = Security(OAUTH2_SCHEME),
+    api_key: str = Security(_get_api_key_from_header),
+    container: Container = Depends(get_container()),
+) -> UserInDB:
+    user_service = container.user_service()
+    return await user_service.authenticate(token, api_key)
+
+
+async def get_current_active_user_with_quota(
+    token: str = Security(OAUTH2_SCHEME),
+    api_key: str = Security(_get_api_key_from_header),
+    container: Container = Depends(get_container()),
+) -> UserInDB:
+    user_service = container.user_service()
+    return await user_service.authenticate(token, api_key, with_quota_used=True)
+
+
+async def get_user_from_token_or_assistant_api_key(
+    id: UUID,
+    token: str = Security(OAUTH2_SCHEME),
+    api_key: str = Security(_get_api_key_from_header),
+    container: Container = Depends(get_container()),
+):
+    user_service = container.user_service()
+    return await user_service.authenticate_with_assistant_api_key(
+        api_key, token, assistant_id=id
+    )
+
+
+async def get_user_from_token_or_assistant_api_key_without_assistant_id(
+    token: str = Security(OAUTH2_SCHEME),
+    api_key: str = Security(_get_api_key_from_header),
+    container: Container = Depends(get_container()),
+):
+    user_service = container.user_service()
+    return await user_service.authenticate_with_assistant_api_key(api_key, token)
+
+
+def get_api_key(hashed: bool = True):
+    async def _get_api_key(
+        api_key: str = Security(_get_api_key_from_header),
+        auth_service: AuthService = Depends(get_auth_service),
+    ):
+        return await auth_service.get_api_key(api_key, hash_key=hashed)
+
+    return _get_api_key
+
+def require_permission(permission: Permission):
+    async def _dep(user: UserInDB = Depends(get_current_active_user)):
+        try:
+            validate_permission(user, permission) 
+        except UnauthorizedException as e:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    return _dep

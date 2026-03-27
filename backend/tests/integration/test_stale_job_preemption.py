@@ -20,8 +20,8 @@ These tests verify the configuration layer that enables stale detection.
 import pytest
 from httpx import AsyncClient
 
-from intric.jobs.job_models import Task
-from intric.tenants.crawler_settings_helper import (
+from eneo.jobs.job_models import Task
+from eneo.tenants.crawler_settings_helper import (
     get_crawler_setting,
 )
 
@@ -472,9 +472,9 @@ class TestJobRepoTouchJob:
     async def test_touch_job_updates_timestamp(self, db_container, admin_user):
         """touch_job() should update the job's updated_at timestamp."""
         from datetime import datetime, timezone, timedelta
-        from intric.database.tables.job_table import Jobs
-        from intric.jobs.job_repo import JobRepository
-        from intric.main.models import Status
+        from eneo.database.tables.job_table import Jobs
+        from eneo.jobs.job_repo import JobRepository
+        from eneo.main.models import Status
 
         async with db_container() as container:
             session = container.session()
@@ -517,9 +517,9 @@ class TestJobRepoTouchJob:
     ):
         """Regular touch_job() calls should keep job under stale threshold."""
         from datetime import datetime, timezone
-        from intric.database.tables.job_table import Jobs
-        from intric.jobs.job_repo import JobRepository
-        from intric.main.models import Status
+        from eneo.database.tables.job_table import Jobs
+        from eneo.jobs.job_repo import JobRepository
+        from eneo.main.models import Status
 
         async with db_container() as container:
             session = container.session()
@@ -556,7 +556,7 @@ class TestJobRepoTouchJob:
     async def test_touch_job_nonexistent_job_no_error(self, db_container):
         """touch_job() on non-existent job should not raise error."""
         from uuid import uuid4
-        from intric.jobs.job_repo import JobRepository
+        from eneo.jobs.job_repo import JobRepository
 
         async with db_container() as container:
             session = container.session()
@@ -579,9 +579,9 @@ class TestJobRepoMarkJobFailedIfRunning:
 
     async def test_marks_queued_job_as_failed(self, db_container, admin_user):
         """mark_job_failed_if_running() should fail QUEUED jobs."""
-        from intric.database.tables.job_table import Jobs
-        from intric.jobs.job_repo import JobRepository
-        from intric.main.models import Status
+        from eneo.database.tables.job_table import Jobs
+        from eneo.jobs.job_repo import JobRepository
+        from eneo.main.models import Status
 
         async with db_container() as container:
             session = container.session()
@@ -610,9 +610,9 @@ class TestJobRepoMarkJobFailedIfRunning:
 
     async def test_marks_in_progress_job_as_failed(self, db_container, admin_user):
         """mark_job_failed_if_running() should fail IN_PROGRESS jobs."""
-        from intric.database.tables.job_table import Jobs
-        from intric.jobs.job_repo import JobRepository
-        from intric.main.models import Status
+        from eneo.database.tables.job_table import Jobs
+        from eneo.jobs.job_repo import JobRepository
+        from eneo.main.models import Status
 
         async with db_container() as container:
             session = container.session()
@@ -641,9 +641,9 @@ class TestJobRepoMarkJobFailedIfRunning:
 
     async def test_does_not_affect_completed_job(self, db_container, admin_user):
         """mark_job_failed_if_running() should not touch COMPLETE jobs."""
-        from intric.database.tables.job_table import Jobs
-        from intric.jobs.job_repo import JobRepository
-        from intric.main.models import Status
+        from eneo.database.tables.job_table import Jobs
+        from eneo.jobs.job_repo import JobRepository
+        from eneo.main.models import Status
 
         async with db_container() as container:
             session = container.session()
@@ -672,9 +672,9 @@ class TestJobRepoMarkJobFailedIfRunning:
 
     async def test_does_not_affect_already_failed_job(self, db_container, admin_user):
         """mark_job_failed_if_running() should not touch already FAILED jobs."""
-        from intric.database.tables.job_table import Jobs
-        from intric.jobs.job_repo import JobRepository
-        from intric.main.models import Status
+        from eneo.database.tables.job_table import Jobs
+        from eneo.jobs.job_repo import JobRepository
+        from eneo.main.models import Status
 
         async with db_container() as container:
             session = container.session()
@@ -709,9 +709,9 @@ class TestJobRepoMarkJobFailedIfRunning:
         This tests the Compare-and-Swap pattern: when multiple processes
         try to preempt the same job, only one should win.
         """
-        from intric.database.tables.job_table import Jobs
-        from intric.jobs.job_repo import JobRepository
-        from intric.main.models import Status
+        from eneo.database.tables.job_table import Jobs
+        from eneo.jobs.job_repo import JobRepository
+        from eneo.main.models import Status
 
         async with db_container() as container:
             session = container.session()
@@ -750,7 +750,7 @@ class TestJobRepoMarkJobFailedIfRunning:
     async def test_nonexistent_job_returns_zero(self, db_container):
         """mark_job_failed_if_running() on non-existent job returns 0."""
         from uuid import uuid4
-        from intric.jobs.job_repo import JobRepository
+        from eneo.jobs.job_repo import JobRepository
 
         async with db_container() as container:
             session = container.session()

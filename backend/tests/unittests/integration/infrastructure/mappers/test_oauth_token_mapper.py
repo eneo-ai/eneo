@@ -2,11 +2,11 @@ import unittest
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-from intric.integration.domain.entities.oauth_token import ConfluenceToken
-from intric.integration.infrastructure.mappers.oauth_token_mapper import (
+from eneo.integration.domain.entities.oauth_token import ConfluenceToken
+from eneo.integration.infrastructure.mappers.oauth_token_mapper import (
     OauthTokenMapper,
 )
-from intric.integration.presentation.models import IntegrationType
+from eneo.integration.presentation.models import IntegrationType
 
 
 class TestOauthTokenMapper(unittest.TestCase):
@@ -51,7 +51,7 @@ class TestOauthTokenMapper(unittest.TestCase):
         self.assertNotIn("id", db_dict)
 
     @patch(
-        "intric.integration.domain.factories.oauth_token_factory.OauthTokenFactory.create_entity"
+        "eneo.integration.domain.factories.oauth_token_factory.OauthTokenFactory.create_entity"
     )
     def test_to_entity(self, mock_create_entity):
         """Test mapping from DB model to domain entity using factory."""

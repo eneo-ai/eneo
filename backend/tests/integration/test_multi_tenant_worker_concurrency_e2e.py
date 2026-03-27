@@ -27,7 +27,7 @@ import redis.asyncio as aioredis
 from httpx import AsyncClient
 
 if TYPE_CHECKING:
-    from intric.main.config import Settings
+    from eneo.main.config import Settings
 
 
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
@@ -140,7 +140,7 @@ async def test_tenant_worker_limit_enforced_under_load(
     # This requires access to the ARQ queue or job manager
     # For now, verify the semaphore behavior directly using the limiter
 
-    from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
+    from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 
     limiter = TenantConcurrencyLimiter(
         redis=redis_client,
@@ -204,7 +204,7 @@ async def test_redis_failure_opens_circuit_and_enforces_fallback(
     tenant = await _create_tenant(client, super_admin_token, tenant_slug)
     tenant_id = UUID(tenant["id"])
 
-    from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
+    from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 
     # Create limiter with mocked Redis that raises exception
     class FailingRedis:
@@ -275,7 +275,7 @@ async def test_semaphore_ttl_prevents_slot_leakage(
     tenant = await _create_tenant(client, super_admin_token, tenant_slug)
     tenant_id = UUID(tenant["id"])
 
-    from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
+    from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 
     # Use very short TTL for testing (2 seconds)
     short_ttl = 2
@@ -342,7 +342,7 @@ async def test_multiple_tenants_share_global_worker_pool_fairly(
         tenant = await _create_tenant(client, super_admin_token, tenant_slug)
         tenants.append(UUID(tenant["id"]))
 
-    from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
+    from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 
     limiter = TenantConcurrencyLimiter(
         redis=redis_client,
@@ -396,7 +396,7 @@ async def test_concurrent_acquire_and_release_race_condition(
     tenant = await _create_tenant(client, super_admin_token, tenant_slug)
     tenant_id = UUID(tenant["id"])
 
-    from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
+    from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 
     limiter = TenantConcurrencyLimiter(
         redis=redis_client,
@@ -468,7 +468,7 @@ async def test_zero_limit_disables_concurrency_control(
     tenant = await _create_tenant(client, super_admin_token, tenant_slug)
     tenant_id = UUID(tenant["id"])
 
-    from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
+    from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 
     # Limit=0 means no limit
     limiter = TenantConcurrencyLimiter(
@@ -523,7 +523,7 @@ async def test_circuit_breaker_end_to_end_redis_recovery(
     tenant = await _create_tenant(client, super_admin_token, tenant_slug)
     tenant_id = UUID(tenant["id"])
 
-    from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
+    from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 
     # Create limiter
     limiter = TenantConcurrencyLimiter(
@@ -612,7 +612,7 @@ async def test_multiple_tenants_independent_fallback_limits(
         tenant = await _create_tenant(client, super_admin_token, tenant_slug)
         tenants.append(UUID(tenant["id"]))
 
-    from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
+    from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 
     # Force circuit open with failing Redis
     class FailingRedis:

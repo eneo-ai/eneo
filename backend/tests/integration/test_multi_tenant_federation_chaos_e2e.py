@@ -25,10 +25,10 @@ import pytest
 from httpx import AsyncClient
 import sqlalchemy as sa
 
-from intric.authentication.auth_service import AuthService
-from intric.tenants.tenant_repo import TenantRepository
-from intric.database.tables.tenant_table import Tenants
-from intric.database.database import sessionmanager
+from eneo.authentication.auth_service import AuthService
+from eneo.tenants.tenant_repo import TenantRepository
+from eneo.database.tables.tenant_table import Tenants
+from eneo.database.database import sessionmanager
 
 
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
@@ -559,7 +559,7 @@ async def test_tenant_deleted_during_oidc_flow_returns_404(
     async with sessionmanager.session() as session:
         async with session.begin():
             # Delete associated user first (foreign key)
-            from intric.database.tables.users_table import Users
+            from eneo.database.tables.users_table import Users
             await session.execute(
                 sa.delete(Users).where(Users.tenant_id == tenant_id)
             )
@@ -750,7 +750,7 @@ async def test_grace_period_boundary_exact_ttl_minus_grace(
         # Set grace > TTL (should trigger validation warning)
         test_settings.oidc_state_ttl_seconds = 600
         test_settings.oidc_redirect_grace_period_seconds = 900
-        from intric.main.config import set_settings
+        from eneo.main.config import set_settings
         set_settings(test_settings)
 
         # Configure federation
@@ -778,5 +778,5 @@ async def test_grace_period_boundary_exact_ttl_minus_grace(
     finally:
         test_settings.oidc_state_ttl_seconds = original_ttl
         test_settings.oidc_redirect_grace_period_seconds = original_grace
-        from intric.main.config import set_settings
+        from eneo.main.config import set_settings
         set_settings(test_settings)

@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.tenants.tenant_repo import TenantRepository
+from eneo.tenants.tenant_repo import TenantRepository
 
 
 def _make_repo(*, encryption_service=None):

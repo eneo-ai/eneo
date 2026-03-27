@@ -2,12 +2,12 @@ import unittest
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-from intric.integration.domain.entities.oauth_token import (
+from eneo.integration.domain.entities.oauth_token import (
     ConfluenceToken,
     SharePointToken,
 )
-from intric.integration.domain.factories.oauth_token_factory import OauthTokenFactory
-from intric.integration.presentation.models import IntegrationType
+from eneo.integration.domain.factories.oauth_token_factory import OauthTokenFactory
+from eneo.integration.presentation.models import IntegrationType
 
 
 class TestOauthTokenFactory(unittest.TestCase):

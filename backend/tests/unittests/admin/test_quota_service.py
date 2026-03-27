@@ -2,10 +2,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from intric.admin.quota_service import QuotaService
-from intric.main.exceptions import QuotaExceededException
-from intric.tenants.tenant import TenantInDB
-from intric.users.user import UserInDB
+from eneo.admin.quota_service import QuotaService
+from eneo.main.exceptions import QuotaExceededException
+from eneo.tenants.tenant import TenantInDB
+from eneo.users.user import UserInDB
 
 
 @pytest.fixture

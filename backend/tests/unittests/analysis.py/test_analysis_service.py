@@ -4,17 +4,17 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import (
+from eneo.ai_models.completion_models.completion_model import (
     CompletionModel,
 )
-from intric.analysis.analysis import AnalysisProcessingMode
-from intric.analysis.analysis_service import (
+from eneo.analysis.analysis import AnalysisProcessingMode
+from eneo.analysis.analysis_service import (
     ASYNC_AUTO_QUESTION_THRESHOLD,
     NO_QUESTIONS_ANSWER,
     AnalysisService,
 )
-from intric.main.exceptions import BadRequestException, UnauthorizedException
-from intric.roles.permissions import Permission
+from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.roles.permissions import Permission
 from tests.fixtures import TEST_UUID
 
 

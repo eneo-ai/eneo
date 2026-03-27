@@ -24,9 +24,9 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.settings.credential_resolver import CredentialResolver
-from intric.settings.encryption_service import EncryptionService
-from intric.tenants.tenant_repo import TenantRepository
+from eneo.settings.credential_resolver import CredentialResolver
+from eneo.settings.encryption_service import EncryptionService
+from eneo.tenants.tenant_repo import TenantRepository
 
 
 @pytest.fixture(autouse=True)
@@ -250,7 +250,7 @@ async def test_mixed_encryption_states_during_migration(
     2. Deploy new ENCRYPTION_KEY in .env (do NOT restart yet)
     3. Run migration script:
        ```
-       uv run python -m intric.cli.rotate_encryption_key \\
+       uv run python -m eneo.cli.rotate_encryption_key \\
          --old-key="OLD_KEY" \\
          --new-key="NEW_KEY" \\
          --dry-run
@@ -427,7 +427,7 @@ async def test_credential_re_encryption_with_new_key(
 
     # Step 4: Update database (manual UPDATE to simulate migration script)
     import sqlalchemy as sa
-    from intric.database.tables.tenant_table import Tenants
+    from eneo.database.tables.tenant_table import Tenants
 
     # Create new api_credentials with re-encrypted key
     new_api_credentials = tenant.api_credentials.copy()
@@ -512,7 +512,7 @@ async def test_encryption_service_detects_corrupted_ciphertext(
     for corrupted_value in corruptions:
         # Update tenant with corrupted ciphertext
         import sqlalchemy as sa
-        from intric.database.tables.tenant_table import Tenants
+        from eneo.database.tables.tenant_table import Tenants
 
         corrupted_credentials = {"openai": {"api_key": corrupted_value}}
 

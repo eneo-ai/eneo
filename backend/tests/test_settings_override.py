@@ -3,7 +3,7 @@ Test to validate that settings can be properly mocked and overridden for integra
 """
 import pytest
 
-from intric.main.config import Settings, get_settings, reset_settings, set_settings
+from eneo.main.config import Settings, get_settings, reset_settings, set_settings
 
 
 def test_settings_lazy_initialization():

@@ -16,7 +16,7 @@ from uuid import uuid4
 import pytest
 import redis.asyncio as aioredis
 
-from intric.worker.crawl.recovery import (
+from eneo.worker.crawl.recovery import (
     calculate_exponential_backoff,
     update_job_retry_stats,
 )

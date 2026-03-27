@@ -5,15 +5,15 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from intric.assistants.api.assistant_models import (
+from eneo.assistants.api.assistant_models import (
     AssistantBase,
     AssistantCreatePublic,
     AssistantUpdatePublic,
 )
-from intric.assistants.assistant_service import AssistantService
-from intric.main.exceptions import BadRequestException, UnauthorizedException
-from intric.main.models import ModelId
-from intric.prompts.api.prompt_models import PromptCreate
+from eneo.assistants.assistant_service import AssistantService
+from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.main.models import ModelId
+from eneo.prompts.api.prompt_models import PromptCreate
 from tests.fixtures import (
     TEST_ASSISTANT,
     TEST_COLLECTION,

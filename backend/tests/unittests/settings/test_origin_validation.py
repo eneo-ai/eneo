@@ -1,7 +1,7 @@
 """Tests for validate_public_origin() helper."""
 
 import pytest
-from intric.main.config import validate_public_origin
+from eneo.main.config import validate_public_origin
 
 
 def test_validates_https_required():

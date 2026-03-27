@@ -1,0 +1,366 @@
+from uuid import UUID
+
+from fastapi import APIRouter, Depends
+
+from eneo.authentication.auth_dependencies import get_current_active_user
+from eneo.database.database import AsyncSession, get_session_with_transaction
+from eneo.main.config import get_settings
+from eneo.model_providers.domain.model_provider_service import ModelProviderService
+from eneo.model_providers.infrastructure.model_provider_repository import (
+    ModelProviderRepository,
+)
+from eneo.model_providers.presentation.model_provider_models import (
+    FavoriteProvidersUpdate,
+    ModelProviderCreate,
+    ModelProviderPublic,
+    ModelProviderUpdate,
+    ValidateModelRequest,
+)
+from eneo.server.protocol import responses
+from eneo.settings.encryption_service import EncryptionService
+from eneo.tenants.tenant_repo import TenantRepository
+from eneo.users.user import UserInDB
+
+router = APIRouter()
+
+
+def get_model_provider_service(
+    user: UserInDB = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_session_with_transaction),
+) -> ModelProviderService:
+    """Dependency for getting the model provider service."""
+    settings = get_settings()
+    encryption = EncryptionService(settings)
+    repository = ModelProviderRepository(session, user.tenant_id)
+    return ModelProviderService(repository, encryption)
+
+
+@router.get(
+    "/",
+    response_model=list[ModelProviderPublic],
+)
+async def list_providers(
+    service: ModelProviderService = Depends(get_model_provider_service),
+):
+    """List all model providers for the tenant."""
+    providers = await service.get_all()
+    return [ModelProviderPublic(**provider.to_dict()) for provider in providers]
+
+
+@router.get(
+    "/capabilities/",
+)
+async def get_provider_capabilities(
+    _user: UserInDB = Depends(get_current_active_user),
+):
+    """Get supported model types and top models per provider type from LiteLLM.
+
+    Returns a structured response with:
+    - providers: dict of canonical provider types, each with modes, models, and fields
+    - default_fields: fallback field definitions for providers without custom fields
+    """
+    import re
+
+    import litellm
+    from collections import defaultdict
+    from datetime import date
+
+    from eneo.tenants.provider_field_config import (
+        DEFAULT_FIELDS,
+        get_canonical_provider_type,
+        get_field_definitions,
+    )
+
+    # Mode mapping: LiteLLM mode -> our model type
+    mode_map = {
+        "chat": "completion",
+        "completion": "completion",
+        "embedding": "embedding",
+        "audio_transcription": "transcription",
+    }
+
+    # Date extraction for sorting by release date (newest first).
+    # LiteLLM has no release_date field, so we extract from model names.
+    # Supports: YYYY-MM-DD (OpenAI), YYYYMMDD (Anthropic), @YYYYMMDD (Vertex)
+    _date_dashed = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+    _date_compact = re.compile(r"(?:@|-)(\d{8})(?:\D|$)|(\d{8})$")
+
+    def _extract_model_date(name: str) -> str:
+        """Extract date from model name, normalized to YYYYMMDD for sorting."""
+        # YYYY-MM-DD (e.g. gpt-4o-2024-08-06)
+        m = _date_dashed.search(name)
+        if m:
+            return f"{m.group(1)}{m.group(2)}{m.group(3)}"
+        # YYYYMMDD (e.g. claude-opus-4-6-20260205, vertex @20241022)
+        m = _date_compact.search(name)
+        if m:
+            return m.group(1) or m.group(2)
+        return "00000000"
+
+    # Collect all models per provider per mode with metadata
+    raw: dict[str, dict[str, dict[str, dict]]] = defaultdict(
+        lambda: defaultdict(dict)
+    )
+
+    today = date.today().isoformat()
+
+    for model_key, info in litellm.model_cost.items():
+        raw_provider = info.get("litellm_provider", "")
+        litellm_mode = info.get("mode", "")
+        mode = mode_map.get(litellm_mode)
+
+        # Skip fine-tuned model templates
+        if model_key.startswith("ft:"):
+            continue
+
+        # Skip deprecated models
+        dep = info.get("deprecation_date")
+        if dep and dep <= today:
+            continue
+
+        # Skip *-latest aliases (the concrete dated versions are more useful)
+        if model_key.endswith("-latest"):
+            continue
+
+        # Skip non-standard model types that aren't useful for text chat/embedding
+        model_lower = model_key.lower()
+        if model_lower.endswith("/container"):
+            continue
+        if any(
+            kw in model_lower
+            for kw in ("realtime", "-audio-", "gpt-audio", "search-preview", "search-api", "-diarize")
+        ):
+            continue
+
+        # Map to canonical provider type (e.g. "vllm" -> "hosted_vllm")
+        provider = get_canonical_provider_type(raw_provider) if raw_provider else ""
+
+        if provider and mode and model_key not in raw[provider][mode]:
+            model_info: dict = {"name": model_key}
+            if mode == "completion":
+                model_info["max_input_tokens"] = info.get("max_input_tokens")
+                model_info["max_output_tokens"] = info.get("max_output_tokens")
+                model_info["supports_vision"] = info.get("supports_vision", False)
+                model_info["supports_function_calling"] = info.get(
+                    "supports_function_calling", False
+                )
+                model_info["supports_reasoning"] = info.get(
+                    "supports_reasoning", False
+                )
+            elif mode == "embedding":
+                model_info["max_input_tokens"] = info.get("max_input_tokens")
+                model_info["output_vector_size"] = info.get("output_vector_size")
+            raw[provider][mode][model_key] = model_info
+
+    # Serialize field definitions (convert in_ -> in for JSON)
+    def serialize_fields(fields: list) -> list[dict]:
+        return [
+            {"name": f["name"], "required": f["required"], "secret": f["secret"], "in": f["in_"]}
+            for f in fields
+        ]
+
+    # Build response sorted by release date (newest first)
+    providers = {}
+    for provider, modes in raw.items():
+        provider_data: dict = {
+            "modes": sorted(modes.keys()),
+            "models": {},
+            "fields": serialize_fields(get_field_definitions(provider)),
+        }
+        for mode, models_dict in modes.items():
+            provider_data["models"][mode] = sorted(
+                models_dict.values(),
+                key=lambda m: _extract_model_date(m["name"]),
+                reverse=True,
+            )
+        providers[provider] = provider_data
+
+    # Ensure providers with custom field definitions are always present
+    # (e.g. hosted_vllm, which is self-hosted and has no static models in LiteLLM)
+    from eneo.tenants.provider_field_config import PROVIDER_FIELD_DEFINITIONS
+
+    for provider_type in PROVIDER_FIELD_DEFINITIONS:
+        if provider_type not in providers:
+            providers[provider_type] = {
+                # Self-hosted providers can host any model type
+                "modes": sorted(set(mode_map.values())),
+                "models": {},
+                "fields": serialize_fields(get_field_definitions(provider_type)),
+            }
+
+    return {
+        "providers": providers,
+        "default_fields": serialize_fields(DEFAULT_FIELDS),
+    }
+
+
+@router.get("/favorites/")
+async def get_favorite_providers(
+    user: UserInDB = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_session_with_transaction),
+):
+    """Get the tenant's favorite provider types."""
+    repo = TenantRepository(session)
+    tenant = await repo.get(user.tenant_id)
+    return {"providers": tenant.favorite_providers}
+
+
+@router.put("/favorites/")
+async def set_favorite_providers(
+    body: FavoriteProvidersUpdate,
+    user: UserInDB = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_session_with_transaction),
+):
+    """Set the tenant's favorite provider types."""
+    repo = TenantRepository(session)
+    await repo.update_favorite_providers(user.tenant_id, body.providers)
+    return {"providers": body.providers}
+
+
+@router.get(
+    "/model-defaults/",
+)
+async def get_model_defaults(
+    model_name: str,
+    _user: UserInDB = Depends(get_current_active_user),
+):
+    """Look up recommended default values for a model from LiteLLM's model_cost database."""
+    import litellm
+
+    # Try exact match first
+    info = litellm.model_cost.get(model_name)
+
+    # If no exact match, try common prefixed variants
+    if info is None:
+        prefixes = set()
+        for key in litellm.model_cost:
+            if "/" in key:
+                prefix = key.split("/")[0]
+                prefixes.add(prefix)
+        for prefix in sorted(prefixes):
+            candidate = f"{prefix}/{model_name}"
+            info = litellm.model_cost.get(candidate)
+            if info is not None:
+                break
+
+    if info is None:
+        return {"found": False}
+
+    return {
+        "found": True,
+        "max_input_tokens": info.get("max_input_tokens"),
+        "max_output_tokens": info.get("max_output_tokens"),
+        "supports_vision": info.get("supports_vision", False),
+        "supports_function_calling": info.get("supports_function_calling", False),
+        "supports_reasoning": info.get("supports_reasoning", False),
+    }
+
+
+@router.get(
+    "/{provider_id}/",
+    response_model=ModelProviderPublic,
+    responses=responses.get_responses([404]),
+)
+async def get_provider(
+    provider_id: UUID,
+    service: ModelProviderService = Depends(get_model_provider_service),
+):
+    """Get a specific model provider."""
+    provider = await service.get_by_id(provider_id)
+    return ModelProviderPublic(**provider.to_dict())
+
+
+@router.post(
+    "/",
+    response_model=ModelProviderPublic,
+    responses=responses.get_responses([409]),
+)
+async def create_provider(
+    data: ModelProviderCreate,
+    user: UserInDB = Depends(get_current_active_user),
+    service: ModelProviderService = Depends(get_model_provider_service),
+):
+    """Create a new model provider."""
+    provider = await service.create(
+        tenant_id=user.tenant_id,
+        name=data.name,
+        provider_type=data.provider_type,
+        credentials=data.credentials,
+        config=data.config,
+        is_active=data.is_active,
+    )
+    return ModelProviderPublic(**provider.to_dict())
+
+
+@router.put(
+    "/{provider_id}/",
+    response_model=ModelProviderPublic,
+    responses=responses.get_responses([404, 409]),
+)
+async def update_provider(
+    provider_id: UUID,
+    data: ModelProviderUpdate,
+    service: ModelProviderService = Depends(get_model_provider_service),
+):
+    """Update an existing model provider."""
+    provider = await service.update(
+        provider_id=provider_id,
+        name=data.name,
+        credentials=data.credentials,
+        config=data.config,
+        is_active=data.is_active,
+    )
+    return ModelProviderPublic(**provider.to_dict())
+
+
+@router.get(
+    "/{provider_id}/models/",
+    responses=responses.get_responses([404]),
+)
+async def list_provider_models(
+    provider_id: UUID,
+    service: ModelProviderService = Depends(get_model_provider_service),
+):
+    """List available models/deployments from the provider's API using its credentials."""
+    return await service.list_available_models(provider_id)
+
+
+@router.post(
+    "/{provider_id}/test/",
+    responses=responses.get_responses([404]),
+)
+async def test_provider(
+    provider_id: UUID,
+    service: ModelProviderService = Depends(get_model_provider_service),
+):
+    """Test connectivity to a model provider."""
+    return await service.test_connection(provider_id)
+
+
+@router.post(
+    "/{provider_id}/validate-model/",
+    responses=responses.get_responses([404]),
+)
+async def validate_model(
+    provider_id: UUID,
+    body: ValidateModelRequest,
+    service: ModelProviderService = Depends(get_model_provider_service),
+):
+    """Validate that a model works with this provider by making a minimal API call."""
+    return await service.validate_model(provider_id, body.model_name, body.model_type)
+
+
+@router.delete(
+    "/{provider_id}/",
+    responses=responses.get_responses([404]),
+)
+async def delete_provider(
+    provider_id: UUID,
+    service: ModelProviderService = Depends(get_model_provider_service),
+):
+    """Delete a model provider.
+
+    Will fail if the provider has models attached to it.
+    """
+    await service.delete(provider_id)
+    return {"message": "Provider deleted successfully"}

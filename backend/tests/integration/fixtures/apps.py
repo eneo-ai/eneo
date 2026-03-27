@@ -1,5 +1,5 @@
 """
-Fixtures for apps (mirrors src/intric/apps/).
+Fixtures for apps (mirrors src/eneo/apps/).
 
 These fixtures create apps with completion models.
 """
@@ -7,7 +7,7 @@ from uuid import UUID
 
 import pytest
 
-from intric.database.tables.app_table import Apps
+from eneo.database.tables.app_table import Apps
 
 
 @pytest.fixture

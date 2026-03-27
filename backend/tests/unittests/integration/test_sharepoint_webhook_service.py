@@ -10,8 +10,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.integration.infrastructure.sharepoint_webhook_service import SharepointWebhookService
-from intric.jobs.job_models import Task
+from eneo.integration.infrastructure.sharepoint_webhook_service import SharepointWebhookService
+from eneo.jobs.job_models import Task
 
 
 @dataclass
@@ -196,7 +196,7 @@ async def test_changekey_deduplication_prevents_duplicate_processing(
     mock_job_service.queue_job = AsyncMock()
 
     with patch(
-        "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
         return_value=mock_job_service
     ):
         # Send two identical notifications
@@ -253,7 +253,7 @@ async def test_changekey_deduplication_allows_new_changekeys(
     mock_job_service.queue_job = AsyncMock()
 
     with patch(
-        "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
         return_value=mock_job_service
     ):
         notifications = {"value": [notification1, notification2]}
@@ -343,7 +343,7 @@ async def test_tenant_app_integration_uses_tenant_app_id(
     mock_job_service.queue_job = AsyncMock()
 
     with patch(
-        "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
         return_value=mock_job_service
     ):
         notifications = {"value": [mock_notification]}
@@ -390,7 +390,7 @@ async def test_user_oauth_integration_uses_oauth_token(
     mock_job_service.queue_job = AsyncMock()
 
     with patch(
-        "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
         return_value=mock_job_service
     ):
         notifications = {"value": [mock_notification]}
@@ -436,7 +436,7 @@ async def test_tenant_app_integration_uses_admin_user_for_job(
     mock_job_service.queue_job = AsyncMock()
 
     with patch(
-        "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
         return_value=mock_job_service
     ):
         notifications = {"value": [mock_notification]}
@@ -471,7 +471,7 @@ async def test_missing_tenant_admin_skips_integration(
     mock_job_service.queue_job = AsyncMock()
 
     with patch(
-        "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
         return_value=mock_job_service
     ):
         notifications = {"value": [mock_notification]}
@@ -503,7 +503,7 @@ async def test_missing_oauth_token_skips_integration(
     mock_job_service.queue_job = AsyncMock()
 
     with patch(
-        "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
         return_value=mock_job_service
     ):
         notifications = {"value": [mock_notification]}
@@ -538,7 +538,7 @@ async def test_delta_sync_when_delta_token_exists(
     mock_job_service.queue_job = AsyncMock()
 
     with patch(
-        "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
         return_value=mock_job_service
     ):
         notifications = {"value": [mock_notification]}
@@ -575,7 +575,7 @@ async def test_full_sync_when_no_delta_token(
     mock_job_service.queue_job = AsyncMock()
 
     with patch(
-        "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
         return_value=mock_job_service
     ):
         notifications = {"value": [mock_notification]}
@@ -693,7 +693,7 @@ async def test_onedrive_queued_job_contains_drive_id(
     mock_job_service.queue_job = AsyncMock()
 
     with patch(
-        "intric.integration.infrastructure.sharepoint_webhook_service.JobService",
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
         return_value=mock_job_service
     ):
         await setup.service.handle_notifications({"value": [notification]})

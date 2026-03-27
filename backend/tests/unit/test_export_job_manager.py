@@ -7,8 +7,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.audit.domain.export_job import ExportJob, ExportJobStatus
-from intric.audit.infrastructure.export_job_manager import ExportJobManager
+from eneo.audit.domain.export_job import ExportJob, ExportJobStatus
+from eneo.audit.infrastructure.export_job_manager import ExportJobManager
 
 
 class TestExportJobManagerKeyGeneration:
@@ -52,7 +52,7 @@ class TestExportJobCreation:
         """Create manager with mocked Redis."""
         redis_mock = AsyncMock()
         with patch(
-            "intric.audit.infrastructure.export_job_manager.get_settings",
+            "eneo.audit.infrastructure.export_job_manager.get_settings",
             return_value=mock_settings,
         ):
             manager = ExportJobManager(redis_mock)
@@ -126,7 +126,7 @@ class TestExportJobRetrieval:
         settings_mock.export_max_age_hours = 24
 
         with patch(
-            "intric.audit.infrastructure.export_job_manager.get_settings",
+            "eneo.audit.infrastructure.export_job_manager.get_settings",
             return_value=settings_mock,
         ):
             manager = ExportJobManager(redis_mock)
@@ -191,7 +191,7 @@ class TestExportJobProgressUpdates:
         settings_mock.export_max_age_hours = 24
 
         with patch(
-            "intric.audit.infrastructure.export_job_manager.get_settings",
+            "eneo.audit.infrastructure.export_job_manager.get_settings",
             return_value=settings_mock,
         ):
             manager = ExportJobManager(redis_mock)
@@ -292,7 +292,7 @@ class TestExportJobCompletion:
         settings_mock.export_max_age_hours = 24
 
         with patch(
-            "intric.audit.infrastructure.export_job_manager.get_settings",
+            "eneo.audit.infrastructure.export_job_manager.get_settings",
             return_value=settings_mock,
         ):
             manager = ExportJobManager(redis_mock)
@@ -368,7 +368,7 @@ class TestExportJobCancellation:
         settings_mock.export_max_age_hours = 24
 
         with patch(
-            "intric.audit.infrastructure.export_job_manager.get_settings",
+            "eneo.audit.infrastructure.export_job_manager.get_settings",
             return_value=settings_mock,
         ):
             manager = ExportJobManager(redis_mock)
@@ -420,7 +420,7 @@ class TestExportJobCancellation:
         settings_mock.export_max_age_hours = 24
 
         with patch(
-            "intric.audit.infrastructure.export_job_manager.get_settings",
+            "eneo.audit.infrastructure.export_job_manager.get_settings",
             return_value=settings_mock,
         ):
             manager = ExportJobManager(redis_mock)
@@ -506,7 +506,7 @@ class TestExportJobConcurrencyLimit:
         settings_mock.export_max_age_hours = 24
 
         with patch(
-            "intric.audit.infrastructure.export_job_manager.get_settings",
+            "eneo.audit.infrastructure.export_job_manager.get_settings",
             return_value=settings_mock,
         ):
             manager = ExportJobManager(redis_mock)
@@ -566,7 +566,7 @@ class TestExportJobConcurrencyLimit:
         settings_mock.export_max_age_hours = 24
 
         with patch(
-            "intric.audit.infrastructure.export_job_manager.get_settings",
+            "eneo.audit.infrastructure.export_job_manager.get_settings",
             return_value=settings_mock,
         ):
             manager = ExportJobManager(redis_mock)
@@ -631,7 +631,7 @@ class TestExportJobCleanup:
         settings_mock.export_max_age_hours = 24
 
         with patch(
-            "intric.audit.infrastructure.export_job_manager.get_settings",
+            "eneo.audit.infrastructure.export_job_manager.get_settings",
             return_value=settings_mock,
         ):
             manager = ExportJobManager(redis_mock)
@@ -701,7 +701,7 @@ class TestExportJobCleanup:
         settings_mock.export_max_age_hours = 24
 
         with patch(
-            "intric.audit.infrastructure.export_job_manager.get_settings",
+            "eneo.audit.infrastructure.export_job_manager.get_settings",
             return_value=settings_mock,
         ):
             manager = ExportJobManager(redis_mock)

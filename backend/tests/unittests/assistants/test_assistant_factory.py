@@ -3,8 +3,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from intric.assistants.assistant_factory import AssistantFactory
-from intric.templates.app_template.app_template import AppTemplate
+from eneo.assistants.assistant_factory import AssistantFactory
+from eneo.templates.app_template.app_template import AppTemplate
 
 
 @pytest.fixture

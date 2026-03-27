@@ -6,7 +6,7 @@ Requires super_admin_token for authentication (system admin only).
 
 import pytest
 from uuid import uuid4
-from intric.tenants.crawler_settings_helper import CRAWLER_SETTING_SPECS
+from eneo.tenants.crawler_settings_helper import CRAWLER_SETTING_SPECS
 
 
 @pytest.mark.asyncio

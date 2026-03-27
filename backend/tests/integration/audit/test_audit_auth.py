@@ -3,10 +3,10 @@
 import pytest
 from uuid import uuid4
 
-from intric.audit.application.audit_service import AuditService
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
-from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
 pytestmark = pytest.mark.integration
 

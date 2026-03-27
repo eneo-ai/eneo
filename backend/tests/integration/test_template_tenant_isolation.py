@@ -12,7 +12,7 @@ These tests verify:
 import pytest
 from uuid import uuid4
 from sqlalchemy import text
-from intric.database.database import sessionmanager
+from eneo.database.database import sessionmanager
 
 
 # Helper functions for test setup

@@ -1,5 +1,5 @@
 """
-Fixtures for services (mirrors src/intric/services/).
+Fixtures for services (mirrors src/eneo/services/).
 
 These fixtures create services with completion models.
 """
@@ -7,7 +7,7 @@ from uuid import UUID
 
 import pytest
 
-from intric.database.tables.service_table import Services
+from eneo.database.tables.service_table import Services
 
 
 @pytest.fixture

@@ -15,7 +15,7 @@ These tests verify the integration layer that makes timeout enforcement possible
 import pytest
 from httpx import AsyncClient
 
-from intric.tenants.crawler_settings_helper import (
+from eneo.tenants.crawler_settings_helper import (
     get_crawler_setting,
     CRAWLER_SETTING_SPECS,
 )

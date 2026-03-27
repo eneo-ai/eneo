@@ -1,5 +1,5 @@
 """
-Fixtures for spaces (mirrors src/intric/spaces/).
+Fixtures for spaces (mirrors src/eneo/spaces/).
 
 These fixtures create spaces with access to completion models.
 """
@@ -8,7 +8,7 @@ from uuid import UUID
 
 import pytest
 
-from intric.database.tables.spaces_table import Spaces, SpacesCompletionModels
+from eneo.database.tables.spaces_table import Spaces, SpacesCompletionModels
 
 
 @pytest.fixture
@@ -50,7 +50,7 @@ def space_factory(admin_user):
             model_ids = []
 
         # Get or create org space for this tenant
-        from intric.database.tables.spaces_table import Spaces as SpacesTable
+        from eneo.database.tables.spaces_table import Spaces as SpacesTable
 
         org_space = (
             await session.execute(

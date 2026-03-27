@@ -1,8 +1,8 @@
 from unittest.mock import AsyncMock, MagicMock
 
-from intric.ai_models.completion_models.completion_model import Completion
-from intric.apps.app_runs.app_run_service import AppRunService
-from intric.completion_models.infrastructure.context_builder import count_tokens
+from eneo.ai_models.completion_models.completion_model import Completion
+from eneo.apps.app_runs.app_run_service import AppRunService
+from eneo.completion_models.infrastructure.context_builder import count_tokens
 
 
 async def test_update_tokens_in_run():

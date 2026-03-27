@@ -93,12 +93,12 @@ class TestCsvInjectionProtection:
 
     async def test_formula_prefix_sanitized_in_export(self, client, auth_headers, db_session, test_tenant, test_user):
         """Verify formula characters are sanitized in CSV export."""
-        from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-        from intric.audit.domain.audit_log import AuditLog
-        from intric.audit.domain.action_types import ActionType
-        from intric.audit.domain.entity_types import EntityType
-        from intric.audit.domain.actor_types import ActorType
-        from intric.audit.domain.outcome import Outcome
+        from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+        from eneo.audit.domain.audit_log import AuditLog
+        from eneo.audit.domain.action_types import ActionType
+        from eneo.audit.domain.entity_types import EntityType
+        from eneo.audit.domain.actor_types import ActorType
+        from eneo.audit.domain.outcome import Outcome
         from uuid import uuid4
 
         # Create a log with dangerous description

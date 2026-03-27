@@ -6,10 +6,10 @@ from uuid import uuid4
 
 import pytest
 
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.actor_types import ActorType
-from intric.audit.domain.audit_log import AuditLog
-from intric.audit.domain.constants import (
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.actor_types import ActorType
+from eneo.audit.domain.audit_log import AuditLog
+from eneo.audit.domain.constants import (
     MAX_DESCRIPTION_LENGTH,
     MAX_ERROR_MESSAGE_LENGTH,
     MAX_USER_AGENT_LENGTH,
@@ -17,8 +17,8 @@ from intric.audit.domain.constants import (
     MAX_RETENTION_DAYS,
     DEFAULT_RETENTION_DAYS,
 )
-from intric.audit.domain.entity_types import EntityType
-from intric.audit.domain.outcome import Outcome
+from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.outcome import Outcome
 
 
 class TestAuditLogCreation:

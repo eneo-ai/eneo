@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 from datetime import datetime, timezone
 
-from intric.audit.application.retention_service import (
+from eneo.audit.application.retention_service import (
     RetentionService,
     RetentionPolicyModel,
 )
@@ -404,7 +404,7 @@ class TestPurgeOldLogs:
         mock_result_policy.scalar_one_or_none.return_value = policy
 
         # Mock the repository's hard_delete_old_logs (imported inside the function)
-        with patch("intric.audit.infrastructure.audit_log_repo_impl.AuditLogRepositoryImpl") as MockRepo:
+        with patch("eneo.audit.infrastructure.audit_log_repo_impl.AuditLogRepositoryImpl") as MockRepo:
             mock_repo_instance = AsyncMock()
             mock_repo_instance.hard_delete_old_logs.return_value = 10  # 10 logs purged
             MockRepo.return_value = mock_repo_instance
@@ -434,7 +434,7 @@ class TestPurgeOldLogs:
         mock_result_policy = MagicMock()
         mock_result_policy.scalar_one_or_none.return_value = policy
 
-        with patch("intric.audit.infrastructure.audit_log_repo_impl.AuditLogRepositoryImpl") as MockRepo:
+        with patch("eneo.audit.infrastructure.audit_log_repo_impl.AuditLogRepositoryImpl") as MockRepo:
             mock_repo_instance = AsyncMock()
             mock_repo_instance.hard_delete_old_logs.return_value = 0  # No logs purged
             MockRepo.return_value = mock_repo_instance

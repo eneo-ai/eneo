@@ -2,8 +2,8 @@ import unittest
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-from intric.integration.domain.entities.user_integration import UserIntegration
-from intric.integration.infrastructure.mappers.user_integration_mapper import (
+from eneo.integration.domain.entities.user_integration import UserIntegration
+from eneo.integration.infrastructure.mappers.user_integration_mapper import (
     UserIntegrationMapper,
 )
 
@@ -48,7 +48,7 @@ class TestUserIntegrationMapper(unittest.TestCase):
         self.assertNotIn("id", db_dict)
 
     @patch(
-        "intric.integration.domain.factories.user_integration_factory.UserIntegrationFactory.create_entity"  # noqa
+        "eneo.integration.domain.factories.user_integration_factory.UserIntegrationFactory.create_entity"  # noqa
     )
     def test_to_entity(self, mock_create_entity):
         """Test mapping from DB model to domain entity using factory."""
@@ -78,7 +78,7 @@ class TestUserIntegrationMapper(unittest.TestCase):
         self.assertEqual(entity, mock_entity)
 
     @patch(
-        "intric.integration.domain.factories.user_integration_factory.UserIntegrationFactory.create_entities"  # noqa
+        "eneo.integration.domain.factories.user_integration_factory.UserIntegrationFactory.create_entities"  # noqa
     )
     def test_to_entities(self, mock_create_entities):
         """Test mapping from DB models to domain entities using factory."""

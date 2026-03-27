@@ -18,7 +18,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.auth_service import AuthService
+from eneo.authentication.auth_service import AuthService
 
 
 async def _create_tenant(client, super_api_key: str, name: str):

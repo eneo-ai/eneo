@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta
 from uuid import uuid4
 
-from intric.sessions.session import SessionInDB
-from intric.sessions.session import SessionMetadataPublic
-from intric.sessions.session_protocol import (
+from eneo.sessions.session import SessionInDB
+from eneo.sessions.session import SessionMetadataPublic
+from eneo.sessions.session_protocol import (
     to_session_metadata_paginated_response,
     to_sessions_paginated_response,
 )

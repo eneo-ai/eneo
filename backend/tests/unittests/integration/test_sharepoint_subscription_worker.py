@@ -11,8 +11,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.integration.domain.entities.sharepoint_subscription import SharePointSubscription
-from intric.integration.infrastructure.sharepoint_subscription_worker import (
+from eneo.integration.domain.entities.sharepoint_subscription import SharePointSubscription
+from eneo.integration.infrastructure.sharepoint_subscription_worker import (
     get_token_for_subscription,
     cleanup_orphaned_subscriptions,
     renew_expiring_subscriptions,
@@ -231,12 +231,12 @@ class TestCleanupOrphanedSubscriptions:
 
         # Patch sessionmanager and worker._create_container
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            "eneo.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
             new_callable=AsyncMock,
             return_value=mock_container,
         ):
             with patch(
-                "intric.worker.worker.sessionmanager.session",
+                "eneo.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
                 result = await cleanup_orphaned_subscriptions()
@@ -283,12 +283,12 @@ class TestCleanupOrphanedSubscriptions:
 
         # Patch sessionmanager and worker._create_container
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            "eneo.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
             new_callable=AsyncMock,
             return_value=mock_container,
         ):
             with patch(
-                "intric.worker.worker.sessionmanager.session",
+                "eneo.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
                 result = await cleanup_orphaned_subscriptions()
@@ -339,12 +339,12 @@ class TestRenewExpiringSubscriptions:
 
         # Patch sessionmanager and worker._create_container
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            "eneo.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
             new_callable=AsyncMock,
             return_value=mock_container,
         ):
             with patch(
-                "intric.worker.worker.sessionmanager.session",
+                "eneo.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
                 result = await renew_expiring_subscriptions()
@@ -362,12 +362,12 @@ class TestRenewExpiringSubscriptions:
 
         # Patch sessionmanager and worker._create_container
         with patch(
-            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            "eneo.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
             new_callable=AsyncMock,
             return_value=mock_container,
         ):
             with patch(
-                "intric.worker.worker.sessionmanager.session",
+                "eneo.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
                 result = await renew_expiring_subscriptions()

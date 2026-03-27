@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 from datetime import datetime, timezone
 
-from intric.audit.infrastructure.audit_session_service import AuditSessionService
+from eneo.audit.infrastructure.audit_session_service import AuditSessionService
 
 
 class TestSessionValidationBugs:
@@ -222,7 +222,7 @@ class TestConfigValidationBugs:
         Valid categories: admin_actions, user_actions, security_events,
         file_operations, integration_events, system_actions, audit_access
         """
-        from intric.audit.domain.category_mappings import CATEGORY_MAPPINGS, CATEGORY_DESCRIPTIONS
+        from eneo.audit.domain.category_mappings import CATEGORY_MAPPINGS, CATEGORY_DESCRIPTIONS
 
         expected_categories = {
             "admin_actions",
@@ -251,7 +251,7 @@ class TestConfigValidationBugs:
 
         This test will FAIL until the bug is fixed.
         """
-        from intric.audit.schemas.audit_config_schemas import AuditConfigUpdateRequest
+        from eneo.audit.schemas.audit_config_schemas import AuditConfigUpdateRequest
 
         # Try to create a request with invalid category
         # If schema doesn't validate, this will succeed (bug exists)
@@ -280,7 +280,7 @@ class TestConfigValidationBugs:
 
         This test will FAIL until the bug is fixed.
         """
-        from intric.audit.schemas.audit_config_schemas import ActionConfigUpdateRequest
+        from eneo.audit.schemas.audit_config_schemas import ActionConfigUpdateRequest
 
         try:
             ActionConfigUpdateRequest(
@@ -340,11 +340,11 @@ class TestNullEmailBug:
     @pytest.fixture
     def mock_log(self):
         """Create a proper mock audit log object that passes Pydantic validation."""
-        from intric.audit.domain.audit_log import AuditLog
-        from intric.audit.domain.action_types import ActionType
-        from intric.audit.domain.entity_types import EntityType
-        from intric.audit.domain.actor_types import ActorType
-        from intric.audit.domain.outcome import Outcome
+        from eneo.audit.domain.audit_log import AuditLog
+        from eneo.audit.domain.action_types import ActionType
+        from eneo.audit.domain.entity_types import EntityType
+        from eneo.audit.domain.actor_types import ActorType
+        from eneo.audit.domain.outcome import Outcome
 
         now = datetime.now(timezone.utc)
         return AuditLog(
@@ -375,7 +375,7 @@ class TestNullEmailBug:
 
         This test should FAIL until the bug is fixed.
         """
-        from intric.api.audit.routes import _enrich_logs_with_actor_info
+        from eneo.api.audit.routes import _enrich_logs_with_actor_info
 
         # Mock the database session
         mock_session = AsyncMock()
@@ -413,7 +413,7 @@ class TestNullEmailBug:
         When username is present, it should be used as the name.
         This tests the happy path where username saves us from the bug.
         """
-        from intric.api.audit.routes import _enrich_logs_with_actor_info
+        from eneo.api.audit.routes import _enrich_logs_with_actor_info
 
         mock_session = AsyncMock()
 
@@ -453,7 +453,7 @@ class TestCacheInvalidationBug:
     @pytest.fixture
     def config_service(self):
         """Create AuditConfigService with mocked dependencies."""
-        from intric.audit.application.audit_config_service import AuditConfigService
+        from eneo.audit.application.audit_config_service import AuditConfigService
 
         mock_repository = AsyncMock()
         service = AuditConfigService(mock_repository)
@@ -469,7 +469,7 @@ class TestCacheInvalidationBug:
 
         This test checks if action caches are properly invalidated.
         """
-        from intric.audit.schemas.audit_config_schemas import CategoryUpdate
+        from eneo.audit.schemas.audit_config_schemas import CategoryUpdate
 
         service, mock_repository = config_service
         tenant_id = uuid4()
@@ -501,7 +501,7 @@ class TestCacheInvalidationBug:
         # BUG CHECK: Were action caches also invalidated?
         # admin_actions category contains actions like: user_created, user_updated, etc.
         # These action cache keys should ALSO be deleted!
-        from intric.audit.domain.category_mappings import CATEGORY_MAPPINGS
+        from eneo.audit.domain.category_mappings import CATEGORY_MAPPINGS
 
         # Get all actions in admin_actions category
         admin_actions = [
@@ -535,7 +535,7 @@ class TestCacheInvalidationBug:
 
         This test verifies the bug is fixed.
         """
-        from intric.audit.schemas.audit_config_schemas import CategoryUpdate
+        from eneo.audit.schemas.audit_config_schemas import CategoryUpdate
 
         service, mock_repository = config_service
         tenant_id = uuid4()

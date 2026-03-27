@@ -5,11 +5,11 @@ from uuid import uuid4
 
 import pytest
 
-from intric.audit.application.audit_service import AuditService
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.audit_log import AuditLog
-from intric.audit.domain.entity_types import EntityType
-from intric.audit.domain.outcome import Outcome
+from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.audit_log import AuditLog
+from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.outcome import Outcome
 
 
 @pytest.fixture
@@ -345,7 +345,7 @@ class TestLogAsync:
             feature_flag_service=mock_feature_flag_service,
         )
 
-        with patch("intric.audit.application.audit_service.job_manager"):
+        with patch("eneo.audit.application.audit_service.job_manager"):
             result = await service.log_async(
                 tenant_id=uuid4(),
                 actor_id=uuid4(),
@@ -371,7 +371,7 @@ class TestLogAsync:
             feature_flag_service=mock_feature_flag_service,
         )
 
-        with patch("intric.audit.application.audit_service.job_manager"):
+        with patch("eneo.audit.application.audit_service.job_manager"):
             result = await service.log_async(
                 tenant_id=uuid4(),
                 actor_id=uuid4(),
@@ -398,7 +398,7 @@ class TestLogAsync:
             feature_flag_service=mock_feature_flag_service,
         )
 
-        with patch("intric.audit.application.audit_service.job_manager", mock_job_manager):
+        with patch("eneo.audit.application.audit_service.job_manager", mock_job_manager):
             await service.log_async(
                 tenant_id=uuid4(),
                 actor_id=uuid4(),
@@ -417,7 +417,7 @@ class TestLogAsync:
         """FAILURE outcome with error_message should enqueue successfully."""
         mock_job_manager = AsyncMock()
 
-        with patch("intric.audit.application.audit_service.job_manager", mock_job_manager):
+        with patch("eneo.audit.application.audit_service.job_manager", mock_job_manager):
             result = await audit_service.log_async(
                 tenant_id=uuid4(),
                 actor_id=uuid4(),

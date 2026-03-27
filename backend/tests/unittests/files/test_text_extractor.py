@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from intric.files.text import (
+from eneo.files.text import (
     CorruptFileError,
     EncryptedFileError,
     ExtractionError,
@@ -126,7 +126,7 @@ class TestTextExtractorPDF:
 
     def test_extract_from_pdf_basic(self):
         """Should extract text from a basic PDF."""
-        with patch("intric.files.text.pdfplumber.open") as mock_open:
+        with patch("eneo.files.text.pdfplumber.open") as mock_open:
             mock_page = MagicMock()
             mock_page.extract_text.return_value = "Sample PDF text content"
             mock_open.return_value.__enter__ = MagicMock(return_value=MagicMock(pages=[mock_page]))
@@ -139,7 +139,7 @@ class TestTextExtractorPDF:
 
     def test_extract_from_pdf_handles_none_pages(self):
         """Should handle pages that return None from extract_text()."""
-        with patch("intric.files.text.pdfplumber.open") as mock_open:
+        with patch("eneo.files.text.pdfplumber.open") as mock_open:
             mock_page1 = MagicMock()
             mock_page1.extract_text.return_value = "Page 1 text"
 
@@ -161,7 +161,7 @@ class TestTextExtractorPDF:
 
     def test_extract_from_pdf_sanitizes_null_bytes(self):
         """Should sanitize null bytes from extracted text."""
-        with patch("intric.files.text.pdfplumber.open") as mock_open:
+        with patch("eneo.files.text.pdfplumber.open") as mock_open:
             mock_page = MagicMock()
             mock_page.extract_text.return_value = "Hello\x00World"
             mock_open.return_value.__enter__ = MagicMock(return_value=MagicMock(pages=[mock_page]))
@@ -452,7 +452,7 @@ class TestTextExtractorExtractMethod:
         test_file = tmp_path / "test.txt"
         test_file.write_text("Auto-detected content")
 
-        with patch("intric.files.text.magic.from_file", return_value="text/plain"):
+        with patch("eneo.files.text.magic.from_file", return_value="text/plain"):
             result = extractor.extract(test_file)
             assert result == "Auto-detected content"
 
@@ -464,7 +464,7 @@ class TestTextExtractorErrorHandling:
         """Should raise CorruptFileError when pdfplumber encounters a corrupt PDF."""
         from pdfminer.pdfparser import PDFSyntaxError
 
-        with patch("intric.files.text.pdfplumber.open") as mock_open:
+        with patch("eneo.files.text.pdfplumber.open") as mock_open:
             mock_open.side_effect = PDFSyntaxError("Invalid PDF structure")
 
             with pytest.raises(CorruptFileError) as exc_info:

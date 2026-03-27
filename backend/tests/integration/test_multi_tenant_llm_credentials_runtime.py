@@ -8,8 +8,8 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.settings.credential_resolver import CredentialResolver
-from intric.tenants.tenant_repo import TenantRepository
+from eneo.settings.credential_resolver import CredentialResolver
+from eneo.tenants.tenant_repo import TenantRepository
 
 
 @pytest.fixture(autouse=True)

@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.audit.application.audit_export_service import AuditExportService, ExportTooLargeError
+from eneo.audit.application.audit_export_service import AuditExportService, ExportTooLargeError
 
 
 def make_raw_log_dict(

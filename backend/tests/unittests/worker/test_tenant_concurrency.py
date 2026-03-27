@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
+from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 
 
 class FakeRedis:

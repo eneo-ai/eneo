@@ -5,15 +5,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
-from intric.database.tables.ai_models_table import EmbeddingModels
-from intric.database.tables.integration_table import (
+from eneo.database.tables.ai_models_table import EmbeddingModels
+from eneo.database.tables.integration_table import (
     Integration as IntegrationDB,
     IntegrationKnowledge as IntegrationKnowledgeDB,
     TenantIntegration as TenantIntegrationDB,
     UserIntegration as UserIntegrationDB,
 )
-from intric.database.tables.spaces_table import Spaces
-from intric.integration.domain.entities.sync_log import SyncLog
+from eneo.database.tables.spaces_table import Spaces
+from eneo.integration.domain.entities.sync_log import SyncLog
 from sqlalchemy import text
 
 

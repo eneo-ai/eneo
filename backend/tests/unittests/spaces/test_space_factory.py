@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.spaces.space_factory import SpaceFactory
+from eneo.spaces.space_factory import SpaceFactory
 
 
 @pytest.fixture

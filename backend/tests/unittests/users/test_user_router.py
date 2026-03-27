@@ -2,11 +2,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-from intric.main.models import ModelId
-from intric.predefined_roles.predefined_role import PredefinedRoleInDB
-from intric.roles.permissions import Permission
-from intric.users import user_router
-from intric.users.user import PropUserInvite, PropUserUpdate, UserState
+from eneo.main.models import ModelId
+from eneo.predefined_roles.predefined_role import PredefinedRoleInDB
+from eneo.roles.permissions import Permission
+from eneo.users import user_router
+from eneo.users.user import PropUserInvite, PropUserUpdate, UserState
 from tests.fixtures import TEST_USER
 
 

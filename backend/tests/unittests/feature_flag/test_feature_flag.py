@@ -2,7 +2,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.feature_flag.feature_flag import FeatureFlag
+from eneo.feature_flag.feature_flag import FeatureFlag
 
 
 @pytest.fixture

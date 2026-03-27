@@ -5,17 +5,17 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import Message
-from intric.completion_models.infrastructure.context_builder import (
+from eneo.ai_models.completion_models.completion_model import Message
+from eneo.completion_models.infrastructure.context_builder import (
     ContextBuilder,
     count_tokens,
 )
-from intric.completion_models.infrastructure.static_prompts import (
+from eneo.completion_models.infrastructure.static_prompts import (
     HALLUCINATION_GUARD,
     SHOW_REFERENCES_PROMPT,
 )
-from intric.files.file_models import File, FileType
-from intric.main.exceptions import QueryException
+from eneo.files.file_models import File, FileType
+from eneo.main.exceptions import QueryException
 
 QUESTION = "I have a question"
 

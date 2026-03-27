@@ -7,7 +7,7 @@ across all audit log entries.
 import pytest
 from pydantic import ValidationError
 
-from intric.audit.domain.audit_metadata_schema import (
+from eneo.audit.domain.audit_metadata_schema import (
     AuditActor,
     AuditChange,
     AuditMetadata,

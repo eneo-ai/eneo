@@ -12,7 +12,7 @@ Tests the system-wide AI model management endpoints that require super admin API
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.ai_models_table import CompletionModels, EmbeddingModels
+from eneo.database.tables.ai_models_table import CompletionModels, EmbeddingModels
 
 
 @pytest.mark.integration

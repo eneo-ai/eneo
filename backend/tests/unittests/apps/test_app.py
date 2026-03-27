@@ -2,12 +2,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from intric.apps.apps.api.app_models import InputFieldType
-from intric.apps.apps.app import App
-from intric.files.audio import AudioMimeTypes
-from intric.files.image import ImageMimeTypes
-from intric.files.text import TextMimeTypes
-from intric.main.exceptions import BadRequestException
+from eneo.apps.apps.api.app_models import InputFieldType
+from eneo.apps.apps.app import App
+from eneo.files.audio import AudioMimeTypes
+from eneo.files.image import ImageMimeTypes
+from eneo.files.text import TextMimeTypes
+from eneo.main.exceptions import BadRequestException
 
 
 @pytest.fixture

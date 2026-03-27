@@ -1,7 +1,7 @@
 import pytest
 
-from intric.files.chunk_embedding_list import ChunkEmbeddingList
-from intric.main.exceptions import ChunkEmbeddingMisMatchException
+from eneo.files.chunk_embedding_list import ChunkEmbeddingList
+from eneo.main.exceptions import ChunkEmbeddingMisMatchException
 
 
 def test_add_one_at_a_time():

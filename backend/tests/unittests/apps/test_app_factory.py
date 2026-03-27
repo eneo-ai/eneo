@@ -3,9 +3,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from intric.apps.apps.api.app_models import InputField, InputFieldType
-from intric.apps.apps.app_factory import AppFactory
-from intric.templates.app_template.app_template import AppTemplate
+from eneo.apps.apps.api.app_models import InputField, InputFieldType
+from eneo.apps.apps.app_factory import AppFactory
+from eneo.templates.app_template.app_template import AppTemplate
 
 
 @pytest.fixture

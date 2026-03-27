@@ -2,9 +2,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from intric.main.exceptions import UnauthorizedException
-from intric.roles.permissions import Permission, validate_permissions
-from intric.users.user import UserInDB
+from eneo.main.exceptions import UnauthorizedException
+from eneo.roles.permissions import Permission, validate_permissions
+from eneo.users.user import UserInDB
 
 
 class MockService:

@@ -13,9 +13,9 @@ from uuid import uuid4
 import pytest
 import redis.asyncio as aioredis
 
-from intric.worker.feeder.capacity import CapacityManager
-from intric.worker.feeder.election import LeaderElection
-from intric.worker.feeder.queues import PendingQueue
+from eneo.worker.feeder.capacity import CapacityManager
+from eneo.worker.feeder.election import LeaderElection
+from eneo.worker.feeder.queues import PendingQueue
 
 
 @pytest.mark.integration

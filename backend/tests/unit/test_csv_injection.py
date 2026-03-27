@@ -1,7 +1,7 @@
 """Unit tests for CSV injection prevention in audit export service."""
 
 
-from intric.audit.application.audit_export_service import _sanitize_csv_cell
+from eneo.audit.application.audit_export_service import _sanitize_csv_cell
 
 
 class TestSanitizeCsvCell:

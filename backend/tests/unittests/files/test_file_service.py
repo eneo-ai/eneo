@@ -4,8 +4,8 @@ from uuid import uuid4
 import pytest
 from fastapi import UploadFile
 
-from intric.files.file_models import FileBaseWithContent, FileType
-from intric.files.file_service import FileService
+from eneo.files.file_models import FileBaseWithContent, FileType
+from eneo.files.file_service import FileService
 
 
 @pytest.fixture

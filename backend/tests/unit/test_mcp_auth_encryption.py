@@ -16,12 +16,12 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from intric.mcp_servers.presentation.models import (
+from eneo.mcp_servers.presentation.models import (
     MCPServerCreate,
     MCPServerPublic,
     MCPServerUpdate,
 )
-from intric.settings.encryption_service import EncryptionService
+from eneo.settings.encryption_service import EncryptionService
 
 
 # =============================================================================
@@ -39,7 +39,7 @@ def _make_encryption_service() -> EncryptionService:
 
 def _make_service(encryption_service=None):
     """Create an MCPServerService with mocked repos."""
-    from intric.mcp_servers.application.mcp_server_service import MCPServerService
+    from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 
     mock_repo = AsyncMock()
     mock_tool_repo = AsyncMock()
@@ -221,7 +221,7 @@ class TestAssemblerHasCredentials:
     """Test assemblers compute has_credentials from http_auth_config_schema."""
 
     def test_from_domain_to_model_with_credentials(self):
-        from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
+        from eneo.mcp_servers.presentation.assemblers.mcp_server_assembler import (
             MCPServerAssembler,
         )
 
@@ -242,7 +242,7 @@ class TestAssemblerHasCredentials:
         assert dto.has_credentials is True
 
     def test_from_domain_to_model_without_credentials(self):
-        from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
+        from eneo.mcp_servers.presentation.assemblers.mcp_server_assembler import (
             MCPServerAssembler,
         )
 
@@ -264,7 +264,7 @@ class TestAssemblerHasCredentials:
         assert dto.credential_preview is None
 
     def test_settings_assembler_with_credentials(self):
-        from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
+        from eneo.mcp_servers.presentation.assemblers.mcp_server_assembler import (
             MCPServerSettingsAssembler,
         )
 
@@ -287,7 +287,7 @@ class TestAssemblerHasCredentials:
         assert dto.has_credentials is True
 
     def test_settings_assembler_without_credentials(self):
-        from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
+        from eneo.mcp_servers.presentation.assemblers.mcp_server_assembler import (
             MCPServerSettingsAssembler,
         )
 
@@ -312,7 +312,7 @@ class TestAssemblerHasCredentials:
 
     def test_credential_preview_with_encryption(self):
         """Test that credential_preview shows masked token when encryption is available."""
-        from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
+        from eneo.mcp_servers.presentation.assemblers.mcp_server_assembler import (
             MCPServerAssembler,
         )
 
@@ -342,7 +342,7 @@ class TestAssemblerHasCredentials:
 
     def test_credential_preview_without_encryption_service(self):
         """Test that credential_preview still works with plaintext tokens."""
-        from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
+        from eneo.mcp_servers.presentation.assemblers.mcp_server_assembler import (
             MCPServerAssembler,
         )
 
@@ -375,7 +375,7 @@ class TestProxyFactoryDecryption:
     """Test MCPProxySessionFactory reads and decrypts http_auth_config_schema."""
 
     def test_creates_auth_map_from_http_auth_config_schema(self):
-        from intric.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
+        from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
             MCPProxySessionFactory,
         )
 
@@ -397,7 +397,7 @@ class TestProxyFactoryDecryption:
         assert proxy.auth_credentials_map[server.id]["token"] == "my-bearer-token"
 
     def test_decrypts_encrypted_credentials(self):
-        from intric.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
+        from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
             MCPProxySessionFactory,
         )
 
@@ -420,7 +420,7 @@ class TestProxyFactoryDecryption:
         assert proxy.auth_credentials_map[server.id]["token"] == "sk-secret-123"
 
     def test_skips_servers_without_credentials(self):
-        from intric.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
+        from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
             MCPProxySessionFactory,
         )
 
@@ -450,7 +450,7 @@ class TestUpdateConnectionValidation:
     @pytest.fixture
     def _setup(self):
         """Set up service with mocked repo and connection test."""
-        from intric.mcp_servers.domain.entities.mcp_server import MCPServer
+        from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 
         enc = _make_encryption_service()
         service, mock_repo, _ = _make_service(encryption_service=enc)
@@ -472,7 +472,7 @@ class TestUpdateConnectionValidation:
     @pytest.mark.asyncio
     async def test_rejects_update_when_url_change_fails_connection(self, _setup):
         """Changing URL triggers validation; failure blocks the update."""
-        from intric.mcp_servers.application.mcp_server_service import ConnectionResult
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
 
         service, mock_repo, existing, _ = _setup
 
@@ -494,7 +494,7 @@ class TestUpdateConnectionValidation:
     @pytest.mark.asyncio
     async def test_allows_update_when_url_change_passes_connection(self, _setup):
         """Changing URL triggers validation; success allows the update."""
-        from intric.mcp_servers.application.mcp_server_service import ConnectionResult
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
 
         service, mock_repo, existing, _ = _setup
 
@@ -513,7 +513,7 @@ class TestUpdateConnectionValidation:
     @pytest.mark.asyncio
     async def test_rejects_update_when_auth_type_change_fails(self, _setup):
         """Changing auth type from bearer to none triggers validation."""
-        from intric.mcp_servers.application.mcp_server_service import ConnectionResult
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
 
         service, mock_repo, existing, _ = _setup
 
@@ -533,7 +533,7 @@ class TestUpdateConnectionValidation:
     @pytest.mark.asyncio
     async def test_skips_validation_for_non_connection_changes(self, _setup):
         """Changing only name/description does NOT trigger connection validation."""
-        from intric.mcp_servers.application.mcp_server_service import ConnectionResult
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
 
         service, mock_repo, existing, _ = _setup
 
@@ -555,7 +555,7 @@ class TestUpdateConnectionValidation:
     @pytest.mark.asyncio
     async def test_rejects_credential_update_when_connection_fails(self, _setup):
         """Providing new credentials triggers validation."""
-        from intric.mcp_servers.application.mcp_server_service import ConnectionResult
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
 
         service, mock_repo, existing, _ = _setup
 
@@ -576,7 +576,7 @@ class TestUpdateConnectionValidation:
     @pytest.mark.asyncio
     async def test_uses_plaintext_new_credentials_for_test(self, _setup):
         """When new credentials are provided, they are used in plaintext for the connection test."""
-        from intric.mcp_servers.application.mcp_server_service import ConnectionResult
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
 
         service, mock_repo, existing, _ = _setup
 
@@ -597,7 +597,7 @@ class TestUpdateConnectionValidation:
     @pytest.mark.asyncio
     async def test_decrypts_existing_credentials_for_url_change_test(self, _setup):
         """When URL changes but credentials don't, existing encrypted credentials are decrypted for the test."""
-        from intric.mcp_servers.application.mcp_server_service import ConnectionResult
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
 
         service, mock_repo, existing, _ = _setup
 
@@ -618,7 +618,7 @@ class TestUpdateConnectionValidation:
     @pytest.mark.asyncio
     async def test_same_url_resent_does_not_trigger_validation(self, _setup):
         """Sending the same URL that's already stored should not trigger validation."""
-        from intric.mcp_servers.application.mcp_server_service import ConnectionResult
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
 
         service, mock_repo, existing, _ = _setup
 

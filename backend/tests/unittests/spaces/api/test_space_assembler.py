@@ -3,13 +3,13 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import ModelKwargs
-from intric.assistants.api.assistant_models import AssistantType, DefaultAssistant
-from intric.files.file_models import FileRestrictions, Limit
-from intric.questions.question import UseTools
-from intric.spaces.api.space_assembler import SpaceAssembler
-from intric.spaces.api.space_models import SpaceMember, SpaceRoleValue
-from intric.spaces.space import Space
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.api.assistant_models import AssistantType, DefaultAssistant
+from eneo.files.file_models import FileRestrictions, Limit
+from eneo.questions.question import UseTools
+from eneo.spaces.api.space_assembler import SpaceAssembler
+from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
+from eneo.spaces.space import Space
 from tests.fixtures import (
     TEST_EMBEDDING_MODEL,
     TEST_MODEL_CHATGPT,

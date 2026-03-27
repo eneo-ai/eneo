@@ -2,12 +2,12 @@ import uuid
 
 import pytest
 
-from intric.ai_models.embedding_models.embedding_model import (
+from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelLegacy,
 )
-from intric.main.config import Settings, reset_settings
-from intric.tenants.tenant import TenantInDB
-from intric.users.user import UserInDB
+from eneo.main.config import Settings, reset_settings
+from eneo.tenants.tenant import TenantInDB
+from eneo.users.user import UserInDB
 
 
 @pytest.fixture(scope="session")

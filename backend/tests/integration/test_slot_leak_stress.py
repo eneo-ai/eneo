@@ -21,8 +21,8 @@ from uuid import uuid4
 import pytest
 import redis.asyncio as aioredis
 
-from intric.worker.feeder.capacity import CapacityManager
-from intric.worker.redis.lua_scripts import LuaScripts
+from eneo.worker.feeder.capacity import CapacityManager
+from eneo.worker.redis.lua_scripts import LuaScripts
 
 
 # =============================================================================
@@ -148,7 +148,7 @@ class TestEnqueueGapSlotLeak:
         assert initial == 1, "Should have 1 slot acquired"
 
         # Simulate duplicate detection via JobEnqueuer pattern matching
-        from intric.worker.feeder.queues import JobEnqueuer
+        from eneo.worker.feeder.queues import JobEnqueuer
 
         enqueuer = JobEnqueuer()
 
@@ -331,7 +331,7 @@ class TestHeartbeatTTLTiming:
 
     async def test_heartbeat_monitor_interval_check(self):
         """HeartbeatMonitor.tick() should skip if called before interval."""
-        from intric.worker.crawl.heartbeat import HeartbeatMonitor
+        from eneo.worker.crawl.heartbeat import HeartbeatMonitor
 
         job_id = uuid4()
 

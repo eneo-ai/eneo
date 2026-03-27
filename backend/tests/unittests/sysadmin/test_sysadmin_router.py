@@ -14,14 +14,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from intric.main.exceptions import NotFoundException
-from intric.sysadmin.sysadmin_router import (
+from eneo.main.exceptions import NotFoundException
+from eneo.sysadmin.sysadmin_router import (
     get_access_token,
     get_user,
     delete_user,
     update_user,
 )
-from intric.users.user import UserUpdatePublic
+from eneo.users.user import UserUpdatePublic
 
 
 @pytest.fixture

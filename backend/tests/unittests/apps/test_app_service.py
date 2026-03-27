@@ -3,8 +3,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.apps.apps.app_service import AppService
-from intric.main.exceptions import UnauthorizedException
+from eneo.apps.apps.app_service import AppService
+from eneo.main.exceptions import UnauthorizedException
 
 
 @pytest.fixture

@@ -10,7 +10,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from intric.integration.infrastructure.auth_service.service_account_auth_service import (
+from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountAuthService,
     ServiceAccountCredentials,
     ServiceAccountTokenResult,
@@ -56,7 +56,7 @@ def mock_settings():
 def service(mock_settings):
     """Create ServiceAccountAuthService instance with mocked settings."""
     with patch(
-        "intric.integration.infrastructure.auth_service.service_account_auth_service.get_settings",
+        "eneo.integration.infrastructure.auth_service.service_account_auth_service.get_settings",
         return_value=mock_settings
     ):
         yield ServiceAccountAuthService()
@@ -121,7 +121,7 @@ class TestGenAuthUrl:
         """Uses correct redirect URI from settings."""
         mock_settings.oauth_callback_url = "https://myapp.com/callback"
 
-        with patch("intric.integration.infrastructure.auth_service.service_account_auth_service.get_settings", return_value=mock_settings):
+        with patch("eneo.integration.infrastructure.auth_service.service_account_auth_service.get_settings", return_value=mock_settings):
             service = ServiceAccountAuthService()
             result = service.gen_auth_url(
                 state="state",

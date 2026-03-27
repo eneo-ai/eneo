@@ -9,7 +9,7 @@ import secrets
 import sqlalchemy as sa
 
 from alembic import op
-from intric.main.config import get_settings
+from eneo.main.config import get_settings
 
 API_KEY_COLUMN_NAME = "api_key"
 USERS_TABLE_NAME = "users"

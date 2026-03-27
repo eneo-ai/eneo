@@ -3,11 +3,11 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.auth_models import AccessToken, ApiKeyCreated
-from intric.main.exceptions import AuthenticationException, UniqueUserException
-from intric.settings.settings import SettingsUpsert
-from intric.main.models import ModelId
-from intric.users.user import (
+from eneo.authentication.auth_models import AccessToken, ApiKeyCreated
+from eneo.main.exceptions import AuthenticationException, UniqueUserException
+from eneo.settings.settings import SettingsUpsert
+from eneo.main.models import ModelId
+from eneo.users.user import (
     PropUserInvite,
     UserAdd,
     UserAddSuperAdmin,
@@ -15,7 +15,7 @@ from intric.users.user import (
     UserState,
     UserUpdate,
 )
-from intric.users.user_service import UserService
+from eneo.users.user_service import UserService
 from tests.fixtures import TEST_TENANT, TEST_USER
 
 

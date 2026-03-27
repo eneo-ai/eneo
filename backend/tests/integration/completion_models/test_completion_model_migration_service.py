@@ -11,11 +11,11 @@ These tests verify end-to-end migration functionality including:
 import pytest
 from sqlalchemy import select
 
-from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.app_table import Apps
-from intric.database.tables.service_table import Services
-from intric.database.tables.spaces_table import SpacesCompletionModels
-from intric.main.exceptions import ValidationException
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.app_table import Apps
+from eneo.database.tables.service_table import Services
+from eneo.database.tables.spaces_table import SpacesCompletionModels
+from eneo.main.exceptions import ValidationException
 
 @pytest.mark.integration
 @pytest.mark.asyncio

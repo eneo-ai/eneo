@@ -11,7 +11,7 @@ from datetime import datetime
 from uuid import uuid4
 
 
-from intric.completion_models.domain.completion_model import CompletionModel
+from eneo.completion_models.domain.completion_model import CompletionModel
 
 
 class MockSettings:
@@ -53,7 +53,7 @@ class TestModelCredentialLocking:
         tenant = MockTenant(api_credentials={})  # No credentials
         user = MockUser(tenant=tenant)
 
-        monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
+        monkeypatch.setattr("eneo.ai_models.ai_model.get_settings", lambda: settings)
 
         model = CompletionModel(
             user=user,
@@ -98,7 +98,7 @@ class TestModelCredentialLocking:
         )
         user = MockUser(tenant=tenant)
 
-        monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
+        monkeypatch.setattr("eneo.ai_models.ai_model.get_settings", lambda: settings)
 
         model = CompletionModel(
             user=user,
@@ -139,7 +139,7 @@ class TestModelCredentialLocking:
         tenant = MockTenant(api_credentials={})  # No credentials
         user = MockUser(tenant=tenant)
 
-        monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
+        monkeypatch.setattr("eneo.ai_models.ai_model.get_settings", lambda: settings)
 
         model = CompletionModel(
             user=user,
@@ -186,7 +186,7 @@ class TestModelCredentialLocking:
         tenant = MockTenant(api_credentials={})  # No credentials
         user = MockUser(tenant=tenant)
 
-        monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
+        monkeypatch.setattr("eneo.ai_models.ai_model.get_settings", lambda: settings)
 
         model = CompletionModel(
             user=user,
@@ -228,7 +228,7 @@ class TestModelCredentialLocking:
         )
         user = MockUser(tenant=tenant)
 
-        monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
+        monkeypatch.setattr("eneo.ai_models.ai_model.get_settings", lambda: settings)
 
         model = CompletionModel(
             user=user,
@@ -287,7 +287,7 @@ class TestModelCredentialLocking:
             ("ovhcloud", "ovhcloud"),
         ]
 
-        monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
+        monkeypatch.setattr("eneo.ai_models.ai_model.get_settings", lambda: settings)
 
         for family, expected_provider in test_cases:
             # Model without credentials - should show credential warning

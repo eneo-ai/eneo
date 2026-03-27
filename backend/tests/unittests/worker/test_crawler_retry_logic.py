@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.worker.crawl.recovery import (
+from eneo.worker.crawl.recovery import (
     calculate_exponential_backoff,
     update_job_retry_stats,
 )
@@ -235,7 +235,7 @@ class TestUpdateJobRetryStats:
             True,       # EXPIRE result
         ])
 
-        with patch("intric.worker.crawl_tasks.time.time", return_value=1100.0):
+        with patch("eneo.worker.crawl_tasks.time.time", return_value=1100.0):
             await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
@@ -258,7 +258,7 @@ class TestUpdateJobRetryStats:
             b"0",       # GET retry_count (existing)
         ])
 
-        with patch("intric.worker.crawl_tasks.time.time", return_value=1050.0):
+        with patch("eneo.worker.crawl_tasks.time.time", return_value=1050.0):
             await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
@@ -278,7 +278,7 @@ class TestUpdateJobRetryStats:
             True, b"1000.0", 1, True
         ])
 
-        with patch("intric.worker.crawl_tasks.time.time", return_value=1100.0):
+        with patch("eneo.worker.crawl_tasks.time.time", return_value=1100.0):
             await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
@@ -323,7 +323,7 @@ class TestUpdateJobRetryStats:
             True, b"1000.0", 1, True
         ])
 
-        with patch("intric.worker.crawl_tasks.time.time", return_value=1000.0):
+        with patch("eneo.worker.crawl_tasks.time.time", return_value=1000.0):
             await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
@@ -346,7 +346,7 @@ class TestUpdateJobRetryStats:
             True, b"1000.0", 1, True
         ])
 
-        with patch("intric.worker.crawl_tasks.time.time", return_value=1000.0):
+        with patch("eneo.worker.crawl_tasks.time.time", return_value=1000.0):
             await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
@@ -405,7 +405,7 @@ class TestUpdateJobRetryStats:
             True,  # Only SET result, missing GET and INCR results
         ])
 
-        with patch("intric.worker.crawl_tasks.time.time", return_value=1000.0):
+        with patch("eneo.worker.crawl_tasks.time.time", return_value=1000.0):
             # This should handle incomplete results gracefully
             retry_count, job_age = await update_job_retry_stats(
                 job_id=job_id,
@@ -433,7 +433,7 @@ class TestUpdateJobRetryStats:
             True, b"1000.0", 1, True
         ])
 
-        with patch("intric.worker.crawl_tasks.time.time", return_value=1000.0):
+        with patch("eneo.worker.crawl_tasks.time.time", return_value=1000.0):
             retry_count_1, _ = await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis_1,
@@ -446,7 +446,7 @@ class TestUpdateJobRetryStats:
             False, b"1000.0", 2, True  # SET returns False (key exists), INCR returns 2
         ])
 
-        with patch("intric.worker.crawl_tasks.time.time", return_value=1050.0):
+        with patch("eneo.worker.crawl_tasks.time.time", return_value=1050.0):
             retry_count_2, _ = await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis_2,

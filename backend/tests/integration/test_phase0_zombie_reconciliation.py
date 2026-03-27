@@ -27,10 +27,10 @@ from uuid import uuid4
 import pytest
 import redis.asyncio as aioredis
 
-from intric.jobs.job_models import Task
-from intric.main.config import Settings
-from intric.main.models import Status
-from intric.worker.feeder.watchdog import OrphanWatchdog
+from eneo.jobs.job_models import Task
+from eneo.main.config import Settings
+from eneo.main.models import Status
+from eneo.worker.feeder.watchdog import OrphanWatchdog
 
 
 # ============================================================================
@@ -40,8 +40,8 @@ from intric.worker.feeder.watchdog import OrphanWatchdog
 
 async def create_test_website(session, tenant_id, user_id, embedding_model_id):
     """Create a minimal Website record for CrawlRun tests."""
-    from intric.database.tables.websites_table import Websites
-    from intric.websites.domain.crawl_run import CrawlType
+    from eneo.database.tables.websites_table import Websites
+    from eneo.websites.domain.crawl_run import CrawlType
 
     website = Websites(
         tenant_id=tenant_id,
@@ -104,7 +104,7 @@ async def clean_redis(redis_client: aioredis.Redis):
 async def test_embedding_model_id(db_container):
     """Get the fixture embedding model ID for tests."""
     from sqlalchemy import select
-    from intric.database.tables.ai_models_table import EmbeddingModels
+    from eneo.database.tables.ai_models_table import EmbeddingModels
 
     async with db_container() as container:
         session = container.session()
@@ -186,8 +186,8 @@ class TestPhase0ZombieCounterReconciliation:
         - Redis counter reset to 2 (matches DB)
         - Counter has TTL set
         """
-        from intric.database.tables.job_table import Jobs
-        from intric.database.tables.websites_table import CrawlRuns
+        from eneo.database.tables.job_table import Jobs
+        from eneo.database.tables.websites_table import CrawlRuns
 
         # Setup Redis with inflated counter
         slot_key = f"tenant:{test_tenant.id}:active_jobs"
@@ -256,8 +256,8 @@ class TestPhase0ZombieCounterReconciliation:
         Expected:
         - Redis counter remains 3 (no change)
         """
-        from intric.database.tables.job_table import Jobs
-        from intric.database.tables.websites_table import CrawlRuns
+        from eneo.database.tables.job_table import Jobs
+        from eneo.database.tables.websites_table import CrawlRuns
 
         # Setup Redis with correct counter
         slot_key = f"tenant:{test_tenant.id}:active_jobs"
@@ -329,8 +329,8 @@ class TestPhase0ZombieCounterReconciliation:
         feeder will still allow new jobs (not blocking). The counter will
         self-correct as jobs complete and new ones acquire slots.
         """
-        from intric.database.tables.job_table import Jobs
-        from intric.database.tables.websites_table import CrawlRuns
+        from eneo.database.tables.job_table import Jobs
+        from eneo.database.tables.websites_table import CrawlRuns
 
         # Setup Redis with undercount
         slot_key = f"tenant:{test_tenant.id}:active_jobs"
@@ -438,8 +438,8 @@ class TestPhase0ZombieCounterReconciliation:
         Expected:
         - Redis counter reset to 3 (QUEUED + IN_PROGRESS)
         """
-        from intric.database.tables.job_table import Jobs
-        from intric.database.tables.websites_table import CrawlRuns
+        from eneo.database.tables.job_table import Jobs
+        from eneo.database.tables.websites_table import CrawlRuns
 
         # Setup Redis with zombie counter
         slot_key = f"tenant:{test_tenant.id}:active_jobs"
@@ -532,8 +532,8 @@ class TestPhase0ZombieCounterReconciliation:
         Expected:
         - Redis counter reset to 1 (only QUEUED counted)
         """
-        from intric.database.tables.job_table import Jobs
-        from intric.database.tables.websites_table import CrawlRuns
+        from eneo.database.tables.job_table import Jobs
+        from eneo.database.tables.websites_table import CrawlRuns
 
         # Setup Redis with zombie counter
         slot_key = f"tenant:{test_tenant.id}:active_jobs"
@@ -660,8 +660,8 @@ class TestPhase0ZombieCounterReconciliation:
         - After cleanup: Redis counter = 0 or deleted
         - Expired job marked FAILED
         """
-        from intric.database.tables.job_table import Jobs
-        from intric.database.tables.websites_table import CrawlRuns
+        from eneo.database.tables.job_table import Jobs
+        from eneo.database.tables.websites_table import CrawlRuns
         from sqlalchemy import select
 
         # Setup Redis with zombie counter
