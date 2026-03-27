@@ -35,6 +35,7 @@ async def startup():
     await init_modules()
 
 
+
 async def shutdown():
     settings = get_settings()
     # Skip all shutdown dependencies when in OpenAPI-only mode

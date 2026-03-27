@@ -42,7 +42,7 @@ def test_settings() -> Settings:
 
         # Feature flags - default to single-tenant mode for unit tests
         tenant_credentials_enabled=False,
-        federation_per_tenant_enabled=False,
+        federation_enabled=False,
 
         # Crawler settings - ensure TTL > max_length to pass validation
         crawl_max_length=1800,  # 30 minutes
