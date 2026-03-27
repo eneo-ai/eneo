@@ -16,7 +16,7 @@
 -->
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
 
   export let page: number;
   export let totalPages: number;
