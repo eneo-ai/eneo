@@ -8,7 +8,6 @@
   import { fade } from "svelte/transition";
   import { LoadingScreen } from "$lib/components/layout";
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
-  import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import TenantSelector from "$lib/components/TenantSelector.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
