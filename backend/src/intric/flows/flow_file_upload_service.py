@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from enum import Enum
 import logging
 from typing import Protocol
 from uuid import UUID
@@ -14,7 +15,7 @@ from intric.files.file_models import File
 from intric.files.file_service import FileService
 from intric.files.image import ImageMimeTypes
 from intric.files.text import TextMimeTypes
-from intric.flows.flow import Flow, FlowStep, FlowTemplateAsset, FlowVersion
+from intric.flows.domain.flow import Flow, FlowStep, FlowTemplateAsset, FlowVersion
 from intric.flows.flow_input_limits import FlowInputLimits, effective_flow_input_limit, effective_max_files_per_run
 from intric.flows.runtime.step_definition_parser import parse_runtime_steps
 from intric.flows.runtime_input import build_runtime_input_config, runtime_input_accept_mimetypes
@@ -206,7 +207,7 @@ def _build_policy(flow: Flow, limits: FlowInputLimits) -> FlowFileInputPolicy:
             recommended_run_payload=None,
         )
 
-    input_type = str(step.input_type)
+    input_type = _enum_value(step.input_type)
     accepts_file_upload = input_type in _FILE_UPLOAD_INPUT_TYPES
     accepted_mimetypes = _accepted_mimetypes_for_input_type(input_type)
     max_file_size_bytes = None
@@ -224,7 +225,7 @@ def _build_policy(flow: Flow, limits: FlowInputLimits) -> FlowFileInputPolicy:
     return FlowFileInputPolicy(
         flow_id=flow_id,
         input_type=input_type,
-        input_source=step.input_source,
+        input_source=_enum_value(step.input_source),
         accepts_file_upload=accepts_file_upload,
         accepted_mimetypes=accepted_mimetypes,
         max_file_size_bytes=max_file_size_bytes,
@@ -243,6 +244,12 @@ def _require_flow_id(flow: Flow) -> UUID:
             code="flow_id_missing",
         )
     return flow.id
+
+
+def _enum_value(value: str | Enum) -> str:
+    if isinstance(value, Enum):
+        return str(value.value)
+    return value
 
 
 class FlowFileUploadService:

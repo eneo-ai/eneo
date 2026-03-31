@@ -4,11 +4,11 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Awaitable, Protocol
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import Completion
-from intric.flows.flow import FlowRun, FlowStepResultStatus
+from intric.flows.domain.flow import FlowRun, FlowStepResultStatus
 from intric.flows.output_modes import transcribe_only_violation
 from intric.flows.runtime.models import (
     RunExecutionState,
@@ -33,6 +33,103 @@ except Exception:  # pragma: no cover - defensive import guard
 logger = logging.getLogger(__name__)
 
 
+class VariableResolverProtocol(Protocol):
+    def build_context(
+        self,
+        flow_input: dict[str, Any] | None,
+        prior_results: list[Any],
+        *,
+        current_step_order: int | None = None,
+        step_names_by_order: dict[int, str] | None = None,
+        current_step_input: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
+
+    def interpolate(self, template: str, context: dict[str, Any]) -> str: ...
+
+
+class CountTokensFn(Protocol):
+    def __call__(self, text: str) -> int: ...
+
+
+class LoadAssistantFn(Protocol):
+    def __call__(
+        self,
+        assistant_id: UUID,
+        state: RunExecutionState | None = None,
+    ) -> Awaitable[Any]: ...
+
+
+class ResolveStepInputFn(Protocol):
+    def __call__(
+        self,
+        *,
+        step: RuntimeStep,
+        context: dict[str, Any],
+        run: FlowRun,
+        prior_results: list[Any],
+        assistant_prompt_text: str | None,
+        state: RunExecutionState,
+        version_metadata: dict[str, Any] | None,
+    ) -> Awaitable[StepInputValue]: ...
+
+
+class RetrieveRagChunksFn(Protocol):
+    def __call__(
+        self,
+        *,
+        assistant: Any,
+        question: str,
+        run_id: UUID,
+        step_order: int,
+    ) -> Awaitable[
+        tuple[list[str], dict[str, Any] | None, list[StepDiagnostic]]
+    ]: ...
+
+
+class ProcessTypedOutputFn(Protocol):
+    def __call__(
+        self,
+        *,
+        full_text: str,
+        step: RuntimeStep,
+        run: FlowRun,
+    ) -> Awaitable[
+        tuple[dict[str, Any] | list[Any] | None, list[dict[str, Any]] | None]
+    ]: ...
+
+
+class ApplyOutputCapFn(Protocol):
+    def __call__(
+        self,
+        *,
+        text: str,
+        run: FlowRun,
+        step: RuntimeStep,
+    ) -> Awaitable[tuple[str, list[UUID]]]: ...
+
+
+class AttachTypedFailureContextFn(Protocol):
+    def __call__(
+        self,
+        exc: TypedIOValidationException,
+        *,
+        input_payload_for_result: dict[str, Any],
+        effective_prompt: str,
+    ) -> TypedIOValidationException: ...
+
+
+class EffectiveModelParametersFn(Protocol):
+    def __call__(self, assistant: Any) -> dict[str, Any]: ...
+
+
+class JsonModeCacheKeyFn(Protocol):
+    def __call__(self, assistant: Any) -> str: ...
+
+
+class JsonModeRejectionFn(Protocol):
+    def __call__(self, exc: Exception) -> bool: ...
+
+
 @dataclass
 class PreparedStepExecution:
     assistant: Any
@@ -46,18 +143,18 @@ class PreparedStepExecution:
 
 @dataclass(frozen=True)
 class StepExecutionRuntimeDeps:
-    variable_resolver: Any
+    variable_resolver: VariableResolverProtocol
     completion_service: Any
-    load_assistant: Any
-    resolve_step_input: Any
-    retrieve_rag_chunks: Any
-    process_typed_output: Any
-    apply_output_cap: Any
-    attach_typed_failure_context: Any
-    effective_model_parameters: Any
-    json_mode_cache_key: Any
-    is_json_mode_rejection: Any
-    count_tokens: Any
+    load_assistant: LoadAssistantFn
+    resolve_step_input: ResolveStepInputFn
+    retrieve_rag_chunks: RetrieveRagChunksFn
+    process_typed_output: ProcessTypedOutputFn
+    apply_output_cap: ApplyOutputCapFn
+    attach_typed_failure_context: AttachTypedFailureContextFn
+    effective_model_parameters: EffectiveModelParametersFn
+    json_mode_cache_key: JsonModeCacheKeyFn
+    is_json_mode_rejection: JsonModeRejectionFn
+    count_tokens: CountTokensFn
     logger: Any | None = None
     rag_retrieval_timeout_seconds: float = 30
 
@@ -167,6 +264,27 @@ def effective_model_parameters(assistant: Any) -> dict[str, Any]:
         "provider": getattr(completion_model, "provider_type", None),
         **kwargs,
     }
+
+
+def requested_model_name(assistant: Any) -> str | None:
+    completion_model = getattr(assistant, "completion_model", None)
+    if completion_model is None:
+        return None
+    model_name = getattr(completion_model, "name", None)
+    return model_name if isinstance(model_name, str) and model_name else None
+
+
+def infer_finish_reason(
+    *,
+    completion: Completion | str | Any,
+    tool_calls: list[dict[str, Any]] | None,
+) -> str | None:
+    if isinstance(completion, Completion):
+        if completion.stop:
+            return "stop"
+        if tool_calls:
+            return "tool_calls"
+    return None
 
 
 def augment_prompt_for_json_output(
@@ -549,6 +667,7 @@ async def complete_step_execution(
         run=run,
         step=step,
     )
+    response_model_info = getattr(response, "model", None)
     return StepExecutionOutput(
         input_text=prepared.step_input.text,
         source_text=prepared.step_input.source_text,
@@ -563,6 +682,11 @@ async def complete_step_execution(
         num_tokens_output=deps.count_tokens(full_text) + reasoning_tokens,
         effective_prompt=prepared.effective_prompt,
         model_parameters_json=deps.effective_model_parameters(prepared.assistant),
+        requested_model=requested_model_name(prepared.assistant),
+        response_model=getattr(response_model_info, "name", None),
+        provider=getattr(response_model_info, "provider_type", None),
+        finish_reason=infer_finish_reason(completion=completion, tool_calls=tool_calls),
+        provider_response_id=getattr(completion, "provider_response_id", None),
         contract_validation=prepared.contract_validation,
         structured_output=structured_output,
         artifacts=artifacts,

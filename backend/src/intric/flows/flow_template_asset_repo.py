@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from intric.database.database import AsyncSession
 from intric.database.tables.flow_tables import FlowTemplateAssets
 from intric.database.tables.users_table import Users
-from intric.flows.flow import FlowTemplateAsset
+from intric.flows.domain.flow import FlowTemplateAsset
 from intric.main.exceptions import NotFoundException
 
 

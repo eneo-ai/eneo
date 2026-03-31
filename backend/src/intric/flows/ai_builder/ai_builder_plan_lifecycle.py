@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -27,8 +28,8 @@ from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
-    from intric.flows.flow import Flow
-    from intric.flows.flow_service import FlowService
+    from intric.flows.application.flow_service import FlowService
+    from intric.flows.domain.flow import Flow
     from intric.spaces.space_service import SpaceService
     from intric.users.user import UserInDB
 
@@ -116,12 +117,22 @@ class AIBuilderPlanLifecycle:
             tenant_id=self.user.tenant_id,
             status=SessionStatus.APPLYING,
         )
-
+        description_override_manual = bool(
+            isinstance(plan.edit_result_json, dict)
+            and plan.edit_result_json.get("description_override_manual")
+        )
         try:
             changeset = compile_changeset(
                 spec,
                 current_flow,
                 default_transcription_model_id=default_transcription_model_id,
+                description_override_manual=description_override_manual,
+                ai_builder_origin={
+                    "builder_session_id": str(session.id),
+                    "builder_plan_id": str(plan.id),
+                    "builder_spec_hash": plan.spec_hash,
+                    "applied_at": datetime.now(timezone.utc).isoformat(),
+                },
             )
             result = await execute_changeset(
                 changeset=changeset,
@@ -132,10 +143,6 @@ class AIBuilderPlanLifecycle:
             )
         except Exception:
             await self._rollback_session_status(session.id)
-            # For create mode, attempt to clean up the temp flow created by
-            # execute_changeset. This prevents orphaned empty flows on failure.
-            if session.target_kind == TargetKind.CREATE and session.flow_id is None:
-                await self._cleanup_orphaned_create_artifacts(session.space_id)
             raise
 
         await self.repo.update_plan_status(
@@ -258,33 +265,6 @@ class AIBuilderPlanLifecycle:
             logger.warning(
                 "Failed to rollback AI builder session status",
                 exc_info=error,
-            )
-
-    async def _cleanup_orphaned_create_artifacts(self, space_id: UUID) -> None:
-        """Best-effort cleanup of orphaned temp flows from failed create-mode apply.
-
-        The temp flow is created with empty steps by execute_changeset.
-        If the apply fails mid-way, this flow remains as an orphan.
-        """
-        try:
-            flows = await self.flow_service.list_flows(space_id=space_id, sparse=False)
-            for flow in flows:
-                if len(flow.steps) == 0:
-                    # Empty flow likely created by a failed apply — but only
-                    # delete if it was just created (within last 60 seconds)
-                    if flow.created_at is not None:
-                        from datetime import datetime, timezone
-                        age = (datetime.now(timezone.utc) - flow.created_at).total_seconds()
-                        if age < 60:
-                            logger.info(
-                                "Cleaning up orphaned temp flow %s from failed create apply",
-                                flow.id,
-                            )
-                            await self.flow_service.delete_flow(flow.id)
-        except Exception as cleanup_error:
-            logger.warning(
-                "Failed to clean up orphaned create artifacts",
-                exc_info=cleanup_error,
             )
 
     @staticmethod

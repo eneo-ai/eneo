@@ -37,7 +37,12 @@ export default defineConfig({
     }
   },
   ssr: {
-    noExternal: ["@xyflow/svelte", "@xyflow/system"]
+    noExternal: ["@xyflow/svelte", "@xyflow/system"],
+    resolve: process.env.VITEST
+      ? {
+          conditions: ["browser"]
+        }
+      : undefined
   },
   server: {
     host: "0.0.0.0", // Change to host 0.0.0.0 if you cant login on localhost (e.g. WSL)

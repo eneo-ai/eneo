@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import cast, select, update
+from sqlalchemy import cast, insert, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,7 +61,7 @@ class AIBuilderRepository:
     ) -> BuilderSession:
         async with self._transaction():
             stmt = (
-                BuilderSessions.__table__.insert()
+                insert(BuilderSessions)
                 .values(
                     tenant_id=tenant_id,
                     space_id=space_id,
@@ -71,9 +71,9 @@ class AIBuilderRepository:
                     actor_user_id=actor_user_id,
                     conversation=[],
                 )
-                .returning(BuilderSessions.__table__)
+                .returning(BuilderSessions)
             )
-            row = (await self.session.execute(stmt)).mappings().one()
+            row = (await self.session.execute(stmt)).scalar_one()
             return _session_from_row(row)
 
     async def find_latest_resumable_session(
@@ -335,11 +335,11 @@ class AIBuilderRepository:
             if edit_result_json is not None:
                 values["edit_result_json"] = edit_result_json
             stmt = (
-                BuilderPlans.__table__.insert()
+                insert(BuilderPlans)
                 .values(**values)
-                .returning(BuilderPlans.__table__)
+                .returning(BuilderPlans)
             )
-            row = (await self.session.execute(stmt)).mappings().one()
+            row = (await self.session.execute(stmt)).scalar_one()
             return _plan_from_row(row)
 
     async def get_plan(

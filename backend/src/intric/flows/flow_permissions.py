@@ -21,6 +21,10 @@ def user_can_use_flow_ai_builder(user: UserInDB) -> bool:
     return has_permission(user.permissions, Permission.FLOWS_AI_BUILDER)
 
 
+def user_can_view_flow_trace(user: UserInDB) -> bool:
+    return has_permission(user.permissions, Permission.FLOWS_TRACE)
+
+
 def _raise_insufficient_tenant_permission(message: str) -> None:
     raise UnauthorizedException(
         message,
@@ -55,4 +59,12 @@ def ensure_can_use_flow_ai_builder(user: UserInDB) -> None:
     if not user_can_use_flow_ai_builder(user):
         _raise_insufficient_tenant_permission(
             "You do not have permission to use Flow AI Builder."
+        )
+
+
+def ensure_can_view_flow_trace(user: UserInDB) -> None:
+    ensure_can_view_flows(user)
+    if not user_can_view_flow_trace(user):
+        _raise_insufficient_tenant_permission(
+            "You do not have permission to view flow trace."
         )

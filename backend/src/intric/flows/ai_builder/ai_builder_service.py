@@ -6,12 +6,19 @@ conversation loop and plan lifecycle live in focused collaborators.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+import inspect
 import logging
-from typing import TYPE_CHECKING, Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Protocol, cast
 from uuid import UUID
 
 import litellm
 
+from intric.flows.ai_builder.ai_builder_context import (
+    AIBuilderPlannerContext,
+    build_planner_context,
+)
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_DONE as _SSE_EVENT_DONE,
     SSE_EVENT_ERROR as _SSE_EVENT_ERROR,
@@ -38,8 +45,8 @@ if TYPE_CHECKING:
     from intric.completion_models.infrastructure.completion_service import (
         CompletionService,
     )
-    from intric.flows.flow import Flow
-    from intric.flows.flow_service import FlowService
+    from intric.flows.application.flow_service import FlowService
+    from intric.flows.domain.flow import Flow
     from intric.spaces.space_service import SpaceService
     from intric.users.user import UserInDB
 
@@ -62,6 +69,28 @@ SSE_EVENT_STATUS = _SSE_EVENT_STATUS
 SSE_EVENT_DONE = _SSE_EVENT_DONE
 
 logger = logging.getLogger(__name__)
+
+
+class _CredentialResolverProtocol(Protocol):
+    def get_api_key(self) -> str | None: ...
+
+    def get_credential_field(self, *, field: str) -> str | None: ...
+
+
+class _CompletionModelAdapterProtocol(Protocol):
+    credential_resolver: _CredentialResolverProtocol
+    litellm_model: str
+
+
+@dataclass(frozen=True)
+class PreparedMessageContext:
+    """Pre-fetched planner and flow context for AI Builder message handling."""
+
+    planner_context: AIBuilderPlannerContext
+    litellm_model: str
+    litellm_kwargs: dict[str, object]
+    flow: "Flow | None"
+    assistant_snapshots: dict[UUID, dict[str, Any]] | None
 
 
 class AIBuilderService:
@@ -93,7 +122,8 @@ class AIBuilderService:
             raise BadRequestException("flow_id is required for edit sessions.")
 
         if flow_id is not None:
-            await self.flow_service.get_flow(flow_id)
+            flow = await self.flow_service.get_flow(flow_id)
+            self._assert_flow_in_space(flow=flow, space_id=space_id)
 
         should_resume_existing = target_kind == TargetKind.EDIT and not force_new
         if should_resume_existing:
@@ -192,6 +222,88 @@ class AIBuilderService:
         )
         return await self.get_session(session_id)
 
+    async def resolve_planner_params(self, model: Any) -> tuple[str, dict[str, object]]:
+        """Resolve LiteLLM model name and provider kwargs for the planner model."""
+        resolve_params = getattr(self.completion_service, "resolve_litellm_params", None)
+        if callable(resolve_params):
+            resolved_candidate = resolve_params(model)
+            if inspect.isawaitable(resolved_candidate):
+                resolved_candidate = await resolved_candidate
+            if (
+                isinstance(resolved_candidate, tuple)
+                and len(resolved_candidate) == 2
+                and isinstance(resolved_candidate[0], str)
+                and isinstance(resolved_candidate[1], dict)
+            ):
+                return resolved_candidate
+
+        adapter = cast(
+            _CompletionModelAdapterProtocol,
+            await self.completion_service._get_adapter(model),
+        )
+        litellm_kwargs: dict[str, object] = {}
+        api_key = adapter.credential_resolver.get_api_key()
+        if api_key:
+            litellm_kwargs["api_key"] = api_key
+
+        field_mapping = {
+            "endpoint": "api_base",
+            "api_version": "api_version",
+            "api_type": "api_type",
+            "organization": "organization",
+            "deployment_name": "deployment_name",
+        }
+        for field, key in field_mapping.items():
+            value = adapter.credential_resolver.get_credential_field(field=field)
+            if value:
+                litellm_kwargs[key] = value
+
+        return adapter.litellm_model, litellm_kwargs
+
+    async def prepare_message_context(
+        self,
+        *,
+        session: BuilderSession,
+        space,
+        model_id: UUID | None,
+        tenant_flow_settings: dict[str, Any] | None,
+        planner_params_resolver: Callable[[Any], Awaitable[tuple[str, dict[str, object]]]]
+        | None = None,
+    ) -> PreparedMessageContext:
+        """Pre-fetch planner, provider, and flow-edit context before SSE streaming."""
+        planner_context = build_planner_context(
+            space,
+            model_id=model_id,
+            tenant_flow_settings=tenant_flow_settings,
+        )
+        resolve_planner_params = planner_params_resolver or self.resolve_planner_params
+        litellm_model, litellm_kwargs = await resolve_planner_params(planner_context.model)
+
+        flow = None
+        assistant_snapshots = None
+        if session.flow_id is not None:
+            flow = await self.flow_service.get_flow(session.flow_id)
+            self._assert_flow_in_space(flow=flow, space_id=session.space_id)
+            assistant_snapshots = await self.flow_service.get_flow_assistant_snapshots(
+                flow
+            )
+
+        return PreparedMessageContext(
+            planner_context=planner_context,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            flow=flow,
+            assistant_snapshots=assistant_snapshots,
+        )
+
+    @staticmethod
+    def _assert_flow_in_space(*, flow: Any, space_id: UUID) -> None:
+        if getattr(flow, "space_id", None) != space_id:
+            raise BadRequestException(
+                "Flow space does not match the AI builder session space.",
+                code="flow_space_mismatch",
+            )
+
     async def send_message(
         self,
         *,
@@ -248,7 +360,6 @@ class AIBuilderService:
         """Create a new plan version with a structured revision.
 
         - keep_current_description: copies spec with description_override_manual=True
-        - regenerate_description: placeholder for constrained LLM description retry
         """
         from intric.flows.ai_builder.ai_builder_plan_store import persist_plan
         from intric.flows.ai_builder.ai_builder_plan_store import build_plan_envelope

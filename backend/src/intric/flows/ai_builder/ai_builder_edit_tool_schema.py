@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from intric.flows.flow import FlowStep
+from intric.flows.domain.flow import FlowStep
 
 EDIT_FLOW_TOOL_NAME = "edit_flow"
 

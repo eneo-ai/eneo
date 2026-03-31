@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 from intric.flows.ai_builder.ai_builder_discovery import build_discovery_block_message
 
 if TYPE_CHECKING:
-    from intric.flows.flow import Flow
+    from intric.flows.domain.flow import Flow
     from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 
 

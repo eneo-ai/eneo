@@ -64,7 +64,7 @@ from intric.main.logging import get_logger
 from intric.model_providers.domain.model_defaults import lookup_model_defaults
 
 if TYPE_CHECKING:
-    from intric.flows.flow import Flow
+    from intric.flows.domain.flow import Flow
     from intric.users.user import UserInDB
 
 logger = get_logger(__name__)

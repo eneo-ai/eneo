@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from intric.flows.flow import FlowRun, FlowStepResult
+from intric.flows.domain.flow import FlowRun, FlowStepResult
 from intric.flows.flow_input_limits import DEFAULT_MAX_AUDIO_FILES_PER_RUN
 from intric.flows.runtime_input import build_runtime_input_config
 from intric.flows.runtime.input_files import (

@@ -36,6 +36,7 @@ def _run() -> FlowRun:
         flow_version=1,
         user_id=uuid4(),
         tenant_id=uuid4(),
+        trace_id=uuid4(),
         status=FlowRunStatus.RUNNING,
         input_payload_json={"text": '{"title":"A"}'},
         created_at=now,

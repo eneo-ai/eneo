@@ -39,7 +39,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputType,
     StepSpec,
 )
-from intric.flows.flow import FlowStep
+from intric.flows.domain.flow import FlowStep
 
 _RUNTIME_STEP_ALIAS_PATTERN = re.compile(r"\{\{\s*step_(\d+)(\.[^{}]+?)\s*\}\}")
 

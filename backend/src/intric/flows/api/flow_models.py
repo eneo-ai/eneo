@@ -1,64 +1,25 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from typing import Literal
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from intric.flows.flow import FlowRunStatus, FlowStepResultStatus
+from intric.flows.enums import (
+    FlowInputSource,
+    FlowInputType,
+    FlowMcpPolicy,
+    FlowOutputMode,
+    FlowOutputType,
+    FlowRunStatus,
+    FlowRuntimeInputFormat,
+    FlowStepAttemptStatus,
+    FlowStepResultStatus,
+    FlowTemplateAssetStatus,
+)
 from intric.main.models import NOT_PROVIDED, NotProvided, partial_model
-
-
-class FlowInputSource(str, Enum):
-    FLOW_INPUT = "flow_input"
-    PREVIOUS_STEP = "previous_step"
-    ALL_PREVIOUS_STEPS = "all_previous_steps"
-    HTTP_GET = "http_get"
-    HTTP_POST = "http_post"
-
-
-class FlowInputType(str, Enum):
-    TEXT = "text"
-    JSON = "json"
-    IMAGE = "image"
-    AUDIO = "audio"
-    DOCUMENT = "document"
-    FILE = "file"
-    ANY = "any"
-
-
-class FlowOutputType(str, Enum):
-    TEXT = "text"
-    JSON = "json"
-    PDF = "pdf"
-    DOCX = "docx"
-
-
-class FlowOutputMode(str, Enum):
-    PASS_THROUGH = "pass_through"
-    HTTP_POST = "http_post"
-    TRANSCRIBE_ONLY = "transcribe_only"
-    TEMPLATE_FILL = "template_fill"
-
-
-class FlowMcpPolicy(str, Enum):
-    INHERIT = "inherit"
-    RESTRICTED = "restricted"
-
-
-class FlowRuntimeInputFormat(str, Enum):
-    DOCUMENT = "document"
-    AUDIO = "audio"
-    FILE = "file"
-
-
-class FlowTemplateAssetStatus(str, Enum):
-    READY = "ready"
-    NEEDS_ACTION = "needs_action"
-    READ_ONLY = "read_only"
-    UNAVAILABLE = "unavailable"
 
 
 FLOW_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
@@ -116,6 +77,7 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "flow_version": 3,
     "user_id": "00000000-0000-0000-0000-000000000030",
     "tenant_id": "00000000-0000-0000-0000-000000000010",
+    "trace_id": "00000000-0000-0000-0000-000000000302",
     "status": "queued",
     "cancelled_at": None,
     "input_payload_json": {"employee_name": "Alex Example"},
@@ -369,6 +331,10 @@ class FlowPublic(FlowSparsePublic):
     steps: list[FlowStepPublic]
 
 
+class StepRunInput(BaseModel):
+    file_ids: list[UUID] = Field(default_factory=list)
+
+
 class FlowRunCreateRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -388,7 +354,7 @@ class FlowRunCreateRequest(BaseModel):
 
     expected_flow_version: int | None = None
     input_payload_json: dict[str, Any] | None = None
-    step_inputs: dict[UUID, dict[str, list[UUID]]] | None = None
+    step_inputs: dict[UUID, StepRunInput] | None = None
     file_ids: list[UUID] | None = None
 
 
@@ -408,6 +374,7 @@ class FlowRunPublic(BaseModel):
     flow_version: int
     user_id: UUID | None = None
     tenant_id: UUID
+    trace_id: UUID
     status: FlowRunStatus
     cancelled_at: datetime | None = None
     input_payload_json: dict[str, Any] | None = None
@@ -454,15 +421,22 @@ class FlowRunStepPublic(BaseModel):
     )
 
     id: UUID | None = None
+    flow_run_id: UUID | None = None
+    flow_id: UUID | None = None
+    tenant_id: UUID | None = None
     step_id: UUID | None = None
     step_order: int
     assistant_id: UUID | None = None
     status: FlowStepResultStatus
     input_payload_json: dict[str, Any] | None = None
     output_payload_json: dict[str, Any] | None = None
+    effective_prompt: str | None = None
+    model_parameters_json: dict[str, Any] | None = None
     num_tokens_input: int | None = None
     num_tokens_output: int | None = None
     error_message: str | None = None
+    flow_step_execution_hash: str | None = None
+    tool_calls_metadata: list[dict[str, Any]] | dict[str, Any] | None = None
     diagnostics: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
@@ -475,11 +449,55 @@ class FlowRunRedispatchResponse(BaseModel):
     redispatched_count: int
 
 
+class GraphNode(BaseModel):
+    id: str
+    label: str
+    type: str
+    step_order: int | None = None
+    input_source: str | None = None
+    input_type: str | None = None
+    output_type: str | None = None
+    output_mode: str | None = None
+    mcp_policy: str | None = None
+    output_classification_override: int | None = None
+    run_status: str | None = None
+    num_tokens_input: int | None = None
+    num_tokens_output: int | None = None
+    error_message: str | None = None
+
+
+class GraphEdge(BaseModel):
+    source: str
+    target: str
+    kind: str | None = None
+    source_step_order: int | None = None
+    target_step_order: int | None = None
+    style: str | None = None
+    label: str | None = None
+
+
 class GraphResponse(BaseModel):
     model_config = ConfigDict(json_schema_extra={"example": GRAPH_RESPONSE_EXAMPLE})
 
-    nodes: list[dict[str, Any]]
-    edges: list[dict[str, Any]]
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+
+
+class HttpTestRequest(BaseModel):
+    config: dict[str, Any]
+    direction: Literal["input", "output"] = "output"
+    method: str = "POST"
+    test_variables: dict[str, Any] | None = None
+
+
+class HttpTestResponse(BaseModel):
+    success: bool
+    status_code: int | None = None
+    duration_ms: float = 0.0
+    response_preview: str | None = None
+    request_preview: dict[str, Any] | None = None
+    error_code: str | None = None
+    error_message: str | None = None
 
 
 class FlowTemplatePlaceholderPublic(BaseModel):
@@ -547,12 +565,23 @@ class FlowTemplateReadinessPublic(BaseModel):
     message_code: str | None = None
 
 
+class FormFieldPublic(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    type: str
+    label: str | None = None
+    required: bool = False
+    options: list[str] | None = None
+    order: int | None = None
+
+
 class FlowRunContractPublic(BaseModel):
     model_config = ConfigDict(json_schema_extra={"example": FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE})
 
     flow_id: UUID
     published_flow_version: int
-    form_fields: list[dict[str, Any]] = Field(default_factory=list)
+    form_fields: list[FormFieldPublic] = Field(default_factory=list)
     steps_requiring_input: list[FlowRuntimeInputContractPublic] = Field(default_factory=list)
     aggregate_max_files: int | None = None
     template_readiness: list[FlowTemplateReadinessPublic] = Field(default_factory=list)
@@ -618,6 +647,37 @@ class FlowRunDebugRag(BaseModel):
     references_truncated: bool | None = None
 
 
+class FlowRunDebugAttempt(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "attempt_no": 1,
+                "status": "completed",
+                "duration_ms": 5240,
+                "requested_model": "gpt-4.1",
+                "response_model": "gpt-4.1-mini",
+                "provider": "openai",
+                "finish_reason": "stop",
+                "provider_response_id": "resp_123",
+                "num_tokens_input": 321,
+                "num_tokens_output": 118,
+            }
+        }
+    )
+
+    attempt_no: int
+    status: str | None = None
+    duration_ms: int | None = None
+    error_code: str | None = None
+    requested_model: str | None = None
+    response_model: str | None = None
+    provider: str | None = None
+    finish_reason: str | None = None
+    provider_response_id: str | None = None
+    num_tokens_input: int | None = None
+    num_tokens_output: int | None = None
+
+
 class FlowRunDebugStep(BaseModel):
     step_id: str | None = None
     step_order: int | None = None
@@ -627,12 +687,14 @@ class FlowRunDebugStep(BaseModel):
     output: FlowRunDebugOutput
     mcp: FlowRunDebugMcp
     rag: FlowRunDebugRag | None = None
+    attempts: list[FlowRunDebugAttempt] = Field(default_factory=list)
 
 
 class FlowRunDebugRun(BaseModel):
     run_id: str
     flow_id: str
     flow_version: int
+    trace_id: str | None = None
     status: str
 
 
@@ -650,6 +712,35 @@ class FlowRunDebugSecurity(BaseModel):
 
 
 class FlowRunDebugExport(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "schema_version": "eneo.flow.debug-export.v2",
+                "generated_at": "2026-03-31T12:00:00Z",
+                "run": {
+                    "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+                    "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+                    "flow_version": 3,
+                    "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
+                    "status": "completed",
+                },
+                "definition": {
+                    "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+                    "version": 3,
+                    "checksum": "sha256:example",
+                    "steps_count": 1,
+                },
+                "definition_snapshot": {"steps": []},
+                "steps": [],
+                "security": {
+                    "redaction_applied": True,
+                    "classification_field": "output_classification_override",
+                    "mcp_policy_field": "mcp_policy",
+                },
+            }
+        }
+    )
+
     schema_version: str
     generated_at: datetime
     run: FlowRunDebugRun
@@ -659,9 +750,73 @@ class FlowRunDebugExport(BaseModel):
     security: FlowRunDebugSecurity
 
 
+class FlowStepAttemptPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    flow_run_id: UUID
+    flow_id: UUID
+    tenant_id: UUID
+    step_id: UUID | None = None
+    step_order: int
+    attempt_no: int
+    celery_task_id: str | None = None
+    status: FlowStepAttemptStatus
+    error_code: str | None = None
+    error_message: str | None = None
+    requested_model: str | None = None
+    response_model: str | None = None
+    provider: str | None = None
+    finish_reason: str | None = None
+    provider_response_id: str | None = None
+    num_tokens_input: int | None = None
+    num_tokens_output: int | None = None
+    provenance_json: dict[str, Any] | None = None
+    started_at: datetime
+    finished_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class FlowRunEvidenceResponse(BaseModel):
-    run: dict[str, Any]
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "run": FLOW_RUN_PUBLIC_EXAMPLE,
+                "definition_snapshot": {"steps": []},
+                "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
+                "step_attempts": [],
+                "debug_export": FlowRunDebugExport.model_config["json_schema_extra"]["example"],
+            }
+        }
+    )
+
+    run: FlowRunPublic
     definition_snapshot: dict[str, Any]
-    step_results: list[dict[str, Any]]
-    step_attempts: list[dict[str, Any]]
+    step_results: list[FlowRunStepPublic]
+    step_attempts: list[FlowStepAttemptPublic]
     debug_export: FlowRunDebugExport
+
+
+class FlowRunEvidenceExportResponse(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "schema_version": "flow-evidence-export.v2",
+                "generated_at": "2026-03-31T12:00:00Z",
+                "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
+                "bundle": {
+                    "run": FLOW_RUN_PUBLIC_EXAMPLE,
+                    "definition_snapshot": {"steps": []},
+                    "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
+                    "step_attempts": [],
+                    "debug_export": FlowRunDebugExport.model_config["json_schema_extra"]["example"],
+                },
+            }
+        }
+    )
+
+    schema_version: str
+    generated_at: datetime
+    content_hash: str
+    bundle: FlowRunEvidenceResponse

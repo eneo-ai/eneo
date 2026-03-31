@@ -11,6 +11,8 @@ in a single logical transaction.
 
 from __future__ import annotations
 
+from datetime import datetime
+import logging
 import re
 from typing import Any
 from uuid import UUID, uuid4
@@ -19,6 +21,12 @@ from intric.flows.ai_builder.ai_builder_description_semantics import (
     DescriptionProvenance,
     FlowSemanticSignature,
     _description_hash,
+)
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
 )
 from intric.flows.ai_builder.ai_builder_models import (
     ApplyResultResponse,
@@ -42,9 +50,11 @@ from intric.flows.ai_builder.ai_builder_reference_rewriter import (
 from intric.flows.ai_builder.ai_builder_transcription_defaults import (
     apply_audio_transcription_defaults,
 )
-from intric.flows.flow import Flow, FlowStep
+from intric.flows.domain.flow import Flow, FlowStep
 from intric.main.exceptions import BadRequestException
 from intric.prompts.api.prompt_models import PromptCreate
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +68,7 @@ def compile_changeset(
     *,
     default_transcription_model_id: UUID | None = None,
     description_override_manual: bool = False,
+    ai_builder_origin: dict[str, Any] | None = None,
 ) -> FlowChangeSet:
     """Compile a FlowDraftSpecCore into a FlowChangeSet.
 
@@ -139,17 +150,29 @@ def compile_changeset(
                     )
                 )
 
+    resolved_description = _resolve_changeset_flow_description(
+        spec=spec,
+        current_flow=current_flow,
+        description_override_manual=description_override_manual,
+    )
+    effective_spec = (
+        spec
+        if resolved_description == spec.flow_description
+        else spec.model_copy(update={"flow_description": resolved_description})
+    )
+
     # Build metadata_json
     metadata_json = _build_metadata_json(
-        spec,
+        effective_spec,
         current_flow,
         default_transcription_model_id=default_transcription_model_id,
         description_override_manual=description_override_manual,
+        ai_builder_origin=ai_builder_origin,
     )
 
     return FlowChangeSet(
-        flow_name=spec.flow_name,
-        flow_description=spec.flow_description,
+        flow_name=effective_spec.flow_name,
+        flow_description=effective_spec.flow_description,
         description_override_manual=description_override_manual,
         assistants_to_create=assistants_to_create,
         assistants_to_update=assistants_to_update,
@@ -191,127 +214,148 @@ async def execute_changeset(
         ApplyResultResponse with counts and flow_id.
     """
     is_create = flow_id is None
+    created_flow_id: UUID | None = None
 
-    # Step 1: Create new assistants and collect ref → real_id mapping
-    ref_to_assistant_id: dict[str, UUID] = {}
+    try:
+        # Step 1: Create new assistants and collect ref → real_id mapping
+        ref_to_assistant_id: dict[str, UUID] = {}
 
-    if is_create:
-        # For create mode, we need a temporary flow to own the assistants.
-        # Create the flow first with empty steps, then update with real steps.
-        unique_name = await _deduplicate_flow_name(
-            flow_service=flow_service,
-            space_id=space_id,
-            desired_name=changeset.flow_name,
-        )
-        temp_flow = await flow_service.create_flow(
-            space_id=space_id,
-            name=unique_name,
-            description=changeset.flow_description,
-            steps=[],
-            metadata_json=changeset.metadata_json,
-        )
-        flow_id = temp_flow.id
-        # Update changeset flow_name so the returned result reflects the actual name
-        changeset = FlowChangeSet(
-            flow_name=unique_name,
-            flow_description=changeset.flow_description,
-            assistants_to_create=changeset.assistants_to_create,
-            assistants_to_update=changeset.assistants_to_update,
-            assistants_to_delete=changeset.assistants_to_delete,
-            compiled_steps=changeset.compiled_steps,
-            metadata_json=changeset.metadata_json,
-        )
-
-    for assistant_to_create in changeset.assistants_to_create:
-        assistant, _ = await flow_service.create_flow_assistant(
-            flow_id=flow_id,
-            name=assistant_to_create.plan_step_ref,
-        )
-        ref_to_assistant_id[assistant_to_create.plan_step_ref] = assistant.id
-
-        # Configure the assistant with prompt, model, knowledge bases
-        await _configure_assistant(
-            flow_service=flow_service,
-            flow_id=flow_id,
-            assistant_id=assistant.id,
-            assistant_spec=assistant_to_create.assistant_spec,
-        )
-
-    # Step 2: Update existing assistants
-    for assistant_to_update in changeset.assistants_to_update:
-        await _configure_assistant(
-            flow_service=flow_service,
-            flow_id=flow_id,
-            assistant_id=assistant_to_update.existing_assistant_id,
-            assistant_spec=assistant_to_update.assistant_spec,
-        )
-
-    # Step 3: Build final FlowStep list with real assistant IDs
-    final_steps: list[FlowStep] = []
-    for compiled in changeset.compiled_steps:
-        assistant_id = compiled.assistant_id
-        if assistant_id is None:
-            # New step — look up the real ID from the creation mapping
-            assistant_id = ref_to_assistant_id[compiled.plan_step_ref]
-
-        final_steps.append(
-            FlowStep(
-                assistant_id=assistant_id,
-                step_order=compiled.step_order,
-                user_description=compiled.user_description,
-                input_source=compiled.input_source,
-                input_type=compiled.input_type,
-                output_mode=compiled.output_mode,
-                output_type=compiled.output_type,
-                mcp_policy=compiled.mcp_policy,
-                input_bindings=compiled.input_bindings,
-                input_contract=compiled.input_contract,
-                output_contract=compiled.output_contract,
-                input_config=compiled.input_config,
-                output_config=compiled.output_config,
+        if is_create:
+            # For create mode, we need a temporary flow to own the assistants.
+            # Create the flow first with empty steps, then update with real steps.
+            unique_name = await _deduplicate_flow_name(
+                flow_service=flow_service,
+                space_id=space_id,
+                desired_name=changeset.flow_name,
             )
-        )
+            temp_flow = await flow_service.create_flow(
+                space_id=space_id,
+                name=unique_name,
+                description=changeset.flow_description,
+                steps=[],
+                metadata_json=changeset.metadata_json,
+            )
+            flow_id = temp_flow.id
+            created_flow_id = flow_id
+            # Update changeset flow_name so the returned result reflects the actual name
+            changeset = FlowChangeSet(
+                flow_name=unique_name,
+                flow_description=changeset.flow_description,
+                description_override_manual=changeset.description_override_manual,
+                assistants_to_create=changeset.assistants_to_create,
+                assistants_to_update=changeset.assistants_to_update,
+                assistants_to_delete=changeset.assistants_to_delete,
+                compiled_steps=changeset.compiled_steps,
+                metadata_json=changeset.metadata_json,
+            )
+        if flow_id is None:
+            raise BadRequestException("Flow id missing while executing AI builder changeset.")
 
-    # Step 4: Update the flow with final steps
-    if is_create:
-        # Update the temp flow with real steps
-        await flow_service.update_flow(
-            flow_id=flow_id,
-            steps=final_steps,
-        )
-    else:
-        await flow_service.update_flow(
-            flow_id=flow_id,
-            name=changeset.flow_name,
-            description=changeset.flow_description,
-            steps=final_steps,
-            metadata_json=changeset.metadata_json,
-            expected_revision=expected_revision,
-        )
+        for assistant_to_create in changeset.assistants_to_create:
+            assistant, _ = await flow_service.create_flow_assistant(
+                flow_id=flow_id,
+                name=assistant_to_create.plan_step_ref,
+            )
+            ref_to_assistant_id[assistant_to_create.plan_step_ref] = assistant.id
 
-    # Step 5: Delete removed assistants (after flow update removed references)
-    for assistant_to_delete in changeset.assistants_to_delete:
-        await flow_service.delete_flow_assistant(
-            flow_id=flow_id,
-            assistant_id=assistant_to_delete.assistant_id,
+            # Configure the assistant with prompt, model, knowledge bases
+            await _configure_assistant(
+                flow_service=flow_service,
+                flow_id=flow_id,
+                assistant_id=assistant.id,
+                assistant_spec=assistant_to_create.assistant_spec,
+            )
+
+        # Step 2: Update existing assistants
+        for assistant_to_update in changeset.assistants_to_update:
+            if assistant_to_update.existing_assistant_id is None:
+                raise BadRequestException(
+                    "Existing assistant id missing while applying AI builder changeset."
+                )
+            await _configure_assistant(
+                flow_service=flow_service,
+                flow_id=flow_id,
+                assistant_id=assistant_to_update.existing_assistant_id,
+                assistant_spec=assistant_to_update.assistant_spec,
+            )
+
+        # Step 3: Build final FlowStep list with real assistant IDs
+        final_steps: list[FlowStep] = []
+        for compiled in changeset.compiled_steps:
+            assistant_id = compiled.assistant_id
+            if assistant_id is None:
+                # New step — look up the real ID from the creation mapping
+                assistant_id = ref_to_assistant_id[compiled.plan_step_ref]
+
+            final_steps.append(
+                FlowStep(
+                    assistant_id=assistant_id,
+                    step_order=compiled.step_order,
+                    user_description=compiled.user_description,
+                    input_source=compiled.input_source,
+                    input_type=compiled.input_type,
+                    output_mode=compiled.output_mode,
+                    output_type=compiled.output_type,
+                    mcp_policy=compiled.mcp_policy,
+                    input_bindings=compiled.input_bindings,
+                    input_contract=compiled.input_contract,
+                    output_contract=compiled.output_contract,
+                    input_config=compiled.input_config,
+                    output_config=compiled.output_config,
+                )
+            )
+
+        # Step 4: Update the flow with final steps
+        if is_create:
+            # Update the temp flow with real steps
+            await flow_service.update_flow(
+                flow_id=flow_id,
+                steps=final_steps,
+            )
+        else:
+            await flow_service.update_flow(
+                flow_id=flow_id,
+                name=changeset.flow_name,
+                description=changeset.flow_description,
+                steps=final_steps,
+                metadata_json=changeset.metadata_json,
+                expected_revision=expected_revision,
+            )
+
+        # Step 5: Delete removed assistants (after flow update removed references)
+        for assistant_to_delete in changeset.assistants_to_delete:
+            await flow_service.delete_flow_assistant(
+                flow_id=flow_id,
+                assistant_id=assistant_to_delete.assistant_id,
+            )
+
+        # Count changes
+        steps_created = sum(
+            1 for s in changeset.compiled_steps if s.change_kind == StepChangeKind.ADDED
         )
+        steps_updated = sum(
+            1 for s in changeset.compiled_steps if s.change_kind == StepChangeKind.MODIFIED
+        )
+        steps_removed = len(changeset.assistants_to_delete)
 
-    # Count changes
-    steps_created = sum(
-        1 for s in changeset.compiled_steps if s.change_kind == StepChangeKind.ADDED
-    )
-    steps_updated = sum(
-        1 for s in changeset.compiled_steps if s.change_kind == StepChangeKind.MODIFIED
-    )
-    steps_removed = len(changeset.assistants_to_delete)
-
-    return ApplyResultResponse(
-        flow_id=flow_id,  # type: ignore[arg-type]
-        flow_name=changeset.flow_name,
-        steps_created=steps_created,
-        steps_updated=steps_updated,
-        steps_removed=steps_removed,
-    )
+        return ApplyResultResponse(
+            flow_id=flow_id,  # type: ignore[arg-type]
+            flow_name=changeset.flow_name,
+            steps_created=steps_created,
+            steps_updated=steps_updated,
+            steps_removed=steps_removed,
+        )
+    except Exception:
+        if is_create and created_flow_id is not None:
+            try:
+                await flow_service.delete_flow(created_flow_id)
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Failed to clean up temporary AI builder flow after apply error",
+                    exc_info=cleanup_error,
+                    extra={"flow_id": str(created_flow_id), "space_id": str(space_id)},
+                )
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -424,6 +468,7 @@ def _build_metadata_json(
     *,
     default_transcription_model_id: UUID | None = None,
     description_override_manual: bool = False,
+    ai_builder_origin: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Build metadata_json from spec form_fields, preserving existing metadata."""
     # Start with existing metadata or empty dict
@@ -450,13 +495,17 @@ def _build_metadata_json(
         metadata=metadata if metadata else None,
         spec=spec,
         default_transcription_model_id=default_transcription_model_id,
-    )
+    ) or {}
 
     # Stamp description provenance
     metadata = _stamp_description_provenance(
         metadata=metadata,
         spec=spec,
         description_override_manual=description_override_manual,
+    )
+    metadata = _stamp_ai_builder_origin(
+        metadata=metadata,
+        ai_builder_origin=ai_builder_origin,
     )
 
     return metadata if metadata else None
@@ -485,6 +534,116 @@ def _stamp_description_provenance(
     ai_builder["description"] = provenance.model_dump(mode="json")
     result["ai_builder"] = ai_builder
     return result
+
+
+def _stamp_ai_builder_origin(
+    *,
+    metadata: dict[str, Any] | None,
+    ai_builder_origin: dict[str, Any] | None,
+) -> dict[str, Any]:
+    result = dict(metadata or {})
+    if not ai_builder_origin:
+        return result
+
+    normalized_origin = {
+        str(key): _normalize_ai_builder_origin_value(value)
+        for key, value in ai_builder_origin.items()
+        if value is not None
+    }
+    if not normalized_origin:
+        return result
+
+    ai_builder = dict(result.get("ai_builder", {}))
+    ai_builder["origin"] = normalized_origin
+    result["ai_builder"] = ai_builder
+    return result
+
+
+def _normalize_ai_builder_origin_value(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    value_attr = getattr(value, "value", None)
+    if value_attr is not None and not callable(value_attr):
+        return value_attr
+    return value
+
+
+def _resolve_changeset_flow_description(
+    *,
+    spec: FlowDraftSpecCore,
+    current_flow: Flow | None,
+    description_override_manual: bool,
+) -> str:
+    if current_flow is None or description_override_manual:
+        return spec.flow_description
+
+    current_description = current_flow.description or ""
+    if spec.flow_description != current_description:
+        return spec.flow_description
+
+    try:
+        old_sig = FlowSemanticSignature.from_steps(_flow_steps_to_step_specs(current_flow.steps))
+    except ValueError:
+        # Existing flows may contain supported runtime enums outside the AI Builder
+        # subset. Keep the current description rather than failing apply-time
+        # description rewriting for those legacy/manual flows.
+        return spec.flow_description
+    new_sig = FlowSemanticSignature.from_steps(spec.steps)
+    if old_sig == new_sig:
+        return spec.flow_description
+
+    return _rewrite_terminal_output_phrase(
+        description=current_description,
+        old_output_type=old_sig.terminal_output_type,
+        new_output_type=new_sig.terminal_output_type,
+    )
+
+
+def _flow_steps_to_step_specs(steps: list[FlowStep]) -> list[StepSpec]:
+    return [
+        StepSpec(
+            plan_step_ref=f"existing_step_{step.step_order}",
+            name=step.user_description or f"Step {step.step_order}",
+            assistant_spec=AssistantSpec(instructions=""),
+            input_source=InputSource(step.input_source.value),
+            input_type=InputType(step.input_type.value),
+            output_mode=OutputMode(step.output_mode.value),
+            output_type=OutputType(step.output_type.value),
+            input_bindings=step.input_bindings,
+            input_contract=step.input_contract,
+            output_contract=step.output_contract,
+            input_config=step.input_config,
+            output_config=step.output_config,
+            mcp_policy=step.mcp_policy,
+        )
+        for step in steps
+    ]
+
+
+def _rewrite_terminal_output_phrase(
+    *,
+    description: str,
+    old_output_type: str | None,
+    new_output_type: str | None,
+) -> str:
+    output_labels = {
+        "text": "text",
+        "docx": "DOCX",
+        "pdf": "PDF",
+        "json": "JSON",
+    }
+    old_label = output_labels.get(old_output_type or "")
+    new_label = output_labels.get(new_output_type or "")
+    if old_label is None or new_label is None or old_label == new_label:
+        return description
+
+    format_pattern = re.compile(
+        rf"\bi\s+{re.escape(old_label)}-?format\b",
+        flags=re.IGNORECASE,
+    )
+    if format_pattern.search(description):
+        return format_pattern.sub(f"i {new_label}-format", description)
+    return description
 
 
 async def _configure_assistant(

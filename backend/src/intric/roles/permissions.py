@@ -28,6 +28,7 @@ class Permission(str, Enum):
     FLOWS_RUN = "flows_run"
     FLOWS_MANAGE = "flows_manage"
     FLOWS_AI_BUILDER = "flows_ai_builder"
+    FLOWS_TRACE = "flows_trace"
 
 
 _FLOW_PERMISSION_ALIASES: dict[Permission, tuple[Permission, ...]] = {
@@ -48,6 +49,10 @@ _FLOW_PERMISSION_ALIASES: dict[Permission, tuple[Permission, ...]] = {
     ),
     Permission.FLOWS_AI_BUILDER: (
         Permission.FLOWS_AI_BUILDER,
+        Permission.FLOWS,
+    ),
+    Permission.FLOWS_TRACE: (
+        Permission.FLOWS_TRACE,
         Permission.FLOWS,
     ),
 }

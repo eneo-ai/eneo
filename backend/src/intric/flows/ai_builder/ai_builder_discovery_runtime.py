@@ -13,7 +13,7 @@ from intric.flows.ai_builder.ai_builder_semantic_adjudication import (
     should_run_semantic_adjudication,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
-from intric.flows.flow import Flow
+from intric.flows.domain.flow import Flow
 
 
 async def analyze_discovery_runtime(

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from intric.audit.application.audit_service import AuditService
     from intric.files.file_models import File
     from intric.files.transcriber import Transcriber
-    from intric.flows.flow import FlowRun
+    from intric.flows.domain.flow import FlowRun
     from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
     from intric.spaces.space_repo import SpaceRepository
     from intric.users.user import UserInDB

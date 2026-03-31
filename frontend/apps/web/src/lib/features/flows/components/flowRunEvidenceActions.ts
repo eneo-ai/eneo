@@ -1,3 +1,5 @@
+import type { Intric } from "@intric/intric-js";
+
 export function serializeEvidencePayload(payload: unknown): string {
   if (typeof payload === "string") {
     return payload;
@@ -40,4 +42,23 @@ export function downloadJsonArtifact(
   resolved.scheduleRevoke(() => {
     resolved.revokeObjectURL(url);
   });
+}
+
+export async function downloadEvidenceExport(
+  params: {
+    intric: Intric;
+    flowId: string;
+    runId: string;
+  },
+  deps: {
+    triggerDownload?: typeof downloadJsonArtifact;
+  } = {},
+): Promise<void> {
+  const exportPayload = await params.intric.flows.runs.exportEvidence({
+    id: params.runId,
+    flowId: params.flowId,
+    format: "json",
+  });
+  const triggerDownload = deps.triggerDownload ?? downloadJsonArtifact;
+  triggerDownload(`flow-run-evidence-${params.runId}.json`, exportPayload);
 }

@@ -4,7 +4,7 @@ from typing import Any
 
 from intric.files.audio import AudioMimeTypes
 from intric.files.text import TextMimeTypes
-from intric.flows.flow import FlowRuntimeInputConfig
+from intric.flows.domain.flow import FlowRuntimeInputConfig
 from intric.main.exceptions import BadRequestException
 
 _DEFAULT_RUNTIME_LABEL = "Indata"

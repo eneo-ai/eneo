@@ -9,7 +9,7 @@ from intric.flows.ai_builder.ai_builder_reference_rewriter import (
     rewrite_step_spec_variables,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
-from intric.flows.flow import FlowStep
+from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_validators import (
     validate_form_schema,
     validate_steps,

@@ -76,6 +76,23 @@ describe("flows templates endpoint", () => {
     expect(fetch.mock.calls[0][1].method).toBe("post");
   });
 
+  it("exports evidence from the canonical flow run route", async () => {
+    const fetch = vi.fn(async () => ({
+      schema_version: "flow-evidence-export.v2",
+      content_hash: "abc123"
+    }));
+    const flows = initFlows({ fetch });
+
+    await flows.runs.exportEvidence({ id: "run-1", flowId: "flow-1" });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/flow-1/runs/run-1/evidence/export");
+    expect(fetch.mock.calls[0][1]).toMatchObject({
+      method: "get",
+      params: { query: { format: "json" } }
+    });
+  });
+
   it("creates flow run with canonical step_inputs payload", async () => {
     const fetch = vi.fn(async () => ({ id: "run-1" }));
     const flows = initFlows({ fetch });

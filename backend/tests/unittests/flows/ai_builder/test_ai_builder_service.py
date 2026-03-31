@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -31,6 +32,7 @@ from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifec
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_service import (
     AIBuilderService,
+    PreparedMessageContext,
     SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
     SSE_EVENT_PLAN,
@@ -89,6 +91,7 @@ def _make_plan(
     tenant_id: UUID | None = None,
     status: PlanStatus = PlanStatus.PROPOSED,
     spec: FlowDraftSpecCore | None = None,
+    edit_result_json: dict[str, object] | None = None,
 ) -> BuilderPlan:
     if spec is None:
         spec = FlowDraftSpecCore(
@@ -111,6 +114,7 @@ def _make_plan(
         spec=spec,
         spec_hash=spec.spec_hash(),
         envelope=envelope,
+        edit_result_json=edit_result_json,
     )
 
 
@@ -243,14 +247,22 @@ class TestCreateSession:
     async def test_create_edit_session_reuses_existing_matching_draft(self):
         user = _make_user()
         repo = AsyncMock()
+        flow_id = uuid4()
+        space_id = uuid4()
         existing = _make_session(
             tenant_id=user.tenant_id,
             actor_user_id=user.id,
             target_kind=TargetKind.EDIT,
-            flow_id=uuid4(),
+            flow_id=flow_id,
+            space_id=space_id,
         )
         repo.find_latest_resumable_session.return_value = existing
-        service = _make_service(user=user, repo=repo)
+        flow_service = AsyncMock()
+        flow_service.get_flow.return_value = SimpleNamespace(
+            id=flow_id,
+            space_id=space_id,
+        )
+        service = _make_service(user=user, repo=repo, flow_service=flow_service)
 
         result = await service.create_session(
             space_id=existing.space_id,
@@ -329,14 +341,38 @@ class TestCreateSession:
         repo.find_latest_resumable_session.return_value = None
         service = _make_service(flow_service=flow_service, repo=repo)
         flow_id = uuid4()
+        space_id = uuid4()
+        flow_service.get_flow.return_value = SimpleNamespace(
+            id=flow_id,
+            space_id=space_id,
+        )
 
         await service.create_session(
-            space_id=uuid4(),
+            space_id=space_id,
             target_kind=TargetKind.EDIT,
             flow_id=flow_id,
         )
 
         flow_service.get_flow.assert_called_once_with(flow_id)
+
+    @pytest.mark.anyio
+    async def test_create_edit_session_rejects_flow_space_mismatch(self):
+        flow_service = AsyncMock()
+        repo = AsyncMock()
+        repo.find_latest_resumable_session.return_value = None
+        service = _make_service(flow_service=flow_service, repo=repo)
+        flow_id = uuid4()
+        flow_service.get_flow.return_value = SimpleNamespace(
+            id=flow_id,
+            space_id=uuid4(),
+        )
+
+        with pytest.raises(BadRequestException, match="space"):
+            await service.create_session(
+                space_id=uuid4(),
+                target_kind=TargetKind.EDIT,
+                flow_id=flow_id,
+            )
 
     @pytest.mark.anyio
     async def test_create_session_with_nonexistent_flow_propagates_error(self):
@@ -560,6 +596,164 @@ class TestServiceComposition:
             plan_id=plan_id,
             expected_revision=7,
         )
+
+
+class TestPlannerContextPreparation:
+    @pytest.mark.anyio
+    async def test_prepare_message_context_prefetches_planner_and_flow_context(self):
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+        completion_service = AsyncMock()
+
+        model = _make_model()
+        model.max_input_tokens = 4096
+        model.max_output_tokens = 2048
+        model.provider_type = "openai"
+
+        space = MagicMock()
+        space.completion_models = [model]
+        space.collections = []
+        space.get_default_completion_model.return_value = model
+
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            flow_id=uuid4(),
+        )
+        flow = MagicMock()
+        flow.id = session.flow_id
+        flow.space_id = session.space_id
+        snapshots = {uuid4(): {"name": "Assistant"}}
+        flow_service.get_flow.return_value = flow
+        flow_service.get_flow_assistant_snapshots.return_value = snapshots
+        completion_service.resolve_litellm_params.return_value = (
+            "azure/gpt-4",
+            {
+                "api_key": "sk-test",
+                "api_base": "https://azure.example.com",
+            },
+        )
+
+        service = _make_service(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+            completion_service=completion_service,
+        )
+
+        result = await service.prepare_message_context(
+            session=session,
+            space=space,
+            model_id=model.id,
+            tenant_flow_settings=None,
+        )
+
+        assert isinstance(result, PreparedMessageContext)
+        assert result.litellm_model == "azure/gpt-4"
+        assert result.litellm_kwargs == {
+            "api_key": "sk-test",
+            "api_base": "https://azure.example.com",
+        }
+        assert result.flow is flow
+        assert result.assistant_snapshots == snapshots
+        assert result.planner_context.available_models == [
+            {"id": str(model.id), "name": "test-model", "provider": "openai"}
+        ]
+        completion_service.resolve_litellm_params.assert_awaited_once_with(model)
+        flow_service.get_flow.assert_awaited_once_with(session.flow_id)
+        flow_service.get_flow_assistant_snapshots.assert_awaited_once_with(flow)
+
+    @pytest.mark.anyio
+    async def test_prepare_message_context_rejects_flow_space_mismatch(self):
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+        completion_service = AsyncMock()
+
+        model = _make_model()
+        space = MagicMock()
+        space.id = uuid4()
+        space.completion_models = [model]
+        space.collections = []
+        space.get_default_completion_model.return_value = model
+
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            flow_id=uuid4(),
+            space_id=space.id,
+        )
+        flow_service.get_flow.return_value = SimpleNamespace(
+            id=session.flow_id,
+            space_id=uuid4(),
+        )
+        completion_service.resolve_litellm_params.return_value = (
+            "openai/gpt-4",
+            {"api_key": "sk-test"},
+        )
+
+        service = _make_service(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+            completion_service=completion_service,
+        )
+
+        with pytest.raises(BadRequestException, match="space"):
+            await service.prepare_message_context(
+                session=session,
+                space=space,
+                model_id=model.id,
+                tenant_flow_settings=None,
+            )
+
+    @pytest.mark.anyio
+    async def test_resolve_planner_params_falls_back_to_adapter_credentials(self):
+        completion_service = MagicMock()
+        adapter = _make_adapter()
+        adapter.credential_resolver.get_credential_field.side_effect = (
+            lambda *, field: {
+                "endpoint": "https://azure.example.com",
+                "api_version": "2024-02-15-preview",
+                "api_type": "azure",
+                "organization": "org-123",
+                "deployment_name": "gpt4-prod",
+            }.get(field)
+        )
+        completion_service._get_adapter = AsyncMock(return_value=adapter)
+
+        service = _make_service(completion_service=completion_service)
+
+        model = _make_model()
+        litellm_model, litellm_kwargs = await service.resolve_planner_params(model)
+
+        assert litellm_model == "openai/gpt-4"
+        assert litellm_kwargs == {
+            "api_key": "sk-test",
+            "api_base": "https://azure.example.com",
+            "api_version": "2024-02-15-preview",
+            "api_type": "azure",
+            "organization": "org-123",
+            "deployment_name": "gpt4-prod",
+        }
+        completion_service._get_adapter.assert_awaited_once_with(model)
+
+    @pytest.mark.anyio
+    async def test_resolve_planner_params_returns_sync_resolver_tuple(self):
+        completion_service = MagicMock()
+        completion_service.resolve_litellm_params = MagicMock(
+            return_value=("anthropic/claude-3-7-sonnet", {"api_key": "sk-sync"})
+        )
+        completion_service._get_adapter = AsyncMock()
+
+        service = _make_service(completion_service=completion_service)
+
+        model = _make_model()
+        litellm_model, litellm_kwargs = await service.resolve_planner_params(model)
+
+        assert litellm_model == "anthropic/claude-3-7-sonnet"
+        assert litellm_kwargs == {"api_key": "sk-sync"}
+        completion_service.resolve_litellm_params.assert_called_once_with(model)
+        completion_service._get_adapter.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -2150,6 +2344,83 @@ class TestApprovePlan:
 
 
 # ---------------------------------------------------------------------------
+# Revise plan tests
+# ---------------------------------------------------------------------------
+
+
+class TestRevisePlan:
+    @pytest.mark.anyio
+    @patch("intric.flows.ai_builder.ai_builder_plan_store.persist_plan", new_callable=AsyncMock)
+    async def test_keep_current_description_sets_manual_override(self, mock_persist_plan):
+        user = _make_user()
+        repo = AsyncMock()
+
+        plan = _make_plan(
+            status=PlanStatus.PROPOSED,
+            tenant_id=user.tenant_id,
+            edit_result_json={"other_key": "value"},
+        )
+        session = _make_session(
+            session_id=plan.session_id,
+            actor_user_id=user.id,
+            tenant_id=user.tenant_id,
+        )
+        revised_plan = _make_plan(
+            session_id=plan.session_id,
+            tenant_id=user.tenant_id,
+            edit_result_json={
+                "other_key": "value",
+                "description_override_manual": True,
+            },
+        )
+
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+        mock_persist_plan.return_value = revised_plan
+
+        service = _make_service(user=user, repo=repo)
+        result = await service.revise_plan(
+            plan_id=plan.id,
+            revision_type="keep_current_description",
+        )
+
+        assert result == revised_plan
+        assert mock_persist_plan.await_count == 1
+        assert (
+            mock_persist_plan.await_args.kwargs["edit_result_json"][
+                "description_override_manual"
+            ]
+            is True
+        )
+
+    @pytest.mark.anyio
+    async def test_unsupported_revision_type_raises(self):
+        user = _make_user()
+        repo = AsyncMock()
+
+        plan = _make_plan(
+            status=PlanStatus.PROPOSED,
+            tenant_id=user.tenant_id,
+        )
+        session = _make_session(
+            session_id=plan.session_id,
+            actor_user_id=user.id,
+            tenant_id=user.tenant_id,
+        )
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+
+        service = _make_service(user=user, repo=repo)
+        with pytest.raises(BadRequestException) as exc_info:
+            await service.revise_plan(
+                plan_id=plan.id,
+                revision_type="regenerate_description",
+            )
+
+        assert exc_info.value.code == "unsupported_revision_type"
+
+
+# ---------------------------------------------------------------------------
 # Apply plan tests
 # ---------------------------------------------------------------------------
 
@@ -2579,6 +2850,56 @@ class TestApplyPlan:
         apply_result = await service.apply_plan(plan_id=plan.id, expected_revision=7)
 
         assert apply_result.steps_updated == 1
+
+    @pytest.mark.anyio
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
+    async def test_apply_plan_passes_manual_description_override_to_compile(
+        self, mock_compile, mock_execute
+    ):
+        from intric.flows.ai_builder.ai_builder_models import ApplyResultResponse
+
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+
+        flow_id = uuid4()
+        plan = _make_plan(
+            status=PlanStatus.APPROVED,
+            tenant_id=user.tenant_id,
+            edit_result_json={"description_override_manual": True},
+        )
+        session = _make_session(
+            session_id=plan.session_id,
+            actor_user_id=user.id,
+            tenant_id=user.tenant_id,
+            target_kind=TargetKind.EDIT,
+            flow_id=flow_id,
+        )
+
+        flow = MagicMock()
+        flow.draft_revision = 4
+        flow.space_id = session.space_id
+        flow.published_version = None
+        flow.id = flow_id
+        flow.steps = []
+        flow_service.get_flow.return_value = flow
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+
+        mock_compile.return_value = MagicMock()
+        mock_execute.return_value = ApplyResultResponse(
+            flow_id=flow_id,
+            flow_name="Flow",
+            steps_created=0,
+            steps_updated=1,
+            steps_removed=0,
+        )
+
+        service = _make_service(user=user, repo=repo, flow_service=flow_service)
+        await service.apply_plan(plan_id=plan.id, expected_revision=4)
+
+        assert mock_compile.call_args.kwargs["description_override_manual"] is True
 
     @pytest.mark.anyio
     async def test_apply_published_flow_raises_flow_is_published(self):

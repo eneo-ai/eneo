@@ -47,6 +47,7 @@ def test_flow_granular_permissions_accept_legacy_flows_permission():
     assert has_permission(permissions, Permission.FLOWS_RUN) is True
     assert has_permission(permissions, Permission.FLOWS_MANAGE) is True
     assert has_permission(permissions, Permission.FLOWS_AI_BUILDER) is True
+    assert has_permission(permissions, Permission.FLOWS_TRACE) is True
 
 
 def test_legacy_flows_permission_is_not_implied_by_granular_permissions():

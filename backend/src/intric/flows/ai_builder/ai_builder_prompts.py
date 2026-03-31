@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from intric.flows.flow import Flow
+from intric.flows.domain.flow import Flow
 from intric.flows.ai_builder.ai_builder_models import (
     ConversationMessage,
     RequirementsSummaryPayload,

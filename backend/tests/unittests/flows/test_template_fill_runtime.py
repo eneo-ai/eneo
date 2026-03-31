@@ -56,6 +56,7 @@ def _run() -> FlowRun:
         flow_version=3,
         user_id=uuid4(),
         tenant_id=uuid4(),
+        trace_id=uuid4(),
         status=FlowRunStatus.RUNNING,
         input_payload_json={"title": "Social medias påverkan", "author": "Anders Svensson"},
         created_at=now,

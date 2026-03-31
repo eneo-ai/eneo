@@ -15,7 +15,7 @@ from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_plan_store import append_session_messages
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_tools import ASK_STRUCTURED_QUESTION_TOOL_NAME
-from intric.flows.flow import Flow
+from intric.flows.domain.flow import Flow
 
 
 async def persist_backend_question(

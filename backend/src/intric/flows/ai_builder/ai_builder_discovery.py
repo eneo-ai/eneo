@@ -67,7 +67,7 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     question_is_already_resolved,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
-from intric.flows.flow import Flow
+from intric.flows.domain.flow import Flow
 
 
 def analyze_discovery(

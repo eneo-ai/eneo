@@ -5,6 +5,10 @@ from uuid import uuid4
 import pytest
 
 from intric.flows.flow import FlowStep
+from intric.flows.flow_validators_form import (
+    normalize_legacy_form_schema,
+    validate_variable_alias_collisions,
+)
 from intric.flows.flow_validators import validate_form_schema, validate_steps
 from intric.main.exceptions import BadRequestException
 
@@ -194,3 +198,39 @@ def test_validate_steps_allows_explicit_empty_template_bindings_for_publish():
         ],
         require_complete_template_fill_config=True,
     )
+
+
+def test_normalize_legacy_form_schema_maps_legacy_string_type_to_text():
+    metadata_json = {
+        "form_schema": {
+            "fields": [
+                {"name": "CustomerName", "type": "string"},
+                {"name": "Category", "type": "select"},
+            ]
+        }
+    }
+
+    normalized = normalize_legacy_form_schema(metadata_json)
+
+    assert normalized == {
+        "form_schema": {
+            "fields": [
+                {"name": "CustomerName", "type": "text"},
+                {"name": "Category", "type": "select"},
+            ]
+        }
+    }
+
+
+def test_validate_variable_alias_collisions_rejects_step_name_matching_form_field():
+    with pytest.raises(BadRequestException, match="conflicts with form field name"):
+        validate_variable_alias_collisions(
+            steps=[_step(user_description="CaseId")],
+            metadata_json={
+                "form_schema": {
+                    "fields": [
+                        {"name": "caseid", "type": "text"},
+                    ]
+                }
+            },
+        )

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -11,9 +13,12 @@ from intric.flows.flow import (
     Flow,
     FlowRun,
     FlowRunStatus,
+    FlowStepAttempt,
+    FlowStepResult,
     FlowStep,
     FlowVersion,
 )
+from intric.flows.enums import FlowStepAttemptStatus, FlowStepResultStatus
 from intric.flows.flow_run_service import FlowRunService
 from intric.main.exceptions import BadRequestException, NotFoundException, UnauthorizedException
 
@@ -66,12 +71,92 @@ def _run(user, flow_id) -> FlowRun:
         flow_version=1,
         user_id=user.id,
         tenant_id=user.tenant_id,
+        trace_id=uuid4(),
         status=FlowRunStatus.QUEUED,
         cancelled_at=None,
         input_payload_json={"input": "value"},
         output_payload_json=None,
         error_message=None,
         job_id=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _step_result_record(
+    run: FlowRun,
+    *,
+    step_order: int,
+    input_payload_json: dict[str, object] | None = None,
+    output_payload_json: dict[str, object] | None = None,
+    effective_prompt: str | None = None,
+    error_message: str | None = None,
+) -> FlowStepResult:
+    now = datetime.now(timezone.utc)
+    return FlowStepResult(
+        id=uuid4(),
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=uuid4(),
+        step_order=step_order,
+        assistant_id=uuid4(),
+        input_payload_json=input_payload_json,
+        effective_prompt=effective_prompt,
+        output_payload_json=output_payload_json,
+        model_parameters_json=None,
+        num_tokens_input=None,
+        num_tokens_output=None,
+        status=FlowStepResultStatus.COMPLETED,
+        error_message=error_message,
+        flow_step_execution_hash=None,
+        tool_calls_metadata=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _step_attempt_record(
+    run: FlowRun,
+    *,
+    step_order: int,
+    attempt_no: int = 1,
+    error_message: str | None = None,
+    error_code: str | None = None,
+    requested_model: str | None = None,
+    response_model: str | None = None,
+    provider: str | None = None,
+    finish_reason: str | None = None,
+    provider_response_id: str | None = None,
+    num_tokens_input: int | None = None,
+    num_tokens_output: int | None = None,
+    provenance_json: dict[str, object] | None = None,
+    started_at: datetime | None = None,
+    finished_at: datetime | None = None,
+) -> FlowStepAttempt:
+    now = datetime.now(timezone.utc)
+    return FlowStepAttempt(
+        id=uuid4(),
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=uuid4(),
+        step_order=step_order,
+        attempt_no=attempt_no,
+        celery_task_id=None,
+        status=FlowStepAttemptStatus.COMPLETED,
+        error_code=error_code,
+        error_message=error_message,
+        requested_model=requested_model,
+        response_model=response_model,
+        provider=provider,
+        finish_reason=finish_reason,
+        provider_response_id=provider_response_id,
+        num_tokens_input=num_tokens_input,
+        num_tokens_output=num_tokens_output,
+        provenance_json=provenance_json,
+        started_at=started_at or now,
+        finished_at=finished_at,
         created_at=now,
         updated_at=now,
     )
@@ -568,6 +653,11 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
     assert payload["step_inputs"] == {
         str(runtime_step.id): {"file_ids": [str(file_id)]}
     }
+    flow_version_repo.get.assert_awaited_once_with(
+        flow_id=flow.id,
+        version=2,
+        tenant_id=user.tenant_id,
+    )
 
 
 @pytest.mark.asyncio
@@ -1258,34 +1348,32 @@ async def test_get_evidence_redacts_sensitive_values(user):
         updated_at=datetime.now(timezone.utc),
     )
     flow_run_repo.list_step_results.return_value = [
-        SimpleNamespace(
-            model_dump=lambda mode="json": {
-                "step_order": 1,
-                "input_payload_json": {
-                    "text": "safe",
-                    "token": "abc",
-                    "x-api-key": "abc-2",
-                    "auth.token": "abc-3",
-                    "contract_validation": {
-                        "schema_type_hint": "object",
-                        "parse_attempted": True,
-                        "parse_succeeded": False,
-                        "candidate_type": "str",
-                    },
+        _step_result_record(
+            run,
+            step_order=1,
+            input_payload_json={
+                "text": "safe",
+                "token": "abc",
+                "x-api-key": "abc-2",
+                "auth.token": "abc-3",
+                "contract_validation": {
+                    "schema_type_hint": "object",
+                    "parse_attempted": True,
+                    "parse_succeeded": False,
+                    "candidate_type": "str",
                 },
-                "effective_prompt": "Authorization: Bearer xyz",
-                "output_payload_json": {
-                    "url": "https://bob:pw@example.org/path?client_secret=x&client.secret=z&api-key=y",
-                },
-            }
+            },
+            effective_prompt="Authorization: Bearer xyz",
+            output_payload_json={
+                "url": "https://bob:pw@example.org/path?client_secret=x&client.secret=z&api-key=y",
+            },
         )
     ]
     flow_run_repo.list_step_attempts.return_value = [
-        SimpleNamespace(
-            model_dump=lambda mode="json": {
-                "attempt_no": 1,
-                "error_message": "Bearer should-hide",
-            }
+        _step_attempt_record(
+            run,
+            step_order=1,
+            error_message="Bearer should-hide",
         )
     ]
 
@@ -1325,7 +1413,7 @@ async def test_get_evidence_redacts_sensitive_values(user):
         "https://example.org/path?client_secret=%5BREDACTED%5D&client.secret=%5BREDACTED%5D&api-key=%5BREDACTED%5D"
     )
     assert evidence["step_attempts"][0]["error_message"] == "Bearer [REDACTED]"
-    assert evidence["debug_export"]["schema_version"] == "eneo.flow.debug-export.v1"
+    assert evidence["debug_export"]["schema_version"] == "eneo.flow.debug-export.v2"
     assert evidence["debug_export"]["definition"]["checksum"] == "checksum"
     assert evidence["debug_export"]["run"]["status"] == "queued"
     assert evidence["debug_export"]["steps"][0]["input"]["source"] is None
@@ -1367,7 +1455,8 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
         updated_at=datetime.now(timezone.utc),
     )
     flow_run_repo.list_step_results.return_value = [
-        SimpleNamespace(
+        _step_result_record(
+            run,
             step_order=1,
             input_payload_json={
                 "text": "hello",
@@ -1405,45 +1494,6 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
                     ],
                 },
             },
-            model_dump=lambda mode="json": {
-                "step_order": 1,
-                "input_payload_json": {
-                    "text": "hello",
-                    "rag": {
-                        "attempted": True,
-                        "status": "success",
-                        "version": 1,
-                        "timeout_seconds": 30,
-                        "include_info_blobs": False,
-                        "chunks_retrieved": 5,
-                        "raw_chunks_count": 5,
-                        "deduped_chunks_count": 2,
-                        "unique_sources": 2,
-                        "source_ids": ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
-                        "source_ids_short": ["aaaaaaaa"],
-                        "error_code": None,
-                        "retrieval_duration_ms": 87,
-                        "retrieval_error_type": None,
-                        "references_truncated": False,
-                        "references": [
-                            {
-                                "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-                                "id_short": "aaaaaaaa",
-                                "title": "Sundsvall source",
-                                "hit_count": 2,
-                                "best_score": 0.92,
-                                "chunks": [
-                                    {
-                                        "chunk_no": 1,
-                                        "score": 0.92,
-                                        "snippet": "Sundsvall redovisar positivt resultat.",
-                                    }
-                                ],
-                            }
-                        ],
-                    },
-                },
-            },
         )
     ]
     flow_run_repo.list_step_attempts.return_value = []
@@ -1466,6 +1516,165 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
     assert evidence["debug_export"]["steps"][0]["rag"]["references"][0]["title"] == "Sundsvall source"
     assert evidence["debug_export"]["steps"][0]["rag"]["references"][0]["chunks"][0]["chunk_no"] == 1
     assert evidence["debug_export"]["steps"][0]["rag"]["source_ids_short"] == ["aaaaaaaa"]
+
+
+@pytest.mark.asyncio
+async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    run = _run(user=user, flow_id=flow.id)
+    flow_run_repo.get.return_value = run
+    flow_version_repo.get.return_value = FlowVersion(
+        flow_id=flow.id,
+        version=1,
+        tenant_id=user.tenant_id,
+        definition_checksum="checksum",
+        definition_json={
+            "steps": [
+                {
+                    "step_order": 1,
+                    "step_id": str(uuid4()),
+                    "assistant_id": str(uuid4()),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "text",
+                    "mcp_policy": "inherit",
+                }
+            ]
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    flow_run_repo.list_step_results.return_value = [
+        _step_result_record(
+            run,
+            step_order=1,
+            input_payload_json={"text": "hello"},
+        )
+    ]
+    flow_run_repo.list_step_attempts.return_value = [
+        _step_attempt_record(
+            run,
+            step_order=1,
+            attempt_no=2,
+            started_at=datetime(2026, 3, 20, 12, 0, 0, tzinfo=timezone.utc),
+            finished_at=datetime(2026, 3, 20, 12, 0, 5, tzinfo=timezone.utc),
+            requested_model="gpt-4.1",
+            response_model="gpt-4.1-mini",
+            provider="openai",
+            finish_reason="stop",
+            provider_response_id="resp-123",
+            num_tokens_input=11,
+            num_tokens_output=13,
+        )
+    ]
+
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    evidence = await service.get_evidence(run_id=run.id)
+
+    assert evidence["debug_export"]["schema_version"] == "eneo.flow.debug-export.v2"
+    assert evidence["debug_export"]["run"]["trace_id"] == str(run.trace_id)
+    assert evidence["debug_export"]["steps"][0]["attempts"][0]["attempt_no"] == 2
+    assert evidence["debug_export"]["steps"][0]["attempts"][0]["duration_ms"] == 5000
+    assert evidence["debug_export"]["steps"][0]["attempts"][0]["response_model"] == "gpt-4.1-mini"
+
+
+@pytest.mark.asyncio
+async def test_export_evidence_json_returns_hashed_redacted_bundle(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    run = _run(user=user, flow_id=flow.id)
+    flow_run_repo.get.return_value = run
+    flow_version_repo.get.return_value = FlowVersion(
+        flow_id=flow.id,
+        version=1,
+        tenant_id=user.tenant_id,
+        definition_checksum="checksum",
+        definition_json={"steps": []},
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_step_attempts.return_value = []
+
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    export = await service.export_evidence_json(run_id=run.id)
+
+    assert export["schema_version"] == "flow-evidence-export.v2"
+    assert export["bundle"]["run"]["trace_id"] == str(run.trace_id)
+    serialized_bundle = json.dumps(
+        export["bundle"],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert export["content_hash"] == hashlib.sha256(serialized_bundle).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_get_evidence_normalizes_attempt_provenance_payloads(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    run = _run(user=user, flow_id=flow.id)
+    flow_run_repo.get.return_value = run
+    flow_version_repo.get.return_value = FlowVersion(
+        flow_id=flow.id,
+        version=1,
+        tenant_id=user.tenant_id,
+        definition_checksum="checksum",
+        definition_json={"steps": []},
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_step_attempts.return_value = [
+        _step_attempt_record(
+            run,
+            step_order=1,
+            provenance_json={
+                "llm": {
+                    "effective_prompt": "Bearer secret " + ("x" * 20000),
+                    "tool_calls": {"result": "y" * 20000},
+                }
+            },
+        )
+    ]
+
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    evidence = await service.get_evidence(run_id=run.id)
+
+    llm_provenance = evidence["step_attempts"][0]["provenance_json"]["llm"]
+    assert llm_provenance["effective_prompt"]["truncated"] is True
+    assert llm_provenance["effective_prompt"]["sha256"] is not None
+    assert llm_provenance["tool_calls"]["truncated"] is True
 
 
 @pytest.mark.asyncio
@@ -1499,13 +1708,10 @@ async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
         updated_at=datetime.now(timezone.utc),
     )
     flow_run_repo.list_step_results.return_value = [
-        SimpleNamespace(
+        _step_result_record(
+            run,
             step_order=1,
             input_payload_json={"text": "hello"},
-            model_dump=lambda mode="json": {
-                "step_order": 1,
-                "input_payload_json": {"text": "hello"},
-            },
         )
     ]
     flow_run_repo.list_step_attempts.return_value = []
@@ -1553,22 +1759,7 @@ async def test_get_evidence_ignores_rag_metadata_when_step_order_is_boolean(user
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
-    flow_run_repo.list_step_results.return_value = [
-        SimpleNamespace(
-            step_order=True,
-            input_payload_json={
-                "text": "hello",
-                "rag": {"status": "success", "chunks_retrieved": 1},
-            },
-            model_dump=lambda mode="json": {
-                "step_order": True,
-                "input_payload_json": {
-                    "text": "hello",
-                    "rag": {"status": "success", "chunks_retrieved": 1},
-                },
-            },
-        )
-    ]
+    flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = []
 
     service = FlowRunService(

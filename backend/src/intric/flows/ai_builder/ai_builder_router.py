@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable
 import logging
 from types import SimpleNamespace
-from typing import Annotated, Any, Protocol, cast
+from typing import Annotated, Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Request, status
@@ -15,7 +15,7 @@ from sse_starlette import EventSourceResponse, ServerSentEvent
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_api_models import (
     ApplyPlanRequest,
     ApplyResultResponse,
     CreateSessionRequest,
@@ -30,7 +30,6 @@ from intric.flows.ai_builder.ai_builder_models import (
     SessionResponse,
 )
 from intric.flows.ai_builder.ai_builder_context import (
-    build_planner_context,
     resolve_planner_model,
     serialize_space_kbs,
     serialize_space_models,
@@ -44,23 +43,6 @@ from intric.server.dependencies.container import get_container
 
 router = APIRouter(prefix="/ai-builder", tags=["ai-builder"])
 logger = logging.getLogger(__name__)
-
-
-class _CredentialResolverProtocol(Protocol):
-    def get_api_key(self) -> str | None: ...
-
-    def get_credential_field(self, *, field: str) -> str | None: ...
-
-
-class _CompletionModelAdapterProtocol(Protocol):
-    credential_resolver: _CredentialResolverProtocol
-    litellm_model: str
-
-
-class _CompletionServiceProtocol(Protocol):
-    async def resolve_litellm_params(self, model: Any) -> tuple[str, dict[str, object]]: ...
-
-    async def _get_adapter(self, model: Any) -> _CompletionModelAdapterProtocol: ...
 
 
 EventStream = AsyncGenerator[dict[str, str], None]
@@ -81,6 +63,11 @@ async def _coerce_event_stream(
     if hasattr(stream, "__aiter__"):
         return cast(EventStream, stream)
     return await cast(Awaitable[EventStream], stream)
+
+
+async def _resolve_litellm_params(service: Any, model: Any) -> tuple[str, dict[str, object]]:
+    """Compatibility seam for tests and thin router-level planner resolution."""
+    return await service.resolve_planner_params(model)
 
 
 # ---------------------------------------------------------------------------
@@ -173,52 +160,10 @@ async def _get_space_kbs(container: Container, space_id: UUID) -> list[dict]:
     return serialize_space_kbs(space)
 
 
-async def _get_flow_assistant_snapshots(container: Container, flow) -> dict[UUID, dict]:
-    """Build compact assistant snapshots for flow edit context."""
-    return await container.flow_service().get_flow_assistant_snapshots(flow)
-
-
 async def _get_planner_model(container: Container, space_id: UUID):
     """Get a completion model to use for the AI builder planner."""
     space = await container.space_service().get_space(space_id)
     return resolve_planner_model(space)
-
-
-async def _resolve_litellm_params(container: Container, model) -> tuple[str, dict]:
-    """Resolve LiteLLM model name and provider kwargs for the planner model."""
-    completion_service = cast(_CompletionServiceProtocol, container.completion_service())
-    resolve_params = cast(
-        Callable[[Any], Awaitable[tuple[str, dict[str, object]]]] | None,
-        getattr(completion_service, "resolve_litellm_params", None),
-    )
-    if resolve_params is not None:
-        resolved = await resolve_params(model)
-        if (
-            isinstance(resolved, tuple)
-            and len(resolved) == 2
-            and isinstance(resolved[0], str)
-            and isinstance(resolved[1], dict)
-        ):
-            return resolved
-
-    adapter = await completion_service._get_adapter(model)
-    litellm_kwargs: dict[str, object] = {}
-    api_key = adapter.credential_resolver.get_api_key()
-    if api_key:
-        litellm_kwargs["api_key"] = api_key
-    field_mapping = {
-        "endpoint": "api_base",
-        "api_version": "api_version",
-        "api_type": "api_type",
-        "organization": "organization",
-        "deployment_name": "deployment_name",
-    }
-    for field, key in field_mapping.items():
-        value = adapter.credential_resolver.get_credential_field(field=field)
-        if value:
-            litellm_kwargs[key] = value
-
-    return adapter.litellm_model, litellm_kwargs
 
 
 def _to_plan_response(plan) -> PlanResponse:
@@ -449,25 +394,13 @@ async def send_message(
     _require_ai_builder_scope(request, space_id=session.space_id)
     space = await _require_flow_edit_permission(container, session.space_id)
     tenant = await container.tenant_repo().get(container.user().tenant_id)
-
-    # Pre-fetch everything while the DI transaction is still active.
-    # The SSE generator runs after the transaction commits, so any DB calls
-    # via services sharing the same session would fail.
-    planner_context = build_planner_context(
-        space,
+    prepared_context = await service.prepare_message_context(
+        session=session,
+        space=space,
         model_id=body.model_id,
         tenant_flow_settings=tenant.flow_settings if tenant else None,
+        planner_params_resolver=lambda model: _resolve_litellm_params(service, model),
     )
-    model = planner_context.model
-
-    # Resolve the LLM adapter (queries ModelProviders for credentials)
-    litellm_model, litellm_kwargs = await _resolve_litellm_params(container, model)
-
-    flow = None
-    assistant_snapshots = None
-    if session.flow_id is not None:
-        flow = await container.flow_service().get_flow(session.flow_id)
-        assistant_snapshots = await _get_flow_assistant_snapshots(container, flow)
 
     async def event_stream():
         question_answer = (
@@ -488,15 +421,15 @@ async def send_message(
                     session_id=session_id,
                     message=body.message,
                     question_answer=question_answer,
-                    litellm_model=litellm_model,
-                    litellm_kwargs=litellm_kwargs,
-                    available_models=planner_context.available_models,
-                    available_kbs=planner_context.available_kbs,
-                    flow=flow,
-                    assistant_snapshots=assistant_snapshots,
-                    max_input_tokens=planner_context.max_input_tokens,
-                    max_output_tokens=planner_context.max_output_tokens,
-                    budget_policy=planner_context.budget_policy,
+                    litellm_model=prepared_context.litellm_model,
+                    litellm_kwargs=prepared_context.litellm_kwargs,
+                    available_models=prepared_context.planner_context.available_models,
+                    available_kbs=prepared_context.planner_context.available_kbs,
+                    flow=prepared_context.flow,
+                    assistant_snapshots=prepared_context.assistant_snapshots,
+                    max_input_tokens=prepared_context.planner_context.max_input_tokens,
+                    max_output_tokens=prepared_context.planner_context.max_output_tokens,
+                    budget_policy=prepared_context.planner_context.budget_policy,
                 )
             )
 
@@ -932,8 +865,7 @@ async def apply_plan(
     summary="Revise AI Builder Plan",
     description=(
         "Create a new plan revision with a structured change. "
-        "Supports 'keep_current_description' (marks description as manually owned) "
-        "and 'regenerate_description' (constrained description-only retry)."
+        "Supports 'keep_current_description' (marks description as manually owned)."
     ),
     responses={
         200: {"description": "New plan revision created."},

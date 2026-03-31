@@ -403,6 +403,22 @@ export function initFlows(client) {
       },
 
       /**
+       * Export canonical evidence bundle for a flow run.
+       * @param {{id: string, flowId: string, flow_id?: string, format?: "json"}} run
+       * @returns {Promise<import('../types/resources').FlowRunEvidenceExport>}
+       * @throws {IntricError}
+       */
+      exportEvidence: async (run) => {
+        const flowId = _requireFlowIdForRunRoute(run, "exportEvidence");
+        return _fetch(`/api/v1/flows/${flowId}/runs/${run.id}/evidence/export`, {
+          method: "get",
+          params: {
+            query: { format: run.format ?? "json" }
+          }
+        });
+      },
+
+      /**
        * Generate signed URL for a flow run artifact download.
        * Uses tenant-scoped access so any user with flow access can download artifacts.
        * @param {{flowId: string, runId: string, fileId: string, expiresIn?: number, contentDisposition?: "attachment" | "inline"}} params

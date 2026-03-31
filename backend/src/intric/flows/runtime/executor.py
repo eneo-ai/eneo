@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import logging
 from typing import TYPE_CHECKING, Any, cast
@@ -10,7 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-from intric.flows.flow import (
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
+from intric.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStepAttemptStatus,
@@ -76,6 +80,12 @@ from intric.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
     execute_template_fill_step,
 )
+from intric.flows.flow_run_provenance import (
+    FlowAttemptProvenance,
+    LlmProvenance,
+    normalize_json_preview,
+    normalize_text_preview,
+)
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
 from intric.settings.encryption_service import EncryptionService
@@ -91,6 +101,98 @@ if TYPE_CHECKING:
     from intric.audit.application.audit_service import AuditService
     from intric.assistants.references import ReferencesService
     from intric.files.transcriber import Transcriber
+
+
+@dataclass(frozen=True)
+class FlowRunExecutorConfig:
+    max_inline_text_bytes: int
+    max_audio_files: int = 10
+    max_generic_files: int | None = None
+    http_request_timeout_seconds: float = 30.0
+    http_max_timeout_seconds: float = 30.0
+    http_allow_private_networks: bool = False
+    rag_retrieval_timeout_seconds: float = 30.0
+    rag_max_reference_sources: int = 25
+    rag_max_chunks_per_source: int = 5
+
+    @classmethod
+    def from_settings(
+        cls,
+        *,
+        max_inline_text_bytes: int,
+        max_audio_files: int = 10,
+        max_generic_files: int | None = None,
+    ) -> "FlowRunExecutorConfig":
+        settings = get_settings()
+        return cls(
+            max_inline_text_bytes=max_inline_text_bytes,
+            max_audio_files=max_audio_files,
+            max_generic_files=max_generic_files,
+            http_request_timeout_seconds=float(
+                settings.flow_http_request_timeout_seconds
+            ),
+            http_max_timeout_seconds=float(settings.flow_http_max_timeout_seconds),
+            http_allow_private_networks=bool(
+                settings.flow_http_allow_private_networks
+            ),
+        )
+
+
+def _build_attempt_provenance(
+    *,
+    step: RuntimeStep,
+    output: StepExecutionOutput,
+    step_result: FlowStepResult,
+) -> dict[str, Any]:
+    provenance = FlowAttemptProvenance(
+        llm=LlmProvenance(
+            effective_prompt=normalize_text_preview(output.effective_prompt),
+            model_parameters=output.model_parameters_json,
+            tool_calls=normalize_json_preview(output.tool_calls_metadata)
+            if output.tool_calls_metadata is not None
+            else None,
+        )
+    ).to_payload()
+    if output.rag_metadata is not None:
+        provenance["rag"] = output.rag_metadata
+    if output.runtime_input_metadata is not None:
+        provenance["runtime_input"] = output.runtime_input_metadata
+    if output.transcription_metadata is not None:
+        provenance["transcription"] = output.transcription_metadata
+    if output.contract_validation is not None or output.diagnostics:
+        provenance["guards"] = {
+            "contract_validation": output.contract_validation,
+            "diagnostics": [
+                {
+                    "code": diagnostic.code,
+                    "message": diagnostic.message,
+                    "severity": diagnostic.severity,
+                }
+                for diagnostic in output.diagnostics
+            ],
+        }
+    output_payload = step_result.output_payload_json or {}
+    template_provenance = output_payload.get("template_provenance")
+    if isinstance(template_provenance, dict):
+        provenance["template"] = template_provenance
+    artifacts = output_payload.get("artifacts")
+    if isinstance(artifacts, list):
+        provenance["artifacts"] = {
+            "items": artifacts,
+            "generated_file_ids": [str(file_id) for file_id in output.generated_file_ids],
+        }
+    if step.input_source in {"http_get", "http_post"}:
+        provenance["http"] = {
+            "input_source": step.input_source,
+            "structured_input_present": output.source_text != "",
+        }
+    if step.output_mode == "http_post":
+        provenance["http"] = {
+            **cast(dict[str, Any], provenance.get("http", {})),
+            "output_mode": step.output_mode,
+        }
+    return provenance
+
 
 class FlowRunExecutor:
     """Executes a version-pinned flow run sequentially with CAS step claims."""
@@ -113,13 +215,26 @@ class FlowRunExecutor:
         file_repo: FileRepository,
         template_asset_service: FlowTemplateAssetService,
         encryption_service: EncryptionService,
-        max_inline_text_bytes: int,
+        max_inline_text_bytes: int | None = None,
         audit_service: AuditService | None = None,
         references_service: ReferencesService | None = None,
         transcriber: Transcriber | None = None,
         max_audio_files: int = 10,
         max_generic_files: int | None = None,
+        config: FlowRunExecutorConfig | None = None,
     ):
+        resolved_config = config
+        if resolved_config is None:
+            if max_inline_text_bytes is None:
+                raise TypeError(
+                    "FlowRunExecutor requires max_inline_text_bytes or config."
+                )
+            resolved_config = FlowRunExecutorConfig.from_settings(
+                max_inline_text_bytes=max_inline_text_bytes,
+                max_audio_files=max_audio_files,
+                max_generic_files=max_generic_files,
+            )
+
         self.user = user
         self.session = session
         self.flow_repo = flow_repo
@@ -130,26 +245,31 @@ class FlowRunExecutor:
         self.file_repo = file_repo
         self.template_asset_service = template_asset_service
         self.encryption_service = encryption_service
-        self.max_inline_text_bytes = max_inline_text_bytes
+        self.max_inline_text_bytes = resolved_config.max_inline_text_bytes
         self.audit_service = audit_service
         self.references_service = references_service
         self.transcriber = transcriber
         self.variable_resolver = FlowVariableResolver()
-        settings = get_settings()
-        self.http_request_timeout_seconds = float(settings.flow_http_request_timeout_seconds)
-        self.http_max_timeout_seconds = float(settings.flow_http_max_timeout_seconds)
-        self.http_allow_private_networks = bool(settings.flow_http_allow_private_networks)
+        self.http_request_timeout_seconds = (
+            resolved_config.http_request_timeout_seconds
+        )
+        self.http_max_timeout_seconds = resolved_config.http_max_timeout_seconds
+        self.http_allow_private_networks = (
+            resolved_config.http_allow_private_networks
+        )
         self.http_runtime = FlowHttpRuntimeHelper(
             variable_resolver=self.variable_resolver,
             request_timeout_seconds=self.http_request_timeout_seconds,
             max_timeout_seconds=self.http_max_timeout_seconds,
             allow_private_networks=self.http_allow_private_networks,
         )
-        self.rag_retrieval_timeout_seconds = 30
-        self.rag_max_reference_sources = 25
-        self.rag_max_chunks_per_source = 5
-        self.max_audio_files = max_audio_files
-        self.max_generic_files = max_generic_files
+        self.rag_retrieval_timeout_seconds = (
+            resolved_config.rag_retrieval_timeout_seconds
+        )
+        self.rag_max_reference_sources = resolved_config.rag_max_reference_sources
+        self.rag_max_chunks_per_source = resolved_config.rag_max_chunks_per_source
+        self.max_audio_files = resolved_config.max_audio_files
+        self.max_generic_files = resolved_config.max_generic_files
 
     async def execute(
         self,
@@ -367,6 +487,24 @@ class FlowRunExecutor:
                     claimed=claimed_result,
                 )
 
+            latest_run = await self.flow_run_repo.get(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
+            if latest_run.status == FlowRunStatus.CANCELLED:
+                await self.flow_run_repo.finish_attempt(
+                    run_id=run_id,
+                    step_id=step.step_id,
+                    attempt_no=attempt_no,
+                    tenant_id=tenant_id,
+                    status=FlowStepAttemptStatus.CANCELLED,
+                    error_code="run_cancelled",
+                    error_message="Run was cancelled during step execution.",
+                )
+                await self._commit()
+                return {"status": "skipped", "reason": "run_cancelled"}
+
             success_plan = build_step_success_plan(
                 claimed=claimed_result,
                 run_id=run_id,
@@ -387,6 +525,7 @@ class FlowRunExecutor:
                 run_id=run_id,
                 tenant_id=tenant_id,
                 step=step,
+                output=output,
                 step_result=step_result,
                 attempt_no=attempt_no,
             )
@@ -423,7 +562,7 @@ class FlowRunExecutor:
         if outcome.result_status == "skipped":
             return {"status": "skipped", "reason": outcome.reason}
 
-        await self.flow_run_repo.update_status(
+        updated_run = await self.flow_run_repo.update_status(
             run_id=run_id,
             tenant_id=tenant_id,
             status=FlowRunStatus(outcome.flow_status),
@@ -431,6 +570,12 @@ class FlowRunExecutor:
             output_payload_json=outcome.output_payload_json,
             from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
         )
+        if updated_run.status == FlowRunStatus.COMPLETED:
+            await self._audit_run_terminal_state(
+                run=updated_run,
+                action=ActionType.FLOW_RUN_COMPLETED,
+                description=f"Completed flow run {updated_run.id}",
+            )
         await self._commit()
         return {"status": outcome.result_status}
 
@@ -631,6 +776,7 @@ class FlowRunExecutor:
         run_id: UUID,
         tenant_id: UUID,
         step: RuntimeStep,
+        output: StepExecutionOutput,
         step_result: FlowStepResult,
         attempt_no: int,
     ) -> None:
@@ -642,6 +788,18 @@ class FlowRunExecutor:
             attempt_no=attempt_no,
             tenant_id=tenant_id,
             status=FlowStepAttemptStatus.COMPLETED,
+            requested_model=output.requested_model,
+            response_model=output.response_model,
+            provider=output.provider,
+            finish_reason=output.finish_reason,
+            provider_response_id=output.provider_response_id,
+            num_tokens_input=output.num_tokens_input,
+            num_tokens_output=output.num_tokens_output,
+            provenance_json=_build_attempt_provenance(
+                step=step,
+                output=output,
+                step_result=step_result,
+            ),
         )
         await self._commit()
 
@@ -720,14 +878,61 @@ class FlowRunExecutor:
         tenant_id: UUID,
         error_message: str,
     ) -> None:
-        await self.flow_run_repo.update_status(
+        updated_run = await self.flow_run_repo.update_status(
             run_id=run_id,
             tenant_id=tenant_id,
             status=FlowRunStatus.FAILED,
             error_message=error_message,
             from_statuses=(FlowRunStatus.QUEUED.value, FlowRunStatus.RUNNING.value),
         )
+        if updated_run.status == FlowRunStatus.FAILED:
+            await self._audit_run_terminal_state(
+                run=updated_run,
+                action=ActionType.FLOW_RUN_FAILED,
+                description=f"Failed flow run {updated_run.id}",
+                error_message=error_message,
+            )
         await self._commit()
+
+    async def _audit_run_terminal_state(
+        self,
+        *,
+        run: FlowRun,
+        action: ActionType,
+        description: str,
+        error_message: str | None = None,
+    ) -> None:
+        if self.audit_service is None:
+            return
+
+        metadata = AuditMetadata.standard(
+            actor=self.user,
+            target=run,
+            extra={
+                "status": run.status.value,
+                "error_message": error_message,
+            },
+        )
+        try:
+            await self.audit_service.log_async(
+                tenant_id=self.user.tenant_id,
+                actor_id=self.user.id,
+                action=action,
+                entity_type=EntityType.FLOW_RUN,
+                entity_id=run.id,
+                description=description,
+                metadata=metadata,
+            )
+        except Exception as error:
+            logger.warning(
+                "Failed to audit flow run terminal state",
+                exc_info=error,
+                extra={
+                    "run_id": str(run.id),
+                    "tenant_id": str(self.user.tenant_id),
+                    "action": action.value,
+                },
+            )
 
     async def _resolve_step_input(
         self,

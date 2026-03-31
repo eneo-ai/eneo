@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from intric.flows.flow import Flow
+from intric.flows.domain.flow import Flow
 
 
 def build_flow_discovery_defaults(flow: Flow | None) -> dict[str, set[str]]:

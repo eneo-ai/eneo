@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import UUID
 
-from intric.flows.flow import FlowRunStatus, FlowStepAttemptStatus, FlowStepResult
+from intric.flows.domain.flow import FlowRunStatus, FlowStepAttemptStatus, FlowStepResult
 from intric.flows.runtime.claim_resolution import StepClaimResolution
 from intric.flows.runtime.models import RuntimeStep, StepExecutionOutput
 from intric.flows.runtime.step_result_builder import (

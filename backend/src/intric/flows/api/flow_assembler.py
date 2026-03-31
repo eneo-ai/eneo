@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from intric.flows.flow import Flow, FlowRun, FlowSparse, FlowStep
+from intric.flows.domain.flow import Flow, FlowRun, FlowSparse, FlowStep
 from intric.flows.api.flow_models import (
     FlowPublic,
     FlowRunPublic,

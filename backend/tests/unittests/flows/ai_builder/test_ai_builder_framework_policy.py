@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+from intric.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     build_framework_guardrails_block,
@@ -17,6 +18,7 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     resolve_docx_output_mode,
     resolve_explicit_output_choice,
 )
+from intric.flows.ai_builder.ai_builder_keywords import OUTPUT_CHANGE_KEYWORDS
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_models import OutputType
 from intric.flows.flow import Flow, FlowStep
@@ -166,6 +168,14 @@ def test_normalizes_output_question_aliases_to_canonical_mode() -> None:
         "docx_document",
         "structured_json",
     ]
+
+
+def test_canonical_question_id_is_available_from_canonicalization_module() -> None:
+    assert canonical_question_id("final_output_format") == "final_output_mode"
+
+
+def test_output_change_keywords_live_in_keywords_module() -> None:
+    assert "final pdf" in OUTPUT_CHANGE_KEYWORDS
 
 
 def test_normalizes_output_answer_aliases_to_canonical_mode() -> None:

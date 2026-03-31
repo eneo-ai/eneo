@@ -8,7 +8,7 @@ from intric.database.tables.flow_tables import (
     Flows,
     FlowVersions,
 )
-from intric.flows.flow import (
+from intric.flows.domain.flow import (
     Flow,
     FlowRun,
     FlowSparse,

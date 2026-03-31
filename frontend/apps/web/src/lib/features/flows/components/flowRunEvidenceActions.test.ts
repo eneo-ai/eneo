@@ -1,6 +1,11 @@
 import { expect, test, vi } from "vitest";
+import type { Intric } from "@intric/intric-js";
 
-import { downloadJsonArtifact, serializeEvidencePayload } from "./flowRunEvidenceActions";
+import {
+  downloadEvidenceExport,
+  downloadJsonArtifact,
+  serializeEvidencePayload
+} from "./flowRunEvidenceActions";
 
 test("serializeEvidencePayload preserves plain strings", () => {
   expect(serializeEvidencePayload("already-serialized")).toBe("already-serialized");
@@ -49,4 +54,33 @@ test("downloadJsonArtifact triggers anchor download and deferred URL revocation"
   expect(removeAnchor).toHaveBeenCalledWith(anchor);
   expect(scheduleRevoke).toHaveBeenCalledOnce();
   expect(revokeObjectURL).toHaveBeenCalledWith("blob:test");
+});
+
+test("downloadEvidenceExport fetches canonical evidence export before download", async () => {
+  const exportEvidence = vi.fn(async () => ({
+    schema_version: "flow-evidence-export.v2",
+    content_hash: "abc123"
+  }));
+  const triggerDownload = vi.fn();
+
+  await downloadEvidenceExport(
+    {
+      intric: {
+        flows: {
+          runs: {
+            exportEvidence
+          }
+        }
+      } as unknown as Intric,
+      flowId: "flow-1",
+      runId: "run-1"
+    },
+    { triggerDownload }
+  );
+
+  expect(exportEvidence).toHaveBeenCalledWith({ id: "run-1", flowId: "flow-1", format: "json" });
+  expect(triggerDownload).toHaveBeenCalledWith("flow-run-evidence-run-1.json", {
+    schema_version: "flow-evidence-export.v2",
+    content_hash: "abc123"
+  });
 });

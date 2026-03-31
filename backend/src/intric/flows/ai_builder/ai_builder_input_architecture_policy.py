@@ -20,7 +20,7 @@ from intric.flows.ai_builder.ai_builder_models import (
 )
 
 if TYPE_CHECKING:
-    from intric.flows.flow import Flow
+    from intric.flows.domain.flow import Flow
 
 PrimaryRuntimeInput = Literal["audio", "documents", "text", "text_and_documents", "unknown"]
 

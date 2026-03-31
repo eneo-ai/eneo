@@ -427,6 +427,21 @@ export type FlowRunDebugStep = {
   output: FlowRunDebugOutput;
   mcp: FlowRunDebugMcp;
   rag?: FlowRunDebugRag | null;
+  attempts: FlowRunDebugAttempt[];
+};
+
+export type FlowRunDebugAttempt = {
+  attempt_no: number;
+  status?: string | null;
+  duration_ms?: number | null;
+  error_code?: string | null;
+  requested_model?: string | null;
+  response_model?: string | null;
+  provider?: string | null;
+  finish_reason?: string | null;
+  provider_response_id?: string | null;
+  num_tokens_input?: number | null;
+  num_tokens_output?: number | null;
 };
 
 export type FlowRunDebugExport = {
@@ -436,6 +451,7 @@ export type FlowRunDebugExport = {
     run_id: string;
     flow_id: string;
     flow_version: number;
+    trace_id?: string | null;
     status: string;
   };
   definition: {
@@ -459,6 +475,13 @@ export type FlowRunEvidence = {
   step_results: FlowStepResult[];
   step_attempts: Record<string, unknown>[];
   debug_export: FlowRunDebugExport;
+};
+
+export type FlowRunEvidenceExport = {
+  schema_version: string;
+  generated_at: string;
+  content_hash: string;
+  bundle: FlowRunEvidence;
 };
 
 export type FlowRunRedispatchResult = {

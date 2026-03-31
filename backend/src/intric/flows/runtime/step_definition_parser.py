@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 from uuid import UUID
 
@@ -26,7 +27,7 @@ def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
     for item in steps:
         if not isinstance(item, dict):
             raise BadRequestException("Invalid step definition in flow snapshot.")
-        input_source = str(item.get("input_source", "flow_input"))
+        input_source = _enum_value(item.get("input_source", "flow_input"))
         if input_source not in ALLOWED_INPUT_SOURCES:
             raise BadRequestException(f"Unsupported input source '{input_source}'.")
         raw_input_config = item.get("input_config")
@@ -39,11 +40,11 @@ def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
         elif raw_input_config is not None and not isinstance(raw_input_config, dict):
             raise BadRequestException("Step input_config must be an object.")
         build_runtime_input_config(raw_input_config)
-        output_mode = str(item.get("output_mode", "pass_through"))
+        output_mode = _enum_value(item.get("output_mode", "pass_through"))
         if output_mode not in ALLOWED_OUTPUT_MODES:
             raise BadRequestException(f"Unsupported output mode '{output_mode}'.")
-        output_type = str(item.get("output_type", "text"))
-        input_type = str(item.get("input_type", "text"))
+        output_type = _enum_value(item.get("output_type", "text"))
+        input_type = _enum_value(item.get("input_type", "text"))
         if input_type not in ALLOWED_INPUT_TYPES:
             raise BadRequestException(f"Unsupported input type '{input_type}'.")
         if output_type not in ALLOWED_OUTPUT_TYPES:
@@ -119,3 +120,9 @@ def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
     if chain_violation is not None:
         raise BadRequestException(chain_violation.message)
     return parsed
+
+
+def _enum_value(value: Any) -> str:
+    if isinstance(value, Enum):
+        return str(value.value)
+    return str(value)

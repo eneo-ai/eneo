@@ -4,7 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore
-from intric.flows.flow import Flow
+from intric.flows.domain.flow import Flow
 
 
 def build_flow_context(

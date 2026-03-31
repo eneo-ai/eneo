@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from intric.flows.flow import FlowStepResult, FlowStepResultStatus
+from intric.flows.domain.flow import FlowStepResult, FlowStepResultStatus
 from intric.flows.runtime.models import RunExecutionState
 
 

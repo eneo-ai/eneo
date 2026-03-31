@@ -88,7 +88,7 @@ from intric.flows.ai_builder.ai_builder_models import TargetKind
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
-    from intric.flows.flow import Flow
+    from intric.flows.domain.flow import Flow
     from intric.users.user import UserInDB
 
 logger = get_logger(__name__)
@@ -100,6 +100,24 @@ class ProposalDraftProcessingResult:
     plan_event: dict[str, str] | None = None
     feedback: str | None = None
     failure_kind: str | None = None
+
+
+@dataclass(frozen=True)
+class ProposalContext:
+    session_id: UUID
+    conversation: list[ConversationMessage]
+    new_messages_start: int
+    llm_messages: list[dict[str, Any]]
+    tool_schemas: list[dict[str, Any]]
+    litellm_model: str
+    litellm_kwargs: dict[str, Any]
+    available_model_refs: set[str] | None
+    available_kb_refs: set[str] | None
+    max_output_tokens: int
+    request_id: str
+    flow: "Flow | None" = None
+    assistant_snapshots: dict[UUID, dict[str, Any]] | None = None
+    text_content: str | None = None
 
 
 class AIBuilderProposalProcessor:
@@ -296,27 +314,27 @@ class AIBuilderProposalProcessor:
         flow=None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
-        if text_content:
-            yield build_text_event(text_content)
+        ctx = ProposalContext(
+            session_id=session_id,
+            conversation=conversation,
+            new_messages_start=new_messages_start,
+            llm_messages=llm_messages,
+            tool_schemas=tool_schemas,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            available_model_refs=available_model_refs,
+            available_kb_refs=available_kb_refs,
+            max_output_tokens=max_output_tokens,
+            request_id=request_id,
+            flow=flow,
+            assistant_snapshots=assistant_snapshots,
+            text_content=text_content,
+        )
+        if ctx.text_content:
+            yield build_text_event(ctx.text_content)
 
         for tool_call in tool_calls:
-            dispatched = self._dispatch_known_tool_call(
-                session_id=session_id,
-                conversation=conversation,
-                new_messages_start=new_messages_start,
-                tool_call=tool_call,
-                text_content=text_content,
-                llm_messages=llm_messages,
-                tool_schemas=tool_schemas,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                available_model_refs=available_model_refs,
-                available_kb_refs=available_kb_refs,
-                max_output_tokens=max_output_tokens,
-                request_id=request_id,
-                flow=flow,
-                assistant_snapshots=assistant_snapshots,
-            )
+            dispatched = self._dispatch_known_tool_call(ctx=ctx, tool_call=tool_call)
             if dispatched is not None:
                 async for event in dispatched:
                     yield event
@@ -326,125 +344,59 @@ class AIBuilderProposalProcessor:
                 continue
 
             async for event in self._handle_propose_flow_tool_call(
-                session_id=session_id,
-                conversation=conversation,
-                new_messages_start=new_messages_start,
+                ctx=ctx,
                 tool_call=tool_call,
-                text_content=text_content,
-                llm_messages=llm_messages,
-                tool_schemas=tool_schemas,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                available_model_refs=available_model_refs,
-                available_kb_refs=available_kb_refs,
-                max_output_tokens=max_output_tokens,
-                request_id=request_id,
-                flow=flow,
             ):
                 yield event
 
     def _dispatch_known_tool_call(
         self,
         *,
-        session_id: UUID,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
+        ctx: ProposalContext,
         tool_call: Any,
-        text_content: str | None,
-        llm_messages: list[dict[str, Any]],
-        tool_schemas: list[dict[str, Any]],
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        available_model_refs: set[str] | None,
-        available_kb_refs: set[str] | None,
-        max_output_tokens: int,
-        request_id: str,
-        flow=None,
-        assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
     ) -> AsyncGenerator[dict[str, str], None] | None:
         tool_name = tool_call.function.name
         if tool_name == ASK_STRUCTURED_QUESTION_TOOL_NAME:
             return self._handle_structured_question(
-                session_id=session_id,
-                conversation=conversation,
-                new_messages_start=new_messages_start,
+                ctx=ctx,
                 tool_call=tool_call,
-                llm_messages=llm_messages,
-                tool_schemas=tool_schemas,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                available_model_refs=available_model_refs,
-                available_kb_refs=available_kb_refs,
-                max_output_tokens=max_output_tokens,
-                flow=flow,
-                assistant_snapshots=assistant_snapshots,
             )
         if tool_name == CONFIRM_REQUIREMENTS_TOOL_NAME:
             return self._handle_confirm_requirements(
-                session_id=session_id,
-                conversation=conversation,
-                new_messages_start=new_messages_start,
+                ctx=ctx,
                 tool_call=tool_call,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                flow=flow,
             )
         if tool_name == EDIT_FLOW_TOOL_NAME:
             return self._handle_edit_flow(
-                session_id=session_id,
-                conversation=conversation,
-                new_messages_start=new_messages_start,
+                ctx=ctx,
                 tool_call=tool_call,
-                text_content=text_content,
-                llm_messages=llm_messages,
-                tool_schemas=tool_schemas,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                available_model_refs=available_model_refs,
-                available_kb_refs=available_kb_refs,
-                max_output_tokens=max_output_tokens,
-                request_id=request_id,
-                flow=flow,
-                assistant_snapshots=assistant_snapshots,
             )
         return None
 
     async def _handle_propose_flow_tool_call(
         self,
         *,
-        session_id: UUID,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
+        ctx: ProposalContext,
         tool_call: Any,
-        text_content: str | None,
-        llm_messages: list[dict[str, Any]],
-        tool_schemas: list[dict[str, Any]],
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        available_model_refs: set[str] | None,
-        available_kb_refs: set[str] | None,
-        max_output_tokens: int,
-        request_id: str,
-        flow=None,
     ) -> AsyncGenerator[dict[str, str], None]:
-        requirements_state = resolve_requirements_state(conversation)
+        requirements_state = resolve_requirements_state(ctx.conversation)
         if not requirements_state.confirmed:
             for event in await self.emit_discovery_followup_if_needed(
-                session_id=session_id,
-                conversation=conversation,
-                new_messages_start=new_messages_start,
-                flow=flow,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
+                session_id=ctx.session_id,
+                conversation=ctx.conversation,
+                new_messages_start=ctx.new_messages_start,
+                flow=ctx.flow,
+                litellm_model=ctx.litellm_model,
+                litellm_kwargs=ctx.litellm_kwargs,
             ):
                 yield event
-            if not analyze_discovery_ready(conversation, flow=flow):
+            if not analyze_discovery_ready(ctx.conversation, flow=ctx.flow):
                 return
             yield build_error_event(
                 message="Requirements must be confirmed before proposing a flow.",
                 code="requirements_not_confirmed",
                 phase="requirements",
-                request_id=request_id,
+                request_id=ctx.request_id,
             )
             return
 
@@ -455,36 +407,26 @@ class AIBuilderProposalProcessor:
                 message="Invalid tool call arguments.",
                 code="invalid_tool_call_arguments",
                 phase="tool_call",
-                request_id=request_id,
+                request_id=ctx.request_id,
             )
             return
 
         proposal_result = await self._process_proposal_arguments(
-            session_id=session_id,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
+            session_id=ctx.session_id,
+            conversation=ctx.conversation,
+            new_messages_start=ctx.new_messages_start,
             arguments=arguments,
-            assistant_content=text_content or "Här är mitt förslag:",
+            assistant_content=ctx.text_content or "Här är mitt förslag:",
             tool_call_id=tool_call.id,
-            available_model_refs=available_model_refs,
-            available_kb_refs=available_kb_refs,
-            flow=flow,
+            available_model_refs=ctx.available_model_refs,
+            available_kb_refs=ctx.available_kb_refs,
+            flow=ctx.flow,
         )
         if proposal_result.plan_event is None:
-            async for event in self.request_self_correction(
-                session_id=session_id,
-                conversation=conversation,
-                new_messages_start=new_messages_start,
+            async for event in self._request_self_correction_with_context(
+                ctx=ctx,
                 error_message=proposal_result.feedback or "Invalid flow specification.",
-                llm_messages=llm_messages,
                 tool_call=tool_call,
-                tool_schemas=tool_schemas,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                available_model_refs=available_model_refs,
-                available_kb_refs=available_kb_refs,
-                max_output_tokens=max_output_tokens,
-                flow=flow,
             ):
                 yield event
             return
@@ -600,26 +542,54 @@ class AIBuilderProposalProcessor:
         max_output_tokens: int,
         flow=None,
     ) -> AsyncGenerator[dict[str, str], None]:
-        async for event in run_request_self_correction(
+        ctx = ProposalContext(
             session_id=session_id,
             conversation=conversation,
             new_messages_start=new_messages_start,
-            error_message=error_message,
             llm_messages=llm_messages,
-            tool_call=tool_call,
             tool_schemas=tool_schemas,
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
             available_model_refs=available_model_refs,
             available_kb_refs=available_kb_refs,
             max_output_tokens=max_output_tokens,
+            request_id="self-correction",
+            flow=flow,
+        )
+        async for event in self._request_self_correction_with_context(
+            ctx=ctx,
+            error_message=error_message,
+            tool_call=tool_call,
+        ):
+            yield event
+
+    async def _request_self_correction_with_context(
+        self,
+        *,
+        ctx: ProposalContext,
+        error_message: str,
+        tool_call: Any,
+    ) -> AsyncGenerator[dict[str, str], None]:
+        async for event in run_request_self_correction(
+            session_id=ctx.session_id,
+            conversation=ctx.conversation,
+            new_messages_start=ctx.new_messages_start,
+            error_message=error_message,
+            llm_messages=ctx.llm_messages,
+            tool_call=tool_call,
+            tool_schemas=ctx.tool_schemas,
+            litellm_model=ctx.litellm_model,
+            litellm_kwargs=ctx.litellm_kwargs,
+            available_model_refs=ctx.available_model_refs,
+            available_kb_refs=ctx.available_kb_refs,
+            max_output_tokens=ctx.max_output_tokens,
             self_correction_temperature=self.self_correction_temperature,
             max_self_correction_retries=MAX_SELF_CORRECTION_RETRIES,
             call_repair_completion=self._call_repair_completion,
             process_proposal_arguments=self._process_proposal_arguments,
             build_self_correction_error_event=self._build_self_correction_error_event,
             retry_forced_proposal_after_text=self.retry_forced_proposal_after_text,
-            flow=flow,
+            flow=ctx.flow,
         ):
             yield event
 
@@ -816,27 +786,16 @@ class AIBuilderProposalProcessor:
     async def _handle_structured_question(
         self,
         *,
-        session_id: UUID,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
+        ctx: ProposalContext,
         tool_call: Any,
-        llm_messages: list[dict[str, Any]],
-        tool_schemas: list[dict[str, Any]],
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        available_model_refs: set[str] | None,
-        available_kb_refs: set[str] | None,
-        max_output_tokens: int,
-        flow=None,
-        assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         followup_events = await self.emit_discovery_followup_if_needed(
-            session_id=session_id,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
-            flow=flow,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
+            session_id=ctx.session_id,
+            conversation=ctx.conversation,
+            new_messages_start=ctx.new_messages_start,
+            flow=ctx.flow,
+            litellm_model=ctx.litellm_model,
+            litellm_kwargs=ctx.litellm_kwargs,
         )
         if followup_events:
             for event in followup_events:
@@ -869,9 +828,9 @@ class AIBuilderProposalProcessor:
                 return
 
             await self._persist_tool_turn(
-                session_id=session_id,
-                conversation=conversation,
-                new_messages_start=new_messages_start,
+                session_id=ctx.session_id,
+                conversation=ctx.conversation,
+                new_messages_start=ctx.new_messages_start,
                 tool_call=tool_call,
                 arguments=arguments,
                 tool_content=(
@@ -884,11 +843,11 @@ class AIBuilderProposalProcessor:
         question_data = normalize_structured_question_payload(question_data)
         question_id = question_data["question_id"]
         registry_followup = (
-            build_registry_question_followup(
-                question_id,
-                conversation,
-                flow=flow,
-            )
+                build_registry_question_followup(
+                    question_id,
+                    ctx.conversation,
+                    flow=ctx.flow,
+                )
             if is_supported_structured_question_id(question_id)
             else None
         )
@@ -897,9 +856,9 @@ class AIBuilderProposalProcessor:
             for event in await persist_backend_question(
                 repo=self.repo,
                 tenant_id=self.user.tenant_id,
-                session_id=session_id,
-                conversation=conversation,
-                new_messages_start=new_messages_start,
+                session_id=ctx.session_id,
+                conversation=ctx.conversation,
+                new_messages_start=ctx.new_messages_start,
                 question_data=backend_question_data,
                 assistant_text=assistant_text,
                 tool_content=(
@@ -910,33 +869,28 @@ class AIBuilderProposalProcessor:
             return
 
         async for event in self.request_non_question_continuation(
-            session_id=session_id,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
-            llm_messages=llm_messages,
+            session_id=ctx.session_id,
+            conversation=ctx.conversation,
+            new_messages_start=ctx.new_messages_start,
+            llm_messages=ctx.llm_messages,
             tool_call=tool_call,
-            tool_schemas=tool_schemas,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            available_model_refs=available_model_refs,
-            available_kb_refs=available_kb_refs,
-            max_output_tokens=max_output_tokens,
-            flow=flow,
+            tool_schemas=ctx.tool_schemas,
+            litellm_model=ctx.litellm_model,
+            litellm_kwargs=ctx.litellm_kwargs,
+            available_model_refs=ctx.available_model_refs,
+            available_kb_refs=ctx.available_kb_refs,
+            max_output_tokens=ctx.max_output_tokens,
+            flow=ctx.flow,
             original_question_id=question_id,
-            assistant_snapshots=assistant_snapshots,
+            assistant_snapshots=ctx.assistant_snapshots,
         ):
             yield event
 
     async def _handle_confirm_requirements(
         self,
         *,
-        session_id: UUID,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
+        ctx: ProposalContext,
         tool_call: Any,
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        flow=None,
     ) -> AsyncGenerator[dict[str, str], None]:
         try:
             arguments = json.loads(tool_call.function.arguments)
@@ -959,20 +913,20 @@ class AIBuilderProposalProcessor:
             return
 
         discovery_block_message, discovery_analysis = await build_discovery_block_message_runtime(
-            conversation,
-            flow=flow,
+            ctx.conversation,
+            flow=ctx.flow,
             litellm_client=self.litellm_client,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
+            litellm_model=ctx.litellm_model,
+            litellm_kwargs=ctx.litellm_kwargs,
         )
         if discovery_block_message is not None:
             for event in await self.emit_discovery_followup_if_needed(
-                session_id=session_id,
-                conversation=conversation,
-                new_messages_start=new_messages_start,
-                flow=flow,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
+                session_id=ctx.session_id,
+                conversation=ctx.conversation,
+                new_messages_start=ctx.new_messages_start,
+                flow=ctx.flow,
+                litellm_model=ctx.litellm_model,
+                litellm_kwargs=ctx.litellm_kwargs,
             ):
                 yield event
             return
@@ -993,9 +947,9 @@ class AIBuilderProposalProcessor:
         }
 
         await self._persist_tool_turn(
-            session_id=session_id,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
+            session_id=ctx.session_id,
+            conversation=ctx.conversation,
+            new_messages_start=ctx.new_messages_start,
             tool_call=tool_call,
             arguments=arguments,
             tool_content="Requirements presented to user. Awaiting confirmation.",
@@ -1009,29 +963,16 @@ class AIBuilderProposalProcessor:
     async def _handle_edit_flow(
         self,
         *,
-        session_id: UUID,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
+        ctx: ProposalContext,
         tool_call: Any,
-        text_content: str | None,
-        llm_messages: list[dict[str, Any]],
-        tool_schemas: list[dict[str, Any]],
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        available_model_refs: set[str] | None,
-        available_kb_refs: set[str] | None,
-        max_output_tokens: int,
-        request_id: str,
-        flow: "Flow | None" = None,
-        assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         """Handle the edit_flow tool call — validate, compile, store, and emit plan."""
-        if flow is None:
+        if ctx.flow is None:
             yield build_error_event(
                 message="edit_flow requires an existing flow context.",
                 code="edit_no_flow",
                 phase="proposal",
-                request_id=request_id,
+                request_id=ctx.request_id,
             )
             return
 
@@ -1045,13 +986,13 @@ class AIBuilderProposalProcessor:
                 message=f"Invalid edit_flow arguments: {exc}",
                 code="edit_parse_error",
                 phase="proposal",
-                request_id=request_id,
+                request_id=ctx.request_id,
             )
             return
 
         # Validate draft structure
         valid_step_refs = [
-            f"existing_step_{step.step_order}" for step in flow.steps
+            f"existing_step_{step.step_order}" for step in ctx.flow.steps
         ]
         edit_validation = validate_edit_draft(draft, valid_step_refs)
         if edit_validation.errors:
@@ -1062,7 +1003,7 @@ class AIBuilderProposalProcessor:
                 message=f"Edit validation failed: {'; '.join(error_messages)}",
                 code="edit_validation_error",
                 phase="proposal",
-                request_id=request_id,
+                request_id=ctx.request_id,
             )
             return
 
@@ -1071,12 +1012,12 @@ class AIBuilderProposalProcessor:
         try:
             edit_result = compile_edit_draft(
                 draft,
-                current_steps=list(flow.steps),
-                base_flow_revision=flow.draft_revision,
-                flow_name=flow.name,
-                flow_description=flow.description,
-                current_metadata_json=flow.metadata_json,
-                assistant_snapshots=assistant_snapshots,
+                current_steps=list(ctx.flow.steps),
+                base_flow_revision=ctx.flow.draft_revision,
+                flow_name=ctx.flow.name,
+                flow_description=ctx.flow.description,
+                current_metadata_json=ctx.flow.metadata_json,
+                assistant_snapshots=ctx.assistant_snapshots,
             )
         except Exception as exc:
             logger.error("Edit compilation failed: %s", exc, exc_info=True)
@@ -1084,7 +1025,7 @@ class AIBuilderProposalProcessor:
                 message=f"Failed to compile edit: {exc}",
                 code="edit_compile_error",
                 phase="proposal",
-                request_id=request_id,
+                request_id=ctx.request_id,
             )
             return
 
@@ -1108,26 +1049,26 @@ class AIBuilderProposalProcessor:
                 message=f"Compiled edit spec validation failed: {'; '.join(error_messages)}",
                 code="edit_spec_validation_error",
                 phase="proposal",
-                request_id=request_id,
+                request_id=ctx.request_id,
             )
             return
 
         # Attempt constrained description repair if applicable
-        current_provenance = _extract_description_provenance(flow.metadata_json)
+        current_provenance = _extract_description_provenance(ctx.flow.metadata_json)
         if should_attempt_description_repair(
             advisories=edit_result.advisories,
-            current_description=flow.description,
+            current_description=ctx.flow.description,
             current_provenance=current_provenance,
         ):
             yield build_status_event("repairing")
             repaired_spec = await self._attempt_description_repair(
                 compiled_spec=compiled_spec,
-                flow=flow,
-                llm_messages=llm_messages,
-                tool_schemas=tool_schemas,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                max_output_tokens=max_output_tokens,
+                flow=ctx.flow,
+                llm_messages=ctx.llm_messages,
+                tool_schemas=ctx.tool_schemas,
+                litellm_model=ctx.litellm_model,
+                litellm_kwargs=ctx.litellm_kwargs,
+                max_output_tokens=ctx.max_output_tokens,
             )
             if repaired_spec is not None:
                 compiled_spec = repaired_spec
@@ -1146,10 +1087,10 @@ class AIBuilderProposalProcessor:
         plan, envelope = await store_plan_and_update_conversation(
             repo=self.repo,
             tenant_id=self.user.tenant_id,
-            session_id=session_id,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
-            assistant_content=text_content or "",
+            session_id=ctx.session_id,
+            conversation=ctx.conversation,
+            new_messages_start=ctx.new_messages_start,
+            assistant_content=ctx.text_content or "",
             tool_call_id=tool_call.id,
             arguments=raw_args,
             spec=compiled_spec,

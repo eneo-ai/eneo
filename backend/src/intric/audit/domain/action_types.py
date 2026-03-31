@@ -79,6 +79,8 @@ class ActionType(str, Enum):
     FLOW_PUBLISHED = "flow_published"
     FLOW_UNPUBLISHED = "flow_unpublished"
     FLOW_RUN_CREATED = "flow_run_created"
+    FLOW_RUN_COMPLETED = "flow_run_completed"
+    FLOW_RUN_FAILED = "flow_run_failed"
     FLOW_RUN_REDISPATCHED = "flow_run_redispatched"
     FLOW_RUN_CANCELLED = "flow_run_cancelled"
     FLOW_CLASSIFICATION_OVERRIDE = "flow_classification_override"
@@ -87,6 +89,8 @@ class ActionType(str, Enum):
     FLOW_RUN_AUDIO_TRANSCRIBED = "flow_run_audio_transcribed"
     FLOW_HTTP_OUTBOUND_CALL = "flow_http_outbound_call"
     FLOW_RUN_ARTIFACT_DOWNLOADED = "flow_run_artifact_downloaded"
+    FLOW_EVIDENCE_VIEWED = "flow_evidence_viewed"
+    FLOW_EVIDENCE_EXPORTED_JSON = "flow_evidence_exported_json"
 
     # AI Builder Actions
     AI_BUILDER_SESSION_CREATED = "ai_builder_session_created"

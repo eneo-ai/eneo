@@ -154,9 +154,6 @@
                 <Button variant="outlined" size="small" onclick={() => service.revisePlan("keep_current_description")}>
                   {m.ai_builder_description_keep_current()}
                 </Button>
-                <Button variant="outlined" size="small" onclick={() => service.revisePlan("regenerate_description")}>
-                  {m.ai_builder_description_regenerate()}
-                </Button>
               </div>
             {/if}
           </div>

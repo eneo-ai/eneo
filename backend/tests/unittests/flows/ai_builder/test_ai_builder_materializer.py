@@ -814,6 +814,80 @@ class TestDescriptionProvenance:
         assert ai_builder.get("other_key") == "preserve_me"
         assert "description" in ai_builder
 
+    def test_compile_changeset_stamps_ai_builder_origin_metadata(self) -> None:
+        spec = _make_spec(steps=[_make_step_spec(plan_step_ref="step_a")])
+
+        changeset = compile_changeset(
+            spec,
+            current_flow=None,
+            ai_builder_origin={
+                "builder_session_id": str(uuid4()),
+                "builder_plan_id": str(uuid4()),
+                "builder_spec_hash": spec.spec_hash(),
+                "applied_at": "2026-03-31T12:00:00Z",
+            },
+        )
+
+        assert changeset.metadata_json is not None
+        ai_builder = changeset.metadata_json["ai_builder"]
+        assert ai_builder["origin"]["builder_spec_hash"] == spec.spec_hash()
+        assert ai_builder["origin"]["applied_at"] == "2026-03-31T12:00:00Z"
+
+    def test_edit_mode_tolerates_existing_http_get_input_source(self) -> None:
+        flow = _make_flow(
+            description="Fetches a remote payload and summarizes it.",
+            steps=[
+                _make_flow_step(
+                    step_order=1,
+                    input_source="http_get",
+                    output_mode="pass_through",
+                    output_type="text",
+                )
+            ],
+        )
+        spec = _make_spec(
+            flow_description=flow.description or "",
+            steps=[
+                _make_step_spec(
+                    plan_step_ref="step_a",
+                    existing_step_ref="existing_step_1",
+                    input_source=InputSource.FLOW_INPUT,
+                )
+            ],
+        )
+
+        changeset = compile_changeset(spec, current_flow=flow)
+
+        assert changeset.flow_description == flow.description
+
+    def test_edit_mode_tolerates_existing_http_post_output_mode(self) -> None:
+        flow = _make_flow(
+            description="Posts the result to another system.",
+            steps=[
+                _make_flow_step(
+                    step_order=1,
+                    input_source="flow_input",
+                    output_mode="http_post",
+                    output_type="json",
+                )
+            ],
+        )
+        spec = _make_spec(
+            flow_description=flow.description or "",
+            steps=[
+                _make_step_spec(
+                    plan_step_ref="step_a",
+                    existing_step_ref="existing_step_1",
+                    output_mode=OutputMode.PASS_THROUGH,
+                    output_type=OutputType.JSON,
+                )
+            ],
+        )
+
+        changeset = compile_changeset(spec, current_flow=flow)
+
+        assert changeset.flow_description == flow.description
+
 
 # ---------------------------------------------------------------------------
 # Compiler: variable binding rewriting (plan_step_ref → step order refs)
@@ -1111,6 +1185,53 @@ class TestExecuteCreateFlow:
         assert update_kwargs["prompt"].text == "Detailed prompt here"
         assert update_kwargs["completion_model_id"] == model_id
         assert update_kwargs["groups"] == [kb_id_1, kb_id_2]
+
+    @pytest.mark.asyncio
+    async def test_create_mode_cleans_up_exact_temp_flow_when_apply_fails(self) -> None:
+        flow_id = uuid4()
+        space_id = uuid4()
+        assistant_id = uuid4()
+
+        mock_flow_service = AsyncMock()
+        mock_flow_service.create_flow.return_value = _make_flow(
+            flow_id=flow_id,
+            space_id=space_id,
+            name="Created flow",
+        )
+        created_assistant = MagicMock()
+        created_assistant.id = assistant_id
+        mock_flow_service.create_flow_assistant.return_value = (created_assistant, [])
+        mock_flow_service.update_flow_assistant.return_value = (created_assistant, [])
+        mock_flow_service.update_flow.side_effect = RuntimeError("apply failed")
+
+        changeset = FlowChangeSet(
+            flow_name="Created flow",
+            flow_description="Desc",
+            assistants_to_create=[
+                AssistantToCreate(
+                    plan_step_ref="step_a",
+                    assistant_spec=AssistantSpec(instructions="Do stuff"),
+                ),
+            ],
+            compiled_steps=[
+                _compiled_step(
+                    plan_step_ref="step_a",
+                    step_order=1,
+                    change_kind=StepChangeKind.ADDED,
+                    user_description="Step A",
+                ),
+            ],
+        )
+
+        with pytest.raises(RuntimeError, match="apply failed"):
+            await execute_changeset(
+                changeset=changeset,
+                flow_service=mock_flow_service,
+                space_id=space_id,
+                flow_id=None,
+            )
+
+        mock_flow_service.delete_flow.assert_awaited_once_with(flow_id)
 
 
 # ---------------------------------------------------------------------------

@@ -23,7 +23,7 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
-from intric.flows.flow import Flow
+from intric.flows.domain.flow import Flow
 
 _TASK_VERBS_SV = (
     "sammanfatta",

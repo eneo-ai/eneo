@@ -261,6 +261,14 @@ ACTION_METADATA = {
         "name_sv": "Transkriptionsmodell uppdaterad",
         "description_sv": "Loggar ändringar av transkriptionsmodell",
     },
+    ActionType.FLOW_EVIDENCE_VIEWED.value: {
+        "name_sv": "Flow-bevisning visad",
+        "description_sv": "Loggar när rik körningsbevisning visas för ett flow",
+    },
+    ActionType.FLOW_EVIDENCE_EXPORTED_JSON.value: {
+        "name_sv": "Flow-bevisning exporterad",
+        "description_sv": "Loggar när rik körningsbevisning exporteras som JSON",
+    },
     ActionType.TEMPLATE_CREATED.value: {
         "name_sv": "Mall skapad",
         "description_sv": "Loggar när en ny mall skapas",

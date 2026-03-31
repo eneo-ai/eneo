@@ -25,7 +25,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputType,
 )
 from intric.flows.ai_builder.ai_builder_plan_store import format_revision_feedback
-from intric.flows.flow import Flow
+from intric.flows.domain.flow import Flow
 
 # Markers that indicate the user explicitly wants structured JSON extraction
 # for downstream reuse — NOT just any mention of "json" in passing.

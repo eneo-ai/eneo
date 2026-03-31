@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from intric.flows.ai_builder.ai_builder_api_models import SendMessageRequest
+from intric.flows.ai_builder.ai_builder_event_models import AIBuilderErrorEventData
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowChangeSet,
@@ -16,7 +18,6 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputType,
     PlannerPlanEnvelope,
     PlanStatus,
-    SendMessageRequest,
     SessionStatus,
     StepSpec,
     TargetKind,
@@ -256,3 +257,7 @@ class TestApiModels:
         values = {e.value for e in InputSource}
         assert "http_get" not in values
         assert "http_post" not in values
+
+    def test_event_model_still_exposes_error_code_field(self) -> None:
+        payload = AIBuilderErrorEventData(message="boom", code="planner_failed")
+        assert payload.code == "planner_failed"

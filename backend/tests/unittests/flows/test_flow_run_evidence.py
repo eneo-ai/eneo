@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from types import SimpleNamespace
 from uuid import uuid4
 
-from intric.flows.flow import FlowRun, FlowRunStatus, FlowVersion
+from intric.flows.enums import FlowStepResultStatus
+from intric.flows.flow import FlowRun, FlowRunStatus, FlowStepResult, FlowVersion
 from intric.flows.flow_run_evidence import build_debug_export, normalize_debug_step, parse_step_order
+from intric.flows.flow_run_provenance import normalize_attempt_provenance
 
 
 def test_parse_step_order_handles_strings_and_bools():
@@ -36,7 +37,7 @@ def test_normalize_debug_step_uses_list_allowlist_and_rag_metadata():
     assert step["rag"] == {"status": "success"}
 
 
-def test_build_debug_export_reads_rag_metadata_from_model_dump_fallback():
+def test_build_debug_export_reads_rag_metadata_from_typed_step_results():
     now = datetime.now(timezone.utc)
     run = FlowRun(
         id=uuid4(),
@@ -44,6 +45,7 @@ def test_build_debug_export_reads_rag_metadata_from_model_dump_fallback():
         flow_version=2,
         user_id=uuid4(),
         tenant_id=uuid4(),
+        trace_id=uuid4(),
         status=FlowRunStatus.COMPLETED,
         cancelled_at=None,
         input_payload_json=None,
@@ -75,13 +77,26 @@ def test_build_debug_export_reads_rag_metadata_from_model_dump_fallback():
         created_at=now,
         updated_at=now,
     )
-    result = SimpleNamespace(
-        step_order=None,
-        input_payload_json=None,
-        model_dump=lambda mode="json": {
-            "step_order": "1",
-            "input_payload_json": {"rag": {"status": "success", "chunks_retrieved": 3}},
-        },
+    result = FlowStepResult(
+        id=uuid4(),
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        input_payload_json={"rag": {"status": "success", "chunks_retrieved": 3}},
+        effective_prompt=None,
+        output_payload_json=None,
+        model_parameters_json=None,
+        num_tokens_input=None,
+        num_tokens_output=None,
+        status=FlowStepResultStatus.COMPLETED,
+        error_message=None,
+        flow_step_execution_hash=None,
+        tool_calls_metadata=None,
+        created_at=now,
+        updated_at=now,
     )
 
     export = build_debug_export(run=run, version=version, step_results=[result])
@@ -98,6 +113,7 @@ def test_build_debug_export_handles_empty_steps():
         flow_version=1,
         user_id=uuid4(),
         tenant_id=uuid4(),
+        trace_id=uuid4(),
         status=FlowRunStatus.COMPLETED,
         cancelled_at=None,
         input_payload_json=None,
@@ -121,3 +137,26 @@ def test_build_debug_export_handles_empty_steps():
 
     assert export["steps"] == []
     assert export["definition"]["steps_count"] == 0
+
+
+def test_normalize_attempt_provenance_truncates_large_text_and_json_payloads():
+    normalized = normalize_attempt_provenance(
+        {
+            "llm": {
+                "effective_prompt": "x" * 20000,
+                "tool_calls": {
+                    "result": "y" * 20000,
+                },
+            }
+        }
+    )
+
+    assert normalized is not None
+    assert normalized.llm is not None
+    assert normalized.llm.effective_prompt is not None
+    assert normalized.llm.effective_prompt.truncated is True
+    assert normalized.llm.effective_prompt.byte_size > 16000
+    assert normalized.llm.effective_prompt.sha256 is not None
+    assert normalized.llm.tool_calls is not None
+    assert normalized.llm.tool_calls.truncated is True
+    assert normalized.llm.tool_calls.sha256 is not None

@@ -90,6 +90,13 @@ def test_flow_consumer_router_split_modules_reexport_existing_handlers() -> None
     flow_consumer_router = importlib.import_module("intric.flows.api.flow_consumer_router")
     flow_upload_router = importlib.import_module("intric.flows.api.flow_upload_router")
     flow_run_router = importlib.import_module("intric.flows.api.flow_run_router")
+    flow_run_execution_router = importlib.import_module(
+        "intric.flows.api.flow_run_execution_router"
+    )
+    flow_run_evidence_router = importlib.import_module(
+        "intric.flows.api.flow_run_evidence_router"
+    )
+    flow_run_steps_router = importlib.import_module("intric.flows.api.flow_run_steps_router")
 
     assert (
         flow_upload_router.get_flow_run_contract.__name__
@@ -112,7 +119,15 @@ def test_flow_consumer_router_split_modules_reexport_existing_handlers() -> None
         == flow_consumer_router.create_flow_run.__name__
     )
     assert (
+        flow_run_execution_router.create_flow_run.__name__
+        == flow_consumer_router.create_flow_run.__name__
+    )
+    assert (
         flow_run_router.list_flow_runs_alias.__name__
+        == flow_consumer_router.list_flow_runs_alias.__name__
+    )
+    assert (
+        flow_run_execution_router.list_flow_runs_alias.__name__
         == flow_consumer_router.list_flow_runs_alias.__name__
     )
     assert (
@@ -120,7 +135,15 @@ def test_flow_consumer_router_split_modules_reexport_existing_handlers() -> None
         == flow_consumer_router.get_flow_run_alias.__name__
     )
     assert (
+        flow_run_execution_router.get_flow_run_alias.__name__
+        == flow_consumer_router.get_flow_run_alias.__name__
+    )
+    assert (
         flow_run_router.cancel_flow_run_alias.__name__
+        == flow_consumer_router.cancel_flow_run_alias.__name__
+    )
+    assert (
+        flow_run_execution_router.cancel_flow_run_alias.__name__
         == flow_consumer_router.cancel_flow_run_alias.__name__
     )
     assert (
@@ -128,16 +151,40 @@ def test_flow_consumer_router_split_modules_reexport_existing_handlers() -> None
         == flow_consumer_router.redispatch_flow_run_alias.__name__
     )
     assert (
+        flow_run_execution_router.redispatch_flow_run_alias.__name__
+        == flow_consumer_router.redispatch_flow_run_alias.__name__
+    )
+    assert (
         flow_run_router.get_flow_run_evidence_alias.__name__
         == flow_consumer_router.get_flow_run_evidence_alias.__name__
+    )
+    assert (
+        flow_run_evidence_router.get_flow_run_evidence_alias.__name__
+        == flow_consumer_router.get_flow_run_evidence_alias.__name__
+    )
+    assert (
+        flow_run_router.export_flow_run_evidence_alias.__name__
+        == flow_run_evidence_router.export_flow_run_evidence_alias.__name__
     )
     assert (
         flow_run_router.list_flow_run_steps.__name__
         == flow_consumer_router.list_flow_run_steps.__name__
     )
+    assert (
+        flow_run_steps_router.list_flow_run_steps.__name__
+        == flow_consumer_router.list_flow_run_steps.__name__
+    )
     assert flow_run_router.get_flow_graph.__name__ == flow_consumer_router.get_flow_graph.__name__
     assert (
+        flow_run_steps_router.get_flow_graph.__name__
+        == flow_consumer_router.get_flow_graph.__name__
+    )
+    assert (
         flow_run_router.generate_flow_run_artifact_signed_url.__name__
+        == flow_consumer_router.generate_flow_run_artifact_signed_url.__name__
+    )
+    assert (
+        flow_run_steps_router.generate_flow_run_artifact_signed_url.__name__
         == flow_consumer_router.generate_flow_run_artifact_signed_url.__name__
     )
 
@@ -218,6 +265,9 @@ def test_flow_and_ai_builder_response_models_expose_openapi_examples() -> None:
         flow_models.FlowTemplateInspectionPublic,
         flow_models.FlowRunContractPublic,
         flow_models.GraphResponse,
+        flow_models.FlowRunDebugExport,
+        flow_models.FlowRunEvidenceResponse,
+        flow_models.FlowRunEvidenceExportResponse,
         ai_builder_models.SessionResponse,
         ai_builder_models.SessionListResponse,
         ai_builder_models.SessionModelsResponse,
@@ -271,6 +321,31 @@ def test_flow_and_ai_builder_openapi_documents_parameters_and_error_examples() -
     assert (
         get_flow_operation["responses"]["404"]["content"]["application/json"]["example"]["code"]
         == "not_found"
+    )
+
+    list_steps_operation = schema["paths"]["/api/v1/flows/{id}/runs/{run_id}/steps/"]["get"]
+    assert list_steps_operation["summary"]
+    assert list_steps_operation["description"]
+
+    get_evidence_operation = schema["paths"]["/api/v1/flows/{id}/runs/{run_id}/evidence/"]["get"]
+    evidence_params = {param["name"]: param for param in get_evidence_operation["parameters"]}
+    assert evidence_params["id"]["description"]
+    assert evidence_params["run_id"]["description"]
+    assert (
+        get_evidence_operation["responses"]["503"]["content"]["application/json"]["example"]["code"]
+        == "flow_evidence_audit_logging_failed"
+    )
+
+    export_evidence_operation = schema["paths"]["/api/v1/flows/{id}/runs/{run_id}/evidence/export"]["get"]
+    export_params = {param["name"]: param for param in export_evidence_operation["parameters"]}
+    assert export_params["format"]["description"]
+    assert (
+        export_evidence_operation["responses"]["400"]["content"]["application/json"]["example"]["code"]
+        == "flow_evidence_export_format_not_supported"
+    )
+    assert (
+        export_evidence_operation["responses"]["503"]["content"]["application/json"]["example"]["code"]
+        == "flow_evidence_audit_logging_failed"
     )
 
     list_flows_operation = schema["paths"]["/api/v1/flows/"]["get"]

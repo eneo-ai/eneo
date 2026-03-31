@@ -142,7 +142,7 @@ export interface ApplyError {
   context: Record<string, unknown>;
 }
 
-export type PlanRevisionType = "keep_current_description" | "regenerate_description";
+export type PlanRevisionType = "keep_current_description";
 
 export interface ApplyResult {
   flow_id: string;

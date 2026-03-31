@@ -864,6 +864,164 @@ async def test_create_flow_rejects_assistants_outside_space_or_tenant(user):
 
 
 @pytest.mark.asyncio
+async def test_create_flow_allows_scoped_assistant_references_before_flow_exists(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    assistant_id = uuid4()
+    flow_repo.create.side_effect = lambda **kwargs: kwargs["flow"]
+    flow_repo.get_assistant_scope_rows.return_value = [
+        SimpleNamespace(
+            id=assistant_id,
+            origin=AssistantOrigin.USER.value,
+            managing_flow_id=None,
+        )
+    ]
+
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=AsyncMock(),
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+    )
+    step = _step(step_order=1).model_copy(update={"assistant_id": assistant_id})
+
+    created = await service.create_flow(
+        space_id=uuid4(),
+        name="Flow",
+        steps=[step],
+        metadata_json=None,
+    )
+
+    assert created.steps[0].assistant_id == assistant_id
+    flow_repo.get_assistant_scope_rows.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_flow_allows_empty_steps_with_strict_flow_managed_enforcement(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_repo.create.side_effect = lambda **kwargs: kwargs["flow"]
+
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=AsyncMock(),
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+    )
+
+    created = await service.create_flow(
+        space_id=uuid4(),
+        name="Flow",
+        steps=[],
+        metadata_json=None,
+    )
+
+    assert created.steps == []
+    flow_repo.get_assistant_scope_rows.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_flow_rejects_flow_managed_assistants_not_owned_by_flow(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_id = uuid4()
+    assistant_id = uuid4()
+    flow_repo.get_assistant_scope_rows.return_value = [
+        SimpleNamespace(
+            id=assistant_id,
+            origin=AssistantOrigin.FLOW_MANAGED.value,
+            managing_flow_id=uuid4(),
+        )
+    ]
+
+    existing_flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Draft",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1).model_copy(update={"assistant_id": assistant_id})],
+    )
+    flow_repo.get.return_value = existing_flow
+
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=AsyncMock(),
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="Flow steps must reference flow-managed assistants owned by the flow",
+    ):
+        await service.update_flow(
+            flow_id=flow_id,
+            steps=[_step(step_order=1).model_copy(update={"assistant_id": assistant_id})],
+        )
+
+
+@pytest.mark.asyncio
+async def test_publish_flow_rejects_flow_managed_assistants_not_owned_by_flow(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_id = uuid4()
+    assistant_id = uuid4()
+    flow_repo.get_assistant_scope_rows.return_value = [
+        SimpleNamespace(
+            id=assistant_id,
+            origin=AssistantOrigin.FLOW_MANAGED.value,
+            managing_flow_id=uuid4(),
+        )
+    ]
+
+    source_flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Draft",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1).model_copy(update={"assistant_id": assistant_id})],
+    )
+    flow_repo.get.return_value = source_flow
+
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=AsyncMock(),
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="Flow steps must reference flow-managed assistants owned by the flow",
+    ):
+        await service.publish_flow(flow_id=flow_id)
+
+
+@pytest.mark.asyncio
 async def test_update_flow_rejects_when_flow_is_published(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()

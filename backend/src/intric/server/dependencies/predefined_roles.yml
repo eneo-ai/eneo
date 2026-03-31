@@ -16,6 +16,7 @@ roles:
       - AI
       - websites
       - integrations
+      - flows_trace
 
   - name: 'Owner'
     permissions:
@@ -33,3 +34,4 @@ roles:
       - flows_run
       - flows_manage
       - flows_ai_builder
+      - flows_trace

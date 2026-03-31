@@ -12,168 +12,52 @@ from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
     infer_answer_signals_from_text,
     normalize_signal_text,
 )
+from intric.flows.ai_builder.ai_builder_canonicalization import (
+    canonical_question_id,
+    canonical_option_id,
+    is_supported_structured_question_id,
+    normalize_question_answer,
+    normalize_structured_question_payload,
+    supported_structured_question_ids,
+)
+from intric.flows.ai_builder.ai_builder_keywords import (
+    DOCX_CONTEXT_MARKERS,
+    DOCX_GENERATED_MODE_MARKERS,
+    DOCX_TEMPLATE_MODE_MARKERS,
+    OUTPUT_CHANGE_KEYWORDS,
+    PDF_GENERATED_MODE_MARKERS,
+    PDF_TEMPLATE_EXPECTATION_MARKERS,
+    PDF_TEMPLATE_GENERIC_MARKERS,
+    RUNTIME_METADATA_KEYWORDS,
+    STRUCTURED_EXTRACTION_KEYWORDS,
+)
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage, OutputType
 from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_discovery_defaults,
 )
 
-OUTPUT_CHANGE_KEYWORDS: tuple[str, ...] = (
-    "structured json",
-    "structured_text",
-    "structured text",
-    "slut-pdf",
-    "final pdf",
-    "pdf-dokument",
-    "pdf document",
-    "docx-dokument",
-    "docx document",
-    "text summary",
-    "textsammanfattning",
-)
-
-RUNTIME_METADATA_KEYWORDS: tuple[str, ...] = (
-    "ärendenummer",
-    "case number",
-    "committee",
-    "nämnd",
-    "språk",
-    "language",
-    "fokus",
-    "focus",
-    "metadata",
-    "form fields",
-    "formulärfält",
-)
-
-STRUCTURED_EXTRACTION_KEYWORDS: tuple[str, ...] = (
-    "structured data",
-    "strukturerad data",
-    "json",
-    "output contract",
-    "output_contract",
-    "extrahera viktiga fakta",
-    "risker",
-    "möjligheter",
-    "rekommendationer",
-    "key facts",
-    "risks",
-    "opportunities",
-    "recommendations",
-)
-
-DOCX_TEMPLATE_MODE_MARKERS: tuple[str, ...] = (
-    "template fill",
-    "template_fill",
-    "template",
-    "mall",
-    "fylla i",
-)
-
-DOCX_GENERATED_MODE_MARKERS: tuple[str, ...] = (
-    "utan mall",
-    "without template",
-)
-
-DOCX_CONTEXT_MARKERS: tuple[str, ...] = (
-    "docx",
-    "word",
-    "word-dokument",
-    "word document",
-)
-
-PDF_TEMPLATE_EXPECTATION_MARKERS: tuple[str, ...] = (
-    "pdf mall",
-    "pdf-mall",
-    "pdf template",
-    "pdf-template",
-    "template pdf",
-    "fillable pdf",
-    "fixed pdf layout",
-    "fast pdf layout",
-    "specific pdf layout",
-    "specifik pdf layout",
-)
-
-PDF_TEMPLATE_GENERIC_MARKERS: tuple[str, ...] = (
-    "mall",
-    "template",
-    "fylla i",
-    "fyll i",
-    "fixed layout",
-    "fast layout",
-    "specific layout",
-    "specifik layout",
-)
-
-PDF_GENERATED_MODE_MARKERS: tuple[str, ...] = (
-    "generated pdf",
-    "vanlig pdf",
-    "normal pdf",
-    "utan mall",
-    "without template",
-)
-
-QUESTION_ID_ALIASES: dict[str, str] = {
-    "final_output_format": "final_output_mode",
-    "primary_output_format": "final_output_mode",
-    "output_format": "final_output_mode",
-    "file_handling_mode": "document_material_scope",
-    "upload_mode": "document_material_scope",
-    "final_output_type": "final_output_mode",
-}
-
-OPTION_ID_ALIASES: dict[str, dict[str, str]] = {
-    "final_output_mode": {
-        "text_output": "structured_text",
-        "text_brief": "structured_text",
-        "structured_text": "structured_text",
-        "docx_generated": "docx_document",
-        "docx_output": "docx_document",
-        "docx_document": "docx_document",
-        "docx_template": "docx_document",
-        "json_output": "structured_json",
-        "structured_json": "structured_json",
-        "json_analysis_plus_text": "structured_json",
-        "pdf_output": "pdf_document",
-        "final_pdf": "pdf_document",
-        "pdf_document": "pdf_document",
-        "comparison_report_text": "structured_text",
-        "executive_summary": "structured_text",
-        "comparison_matrix_json": "structured_json",
-        "docx_report": "docx_document",
-    },
-    "document_material_scope": {
-        "multi_upload_same_run": "multiple_documents_case",
-        "multiple_same_run": "multiple_documents_case",
-        "single_file_per_run": "single_document_case",
-        "one_per_run": "single_document_case",
-    },
-    "runtime_metadata_fields": {
-        "add_basic_metadata": "basic_case_metadata",
-    },
-}
-
-SUPPORTED_STRUCTURED_QUESTION_IDS: frozenset[str] = frozenset(
-    {
-        "processing_scope",
-        "input_material_mode",
-        "flow_input_architecture",
-        "document_kind",
-        "document_material_scope",
-        "comparison_scope",
-        "final_output_mode",
-        "docx_output_mode",
-        "output_reader",
-        "decision_support_scope",
-        "runtime_metadata_fields",
-        "structured_analysis_need",
-        "output_style",
-        "output_tone",
-        "detail_level",
-        "final_pdf_type",
-        "pdf_generation_mode",
-    }
-)
+__all__ = [
+    "aggregate_freeform_user_text",
+    "aggregate_user_text",
+    "build_framework_guardrails_block",
+    "canonical_option_id",
+    "canonical_question_id",
+    "extract_answer_signals",
+    "infer_question_answer_from_freeform",
+    "is_supported_structured_question_id",
+    "latest_pending_structured_question",
+    "mentions_output_change",
+    "mentions_runtime_metadata",
+    "needs_structured_extraction",
+    "normalize_question_answer",
+    "normalize_structured_question_payload",
+    "question_is_already_resolved",
+    "resolve_docx_output_mode",
+    "resolve_explicit_output_choice",
+    "resolve_output_intent",
+    "runtime_metadata_requested",
+    "supported_structured_question_ids",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,86 +66,6 @@ class OutputIntentResolution:
     content_shape: str | None = None
     docx_output_mode: str | None = None
     pdf_generation_mode: str | None = None
-
-def canonical_question_id(question_id: str) -> str:
-    return QUESTION_ID_ALIASES.get(question_id, question_id)
-
-
-def canonical_option_id(question_id: str, option_id: str) -> str:
-    canonical_question = canonical_question_id(question_id)
-    return OPTION_ID_ALIASES.get(canonical_question, {}).get(option_id, option_id)
-
-
-def normalize_structured_question_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = dict(payload)
-    raw_question_id = normalized.get("question_id")
-    if isinstance(raw_question_id, str) and raw_question_id:
-        normalized_question_id = canonical_question_id(raw_question_id)
-        normalized["question_id"] = normalized_question_id
-
-        raw_options = normalized.get("options")
-        if isinstance(raw_options, list):
-            normalized_options: list[dict[str, Any]] = []
-            for option in raw_options:
-                if not isinstance(option, Mapping):
-                    normalized_options.append(option)
-                    continue
-                normalized_option = dict(option)
-                option_id = normalized_option.get("id")
-                if isinstance(option_id, str) and option_id:
-                    normalized_option["id"] = canonical_option_id(
-                        normalized_question_id,
-                        option_id,
-                    )
-                value = normalized_option.get("value")
-                if isinstance(value, str) and value:
-                    normalized_option["value"] = canonical_option_id(
-                        normalized_question_id,
-                        value,
-                    )
-                normalized_options.append(normalized_option)
-            normalized["options"] = normalized_options
-    return normalized
-
-
-def normalize_question_answer(answer: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = dict(answer)
-    raw_question_id = normalized.get("question_id")
-    if not isinstance(raw_question_id, str) or not raw_question_id:
-        return normalized
-
-    normalized_question_id = canonical_question_id(raw_question_id)
-    normalized["question_id"] = normalized_question_id
-
-    for key in ("selected_option_ids", "selected_values"):
-        raw_values = normalized.get(key)
-        if not isinstance(raw_values, list):
-            continue
-        normalized[key] = [
-            canonical_option_id(normalized_question_id, value) if isinstance(value, str) else value
-            for value in raw_values
-        ]
-
-    answer_value = normalized.get("answer")
-    if isinstance(answer_value, str) and answer_value:
-        normalized["answer"] = canonical_option_id(normalized_question_id, answer_value)
-
-    custom_value = normalized.get("custom_value")
-    if isinstance(custom_value, str) and custom_value:
-        normalized["custom_value"] = canonical_option_id(
-            normalized_question_id,
-            custom_value,
-        )
-
-    for singular_key in ("selected_option_id", "selected_value"):
-        raw_value = normalized.get(singular_key)
-        if isinstance(raw_value, str) and raw_value:
-            normalized[singular_key] = canonical_option_id(
-                normalized_question_id,
-                raw_value,
-            )
-
-    return normalized
 
 
 def latest_pending_structured_question(
@@ -603,16 +407,6 @@ def question_is_already_resolved(
     return bool(flow_defaults.get(canonical_id)) and not mentions_output_change(
         freeform_text
     )
-
-
-def is_supported_structured_question_id(question_id: str) -> bool:
-    return canonical_question_id(question_id) in SUPPORTED_STRUCTURED_QUESTION_IDS
-
-
-def supported_structured_question_ids() -> tuple[str, ...]:
-    return tuple(sorted(SUPPORTED_STRUCTURED_QUESTION_IDS))
-
-
 def resolve_explicit_output_choice(
     text: str,
     answer_signals: dict[str, set[str]],

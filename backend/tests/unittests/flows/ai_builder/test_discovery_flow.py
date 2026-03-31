@@ -1034,7 +1034,7 @@ class TestExtendedClarificationHints:
                     input_type="audio",
                     output_mode="transcribe_only",
                     output_type="text",
-                    mcp_policy="none",
+                    mcp_policy="inherit",
                 ),
                 FlowStep(
                     assistant_id=uuid4(),
@@ -1042,9 +1042,9 @@ class TestExtendedClarificationHints:
                     user_description="Skriv slutrapport",
                     input_source="previous_step",
                     input_type="text",
-                    output_mode="final",
+                    output_mode="pass_through",
                     output_type="text",
-                    mcp_policy="none",
+                    mcp_policy="inherit",
                 ),
             ],
         )
@@ -1088,7 +1088,7 @@ class TestExtendedClarificationHints:
                     input_type="document",
                     output_mode="pass_through",
                     output_type="json",
-                    mcp_policy="none",
+                    mcp_policy="inherit",
                 ),
                 FlowStep(
                     assistant_id=uuid4(),
@@ -1098,7 +1098,7 @@ class TestExtendedClarificationHints:
                     input_type="json",
                     output_mode="pass_through",
                     output_type="pdf",
-                    mcp_policy="none",
+                    mcp_policy="inherit",
                 ),
             ],
         )
@@ -1439,7 +1439,7 @@ class TestPlannerDiscoveryShortCircuit:
                     input_type="document",
                     output_mode="pass_through",
                     output_type="text",
-                    mcp_policy="none",
+                    mcp_policy="inherit",
                     input_config={"runtime_input": {"enabled": True, "required": True, "max_files": 1}},
                 )
             ],

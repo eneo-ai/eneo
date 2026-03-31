@@ -39,6 +39,7 @@ def _run(*, user, payload: dict | None = None) -> FlowRun:
         flow_version=1,
         user_id=user.id,
         tenant_id=user.tenant_id,
+        trace_id=uuid4(),
         status=FlowRunStatus.RUNNING,
         cancelled_at=None,
         input_payload_json=payload or {"text": "hello"},

@@ -15,25 +15,30 @@ from intric.database.tables.mcp_server_table import MCPServerTools
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
-
-
-FLOW_STEP_INPUT_SOURCE_VALUES = (
-    "flow_input",
-    "previous_step",
-    "all_previous_steps",
-    "http_get",
-    "http_post",
+from intric.flows.enums import (
+    FlowInputSource,
+    FlowInputType,
+    FlowMcpPolicy,
+    FlowOutputMode,
+    FlowOutputType,
+    FlowRunStatus,
+    FlowStepAttemptStatus,
+    FlowStepResultStatus,
+    FlowTemplateAssetStatus,
 )
-FLOW_STEP_INPUT_TYPE_VALUES = ("text", "json", "image", "audio", "document", "file", "any")
-FLOW_STEP_OUTPUT_MODE_VALUES = ("pass_through", "http_post", "transcribe_only", "template_fill")
-FLOW_STEP_OUTPUT_TYPE_VALUES = ("text", "json", "pdf", "docx")
-FLOW_STEP_MCP_POLICY_VALUES = ("inherit", "restricted")
-FLOW_RUN_STATUS_VALUES = ("queued", "running", "completed", "failed", "cancelled")
-FLOW_STEP_RESULT_STATUS_VALUES = ("pending", "running", "completed", "failed", "cancelled")
-FLOW_STEP_ATTEMPT_STATUS_VALUES = ("started", "retried", "failed", "completed", "cancelled")
+
+
+FLOW_STEP_INPUT_SOURCE_VALUES = tuple(item.value for item in FlowInputSource)
+FLOW_STEP_INPUT_TYPE_VALUES = tuple(item.value for item in FlowInputType)
+FLOW_STEP_OUTPUT_MODE_VALUES = tuple(item.value for item in FlowOutputMode)
+FLOW_STEP_OUTPUT_TYPE_VALUES = tuple(item.value for item in FlowOutputType)
+FLOW_STEP_MCP_POLICY_VALUES = tuple(item.value for item in FlowMcpPolicy)
+FLOW_RUN_STATUS_VALUES = tuple(item.value for item in FlowRunStatus)
+FLOW_STEP_RESULT_STATUS_VALUES = tuple(item.value for item in FlowStepResultStatus)
+FLOW_STEP_ATTEMPT_STATUS_VALUES = tuple(item.value for item in FlowStepAttemptStatus)
 MODULE_HEALTH_STATUS_VALUES = ("healthy", "unhealthy", "unknown")
 MODULE_COMPAT_STATUS_VALUES = ("compatible", "incompatible", "unknown")
-FLOW_TEMPLATE_ASSET_STATUS_VALUES = ("ready", "needs_action", "read_only", "unavailable")
+FLOW_TEMPLATE_ASSET_STATUS_VALUES = tuple(item.value for item in FlowTemplateAssetStatus)
 
 
 class Flows(BasePublic):
@@ -316,6 +321,7 @@ class FlowRuns(BasePublic):
         nullable=False,
         index=True,
     )
+    trace_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     status: Mapped[str] = mapped_column(
         sa.String(32),
         nullable=False,
@@ -443,6 +449,14 @@ class FlowStepAttempts(BasePublic):
     status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     error_code: Mapped[Optional[str]] = mapped_column(nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(nullable=True)
+    requested_model: Mapped[Optional[str]] = mapped_column(nullable=True)
+    response_model: Mapped[Optional[str]] = mapped_column(nullable=True)
+    provider: Mapped[Optional[str]] = mapped_column(nullable=True)
+    finish_reason: Mapped[Optional[str]] = mapped_column(nullable=True)
+    provider_response_id: Mapped[Optional[str]] = mapped_column(nullable=True)
+    num_tokens_input: Mapped[Optional[int]] = mapped_column(nullable=True)
+    num_tokens_output: Mapped[Optional[int]] = mapped_column(nullable=True)
+    provenance_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     started_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     finished_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
 

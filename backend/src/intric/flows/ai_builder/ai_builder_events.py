@@ -6,15 +6,15 @@ from uuid import UUID, uuid4
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_edit_models import CompiledEditResult
 
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_event_models import (
     AIBuilderErrorEventData,
     AIBuilderPlanEventData,
     AIBuilderStatusEventData,
     AIBuilderTextEventData,
-    PlannerPlanEnvelope,
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
 )
+from intric.flows.ai_builder.ai_builder_models import PlannerPlanEnvelope
 from intric.main.exceptions import ErrorCodes
 
 SSE_EVENT_TEXT = "text"
@@ -133,7 +133,7 @@ def build_plan_event(
     envelope: PlannerPlanEnvelope,
     edit_result: "CompiledEditResult | None" = None,
 ) -> dict[str, str]:
-    edit_kwargs: dict[str, object] = {}
+    edit_kwargs: dict[str, Any] = {}
     if edit_result is not None:
         edit_kwargs["edit_diff"] = edit_result.diff.model_dump(mode="json")
         edit_kwargs["edit_confidence"] = edit_result.confidence

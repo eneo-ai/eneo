@@ -2144,6 +2144,13 @@ export interface paths {
      */
     get: operations["get_flow_run_evidence_alias"];
   };
+  "/api/v1/flows/{id}/runs/{run_id}/evidence/export": {
+    /**
+     * Export flow run evidence bundle
+     * @description Export the redacted rich evidence bundle for one flow run as a JSON attachment.
+     */
+    get: operations["export_flow_run_evidence_alias"];
+  };
   "/api/v1/flows/{id}/runs/{run_id}/steps/": {
     /**
      * List flow run step outputs (flow-first)
@@ -2244,6 +2251,13 @@ export interface paths {
      * @description Materialize an approved AI Builder plan into the target flow definition.
      */
     post: operations["apply_ai_builder_plan"];
+  };
+  "/api/v1/flows/ai-builder/plans/{plan_id}/revise": {
+    /**
+     * Revise AI Builder Plan
+     * @description Create a new plan revision with a structured change. Supports 'keep_current_description' (marks description as manually owned).
+     */
+    post: operations["revise_ai_builder_plan"];
   };
   "/api/v1/prompts/{id}/": {
     /** Get Prompt */
@@ -3273,6 +3287,21 @@ export interface components {
       unknown_model_context_window_tokens?: number | null;
     };
     /**
+     * AIBuilderInputSource
+     * @enum {string}
+     */
+    AIBuilderInputSource: "flow_input" | "previous_step" | "all_previous_steps";
+    /**
+     * AIBuilderInputType
+     * @enum {string}
+     */
+    AIBuilderInputType: "text" | "json" | "audio" | "document" | "file" | "any";
+    /**
+     * AIBuilderOutputMode
+     * @enum {string}
+     */
+    AIBuilderOutputMode: "pass_through" | "transcribe_only" | "template_fill";
+    /**
      * ARQHealth
      * @description Parsed ARQ health metrics (clean view).
      */
@@ -3524,6 +3553,8 @@ export interface components {
       | "flow_published"
       | "flow_unpublished"
       | "flow_run_created"
+      | "flow_run_completed"
+      | "flow_run_failed"
       | "flow_run_redispatched"
       | "flow_run_cancelled"
       | "flow_classification_override"
@@ -3532,6 +3563,8 @@ export interface components {
       | "flow_run_audio_transcribed"
       | "flow_http_outbound_call"
       | "flow_run_artifact_downloaded"
+      | "flow_evidence_viewed"
+      | "flow_evidence_exported_json"
       | "ai_builder_session_created"
       | "ai_builder_plan_proposed"
       | "ai_builder_plan_approved"
@@ -5799,20 +5832,20 @@ export interface components {
       role: string;
       /** Content */
       content?: string | null;
-      /** Timestamp */
-      timestamp?: string | null;
+      /** Tool Call Id */
+      tool_call_id?: string | null;
       /** Tool Calls */
       tool_calls?:
         | {
             [key: string]: unknown;
           }[]
         | null;
-      /** Tool Call Id */
-      tool_call_id?: string | null;
       /** Metadata */
       metadata?: {
         [key: string]: unknown;
       } | null;
+      /** Timestamp */
+      timestamp?: string | null;
     };
     /**
      * ConversationRequest
@@ -7250,10 +7283,6 @@ export interface components {
     /**
      * FlowDraftSpecCore
      * @description Canonical portable flow definition.
-     *
-     * Used for:
-     * 1. AI planning — the AI outputs this; validated, stored, rendered
-     * 2. Export/import (Phase 2) — portable between Eneo instances
      */
     FlowDraftSpecCore: {
       /** Flow Name */
@@ -7499,9 +7528,7 @@ export interface components {
       /** Published Flow Version */
       published_flow_version: number;
       /** Form Fields */
-      form_fields?: {
-        [key: string]: unknown;
-      }[];
+      form_fields?: components["schemas"]["FormFieldPublic"][];
       /** Steps Requiring Input */
       steps_requiring_input?: components["schemas"]["FlowRuntimeInputContractPublic"][];
       /** Aggregate Max Files */
@@ -7534,12 +7561,35 @@ export interface components {
       } | null;
       /** Step Inputs */
       step_inputs?: {
-        [key: string]: {
-          [key: string]: string[];
-        };
+        [key: string]: components["schemas"]["StepRunInput"];
       } | null;
       /** File Ids */
       file_ids?: string[] | null;
+    };
+    /** FlowRunDebugAttempt */
+    FlowRunDebugAttempt: {
+      /** Attempt No */
+      attempt_no: number;
+      /** Status */
+      status?: string | null;
+      /** Duration Ms */
+      duration_ms?: number | null;
+      /** Error Code */
+      error_code?: string | null;
+      /** Requested Model */
+      requested_model?: string | null;
+      /** Response Model */
+      response_model?: string | null;
+      /** Provider */
+      provider?: string | null;
+      /** Finish Reason */
+      finish_reason?: string | null;
+      /** Provider Response Id */
+      provider_response_id?: string | null;
+      /** Num Tokens Input */
+      num_tokens_input?: number | null;
+      /** Num Tokens Output */
+      num_tokens_output?: number | null;
     };
     /** FlowRunDebugDefinition */
     FlowRunDebugDefinition: {
@@ -7703,6 +7753,8 @@ export interface components {
       flow_id: string;
       /** Flow Version */
       flow_version: number;
+      /** Trace Id */
+      trace_id?: string | null;
       /** Status */
       status: string;
     };
@@ -7728,25 +7780,33 @@ export interface components {
       output: components["schemas"]["FlowRunDebugOutput"];
       mcp: components["schemas"]["FlowRunDebugMcp"];
       rag?: components["schemas"]["FlowRunDebugRag"] | null;
+      /** Attempts */
+      attempts?: components["schemas"]["FlowRunDebugAttempt"][];
+    };
+    /** FlowRunEvidenceExportResponse */
+    FlowRunEvidenceExportResponse: {
+      /** Schema Version */
+      schema_version: string;
+      /**
+       * Generated At
+       * Format: date-time
+       */
+      generated_at: string;
+      /** Content Hash */
+      content_hash: string;
+      bundle: components["schemas"]["FlowRunEvidenceResponse"];
     };
     /** FlowRunEvidenceResponse */
     FlowRunEvidenceResponse: {
-      /** Run */
-      run: {
-        [key: string]: unknown;
-      };
+      run: components["schemas"]["FlowRunPublic"];
       /** Definition Snapshot */
       definition_snapshot: {
         [key: string]: unknown;
       };
       /** Step Results */
-      step_results: {
-        [key: string]: unknown;
-      }[];
+      step_results: components["schemas"]["FlowRunStepPublic"][];
       /** Step Attempts */
-      step_attempts: {
-        [key: string]: unknown;
-      }[];
+      step_attempts: components["schemas"]["FlowStepAttemptPublic"][];
       debug_export: components["schemas"]["FlowRunDebugExport"];
     };
     /**
@@ -7762,6 +7822,7 @@ export interface components {
      *   "job_id": "00000000-0000-0000-0000-000000000401",
      *   "status": "queued",
      *   "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *   "trace_id": "00000000-0000-0000-0000-000000000302",
      *   "updated_at": "2026-03-17T10:05:00Z",
      *   "user_id": "00000000-0000-0000-0000-000000000030"
      * }
@@ -7786,6 +7847,11 @@ export interface components {
        * Format: uuid
        */
       tenant_id: string;
+      /**
+       * Trace Id
+       * Format: uuid
+       */
+      trace_id: string;
       status: components["schemas"]["FlowRunStatus"];
       /** Cancelled At */
       cancelled_at?: string | null;
@@ -7827,6 +7893,7 @@ export interface components {
      *     "job_id": "00000000-0000-0000-0000-000000000401",
      *     "status": "queued",
      *     "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *     "trace_id": "00000000-0000-0000-0000-000000000302",
      *     "updated_at": "2026-03-17T10:05:00Z",
      *     "user_id": "00000000-0000-0000-0000-000000000030"
      *   }
@@ -7876,6 +7943,12 @@ export interface components {
     FlowRunStepPublic: {
       /** Id */
       id?: string | null;
+      /** Flow Run Id */
+      flow_run_id?: string | null;
+      /** Flow Id */
+      flow_id?: string | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
       /** Step Id */
       step_id?: string | null;
       /** Step Order */
@@ -7891,12 +7964,29 @@ export interface components {
       output_payload_json?: {
         [key: string]: unknown;
       } | null;
+      /** Effective Prompt */
+      effective_prompt?: string | null;
+      /** Model Parameters Json */
+      model_parameters_json?: {
+        [key: string]: unknown;
+      } | null;
       /** Num Tokens Input */
       num_tokens_input?: number | null;
       /** Num Tokens Output */
       num_tokens_output?: number | null;
       /** Error Message */
       error_message?: string | null;
+      /** Flow Step Execution Hash */
+      flow_step_execution_hash?: string | null;
+      /** Tool Calls Metadata */
+      tool_calls_metadata?:
+        | {
+            [key: string]: unknown;
+          }[]
+        | {
+            [key: string]: unknown;
+          }
+        | null;
       /** Diagnostics */
       diagnostics?: {
         [key: string]: unknown;
@@ -7996,6 +8086,82 @@ export interface components {
       /** Updated At */
       updated_at?: string | null;
     };
+    /** FlowStepAttemptPublic */
+    FlowStepAttemptPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Flow Run Id
+       * Format: uuid
+       */
+      flow_run_id: string;
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Step Id */
+      step_id?: string | null;
+      /** Step Order */
+      step_order: number;
+      /** Attempt No */
+      attempt_no: number;
+      /** Celery Task Id */
+      celery_task_id?: string | null;
+      status: components["schemas"]["FlowStepAttemptStatus"];
+      /** Error Code */
+      error_code?: string | null;
+      /** Error Message */
+      error_message?: string | null;
+      /** Requested Model */
+      requested_model?: string | null;
+      /** Response Model */
+      response_model?: string | null;
+      /** Provider */
+      provider?: string | null;
+      /** Finish Reason */
+      finish_reason?: string | null;
+      /** Provider Response Id */
+      provider_response_id?: string | null;
+      /** Num Tokens Input */
+      num_tokens_input?: number | null;
+      /** Num Tokens Output */
+      num_tokens_output?: number | null;
+      /** Provenance Json */
+      provenance_json?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Started At
+       * Format: date-time
+       */
+      started_at: string;
+      /** Finished At */
+      finished_at?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * FlowStepAttemptStatus
+     * @enum {string}
+     */
+    FlowStepAttemptStatus: "started" | "retried" | "failed" | "completed" | "cancelled";
     /**
      * FlowStepCreateRequest
      * @example {
@@ -8270,6 +8436,25 @@ export interface components {
       /** Message Code */
       message_code?: string | null;
     };
+    /** FormFieldPublic */
+    FormFieldPublic: {
+      /** Name */
+      name: string;
+      /** Type */
+      type: string;
+      /** Label */
+      label?: string | null;
+      /**
+       * Required
+       * @default false
+       */
+      required?: boolean;
+      /** Options */
+      options?: string[] | null;
+      /** Order */
+      order?: number | null;
+      [key: string]: unknown;
+    };
     /**
      * FormFieldSpec
      * @description Form field definition for flow runtime input forms.
@@ -8321,6 +8506,54 @@ export interface components {
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublicLegacy"][];
     };
+    /** GraphEdge */
+    GraphEdge: {
+      /** Source */
+      source: string;
+      /** Target */
+      target: string;
+      /** Kind */
+      kind?: string | null;
+      /** Source Step Order */
+      source_step_order?: number | null;
+      /** Target Step Order */
+      target_step_order?: number | null;
+      /** Style */
+      style?: string | null;
+      /** Label */
+      label?: string | null;
+    };
+    /** GraphNode */
+    GraphNode: {
+      /** Id */
+      id: string;
+      /** Label */
+      label: string;
+      /** Type */
+      type: string;
+      /** Step Order */
+      step_order?: number | null;
+      /** Input Source */
+      input_source?: string | null;
+      /** Input Type */
+      input_type?: string | null;
+      /** Output Type */
+      output_type?: string | null;
+      /** Output Mode */
+      output_mode?: string | null;
+      /** Mcp Policy */
+      mcp_policy?: string | null;
+      /** Output Classification Override */
+      output_classification_override?: number | null;
+      /** Run Status */
+      run_status?: string | null;
+      /** Num Tokens Input */
+      num_tokens_input?: number | null;
+      /** Num Tokens Output */
+      num_tokens_output?: number | null;
+      /** Error Message */
+      error_message?: string | null;
+    };
     /**
      * GraphResponse
      * @example {
@@ -8346,13 +8579,9 @@ export interface components {
      */
     GraphResponse: {
       /** Nodes */
-      nodes: {
-        [key: string]: unknown;
-      }[];
+      nodes: components["schemas"]["GraphNode"][];
       /** Edges */
-      edges: {
-        [key: string]: unknown;
-      }[];
+      edges: components["schemas"]["GraphEdge"][];
     };
     /** GroupChatAssistantPublic */
     GroupChatAssistantPublic: {
@@ -8617,8 +8846,9 @@ export interface components {
       /**
        * Direction
        * @default output
+       * @enum {string}
        */
-      direction?: string;
+      direction?: "input" | "output";
       /**
        * Method
        * @default POST
@@ -8628,6 +8858,28 @@ export interface components {
       test_variables?: {
         [key: string]: unknown;
       } | null;
+    };
+    /** HttpTestResponse */
+    HttpTestResponse: {
+      /** Success */
+      success: boolean;
+      /** Status Code */
+      status_code?: number | null;
+      /**
+       * Duration Ms
+       * @default 0
+       */
+      duration_ms?: number;
+      /** Response Preview */
+      response_preview?: string | null;
+      /** Request Preview */
+      request_preview?: {
+        [key: string]: unknown;
+      } | null;
+      /** Error Code */
+      error_code?: string | null;
+      /** Error Message */
+      error_message?: string | null;
     };
     /** IconPublic */
     IconPublic: {
@@ -8776,16 +9028,6 @@ export interface components {
       | "audio-upload"
       | "audio-recorder"
       | "image-upload";
-    /**
-     * InputSource
-     * @enum {string}
-     */
-    InputSource: "flow_input" | "previous_step" | "all_previous_steps";
-    /**
-     * InputType
-     * @enum {string}
-     */
-    InputType: "text" | "json" | "audio" | "document" | "file" | "any";
     /** Integration */
     Integration: {
       /**
@@ -9027,11 +9269,6 @@ export interface components {
       /** Error Message */
       error_message?: string | null;
     };
-    /**
-     * MCPPolicy
-     * @enum {string}
-     */
-    MCPPolicy: "inherit" | "restricted";
     /**
      * MCPServerCreate
      * @description DTO for creating an MCP server (admin only, uses Streamable HTTP transport).
@@ -9876,16 +10113,6 @@ export interface components {
      * @enum {string}
      */
     Outcome: "success" | "failure";
-    /**
-     * OutputMode
-     * @enum {string}
-     */
-    OutputMode: "pass_through" | "transcribe_only" | "template_fill";
-    /**
-     * OutputType
-     * @enum {string}
-     */
-    OutputType: "text" | "json" | "pdf" | "docx";
     /** PaginatedPermissions[AppSparse] */
     PaginatedPermissions_AppSparse_: {
       /**
@@ -10896,7 +11123,8 @@ export interface components {
       | "flows_view"
       | "flows_run"
       | "flows_manage"
-      | "flows_ai_builder";
+      | "flows_ai_builder"
+      | "flows_trace";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
@@ -10997,6 +11225,10 @@ export interface components {
       /** Spec Hash */
       spec_hash: string;
       envelope: components["schemas"]["PlannerPlanEnvelope"];
+      /** Edit Result Json */
+      edit_result_json?: {
+        [key: string]: unknown;
+      } | null;
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -11010,9 +11242,6 @@ export interface components {
     /**
      * PlannerPlanEnvelope
      * @description Wraps FlowDraftSpecCore with AI session metadata.
-     *
-     * This separation keeps the portable schema clean.
-     * Export strips the envelope; AI output includes it.
      */
     PlannerPlanEnvelope: {
       spec: components["schemas"]["FlowDraftSpecCore"];
@@ -11022,10 +11251,10 @@ export interface components {
       lint_warnings?: components["schemas"]["LintWarning"][];
       /** Risk Acknowledgments */
       risk_acknowledgments?: string[];
-      /** Plan Rationale */
-      plan_rationale?: string | null;
       /** Reasoning */
       reasoning?: string | null;
+      /** Plan Rationale */
+      plan_rationale?: string | null;
     };
     /** PredefinedRoleInDB */
     PredefinedRoleInDB: {
@@ -11241,6 +11470,19 @@ export interface components {
        * @description Days to retain audit logs (1 day minimum, 2555 days/7 years maximum). Recommended: 90+ days for compliance
        */
       retention_days: number;
+    };
+    /**
+     * RevisePlanRequest
+     * @example {
+     *   "type": "keep_current_description"
+     * }
+     */
+    RevisePlanRequest: {
+      /**
+       * Type
+       * @constant
+       */
+      type: "keep_current_description";
     };
     /** RoleCreateRequest */
     RoleCreateRequest: {
@@ -12325,6 +12567,11 @@ export interface components {
      * @enum {string}
      */
     Status: "in progress" | "queued" | "complete" | "failed" | "not found";
+    /** StepRunInput */
+    StepRunInput: {
+      /** File Ids */
+      file_ids?: string[];
+    };
     /**
      * StepSpec
      * @description Single step in a FlowDraftSpecCore.
@@ -12347,14 +12594,14 @@ export interface components {
       name: string;
       assistant_spec: components["schemas"]["AssistantSpec"];
       /** @default inherit */
-      mcp_policy?: components["schemas"]["MCPPolicy"];
-      input_source: components["schemas"]["InputSource"];
+      mcp_policy?: components["schemas"]["FlowMcpPolicy"];
+      input_source: components["schemas"]["AIBuilderInputSource"];
       /** @default text */
-      input_type?: components["schemas"]["InputType"];
+      input_type?: components["schemas"]["AIBuilderInputType"];
       /** @default pass_through */
-      output_mode?: components["schemas"]["OutputMode"];
+      output_mode?: components["schemas"]["AIBuilderOutputMode"];
       /** @default text */
-      output_type?: components["schemas"]["OutputType"];
+      output_type?: components["schemas"]["FlowOutputType"];
       /** Input Bindings */
       input_bindings?: {
         [key: string]: unknown;
@@ -26141,7 +26388,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["HttpTestResponse"];
         };
       };
       /** @description Caller lacks permission to edit this flow. */
@@ -26828,6 +27075,68 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Evidence audit logging is unavailable for this request. */
+      503: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  /**
+   * Export flow run evidence bundle
+   * @description Export the redacted rich evidence bundle for one flow run as a JSON attachment.
+   */
+  export_flow_run_evidence_alias: {
+    parameters: {
+      query?: {
+        /** @description Export format. */
+        format?: "json";
+      };
+      path: {
+        /** @description Identifier of the flow that owns the run evidence export. */
+        id: string;
+        /** @description Identifier of the run whose evidence export should be downloaded. */
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FlowRunEvidenceExportResponse"];
+        };
+      };
+      /** @description Requested evidence export format is not supported. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden: API key scope does not match flow space. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Evidence audit logging is unavailable for this request. */
+      503: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   /**
@@ -27349,6 +27658,49 @@ export interface operations {
       };
       /** @description The target flow revision changed before apply completed. */
       409: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Revise AI Builder Plan
+   * @description Create a new plan revision with a structured change. Supports 'keep_current_description' (marks description as manually owned).
+   */
+  revise_ai_builder_plan: {
+    parameters: {
+      path: {
+        /** @description Identifier of the proposed AI Builder plan to revise. */
+        plan_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RevisePlanRequest"];
+      };
+    };
+    responses: {
+      /** @description New plan revision created. */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PlanResponse"];
+        };
+      };
+      /** @description Invalid revision request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks permission. */
+      403: {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };

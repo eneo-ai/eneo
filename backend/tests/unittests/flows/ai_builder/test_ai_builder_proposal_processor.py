@@ -11,9 +11,11 @@ from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
+    PROPOSE_FLOW_TOOL_NAME,
 )
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
+    ProposalContext,
 )
 
 
@@ -28,6 +30,27 @@ def _make_processor(**overrides) -> AIBuilderProposalProcessor:
     }
     defaults.update(overrides)
     return AIBuilderProposalProcessor(**defaults)
+
+
+def _make_context(**overrides) -> ProposalContext:
+    defaults = {
+        "session_id": uuid4(),
+        "conversation": [],
+        "new_messages_start": 0,
+        "llm_messages": [],
+        "tool_schemas": [],
+        "litellm_model": "openai/gpt-5.4",
+        "litellm_kwargs": {},
+        "available_model_refs": None,
+        "available_kb_refs": None,
+        "max_output_tokens": 4096,
+        "request_id": "req-1",
+        "flow": None,
+        "assistant_snapshots": None,
+        "text_content": None,
+    }
+    defaults.update(overrides)
+    return ProposalContext(**defaults)
 
 
 def _make_response_with_tool_calls(*tool_calls: MagicMock) -> SimpleNamespace:
@@ -505,6 +528,7 @@ async def test_dispatch_known_tool_call_routes_structured_question_handler() -> 
     processor = _make_processor()
     tool_call = MagicMock()
     tool_call.function.name = ASK_STRUCTURED_QUESTION_TOOL_NAME
+    ctx = _make_context()
 
     async def _events():
         yield {"event": "question", "data": "{}"}
@@ -514,27 +538,77 @@ async def test_dispatch_known_tool_call_routes_structured_question_handler() -> 
         "_handle_structured_question",
         return_value=_events(),
     ) as handle_structured_question:
-        dispatched = processor._dispatch_known_tool_call(
-            session_id=uuid4(),
-            conversation=[],
-            new_messages_start=0,
-            tool_call=tool_call,
-            text_content=None,
-            llm_messages=[],
-            tool_schemas=[],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            available_model_refs=None,
-            available_kb_refs=None,
-            max_output_tokens=4096,
-            request_id="req-1",
-            flow=None,
-        )
+        dispatched = processor._dispatch_known_tool_call(ctx=ctx, tool_call=tool_call)
         assert dispatched is not None
         events = [event async for event in dispatched]
 
     assert events == [{"event": "question", "data": "{}"}]
-    handle_structured_question.assert_called_once()
+    handle_structured_question.assert_called_once_with(ctx=ctx, tool_call=tool_call)
+
+
+@pytest.mark.asyncio
+async def test_handle_tool_call_builds_proposal_context_for_proposal_handler() -> None:
+    processor = _make_processor()
+    flow = MagicMock()
+    snapshots = {uuid4(): {"name": "Assistant"}}
+    tool_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Draft",
+            "steps": [],
+        },
+    )
+    captured_ctx: ProposalContext | None = None
+
+    def _proposal_handler(*, ctx: ProposalContext, tool_call: MagicMock):
+        nonlocal captured_ctx
+        captured_ctx = ctx
+
+        async def _events():
+            yield {"event": "done", "data": ""}
+
+        return _events()
+
+    with (
+        patch.object(
+            processor,
+            "_dispatch_known_tool_call",
+            return_value=None,
+        ),
+        patch.object(
+            processor,
+            "_handle_propose_flow_tool_call",
+            side_effect=_proposal_handler,
+        ) as handle_propose,
+    ):
+        events = [
+            event
+            async for event in processor.handle_tool_call(
+                session_id=uuid4(),
+                conversation=[],
+                new_messages_start=0,
+                tool_calls=[tool_call],
+                text_content="draft",
+                llm_messages=[{"role": "system", "content": "Prompt"}],
+                tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+                litellm_model="openai/gpt-5.4",
+                litellm_kwargs={"api_key": "sk-test"},
+                available_model_refs={"model_a"},
+                available_kb_refs={"kb_a"},
+                max_output_tokens=4096,
+                request_id="req-ctx",
+                flow=flow,
+                assistant_snapshots=snapshots,
+            )
+        ]
+
+    assert events == [{"event": "text", "data": '{"text":"draft"}'}, {"event": "done", "data": ""}]
+    assert captured_ctx is not None
+    assert captured_ctx.request_id == "req-ctx"
+    assert captured_ctx.text_content == "draft"
+    assert captured_ctx.flow is flow
+    assert captured_ctx.assistant_snapshots == snapshots
+    handle_propose.assert_called_once()
 
 
 def test_build_tool_retry_messages_appends_assistant_tool_call_and_feedback() -> None:

@@ -360,6 +360,24 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.currentPlan?.status).toBe("applied");
   });
 
+  it("revises a plan with keep_current_description and refreshes current plan state", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(makePlan({ plan_id: "plan-2", status: "proposed" }));
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({ latest_plan_id: "plan-1", status: "awaiting_approval" }),
+      currentPlan: makePlan({ plan_id: "plan-1", status: "proposed" })
+    });
+
+    await driver.revisePlan("keep_current_description");
+
+    expect(fetch).toHaveBeenCalledWith("/api/v1/flows/ai-builder/plans/plan-1/revise", {
+      method: "post",
+      body: JSON.stringify({ type: "keep_current_description" }),
+      headers: { "Content-Type": "application/json" }
+    });
+    expect(driver.state.currentPlan?.plan_id).toBe("plan-2");
+  });
+
   it("starts a fresh edit session when continuing after apply", async () => {
     const fetch = vi
       .fn()

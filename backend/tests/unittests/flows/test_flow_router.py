@@ -2,16 +2,19 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from io import BytesIO
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import httpx
 import pytest
 from fastapi import BackgroundTasks
 from fastapi import HTTPException
 from fastapi import UploadFile
 
 import intric.flows.flow_dispatch as flow_dispatch_module
+import intric.flows.api.flow_trace_audit as flow_trace_audit_module
 from intric.authentication.auth_dependencies import ScopeFilter
 from intric.audit.domain.action_types import ActionType
 from intric.flows.flow import Flow, FlowRun, FlowRunStatus, FlowStep, FlowTemplateAsset, FlowVersion
@@ -32,6 +35,7 @@ from intric.flows.api.flow_assistant_router import (
 from intric.flows.api.flow_consumer_router import (
     cancel_flow_run_alias,
     create_flow_run,
+    export_flow_run_evidence_alias,
     get_flow_run_contract,
     get_flow_input_policy,
     get_flow_run_alias,
@@ -43,16 +47,17 @@ from intric.flows.api.flow_consumer_router import (
     upload_flow_file,
     upload_flow_runtime_file,
 )
-from intric.flows.api.flow_definition_router import create_flow
-from intric.flows.api.flow_definition_router import inspect_flow_template
-from intric.flows.api.flow_definition_router import upload_flow_template_file
+from intric.flows.api.flow_authoring_router import create_flow
+from intric.flows.api.flow_template_router import inspect_flow_template
+from intric.flows.api.flow_template_router import upload_flow_template_file
 from intric.flows.api.flow_router_common import dispatch_flow_run_after_commit
 from intric.settings.settings import FlowInputLimitsPublic
 from intric.assistants.api.assistant_models import AssistantUpdatePublic
-from intric.main.exceptions import BadRequestException, NotFoundException, UnauthorizedException
+from intric.main.exceptions import BadRequestException, ErrorCodes, NotFoundException, UnauthorizedException
 from intric.roles.permissions import Permission
 from intric.flows.api.flow_consumer_router import generate_flow_run_artifact_signed_url
-from intric.flows.api.flow_definition_router import (
+import intric.flows.api.flow_http_test_router as flow_http_test_router_module
+from intric.flows.api.flow_authoring_router import (
     get_flow as definition_get_flow,
     update_flow as definition_update_flow,
     delete_flow as definition_delete_flow,
@@ -60,6 +65,10 @@ from intric.flows.api.flow_definition_router import (
     publish_flow as definition_publish_flow,
     unpublish_flow as definition_unpublish_flow,
 )
+from intric.flows.api.flow_http_test_router import (
+    test_flow_http as flow_definition_test_flow_http,
+)
+from intric.flows.http_transport.test_action import HttpTestResult
 
 
 def _flow_step(step_id, step_order: int) -> FlowStep:
@@ -103,6 +112,7 @@ def _run(flow_id, tenant_id):
         flow_version=1,
         user_id=uuid4(),
         tenant_id=tenant_id,
+        trace_id=uuid4(),
         status=FlowRunStatus.COMPLETED,
         cancelled_at=None,
         input_payload_json=None,
@@ -137,6 +147,10 @@ def _enable_space_access(container, *, can_read=True, can_create=True, can_edit=
 
 def _request():
     return SimpleNamespace(state=SimpleNamespace())
+
+
+def _user() -> SimpleNamespace:
+    return SimpleNamespace(id=uuid4(), tenant_id=uuid4(), permissions=[Permission.FLOWS])
 
 
 @pytest.mark.asyncio
@@ -201,13 +215,202 @@ async def test_get_flow_graph_uses_run_version_snapshot_when_run_id_supplied():
         container=container,
     )
 
-    llm_nodes = [node for node in graph.nodes if node["type"] == "llm"]
+    llm_nodes = [node for node in graph.nodes if node.type == "llm"]
     assert len(llm_nodes) == 1
-    assert llm_nodes[0]["id"] == str(snapshot_step_id)
-    assert llm_nodes[0]["label"] == "Snapshot step"
+    assert llm_nodes[0].id == str(snapshot_step_id)
+    assert llm_nodes[0].label == "Snapshot step"
     # enforce_flow_scope now always loads the flow for space membership checks,
     # but the graph should still be built from the version snapshot, not live flow.
     flow_run_service.get_run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_test_flow_http_returns_typed_invalid_config_payload(monkeypatch):
+    container = MagicMock()
+    container.user.return_value = _user()
+    container.audit_service.return_value = AsyncMock()
+    container.flow_service.return_value = AsyncMock()
+    _enable_space_access(container)
+
+    response = await flow_definition_test_flow_http(
+        id=uuid4(),
+        request=_request(),
+        body=flow_http_test_router_module.HttpTestRequest(
+            config={"auth": "bad"},
+            direction="output",
+            method="POST",
+        ),
+        container=container,
+        )
+
+    assert response.success is False
+    assert response.error_code == "INVALID_CONFIG"
+    container.audit_service.return_value.log_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_test_flow_http_returns_typed_success_payload(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    audit_service = AsyncMock()
+    container.flow_service.return_value = flow_service
+    container.audit_service.return_value = audit_service
+    container.user.return_value = _user()
+    container.encryption_service.return_value = None
+    _enable_space_access(container)
+
+    execute = AsyncMock(
+        return_value=HttpTestResult(
+            success=True,
+            status_code=200,
+            duration_ms=12.5,
+            response_preview="ok",
+            request_preview={"method": "POST", "url": "https://example.org/api"},
+            error_code=None,
+            error_message=None,
+        )
+    )
+    monkeypatch.setattr(flow_http_test_router_module, "execute_http_test", execute)
+
+    response = await flow_definition_test_flow_http(
+        id=flow_id,
+        request=_request(),
+        body=flow_http_test_router_module.HttpTestRequest(
+            config={
+                "url": "https://example.org/api",
+                "auth": {"mode": "none"},
+                "body": {"mode": "auto"},
+                "custom_headers": [],
+                "timeout_seconds": 30,
+            },
+            direction="output",
+            method="POST",
+            test_variables={"name": "Alex"},
+        ),
+        container=container,
+    )
+
+    assert response.success is True
+    assert response.status_code == 200
+    assert response.request_preview == {"method": "POST", "url": "https://example.org/api"}
+    execute.assert_awaited_once()
+    audit_service.log_async.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_test_flow_http_applies_ssrf_runtime_guards(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+    container.audit_service.return_value = AsyncMock()
+    container.user.return_value = _user()
+    container.encryption_service.return_value = None
+    _enable_space_access(container)
+
+    guard_calls: dict[str, object] = {}
+
+    class _FakeRuntimeHelper:
+        def __init__(self, **kwargs):
+            guard_calls["init"] = kwargs
+
+        async def assert_url_allowed(self, url: str):
+            guard_calls["preflight_url"] = url
+            return {"203.0.113.10"}
+
+        def assert_connected_peer_allowed(self, *, response, preflight_resolved_ips):
+            guard_calls["peer_status"] = response.status_code
+            guard_calls["peer_ips"] = preflight_resolved_ips
+
+    async def _fake_request(self, *, method, url, headers, content, json, timeout):
+        request = httpx.Request(method=method, url=url, headers=headers)
+
+        class _NetworkStream:
+            @staticmethod
+            def get_extra_info(name):
+                if name == "server_addr":
+                    return ("203.0.113.10", 443)
+                return None
+
+        return httpx.Response(
+            status_code=200,
+            content=b"ok",
+            request=request,
+            extensions={"network_stream": _NetworkStream()},
+        )
+
+    async def _fake_execute_http_test(**kwargs):
+        await kwargs["send_http_request"](
+            method="POST",
+            url="https://example.org/api",
+            headers={},
+            timeout_seconds=5.0,
+            body_bytes=None,
+            json_body=None,
+        )
+        return HttpTestResult(
+            success=True,
+            status_code=200,
+            duration_ms=1.0,
+            response_preview="ok",
+            request_preview={"method": "POST", "url": "https://example.org/api"},
+        )
+
+    monkeypatch.setattr(
+        flow_http_test_router_module,
+        "FlowHttpRuntimeHelper",
+        _FakeRuntimeHelper,
+        raising=False,
+    )
+    monkeypatch.setattr(httpx.AsyncClient, "request", _fake_request)
+    monkeypatch.setattr(flow_http_test_router_module, "execute_http_test", _fake_execute_http_test)
+
+    response = await flow_definition_test_flow_http(
+        id=flow_id,
+        request=_request(),
+        body=flow_http_test_router_module.HttpTestRequest(
+            config={
+                "url": "https://example.org/api",
+                "auth": {"mode": "none"},
+                "body": {"mode": "auto"},
+                "custom_headers": [],
+                "timeout_seconds": 30,
+            },
+            direction="output",
+            method="POST",
+        ),
+        container=container,
+    )
+
+    assert response.success is True
+    assert guard_calls["preflight_url"] == "https://example.org/api"
+    assert guard_calls["peer_status"] == 200
+    assert guard_calls["peer_ips"] == {"203.0.113.10"}
+
+
+def test_find_stored_http_config_logs_parse_failures(caplog):
+    flow = _flow(uuid4()).model_copy(
+        update={
+            "steps": [
+                _flow_step(uuid4(), 1).model_copy(
+                        update={
+                            "output_config": {
+                                "auth": "bad",
+                            }
+                        }
+                    )
+            ]
+        }
+    )
+
+    with caplog.at_level("WARNING"):
+        result = flow_http_test_router_module._find_stored_http_config(flow, "output")
+
+    assert result is None
+    assert "Failed to parse stored HTTP config" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -230,9 +433,9 @@ async def test_get_flow_graph_uses_live_flow_when_run_id_missing():
         container=container,
     )
 
-    llm_nodes = [node for node in graph.nodes if node["type"] == "llm"]
+    llm_nodes = [node for node in graph.nodes if node.type == "llm"]
     assert len(llm_nodes) == 1
-    assert llm_nodes[0]["label"] == "Step 1"
+    assert llm_nodes[0].label == "Step 1"
 
 
 @pytest.mark.asyncio
@@ -1348,6 +1551,7 @@ async def test_flow_run_alias_evidence_delegates_to_run_service(monkeypatch):
     run_service.get_run.return_value = run
     run_service.get_evidence.return_value = evidence
     container.flow_run_service.return_value = run_service
+    container.audit_service.return_value = AsyncMock()
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_service.return_value = flow_service
@@ -1357,7 +1561,10 @@ async def test_flow_run_alias_evidence_delegates_to_run_service(monkeypatch):
         "get_scope_filter",
         lambda _request: ScopeFilter(space_id=None),
     )
-    _enable_space_access(container)
+    _enable_space_access(
+        container,
+        user_permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
+    )
 
     response = await get_flow_run_evidence_alias(
         id=flow_id,
@@ -1366,9 +1573,314 @@ async def test_flow_run_alias_evidence_delegates_to_run_service(monkeypatch):
         container=container,
     )
 
-    assert response.run["id"] == str(run.id)
+    assert response.run.id == run.id
     run_service.get_run.assert_awaited_once_with(run_id=run.id, flow_id=flow_id)
     run_service.get_evidence.assert_awaited_once_with(run_id=run.id)
+    container.audit_service.return_value.log_async.assert_awaited_once()
+    assert container.audit_service.return_value.log_async.await_args.kwargs["action"] == ActionType.FLOW_EVIDENCE_VIEWED
+
+
+@pytest.mark.asyncio
+async def test_flow_run_alias_evidence_requires_trace_permission(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    run = _run(flow_id=flow_id, tenant_id=uuid4())
+    run_service = AsyncMock()
+    run_service.get_run.return_value = run
+    container.flow_run_service.return_value = run_service
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    _enable_space_access(container, user_permissions=[Permission.FLOWS_VIEW])
+
+    with pytest.raises(UnauthorizedException, match="view flow trace"):
+        await get_flow_run_evidence_alias(
+            id=flow_id,
+            run_id=run.id,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            container=container,
+        )
+
+    run_service.get_evidence.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_flow_run_evidence_export_alias_returns_json_attachment(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    run = _run(flow_id=flow_id, tenant_id=uuid4())
+    export_payload = {
+        "schema_version": "flow-evidence-export.v2",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "content_hash": "abc123",
+        "bundle": {
+            "run": run.model_dump(mode="json"),
+            "definition_snapshot": {"steps": []},
+            "step_results": [],
+            "step_attempts": [],
+            "debug_export": {
+                "schema_version": "eneo.flow.debug-export.v2",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "run": {
+                    "run_id": str(run.id),
+                    "flow_id": str(run.flow_id),
+                    "flow_version": run.flow_version,
+                    "trace_id": str(run.trace_id),
+                    "status": run.status.value,
+                },
+                "definition": {
+                    "flow_id": str(run.flow_id),
+                    "version": 1,
+                    "checksum": "abc",
+                    "steps_count": 0,
+                },
+                "definition_snapshot": {"steps": []},
+                "steps": [],
+                "security": {
+                    "redaction_applied": True,
+                    "classification_field": "output_classification_override",
+                    "mcp_policy_field": "mcp_policy",
+                },
+            },
+        },
+    }
+    run_service = AsyncMock()
+    run_service.get_run.return_value = run
+    run_service.export_evidence_json.return_value = export_payload
+    container.flow_run_service.return_value = run_service
+    container.audit_service.return_value = AsyncMock()
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    _enable_space_access(
+        container,
+        user_permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
+    )
+
+    response = await export_flow_run_evidence_alias(
+        id=flow_id,
+        run_id=run.id,
+        format="json",
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert response.media_type == "application/json"
+    assert "attachment;" in response.headers["content-disposition"]
+    assert str(run.id) in response.body.decode("utf-8")
+    run_service.export_evidence_json.assert_awaited_once_with(run_id=run.id)
+    container.audit_service.return_value.log_async.assert_awaited_once()
+    assert container.audit_service.return_value.log_async.await_args.kwargs["action"] == ActionType.FLOW_EVIDENCE_EXPORTED_JSON
+
+
+@pytest.mark.asyncio
+async def test_flow_run_evidence_export_alias_rejects_unsupported_format_with_standard_error_payload(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    run = _run(flow_id=flow_id, tenant_id=uuid4())
+    run_service = AsyncMock()
+    run_service.get_run.return_value = run
+    container.flow_run_service.return_value = run_service
+    container.audit_service.return_value = AsyncMock()
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    _enable_space_access(
+        container,
+        user_permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
+    )
+
+    response = await export_flow_run_evidence_alias(
+        id=flow_id,
+        run_id=run.id,
+        format="pdf",
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert response.status_code == 400
+    assert json.loads(response.body.decode("utf-8")) == {
+        "message": "Evidence export format is not supported.",
+        "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+        "code": "flow_evidence_export_format_not_supported",
+        "context": {"supported_formats": ["json"]},
+    }
+    run_service.export_evidence_json.assert_not_awaited()
+    container.audit_service.return_value.log_async.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_flow_run_evidence_alias_fails_closed_when_audit_write_fails(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    run = _run(flow_id=flow_id, tenant_id=uuid4())
+    evidence = {
+        "run": run.model_dump(mode="json"),
+        "definition_snapshot": {"steps": []},
+        "step_results": [],
+        "step_attempts": [],
+        "debug_export": {
+            "schema_version": "eneo.flow.debug-export.v2",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "run": {
+                "run_id": str(run.id),
+                "flow_id": str(run.flow_id),
+                "flow_version": run.flow_version,
+                "trace_id": str(run.trace_id),
+                "status": run.status.value,
+            },
+            "definition": {
+                "flow_id": str(run.flow_id),
+                "version": 1,
+                "checksum": "abc",
+                "steps_count": 0,
+            },
+            "definition_snapshot": {"steps": []},
+            "steps": [],
+            "security": {
+                "redaction_applied": True,
+                "classification_field": "output_classification_override",
+                "mcp_policy_field": "mcp_policy",
+            },
+        },
+    }
+    run_service = AsyncMock()
+    run_service.get_run.return_value = run
+    run_service.get_evidence.return_value = evidence
+    container.flow_run_service.return_value = run_service
+    audit_service = AsyncMock()
+    audit_service.log_async.side_effect = RuntimeError("audit unavailable")
+    container.audit_service.return_value = audit_service
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+    logger = MagicMock()
+
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    monkeypatch.setattr(flow_trace_audit_module, "logger", logger)
+    _enable_space_access(
+        container,
+        user_permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
+    )
+
+    response = await get_flow_run_evidence_alias(
+        id=flow_id,
+        run_id=run.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert response.status_code == 503
+    assert json.loads(response.body.decode("utf-8")) == {
+        "message": "Evidence audit logging is unavailable.",
+        "intric_error_code": int(ErrorCodes.INTERNAL_SERVER_ERROR),
+        "code": "flow_evidence_audit_logging_failed",
+        "context": {"audit_required": True},
+    }
+    logger.exception.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_flow_run_evidence_export_alias_fails_closed_when_audit_write_fails(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    run = _run(flow_id=flow_id, tenant_id=uuid4())
+    export_payload = {
+        "schema_version": "flow-evidence-export.v2",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "content_hash": "abc123",
+        "bundle": {
+            "run": run.model_dump(mode="json"),
+            "definition_snapshot": {"steps": []},
+            "step_results": [],
+            "step_attempts": [],
+            "debug_export": {
+                "schema_version": "eneo.flow.debug-export.v2",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "run": {
+                    "run_id": str(run.id),
+                    "flow_id": str(run.flow_id),
+                    "flow_version": run.flow_version,
+                    "trace_id": str(run.trace_id),
+                    "status": run.status.value,
+                },
+                "definition": {
+                    "flow_id": str(run.flow_id),
+                    "version": 1,
+                    "checksum": "abc",
+                    "steps_count": 0,
+                },
+                "definition_snapshot": {"steps": []},
+                "steps": [],
+                "security": {
+                    "redaction_applied": True,
+                    "classification_field": "output_classification_override",
+                    "mcp_policy_field": "mcp_policy",
+                },
+            },
+        },
+    }
+    run_service = AsyncMock()
+    run_service.get_run.return_value = run
+    run_service.export_evidence_json.return_value = export_payload
+    container.flow_run_service.return_value = run_service
+    audit_service = AsyncMock()
+    audit_service.log_async.side_effect = RuntimeError("audit unavailable")
+    container.audit_service.return_value = audit_service
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+    logger = MagicMock()
+
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    monkeypatch.setattr(flow_trace_audit_module, "logger", logger)
+    _enable_space_access(
+        container,
+        user_permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
+    )
+
+    response = await export_flow_run_evidence_alias(
+        id=flow_id,
+        run_id=run.id,
+        format="json",
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert response.status_code == 503
+    assert json.loads(response.body.decode("utf-8")) == {
+        "message": "Evidence audit logging is unavailable.",
+        "intric_error_code": int(ErrorCodes.INTERNAL_SERVER_ERROR),
+        "code": "flow_evidence_audit_logging_failed",
+        "context": {"audit_required": True},
+    }
+    logger.exception.assert_called_once()
 
 
 @pytest.mark.asyncio

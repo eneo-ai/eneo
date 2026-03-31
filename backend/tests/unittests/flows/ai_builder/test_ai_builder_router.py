@@ -19,6 +19,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     CreateSessionRequest,
     PlanResponse,
     PlanStatus,
+    RevisePlanRequest,
     SessionListItemResponse,
     SessionListResponse,
     SessionModelsResponse,
@@ -41,6 +42,7 @@ from intric.flows.ai_builder.ai_builder_router import (
     get_session_models,
     list_sessions,
     list_session_plans,
+    revise_plan,
     send_message,
 )
 from intric.main.exceptions import BadRequestException, ErrorCodes, NotFoundException, UnauthorizedException
@@ -83,7 +85,21 @@ def _make_container(
     container.actor_manager.return_value = actor_manager
 
     # Services
-    container.ai_builder_service.return_value = AsyncMock()
+    service = AsyncMock()
+    service.prepare_message_context.return_value = SimpleNamespace(
+        planner_context=SimpleNamespace(
+            available_models=[],
+            available_kbs=[],
+            max_input_tokens=4096,
+            max_output_tokens=2048,
+            budget_policy=SimpleNamespace(),
+        ),
+        litellm_model="openai/gpt-4",
+        litellm_kwargs={"api_key": "sk-test"},
+        flow=None,
+        assistant_snapshots=None,
+    )
+    container.ai_builder_service.return_value = service
     container.audit_service.return_value = AsyncMock()
 
     # Completion service (adapter resolution for LLM credentials)
@@ -910,7 +926,7 @@ class TestSendMessageEndpoint:
 
     @pytest.mark.anyio
     async def test_resolves_model_and_context(self):
-        """Verify the endpoint resolves planner model and space context."""
+        """Verify the endpoint resolves planner context through the service seam."""
         container = _make_container()
         session = _make_session_domain(flow_id=uuid4())
         service = container.ai_builder_service.return_value
@@ -934,10 +950,19 @@ class TestSendMessageEndpoint:
 
         flow = MagicMock()
         flow.id = session.flow_id
-        flow.steps = []
-        flow_service = container.flow_service.return_value
-        flow_service.get_flow.return_value = flow
-        flow_service.get_flow_assistant_snapshots.return_value = {}
+        service.prepare_message_context.return_value = SimpleNamespace(
+            planner_context=SimpleNamespace(
+                available_models=[{"id": str(model.id), "name": "GPT-4", "provider": "openai"}],
+                available_kbs=[{"id": str(collection.id), "name": "Docs", "description": "Documentation"}],
+                max_input_tokens=4096,
+                max_output_tokens=2048,
+                budget_policy=SimpleNamespace(),
+            ),
+            litellm_model="openai/gpt-4",
+            litellm_kwargs={"api_key": "sk-test"},
+            flow=flow,
+            assistant_snapshots={},
+        )
 
         async def mock_events(*args, **kwargs):
             yield {"event": "done", "data": ""}
@@ -953,14 +978,13 @@ class TestSendMessageEndpoint:
         )
 
         # The EventSourceResponse is returned — service.send_message is called
-        # lazily. The router should resolve the full context from one space load
-        # and one batched assistant snapshot lookup.
+        # lazily. The router should still reuse one authorized space load, but
+        # the remaining prefetch work should come from the service seam.
         assert space_service.get_space.await_count == 1
-        flow_service.get_flow.assert_awaited_once_with(session.flow_id)
-        flow_service.get_flow_assistant_snapshots.assert_awaited_once_with(flow)
+        service.prepare_message_context.assert_awaited_once()
 
     @pytest.mark.anyio
-    async def test_forwards_full_provider_kwargs_from_adapter(self):
+    async def test_forwards_full_provider_kwargs_from_service_context(self):
         from sse_starlette import EventSourceResponse
 
         container = _make_container()
@@ -979,22 +1003,26 @@ class TestSendMessageEndpoint:
         space.completion_models = [model]
         space.get_default_completion_model.return_value = model
 
-        adapter = MagicMock()
-        adapter.litellm_model = "azure/gpt-4"
-        adapter.credential_resolver.get_api_key.return_value = "sk-test"
-
-        def _credential(field: str):
-            values = {
-                "endpoint": "https://azure.example.com",
+        service.prepare_message_context.return_value = SimpleNamespace(
+            planner_context=SimpleNamespace(
+                available_models=[{"id": str(model.id), "name": "GPT-4", "provider": "azure"}],
+                available_kbs=[],
+                max_input_tokens=4096,
+                max_output_tokens=4096,
+                budget_policy=SimpleNamespace(),
+            ),
+            litellm_model="azure/gpt-4",
+            litellm_kwargs={
+                "api_key": "sk-test",
+                "api_base": "https://azure.example.com",
                 "api_version": "2024-02-15-preview",
                 "api_type": "azure",
                 "organization": "org-123",
                 "deployment_name": "gpt4-prod",
-            }
-            return values.get(field)
-
-        adapter.credential_resolver.get_credential_field.side_effect = _credential
-        container.completion_service.return_value._get_adapter.return_value = adapter
+            },
+            flow=None,
+            assistant_snapshots=None,
+        )
 
         captured: dict = {}
 
@@ -1273,3 +1301,52 @@ class TestApplyPlanEndpoint:
         assert payload["message"] == "Flow draft revision is stale."
         assert payload["code"] == "stale_revision"
         assert payload["intric_error_code"] == ErrorCodes.BAD_REQUEST
+
+
+class TestRevisePlanEndpoint:
+    @pytest.mark.anyio
+    async def test_revises_plan_and_returns_response(self):
+        container = _make_container()
+        plan = _make_plan_domain(status=PlanStatus.PROPOSED)
+        revised = _make_plan_domain(
+            session_id=plan.session_id,
+            status=PlanStatus.PROPOSED,
+        )
+        session = _make_session_domain(
+            session_id=plan.session_id,
+            actor_user_id=container.user.return_value.id,
+        )
+        service = container.ai_builder_service.return_value
+        service.get_plan.return_value = plan
+        service.get_session.return_value = session
+        service.revise_plan.return_value = revised
+
+        result = await revise_plan(
+            request=MagicMock(),
+            plan_id=plan.id,
+            body=RevisePlanRequest(type="keep_current_description"),
+            container=container,
+        )
+
+        assert result.plan_id == revised.id
+        service.revise_plan.assert_called_once_with(
+            plan_id=plan.id,
+            revision_type="keep_current_description",
+        )
+
+    @pytest.mark.anyio
+    async def test_checks_flow_edit_permission(self):
+        container = _make_container(can_edit_flows=False)
+        plan = _make_plan_domain(status=PlanStatus.PROPOSED)
+        session = _make_session_domain(session_id=plan.session_id)
+        service = container.ai_builder_service.return_value
+        service.get_plan.return_value = plan
+        service.get_session.return_value = session
+
+        with pytest.raises(UnauthorizedException):
+            await revise_plan(
+                request=MagicMock(),
+                plan_id=plan.id,
+                body=RevisePlanRequest(type="keep_current_description"),
+                container=container,
+            )

@@ -6,7 +6,7 @@ from difflib import get_close_matches
 from datetime import datetime
 from typing import Any
 
-from intric.flows.flow import FlowStepResult
+from intric.flows.domain.flow import FlowStepResult
 from intric.flows.flow_variable_definitions import RESERVED_RUNTIME_VARIABLES_NORMALIZED
 from intric.main.exceptions import BadRequestException
 

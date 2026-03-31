@@ -11,7 +11,7 @@ from uuid import UUID
 
 from intric.files.file_models import FileCreate, FileType
 from intric.files.file_repo import FileRepository
-from intric.flows.flow import FlowRun, FlowStepResultStatus
+from intric.flows.domain.flow import FlowRun, FlowStepResultStatus
 from intric.flows.runtime.docx_template_runtime import extract_docx_text, render_docx_template
 from intric.flows.runtime.models import (
     RunExecutionState,
@@ -24,6 +24,7 @@ from intric.main.exceptions import BadRequestException, TypedIOValidationExcepti
 
 
 _STEP_REFERENCE_PATTERN = re.compile(r"step_(\d+)")
+_FULL_TEMPLATE_EXPRESSION_PATTERN = re.compile(r"^\s*\{\{\s*([^{}]+)\s*\}\}\s*$")
 
 
 ApplyOutputCap = Callable[[str, FlowRun, RuntimeStep], Awaitable[tuple[str, list[UUID]]]]
@@ -33,10 +34,10 @@ ApplyOutputCap = Callable[[str, FlowRun, RuntimeStep], Awaitable[tuple[str, list
 class TemplateFillRuntimeDeps:
     variable_resolver: FlowVariableResolver
     file_repo: FileRepository
-    template_asset_service: Any
     apply_output_cap: ApplyOutputCap
     user_id: UUID
     logger: logging.Logger
+    template_asset_service: Any | None = None
 
 
 async def execute_template_fill_step(
@@ -187,6 +188,23 @@ async def execute_template_fill_step(
         len(rendered_text),
     )
 
+    template_name_value = template_name or getattr(template_file, "name", None)
+    output_payload_extensions = {
+        "template_fill_debug": {
+            "rendered_docx_text_raw": rendered_text,
+            "summary_mode": "resolved_bindings",
+            "placeholder_count": len(placeholders),
+        }
+    }
+    if template_name_value is not None or template_asset_id is not None:
+        output_payload_extensions["template_provenance"] = {
+            "template_name": template_name_value,
+            "template_asset_id": str(template_asset_id) if template_asset_id is not None else None,
+            "template_file_id": str(template_file_id),
+            "template_checksum": template_checksum,
+            "published_flow_version": run.flow_version,
+        }
+
     return StepExecutionOutput(
         input_text=bindings_text,
         source_text=bindings_text,
@@ -224,20 +242,7 @@ async def execute_template_fill_step(
                 severity="info",
             )
         ],
-        output_payload_extensions={
-            "template_provenance": {
-                "template_name": template_name or template_file.name,
-                "template_asset_id": str(template_asset_id) if template_asset_id is not None else None,
-                "template_file_id": str(template_file_id),
-                "template_checksum": template_checksum,
-                "published_flow_version": run.flow_version,
-            },
-            "template_fill_debug": {
-                "rendered_docx_text_raw": rendered_text,
-                "summary_mode": "resolved_bindings",
-                "placeholder_count": len(placeholders),
-            }
-        },
+        output_payload_extensions=output_payload_extensions,
     )
 
 
@@ -319,6 +324,11 @@ async def _load_template_file(
     template_checksum: str | None,
 ):
     if template_asset_id is not None:
+        if template_asset_service is None:
+            raise TypedIOValidationException(
+                "The published DOCX template asset could not be loaded because template asset services are unavailable. Re-publish the flow with a current template.",
+                code="flow_template_not_accessible",
+            )
         try:
             asset, template_file = await template_asset_service.get_published_template_file(
                 tenant_id=tenant_id,
@@ -381,7 +391,12 @@ def _resolve_template_bindings(
             resolved[placeholder] = ""
             continue
         try:
-            resolved[placeholder] = variable_resolver.interpolate(expression, context)
+            match = _FULL_TEMPLATE_EXPRESSION_PATTERN.fullmatch(expression)
+            if match is not None:
+                raw_value = variable_resolver._resolve_path(context, match.group(1).strip())
+                resolved[placeholder] = _stringify_template_binding_value(raw_value)
+            else:
+                resolved[placeholder] = variable_resolver.interpolate(expression, context)
         except BadRequestException as exc:
             failed_step_order = _failed_step_order_for_expression(
                 expression=expression,
@@ -446,6 +461,16 @@ def _optional_string(value: Any) -> str | None:
     if isinstance(value, str) and value:
         return value
     return None
+
+
+def _stringify_template_binding_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
 
 
 def _failed_step_order_for_expression(

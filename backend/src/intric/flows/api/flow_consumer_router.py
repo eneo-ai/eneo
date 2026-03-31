@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from intric.flows.api.flow_run_router import (
     cancel_flow_run_alias,
     create_flow_run,
+    export_flow_run_evidence_alias,
     generate_flow_run_artifact_signed_url,
     get_flow_graph,
     get_flow_run_alias,
@@ -36,6 +37,7 @@ __all__ = [
     "cancel_flow_run_alias",
     "redispatch_flow_run_alias",
     "get_flow_run_evidence_alias",
+    "export_flow_run_evidence_alias",
     "list_flow_run_steps",
     "get_flow_graph",
     "generate_flow_run_artifact_signed_url",

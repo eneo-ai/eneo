@@ -9,7 +9,7 @@ from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.database import sessionmanager
-from intric.flows.flow import FlowRunStatus
+from intric.flows.domain.flow import FlowRunStatus
 from intric.flows.flow_input_limits import (
     DEFAULT_MAX_AUDIO_FILES_PER_RUN,
     resolve_flow_input_limits,
@@ -17,6 +17,7 @@ from intric.flows.flow_input_limits import (
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.runtime.celery_app import celery_app
 from intric.flows.runtime.executor import FlowRunExecutor
+from intric.flows.runtime.executor import FlowRunExecutorConfig
 from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.container.container_overrides import override_user
@@ -90,12 +91,15 @@ async def _execute_flow_run_async(
             file_repo=container.file_repo(),
             template_asset_service=container.flow_template_asset_service(),
             encryption_service=container.encryption_service(),
-            max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
             audit_service=container.audit_service(),
             references_service=container.references_service(),
             transcriber=container.transcriber(),
-            max_audio_files=flow_limits.audio_max_files_per_run or DEFAULT_MAX_AUDIO_FILES_PER_RUN,
-            max_generic_files=flow_limits.max_files_per_run,
+            config=FlowRunExecutorConfig.from_settings(
+                max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
+                max_audio_files=flow_limits.audio_max_files_per_run
+                or DEFAULT_MAX_AUDIO_FILES_PER_RUN,
+                max_generic_files=flow_limits.max_files_per_run,
+            ),
         )
         result = await executor.execute(
             run_id=run_id,

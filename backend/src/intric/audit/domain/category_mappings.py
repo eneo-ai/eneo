@@ -77,6 +77,8 @@ CATEGORY_MAPPINGS = {
     ActionType.FLOW_PUBLISHED.value: "user_actions",
     ActionType.FLOW_UNPUBLISHED.value: "user_actions",
     ActionType.FLOW_RUN_CREATED.value: "user_actions",
+    ActionType.FLOW_RUN_COMPLETED.value: "user_actions",
+    ActionType.FLOW_RUN_FAILED.value: "user_actions",
     ActionType.FLOW_RUN_CANCELLED.value: "user_actions",
     ActionType.FLOW_RUN_REDISPATCHED.value: "user_actions",
     ActionType.FLOW_CLASSIFICATION_OVERRIDE.value: "user_actions",
@@ -84,6 +86,8 @@ CATEGORY_MAPPINGS = {
     ActionType.FLOW_RUN_CONTRACT_REJECTED.value: "user_actions",
     ActionType.FLOW_HTTP_OUTBOUND_CALL.value: "user_actions",
     ActionType.FLOW_RUN_ARTIFACT_DOWNLOADED.value: "file_operations",
+    ActionType.FLOW_EVIDENCE_VIEWED.value: "audit_access",
+    ActionType.FLOW_EVIDENCE_EXPORTED_JSON.value: "audit_access",
     # Security Events (6 actions)
     ActionType.SECURITY_CLASSIFICATION_CREATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_UPDATED.value: "security_events",

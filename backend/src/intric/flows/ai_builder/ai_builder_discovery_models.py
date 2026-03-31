@@ -7,7 +7,7 @@ if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
         InputIntentResolution,
     )
-    from intric.flows.flow import Flow
+    from intric.flows.domain.flow import Flow
 
 DiscoverySeverity = Literal["blocking", "info"]
 DiscoveryLanguage = Literal["sv", "en"]

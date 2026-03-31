@@ -7,6 +7,7 @@ import pytest
 from intric.flows.flow_permissions import (
     ensure_can_manage_flows,
     ensure_can_use_flow_ai_builder,
+    ensure_can_view_flow_trace,
     ensure_can_view_flows,
 )
 from intric.main.exceptions import UnauthorizedException
@@ -33,3 +34,12 @@ def test_ai_builder_requires_manage_and_builder_permission() -> None:
 
 def test_ai_builder_accepts_legacy_flows_alias() -> None:
     ensure_can_use_flow_ai_builder(_user(Permission.FLOWS))
+
+
+def test_trace_permission_rejects_view_only_user() -> None:
+    with pytest.raises(UnauthorizedException, match="view flow trace"):
+        ensure_can_view_flow_trace(_user(Permission.FLOWS_VIEW))
+
+
+def test_trace_permission_accepts_legacy_flows_alias() -> None:
+    ensure_can_view_flow_trace(_user(Permission.FLOWS))

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from intric.flows.flow import FlowStepResult
+from intric.flows.domain.flow import FlowStepResult
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,11 @@ class StepExecutionOutput:
     num_tokens_output: int | None
     effective_prompt: str
     model_parameters_json: dict[str, Any]
+    requested_model: str | None = None
+    response_model: str | None = None
+    provider: str | None = None
+    finish_reason: str | None = None
+    provider_response_id: str | None = None
     contract_validation: dict[str, Any] | None = None
     structured_output: dict[str, Any] | list[Any] | None = None
     diagnostics: list[StepDiagnostic] = field(default_factory=list)
