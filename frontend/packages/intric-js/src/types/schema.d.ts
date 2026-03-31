@@ -2577,10 +2577,15 @@ export interface paths {
      */
     get: operations["get_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_get"];
     /**
-     * Set tenant federation config
-     * @description Configure custom identity provider for tenant. System admin only.
+     * Provide tenant federation config
+     * @description Provide a new full federation configuration for the tenant. This replaces the current setup and requires all required fields. System admin only.
      */
     put: operations["set_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_put"];
+    /**
+     * Update current tenant federation config
+     * @description Update the current tenant federation setup without resending every field. Only provided fields are changed; omitted fields stay unchanged. PATCH requires an existing federation config. System admin only.
+     */
+    patch: operations["patch_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_patch"];
     /**
      * Delete tenant federation config
      * @description Remove custom identity provider for tenant. System admin only.
@@ -9109,8 +9114,54 @@ export interface components {
       feedback?: components["schemas"]["SessionFeedback"] | null;
     };
     /**
+     * PatchFederationRequest
+     * @description Request model for partially updating the current tenant federation config.
+     */
+    PatchFederationRequest: {
+      /**
+       * Provider
+       * @description Identity provider label (e.g., 'mobilityguard', 'entra_id', 'okta', 'auth0')
+       */
+      provider?: string | null;
+      /**
+       * Discovery Endpoint
+       * @description OIDC discovery endpoint URL
+       */
+      discovery_endpoint?: string | null;
+      /**
+       * Client Id
+       * @description OAuth client ID
+       */
+      client_id?: string | null;
+      /**
+       * Client Secret
+       * @description OAuth client secret
+       */
+      client_secret?: string | null;
+      /**
+       * Allowed Domains
+       * @description Email domains allowed for this tenant (e.g., ['stockholm.se'])
+       */
+      allowed_domains?: string[] | null;
+      /**
+       * Canonical Public Origin
+       * @description Canonical public origin for this tenant (e.g., https://tenant.eneo.se). Required when federation is enabled to construct redirect_uri
+       */
+      canonical_public_origin?: string | null;
+      /**
+       * Redirect Path
+       * @description Optional custom redirect path starting with /
+       */
+      redirect_path?: string | null;
+      /**
+       * Additional Redirect Uris
+       * @description Additional fully-qualified redirect URIs for OIDC flows. Use when the tenant is accessed through multiple origins. Each URI must also be registered in the upstream Identity Provider.
+       */
+      additional_redirect_uris?: string[] | null;
+    };
+    /**
      * SetFederationRequest
-     * @description Request model for setting tenant federation config.
+     * @description Request model for providing a full tenant federation config.
      */
     SetFederationRequest: {
       /**
@@ -9148,6 +9199,11 @@ export interface components {
        * @description Optional custom redirect path starting with /
        */
       redirect_path?: string | null;
+      /**
+       * Additional Redirect Uris
+       * @description Additional fully-qualified redirect URIs for OIDC flows. Use when the tenant is accessed through multiple origins. Each URI must also be registered in the upstream Identity Provider.
+       */
+      additional_redirect_uris?: string[] | null;
     };
     /**
      * SetFederationResponse
@@ -24100,8 +24156,8 @@ export interface operations {
     };
   };
   /**
-   * Set tenant federation config
-   * @description Configure custom identity provider for tenant. System admin only.
+   * Provide tenant federation config
+   * @description Provide a new full federation configuration for the tenant. This replaces the current setup and requires all required fields. System admin only.
    */
   set_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_put: {
     parameters: {
@@ -24112,6 +24168,36 @@ export interface operations {
     requestBody: {
       content: {
         "application/json": components["schemas"]["SetFederationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SetFederationResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Update current tenant federation config
+   * @description Update the current tenant federation setup without resending every field. Only provided fields are changed; omitted fields stay unchanged. PATCH requires an existing federation config. System admin only.
+   */
+  patch_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_patch: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PatchFederationRequest"];
       };
     };
     responses: {
