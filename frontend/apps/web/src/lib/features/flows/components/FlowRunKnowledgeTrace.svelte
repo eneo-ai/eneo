@@ -86,6 +86,15 @@
       return title.slice(0, 60);
     }
   }
+
+  function getDisplayTitle(reference: FlowRunDebugRagReference): string {
+    const rawDisplayTitle = (reference as FlowRunDebugRagReference & { display_title?: string | null })
+      .display_title;
+    if (rawDisplayTitle && rawDisplayTitle.trim().length > 0) {
+      return rawDisplayTitle;
+    }
+    return cleanTitle(reference.title);
+  }
 </script>
 
 <svelte:options runes={false} />
@@ -163,7 +172,7 @@
                           {index + 1}
                         </span>
                         <p class="truncate text-sm font-medium group-hover:text-accent-stronger">
-                          {cleanTitle(reference.title) || m.flow_run_knowledge_untitled_source()}
+                          {getDisplayTitle(reference) || m.flow_run_knowledge_untitled_source()}
                         </p>
                       </div>
                       <div class="mt-1">

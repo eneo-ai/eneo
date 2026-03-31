@@ -232,6 +232,7 @@ class CompletionModelResponse(BaseModel):
     model: CompletionModel
     extended_logging: Optional[LoggingDetails] = None
     total_token_count: int
+    knowledge_trace: Optional["KnowledgeTrace"] = None
 
 
 class Message(BaseModel):
@@ -241,6 +242,31 @@ class Message(BaseModel):
     generated_images: list[File] = []
 
 
+class KnowledgeTraceGroup(BaseModel):
+    source_id: str
+    source_id_short: str
+    source_title: Optional[str] = None
+    start_chunk: int
+    end_chunk: int
+    chunk_count: int
+    relevance_score: Optional[float] = None
+
+
+class KnowledgeTrace(BaseModel):
+    version: int = 1
+    selection_basis: str
+    raw_source_count: int = 0
+    raw_chunk_count: int = 0
+    included_source_count: int = 0
+    not_included_source_count: int = 0
+    included_chunk_count: int = 0
+    knowledge_tokens: int = 0
+    truncated_by_token_budget: bool = False
+    included_source_ids: list[str] = []
+    not_included_source_ids: list[str] = []
+    included_groups: list[KnowledgeTraceGroup] = []
+
+
 class Context(BaseModel):
     input: str
     token_count: int = 0
@@ -248,6 +274,7 @@ class Context(BaseModel):
     messages: list[Message] = []
     images: list[File] = []
     function_definitions: list[FunctionDefinition] = []
+    knowledge_trace: Optional[KnowledgeTrace] = None
 
 
 class ModelKwargs(BaseModel):

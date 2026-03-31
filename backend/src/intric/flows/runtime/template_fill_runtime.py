@@ -144,13 +144,14 @@ async def execute_template_fill_step(
         raise _template_fill_runtime_error(stage=current_stage, exc=exc) from exc
 
     try:
+        output_checksum = hashlib.sha256(blob).hexdigest()
         stored_file = await deps.file_repo.add(
             FileCreate(
                 file_type=FileType.DOCUMENT,
                 blob=blob,
                 name=filename,
                 mimetype=mimetype,
-                checksum=hashlib.sha256(blob).hexdigest(),
+                checksum=output_checksum,
                 size=len(blob),
                 user_id=deps.user_id,
                 tenant_id=run.tenant_id,
@@ -231,6 +232,8 @@ async def execute_template_fill_step(
                 "name": filename,
                 "mimetype": mimetype,
                 "size": len(blob),
+                "checksum": getattr(stored_file, "checksum", None) or output_checksum,
+                "file_type": "document",
             }
         ],
         diagnostics=[

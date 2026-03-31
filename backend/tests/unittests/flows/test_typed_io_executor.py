@@ -295,7 +295,16 @@ async def test_resolve_step_input_document_loads_files(user):
         user=user,
         input_payload={"text": "fallback", "file_ids": [str(file_id)]},
     )
-    fake_file = SimpleNamespace(id=file_id, text="Extracted document text")
+    fake_file = SimpleNamespace(
+        id=file_id,
+        text="Extracted document text",
+        name="underlag.pdf",
+        checksum="checksum-1",
+        size=128,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
     executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[fake_file])
 
     step = _runtime_step(input_type="document")
@@ -310,6 +319,28 @@ async def test_resolve_step_input_document_loads_files(user):
 
     assert resolved.files == [fake_file]
     assert resolved.text == "Extracted document text"
+    assert resolved.runtime_input_metadata == {
+        "text": "Extracted document text",
+        "file_ids": [str(file_id)],
+        "files_count": 1,
+        "files": [
+            {
+                "id": str(file_id),
+                "name": "underlag.pdf",
+                "checksum": "checksum-1",
+                "size": 128,
+                "mimetype": "application/pdf",
+                "file_type": "document",
+                "text_length": len("Extracted document text"),
+                "has_text": True,
+                "has_transcription": False,
+            }
+        ],
+        "total_file_size": 128,
+        "extracted_text_length": len("Extracted document text"),
+        "input_format": "document",
+        "capture_mode": "flow_input_files",
+    }
 
 
 @pytest.mark.asyncio

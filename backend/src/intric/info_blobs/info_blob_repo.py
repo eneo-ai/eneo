@@ -1,4 +1,4 @@
-from typing import List
+from typing import Any, List
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -539,6 +539,74 @@ class InfoBlobRepository:
         stmt = sa.select(InfoBlobs.title).where(InfoBlobs.website_id == website_id)
         result = await self.session.scalars(stmt)
         return [title for title in result if title is not None]
+
+    async def get_reference_metadata_by_ids(
+        self,
+        ids: list[UUID],
+    ) -> dict[str, dict[str, Any]]:
+        if not ids:
+            return {}
+
+        stmt = (
+            sa.select(
+                InfoBlobs.id.label("id"),
+                InfoBlobs.title.label("title"),
+                InfoBlobs.url.label("url"),
+                InfoBlobs.group_id.label("group_id"),
+                InfoBlobs.website_id.label("website_id"),
+                InfoBlobs.integration_knowledge_id.label("integration_knowledge_id"),
+                CollectionsTable.name.label("group_name"),
+                Websites.name.label("website_name"),
+                IntegrationKnowledge.name.label("integration_knowledge_name"),
+                IntegrationKnowledge.wrapper_name.label("integration_wrapper_name"),
+            )
+            .select_from(InfoBlobs)
+            .outerjoin(CollectionsTable, CollectionsTable.id == InfoBlobs.group_id)
+            .outerjoin(Websites, Websites.id == InfoBlobs.website_id)
+            .outerjoin(
+                IntegrationKnowledge,
+                IntegrationKnowledge.id == InfoBlobs.integration_knowledge_id,
+            )
+            .where(InfoBlobs.id.in_(ids))
+        )
+
+        rows = (await self.session.execute(stmt)).mappings().all()
+        payload: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            source_kind: str | None = None
+            source_container_kind: str | None = None
+            source_container_id: UUID | None = None
+            source_container_name: str | None = None
+
+            if row["group_id"] is not None:
+                source_kind = "collection"
+                source_container_kind = "collection"
+                source_container_id = row["group_id"]
+                source_container_name = row["group_name"]
+            elif row["website_id"] is not None:
+                source_kind = "website"
+                source_container_kind = "website"
+                source_container_id = row["website_id"]
+                source_container_name = row["website_name"]
+            elif row["integration_knowledge_id"] is not None:
+                source_kind = "integration_knowledge"
+                source_container_kind = "integration_knowledge"
+                source_container_id = row["integration_knowledge_id"]
+                source_container_name = (
+                    row["integration_knowledge_name"] or row["integration_wrapper_name"]
+                )
+
+            payload[str(row["id"])] = {
+                "source_title": row["title"] or row["url"],
+                "source_url": row["url"],
+                "source_kind": source_kind,
+                "source_container_kind": source_container_kind,
+                "source_container_id": (
+                    str(source_container_id) if source_container_id is not None else None
+                ),
+                "source_container_name": source_container_name,
+            }
+        return payload
 
     async def batch_delete_by_titles_and_website(
         self, titles: list[str], website_id: UUID

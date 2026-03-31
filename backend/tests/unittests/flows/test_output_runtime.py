@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -111,6 +112,8 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
             "name": filename,
             "mimetype": mimetype,
             "size": len(blob),
+            "checksum": hashlib.sha256(blob).hexdigest(),
+            "file_type": "document",
         }
     ]
     file_repo.add.assert_awaited_once()

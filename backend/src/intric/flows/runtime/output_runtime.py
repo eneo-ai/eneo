@@ -105,6 +105,8 @@ async def process_typed_output(
                 "name": filename,
                 "mimetype": mimetype,
                 "size": len(blob),
+                "checksum": hashlib.sha256(blob).hexdigest(),
+                "file_type": FileType.DOCUMENT.value,
             }
         ]
 

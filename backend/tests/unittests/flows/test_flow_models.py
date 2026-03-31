@@ -232,7 +232,33 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                             "config": None,
                         },
                         "mcp": {"policy": "inherit", "tool_allowlist": []},
-                        "rag": None,
+                        "rag": {
+                            "attempted": True,
+                            "status": "success",
+                            "tracking": {
+                                "retrieval_tracked": True,
+                                "prompt_context_inclusion_tracked": True,
+                                "citation_tracked": False,
+                                "material_influence_tracked": False,
+                                "selection_basis": "semantic_search_ranked_chunks_grouped_by_source",
+                            },
+                            "prompt_context": {
+                                "tracked": True,
+                                "included_source_ids": ["source-1"],
+                                "included_source_titles": ["Beslut till underlag"],
+                                "included_source_display_names": ["Beslut till underlag"],
+                                "included_groups": [
+                                    {
+                                        "source_id": "source-1",
+                                        "source_title": "Beslut till underlag",
+                                        "start_chunk": 1,
+                                        "end_chunk": 2,
+                                        "chunk_count": 2,
+                                        "relevance_score": 1.0,
+                                    }
+                                ],
+                            },
+                        },
                         "attempts": [
                             {
                                 "attempt_no": 1,
@@ -267,6 +293,13 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
     assert response.step_results[0].tool_calls_metadata == [{"name": "search"}]
     assert isinstance(response.debug_export.steps[0].attempts[0], FlowRunDebugAttempt)
     assert response.debug_export.steps[0].attempts[0].response_model == "gpt-4.1-mini"
+    assert response.debug_export.steps[0].rag is not None
+    assert response.debug_export.steps[0].rag.prompt_context is not None
+    assert response.debug_export.steps[0].rag.prompt_context.included_source_ids == ["source-1"]
+    assert (
+        response.debug_export.steps[0].rag.prompt_context.included_source_display_names
+        == ["Beslut till underlag"]
+    )
 
 
 def test_http_test_request_accepts_current_payload_shape() -> None:

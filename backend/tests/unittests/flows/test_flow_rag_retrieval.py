@@ -73,14 +73,28 @@ async def test_retrieve_rag_chunks_returns_error_diagnostic_on_exception():
 
 @pytest.mark.asyncio
 async def test_retrieve_rag_chunks_happy_path_builds_reference_metadata():
-    chunk_a = SimpleNamespace(info_blob_id=uuid4(), text="alpha")
-    chunk_b = SimpleNamespace(info_blob_id=uuid4(), text="beta")
+    source_a = uuid4()
+    source_b = uuid4()
+    chunk_a = SimpleNamespace(info_blob_id=source_a, info_blob_title="alpha", text="alpha")
+    chunk_b = SimpleNamespace(info_blob_id=source_b, info_blob_title="beta", text="beta")
     datastore_result = SimpleNamespace(
         chunks=[chunk_a, chunk_b],
         no_duplicate_chunks=[chunk_a, chunk_b],
     )
     references_service = MagicMock()
     references_service.get_references = AsyncMock(return_value=datastore_result)
+    references_service.get_reference_metadata = AsyncMock(
+        return_value={
+            str(source_a): {
+                "source_title": "Beslut till underlag",
+                "source_url": "https://kunskap.example.se/beslut/underlag",
+                "source_kind": "website",
+                "source_container_kind": "website",
+                "source_container_name": "Kunskapsbanken",
+                "source_container_id": "website-1",
+            }
+        }
+    )
 
     chunks, metadata, diagnostics = await retrieve_rag_chunks(
         assistant=_assistant(has_knowledge=True),
@@ -100,6 +114,13 @@ async def test_retrieve_rag_chunks_happy_path_builds_reference_metadata():
     assert metadata["status"] == "success"
     assert metadata["chunks_retrieved"] == 2
     assert metadata["unique_sources"] == 2
+    assert metadata["tracking"]["retrieval_tracked"] is True
+    assert metadata["tracking"]["prompt_context_inclusion_tracked"] is False
+    assert metadata["tracking"]["citation_tracked"] is False
+    assert metadata["tracking"]["material_influence_tracked"] is False
+    assert metadata["references"][0]["usage_state"] == "retrieved_candidate"
+    assert metadata["references"][0]["source_kind"] == "website"
+    assert metadata["references"][0]["source_container_name"] == "Kunskapsbanken"
     assert diagnostics == []
 
 

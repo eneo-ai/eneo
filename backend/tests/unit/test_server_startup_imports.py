@@ -1,4 +1,7 @@
 import importlib
+import os
+from pathlib import Path
+import subprocess
 import sys
 
 from fastapi.routing import APIRoute
@@ -8,6 +11,27 @@ def test_server_main_imports_without_circular_flow_template_validation_cycle() -
     module = importlib.import_module("intric.server.main")
 
     assert module is not None
+
+
+def test_server_main_imports_in_fresh_python_process() -> None:
+    backend_root = Path(__file__).resolve().parents[2]
+    env = os.environ.copy()
+    source_path = str(backend_root / "src")
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        f"{source_path}:{existing_pythonpath}" if existing_pythonpath else source_path
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import intric.server.main"],
+        cwd=backend_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_flow_template_validation_shim_reexports_files_domain_helpers() -> None:

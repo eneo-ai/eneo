@@ -1,31 +1,111 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 _REDACTED_VALUE = "[REDACTED]"
-_SENSITIVE_FIELD_FRAGMENTS = (
+REDACTION_POLICY_VERSION = "flow-evidence-redaction.v3"
+_SENSITIVE_EXACT_KEYS = {
     "authorization",
     "api_key",
     "apikey",
-    "token",
-    "secret",
     "password",
     "passwd",
+    "secret",
     "cookie",
-    "session",
+    "cookies",
     "credential",
+    "credentials",
     "bearer",
+    "token",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "auth_token",
+    "session_token",
+    "csrf_token",
+    "x_api_key",
+    "client_secret",
+    "webhook_secret",
+    "private_key",
+    "secret_key",
+    "signature",
+    "signed_url",
+}
+_SENSITIVE_SUFFIXES = (
+    "_token",
+    "_secret",
+    "_password",
+    "_passwd",
+    "_cookie",
+    "_credential",
+    "_credentials",
+    "_authorization",
+    "_api_key",
+    "_apikey",
+    "_signature",
+    "_signed_url",
 )
 _BEARER_TOKEN_PATTERN = re.compile(r"(?i)\bbearer\s+[a-z0-9._\-~+/]+=*")
+
+
+@dataclass(frozen=True)
+class MaskedField:
+    path: str
+    key: str | None
+    reason: str
+
+
+@dataclass(frozen=True)
+class RedactionResult:
+    value: Any
+    masked_paths: tuple[str, ...]
+    masked_fields: tuple[MaskedField, ...] = ()
+
+
+@dataclass(frozen=True)
+class StringRedactionResult:
+    value: str
+    reason: str | None = None
 
 
 def is_sensitive_key(key: str | None) -> bool:
     if key is None:
         return False
-    key_lower = key.lower().replace("-", "_").replace(".", "_")
-    return any(fragment in key_lower for fragment in _SENSITIVE_FIELD_FRAGMENTS)
+
+    normalized_key = _normalize_key(key)
+    if not normalized_key:
+        return False
+    if normalized_key in _SENSITIVE_EXACT_KEYS:
+        return True
+    if any(normalized_key.endswith(suffix) for suffix in _SENSITIVE_SUFFIXES):
+        return True
+
+    key_tokens = set(normalized_key.split("_"))
+    token_pairs = (
+        {"api", "key"},
+        {"access", "token"},
+        {"refresh", "token"},
+        {"id", "token"},
+        {"auth", "token"},
+        {"session", "token"},
+        {"client", "secret"},
+        {"webhook", "secret"},
+        {"private", "key"},
+        {"secret", "key"},
+        {"signed", "url"},
+    )
+    if any(pair.issubset(key_tokens) for pair in token_pairs):
+        return True
+    if "authorization" in key_tokens:
+        return True
+    if "cookie" in key_tokens:
+        return True
+    if "credential" in key_tokens or "credentials" in key_tokens:
+        return True
+    return False
 
 
 def redact_url_secrets(value: str) -> str:
@@ -61,18 +141,97 @@ def redact_url_secrets(value: str) -> str:
 
 
 def redact_string(value: str, *, key: str | None) -> str:
+    return redact_string_with_reason(value, key=key).value
+
+
+def redact_string_with_reason(value: str, *, key: str | None) -> StringRedactionResult:
     if is_sensitive_key(key):
-        return _REDACTED_VALUE
-    if "://" in value:
-        value = redact_url_secrets(value)
-    return _BEARER_TOKEN_PATTERN.sub("Bearer [REDACTED]", value)
+        return StringRedactionResult(value=_REDACTED_VALUE, reason="sensitive_key")
+
+    redacted_value = value
+    reason: str | None = None
+    if "://" in redacted_value:
+        url_redacted = redact_url_secrets(redacted_value)
+        if url_redacted != redacted_value:
+            redacted_value = url_redacted
+            reason = "sensitive_url"
+
+    bearer_redacted = _BEARER_TOKEN_PATTERN.sub("Bearer [REDACTED]", redacted_value)
+    if bearer_redacted != redacted_value:
+        redacted_value = bearer_redacted
+        reason = reason or "bearer_token"
+
+    return StringRedactionResult(value=redacted_value, reason=reason)
 
 
 def redact_payload(value: Any, *, key: str | None = None) -> Any:
+    return redact_payload_with_manifest(value, key=key).value
+
+
+def redact_payload_with_manifest(
+    value: Any,
+    *,
+    key: str | None = None,
+    path: str | None = None,
+) -> RedactionResult:
     if isinstance(value, dict):
-        return {item_key: redact_payload(item_value, key=item_key) for item_key, item_value in value.items()}
+        redacted: dict[str, Any] = {}
+        masked_paths: list[str] = []
+        masked_fields: list[MaskedField] = []
+        for item_key, item_value in value.items():
+            child_path = f"{path}.{item_key}" if path else item_key
+            child_result = redact_payload_with_manifest(
+                item_value,
+                key=item_key,
+                path=child_path,
+            )
+            redacted[item_key] = child_result.value
+            masked_paths.extend(child_result.masked_paths)
+            masked_fields.extend(child_result.masked_fields)
+        return RedactionResult(
+            value=redacted,
+            masked_paths=tuple(masked_paths),
+            masked_fields=tuple(masked_fields),
+        )
     if isinstance(value, list):
-        return [redact_payload(item, key=key) for item in value]
+        redacted_items: list[Any] = []
+        masked_paths: list[str] = []
+        masked_fields: list[MaskedField] = []
+        for index, item in enumerate(value):
+            child_path = f"{path}[{index}]" if path else f"[{index}]"
+            child_result = redact_payload_with_manifest(
+                item,
+                key=key,
+                path=child_path,
+            )
+            redacted_items.append(child_result.value)
+            masked_paths.extend(child_result.masked_paths)
+            masked_fields.extend(child_result.masked_fields)
+        return RedactionResult(
+            value=redacted_items,
+            masked_paths=tuple(masked_paths),
+            masked_fields=tuple(masked_fields),
+        )
     if isinstance(value, str):
-        return redact_string(value, key=key)
-    return value
+        redacted = redact_string_with_reason(value, key=key)
+        masked_paths = (path,) if path and redacted.value != value else ()
+        masked_fields: tuple[MaskedField, ...] = ()
+        if path and redacted.value != value:
+            masked_fields = (
+                MaskedField(
+                    path=path,
+                    key=key,
+                    reason=redacted.reason or "sensitive_value",
+                ),
+            )
+        return RedactionResult(
+            value=redacted.value,
+            masked_paths=masked_paths,
+            masked_fields=masked_fields,
+        )
+    return RedactionResult(value=value, masked_paths=())
+
+
+def _normalize_key(key: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", key.lower())
+    return normalized.strip("_")

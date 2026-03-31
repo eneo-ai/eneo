@@ -8,6 +8,7 @@ from uuid import UUID
 
 from intric.flows.runtime.models import StepDiagnostic
 from intric.flows.runtime.rag_metadata import build_rag_references
+from intric.flows.flow_run_provenance import default_rag_tracking
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,9 @@ async def retrieve_rag_chunks(
         "retrieval_error_type": None,
         "references": [],
         "references_truncated": False,
+        "reference_metadata_status": "skipped_unavailable",
+        "reference_metadata_error_type": None,
+        "tracking": default_rag_tracking(),
     }
     if deps.references_service is None:
         rag_metadata["status"] = "skipped_no_service"
@@ -82,8 +86,39 @@ async def retrieve_rag_chunks(
                 if getattr(chunk, "info_blob_id", None) is not None
             )
         )
+        source_metadata_by_id: dict[str, dict[str, Any]] | None = None
+        metadata_loader = getattr(deps.references_service, "get_reference_metadata", None)
+        if callable(metadata_loader):
+            metadata_ids = list(
+                dict.fromkeys(
+                    getattr(chunk, "info_blob_id")
+                    for chunk in info_blob_chunks
+                    if getattr(chunk, "info_blob_id", None) is not None
+                )
+            )
+            if metadata_ids:
+                try:
+                    raw_metadata = await metadata_loader(info_blob_ids=metadata_ids)
+                except Exception as exc:
+                    rag_metadata["reference_metadata_status"] = "error"
+                    rag_metadata["reference_metadata_error_type"] = exc.__class__.__name__
+                    deps.logger.warning(
+                        "flow_executor.rag_reference_metadata_failed run_id=%s step_order=%d",
+                        run_id,
+                        step_order,
+                        exc_info=True,
+                    )
+                else:
+                    if isinstance(raw_metadata, dict):
+                        source_metadata_by_id = {
+                            str(key): value
+                            for key, value in raw_metadata.items()
+                            if isinstance(value, dict)
+                        }
+                    rag_metadata["reference_metadata_status"] = "success"
         references, references_truncated = build_rag_references(
             info_blob_chunks,
+            source_metadata_by_id=source_metadata_by_id,
             max_sources=deps.rag_max_reference_sources,
             max_chunks_per_source=deps.rag_max_chunks_per_source,
             snippet_chars=200,

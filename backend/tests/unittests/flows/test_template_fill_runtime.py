@@ -169,7 +169,16 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
         "## author\n\nAnders Svensson\n\n"
         "## summary\n\nDetta är sammanfattningen."
     )
-    assert output.artifacts and output.artifacts[0]["mimetype"].endswith("document")
+    assert output.artifacts == [
+        {
+            "file_id": str(file_repo.add.return_value.id),
+            "name": "step_2_output.docx",
+            "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "size": len(file_repo.add.await_args.args[0].blob),
+            "checksum": file_repo.add.await_args.args[0].checksum,
+            "file_type": "document",
+        }
+    ]
     assert output.model_parameters_json["mode"] == "template_fill"
     assert "Detta är sammanfattningen." in output.full_text
     assert output.output_payload_extensions == {

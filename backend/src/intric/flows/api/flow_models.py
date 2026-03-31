@@ -623,9 +623,53 @@ class FlowRunDebugRagReference(BaseModel):
     id: str
     id_short: str
     title: str | None = None
+    display_title: str | None = None
+    source_url: str | None = None
+    source_kind: str | None = None
+    source_container_kind: str | None = None
+    source_container_name: str | None = None
+    source_container_display_name: str | None = None
+    source_container_id: str | None = None
+    usage_state: str | None = None
     hit_count: int = 0
     best_score: float = 0.0
     chunks: list[FlowRunDebugRagReferenceChunk] = Field(default_factory=list)
+
+
+class FlowRunDebugRagTracking(BaseModel):
+    retrieval_tracked: bool = True
+    prompt_context_inclusion_tracked: bool = False
+    citation_tracked: bool = False
+    material_influence_tracked: bool = False
+    selection_basis: str | None = None
+    note: str | None = None
+
+
+class FlowRunDebugRagPromptContextGroup(BaseModel):
+    source_id: str | None = None
+    source_title: str | None = None
+    start_chunk: int | None = None
+    end_chunk: int | None = None
+    chunk_count: int | None = None
+    relevance_score: float | None = None
+
+
+class FlowRunDebugRagPromptContext(BaseModel):
+    tracked: bool = True
+    version: int | None = None
+    selection_basis: str | None = None
+    raw_source_count: int | None = None
+    raw_chunk_count: int | None = None
+    included_source_count: int | None = None
+    not_included_source_count: int | None = None
+    included_chunk_count: int | None = None
+    knowledge_tokens: int | None = None
+    truncated_by_token_budget: bool | None = None
+    included_source_ids: list[str] = Field(default_factory=list)
+    not_included_source_ids: list[str] = Field(default_factory=list)
+    included_source_titles: list[str] = Field(default_factory=list)
+    included_source_display_names: list[str] = Field(default_factory=list)
+    included_groups: list[FlowRunDebugRagPromptContextGroup] = Field(default_factory=list)
 
 
 class FlowRunDebugRag(BaseModel):
@@ -645,6 +689,11 @@ class FlowRunDebugRag(BaseModel):
     retrieval_error_type: str | None = None
     references: list[FlowRunDebugRagReference] | None = None
     references_truncated: bool | None = None
+    source_names: list[str] | None = None
+    source_display_names: list[str] | None = None
+    has_named_sources: bool | None = None
+    tracking: FlowRunDebugRagTracking | None = None
+    prompt_context: FlowRunDebugRagPromptContext | None = None
 
 
 class FlowRunDebugAttempt(BaseModel):
@@ -661,6 +710,23 @@ class FlowRunDebugAttempt(BaseModel):
                 "provider_response_id": "resp_123",
                 "num_tokens_input": 321,
                 "num_tokens_output": 118,
+                "provenance_json": {
+                    "llm": {
+                        "model_parameters": {
+                            "model_name": "gpt-4.1-mini",
+                            "provider": "openai",
+                            "temperature": None,
+                            "reasoning_effort": None,
+                            "verbosity": None,
+                            "parameter_semantics": {
+                                "temperature": {"mode": "model_default"},
+                                "top_p": {"mode": "model_default"},
+                                "reasoning_effort": {"mode": "model_default"},
+                                "verbosity": {"mode": "model_default"},
+                            },
+                        }
+                    }
+                },
             }
         }
     )
@@ -676,6 +742,7 @@ class FlowRunDebugAttempt(BaseModel):
     provider_response_id: str | None = None
     num_tokens_input: int | None = None
     num_tokens_output: int | None = None
+    provenance_json: dict[str, Any] | None = None
 
 
 class FlowRunDebugStep(BaseModel):
@@ -690,12 +757,23 @@ class FlowRunDebugStep(BaseModel):
     attempts: list[FlowRunDebugAttempt] = Field(default_factory=list)
 
 
+class FlowRunDebugRunSummary(BaseModel):
+    steps_count: int
+    completed_steps: int
+    failed_steps: int
+    attempts_count: int
+    artifacts_count: int
+    duration_ms: int | None = None
+    models_used: list[str] = Field(default_factory=list)
+
+
 class FlowRunDebugRun(BaseModel):
     run_id: str
     flow_id: str
     flow_version: int
     trace_id: str | None = None
     status: str
+    summary: FlowRunDebugRunSummary | None = None
 
 
 class FlowRunDebugDefinition(BaseModel):
@@ -709,6 +787,7 @@ class FlowRunDebugSecurity(BaseModel):
     redaction_applied: bool
     classification_field: str
     mcp_policy_field: str
+    masked_fields_count: int | None = None
 
 
 class FlowRunDebugExport(BaseModel):
@@ -723,6 +802,15 @@ class FlowRunDebugExport(BaseModel):
                     "flow_version": 3,
                     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
                     "status": "completed",
+                    "summary": {
+                        "steps_count": 1,
+                        "completed_steps": 1,
+                        "failed_steps": 0,
+                        "attempts_count": 1,
+                        "artifacts_count": 0,
+                        "duration_ms": 5240,
+                        "models_used": ["gpt-4.1-mini"],
+                    },
                 },
                 "definition": {
                     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
@@ -736,6 +824,7 @@ class FlowRunDebugExport(BaseModel):
                     "redaction_applied": True,
                     "classification_field": "output_classification_override",
                     "mcp_policy_field": "mcp_policy",
+                    "masked_fields_count": 2,
                 },
             }
         }
@@ -748,6 +837,42 @@ class FlowRunDebugExport(BaseModel):
     definition_snapshot: dict[str, Any]
     steps: list[FlowRunDebugStep]
     security: FlowRunDebugSecurity
+
+
+FLOW_RUN_DEBUG_EXPORT_EXAMPLE: dict[str, Any] = {
+    "schema_version": "eneo.flow.debug-export.v2",
+    "generated_at": "2026-03-31T12:00:00Z",
+    "run": {
+        "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+        "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+        "flow_version": 3,
+        "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
+        "status": "completed",
+        "summary": {
+            "steps_count": 1,
+            "completed_steps": 1,
+            "failed_steps": 0,
+            "attempts_count": 1,
+            "artifacts_count": 0,
+            "duration_ms": 5240,
+            "models_used": ["gpt-4.1-mini"],
+        },
+    },
+    "definition": {
+        "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+        "version": 3,
+        "checksum": "sha256:example",
+        "steps_count": 1,
+    },
+    "definition_snapshot": {"steps": []},
+    "steps": [],
+    "security": {
+        "redaction_applied": True,
+        "classification_field": "output_classification_override",
+        "mcp_policy_field": "mcp_policy",
+        "masked_fields_count": 2,
+    },
+}
 
 
 class FlowStepAttemptPublic(BaseModel):
@@ -786,7 +911,7 @@ class FlowRunEvidenceResponse(BaseModel):
                 "definition_snapshot": {"steps": []},
                 "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
                 "step_attempts": [],
-                "debug_export": FlowRunDebugExport.model_config["json_schema_extra"]["example"],
+                "debug_export": FLOW_RUN_DEBUG_EXPORT_EXAMPLE,
             }
         }
     )
@@ -805,12 +930,191 @@ class FlowRunEvidenceExportResponse(BaseModel):
                 "schema_version": "flow-evidence-export.v2",
                 "generated_at": "2026-03-31T12:00:00Z",
                 "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
+                "manifest": {
+                    "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+                    "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+                    "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
+                    "flow_version": 3,
+                    "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
+                    "redaction_applied": True,
+                    "masked_fields_count": 2,
+                    "redaction_policy_version": "flow-evidence-redaction.v3",
+                },
+                "summary": {
+                    "status": "completed",
+                    "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
+                    "steps_count": 1,
+                    "completed_steps": 1,
+                    "failed_steps": 0,
+                    "attempts_count": 1,
+                    "artifacts_count": 0,
+                    "artifact_names": ["case-summary.pdf"],
+                    "artifact_details": [
+                        {
+                            "file_id": "artifact-1",
+                            "name": "case-summary.pdf",
+                            "mimetype": "application/pdf",
+                            "size": 14012,
+                            "checksum": "artifact-checksum",
+                            "file_type": "document",
+                        }
+                    ],
+                    "duration_ms": 5240,
+                    "models_used": ["gpt-4.1-mini"],
+                    "rag_sources_count": 1,
+                    "rag_source_names": ["Municipality policy guide"],
+                    "rag_source_display_names": ["Municipality policy guide"],
+                    "rag_sources": [
+                        {
+                            "id": "source-1",
+                            "name": "Municipality policy guide",
+                            "display_name": "Municipality policy guide",
+                            "source_url": "https://example.se/policy-guide",
+                            "source_kind": "website",
+                            "source_container_kind": "website",
+                            "source_container_name": "Municipality knowledge base",
+                            "source_container_display_name": "Municipality knowledge base",
+                            "source_container_id": "website-1",
+                            "usage_state": "inserted_into_prompt",
+                        }
+                    ],
+                    "rag_usage_tracking": {
+                        "retrieval_tracked": True,
+                        "prompt_context_inclusion_tracked": True,
+                        "citation_tracked": False,
+                        "material_influence_tracked": False,
+                        "selection_basis": "semantic_search_ranked_chunks_grouped_by_source",
+                        "note": (
+                            "References record retrieved candidates and exact prompt inclusion. "
+                            "Citations and material influence are not currently tracked."
+                        ),
+                    },
+                    "final_output": {
+                        "kind": "mixed",
+                        "text_present": True,
+                        "text_preview": {
+                            "preview": "Decision support generated.",
+                            "truncated": False,
+                            "byte_size": 27,
+                            "sha256": "69c2b1d5990f8f1cd6c9eaf0d6f20bc6f3ddc31a58496a49f4158a709c27a53d",
+                        },
+                        "structured_present": False,
+                        "artifact_count": 1,
+                        "artifact_names": ["case-summary.pdf"],
+                    },
+                    "step_overview": [
+                        {
+                            "step_order": 1,
+                            "step_id": "step-1",
+                            "user_description": "Draft the decision support summary",
+                            "status": "completed",
+                            "attempts_count": 1,
+                            "retries": 0,
+                            "duration_ms": 5240,
+                            "models_used": ["gpt-4.1-mini"],
+                            "knowledge_sources_count": 1,
+                            "knowledge_usage_state": "inserted_into_prompt",
+                            "knowledge_retrieval": {
+                                "status": "success",
+                                "attempted": True,
+                                "retrieval_duration_ms": 182,
+                                "unique_sources": 1,
+                                "references_truncated": False,
+                                "reference_metadata_status": "success",
+                                "retrieval_error_type": None,
+                                "error_code": None,
+                                "source_names": ["Municipality policy guide"],
+                                "source_display_names": ["Municipality policy guide"],
+                                "prompt_context": {
+                                    "tracked": True,
+                                    "included_source_count": 1,
+                                    "not_included_source_count": 0,
+                                    "included_chunk_count": 2,
+                                    "knowledge_tokens": 248,
+                                    "truncated_by_token_budget": False,
+                                    "included_source_ids": ["source-1"],
+                                    "included_source_titles": ["Municipality policy guide"],
+                                    "included_source_display_names": ["Municipality policy guide"],
+                                },
+                            },
+                            "artifact_names": ["case-summary.pdf"],
+                            "artifact_details": [
+                                {
+                                    "file_id": "artifact-1",
+                                    "name": "case-summary.pdf",
+                                    "mimetype": "application/pdf",
+                                    "size": 14012,
+                                    "checksum": "artifact-checksum",
+                                    "file_type": "document",
+                                }
+                            ],
+                            "result_output_kind": "mixed",
+                            "output_summary": {
+                                "preview": "Decision support generated.",
+                                "truncated": False,
+                                "byte_size": 27,
+                                "sha256": "69c2b1d5990f8f1cd6c9eaf0d6f20bc6f3ddc31a58496a49f4158a709c27a53d",
+                            },
+                            "input_lineage": {
+                                "input_source": "previous_step",
+                                "used_question_binding": True,
+                                "legacy_prompt_binding_used": False,
+                                "uses_runtime_input": True,
+                                "runtime_input_format": "document",
+                                "runtime_file_count": 1,
+                                "runtime_file_ids": ["file-1"],
+                                "runtime_file_names": ["underlag.pdf"],
+                                "runtime_file_checksums": ["input-checksum"],
+                                "runtime_files": [
+                                    {
+                                        "id": "file-1",
+                                        "name": "underlag.pdf",
+                                        "checksum": "input-checksum",
+                                        "size": 2048,
+                                        "mimetype": "application/pdf",
+                                        "file_type": "document",
+                                        "text_length": 1024,
+                                        "has_text": True,
+                                        "has_transcription": False,
+                                    }
+                                ],
+                                "question_binding_references_runtime_input": True,
+                                "question_binding_expressions": [
+                                    "step_1.output.text",
+                                    "step_input.text",
+                                ],
+                                "upstream_step_orders": [1],
+                                "upstream_step_labels": [
+                                    "Collect the source document"
+                                ],
+                            },
+                            "configured_input_type": "text",
+                            "configured_output_type": "pdf",
+                        }
+                    ],
+                },
+                "redaction": {
+                    "applied": True,
+                    "policy_version": "flow-evidence-redaction.v3",
+                    "masked_fields_count": 2,
+                    "masked_paths": [
+                        "bundle.run.input_payload_json.api_key",
+                        "bundle.debug_export.definition_snapshot.steps[0].output_config.headers.Authorization",
+                    ],
+                    "masked_fields": [
+                        {
+                            "path": "bundle.run.input_payload_json.api_key",
+                            "key": "api_key",
+                            "reason": "sensitive_key",
+                        }
+                    ],
+                },
                 "bundle": {
                     "run": FLOW_RUN_PUBLIC_EXAMPLE,
                     "definition_snapshot": {"steps": []},
                     "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
                     "step_attempts": [],
-                    "debug_export": FlowRunDebugExport.model_config["json_schema_extra"]["example"],
+                    "debug_export": FLOW_RUN_DEBUG_EXPORT_EXAMPLE,
                 },
             }
         }
@@ -819,4 +1123,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
     schema_version: str
     generated_at: datetime
     content_hash: str
+    manifest: dict[str, Any]
+    summary: dict[str, Any]
+    redaction: dict[str, Any]
     bundle: FlowRunEvidenceResponse

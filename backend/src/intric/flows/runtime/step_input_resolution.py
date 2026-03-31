@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Awaitable, Callable
 
 from intric.flows.domain.flow import FlowRun, FlowStepResult
@@ -144,6 +145,8 @@ async def resolve_step_input(
             text=runtime_input_text,
             requested_ids=requested_ids,
             input_format=runtime_input_config.input_format,
+            files=files,
+            capture_mode="runtime_input",
         )
 
     bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
@@ -273,8 +276,20 @@ async def resolve_step_input(
             if extracted_text:
                 input_text = extracted_text
                 raw_extracted_text = input_text
+        if files:
+            runtime_input_metadata = _build_runtime_input_metadata(
+                text=input_text,
+                requested_ids=requested_ids,
+                input_format=_infer_file_input_format(step.input_type),
+                files=files,
+                capture_mode="flow_input_files",
+            )
 
-    if runtime_input_metadata is not None and not used_question_binding:
+    if (
+        runtime_input_config.enabled
+        and runtime_input_metadata is not None
+        and not used_question_binding
+    ):
         input_text = _compose_runtime_and_chained_input(
             runtime_text=runtime_input_text,
             chained_text=source_text,
@@ -398,13 +413,55 @@ def _build_runtime_input_metadata(
     text: str,
     requested_ids: list[Any],
     input_format: str,
+    files: list[Any],
+    capture_mode: str,
 ) -> dict[str, Any]:
+    file_metadata = [_build_runtime_file_metadata(file) for file in files]
     return {
         "text": text,
         "file_ids": [str(file_id) for file_id in requested_ids],
+        "files_count": len(file_metadata),
+        "files": file_metadata,
+        "total_file_size": sum(
+            metadata["size"]
+            for metadata in file_metadata
+            if isinstance(metadata.get("size"), int)
+        ),
         "extracted_text_length": len(text),
         "input_format": input_format,
+        "capture_mode": capture_mode,
     }
+
+
+def _build_runtime_file_metadata(file: Any) -> dict[str, Any]:
+    raw_file_type = getattr(file, "file_type", None)
+    if isinstance(raw_file_type, Enum):
+        file_type = raw_file_type.value
+    elif isinstance(raw_file_type, str):
+        file_type = raw_file_type
+    else:
+        file_type = None
+    text_value = getattr(file, "text", None)
+    transcription_value = getattr(file, "transcription", None)
+    return {
+        "id": str(getattr(file, "id")),
+        "name": getattr(file, "name", None),
+        "checksum": getattr(file, "checksum", None),
+        "size": getattr(file, "size", None),
+        "mimetype": getattr(file, "mimetype", None),
+        "file_type": file_type,
+        "text_length": len(text_value) if isinstance(text_value, str) else None,
+        "has_text": isinstance(text_value, str) and text_value.strip() != "",
+        "has_transcription": (
+            isinstance(transcription_value, str) and transcription_value.strip() != ""
+        ),
+    }
+
+
+def _infer_file_input_format(input_type: str) -> str:
+    if input_type in {"audio", "image", "document", "file"}:
+        return input_type
+    return "document"
 
 
 def _compose_runtime_and_chained_input(

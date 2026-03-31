@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import TYPE_CHECKING, Optional
+from uuid import UUID
 
 from intric.files.file_models import FileType
 from intric.info_blobs.info_blob import InfoBlobInDBWithScore
@@ -162,3 +163,10 @@ class ReferencesService:
             no_duplicate_chunks=no_duplicate_chunks,
             info_blobs=info_blobs,
         )
+
+    async def get_reference_metadata(
+        self,
+        *,
+        info_blob_ids: list[UUID],
+    ) -> dict[str, dict[str, object | None]]:
+        return await self.info_blobs_repo.get_reference_metadata_by_ids(info_blob_ids)

@@ -5,8 +5,8 @@ from typing import Any, Sequence, cast
 
 from intric.flows.domain.flow import FlowRun, FlowStepAttempt, FlowStepResult, FlowVersion
 from intric.flows.flow_run_evidence import build_debug_export
-from intric.flows.flow_run_provenance import normalize_attempt_provenance
-from intric.flows.flow_run_redaction import redact_payload
+from intric.flows.flow_run_provenance import normalize_attempt_provenance, normalize_model_parameters_payload
+from intric.flows.flow_run_redaction import MaskedField, redact_payload_with_manifest
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,8 @@ class RedactedEvidenceBundle:
     step_results: tuple[dict[str, Any], ...]
     step_attempts: tuple[dict[str, Any], ...]
     debug_export: dict[str, Any]
+    masked_paths: tuple[str, ...]
+    masked_fields: tuple[MaskedField, ...]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -58,24 +60,67 @@ def build_evidence_bundle(
 
 
 def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
-    debug_export = cast(dict[str, Any], redact_payload(bundle.debug_export))
+    masked_paths: list[str] = []
+    masked_fields: list[MaskedField] = []
+    run_result = redact_payload_with_manifest(
+        bundle.run.model_dump(mode="json"),
+        path="bundle.run",
+    )
+    definition_result = redact_payload_with_manifest(
+        bundle.version.definition_json,
+        path="bundle.definition_snapshot",
+    )
+    step_result_payloads: list[dict[str, Any]] = []
+    for index, item in enumerate(bundle.step_results):
+        result = redact_payload_with_manifest(
+            _dump_json_record(item),
+            path=f"bundle.step_results[{index}]",
+        )
+        step_result_payloads.append(cast(dict[str, Any], result.value))
+        masked_paths.extend(result.masked_paths)
+        masked_fields.extend(result.masked_fields)
+    step_attempt_payloads: list[dict[str, Any]] = []
+    for index, item in enumerate(bundle.step_attempts):
+        result = redact_payload_with_manifest(
+            _dump_json_record(item),
+            path=f"bundle.step_attempts[{index}]",
+        )
+        step_attempt_payloads.append(cast(dict[str, Any], result.value))
+        masked_paths.extend(result.masked_paths)
+        masked_fields.extend(result.masked_fields)
+    debug_result = redact_payload_with_manifest(bundle.debug_export, path="bundle.debug_export")
+    debug_export = cast(dict[str, Any], debug_result.value)
     security = debug_export.get("security")
     if isinstance(security, dict):
         security["redaction_applied"] = True
+        security["masked_fields_count"] = len(
+            tuple(run_result.masked_paths)
+            + tuple(definition_result.masked_paths)
+            + tuple(masked_paths)
+            + tuple(debug_result.masked_paths)
+        )
     return RedactedEvidenceBundle(
-        run=cast(dict[str, Any], redact_payload(bundle.run.model_dump(mode="json"))),
-        definition_snapshot=cast(
-            dict[str, Any], redact_payload(bundle.version.definition_json)
-        ),
-        step_results=tuple(
-            cast(dict[str, Any], redact_payload(_dump_json_record(item)))
-            for item in bundle.step_results
-        ),
-        step_attempts=tuple(
-            cast(dict[str, Any], redact_payload(_dump_json_record(item)))
-            for item in bundle.step_attempts
-        ),
+        run=cast(dict[str, Any], run_result.value),
+        definition_snapshot=cast(dict[str, Any], definition_result.value),
+        step_results=tuple(step_result_payloads),
+        step_attempts=tuple(step_attempt_payloads),
         debug_export=debug_export,
+        masked_paths=tuple(
+            dict.fromkeys(
+                tuple(run_result.masked_paths)
+                + tuple(definition_result.masked_paths)
+                + tuple(masked_paths)
+                + tuple(debug_result.masked_paths)
+            )
+        ),
+        masked_fields=tuple(
+            dict.fromkeys(
+                tuple(run_result.masked_fields)
+                + tuple(definition_result.masked_fields)
+                + tuple(masked_fields)
+                + tuple(debug_result.masked_fields)
+            )
+        ),
     )
 
 
@@ -83,9 +128,28 @@ def _dump_json_record(item: FlowStepResult | FlowStepAttempt) -> dict[str, Any]:
     dumped = item.model_dump(mode="json")
     if isinstance(item, FlowStepAttempt):
         normalized_provenance = normalize_attempt_provenance(item.provenance_json)
+        if normalized_provenance is not None and normalized_provenance.llm is not None:
+            llm_payload = normalized_provenance.llm
+            model_parameters = llm_payload.model_parameters
+            if not isinstance(model_parameters, dict):
+                model_parameters = {}
+            model_parameters = {
+                **model_parameters,
+                "model_name": model_parameters.get("model_name")
+                or item.response_model
+                or item.requested_model,
+                "provider": model_parameters.get("provider") or item.provider,
+            }
+            llm_payload.model_parameters = normalize_model_parameters_payload(model_parameters)
         dumped["provenance_json"] = (
             normalized_provenance.to_payload()
             if normalized_provenance is not None
             else None
         )
+        if dumped.get("provider") is None and normalized_provenance is not None and normalized_provenance.llm is not None:
+            model_parameters = normalized_provenance.llm.model_parameters
+            if isinstance(model_parameters, dict):
+                raw_provider = model_parameters.get("provider")
+                if isinstance(raw_provider, str) and raw_provider.strip():
+                    dumped["provider"] = raw_provider.strip()
     return {key: value for key, value in dumped.items()}

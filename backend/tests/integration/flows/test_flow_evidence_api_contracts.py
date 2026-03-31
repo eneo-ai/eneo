@@ -171,6 +171,13 @@ async def _seed_flow_run_contract_data(
             version=1,
             definition_checksum="evidence-contract-checksum",
             definition_json={
+                "metadata_json": {
+                    "ai_builder": {
+                        "origin": {
+                            "builder_session_id": "builder-session-123",
+                        }
+                    }
+                },
                 "steps": [
                     {
                         "step_id": str(step.id),
@@ -220,6 +227,27 @@ async def _seed_flow_run_contract_data(
                     "question": "What happened?",
                     "token": "super-secret",
                     "diagnostics": [{"code": "ok"}],
+                    "runtime_input": {
+                        "file_ids": ["input-file-1"],
+                        "files_count": 1,
+                        "files": [
+                            {
+                                "id": "input-file-1",
+                                "name": "underlag.pdf",
+                                "checksum": "input-checksum",
+                                "size": 256,
+                                "mimetype": "application/pdf",
+                                "file_type": "document",
+                                "text_length": 42,
+                                "has_text": True,
+                                "has_transcription": False,
+                            }
+                        ],
+                        "total_file_size": 256,
+                        "extracted_text_length": 42,
+                        "input_format": "document",
+                        "capture_mode": "flow_input_files",
+                    },
                 },
                 effective_prompt="Authorization: Bearer super-secret",
                 output_payload_json={
@@ -258,6 +286,59 @@ async def _seed_flow_run_contract_data(
                     "llm": {
                         "prompt": "Authorization: Bearer super-secret",
                         "params": {"temperature": 0.2},
+                    },
+                    "rag": {
+                        "attempted": True,
+                        "status": "success",
+                        "tracking": {
+                            "retrieval_tracked": True,
+                            "prompt_context_inclusion_tracked": True,
+                            "citation_tracked": False,
+                            "material_influence_tracked": False,
+                            "selection_basis": "semantic_search_ranked_chunks_grouped_by_source",
+                        },
+                        "prompt_context": {
+                            "tracked": True,
+                            "version": 2,
+                            "selection_basis": "semantic_search_ranked_chunks_grouped_by_source",
+                            "raw_source_count": 1,
+                            "raw_chunk_count": 1,
+                            "included_source_count": 1,
+                            "not_included_source_count": 0,
+                            "included_chunk_count": 1,
+                            "knowledge_tokens": 64,
+                            "truncated_by_token_budget": False,
+                            "included_source_ids": ["source-1"],
+                            "not_included_source_ids": [],
+                            "included_source_titles": ["https://kunskap.example.se/beslut/underlag"],
+                            "included_groups": [
+                                {
+                                    "source_id": "source-1",
+                                    "source_id_short": "source-1",
+                                    "source_title": "https://kunskap.example.se/beslut/underlag",
+                                    "start_chunk": 1,
+                                    "end_chunk": 1,
+                                    "chunk_count": 1,
+                                    "relevance_score": 0.82,
+                                }
+                            ],
+                        },
+                        "unique_sources": 1,
+                        "references_truncated": False,
+                        "reference_metadata_status": "success",
+                        "source_names": ["https://kunskap.example.se/beslut/underlag"],
+                        "source_display_names": ["kunskap.example.se/beslut/underlag"],
+                        "references": [
+                            {
+                                "id": "source-1",
+                                "id_short": "source-1",
+                                "title": "https://kunskap.example.se/beslut/underlag",
+                                "usage_state": "inserted_into_prompt",
+                                "hit_count": 1,
+                                "best_score": 0.82,
+                                "chunks": [],
+                            }
+                        ],
                     },
                     "http": {
                         "request_preview": {"authorization": "Bearer super-secret"},
@@ -390,8 +471,45 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     assert "attachment;" in response.headers["content-disposition"]
     payload = response.json()
     assert payload["schema_version"] == "flow-evidence-export.v2"
+    assert payload["manifest"]["run_id"] == seeded["run_id"]
+    assert payload["manifest"]["trace_id"] == seeded["trace_id"]
+    assert payload["manifest"]["redaction_applied"] is True
+    assert payload["summary"]["status"] == "completed"
+    assert payload["summary"]["steps_count"] == 1
+    assert payload["summary"]["models_used"] == ["gpt-4o-mini"]
+    assert payload["summary"]["rag_source_names"] == ["https://kunskap.example.se/beslut/underlag"]
+    assert payload["summary"]["rag_source_display_names"] == ["kunskap.example.se/beslut/underlag"]
+    assert payload["summary"]["rag_usage_tracking"]["retrieval_tracked"] is True
+    assert payload["summary"]["rag_usage_tracking"]["prompt_context_inclusion_tracked"] is True
+    assert payload["summary"]["rag_usage_tracking"]["citation_tracked"] is False
+    assert payload["summary"]["rag_sources"][0]["usage_state"] == "inserted_into_prompt"
+    assert payload["summary"]["rag_sources"][0]["source_container_display_name"] == "kunskap.example.se"
+    assert payload["summary"]["final_output"]["kind"] == "structured"
+    assert payload["summary"]["step_overview"][0]["step_order"] == 1
+    assert payload["summary"]["step_overview"][0]["knowledge_retrieval"]["status"] == "success"
+    assert payload["summary"]["step_overview"][0]["knowledge_retrieval"]["unique_sources"] == 1
+    assert payload["summary"]["step_overview"][0]["knowledge_retrieval"]["prompt_context"]["included_source_ids"] == ["source-1"]
+    assert payload["summary"]["step_overview"][0]["input_lineage"]["runtime_file_names"] == ["underlag.pdf"]
+    assert payload["summary"]["step_overview"][0]["input_lineage"]["runtime_file_checksums"] == ["input-checksum"]
+    assert payload["summary"]["step_overview"][0]["output_summary"]["preview"] == "Looks good"
+    assert payload["redaction"]["applied"] is True
+    assert payload["redaction"]["policy_version"] == "flow-evidence-redaction.v3"
+    assert payload["redaction"]["masked_fields_count"] >= 1
+    assert "bundle.run.input_payload_json.api_key" in payload["redaction"]["masked_paths"]
+    assert any(
+        item["path"] == "bundle.run.input_payload_json.api_key" and item["reason"] == "sensitive_key"
+        for item in payload["redaction"]["masked_fields"]
+    )
+    assert (
+        "bundle.definition_snapshot.metadata_json.ai_builder.origin.builder_session_id"
+        not in payload["redaction"]["masked_paths"]
+    )
     assert payload["bundle"]["run"]["trace_id"] == seeded["trace_id"]
     assert payload["bundle"]["run"]["input_payload_json"]["api_key"] == "[REDACTED]"
+    assert (
+        payload["bundle"]["definition_snapshot"]["metadata_json"]["ai_builder"]["origin"]["builder_session_id"]
+        == "builder-session-123"
+    )
     assert (
         payload["bundle"]["step_results"][0]["effective_prompt"]
         == "Authorization: Bearer [REDACTED]"
@@ -400,6 +518,7 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
         payload["bundle"]["definition_snapshot"]["steps"][0]["output_config"]["headers"]["Authorization"]
         == "[REDACTED]"
     )
+    assert payload["bundle"]["step_attempts"][0]["provenance_json"]["llm"]["model_parameters"]["parameter_semantics"]["reasoning_effort"]["mode"] == "model_default"
 
 
 @pytest.mark.asyncio

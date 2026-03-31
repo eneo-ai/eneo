@@ -5,6 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 from intric.flows.domain.flow import FlowRun, FlowStepAttempt, FlowStepResult, FlowVersion
+from intric.flows.flow_run_provenance import normalize_rag_payload
 
 DEBUG_EXPORT_SCHEMA_VERSION = "eneo.flow.debug-export.v2"
 
@@ -37,6 +38,18 @@ class DebugStepProjection(BaseModel):
     mcp: dict[str, Any]
     rag: dict[str, Any] | None = None
     attempts: list[DebugAttemptProjection]
+
+
+class DebugRunSummaryProjection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    steps_count: int
+    completed_steps: int
+    failed_steps: int
+    attempts_count: int
+    artifacts_count: int
+    duration_ms: int | None
+    models_used: list[str]
 
 
 def build_debug_export(
@@ -87,6 +100,19 @@ def build_debug_export(
                         attempts=attempts_by_step_order.get(step_order, []),
                     )
                 )
+    summary = DebugRunSummaryProjection(
+        steps_count=len(normalized_steps),
+        completed_steps=sum(
+            1 for result in step_results or [] if _normalize_status(result.status) == "completed"
+        ),
+        failed_steps=sum(
+            1 for result in step_results or [] if _normalize_status(result.status) == "failed"
+        ),
+        attempts_count=sum(len(attempts) for attempts in attempts_by_step_order.values()),
+        artifacts_count=_count_artifacts(step_results or [], run.output_payload_json),
+        duration_ms=_calculate_duration_ms(run.created_at, run.updated_at),
+        models_used=_collect_models_used(step_attempts or []),
+    )
 
     return {
         "schema_version": DEBUG_EXPORT_SCHEMA_VERSION,
@@ -97,6 +123,7 @@ def build_debug_export(
             "flow_version": run.flow_version,
             "trace_id": str(run.trace_id),
             "status": run.status.value,
+            "summary": summary.model_dump(mode="json"),
         },
         "definition": {
             "flow_id": str(version.flow_id),
@@ -166,7 +193,7 @@ def normalize_debug_step(
             "policy": step.get("mcp_policy"),
             "tool_allowlist": tool_allowlist,
         },
-        rag=rag_metadata if isinstance(rag_metadata, dict) else None,
+        rag=_normalize_debug_rag(rag_metadata),
         attempts=attempts or [],
     ).model_dump(mode="json")
 
@@ -181,6 +208,18 @@ def normalize_debug_attempt(attempt: FlowStepAttempt) -> DebugAttemptProjection:
             0,
             int((finished_at - started_at).total_seconds() * 1000),
         )
+    model_parameters = None
+    if isinstance(attempt.provenance_json, dict):
+        llm_payload = attempt.provenance_json.get("llm")
+        if isinstance(llm_payload, dict):
+            raw_model_parameters = llm_payload.get("model_parameters")
+            if isinstance(raw_model_parameters, dict):
+                model_parameters = raw_model_parameters
+    provider = attempt.provider
+    if provider is None and isinstance(model_parameters, dict):
+        raw_provider = model_parameters.get("provider")
+        if isinstance(raw_provider, str) and raw_provider.strip():
+            provider = raw_provider.strip()
     return DebugAttemptProjection(
         attempt_no=attempt_no,
         status=_normalize_status(attempt.status),
@@ -188,7 +227,7 @@ def normalize_debug_attempt(attempt: FlowStepAttempt) -> DebugAttemptProjection:
         error_code=attempt.error_code,
         requested_model=attempt.requested_model,
         response_model=attempt.response_model,
-        provider=attempt.provider,
+        provider=provider,
         finish_reason=attempt.finish_reason,
         provider_response_id=attempt.provider_response_id,
         num_tokens_input=attempt.num_tokens_input,
@@ -201,3 +240,55 @@ def _normalize_status(value: Any) -> str | None:
         return value
     status_value = getattr(value, "value", None)
     return status_value if isinstance(status_value, str) else None
+
+
+def _normalize_debug_rag(rag_metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+    return normalize_rag_payload(rag_metadata)
+
+
+def _calculate_duration_ms(started_at: Any, finished_at: Any) -> int | None:
+    if not isinstance(started_at, datetime) or not isinstance(finished_at, datetime):
+        return None
+    return max(0, int((finished_at - started_at).total_seconds() * 1000))
+
+
+def _count_artifacts(step_results: list[FlowStepResult], run_output_payload: Any) -> int:
+    artifact_ids: set[str] = set()
+    for result in step_results:
+        _collect_artifact_ids(result.output_payload_json, artifact_ids)
+    _collect_artifact_ids(run_output_payload, artifact_ids)
+    return len(artifact_ids)
+
+
+def _collect_artifact_ids(payload: Any, artifact_ids: set[str]) -> None:
+    if not isinstance(payload, dict):
+        return
+    artifacts = payload.get("artifacts")
+    if isinstance(artifacts, list):
+        for artifact in artifacts:
+            if isinstance(artifact, dict):
+                file_id = artifact.get("file_id")
+                if file_id is not None:
+                    artifact_ids.add(str(file_id))
+    for key in ("generated_file_ids", "file_ids"):
+        file_ids = payload.get(key)
+        if isinstance(file_ids, list):
+            for file_id in file_ids:
+                artifact_ids.add(str(file_id))
+
+
+def _collect_models_used(step_attempts: list[FlowStepAttempt]) -> list[str]:
+    models: list[str] = []
+    for attempt in step_attempts:
+        candidate = attempt.response_model or attempt.requested_model
+        if candidate is None and isinstance(attempt.provenance_json, dict):
+            llm_payload = attempt.provenance_json.get("llm")
+            if isinstance(llm_payload, dict):
+                model_parameters = llm_payload.get("model_parameters")
+                if isinstance(model_parameters, dict):
+                    raw_model_name = model_parameters.get("model_name")
+                    if isinstance(raw_model_name, str) and raw_model_name.strip():
+                        candidate = raw_model_name.strip()
+        if isinstance(candidate, str) and candidate.strip():
+            models.append(candidate.strip())
+    return list(dict.fromkeys(models))

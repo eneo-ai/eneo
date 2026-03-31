@@ -8,6 +8,8 @@ import tiktoken
 from intric.ai_models.completion_models.completion_model import (
     Context,
     FunctionDefinition,
+    KnowledgeTrace,
+    KnowledgeTraceGroup,
     Message,
 )
 from intric.completion_models.infrastructure.static_prompts import (
@@ -81,6 +83,7 @@ class _Prompt:
         self.web_search_result = None
         self.attachments = None
         self._knowledge_tokens = 0
+        self._knowledge_trace: KnowledgeTrace | None = None
         self.version = version
 
     def __str__(self):
@@ -161,12 +164,20 @@ class _Prompt:
         chunks: list["InfoBlobChunkInDBWithScore"],
         max_tokens: int,
     ):
+        raw_source_ids = list(
+            dict.fromkeys(
+                str(chunk.info_blob_id)
+                for chunk in chunks
+                if getattr(chunk, "info_blob_id", None) is not None
+            )
+        )
         # Create a dictionary to store chunk indices
         chunk_indices = {id(chunk): i for i, chunk in enumerate(chunks)}
 
         # Group chunks by info_blob
         chunks_by_info_blob = {}
         used_tokens = 0
+        truncated_by_token_budget = False
         for chunk in chunks:
             chunk_tokens = count_tokens(chunk.text)
 
@@ -181,6 +192,7 @@ class _Prompt:
                 )
 
             if chunk_tokens + used_tokens > max_tokens:
+                truncated_by_token_budget = True
                 break
 
             chunks_by_info_blob[chunk.info_blob_id].append(chunk)
@@ -220,7 +232,11 @@ class _Prompt:
 
                 chunk_grouping = ChunkGrouping(
                     id=doc_id,
-                    title=group[0].info_blob_title,
+                    title=(
+                        group[0].info_blob_title
+                        if isinstance(getattr(group[0], "info_blob_title", None), str)
+                        else None
+                    ),
                     start_chunk=group[0].chunk_no,
                     end_chunk=group[-1].chunk_no,
                     content=full_text,
@@ -238,6 +254,36 @@ class _Prompt:
             grouping.relevance_score = grouping_scores[id(grouping)]
 
         chunk_groupings.sort(key=lambda x: x.relevance_score, reverse=True)
+
+        included_source_ids = list(dict.fromkeys(str(grouping.id) for grouping in chunk_groupings))
+        not_included_source_ids = [
+            source_id for source_id in raw_source_ids if source_id not in included_source_ids
+        ]
+        self._knowledge_trace = KnowledgeTrace(
+            version=self.version,
+            selection_basis="semantic_search_ranked_chunks_grouped_by_source",
+            raw_source_count=len(raw_source_ids),
+            raw_chunk_count=len(chunks),
+            included_source_count=len(included_source_ids),
+            not_included_source_count=len(not_included_source_ids),
+            included_chunk_count=sum(grouping.chunk_count for grouping in chunk_groupings),
+            knowledge_tokens=self._knowledge_tokens,
+            truncated_by_token_budget=truncated_by_token_budget or bool(not_included_source_ids),
+            included_source_ids=included_source_ids,
+            not_included_source_ids=not_included_source_ids,
+            included_groups=[
+                KnowledgeTraceGroup(
+                    source_id=str(grouping.id),
+                    source_id_short=str(grouping.id)[:8],
+                    source_title=grouping.title,
+                    start_chunk=grouping.start_chunk,
+                    end_chunk=grouping.end_chunk,
+                    chunk_count=grouping.chunk_count,
+                    relevance_score=grouping.relevance_score,
+                )
+                for grouping in chunk_groupings
+            ],
+        )
 
         if self.version == 1:
             return "\n".join(
@@ -298,6 +344,9 @@ class _Prompt:
 
     def get_tokens_of_knowledge(self):
         return self._knowledge_tokens
+
+    def get_knowledge_trace(self) -> KnowledgeTrace | None:
+        return self._knowledge_trace
 
 
 class ContextBuilder:
@@ -468,4 +517,5 @@ class ContextBuilder:
             images=self._get_files_by_type(files, FileType.IMAGE),
             token_count=tokens_used,
             function_definitions=functions,
+            knowledge_trace=_prompt.get_knowledge_trace(),
         )

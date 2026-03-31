@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from intric.flows.flow_run_redaction import redact_payload, redact_string, redact_url_secrets
+from intric.flows.flow_run_redaction import (
+    redact_payload,
+    redact_payload_with_manifest,
+    redact_string,
+    redact_url_secrets,
+)
 
 
 def test_redact_payload_redacts_nested_sensitive_fields_and_bearer_tokens():
@@ -35,3 +40,18 @@ def test_redact_payload_matches_hyphenated_and_case_insensitive_keys():
 
 def test_redact_string_leaves_non_sensitive_plain_text_unchanged():
     assert redact_string("plain text", key="description") == "plain text"
+
+
+def test_redact_payload_keeps_traceability_ids_but_redacts_session_tokens() -> None:
+    payload = {
+        "builder_session_id": "builder-session-123",
+        "session_id": "runtime-session-456",
+        "session_token": "very-secret",
+    }
+
+    redacted = redact_payload_with_manifest(payload)
+
+    assert redacted.value["builder_session_id"] == "builder-session-123"
+    assert redacted.value["session_id"] == "runtime-session-456"
+    assert redacted.value["session_token"] == "[REDACTED]"
+    assert redacted.masked_paths == ("session_token",)

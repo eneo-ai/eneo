@@ -3,12 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 from typing import Any, TypeVar
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict
 
 TEXT_PREVIEW_MAX_BYTES = 16 * 1024
 JSON_PREVIEW_MAX_BYTES = 16 * 1024
 ModelT = TypeVar("ModelT", bound=BaseModel)
+DEFAULT_RAG_SELECTION_BASIS = "semantic_search_ranked_chunks_grouped_by_source"
 
 
 class PayloadPreview(BaseModel):
@@ -82,6 +84,20 @@ class FlowAttemptProvenance(BaseModel):
         return self.model_dump(mode="json", exclude_none=True)
 
 
+def default_rag_tracking() -> dict[str, Any]:
+    return {
+        "retrieval_tracked": True,
+        "prompt_context_inclusion_tracked": False,
+        "citation_tracked": False,
+        "material_influence_tracked": False,
+        "selection_basis": DEFAULT_RAG_SELECTION_BASIS,
+        "note": (
+            "References record retrieved candidates. Exact prompt inclusion, citations, "
+            "and material influence are not currently tracked."
+        ),
+    }
+
+
 def normalize_text_preview(text: str, *, max_bytes: int = TEXT_PREVIEW_MAX_BYTES) -> PayloadPreview:
     encoded = text.encode("utf-8")
     byte_size = len(encoded)
@@ -131,11 +147,16 @@ def normalize_attempt_provenance(raw: dict[str, Any] | None) -> FlowAttemptProve
         tool_calls = llm_payload.get("tool_calls")
         if tool_calls is not None:
             llm_payload["tool_calls"] = normalize_json_preview(tool_calls)
+        model_parameters = llm_payload.get("model_parameters")
+        if isinstance(model_parameters, dict):
+            llm_payload["model_parameters"] = normalize_model_parameters_payload(
+                model_parameters
+            )
         llm = LlmProvenance.model_validate(llm_payload)
 
     return FlowAttemptProvenance(
         llm=llm,
-        rag=_validate_extra_model(RagProvenance, raw.get("rag")),
+        rag=_normalize_rag_provenance(raw.get("rag")),
         http=_validate_extra_model(HttpProvenance, raw.get("http")),
         template=_validate_extra_model(TemplateProvenance, raw.get("template")),
         runtime_input=_validate_extra_model(RuntimeInputProvenance, raw.get("runtime_input")),
@@ -153,9 +174,239 @@ def _validate_extra_model(model: type[ModelT], value: Any) -> ModelT | None:
     return model.model_validate(value)
 
 
+def _normalize_rag_provenance(value: Any) -> RagProvenance | None:
+    normalized_payload = normalize_rag_payload(value)
+    if normalized_payload is None:
+        return None
+    return RagProvenance.model_validate(normalized_payload)
+
+
+def normalize_rag_payload(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    payload = dict(value)
+    payload["tracking"] = _normalize_rag_tracking(payload.get("tracking"))
+    prompt_context = _normalize_rag_prompt_context(payload.get("prompt_context"))
+    if prompt_context is not None:
+        payload["prompt_context"] = prompt_context
+    included_source_ids = set()
+    if isinstance(prompt_context, dict):
+        included_source_ids = {
+            source_id
+            for source_id in prompt_context.get("included_source_ids", [])
+            if isinstance(source_id, str) and source_id.strip()
+        }
+    references = payload.get("references")
+    if isinstance(references, list):
+        normalized_references: list[dict[str, Any]] = []
+        source_names: list[str] = []
+        source_display_names: list[str] = []
+        for reference in references:
+            if not isinstance(reference, dict):
+                continue
+            normalized_reference = dict(reference)
+            normalized_reference["usage_state"] = _normalize_usage_state(
+                reference.get("usage_state")
+            )
+            if (
+                included_source_ids
+                and str(normalized_reference.get("id")) in included_source_ids
+            ):
+                normalized_reference["usage_state"] = "inserted_into_prompt"
+            container_display_name = format_source_container_display_name(normalized_reference)
+            if container_display_name is not None:
+                normalized_reference["source_container_display_name"] = container_display_name
+            raw_title = _resolve_reference_title(normalized_reference)
+            if raw_title is not None:
+                source_names.append(raw_title)
+                display_name = format_source_display_name(raw_title)
+                normalized_reference["display_title"] = display_name
+                source_display_names.append(display_name)
+            normalized_references.append(normalized_reference)
+        payload["references"] = normalized_references
+        if source_names:
+            payload["source_names"] = list(dict.fromkeys(source_names))
+            payload["source_display_names"] = list(dict.fromkeys(source_display_names))
+            payload["has_named_sources"] = True
+        else:
+            payload["source_names"] = []
+            payload["source_display_names"] = []
+            payload["has_named_sources"] = False
+    return payload
+
+
+def _normalize_rag_prompt_context(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    payload = dict(value)
+
+    included_source_ids = [
+        str(source_id).strip()
+        for source_id in payload.get("included_source_ids", [])
+        if str(source_id).strip()
+    ]
+    not_included_source_ids = [
+        str(source_id).strip()
+        for source_id in payload.get("not_included_source_ids", [])
+        if str(source_id).strip()
+    ]
+
+    normalized_groups: list[dict[str, Any]] = []
+    derived_titles: list[str] = []
+    raw_groups = payload.get("included_groups")
+    if isinstance(raw_groups, list):
+        for group in raw_groups:
+            if not isinstance(group, dict):
+                continue
+            normalized_group = dict(group)
+            source_id = group.get("source_id")
+            if source_id is not None:
+                normalized_group["source_id"] = str(source_id)
+            source_title = group.get("source_title")
+            if isinstance(source_title, str) and source_title.strip():
+                stripped_title = source_title.strip()
+                normalized_group["source_title"] = stripped_title
+                derived_titles.append(stripped_title)
+            normalized_groups.append(normalized_group)
+
+    included_source_titles = list(
+        dict.fromkeys(
+            [
+                title.strip()
+                for title in payload.get("included_source_titles", [])
+                if isinstance(title, str) and title.strip()
+            ]
+            + derived_titles
+        )
+    )
+    included_source_display_names = [
+        format_source_display_name(title) for title in included_source_titles
+    ]
+
+    payload["tracked"] = bool(payload.get("tracked", True))
+    payload["included_source_ids"] = included_source_ids
+    payload["not_included_source_ids"] = not_included_source_ids
+    payload["included_groups"] = normalized_groups
+    payload["included_source_titles"] = included_source_titles
+    payload["included_source_display_names"] = included_source_display_names
+    return payload
+
+
 def _truncate_utf8(text: str, max_bytes: int) -> str:
     encoded = text.encode("utf-8")
     if len(encoded) <= max_bytes:
         return text
     truncated = encoded[:max_bytes]
     return truncated.decode("utf-8", errors="ignore")
+
+
+def format_source_display_name(title: str) -> str:
+    stripped = title.strip()
+    if not stripped:
+        return stripped
+    if not stripped.startswith(("http://", "https://")):
+        return stripped
+    try:
+        parsed = urlsplit(stripped)
+    except ValueError:
+        return stripped
+    hostname = parsed.hostname or ""
+    path = parsed.path.rstrip("/")
+    if hostname and path:
+        return f"{hostname}{path}"
+    if hostname:
+        return hostname
+    return stripped
+
+
+def format_source_container_display_name(reference: dict[str, Any]) -> str | None:
+    raw_name = reference.get("source_container_name")
+    if isinstance(raw_name, str) and raw_name.strip():
+        return raw_name.strip()
+    raw_url = _resolve_reference_url(reference)
+    if raw_url is not None:
+        try:
+            parsed = urlsplit(raw_url)
+        except ValueError:
+            parsed = None
+        if parsed is not None and parsed.hostname:
+            return parsed.hostname
+    raw_kind = reference.get("source_container_kind")
+    if isinstance(raw_kind, str) and raw_kind.strip():
+        return raw_kind.strip()
+    return None
+
+
+def normalize_model_parameters_payload(model_parameters: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(model_parameters)
+    semantics = payload.get("parameter_semantics")
+    payload["parameter_semantics"] = _normalize_parameter_semantics(
+        payload,
+        semantics if isinstance(semantics, dict) else None,
+    )
+    for key in ("temperature", "top_p", "reasoning_effort", "verbosity"):
+        payload.setdefault(key, None)
+    return payload
+
+
+def _normalize_rag_tracking(value: Any) -> dict[str, Any]:
+    defaults = default_rag_tracking()
+    if not isinstance(value, dict):
+        return defaults
+
+    normalized = dict(defaults)
+    for key in (
+        "retrieval_tracked",
+        "prompt_context_inclusion_tracked",
+        "citation_tracked",
+        "material_influence_tracked",
+    ):
+        if isinstance(value.get(key), bool):
+            normalized[key] = value[key]
+    selection_basis = value.get("selection_basis")
+    if isinstance(selection_basis, str) and selection_basis.strip():
+        normalized["selection_basis"] = selection_basis.strip()
+    note = value.get("note")
+    if isinstance(note, str) and note.strip():
+        normalized["note"] = note.strip()
+    return normalized
+
+
+def _resolve_reference_title(reference: dict[str, Any]) -> str | None:
+    for key in ("source_title", "title", "source_url"):
+        raw_value = reference.get(key)
+        if isinstance(raw_value, str) and raw_value.strip():
+            return raw_value.strip()
+    return None
+
+
+def _resolve_reference_url(reference: dict[str, Any]) -> str | None:
+    for key in ("source_url", "source_title", "title"):
+        raw_value = reference.get(key)
+        if not isinstance(raw_value, str):
+            continue
+        stripped = raw_value.strip()
+        if stripped.startswith(("http://", "https://")):
+            return stripped
+    return None
+
+
+def _normalize_usage_state(value: Any) -> str:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return "retrieved_candidate"
+
+
+def _normalize_parameter_semantics(
+    model_parameters: dict[str, Any],
+    semantics: dict[str, Any] | None,
+) -> dict[str, Any]:
+    normalized: dict[str, Any] = {}
+    for key in ("temperature", "top_p", "reasoning_effort", "verbosity"):
+        existing = semantics.get(key) if isinstance(semantics, dict) else None
+        if isinstance(existing, dict) and isinstance(existing.get("mode"), str):
+            mode = existing["mode"]
+        else:
+            mode = "configured" if model_parameters.get(key) is not None else "model_default"
+        normalized[key] = {"mode": mode}
+    return normalized

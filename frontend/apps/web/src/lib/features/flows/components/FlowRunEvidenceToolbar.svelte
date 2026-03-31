@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { FlowRunDebugExport } from "@intric/intric-js";
-  import { Button } from "@intric/ui";
+  import { Button, Tooltip } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
 
   export let debugExport: FlowRunDebugExport | null;
@@ -21,13 +21,17 @@
   <div class="flex flex-wrap items-center justify-between gap-2">
     <div class="text-muted flex flex-wrap items-center gap-2 text-[11px]">
       {#if redactionApplied}
-        <span class="border-default bg-primary rounded-md border px-2 py-1">
-          {m.flow_run_evidence_redacted()}
-        </span>
+        <Tooltip text={m.flow_run_evidence_redacted_tooltip()}>
+          <span class="border-default bg-primary rounded-md border px-2 py-1">
+            {m.flow_run_evidence_redacted()}
+          </span>
+        </Tooltip>
       {/if}
-      <span class="border-default bg-primary rounded-md border px-2 py-1">
-        {m.flow_run_debug_tools()}
-      </span>
+      <Tooltip text={m.flow_run_debug_tools_tooltip()}>
+        <span class="border-default bg-primary rounded-md border px-2 py-1">
+          {m.flow_run_debug_tools()}
+        </span>
+      </Tooltip>
     </div>
 
     <Button size="small" on:click={() => void onDownloadCanonicalEvidence()}>

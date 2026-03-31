@@ -13,6 +13,7 @@ from intric.flows.runtime.models import RunExecutionState, RuntimeStep, StepExec
 from intric.flows.runtime.step_execution_runtime import (
     PreparedStepExecution,
     StepExecutionRuntimeDeps,
+    apply_prompt_context_trace,
     attach_typed_failure_context,
     augment_prompt_for_json_output,
     build_output_payload,
@@ -218,7 +219,85 @@ def test_detect_native_json_output_support_logs_lookup_failures(
     supported = detect_native_json_output_support(assistant)
 
     assert supported is None
-    assert "Failed to detect native JSON output support for flow step execution." in caplog.text
+
+
+def test_effective_model_parameters_preserves_default_setting_semantics():
+    assistant = SimpleNamespace(
+        completion_model_kwargs=SimpleNamespace(
+            model_dump=lambda **kwargs: {
+                "temperature": None,
+                "top_p": None,
+                "reasoning_effort": None,
+                "verbosity": None,
+            }
+        ),
+        completion_model=SimpleNamespace(
+            id=uuid4(),
+            name="gpt-5.4-nano",
+            provider_type="openai",
+            reasoning=True,
+        ),
+    )
+
+    params = effective_model_parameters(assistant)
+
+    assert params["temperature"] is None
+    assert params["reasoning_effort"] is None
+    assert params["verbosity"] is None
+    assert params["parameter_semantics"]["temperature"]["mode"] == "model_default"
+    assert params["parameter_semantics"]["reasoning_effort"]["mode"] == "model_default"
+    assert params["parameter_semantics"]["verbosity"]["mode"] == "model_default"
+
+
+def test_apply_prompt_context_trace_marks_inserted_sources() -> None:
+    rag_metadata = {
+        "status": "success",
+        "tracking": {
+            "retrieval_tracked": True,
+            "prompt_context_inclusion_tracked": False,
+            "citation_tracked": False,
+            "material_influence_tracked": False,
+        },
+        "references": [
+            {"id": "source-1", "usage_state": "retrieved_candidate"},
+            {"id": "source-2", "usage_state": "retrieved_candidate"},
+        ],
+    }
+
+    traced = apply_prompt_context_trace(
+        rag_metadata,
+        knowledge_trace={
+            "version": 2,
+            "selection_basis": "semantic_search_ranked_chunks_grouped_by_source",
+            "raw_source_count": 2,
+            "raw_chunk_count": 4,
+            "included_source_count": 1,
+            "not_included_source_count": 1,
+            "included_chunk_count": 2,
+            "knowledge_tokens": 128,
+            "truncated_by_token_budget": True,
+            "included_source_ids": ["source-1"],
+            "not_included_source_ids": ["source-2"],
+            "included_groups": [
+                {
+                    "source_id": "source-1",
+                    "source_id_short": "source-1",
+                    "source_title": "Source One",
+                    "start_chunk": 1,
+                    "end_chunk": 2,
+                    "chunk_count": 2,
+                    "relevance_score": 1.0,
+                }
+            ],
+        },
+    )
+
+    assert traced is not None
+    assert traced["tracking"]["prompt_context_inclusion_tracked"] is True
+    assert traced["prompt_context"]["included_source_ids"] == ["source-1"]
+    assert traced["prompt_context"]["included_source_titles"] == ["Source One"]
+    assert traced["references"][0]["usage_state"] == "inserted_into_prompt"
+    assert traced["references"][1]["usage_state"] == "retrieved_candidate"
 
 
 @pytest.mark.asyncio

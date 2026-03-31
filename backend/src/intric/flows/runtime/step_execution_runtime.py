@@ -256,14 +256,95 @@ def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:
 
 
 def effective_model_parameters(assistant: Any) -> dict[str, Any]:
-    kwargs = assistant.completion_model_kwargs.model_dump(exclude_none=True)  # type: ignore[attr-defined]
+    kwargs = assistant.completion_model_kwargs.model_dump(exclude_none=False)  # type: ignore[attr-defined]
     completion_model = assistant.completion_model  # type: ignore[attr-defined]
+    parameter_semantics = {
+        key: {"mode": "configured" if kwargs.get(key) is not None else "model_default"}
+        for key in ("temperature", "top_p", "reasoning_effort", "verbosity")
+    }
     return {
         "model_id": str(completion_model.id) if completion_model and completion_model.id else None,
         "model_name": completion_model.name if completion_model else None,
         "provider": getattr(completion_model, "provider_type", None),
         **kwargs,
+        "parameter_semantics": parameter_semantics,
     }
+
+
+def apply_prompt_context_trace(
+    rag_metadata: dict[str, Any] | None,
+    *,
+    knowledge_trace: Any,
+) -> dict[str, Any] | None:
+    if not isinstance(rag_metadata, dict) or knowledge_trace is None:
+        return rag_metadata
+
+    if hasattr(knowledge_trace, "model_dump"):
+        trace_payload = knowledge_trace.model_dump(mode="json")
+    elif isinstance(knowledge_trace, dict):
+        trace_payload = dict(knowledge_trace)
+    else:
+        return rag_metadata
+
+    payload = dict(rag_metadata)
+    tracking = payload.get("tracking")
+    if not isinstance(tracking, dict):
+        tracking = {}
+    tracking = dict(tracking)
+    tracking["prompt_context_inclusion_tracked"] = True
+    tracking_note = tracking.get("note")
+    if not isinstance(tracking_note, str) or "citations" not in tracking_note:
+        tracking["note"] = (
+            "References record retrieved candidates and exact prompt inclusion. "
+            "Citations and material influence are not currently tracked."
+        )
+    payload["tracking"] = tracking
+
+    included_source_ids = [
+        str(source_id)
+        for source_id in trace_payload.get("included_source_ids", [])
+        if source_id is not None
+    ]
+    included_source_titles = list(
+        dict.fromkeys(
+            source_title.strip()
+            for group in trace_payload.get("included_groups", [])
+            if isinstance(group, dict)
+            and isinstance((source_title := group.get("source_title")), str)
+            and source_title.strip()
+        )
+    )
+    payload["prompt_context"] = {
+        "tracked": True,
+        "version": trace_payload.get("version"),
+        "selection_basis": trace_payload.get("selection_basis"),
+        "raw_source_count": trace_payload.get("raw_source_count"),
+        "raw_chunk_count": trace_payload.get("raw_chunk_count"),
+        "included_source_count": trace_payload.get("included_source_count"),
+        "not_included_source_count": trace_payload.get("not_included_source_count"),
+        "included_chunk_count": trace_payload.get("included_chunk_count"),
+        "knowledge_tokens": trace_payload.get("knowledge_tokens"),
+        "truncated_by_token_budget": trace_payload.get("truncated_by_token_budget"),
+        "included_source_ids": included_source_ids,
+        "not_included_source_ids": trace_payload.get("not_included_source_ids", []),
+        "included_source_titles": included_source_titles,
+        "included_groups": trace_payload.get("included_groups", []),
+    }
+
+    references = payload.get("references")
+    if isinstance(references, list):
+        normalized_references: list[dict[str, Any]] = []
+        included_source_ids_set = set(included_source_ids)
+        for reference in references:
+            if not isinstance(reference, dict):
+                normalized_references.append(reference)
+                continue
+            normalized_reference = dict(reference)
+            if str(normalized_reference.get("id")) in included_source_ids_set:
+                normalized_reference["usage_state"] = "inserted_into_prompt"
+            normalized_references.append(normalized_reference)
+        payload["references"] = normalized_references
+    return payload
 
 
 def requested_model_name(assistant: Any) -> str | None:
@@ -668,6 +749,10 @@ async def complete_step_execution(
         step=step,
     )
     response_model_info = getattr(response, "model", None)
+    rag_metadata = apply_prompt_context_trace(
+        rag_metadata,
+        knowledge_trace=getattr(response, "knowledge_trace", None),
+    )
     return StepExecutionOutput(
         input_text=prepared.step_input.text,
         source_text=prepared.step_input.source_text,

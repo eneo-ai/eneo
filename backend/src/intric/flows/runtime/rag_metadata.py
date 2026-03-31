@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 
 def build_chunk_snippet(text: str, *, max_chars: int = 200) -> str:
@@ -14,6 +14,7 @@ def build_chunk_snippet(text: str, *, max_chars: int = 200) -> str:
 def build_rag_references(
     info_blob_chunks: list[Any],
     *,
+    source_metadata_by_id: Mapping[str, Mapping[str, Any]] | None = None,
     max_sources: int = 25,
     max_chunks_per_source: int = 5,
     snippet_chars: int = 200,
@@ -28,14 +29,20 @@ def build_rag_references(
         source_id = str(info_blob_id)
         entry = references_by_source.get(source_id)
         if entry is None:
+            source_metadata = source_metadata_by_id.get(source_id, {}) if source_metadata_by_id else {}
+            reference_title = _truncate_title(
+                source_metadata.get("source_title") or getattr(chunk, "info_blob_title", None)
+            )
             entry = {
                 "id": source_id,
                 "id_short": source_id[:8],
-                "title": _truncate_title(getattr(chunk, "info_blob_title", None)),
+                "title": reference_title,
                 "hit_count": 0,
                 "best_score": 0.0,
                 "chunks": [],
+                "usage_state": "retrieved_candidate",
             }
+            _attach_source_metadata(entry, source_metadata)
             references_by_source[source_id] = entry
 
         score_value = _safe_score(getattr(chunk, "score", 0.0))
@@ -93,3 +100,23 @@ def _truncate_title(title: Any, *, max_chars: int = 200) -> str | None:
     if len(text) <= max_chars:
         return text
     return text[:max_chars]
+
+
+def _attach_source_metadata(
+    entry: dict[str, Any],
+    source_metadata: Mapping[str, Any],
+) -> None:
+    source_title = _truncate_title(source_metadata.get("source_title"))
+    if source_title:
+        entry["source_title"] = source_title
+        entry["title"] = source_title
+    for key in (
+        "source_url",
+        "source_kind",
+        "source_container_kind",
+        "source_container_name",
+        "source_container_id",
+    ):
+        value = source_metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            entry[key] = value.strip()
