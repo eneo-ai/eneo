@@ -204,9 +204,22 @@ class CompletionModelPublic(CompletionModel):
     credential_provider: Optional[str] = None
     security_classification: Optional[SecurityClassificationPublic] = None
     provider_name: Optional[str] = None
+    deprecation_date: Optional[str] = None
 
     @classmethod
     def from_domain(cls, completion_model: CompletionModelDomain):
+        from intric.ai_models.deprecation_lookup import (
+            get_litellm_deprecation_date,
+            is_model_deprecated,
+        )
+
+        dep_date = get_litellm_deprecation_date(
+            completion_model.name, completion_model.provider_type
+        )
+        deprecated = completion_model.is_deprecated or is_model_deprecated(
+            completion_model.name, completion_model.provider_type
+        )
+
         return cls(
             id=completion_model.id,
             created_at=completion_model.created_at,
@@ -216,7 +229,7 @@ class CompletionModelPublic(CompletionModel):
             family=completion_model.family,
             max_input_tokens=completion_model.max_input_tokens,
             max_output_tokens=completion_model.max_output_tokens,
-            is_deprecated=completion_model.is_deprecated,
+            is_deprecated=deprecated,
             nr_billion_parameters=completion_model.nr_billion_parameters,
             hf_link=completion_model.hf_link,
             stability=completion_model.stability,
@@ -245,6 +258,7 @@ class CompletionModelPublic(CompletionModel):
             provider_id=completion_model.provider_id,
             provider_name=completion_model.provider_name,
             provider_type=completion_model.provider_type,
+            deprecation_date=dep_date,
         )
 
 

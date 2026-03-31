@@ -151,6 +151,17 @@
         {m.enable_model()}
       {/if}
     </Button>
+    {#if type === "completionModel" && model.is_deprecated}
+      <Button
+        is={item}
+        padding="icon-leading"
+        on:click={() => {
+          $showMigrateDialog = true;
+        }}
+      >
+        <ArrowRight class="h-4 w-4" />{m.migrate_model_usage()}
+      </Button>
+    {/if}
     <Button
       is={item}
       padding="icon-leading"

@@ -35,15 +35,26 @@ class TranscriptionModelPublic(BaseModel):
     # Provider info for grouped display in UI
     provider_name: Optional[str] = None
     provider_type: Optional[str] = None
+    deprecation_date: Optional[str] = None
 
     @classmethod
     def from_domain(cls, model: TranscriptionModel):
+        from intric.ai_models.deprecation_lookup import (
+            get_litellm_deprecation_date,
+            is_model_deprecated,
+        )
+
+        dep_date = get_litellm_deprecation_date(model.name, model.provider_type)
+        deprecated = model.is_deprecated or is_model_deprecated(
+            model.name, model.provider_type
+        )
+
         return cls(
             id=model.id,
             name=model.name,
             nickname=model.nickname or "",
             family=model.family,
-            is_deprecated=model.is_deprecated,
+            is_deprecated=deprecated,
             stability=model.stability,
             hosting=model.hosting,
             open_source=model.open_source,
@@ -64,6 +75,7 @@ class TranscriptionModelPublic(BaseModel):
             provider_id=model.provider_id,
             provider_name=model.provider_name,
             provider_type=model.provider_type,
+            deprecation_date=dep_date,
         )
 
 

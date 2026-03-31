@@ -9003,6 +9003,8 @@ export interface components {
       provider_name?: string | null;
       /** Provider Type */
       provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
       /**
        * Token Limit
        * @description Backward-compat: exposed in JSON responses for frontend.
@@ -10054,6 +10056,8 @@ export interface components {
       provider_name?: string | null;
       /** Provider Type */
       provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
     };
     /** EmbeddingModelPublicLegacy */
     EmbeddingModelPublicLegacy: {
@@ -15270,6 +15274,8 @@ export interface components {
       provider_name?: string | null;
       /** Provider Type */
       provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
     };
     /** TranscriptionModelSecurityStatus */
     TranscriptionModelSecurityStatus: {

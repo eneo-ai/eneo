@@ -15,6 +15,18 @@ if TYPE_CHECKING:
 
 class CompletionModelAssembler:
     def from_completion_model_to_model(self, completion_model: "CompletionModel"):
+        from intric.ai_models.deprecation_lookup import (
+            get_litellm_deprecation_date,
+            is_model_deprecated,
+        )
+
+        dep_date = get_litellm_deprecation_date(
+            completion_model.name, completion_model.provider_type
+        )
+        deprecated = completion_model.is_deprecated or is_model_deprecated(
+            completion_model.name, completion_model.provider_type
+        )
+
         return CompletionModelPublic(
             id=completion_model.id,
             created_at=completion_model.created_at,
@@ -32,7 +44,7 @@ class CompletionModelAssembler:
             description=completion_model.description,
             nr_billion_parameters=completion_model.nr_billion_parameters,
             hf_link=completion_model.hf_link,
-            is_deprecated=completion_model.is_deprecated,
+            is_deprecated=deprecated,
             deployment_name=completion_model.deployment_name,
             is_org_enabled=completion_model.is_org_enabled,
             is_org_default=completion_model.is_org_default,
@@ -52,6 +64,7 @@ class CompletionModelAssembler:
             provider_id=completion_model.provider_id,
             provider_name=completion_model.provider_name,
             provider_type=completion_model.provider_type,
+            deprecation_date=dep_date,
         )
 
     @staticmethod

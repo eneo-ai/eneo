@@ -91,6 +91,44 @@ export function initModels(client) {
       });
 
       return res;
+    },
+
+    /**
+     * Get migration history for a specific completion model.
+     * @param {Object} params
+     * @param {string} params.modelId Model ID
+     * @param {number} [params.limit=50] Number of results
+     * @param {number} [params.offset=0] Offset for pagination
+     * @returns {Promise<import("../types/schema").components["schemas"]["ModelMigrationHistory"][]>}
+     * @throws {IntricError}
+     * */
+    getMigrationHistory: async ({ modelId, limit = 50, offset = 0 }) => {
+      const res = await client.fetch(
+        "/api/v1/completion-models/{model_id}/migration-history",
+        {
+          method: "get",
+          params: { path: { model_id: modelId }, query: { limit, offset } }
+        }
+      );
+
+      return res;
+    },
+
+    /**
+     * Get all migration history for the tenant.
+     * @param {Object} [params]
+     * @param {number} [params.limit=50] Number of results
+     * @param {number} [params.offset=0] Offset for pagination
+     * @returns {Promise<import("../types/schema").components["schemas"]["ModelMigrationHistory"][]>}
+     * @throws {IntricError}
+     * */
+    getAllMigrationHistory: async ({ limit = 50, offset = 0 } = {}) => {
+      const res = await client.fetch("/api/v1/completion-models/migration-history", {
+        method: "get",
+        params: { query: { limit, offset } }
+      });
+
+      return res;
     }
   };
 }
