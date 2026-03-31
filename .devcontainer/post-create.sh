@@ -26,8 +26,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 
 # Install Python dependencies
+# Use --reinstall-package to ensure the project entry points are up-to-date
+# even when the .venv volume persists across container rebuilds
 cd /workspace/backend
-uv sync
+uv sync --reinstall-package intric
 
 # Install pre-commit globally and setup hooks
 cd /workspace
@@ -40,6 +42,8 @@ curl -fsSL https://bun.com/install | bash -s "bun-v1.3.0"
 # Add Bun to PATH for this session
 export PATH="$HOME/.bun/bin:$PATH"
 
-# Install frontend dependencies
+# Clean frontend node_modules to prevent stale native binaries (e.g. esbuild)
+# after container rebuilds where the workspace mount persists
 cd /workspace/frontend
+rm -rf node_modules packages/*/node_modules apps/*/node_modules
 bun run setup
