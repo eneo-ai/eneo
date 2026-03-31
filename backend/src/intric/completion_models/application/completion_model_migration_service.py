@@ -132,22 +132,22 @@ class CompletionModelMigrationService:
                     f"Migration requires different source and target models."
                 )
 
-            # For single-tenant deployment, check if models are enabled for the tenant
-            # Settings are now stored directly on the model table
+            # Verify models belong to the tenant
+            # Source model: only needs to exist for the tenant (may be disabled/deprecated
+            # since we're migrating away from it)
+            # Target model: must be enabled for the tenant
             from intric.database.tables.ai_models_table import CompletionModels
 
             from_model_stmt = select(CompletionModels).where(
                 and_(
                     CompletionModels.id == from_model_id,
                     CompletionModels.tenant_id == user.tenant_id,
-                    CompletionModels.is_enabled == True,
                 )
             )
             from_model_result = await self.session.execute(from_model_stmt)
             if not from_model_result.scalar_one_or_none():
                 raise ValidationException(
-                    f"Source model not available: The model '{from_model.name}' is not enabled for your organization. "
-                    f"Please contact your administrator to enable this model."
+                    f"Source model not found: The model '{from_model.name}' does not belong to your organization."
                 )
 
             to_model_stmt = select(CompletionModels).where(
@@ -448,7 +448,10 @@ class CompletionModelMigrationService:
         from_model = await self.completion_model_repo.one(model_id=from_model_id)
         to_model = await self.completion_model_repo.one(model_id=to_model_id)
 
+        # Blocking issues that require confirm_migration=true
         issues = []
+        # Informational warnings that don't block migration
+        info_warnings = []
 
         # Check if target model is deprecated
         if to_model.is_deprecated:
@@ -476,12 +479,14 @@ class CompletionModelMigrationService:
         if from_model.supports_tool_calling and not to_model.supports_tool_calling:
             issues.append("Target model lacks tool calling support")
 
-        # Always warn about kwargs being reset for assistants
-        issues.append("Assistant model parameters (kwargs) will be reset to defaults")
+        # Informational: kwargs will be reset (not a blocking issue)
+        info_warnings.append("Model parameters (kwargs) will be reset to defaults for all migrated entities")
+
+        all_warnings = issues + info_warnings
 
         return ValidationResult(
             compatible=len(issues) == 0,
-            warnings=issues,
+            warnings=all_warnings,
             requires_confirmation=len(issues) > 0,
         )
 
@@ -593,17 +598,18 @@ class CompletionModelMigrationService:
         """Build appropriate tenant filtering condition based on entity type."""
         from intric.database.tables.users_table import Users
 
-        if entity_type in {"app", "question"}:
+        if entity_type in {"apps", "questions"}:
             # Direct tenant_id field
             return table.tenant_id == tenant_id
-        elif entity_type in {"assistant", "service"}:
+        elif entity_type in {"assistants", "services"}:
             # Via user relationship - need to join with Users table
             return table.user_id.in_(
                 select(Users.id).where(Users.tenant_id == tenant_id)
             )
-        elif entity_type in {"assistant_template", "app_template"}:
-            # Global entities - no tenant filtering needed
-            return True
+        elif entity_type in {"assistant_templates", "app_templates"}:
+            # Templates can be tenant-scoped (tenant_id set) or global (tenant_id NULL).
+            # For tenant migrations, only migrate templates belonging to the tenant.
+            return table.tenant_id == tenant_id
         elif entity_type == "spaces":
             # Spaces have direct tenant_id field
             return table.tenant_id == tenant_id
@@ -611,7 +617,9 @@ class CompletionModelMigrationService:
             self.logger.warning(
                 f"Unknown entity type for tenant filtering: {entity_type}"
             )
-            return True
+            raise ValidationException(
+                f"Unknown entity type for tenant filtering: {entity_type}"
+            )
 
     async def _migrate_entity_type(
         self, entity_type: str, from_model_id: UUID, to_model_id: UUID, tenant_id: UUID
@@ -638,13 +646,20 @@ class CompletionModelMigrationService:
             table, entity_type, tenant_id
         )
 
-        # For assistants, we need to handle completion_model_kwargs specially
+        # For assistants, also ensure target model is enabled on their spaces
         if entity_type == "assistants":
-            return await self._migrate_assistants_with_kwargs(
-                from_model_id, to_model_id, tenant_id, table, tenant_condition
+            await self._ensure_target_model_enabled_on_spaces(
+                from_model_id, to_model_id, tenant_id
             )
 
-        # Update all entities of this type (non-assistant entities)
+        # Build update values - reset kwargs for entities that store them
+        update_values: dict = {"completion_model_id": to_model_id}
+
+        # Entity types that have completion_model_kwargs column
+        ENTITIES_WITH_KWARGS = {"assistants", "apps", "services", "assistant_templates", "app_templates"}
+        if entity_type in ENTITIES_WITH_KWARGS:
+            update_values["completion_model_kwargs"] = {}
+
         stmt = (
             update(table)
             .where(
@@ -653,7 +668,7 @@ class CompletionModelMigrationService:
                     tenant_condition,
                 )
             )
-            .values(completion_model_id=to_model_id)
+            .values(**update_values)
         )
 
         self.logger.debug(f"Executing migration query for {entity_type}: {stmt}")
@@ -663,52 +678,6 @@ class CompletionModelMigrationService:
 
         self.logger.info(
             f"Migrated {migrated_count} {entity_type} entities from {from_model_id} to {to_model_id}"
-        )
-
-        return migrated_count
-
-    async def _migrate_assistants_with_kwargs(
-        self,
-        from_model_id: UUID,
-        to_model_id: UUID,
-        tenant_id: UUID,
-        table,
-        tenant_condition,
-    ) -> int:
-        """Migrate assistants and handle their completion_model_kwargs properly."""
-        self.logger.debug(
-            f"Migrating assistants with kwargs handling from {from_model_id} to {to_model_id} for tenant {tenant_id}"
-        )
-
-        # First, enable the target model on spaces where the source model is enabled
-        await self._ensure_target_model_enabled_on_spaces(
-            from_model_id, to_model_id, tenant_id
-        )
-
-        # Update assistants: change model and reset kwargs to avoid incompatibility
-        stmt = (
-            update(table)
-            .where(
-                and_(
-                    table.completion_model_id == from_model_id,
-                    tenant_condition,
-                )
-            )
-            .values(
-                completion_model_id=to_model_id,
-                completion_model_kwargs={},  # Reset kwargs to avoid parameter incompatibilities
-            )
-        )
-
-        self.logger.debug(
-            f"Executing assistant migration query with kwargs reset: {stmt}"
-        )
-
-        result = await self.session.execute(stmt)
-        migrated_count = result.rowcount or 0
-
-        self.logger.info(
-            f"Migrated {migrated_count} assistants from {from_model_id} to {to_model_id}, kwargs reset to avoid incompatibilities"
         )
 
         return migrated_count
