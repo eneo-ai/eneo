@@ -233,6 +233,7 @@ class CompletionService:
         context = self.context_builder.build_context(
             input_str=text_input,
             max_tokens=max_tokens,
+            model_name=model_adapter.model.name,
             files=files,
             prompt=prompt,
             session=session,

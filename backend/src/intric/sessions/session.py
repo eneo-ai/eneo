@@ -94,6 +94,7 @@ class IntricEventType(str, Enum):
     GENERATING_IMAGE = "generating_image"
     TOOL_CALL = "tool_call"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
+    TOKEN_USAGE = "token_usage"
 
 
 class SSEBase(BaseModel):
@@ -124,6 +125,17 @@ class SSEToolApprovalRequired(SSEBase):
     intric_event_type: IntricEventType = IntricEventType.TOOL_APPROVAL_REQUIRED
     approval_id: str  # UUID to correlate approval response
     tools: list[ToolCallInfo]  # Tools pending approval
+
+
+class TokenUsageEvent(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    turn_tokens: int
+
+
+class SSETokenUsage(SSEBase):
+    intric_event_type: IntricEventType = IntricEventType.TOKEN_USAGE
+    usage: TokenUsageEvent
 
 
 class SSEFirstChunk(AskChatResponse):

@@ -27,9 +27,11 @@ from intric.sessions.session import (
     SSEFirstChunk,
     SSEIntricEvent,
     SSEText,
+    SSETokenUsage,
     SSEToolApprovalRequired,
     SSEToolCall,
     SSEError,
+    TokenUsageEvent,
     ToolCallInfo,
 )
 
@@ -166,6 +168,18 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
                 )
                 for tc in (chunk.tool_calls_metadata or [])
             ],
+        )
+
+    if chunk.response_type == ResponseType.TOKEN_USAGE:
+        prompt = chunk.usage.prompt_tokens or 0 if chunk.usage else 0
+        completion = chunk.usage.completion_tokens or 0 if chunk.usage else 0
+        data = SSETokenUsage(
+            session_id=session_id,
+            usage=TokenUsageEvent(
+                prompt_tokens=prompt,
+                completion_tokens=completion,
+                turn_tokens=prompt + completion,
+            ),
         )
 
     if chunk.response_type == ResponseType.ERROR:

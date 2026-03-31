@@ -6,6 +6,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import ProviderGlyph from "../components/ProviderGlyph.svelte";
   import { ArrowLeft, Loader2 } from "lucide-svelte";
 
@@ -155,7 +156,7 @@
       dispatch("complete", { providerId: provider.id });
     } catch (e: unknown) {
       error = e instanceof Error ? e.message : m.failed_to_create_provider();
-      toast.error(m.failed_to_create_provider());
+      toastError(e, m.failed_to_create_provider());
     } finally {
       isSubmitting = false;
     }

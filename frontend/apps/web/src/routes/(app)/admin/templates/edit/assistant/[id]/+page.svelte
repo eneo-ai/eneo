@@ -2,14 +2,17 @@
   import { Page, Settings } from "$lib/components/layout";
   import { Button, Input } from "@intric/ui";
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import ImprovedCategorySelector from "$lib/features/templates/components/admin/ImprovedCategorySelector.svelte";
   import LucideIconPicker from "$lib/features/templates/components/LucideIconPicker.svelte";
+  import HelpTooltip from "../../../../models/components/HelpTooltip.svelte";
   import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
 
   let { data } = $props();
@@ -103,10 +106,10 @@
       };
 
       await intric.templates.admin.updateAssistant(data.template.id, templateData);
-      goto("/admin/templates?success=template_updated");
+      goto(resolve("/admin/templates?success=template_updated"));
     } catch (error) {
       console.error("Failed to update template:", error);
-      toast.error("Failed to update template");
+      toastError(error);
     } finally {
       isSaving = false;
     }
@@ -126,7 +129,12 @@
 
     <Page.Flex>
       <Button variant="outlined" href={localizeHref("/admin/templates")}>{m.cancel()}</Button>
-      <Button variant="positive" class="w-32" onclick={handleUpdateTemplate} disabled={isSaving}>
+      <Button
+        variant="positive"
+        class="w-fit"
+        onclick={handleUpdateTemplate}
+        disabled={isSaving}
+      >
         {isSaving ? m.loading() : m.save_changes()}
       </Button>
     </Page.Flex>
@@ -242,6 +250,7 @@
           hasChanges={false}
           fullWidth
         >
+          <HelpTooltip slot="title" text={m.wizard_attachments_help()} />
           <div class="flex flex-col gap-4">
             <Input.RadioSwitch
               bind:value={wizardAttachmentsEnabled}
@@ -289,6 +298,7 @@
           hasChanges={false}
           fullWidth
         >
+          <HelpTooltip slot="title" text={m.wizard_collections_help()} />
           <div class="flex flex-col gap-4">
             <Input.RadioSwitch
               bind:value={wizardCollectionsEnabled}

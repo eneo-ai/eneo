@@ -10,7 +10,7 @@
   import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
   import { Input, Tooltip } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   export let model: (CompletionModel | EmbeddingModel | TranscriptionModel) & {
     is_locked?: boolean | null | undefined;
@@ -33,7 +33,7 @@
       );
       invalidate("admin:models:load");
     } catch (e) {
-      toast.error(m.error_changing_model_status() + ` ${model.name}`);
+      toastError(e, m.error_changing_model_status());
     }
   }
 

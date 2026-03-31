@@ -14,18 +14,20 @@
   import DeletedTemplatesTable from "./DeletedTemplatesTable.svelte";
   import { LayoutTemplate } from "lucide-svelte";
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { page } from "$app/state";
 
   let { data } = $props();
 
-  // Get active tab from URL or default to assistant_templates
-  let activeTab = $derived(page.url.searchParams.get("tab") ?? "assistant_templates");
+  // Get active tab: prefer page.state.tab (set by TabTrigger via replaceState),
+  // fallback to URL param (for direct navigation), default to assistant_templates
+  let activeTab = $derived((page.state as Record<string, unknown>)?.tab ?? page.url.searchParams.get("tab") ?? "assistant_templates");
 
   function handleCreateTemplate() {
     if (activeTab === "app_templates") {
-      goto("/admin/templates/new/app");
+      goto(resolve("/admin/templates/new/app"));
     } else {
-      goto("/admin/templates/new/assistant");
+      goto(resolve("/admin/templates/new/assistant"));
     }
   }
 </script>

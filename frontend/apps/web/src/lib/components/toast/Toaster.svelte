@@ -30,7 +30,7 @@
 
 <div
   use:portal
-  class="pointer-events-none fixed inset-0 z-50 flex flex-col items-end gap-2.5 pt-16 pr-4 sm:pr-6"
+  class="pointer-events-none fixed inset-0 z-[60] flex flex-col items-end gap-2.5 pt-16 pr-4 sm:pr-6"
   aria-live="polite"
   aria-label="Notifications"
 >

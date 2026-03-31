@@ -8,6 +8,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getIntric } from "$lib/core/Intric";
   import { Button } from "@intric/ui";
+  import { resolve } from "$app/paths";
   import { IconLinkExternal } from "@intric/icons/link-external";
   import { IconRefresh } from "@intric/icons/refresh";
   import IntegrationsTable from "./integrations/IntegrationsTable.svelte";
@@ -15,6 +16,7 @@
   import ImportKnowledgeDialog from "$lib/features/integrations/components/import/ImportKnowledgeDialog.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import type { IntegrationKnowledge } from "@intric/intric-js";
   import { jobCompletionEvents } from "$lib/features/jobs/JobManager";
 
@@ -82,9 +84,7 @@
       $selectedWebsiteIds = new Set();
       refreshCurrentSpace();
     } catch (e) {
-      toast.error(
-        "Failed to trigger bulk recrawl: " + (e instanceof Error ? e.message : String(e))
-      );
+      toastError(e);
       console.error(e);
     }
     isBulkRecrawling = false;
@@ -151,14 +151,14 @@
         {:else if isPersonalSpace}
           <Button
             variant="primary"
-            onclick={() => (window.location.href = "/account/integrations?tab=providers")}
+            onclick={() => (window.location.href = resolve("/account/integrations?tab=providers"))}
           >
             {m.configure_integrations()}
           </Button>
         {:else if isAdmin}
           <Button
             variant="primary"
-            onclick={() => (window.location.href = "/admin/integrations?tab=providers")}
+            onclick={() => (window.location.href = resolve("/admin/integrations?tab=providers"))}
           >
             {m.configure_integrations()}
           </Button>
@@ -200,6 +200,7 @@
               </div>
               <p class="-mt-[0.1rem] max-w-[85ch] pl-6 leading-[1.3rem]">
                 {m.integrations_beta_notice()}
+                <!-- eslint-disable svelte/no-navigation-without-resolve -- external URL -->
                 <a
                   target="_blank"
                   rel="noreferrer"
@@ -207,6 +208,7 @@
                   href={data.environment.integrationRequestFormUrl}
                   >{m.request_integrations_feedback()}
                 </a>
+                <!-- eslint-enable svelte/no-navigation-without-resolve -->
                 <IconLinkExternal class="-mt-0.5 inline" size="sm"></IconLinkExternal>
               </p>
               <div class="flex-grow"></div>

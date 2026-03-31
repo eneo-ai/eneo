@@ -8,7 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from intric.authentication import auth
-from intric.main.config import Settings, get_settings, validate_public_origin
+from intric.main.config import (
+    Settings,
+    get_settings,
+    validate_public_origin,
+    validate_redirect_path,
+    validate_redirect_uri,
+)
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.server.dependencies.container import get_container
@@ -23,10 +29,10 @@ logger = get_logger(__name__)
 
 def check_feature_enabled(settings: Settings = Depends(get_settings)) -> None:
     """Verify federation feature is enabled."""
-    if not settings.federation_per_tenant_enabled:
+    if not settings.federation_enabled:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Federation per tenant is not enabled",
+            detail="Federation is not enabled",
         )
 
 
@@ -37,6 +43,7 @@ router = APIRouter(
         Depends(check_feature_enabled),
     ],
 )
+
 
 
 class SetFederationRequest(BaseModel):
@@ -64,7 +71,7 @@ class SetFederationRequest(BaseModel):
         None,
         description=(
             "Canonical public origin for this tenant (e.g., https://tenant.eneo.se). "
-            "Required for multi-tenant federation to construct redirect_uri"
+            "Required when federation is enabled to construct redirect_uri"
         ),
         examples=["https://stockholm.eneo.se"],
     )
@@ -72,6 +79,15 @@ class SetFederationRequest(BaseModel):
         None,
         description="Optional custom redirect path starting with /",
         examples=["/auth/callback"],
+    )
+    additional_redirect_uris: list[str] | None = Field(
+        None,
+        description=(
+            "Additional fully-qualified redirect URIs for OIDC flows. "
+            "Use when the tenant is accessed through multiple origins. "
+            "Each URI must also be registered in the upstream Identity Provider."
+        ),
+        examples=[["https://qwerty.sundsvall.se/api/eneo/login/callback"]],
     )
 
     @field_validator("client_secret")
@@ -104,10 +120,17 @@ class SetFederationRequest(BaseModel):
     def validate_redirect_path(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        value = value.strip()
-        if not value.startswith("/"):
-            raise ValueError("redirect_path must start with /")
-        return value
+        return validate_redirect_path(value)
+
+    @field_validator("additional_redirect_uris")
+    @classmethod
+    def validate_additional_redirect_uris(
+        cls, value: list[str] | None
+    ) -> list[str] | None:
+        if value is None:
+            return None
+        validated = [validate_redirect_uri(uri) for uri in value]
+        return [uri for uri in validated if uri is not None]
 
 
 class SetFederationResponse(BaseModel):
@@ -134,8 +157,10 @@ class FederationInfo(BaseModel):
     masked_secret: str
     issuer: Optional[str] = None
     allowed_domains: list[str]
+    additional_redirect_uris: list[str]
     configured_at: datetime
     encryption_status: Literal["encrypted", "plaintext"]
+
 
 
 @router.put(
@@ -317,6 +342,9 @@ async def set_tenant_federation(
     if request.redirect_path:
         federation_config["redirect_path"] = request.redirect_path
 
+    if request.additional_redirect_uris is not None:
+        federation_config["additional_redirect_uris"] = request.additional_redirect_uris
+
     # Save to database
     await tenant_repo.update_federation_config(
         tenant_id=tenant_id,
@@ -458,6 +486,7 @@ async def get_tenant_federation(
         masked_secret=metadata["masked_secret"],
         issuer=metadata.get("issuer"),
         allowed_domains=metadata.get("allowed_domains", []),
+        additional_redirect_uris=metadata.get("additional_redirect_uris", []),
         configured_at=datetime.fromisoformat(metadata["encrypted_at"])
         if metadata.get("encrypted_at")
         else tenant.updated_at,

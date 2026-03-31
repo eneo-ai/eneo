@@ -13,7 +13,7 @@
   import { createCombobox } from "@melt-ui/svelte";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte.ts";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { IconPeople } from "@intric/icons/people";
 
   const {
@@ -76,7 +76,7 @@
       $showDialog = false;
       $selected = undefined;
     } catch (e) {
-      toast.error(m.could_not_add_group());
+      toastError(e, m.could_not_add_group());
       console.error(e);
     }
   });

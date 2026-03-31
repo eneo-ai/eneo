@@ -97,7 +97,7 @@ class EmbeddingModel(AIModel):
             updated_at=db_model.updated_at,
             user=user,
             name=db_model.name,
-            nickname=None,
+            nickname=db_model.nickname,
             family=db_model.family,
             hosting=db_model.hosting,
             org=db_model.org,

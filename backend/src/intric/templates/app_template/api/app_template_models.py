@@ -77,6 +77,7 @@ class AppTemplateCreate(BaseModel):
     prompt: str
     organization: Optional[str] = None
     completion_model_kwargs: dict = Field(default_factory=dict)
+    completion_model_id: Optional[UUID] = None
     wizard: AppTemplateWizard
     input_type: str
     input_description: Optional[str]
@@ -149,6 +150,7 @@ class AppTemplateAdminCreate(BaseModel):
     category: str
     prompt: Optional[str] = None
     completion_model_kwargs: dict = Field(default_factory=dict)
+    completion_model_id: Optional[UUID] = None
     wizard: Optional[AppTemplateWizard] = None
     input_type: str
     input_description: Optional[str] = None

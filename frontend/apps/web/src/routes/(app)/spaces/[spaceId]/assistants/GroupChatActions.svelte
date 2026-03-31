@@ -12,7 +12,7 @@
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
 
   export let groupChat: GroupChatSparse;
@@ -30,7 +30,7 @@
       refreshCurrentSpace("applications");
       $showDeleteDialog = false;
     } catch (e) {
-      toast.error(m.could_not_delete_group_chat());
+      toastError(e, m.could_not_delete_group_chat());
       console.error(e);
     }
   });

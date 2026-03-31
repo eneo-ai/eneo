@@ -36,6 +36,7 @@ class ResponseType(str, Enum):
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
     FILES = "image"
     FIRST_CHUNK = "first_chunk"
+    TOKEN_USAGE = "token_usage"
     ERROR = "error"
 
 

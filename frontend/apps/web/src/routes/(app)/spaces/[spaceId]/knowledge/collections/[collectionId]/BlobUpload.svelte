@@ -9,6 +9,7 @@
   import { Button, Dialog, Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   const {
     limits,
@@ -137,7 +138,7 @@
       files = [];
       return;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toastError(e);
     }
   }
 

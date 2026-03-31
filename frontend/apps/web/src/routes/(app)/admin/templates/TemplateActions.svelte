@@ -16,9 +16,10 @@
     ArrowDownToLine
   } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { writable } from "svelte/store";
   import { goto, invalidate } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { getIntric } from "$lib/core/Intric";
   import TemplateDeleteDialog from "$lib/features/templates/components/admin/TemplateDeleteDialog.svelte";
   import TemplateRollbackDialog from "$lib/features/templates/components/admin/TemplateRollbackDialog.svelte";
@@ -34,7 +35,7 @@
   let isRollbackOpen = writable(false);
 
   function handleEdit() {
-    goto(`/admin/templates/edit/${type}/${template.id}`);
+    goto(resolve(`/admin/templates/edit/${type}/${template.id}`));
   }
 
   async function toggleDefault() {
@@ -51,7 +52,7 @@
       await invalidate("/admin/templates");
     } catch (e) {
       console.error("Error toggling default status:", e);
-      toast.error(m.error_changing_default_status?.() || "Error changing default status");
+      toastError(e, m.error_changing_default_status());
     }
   }
 </script>

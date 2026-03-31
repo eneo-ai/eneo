@@ -134,6 +134,7 @@ async def create_template(
         category=data.category,
         prompt=data.prompt or "",
         completion_model_kwargs=data.completion_model_kwargs or {},
+        completion_model_id=data.completion_model_id,
         wizard=data.wizard,
         icon_name=data.icon_name,
     )

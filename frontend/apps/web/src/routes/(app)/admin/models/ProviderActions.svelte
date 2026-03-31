@@ -55,34 +55,20 @@
     return String(model.name);
   }
 
-  function getModelTypeLabel(model: AnyModel): string {
-    if ("token_limit" in model || "vision" in model || "reasoning" in model) {
-      return m.completion_model();
-    }
-    if ("family" in model) {
-      return m.embedding_model();
-    }
-    return m.transcription_model();
-  }
-
-  function getModelTypeIcon(model: AnyModel): typeof Sparkles {
-    if ("token_limit" in model || "vision" in model || "reasoning" in model) {
-      return Sparkles;
-    }
-    if ("family" in model) {
-      return Box;
-    }
-    return AudioLines;
-  }
-
-  function getModelTypeRaw(model: AnyModel): "completion" | "embedding" | "transcription" {
-    if ("token_limit" in model || "vision" in model || "reasoning" in model) {
-      return "completion";
-    }
-    if ("family" in model) {
-      return "embedding";
-    }
-    return "transcription";
+  function tagModels(
+    models: AnyModel[],
+    type: "completion" | "embedding" | "transcription",
+    label: string,
+    icon: typeof Sparkles
+  ) {
+    return models
+      .filter((model) => model.provider_id === provider.id)
+      .map((model) => ({
+        name: getModelName(model),
+        type: label,
+        typeRaw: type,
+        icon
+      }));
   }
 
   async function loadProviderModels() {
@@ -92,21 +78,12 @@
 
     try {
       const models = await intric.models.list();
-      const allModels = [
-        ...models.completionModels,
-        ...models.embeddingModels,
-        ...models.transcriptionModels
-      ];
 
-      providerModels = allModels
-        .filter((model) => model.provider_id === provider.id)
-        .map((model) => ({
-          name: getModelName(model),
-          type: getModelTypeLabel(model),
-          typeRaw: getModelTypeRaw(model),
-          icon: getModelTypeIcon(model)
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name));
+      providerModels = [
+        ...tagModels(models.completionModels, "completion", m.completion_model(), Sparkles),
+        ...tagModels(models.embeddingModels, "embedding", m.embedding_model(), Box),
+        ...tagModels(models.transcriptionModels, "transcription", m.transcription_model(), AudioLines)
+      ].sort((a, b) => a.name.localeCompare(b.name));
     } catch (e: unknown) {
       modelsLoadError = e instanceof Error ? e.message : m.failed_to_load_models();
     } finally {

@@ -1,10 +1,20 @@
 name: Update LiteLLM
 
 on:
-  schedule:
-    # Every Monday at 08:00 UTC
-    - cron: "0 8 * * 1"
-  workflow_dispatch: # Allow manual trigger
+  # PAUSED 2026-03-24: litellm PyPI supply chain attack (v1.82.7 + v1.82.8 compromised).
+  # Do not re-enable until litellm publishing pipeline is verified safe.
+  # See: https://github.com/BerriAI/litellm/issues/24518
+  #
+  # schedule:
+  #   # Every Monday at 08:00 UTC
+  #   - cron: "0 8 * * 1"
+  workflow_dispatch:
+    inputs:
+      confirmed_safe_to_resume:
+        description: "Set to true ONLY after verifying litellm publishing pipeline is safe"
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   update:
@@ -14,6 +24,14 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: Guard — require explicit confirmation
+        if: ${{ github.event.inputs.confirmed_safe_to_resume != 'true' }}
+        run: |
+          echo "❌ LiteLLM auto-update is paused due to supply chain attack (2026-03-24)."
+          echo "Set 'confirmed_safe_to_resume' to true only after verifying litellm publishing is safe."
+          echo "See: https://github.com/BerriAI/litellm/issues/24518"
+          exit 1
+
       - uses: actions/checkout@v4
 
       - name: Install uv

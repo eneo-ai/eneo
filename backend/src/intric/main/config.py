@@ -7,7 +7,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 
-from pydantic import computed_field, field_validator, model_validator
+from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Version manifest lookup:
@@ -87,6 +87,105 @@ def validate_public_origin(origin: str | None) -> str | None:
     port = f":{parsed.port}" if parsed.port and parsed.port != default_port else ""
 
     return f"{scheme}://{host}{port}"
+
+
+def validate_redirect_uri(uri: str | None) -> str | None:
+    """
+    Validate and normalize a full redirect URI for OIDC flows.
+
+    Rules:
+    - Must be HTTPS (or http://localhost for development)
+    - Must include a hostname and a path
+    - Must not include query parameters or fragment
+    - Must not include wildcard hostnames
+    - Normalize: lowercase scheme + host, strip trailing slash from path
+    """
+    if uri is None:
+        return None
+
+    uri = uri.strip()
+    if not uri:
+        raise ValueError("redirect_uri cannot be an empty string")
+
+    parsed = urlparse(uri)
+    if "*" in (parsed.hostname or ""):
+        raise ValueError(f"redirect_uri must not include wildcards: {uri}")
+
+    is_localhost = parsed.hostname in ("localhost", "127.0.0.1")
+    if parsed.scheme != "https" and not (parsed.scheme == "http" and is_localhost):
+        raise ValueError(
+            "redirect_uri must use https:// "
+            f"(or http://localhost for development), got: {uri}"
+        )
+
+    if not parsed.hostname:
+        raise ValueError(f"redirect_uri missing hostname: {uri}")
+
+    path = parsed.path or ""
+    if not path or not path.startswith("/"):
+        raise ValueError(f"redirect_uri must include an absolute path: {uri}")
+
+    if parsed.query or parsed.fragment:
+        raise ValueError(f"redirect_uri must not include query or fragment: {uri}")
+
+    host = parsed.hostname.lower()
+    scheme = parsed.scheme if is_localhost else "https"
+    default_port = 443 if scheme == "https" else 80
+    port = f":{parsed.port}" if parsed.port and parsed.port != default_port else ""
+    normalized_path = path.rstrip("/") or "/"
+
+    return f"{scheme}://{host}{port}{normalized_path}"
+
+
+def canonicalize_legacy_redirect_path(path: str | None) -> str | None:
+    """Canonicalize legacy redirect paths before strict validation.
+
+    This preserves strict validation for new writes while allowing reads/migrations
+    to normalize old values that previously slipped through, such as trailing slashes
+    or query/fragment suffixes.
+    """
+    if path is None:
+        return None
+
+    path = path.strip()
+    if not path:
+        return path
+
+    parsed = urlparse(path)
+    if parsed.scheme or parsed.netloc:
+        return path
+
+    normalized_path = parsed.path or ""
+    if not normalized_path.startswith("/"):
+        return path
+
+    return normalized_path.rstrip("/") or "/"
+
+
+def validate_redirect_path(path: str | None) -> str | None:
+    """Validate and normalize a redirect path used to build redirect_uri."""
+    if path is None:
+        return None
+
+    path = path.strip()
+    if not path:
+        raise ValueError("redirect_path cannot be an empty string")
+
+    parsed = urlparse(path)
+    if parsed.scheme or parsed.netloc:
+        raise ValueError(f"redirect_path must be a path only, got: {path}")
+
+    normalized_path = parsed.path or ""
+    if not normalized_path.startswith("/"):
+        raise ValueError("redirect_path must start with /")
+
+    if parsed.query or parsed.fragment:
+        raise ValueError("redirect_path must not include query or fragment")
+
+    if normalized_path != "/" and normalized_path.endswith("/"):
+        raise ValueError("redirect_path must not end with /")
+
+    return normalized_path
 
 
 def _set_app_version():
@@ -214,8 +313,12 @@ class Settings(BaseSettings):
     export_max_concurrent_per_tenant: int = 2  # Max concurrent exports per tenant
     export_progress_interval: int = 5000  # Update progress every N records
 
-    # Federation per tenant feature flag
-    federation_per_tenant_enabled: bool = False
+    # Federation feature flag. Supports both single-tenant and multi-tenant setups.
+    federation_enabled: bool = False
+    federation_per_tenant_enabled: Optional[bool] = Field(
+        default=None,
+        description="Deprecated alias for federation_enabled.",
+    )
 
     # OIDC redirect safety controls
     oidc_state_ttl_seconds: int = 600
@@ -253,7 +356,6 @@ class Settings(BaseSettings):
     upload_image_to_session_max_size: int
     upload_max_file_size: int
     transcription_max_file_size: int
-    max_in_question: int
 
     # Temporary directory for file uploads
     upload_tmp_dir: Path = Path("/tmp")
@@ -333,7 +435,7 @@ class Settings(BaseSettings):
     sharepoint_max_download_bytes: int = 50 * 1024 * 1024
 
     # Generic encryption key for sensitive data (HTTP auth, tenant API keys, etc.)
-    # Required when TENANT_CREDENTIALS_ENABLED=true or FEDERATION_PER_TENANT_ENABLED=true
+    # Required when TENANT_CREDENTIALS_ENABLED=true or FEDERATION_ENABLED=true
     # Also needed for worker/crawler HTTP authentication
     # Generate with: uv run python -m intric.cli.generate_encryption_key
     encryption_key: Optional[str] = None
@@ -363,24 +465,53 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
+    def resolve_deprecated_federation_flag(self):
+        """Support FEDERATION_PER_TENANT_ENABLED as a deprecated fallback alias."""
+        explicit_fields = self.model_fields_set
+        has_primary = "federation_enabled" in explicit_fields
+        has_deprecated = (
+            "federation_per_tenant_enabled" in explicit_fields
+            and self.federation_per_tenant_enabled is not None
+        )
+
+        if not has_deprecated:
+            return self
+
+        logging.warning(
+            "FEDERATION_PER_TENANT_ENABLED is deprecated and will be removed in a future release. "
+            "Use FEDERATION_ENABLED instead."
+        )
+
+        if has_primary:
+            if self.federation_per_tenant_enabled != self.federation_enabled:
+                logging.warning(
+                    "FEDERATION_ENABLED and deprecated FEDERATION_PER_TENANT_ENABLED are both set with "
+                    "different values. Using FEDERATION_ENABLED."
+                )
+            return self
+
+        self.federation_enabled = bool(self.federation_per_tenant_enabled)
+        return self
+
+    @model_validator(mode="after")
     def validate_encryption_key_requirements(self):
         """
         Validate that encryption_key is present and valid when features requiring it are enabled.
 
         Encryption is required for:
         - TENANT_CREDENTIALS_ENABLED=true (tenant-specific API keys)
-        - FEDERATION_PER_TENANT_ENABLED=true (tenant-specific IdPs)
+        - FEDERATION_ENABLED=true (tenant-specific IdPs)
         - Worker/crawler HTTP authentication
         """
         encryption_required = (
-            self.tenant_credentials_enabled or self.federation_per_tenant_enabled
+            self.tenant_credentials_enabled or self.federation_enabled
         )
 
         if encryption_required:
             if not self.encryption_key or not self.encryption_key.strip():
                 logging.error(
                     "ENCRYPTION_KEY is required when TENANT_CREDENTIALS_ENABLED=true "
-                    "or FEDERATION_PER_TENANT_ENABLED=true.\n"
+                    "or FEDERATION_ENABLED=true.\n"
                     "Generate key: uv run python -m intric.cli.generate_encryption_key"
                 )
                 sys.exit(1)

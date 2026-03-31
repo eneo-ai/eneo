@@ -1,5 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import { Tooltip } from "@intric/ui";
   import * as LucideIcons from "lucide-svelte";
 
   interface Props {
@@ -10,6 +11,9 @@
   }
 
   let { name, description, isDefault = false, iconName }: Props = $props();
+
+  // Show tooltip only for long descriptions that would be truncated
+  const showTooltip = $derived(description && description.length > 80);
 
   // Convert kebab-case to PascalCase for icon lookup
   function toPascalCase(str: string): string {
@@ -33,7 +37,7 @@
         {@render IconComponent({ class: "text-text h-4 w-4" })}
       </div>
     {/if}
-    <span class="text-default font-medium">{name}</span>
+    <span class="font-medium text-default">{name}</span>
     {#if isDefault}
       <span
         class="border-positive-stronger text-positive-stronger cursor-default rounded-full border px-2 py-0.5 text-xs font-medium"
@@ -43,8 +47,16 @@
     {/if}
   </div>
   {#if description}
-    <span class="text-dimmer line-clamp-2 text-sm">
-      {description}
-    </span>
+    {#if showTooltip}
+      <Tooltip text={description} placement="bottom">
+        <span class="line-clamp-1 break-all text-sm text-dimmer max-w-[40ch]">
+          {description}
+        </span>
+      </Tooltip>
+    {:else}
+      <span class="line-clamp-1 break-all text-sm text-dimmer">
+        {description}
+      </span>
+    {/if}
   {/if}
 </div>

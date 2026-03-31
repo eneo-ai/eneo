@@ -9,14 +9,7 @@
   import { m } from "$lib/paraglide/messages";
 
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
-
-  // Determine model type from properties -- inlined for Svelte reactivity tracking
-  $: modelType =
-    "vision" in model || "reasoning" in model || "token_limit" in model
-      ? ("completionModel" as const)
-      : "family" in model
-        ? ("embeddingModel" as const)
-        : ("transcriptionModel" as const);
+  export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
   $: isTenantModel = model.provider_id != null;
 
   const showEditDialog = writable(false);
@@ -51,5 +44,5 @@
 </div>
 
 {#if isTenantModel}
-  <EditModelDialog {model} type={modelType} openController={showEditDialog} />
+  <EditModelDialog {model} {type} openController={showEditDialog} />
 {/if}

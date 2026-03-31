@@ -23,7 +23,6 @@ from intric.info_blobs.info_blob import (
     InfoBlobInDBWithScore,
     InfoBlobPublic,
 )
-from intric.main.config import get_settings
 from intric.main.models import InDB, ModelId, ResourcePermissionsMixin, partial_model
 from intric.users.user import UserInDBBase, UserPublicBase
 
@@ -102,7 +101,7 @@ class ServicePublicWithUser(ServicePublic):
 
 class RunService(BaseModel):
     input: str
-    files: list[ModelId] = Field(max_length=get_settings().max_in_question, default=[])
+    files: list[ModelId] = Field(default=[])
 
 
 class ServiceOutput(BaseModel):

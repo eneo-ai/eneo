@@ -450,6 +450,14 @@ class IntegrationKnowledgeService:
         if not actor.can_delete_integrations():
             raise UnauthorizedException()
 
+        # SECURITY: tenant_app integrations require admin permission
+        if knowledge.user_integration.auth_type == "tenant_app":
+            if Permission.ADMIN not in self.user.permissions:
+                raise UnauthorizedException(
+                    "Admin permission is required to delete organization-wide SharePoint integrations. "
+                    "Please contact your administrator."
+                )
+
         # Check if knowledge belongs to this space
         # Only allow deletion from the space where it was created
         if knowledge.space_id != space.id:
@@ -676,6 +684,14 @@ class IntegrationKnowledgeService:
         if not actor.can_edit_integrations():
             raise UnauthorizedException()
 
+        # SECURITY: tenant_app integrations require admin permission
+        if space_knowledge.user_integration.auth_type == "tenant_app":
+            if Permission.ADMIN not in self.user.permissions:
+                raise UnauthorizedException(
+                    "Admin permission is required to rename organization-wide SharePoint integrations. "
+                    "Please contact your administrator."
+                )
+
         # Only allow renaming from the space where knowledge was created
         if space_knowledge.space_id != space.id:
             raise UnauthorizedException(
@@ -736,6 +752,14 @@ class IntegrationKnowledgeService:
             wrapper_id=wrapper_id,
         )
 
+        # SECURITY: tenant_app integrations require admin permission
+        if owned_items and owned_items[0].user_integration.auth_type == "tenant_app":
+            if Permission.ADMIN not in self.user.permissions:
+                raise UnauthorizedException(
+                    "Admin permission is required to rename organization-wide SharePoint integrations. "
+                    "Please contact your administrator."
+                )
+
         updated_items: list[IntegrationKnowledge] = []
         for item in owned_items:
             knowledge = await self.integration_knowledge_repo.one(id=item.id)
@@ -759,6 +783,15 @@ class IntegrationKnowledgeService:
             space=space,
             wrapper_id=wrapper_id,
         )
+
+        # SECURITY: tenant_app integrations require admin permission
+        if owned_items and owned_items[0].user_integration.auth_type == "tenant_app":
+            if Permission.ADMIN not in self.user.permissions:
+                raise UnauthorizedException(
+                    "Admin permission is required to delete organization-wide SharePoint integrations. "
+                    "Please contact your administrator."
+                )
+
         for item in list(owned_items):
             await self.remove_knowledge(
                 space_id=space_id,

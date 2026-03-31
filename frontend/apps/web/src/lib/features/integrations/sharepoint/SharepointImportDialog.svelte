@@ -8,12 +8,14 @@
   import { IconSearch } from "@intric/icons/search";
   import { IconUploadCloud } from "@intric/icons/upload-cloud";
   import { IconWeb } from "@intric/icons/web";
-  import { IntricError, type IntegrationKnowledgePreview } from "@intric/intric-js";
+  import { type IntegrationKnowledgePreview } from "@intric/intric-js";
   import { Button, Dialog } from "@intric/ui";
   import { createCombobox } from "@melt-ui/svelte";
   import type { IntegrationImportDialogProps } from "../IntegrationData";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import SharePointFolderTree from "./SharePointFolderTree.svelte";
   import { buildSharePointSelectionKey, normalizeSharePointPath } from "./selectionKey";
 
@@ -109,7 +111,7 @@
   });
 
   let groupedFilteredResources = $derived.by(() => {
-    const grouped = new Map<PreviewCategory, PreviewOption[]>();
+    const grouped = new SvelteMap<PreviewCategory, PreviewOption[]>();
     for (const resource of filteredResources) {
       const category = getPreviewCategory(resource.value);
       const existing = grouped.get(category);
@@ -237,7 +239,7 @@
     );
 
     const effectiveEntries: SelectedImportItem[] = [];
-    const excludedKeys = new Set<string>();
+    const excludedKeys = new SvelteSet<string>();
 
     for (const entry of sortedItems) {
       const blockedByParent = effectiveEntries.some((existing) => {
@@ -347,9 +349,7 @@
       wrapperName = "";
       $openController = false;
     } catch (error) {
-      const errorMessage =
-        error instanceof IntricError ? error.getReadableMessage() : String(error);
-      toast.error(errorMessage);
+      toastError(error);
     }
   });
 

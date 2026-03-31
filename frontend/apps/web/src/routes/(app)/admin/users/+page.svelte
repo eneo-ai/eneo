@@ -5,13 +5,16 @@
   import UserTable from "./UserTable.svelte";
   import { m } from "$lib/paraglide/messages";
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { page } from "$app/stores";
+  import ServerPagination from "$lib/components/ServerPagination.svelte";
+  import { SvelteURLSearchParams } from "svelte/reactivity";
 
   // Svelte 5 runes mode: use $props() instead of export let
   let { data } = $props();
 
   // Get search value and tab from URL params
-  const searchValue = $derived($page.url.searchParams.get("search") || "");
+  const _searchValue = $derived($page.url.searchParams.get("search") || "");
   const currentTab = $derived($page.url.searchParams.get("tab") || "active");
 
   // Swedish number formatting for counts (e.g., 2828 → "2 828", 50000 → "50 000")
@@ -25,6 +28,16 @@
 
   // Reference to UserTable component to access filterValue
   let userTableRef: UserTable;
+
+  function goToPage(newPage: number) {
+    const url = new URL($page.url);
+    if (newPage > 1) {
+      url.searchParams.set("page", String(newPage));
+    } else {
+      url.searchParams.delete("page");
+    }
+    goto(resolve(url.toString()), { noScroll: true });
+  }
 
   // Watch built-in table filter and trigger server-side search with debouncing
   let debounceTimer: ReturnType<typeof setTimeout>;
@@ -40,17 +53,21 @@
         debounceTimer = setTimeout(() => {
           const trimmed = value.trim();
 
+          // Skip if search value hasn't changed from current URL (avoids resetting page on mount)
+          const currentSearch = $page.url.searchParams.get("search") || "";
+          if (trimmed === currentSearch) return;
+
           // Only trigger search if empty OR >= 3 characters (matches backend validation)
           // Prevents unnecessary network requests and 400 errors for short searches
           if (trimmed === "" || trimmed.length >= 3) {
-            // Preserve current tab when searching
-            const params = new URLSearchParams();
+            // Preserve current tab when searching, reset page to 1
+            const params = new SvelteURLSearchParams();
             if (currentTab) params.set("tab", currentTab);
             if (trimmed) params.set("search", trimmed);
 
             const url = params.toString() ? `/admin/users?${params.toString()}` : "/admin/users";
 
-            goto(url, { noScroll: true, keepFocus: true, replaceState: true });
+            goto(resolve(url), { noScroll: true, keepFocus: true, replaceState: true });
           }
           // If 1-2 chars: silently ignore (no request, no error, better UX)
         }, 250);
@@ -99,13 +116,16 @@
   <Page.Main>
     <UserTable bind:this={userTableRef} users={data.users ?? []} />
 
-    <!-- Pagination display -->
     {#if data.pagination}
-      <div class="mt-4 text-sm text-gray-600">
-        Showing page {data.pagination.page} of {data.pagination.total_pages}
-        ({data.pagination.total_count} total users{searchValue ? ` matching "${searchValue}"` : ""}, {data
-          .users.length} on this page)
-      </div>
+      <ServerPagination
+        page={data.pagination.page}
+        totalPages={data.pagination.total_pages}
+        totalCount={data.pagination.total_count}
+        pageSize={data.pagination.page_size}
+        hasNext={data.pagination.has_next}
+        hasPrevious={data.pagination.has_previous}
+        on:change={(e) => goToPage(e.detail)}
+      />
     {/if}
   </Page.Main>
 </Page.Root>
