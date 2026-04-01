@@ -214,11 +214,20 @@ def get_application():
                 "enum": [item.value for item in IntricEventType],
             }
 
-        # Add SSE model schemas
+        # Add SSE model schemas, hoisting nested $defs to top-level component schemas
+        # so that openapi-typescript can resolve all $ref pointers.
         for model in SSE_MODELS:
             model_name = model.__name__
             if model_name not in openapi_schema["components"]["schemas"]:
-                openapi_schema["components"]["schemas"][model_name] = model.model_json_schema()
+                schema = model.model_json_schema(
+                    ref_template="#/components/schemas/{model}"
+                )
+                # Extract $defs and promote them to top-level schemas
+                defs = schema.pop("$defs", {})
+                for def_name, def_schema in defs.items():
+                    if def_name not in openapi_schema["components"]["schemas"]:
+                        openapi_schema["components"]["schemas"][def_name] = def_schema
+                openapi_schema["components"]["schemas"][model_name] = schema
 
         app.openapi_schema = openapi_schema
         return app.openapi_schema
