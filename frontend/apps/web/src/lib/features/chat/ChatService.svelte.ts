@@ -1,3 +1,4 @@
+import { browser } from "$app/environment";
 import { PAGINATION } from "$lib/core/constants";
 import { toastError } from "$lib/core/errors";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
@@ -382,7 +383,7 @@ export class ChatService {
         if (error instanceof IntricError) {
           message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
         } else if (error instanceof Object && "message" in error && "name" in error) {
-          message += `\n\`\`\`\n$"${error.name}: error.message}"\n\`\`\``;
+          message += `\n\`\`\`\n${error.name}: "${error.message}"\n\`\`\``;
         }
 
         this.currentConversation.messages[this.currentConversation.messages?.length - 1].answer =
