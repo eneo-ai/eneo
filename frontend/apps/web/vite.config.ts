@@ -29,7 +29,11 @@ export default defineConfig({
   server: {
     host: "0.0.0.0", // Change to host 0.0.0.0 if you cant login on localhost (e.g. WSL)
     port: 3000,
-    strictPort: true
+    strictPort: true,
+    watch: {
+      usePolling: true,
+      interval: 1000
+    }
   },
   define: {
     __FRONTEND_VERSION__: JSON.stringify(pkg.version),

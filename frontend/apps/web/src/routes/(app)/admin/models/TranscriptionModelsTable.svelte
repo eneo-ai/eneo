@@ -6,12 +6,11 @@
   import { createRender } from "svelte-headless-table";
   import ModelEnableSwitch from "./ModelEnableSwitch.svelte";
   import {
-    default as ModelLabels,
-    getLabels
-  } from "$lib/features/ai-models/components/ModelLabels.svelte";
+    default as ModelStatusIcons,
+    getStatusIcons
+  } from "$lib/features/ai-models/components/ModelStatusIcons.svelte";
   import ModelNameCell from "./ModelNameCell.svelte";
   import ModelActions from "./ModelActions.svelte";
-  import ModelClassificationPreview from "$lib/features/security-classifications/components/ModelClassificationPreview.svelte";
   import ProviderActions from "./ProviderActions.svelte";
   import ProviderDialog from "./ProviderDialog.svelte";
   import ProviderGlyph from "./components/ProviderGlyph.svelte";
@@ -81,7 +80,7 @@
       accessor: (model) => model,
       header: m.details(),
       cell: (item) => {
-        return createRender(ModelLabels, { model: item.value });
+        return createRender(ModelStatusIcons, { model: item.value });
       },
       plugins: {
         sort: {
@@ -89,30 +88,10 @@
         },
         tableFilter: {
           getFilterValue(value) {
-            const labels = getLabels(value).flatMap((label) => {
-              return label.label;
+            const icons = getStatusIcons(value).flatMap((icon) => {
+              return icon.ariaLabel;
             });
-            return labels.join(" ");
-          }
-        }
-      }
-    }),
-
-    table.column({
-      accessor: (model) => model,
-      header: m.security(),
-      cell: (item) => {
-        return createRender(ModelClassificationPreview, { model: item.value });
-      },
-      plugins: {
-        sort: {
-          getSortValue(value) {
-            return value.security_classification?.security_level ?? 0;
-          }
-        },
-        tableFilter: {
-          getFilterValue(value) {
-            return value.security_classification?.name ?? "";
+            return icons.join(" ");
           }
         }
       }
@@ -304,3 +283,12 @@
 
 <!-- Edit Provider Dialog -->
 <ProviderDialog openController={editProviderDialogOpen} provider={editingProvider} />
+
+<style>
+  :global(tr:has([data-status="deprecated"])) {
+    background-color: var(--color-negative-dimmer) !important;
+  }
+  :global(tr:has([data-status="retiring"])) {
+    background-color: var(--color-warning-dimmer) !important;
+  }
+</style>

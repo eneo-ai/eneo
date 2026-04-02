@@ -6,12 +6,11 @@
   import { createRender } from "svelte-headless-table";
   import ModelEnabledSwitch from "./ModelEnableSwitch.svelte";
   import {
-    default as ModelLabels,
-    getLabels
-  } from "$lib/features/ai-models/components/ModelLabels.svelte";
+    default as ModelStatusIcons,
+    getStatusIcons
+  } from "$lib/features/ai-models/components/ModelStatusIcons.svelte";
   import ModelActions from "./ModelActions.svelte";
   import ModelNameCell from "./ModelNameCell.svelte";
-  import ModelClassificationPreview from "$lib/features/security-classifications/components/ModelClassificationPreview.svelte";
   import ProviderActions from "./ProviderActions.svelte";
   import ProviderGlyph from "./components/ProviderGlyph.svelte";
   import ProviderStatusBadge from "./components/ProviderStatusBadge.svelte";
@@ -20,7 +19,7 @@
 
   import { writable } from "svelte/store";
   import { Button } from "@intric/ui";
-  import { Plus } from "lucide-svelte";
+  import { Plus, TriangleAlert, Clock } from "lucide-svelte";
   import ProviderDialog from "./ProviderDialog.svelte";
   import { AddWizard } from "./AddWizard/index.js";
   import PageEmptyState from "./components/PageEmptyState.svelte";
@@ -50,7 +49,7 @@
       accessor: (model) => model,
       header: m.name(),
       cell: (item) => {
-        return createRender(ModelNameCell, { model: item.value, type: "completionModel" });
+        return createRender(ModelNameCell, { model: item.value, type: "completionModel", completionModels: filteredModels });
       },
       plugins: {
         sort: {
@@ -85,7 +84,7 @@
       accessor: (model) => model,
       header: m.details(),
       cell: (item) => {
-        return createRender(ModelLabels, { model: item.value });
+        return createRender(ModelStatusIcons, { model: item.value });
       },
       plugins: {
         sort: {
@@ -93,30 +92,10 @@
         },
         tableFilter: {
           getFilterValue(value) {
-            const labels = getLabels(value).flatMap((label) => {
-              return label.label;
+            const icons = getStatusIcons(value).flatMap((icon) => {
+              return icon.ariaLabel;
             });
-            return labels.join(" ");
-          }
-        }
-      }
-    }),
-
-    table.column({
-      accessor: (model) => model,
-      header: m.security(),
-      cell: (item) => {
-        return createRender(ModelClassificationPreview, { model: item.value });
-      },
-      plugins: {
-        sort: {
-          getSortValue(value) {
-            return value.security_classification?.security_level ?? 0;
-          }
-        },
-        tableFilter: {
-          getFilterValue(value) {
-            return value.security_classification?.name ?? "";
+            return icons.join(" ");
           }
         }
       }
@@ -188,6 +167,14 @@
   $: groups = listGroups(providers);
   $: table.update(filteredModels);
 
+  // Count models needing attention
+  $: deprecatedCount = filteredModels.filter(model =>
+    "deprecation_date" in model && model.deprecation_date && model.deprecation_date <= new Date().toISOString().slice(0, 10)
+  ).length;
+  $: retiringCount = filteredModels.filter(model =>
+    "deprecation_date" in model && model.deprecation_date && model.deprecation_date > new Date().toISOString().slice(0, 10)
+  ).length;
+
   // Track open/collapsed state per provider group, defaulting to collapsed for empty providers
   let groupOpenState: Record<string, boolean> = {};
   $: {
@@ -208,6 +195,30 @@
   />
 {:else}
   <div class="flex flex-col gap-4">
+    {#if deprecatedCount > 0 || retiringCount > 0}
+      <div
+        class="mx-3 mt-3 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm {deprecatedCount >
+        0
+          ? 'border-negative-default/20 bg-negative-dimmer/30 text-negative-stronger'
+          : 'border-warning-default/20 bg-warning-dimmer/30 text-warning-stronger'}"
+      >
+        {#if deprecatedCount > 0}
+          <TriangleAlert size={16} class="flex-shrink-0" />
+          <span
+            >{deprecatedCount === 1
+              ? m.models_deprecated_banner_one({ count: deprecatedCount })
+              : m.models_deprecated_banner_other({ count: deprecatedCount })}</span
+          >
+        {:else}
+          <Clock size={16} class="flex-shrink-0" />
+          <span
+            >{retiringCount === 1
+              ? m.models_retiring_banner_one({ count: retiringCount })
+              : m.models_retiring_banner_other({ count: retiringCount })}</span
+          >
+        {/if}
+      </div>
+    {/if}
     <Table.Root {viewModel} resourceName={m.resource_models()} displayAs="list" showEmptyGroups>
       {#each groups as group (group.key)}
         {@const provider = getProviderForGroup(group.key)}
@@ -315,3 +326,12 @@
 
 <!-- Edit Provider Dialog -->
 <ProviderDialog openController={editProviderDialogOpen} provider={editingProvider} />
+
+<style>
+  :global(tr:has([data-status="deprecated"])) {
+    background-color: var(--color-negative-dimmer) !important;
+  }
+  :global(tr:has([data-status="retiring"])) {
+    background-color: var(--color-warning-dimmer) !important;
+  }
+</style>

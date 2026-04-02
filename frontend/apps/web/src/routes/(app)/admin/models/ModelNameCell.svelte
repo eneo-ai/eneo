@@ -5,19 +5,57 @@
   import { Button, Tooltip } from "@intric/ui";
   import { writable } from "svelte/store";
   import ModelNameAndVendor from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
-  import EditModelDialog from "./EditModelDialog.svelte";
+  import ModelDetailDialog from "./ModelDetailDialog.svelte";
   import { m } from "$lib/paraglide/messages";
 
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
   export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
+  export let completionModels: CompletionModel[] = [];
   $: isTenantModel = model.provider_id != null;
 
-  const showEditDialog = writable(false);
+  const showDetailDialog = writable(false);
+
+  $: isDeprecated =
+    "deprecation_date" in model &&
+    model.deprecation_date &&
+    model.deprecation_date <= new Date().toISOString().slice(0, 10);
+
+  $: isRetiring =
+    "deprecation_date" in model &&
+    model.deprecation_date &&
+    model.deprecation_date > new Date().toISOString().slice(0, 10);
+
+  $: statusColor = isDeprecated
+    ? "bg-negative-default"
+    : isRetiring
+      ? "bg-warning-default"
+      : !model.is_org_enabled
+        ? "bg-muted/30"
+        : "bg-positive-default";
+
+  $: statusKey = isDeprecated ? "deprecated" : isRetiring ? "retiring" : "ok";
+
+  $: statusLabel = isDeprecated
+    ? m.model_label_deprecated()
+    : isRetiring
+      ? m.model_label_retiring({ date: ("deprecation_date" in model ? model.deprecation_date : "") ?? "" })
+      : !model.is_org_enabled
+        ? m.model_status_disabled()
+        : m.model_status_active();
 </script>
 
 <div class="flex items-center gap-3">
+  <Tooltip text={statusLabel}>
+    <span
+      class="block h-2 w-2 rounded-full flex-shrink-0 {statusColor}"
+      role="img"
+      aria-label={statusLabel}
+      data-status={statusKey}
+    ></span>
+  </Tooltip>
+
   {#if isTenantModel}
-    <Button on:click={() => showEditDialog.set(true)}>
+    <Button on:click={() => showDetailDialog.set(true)}>
       <ModelNameAndVendor {model} />
     </Button>
   {:else}
@@ -44,5 +82,5 @@
 </div>
 
 {#if isTenantModel}
-  <EditModelDialog {model} {type} openController={showEditDialog} />
+  <ModelDetailDialog {model} {type} {completionModels} openController={showDetailDialog} />
 {/if}
