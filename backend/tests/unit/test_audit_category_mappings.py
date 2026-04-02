@@ -103,6 +103,13 @@ class TestCategoryMappings:
         )
         assert ActionType.TOOL_APPROVAL_SUBMITTED.value in user_actions
 
+    def test_completion_model_migrated_maps_to_user_actions(self):
+        """Verify completion model migration is tracked as a user action."""
+        assert (
+            CATEGORY_MAPPINGS[ActionType.COMPLETION_MODEL_MIGRATED.value]
+            == "user_actions"
+        )
+
     def test_security_events_mapping(self):
         """Verify security event action types are correctly mapped."""
         security_actions = [

@@ -70,6 +70,7 @@ CATEGORY_MAPPINGS = {
     ActionType.SESSION_ENDED.value: "user_actions",
     ActionType.TOOL_APPROVAL_SUBMITTED.value: "user_actions",
     ActionType.COMPLETION_MODEL_UPDATED.value: "user_actions",
+    ActionType.COMPLETION_MODEL_MIGRATED.value: "user_actions",
     ActionType.EMBEDDING_MODEL_UPDATED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_UPDATED.value: "user_actions",
     # Security Events (6 actions)

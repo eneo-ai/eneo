@@ -3,7 +3,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 # Audit logging - module level imports for consistency
@@ -21,6 +21,7 @@ from intric.completion_models.presentation.completion_model_models import (
     ModelMigrationRequest,
     ModelUsageStatistics,
     ModelUsageSummary,
+    ValidationResult,
 )
 from intric.completion_models.presentation.completion_model_models import (
     PaginatedResponse as ModelUsagePaginatedResponse,
@@ -269,6 +270,27 @@ async def get_model_usage_details(
         raise
 
 
+@router.get(
+    "/{model_id}/migration-validate",
+    response_model=ValidationResult,
+    responses=responses.get_responses([400, 404]),
+)
+async def validate_migration(
+    model_id: UUID,
+    to_model_id: UUID = Query(..., description="Target model ID"),
+    user: UserInDB = Depends(get_current_active_user),
+    container: Container = Depends(get_container(with_user=True)),
+) -> ValidationResult:
+    """Validate migration compatibility without executing. Used for preflight checks."""
+    validate_permission(user, Permission.ADMIN)
+    migration_service = container.completion_model_migration_service()
+    return await migration_service.validate_migration(
+        from_model_id=model_id,
+        to_model_id=to_model_id,
+        tenant_id=user.tenant_id,
+    )
+
+
 @router.post(
     "/{model_id}/migrate",
     response_model=MigrationResult,
@@ -357,6 +379,35 @@ async def migrate_model_usage(
                 "warnings": result.warnings,
             },
         )
+
+        # Audit log migration (always, even if 0 entities migrated)
+        try:
+            audit_service = container.audit_service()
+            completion_model_repo = container.completion_model_repo2()
+            from_model = await completion_model_repo.one(model_id=model_id)
+            await audit_service.log_async(
+                tenant_id=user.tenant_id,
+                actor_id=user.id,
+                action=ActionType.COMPLETION_MODEL_MIGRATED,
+                entity_type=EntityType.COMPLETION_MODEL,
+                entity_id=model_id,
+                description=f"Migrated model usage from {from_model.name} to {migration_request.to_model_id} ({result.migrated_count} entities)",
+                metadata=AuditMetadata.standard(
+                    actor=user,
+                    target=from_model,
+                    changes={
+                        "from_model_id": str(model_id),
+                        "to_model_id": str(migration_request.to_model_id),
+                        "migrated_count": result.migrated_count,
+                        "failed_count": result.failed_count,
+                        "duration": result.duration,
+                        "details": result.details,
+                        "warnings": result.warnings,
+                    },
+                ),
+            )
+        except Exception as audit_err:
+            logger.warning(f"Failed to create audit log for migration: {audit_err}")
 
         return result
 

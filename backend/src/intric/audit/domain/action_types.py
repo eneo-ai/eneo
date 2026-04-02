@@ -70,6 +70,7 @@ class ActionType(str, Enum):
     INTEGRATION_KNOWLEDGE_DELETED = "integration_knowledge_deleted"
     INTEGRATION_KNOWLEDGE_SYNCED = "integration_knowledge_synced"
     COMPLETION_MODEL_UPDATED = "completion_model_updated"
+    COMPLETION_MODEL_MIGRATED = "completion_model_migrated"
     EMBEDDING_MODEL_UPDATED = "embedding_model_updated"
     TRANSCRIPTION_MODEL_UPDATED = "transcription_model_updated"
     TEMPLATE_CREATED = "template_created"

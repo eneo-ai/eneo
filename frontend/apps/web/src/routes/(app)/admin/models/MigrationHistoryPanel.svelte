@@ -5,15 +5,16 @@
   import { m } from "$lib/paraglide/messages";
   import { onMount } from "svelte";
   import { Label } from "@intric/ui";
-  import { Loader2 } from "lucide-svelte";
+  import { Loader2, ChevronDown, AlertTriangle } from "lucide-svelte";
+  import { migrationHistoryRefreshVersion } from "./migrationHistoryRefresh";
 
   const intric = getIntric();
 
   type MigrationRecord = {
     id: string;
-    from_model_id: string;
+    from_model_id: string | null;
     from_model_name: string;
-    to_model_id: string;
+    to_model_id: string | null;
     to_model_name: string;
     migrated_count: number;
     status: string;
@@ -23,13 +24,19 @@
     completed_at: string | null;
     duration: number | null;
     error_message: string | null;
+    migration_details: Record<string, number> | null;
+    warnings: string[] | null;
   };
 
   let history: MigrationRecord[] = [];
   let loading = true;
   let error: string | null = null;
+  let lastLoadedVersion = 0;
+  let expandedId: string | null = null;
 
-  onMount(async () => {
+  async function loadHistory() {
+    loading = true;
+    error = null;
     try {
       const result = await intric.models.getAllMigrationHistory();
       history = result as MigrationRecord[];
@@ -38,10 +45,24 @@
     } finally {
       loading = false;
     }
+  }
+
+  onMount(() => {
+    lastLoadedVersion = $migrationHistoryRefreshVersion;
+    void loadHistory();
   });
 
+  $: if ($migrationHistoryRefreshVersion !== lastLoadedVersion) {
+    lastLoadedVersion = $migrationHistoryRefreshVersion;
+    void loadHistory();
+  }
+
+  function toggleExpand(id: string) {
+    expandedId = expandedId === id ? null : id;
+  }
+
   function formatDate(dateStr: string | null): string {
-    if (!dateStr) return "-";
+    if (!dateStr) return "–";
     const date = new Date(dateStr);
     return date.toLocaleDateString(undefined, {
       year: "numeric",
@@ -52,17 +73,43 @@
     });
   }
 
+  function formatDuration(seconds: number | null): string {
+    if (!seconds) return "–";
+    if (seconds < 1) return `${Math.round(seconds * 1000)}ms`;
+    return `${seconds.toFixed(1)}s`;
+  }
+
   function statusColor(status: string): Label.LabelColor {
     switch (status) {
-      case "completed":
-        return "green";
-      case "failed":
-        return "red";
-      case "in_progress":
-        return "yellow";
-      default:
-        return "gray";
+      case "completed": return "green";
+      case "failed": return "red";
+      case "in_progress": return "yellow";
+      default: return "gray";
     }
+  }
+
+  const detailLabels: Record<string, string> = {
+    assistants: "Assistenter",
+    apps: "Appar",
+    services: "Tjänster",
+    questions: "Frågor",
+    spaces: "Spaces",
+    assistant_templates: "Assistentmallar",
+    app_templates: "Appmallar"
+  };
+
+  function translateWarning(code: string): string {
+    if (code === "target_deprecated") return m.migration_warn_target_deprecated();
+    if (code.startsWith("lower_token_limit:")) return m.migration_warn_lower_token_limit({ limit: code.split(":")[1] });
+    if (code.startsWith("different_family:")) { const p = code.split(":"); return m.migration_warn_different_family({ from: p[1], to: p[2] }); }
+    if (code === "lacks_vision") return m.migration_warn_lacks_vision();
+    if (code === "lacks_reasoning") return m.migration_warn_lacks_reasoning();
+    if (code === "lacks_tool_calling") return m.migration_warn_lacks_tool_calling();
+    if (code === "kwargs_reset") return m.migration_warn_kwargs_reset();
+    if (code.startsWith("security_classification_insufficient:")) {
+      const p = code.split(":"); return m.migration_blocked_security({ count: p[1], classification: p[2] });
+    }
+    return code;
   }
 </script>
 
@@ -85,6 +132,7 @@
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-default text-left text-muted">
+            <th class="px-3 py-2 font-medium w-[1%]"></th>
             <th class="px-3 py-2 font-medium">{m.migration_history_date()}</th>
             <th class="px-3 py-2 font-medium">{m.migration_history_from()}</th>
             <th class="px-3 py-2 font-medium">{m.migration_history_to()}</th>
@@ -95,7 +143,16 @@
         </thead>
         <tbody>
           {#each history as record}
-            <tr class="border-b border-dimmer hover:bg-hover-dimmer">
+            <tr
+              class="border-b border-dimmer hover:bg-hover-dimmer cursor-pointer transition-colors"
+              on:click={() => toggleExpand(record.id)}
+            >
+              <td class="px-3 py-2">
+                <ChevronDown
+                  size={14}
+                  class="text-muted transition-transform {expandedId === record.id ? 'rotate-0' : '-rotate-90'}"
+                />
+              </td>
               <td class="px-3 py-2 text-muted whitespace-nowrap">
                 {formatDate(record.completed_at ?? record.started_at)}
               </td>
@@ -112,6 +169,52 @@
                 />
               </td>
             </tr>
+
+            <!-- Expanded detail row -->
+            {#if expandedId === record.id}
+              <tr>
+                <td colspan="8" class="px-0 py-0">
+                  <div class="bg-surface-dimmer/40 border-b border-dimmer px-8 py-4">
+                    <table class="text-sm w-full max-w-lg">
+                      <tbody>
+                        <tr>
+                          <td class="py-1.5 pr-6 text-muted whitespace-nowrap">{m.migration_history_duration()}</td>
+                          <td class="py-1.5 font-mono text-xs">{formatDuration(record.duration)}</td>
+                        </tr>
+                        {#if record.migration_details}
+                          {#each Object.entries(record.migration_details).filter(([k, v]) => k !== "total" && v > 0) as [type, count]}
+                            <tr>
+                              <td class="py-1.5 pr-6 text-muted whitespace-nowrap">{detailLabels[type] ?? type}</td>
+                              <td class="py-1.5 tabular-nums">{count}</td>
+                            </tr>
+                          {/each}
+                        {/if}
+                      </tbody>
+                    </table>
+
+                    {#if record.warnings && record.warnings.length > 0}
+                      <div class="mt-3 pt-3 border-t border-dimmer">
+                        <div class="flex items-center gap-1.5 text-sm text-muted mb-1.5">
+                          <AlertTriangle size={13} />
+                          <span>{m.migration_history_warnings()}</span>
+                        </div>
+                        <ul class="space-y-1 text-sm text-warning-stronger pl-5">
+                          {#each record.warnings as w}
+                            <li>{translateWarning(w)}</li>
+                          {/each}
+                        </ul>
+                      </div>
+                    {/if}
+
+                    {#if record.error_message}
+                      <div class="mt-3 pt-3 border-t border-dimmer text-sm text-negative-default">
+                        {record.error_message}
+                      </div>
+                    {/if}
+                  </div>
+                </td>
+              </tr>
+            {/if}
           {/each}
         </tbody>
       </table>

@@ -19,3 +19,7 @@ ENTITY_TABLE_MAP = {
 
 # List of all entity types that use completion models
 ENTITY_TYPES = list(ENTITY_TABLE_MAP.keys())
+
+# Entity types supported by the migration service, including many-to-many space
+# availability relationships.
+MIGRATABLE_ENTITY_TYPES = [*ENTITY_TYPES, "spaces"]

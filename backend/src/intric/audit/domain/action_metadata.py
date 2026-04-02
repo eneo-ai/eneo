@@ -261,6 +261,10 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "Kompletteringsmodell uppdaterad",
         "description_sv": "Loggar ändringar av AI-kompletteringsmodell",
     },
+    ActionType.COMPLETION_MODEL_MIGRATED.value: {
+        "name_sv": "Kompletteringsmodell migrerad",
+        "description_sv": "Loggar när användning flyttas mellan AI-kompletteringsmodeller",
+    },
     ActionType.EMBEDDING_MODEL_UPDATED.value: {
         "name_sv": "Embedding-modell uppdaterad",
         "description_sv": "Loggar ändringar av embedding-modell",

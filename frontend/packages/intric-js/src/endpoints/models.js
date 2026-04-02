@@ -77,6 +77,29 @@ export function initModels(client) {
      * @returns {Promise<import("../types/schema").components["schemas"]["MigrationResult"]>}
      * @throws {IntricError}
      * */
+    /**
+     * Validate migration compatibility without executing.
+     * @param {Object} params
+     * @param {string} params.fromId Source model ID
+     * @param {string} params.toId Target model ID
+     * @returns {Promise<import("../types/schema").components["schemas"]["ValidationResult"]>}
+     * @throws {IntricError}
+     * */
+    validateMigration: async ({ fromId, toId }) => {
+      const res = await client.fetch(
+        "/api/v1/completion-models/{model_id}/migration-validate",
+        {
+          method: "get",
+          params: {
+            path: { model_id: fromId },
+            query: { to_model_id: toId }
+          }
+        }
+      );
+
+      return res;
+    },
+
     migrateCompletion: async ({ fromId, toId, entityTypes, confirmMigration }) => {
       const res = await client.fetch("/api/v1/completion-models/{model_id}/migrate", {
         method: "post",
@@ -89,6 +112,53 @@ export function initModels(client) {
           }
         }
       });
+
+      return res;
+    },
+
+    /**
+     * Get usage statistics for a completion model (aggregated counts).
+     * @param {Object} params
+     * @param {string} params.modelId Model ID
+     * @returns {Promise<import("../types/schema").components["schemas"]["ModelUsageStatistics"]>}
+     * @throws {IntricError}
+     * */
+    getUsageStats: async ({ modelId }) => {
+      const res = await client.fetch(
+        "/api/v1/completion-models/{model_id}/usage",
+        {
+          method: "get",
+          params: { path: { model_id: modelId } }
+        }
+      );
+
+      return res;
+    },
+
+    /**
+     * Get detailed usage for a completion model (individual entities).
+     * @param {Object} params
+     * @param {string} params.modelId Model ID
+     * @param {string} [params.entityType] Filter by entity type
+     * @param {number} [params.limit=50] Number of results
+     * @returns {Promise<import("../types/schema").components["schemas"]["ModelUsagePaginatedResponse"]>}
+     * @throws {IntricError}
+     * */
+    getUsageDetails: async ({ modelId, entityType, limit = 50 }) => {
+      /** @type {Record<string, any>} */
+      const query = { limit };
+      if (entityType) query.entity_type = entityType;
+
+      const res = await client.fetch(
+        "/api/v1/completion-models/{model_id}/usage/details",
+        {
+          method: "get",
+          params: {
+            path: { model_id: modelId },
+            query
+          }
+        }
+      );
 
       return res;
     },

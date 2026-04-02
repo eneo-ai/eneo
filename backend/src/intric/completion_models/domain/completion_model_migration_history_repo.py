@@ -30,6 +30,8 @@ class CompletionModelMigrationHistoryRepo:
         entity_types: list[str] | None = None,
         affected_count: int = 0,
         started_at: Optional[datetime] = None,
+        from_model_name: Optional[str] = None,
+        to_model_name: Optional[str] = None,
     ) -> CompletionModelMigrationHistory:
         """Create a new migration history record."""
         migration_history = CompletionModelMigrationHistory(
@@ -38,6 +40,8 @@ class CompletionModelMigrationHistoryRepo:
                 tenant_id=tenant_id,
                 from_model_id=from_model_id,
                 to_model_id=to_model_id,
+                from_model_name=from_model_name,
+                to_model_name=to_model_name,
                 initiated_by=initiated_by,
                 status=status,
                 entity_types=entity_types,
