@@ -132,6 +132,11 @@ class CompletionModelUsageService:
                     model_id, tenant_id, limit, cursor_data
                 )
 
+                # Count total for this entity type (not just current page)
+                total_count = await self._count_entities_for_type(
+                    entity_type, model_id, tenant_id
+                )
+
                 # Generate next cursor if there are more results
                 next_cursor = None
                 if has_more and details:
@@ -147,14 +152,13 @@ class CompletionModelUsageService:
 
                 return PaginatedResponse(
                     items=details,
-                    total=len(details),
+                    total=total_count,
                     has_more=has_more,
                     next_cursor=next_cursor,
-                    prev_cursor=None,  # Single direction for simplicity
+                    prev_cursor=None,
                 )
         else:
-            # For multiple entity types, use simpler approach
-            # This is less common and doesn't need full cursor support
+            # Combined mode: fetch from all entity types
             details: list[ModelUsageDetail] = []
             for _entity_type_name, query_func in entity_queries.items():
                 entity_details, _ = await query_func(
@@ -162,19 +166,46 @@ class CompletionModelUsageService:
                 )
                 details.extend(entity_details)
 
+            # Count real total across all entity types
+            total_count = 0
+            for et in entity_queries:
+                total_count += await self._count_entities_for_type(
+                    et, model_id, tenant_id
+                )
+
             # Sort by created_at descending
             details.sort(key=lambda x: x.created_at, reverse=True)
 
-            # Apply limit
+            # Apply limit to details (but total reflects the real count)
             details = details[:limit]
 
             return PaginatedResponse(
                 items=details,
-                total=len(details),
-                has_more=len(details) == limit,
+                total=total_count,
+                has_more=total_count > len(details),
                 next_cursor=None,
                 prev_cursor=None,
             )
+
+    async def _count_entities_for_type(
+        self, entity_type: str, model_id: UUID, tenant_id: UUID
+    ) -> int:
+        """Count total entities of a type using a model (for accurate pagination totals)."""
+        from sqlalchemy import func as sa_func
+
+        from intric.completion_models.constants import ENTITY_TABLE_MAP
+
+        if entity_type not in ENTITY_TABLE_MAP:
+            return 0
+
+        table = ENTITY_TABLE_MAP[entity_type]
+        stmt = (
+            select(sa_func.count())
+            .select_from(table)
+            .where(table.completion_model_id == model_id)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one()
 
     async def get_all_models_usage_summary(
         self, tenant_id: UUID

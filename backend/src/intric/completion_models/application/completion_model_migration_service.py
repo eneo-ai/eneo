@@ -257,7 +257,7 @@ class CompletionModelMigrationService:
             )
 
             # Security blockers cannot be overridden with confirm_migration
-            has_blockers = any(w.startswith("security_classification_insufficient") for w in validation_result.warnings)
+            has_blockers = any(w.startswith("security_classification_insufficient") for w in validation_result.warning_codes)
 
             if has_blockers:
                 duration = (datetime.utcnow() - start_time).total_seconds()
