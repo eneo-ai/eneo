@@ -10,7 +10,7 @@
     intric: Intric;
     spaceId: string;
     flowId: string;
-    onapplied?: (detail: { flow_id: string }) => void;
+    onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
   }
 
   let { intric, spaceId, flowId, onapplied }: Props = $props();
@@ -22,7 +22,4 @@
   });
 </script>
 
-<FlowAIBuilder
-  targetKind="edit"
-  onapplied={(detail) => onapplied?.(detail)}
-/>
+<FlowAIBuilder targetKind="edit" onapplied={(detail) => onapplied?.(detail)} />

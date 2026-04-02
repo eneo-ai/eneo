@@ -8,6 +8,9 @@ from tenacity import (
 )
 
 from intric.ai_models.completion_models.completion_model import Completion, FunctionCall
+from intric.completion_models.infrastructure.provider_response_ids import (
+    extract_provider_response_id,
+)
 from intric.main.exceptions import BadRequestException, OpenAIException
 from intric.main.logging import get_logger
 
@@ -46,6 +49,7 @@ async def get_response(
 
         completion = Completion(
             reasoning_token_count=reasoning_tokens,
+            provider_response_id=extract_provider_response_id(response),
             text=completion_str,
         )
 

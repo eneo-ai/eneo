@@ -53,11 +53,11 @@ async def test_get_response_populates_tool_calls_metadata_for_non_streaming():
         ],
     )
     first_choice = SimpleNamespace(message=first_message, finish_reason="tool_calls")
-    first_response = SimpleNamespace(choices=[first_choice])
+    first_response = SimpleNamespace(choices=[first_choice], id="resp-initial")
 
     follow_up_message = SimpleNamespace(content="final answer", tool_calls=None)
     follow_up_choice = SimpleNamespace(message=follow_up_message, finish_reason="stop")
-    follow_up_response = SimpleNamespace(choices=[follow_up_choice])
+    follow_up_response = SimpleNamespace(choices=[follow_up_choice], id="resp-final")
 
     mocked_acompletion = AsyncMock(side_effect=[first_response, follow_up_response])
 
@@ -77,3 +77,4 @@ async def test_get_response_populates_tool_calls_metadata_for_non_streaming():
     assert completion.tool_calls_metadata[0].server_name == "Server"
     assert completion.tool_calls_metadata[0].tool_name == "tool"
     assert completion.tool_calls_metadata[0].result_status == "succeeded"
+    assert completion.provider_response_id == "resp-final"

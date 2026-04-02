@@ -26,6 +26,7 @@ from intric.flows.ai_builder.ai_builder_keywords import (
     DOCX_TEMPLATE_MODE_MARKERS,
     OUTPUT_CHANGE_KEYWORDS,
     PDF_GENERATED_MODE_MARKERS,
+    PDF_OUTPUT_CONTEXT_MARKERS,
     PDF_TEMPLATE_EXPECTATION_MARKERS,
     PDF_TEMPLATE_GENERIC_MARKERS,
     RUNTIME_METADATA_KEYWORDS,
@@ -42,6 +43,7 @@ __all__ = [
     "build_framework_guardrails_block",
     "canonical_option_id",
     "canonical_question_id",
+    "extract_freeform_user_messages",
     "extract_answer_signals",
     "infer_question_answer_from_freeform",
     "is_supported_structured_question_id",
@@ -66,6 +68,13 @@ class OutputIntentResolution:
     content_shape: str | None = None
     docx_output_mode: str | None = None
     pdf_generation_mode: str | None = None
+
+
+_OUTPUT_REPLACEMENT_PHRASES: tuple[str, ...] = (
+    "i stället för",
+    "istället för",
+    "instead of",
+)
 
 
 def latest_pending_structured_question(
@@ -199,6 +208,35 @@ def aggregate_freeform_user_text(
     return _aggregate_user_text(conversation, include_structured_answers=False)
 
 
+def extract_freeform_user_messages(
+    conversation: Sequence[ConversationMessage | Mapping[str, Any]],
+) -> list[tuple[int, str]]:
+    messages: list[tuple[int, str]] = []
+    for index, message in enumerate(conversation):
+        role = message.role if isinstance(message, ConversationMessage) else message.get("role")
+        content = (
+            message.content
+            if isinstance(message, ConversationMessage)
+            else message.get("content")
+        )
+        metadata = (
+            message.metadata
+            if isinstance(message, ConversationMessage)
+            else message.get("metadata")
+        )
+        if role != "user" or not isinstance(content, str):
+            continue
+        if isinstance(metadata, Mapping):
+            question_answer = metadata.get("question_answer")
+            if isinstance(question_answer, Mapping) and _looks_like_structured_answer_echo(
+                content,
+                question_answer,
+            ):
+                continue
+        messages.append((index, content.casefold()))
+    return messages
+
+
 def _aggregate_user_text(
     conversation: Sequence[ConversationMessage | Mapping[str, Any]],
     *,
@@ -238,6 +276,9 @@ def _looks_like_structured_answer_echo(
     if not normalized_content:
         return True
 
+    if not _has_real_structured_answer_payload(question_answer):
+        return False
+
     candidates: set[str] = set()
     for key in (
         "selected_option_id",
@@ -262,6 +303,31 @@ def _looks_like_structured_answer_echo(
     return len(normalized_content) <= 80 and not any(
         marker in normalized_content for marker in (".", "?", "!", "\n")
     )
+
+
+def _has_real_structured_answer_payload(question_answer: Mapping[str, Any]) -> bool:
+    question_id = question_answer.get("question_id")
+    if not isinstance(question_id, str) or not question_id:
+        return False
+
+    for key in (
+        "selected_option_id",
+        "selected_value",
+        "answer",
+        "custom_value",
+    ):
+        raw_value = question_answer.get(key)
+        if isinstance(raw_value, str) and raw_value:
+            return True
+
+    for key in ("selected_option_ids", "selected_values"):
+        raw_values = question_answer.get(key)
+        if not isinstance(raw_values, Sequence):
+            continue
+        if any(isinstance(raw_value, str) and raw_value for raw_value in raw_values):
+            return True
+
+    return False
 
 
 def _score_option_match(message: str, option: Mapping[str, Any]) -> float:
@@ -414,37 +480,19 @@ def resolve_explicit_output_choice(
     flow_defaults: dict[str, set[str]] | None = None,
 ) -> str | None:
     normalized_text = normalize_signal_text(text)
-    output_values = answer_signals.get("final_output_mode", set())
-    pdf_generation_values = answer_signals.get("pdf_generation_mode", set())
-    if (
-        "pdf_document" in output_values
-        or pdf_generation_values.intersection({"generated_pdf", "pdf_template_requested"})
-        or contains_any_phrase(
-            normalized_text,
-            ("slut pdf", "final pdf", "ny pdf", "en pdf", "pdf med"),
-        )
-    ):
-        return "pdf_document"
-    if contains_any_phrase(
+    replacement_target = _resolve_replacement_output_choice(
         normalized_text,
-        (
-            "beslutsunderlag som text",
-            "structured decision support as text",
-            "decision support as text",
-            "decision support text",
-            "decision-support text",
-            "text summary",
-            "textsammanfattning",
-            "sammanfattning som text",
-        ),
-    ):
-        return "structured_text"
-    if "docx_document" in output_values or contains_any_phrase(normalized_text, ("docx",)):
-        return "docx_document"
-    if "structured_json" in output_values:
-        return "structured_json"
-    if "structured_text" in output_values:
-        return "structured_text"
+        answer_signals,
+    )
+    if replacement_target is not None:
+        return replacement_target
+
+    direct_output = _resolve_direct_output_choice(
+        normalized_text,
+        answer_signals,
+    )
+    if direct_output is not None:
+        return direct_output
 
     if flow_defaults and "final_output_mode" in flow_defaults and not mentions_output_change(
         normalized_text
@@ -457,6 +505,56 @@ def resolve_explicit_output_choice(
     if _infer_output_content_shape(normalized_text) == "structured_report":
         return "structured_text"
 
+    return None
+
+
+def _resolve_replacement_output_choice(
+    text: str,
+    answer_signals: dict[str, set[str]],
+) -> str | None:
+    for phrase in _OUTPUT_REPLACEMENT_PHRASES:
+        if phrase not in text:
+            continue
+        before, _, after = text.partition(phrase)
+        target_output = _resolve_direct_output_choice(before, answer_signals)
+        replaced_output = _resolve_direct_output_choice(after, {})
+        if target_output is not None and target_output != replaced_output:
+            return target_output
+    return None
+
+
+def _resolve_direct_output_choice(
+    text: str,
+    answer_signals: dict[str, set[str]],
+) -> str | None:
+    output_values = answer_signals.get("final_output_mode", set())
+    pdf_generation_values = answer_signals.get("pdf_generation_mode", set())
+    if (
+        "pdf_document" in output_values
+        or pdf_generation_values.intersection({"generated_pdf", "pdf_template_requested"})
+        or contains_any_phrase(text, PDF_OUTPUT_CONTEXT_MARKERS)
+    ):
+        return "pdf_document"
+    if contains_any_phrase(
+        text,
+        (
+            "beslutsunderlag som text",
+            "structured decision support as text",
+            "decision support as text",
+            "decision support text",
+            "decision-support text",
+            "text summary",
+            "textsammanfattning",
+            "sammanfattning som text",
+        ),
+    ):
+        return "structured_text"
+    if "docx_document" in output_values or contains_any_phrase(text, DOCX_CONTEXT_MARKERS):
+        return "docx_document"
+    if "structured_json" in output_values:
+        return "structured_json"
+    if "structured_text" in output_values:
+        return "structured_text"
     return None
 
 

@@ -623,14 +623,24 @@ class FlowRunDebugRagReference(BaseModel):
     id: str
     id_short: str
     title: str | None = None
+    source_title_raw: str | None = None
     display_title: str | None = None
+    source_display_name: str | None = None
     source_url: str | None = None
     source_kind: str | None = None
     source_container_kind: str | None = None
     source_container_name: str | None = None
+    source_container_name_raw: str | None = None
     source_container_display_name: str | None = None
+    source_container_label: str | None = None
     source_container_id: str | None = None
     usage_state: str | None = None
+    display_snippet: str | None = None
+    display_chunk_no: int | None = None
+    display_selection_reason: str | None = None
+    quality_flags: list[str] = Field(default_factory=list)
+    boilerplate_likelihood: float | None = None
+    snippet_quality: str | None = None
     hit_count: int = 0
     best_score: float = 0.0
     chunks: list[FlowRunDebugRagReferenceChunk] = Field(default_factory=list)
@@ -670,6 +680,7 @@ class FlowRunDebugRagPromptContext(BaseModel):
     included_source_titles: list[str] = Field(default_factory=list)
     included_source_display_names: list[str] = Field(default_factory=list)
     included_groups: list[FlowRunDebugRagPromptContextGroup] = Field(default_factory=list)
+    summary: dict[str, Any] | None = None
 
 
 class FlowRunDebugRag(BaseModel):
@@ -989,6 +1000,14 @@ class FlowRunEvidenceExportResponse(BaseModel):
                             "Citations and material influence are not currently tracked."
                         ),
                     },
+                    "citations": {
+                        "tracking_mode": "inline_inref_sidecar",
+                        "citation_tracked": True,
+                        "cited_source_ids": ["source-1"],
+                        "cited_source_count": 1,
+                        "unknown_citation_ids": [],
+                        "uncited_inserted_source_ids": [],
+                    },
                     "final_output": {
                         "kind": "mixed",
                         "text_present": True,
@@ -1035,7 +1054,31 @@ class FlowRunEvidenceExportResponse(BaseModel):
                                     "included_source_ids": ["source-1"],
                                     "included_source_titles": ["Municipality policy guide"],
                                     "included_source_display_names": ["Municipality policy guide"],
+                                    "summary": {
+                                        "total_sources": 1,
+                                        "total_chunks": 2,
+                                        "truncated_by_token_budget": False,
+                                        "top_ranked_sources": [
+                                            {
+                                                "source_id": "source-1",
+                                                "display_name": "Municipality policy guide",
+                                                "source_kind": "website",
+                                                "included_group_count": 1,
+                                                "included_chunk_count": 2,
+                                                "best_score": 0.91,
+                                                "rank": 1,
+                                            }
+                                        ],
+                                    },
                                 },
+                            },
+                            "citations": {
+                                "tracking_mode": "inline_inref_sidecar",
+                                "citation_tracked": True,
+                                "cited_source_ids": ["source-1"],
+                                "cited_source_count": 1,
+                                "unknown_citation_ids": [],
+                                "uncited_inserted_source_ids": [],
                             },
                             "artifact_names": ["case-summary.pdf"],
                             "artifact_details": [

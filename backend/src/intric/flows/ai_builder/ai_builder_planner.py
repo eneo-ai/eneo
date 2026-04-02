@@ -20,6 +20,9 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     build_discovery_block_message_runtime,
 )
+from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
+    build_discovery_profile,
+)
 from intric.flows.ai_builder.ai_builder_semantic_adjudication import (
     adjudicate_pending_question_answer,
 )
@@ -30,6 +33,10 @@ from intric.flows.ai_builder.ai_builder_settings import (
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage, SessionStatus
 from intric.flows.ai_builder.ai_builder_interaction_utils import (
     looks_like_information_request,
+)
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalog,
+    build_ai_builder_resource_catalog,
 )
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
@@ -93,6 +100,7 @@ class PlannerPreparedRequest:
     tool_selection: PlannerToolSelection
     available_model_refs: set[str] | None
     available_kb_refs: set[str] | None
+    resource_catalog: AIBuilderResourceCatalog | None
 
 
 class AIBuilderPlanner:
@@ -173,9 +181,15 @@ class AIBuilderPlanner:
         conversation: list[ConversationMessage],
         message: str,
         question_answer: dict[str, Any] | None,
+        ui_language: str | None = None,
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
     ) -> PlannerMetadataResolution:
+        if ui_language is None and question_answer is not None:
+            raw_ui_language = question_answer.get("ui_language")
+            if isinstance(raw_ui_language, str) and raw_ui_language:
+                ui_language = raw_ui_language
+
         is_requirements_confirmation = (
             question_answer is not None
             and question_answer.get("requirements_confirmed") is True
@@ -188,12 +202,6 @@ class AIBuilderPlanner:
             }
         elif question_answer:
             metadata = {"question_answer": normalize_question_answer(question_answer)}
-
-        if question_answer and question_answer.get("ui_language") is not None:
-            metadata = {
-                **(metadata or {}),
-                "ui_language": question_answer.get("ui_language"),
-            }
 
         if metadata is None and not is_requirements_confirmation:
             inferred_answer = infer_question_answer_from_freeform(conversation, message)
@@ -209,6 +217,12 @@ class AIBuilderPlanner:
                 )
                 if adjudicated_answer is not None:
                     metadata = {"question_answer": adjudicated_answer}
+
+        if ui_language is not None:
+            metadata = {
+                **(metadata or {}),
+                "ui_language": ui_language,
+            }
 
         return PlannerMetadataResolution(
             metadata=metadata,
@@ -260,7 +274,10 @@ class AIBuilderPlanner:
                 available_kbs=available_kbs,
             )
         else:
-            tool_schemas = build_all_tool_schemas()
+            tool_schemas = build_all_tool_schemas(
+                available_models=available_models,
+                available_kbs=available_kbs,
+            )
 
         return PlannerToolSelection(
             tool_schemas=tool_schemas,
@@ -300,10 +317,13 @@ class AIBuilderPlanner:
         is_edit_mode = flow is not None
         flow_context = None
         if flow is not None:
+            discovery_profile = build_discovery_profile(conversation, flow=flow)
             flow_context = build_flow_context(
                 flow,
                 assistant_snapshots=assistant_snapshots,
                 is_edit_mode=True,
+                capabilities=discovery_profile.capabilities,
+                edit_scope=discovery_profile.edit_scope,
             )
 
         models_ctx = (
@@ -312,6 +332,10 @@ class AIBuilderPlanner:
             else None
         )
         kbs_ctx = build_available_kbs_context(available_kbs) if available_kbs else None
+        resource_catalog = build_ai_builder_resource_catalog(
+            available_models=available_models,
+            available_kbs=available_kbs,
+        )
         clarification_hints = build_clarification_hints(
             conversation=conversation,
             latest_user_message=message,
@@ -375,6 +399,7 @@ class AIBuilderPlanner:
                 tool_selection=tool_selection,
                 available_model_refs=available_model_refs,
                 available_kb_refs=available_kb_refs,
+                resource_catalog=resource_catalog,
             )
 
         return PlannerPreparedRequest(
@@ -385,6 +410,7 @@ class AIBuilderPlanner:
             tool_selection=tool_selection,
             available_model_refs=available_model_refs,
             available_kb_refs=available_kb_refs,
+            resource_catalog=resource_catalog,
         )
 
     async def send_message(
@@ -393,6 +419,7 @@ class AIBuilderPlanner:
         session_id: UUID,
         message: str,
         question_answer: dict[str, Any] | None = None,
+        ui_language: str | None = None,
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
         available_models: list[dict[str, Any]] | None = None,
@@ -449,6 +476,7 @@ class AIBuilderPlanner:
             conversation=conversation,
             message=message,
             question_answer=question_answer,
+            ui_language=ui_language,
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
         )
@@ -582,6 +610,7 @@ class AIBuilderPlanner:
                 litellm_kwargs=litellm_kwargs,
                 available_model_refs=prepared_request.available_model_refs,
                 available_kb_refs=prepared_request.available_kb_refs,
+                resource_catalog=prepared_request.resource_catalog,
                 max_output_tokens=max_output_tokens,
                 request_id=request_id,
                 flow=flow,
@@ -609,8 +638,10 @@ class AIBuilderPlanner:
                     new_messages_start=new_messages_start,
                     available_model_refs=prepared_request.available_model_refs,
                     available_kb_refs=prepared_request.available_kb_refs,
+                    resource_catalog=prepared_request.resource_catalog,
                     max_output_tokens=max_output_tokens,
                     flow=flow,
+                    assistant_snapshots=assistant_snapshots,
                 )
                 if forced_plan is not None:
                     yield build_text_event(assistant_message.content)

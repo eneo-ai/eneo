@@ -247,6 +247,22 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                                 "included_source_ids": ["source-1"],
                                 "included_source_titles": ["Beslut till underlag"],
                                 "included_source_display_names": ["Beslut till underlag"],
+                                "summary": {
+                                    "total_sources": 1,
+                                    "total_chunks": 2,
+                                    "truncated_by_token_budget": False,
+                                    "top_ranked_sources": [
+                                        {
+                                            "source_id": "source-1",
+                                            "display_name": "Beslut till underlag",
+                                            "source_kind": "website",
+                                            "included_group_count": 1,
+                                            "included_chunk_count": 2,
+                                            "best_score": 1.0,
+                                            "rank": 1,
+                                        }
+                                    ],
+                                },
                                 "included_groups": [
                                     {
                                         "source_id": "source-1",
@@ -296,6 +312,8 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
     assert response.debug_export.steps[0].rag is not None
     assert response.debug_export.steps[0].rag.prompt_context is not None
     assert response.debug_export.steps[0].rag.prompt_context.included_source_ids == ["source-1"]
+    assert response.debug_export.steps[0].rag.prompt_context.summary is not None
+    assert response.debug_export.steps[0].rag.prompt_context.summary["total_sources"] == 1
     assert (
         response.debug_export.steps[0].rag.prompt_context.included_source_display_names
         == ["Beslut till underlag"]

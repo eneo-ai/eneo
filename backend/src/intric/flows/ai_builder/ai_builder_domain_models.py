@@ -298,8 +298,18 @@ class ConversationMessage(BaseModel):
 
     role: str
     content: str | None = None
-    tool_call_id: str | None = None
-    tool_calls: list[JsonObject] | None = None
+    tool_call_id: str | None = Field(
+        default=None,
+        description="Planner-internal correlation id for a tool response turn.",
+    )
+    tool_calls: list[JsonObject] | None = Field(
+        default=None,
+        description=(
+            "Planner-internal tool trace metadata kept in the conversation history for debugging "
+            "and replay. API consumers should not treat the exact tool trace shape as a stable "
+            "business contract."
+        ),
+    )
     metadata: JsonObject | None = None
     timestamp: datetime | None = None
 
@@ -317,7 +327,6 @@ class BuilderSession(BaseModel):
     status: SessionStatus = SessionStatus.CHATTING
     conversation: list[ConversationMessage] = Field(default_factory=_default_conversation)
     requirements_version: str | None = None
-    flow_title_hint: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

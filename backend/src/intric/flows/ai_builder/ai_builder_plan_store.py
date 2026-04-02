@@ -7,12 +7,12 @@ from intric.flows.ai_builder.ai_builder_models import (
     BuilderPlan,
     ConversationMessage,
     FlowDraftSpecCore,
+    LintSeverity,
     LintWarning,
     PlannerPlanEnvelope,
 )
 from intric.flows.ai_builder.ai_builder_prompts import build_plan_summary
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
-from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationError
 
 
@@ -25,7 +25,18 @@ def build_lint_warnings(validation: Any) -> list[LintWarning]:
             severity=warning.severity,
         )
         for warning in validation.warnings
+        if _is_user_visible_lint_warning(warning)
     ]
+
+
+def _is_user_visible_lint_warning(warning: LintWarning) -> bool:
+    """Return whether a lint warning is relevant in the end-user plan UI.
+
+    Info-level quality lints are useful for internal plan quality feedback and
+    self-correction, but they are usually not actionable for the user approving
+    a plan. Keep the public plan surface focused on user-relevant warnings.
+    """
+    return warning.severity == LintSeverity.WARNING
 
 
 def build_plan_envelope(
@@ -81,7 +92,7 @@ def format_validation_feedback(
     reference_guidance = [
         "Step reference rules:",
         "- Use the exact plan_step_ref values declared in steps[*].plan_step_ref inside all template bindings.",
-        "- In propose_flow drafts, step_a / step_b style refs are authoring aliases. Do not switch to runtime aliases like step_1.",
+        "- In AI Builder drafts, step_a / step_b style refs are authoring aliases. Do not switch to runtime aliases like step_1.",
     ]
     if declared_refs:
         reference_guidance.append(f"- Declared step refs in this draft: {declared_refs}")
@@ -123,6 +134,7 @@ async def store_plan_and_update_conversation(
     new_messages_start: int,
     assistant_content: str,
     tool_call_id: str,
+    tool_name: str,
     arguments: dict[str, Any],
     spec: FlowDraftSpecCore,
     assumptions: list[str],
@@ -150,6 +162,7 @@ async def store_plan_and_update_conversation(
         conversation=conversation,
         assistant_content=assistant_content,
         tool_call_id=tool_call_id,
+        tool_name=tool_name,
         arguments=arguments,
         spec=spec,
         assumptions=assumptions,
@@ -212,6 +225,7 @@ def append_plan_messages(
     conversation: list[ConversationMessage],
     assistant_content: str,
     tool_call_id: str,
+    tool_name: str,
     arguments: dict[str, Any],
     spec: FlowDraftSpecCore,
     assumptions: list[str],
@@ -231,7 +245,7 @@ def append_plan_messages(
             content=assistant_content,
             tool_calls=[{
                 "id": tool_call_id,
-                "name": PROPOSE_FLOW_TOOL_NAME,
+                "name": tool_name,
                 "arguments": compact_arguments,
             }],
         )

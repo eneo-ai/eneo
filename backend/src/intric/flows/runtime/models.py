@@ -22,6 +22,8 @@ class RuntimeStep:
     output_contract: dict[str, Any] | None = None
     input_type: str = "text"
     input_contract: dict[str, Any] | None = None
+    plan_step_ref: str | None = None
+    existing_step_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,8 @@ class StepExecutionOutput:
     transcription_metadata: dict[str, Any] | None = None
     runtime_input_metadata: dict[str, Any] | None = None
     output_payload_extensions: dict[str, Any] | None = None
+    citation_sidecar: dict[str, Any] | None = None
+    raw_completion_text: str | None = None
 
 
 @dataclass
@@ -94,6 +98,7 @@ class RunExecutionState:
     json_mode_supported: dict[str, bool]
     file_cache: dict[frozenset[UUID], list[Any]]
     step_names_by_order: dict[int, str] = field(default_factory=dict)
+    step_ref_mapping: dict[str, int] = field(default_factory=dict)
 
     @property
     def all_previous_text(self) -> str:

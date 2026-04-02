@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
@@ -13,10 +14,34 @@ from intric.flows.ai_builder.ai_builder_events import (
 from intric.flows.ai_builder.ai_builder_interaction_utils import (
     looks_like_information_request,
 )
-from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
+_EXTRA_RETRY_FAILURE_KINDS = frozenset({"recoverable_parse"})
+
+
+def _invalid_tool_arguments_message(error: Exception) -> str:
+    return f"Invalid tool call arguments: {error}"
+
+
+def _build_process_tool_kwargs(
+    *,
+    process_tool_arguments: Callable[..., Awaitable[Any]],
+    process_tool_kwargs: dict[str, Any] | None,
+    flow: Any,
+) -> dict[str, Any]:
+    kwargs = dict(process_tool_kwargs or {})
+    if "flow" in kwargs:
+        return kwargs
+
+    try:
+        signature = inspect.signature(process_tool_arguments)
+    except (TypeError, ValueError):
+        return kwargs
+
+    if "flow" in signature.parameters:
+        kwargs["flow"] = flow
+    return kwargs
 
 
 def build_tool_retry_messages(
@@ -62,6 +87,54 @@ def append_retry_feedback_turn(
     )
 
 
+def _retry_budget_available(
+    *,
+    attempts_remaining: int,
+    failure_kind: str | None,
+    extra_retry_available: bool,
+) -> bool:
+    return attempts_remaining > 0 or (
+        failure_kind in _EXTRA_RETRY_FAILURE_KINDS and extra_retry_available
+    )
+
+
+def _consume_retry_budget(
+    *,
+    attempts_remaining: int,
+    failure_kind: str | None,
+    extra_retry_available: bool,
+) -> tuple[int, bool]:
+    if attempts_remaining > 0:
+        return attempts_remaining - 1, extra_retry_available
+    if failure_kind in _EXTRA_RETRY_FAILURE_KINDS and extra_retry_available:
+        return attempts_remaining, False
+    return attempts_remaining, extra_retry_available
+
+
+def _build_retry_feedback(
+    *,
+    target_tool_name: str,
+    feedback: str,
+    failure_kind: str | None,
+) -> str:
+    suffix = (
+        f"Keep valid parts and fix only the listed issues. Return one complete {target_tool_name} call."
+    )
+    if failure_kind in _EXTRA_RETRY_FAILURE_KINDS:
+        suffix = (
+            "Arrays like steps[] and form_fields[] must contain only complete JSON objects. "
+            "Do not include comments, placeholders, status notes, or quoted fragments inside arrays. "
+            f"Rebuild any broken array entries as normal JSON objects and return one complete {target_tool_name} call."
+        )
+    if target_tool_name == "create_flow":
+        suffix = (
+            "Every steps[] item must be one complete create step object with at least name, instructions, input_source, and output_type. "
+            "Structured field definitions belong only in output_fields on a JSON step, and runtime form fields belong only in form_fields[]. "
+            "Keep valid parts and fix only the listed issues. Return one complete create_flow call."
+        )
+    return f"CORRECTION STILL INVALID: {feedback}\n{suffix}"
+
+
 async def request_self_correction(
     *,
     session_id: UUID,
@@ -79,9 +152,12 @@ async def request_self_correction(
     self_correction_temperature: float,
     max_self_correction_retries: int,
     call_repair_completion: Callable[..., Awaitable[Any]],
-    process_proposal_arguments: Callable[..., Awaitable[Any]],
+    process_tool_arguments: Callable[..., Awaitable[Any]],
+    target_tool_name: str,
+    forced_tool_prompt: str,
     build_self_correction_error_event: Callable[..., dict[str, str]],
-    retry_forced_proposal_after_text: Callable[..., Awaitable[dict[str, str] | None]],
+    retry_forced_tool_after_text: Callable[..., Awaitable[dict[str, str] | None]],
+    process_tool_kwargs: dict[str, Any] | None = None,
     flow: Any = None,
 ) -> AsyncGenerator[dict[str, str], None]:
     yield build_status_event("repairing")
@@ -94,6 +170,7 @@ async def request_self_correction(
     )
 
     attempts_remaining = max_self_correction_retries
+    extra_retry_available = True
     while True:
         try:
             response = await call_repair_completion(
@@ -115,71 +192,97 @@ async def request_self_correction(
 
         choice = response.choices[0]
         message = choice.message
+        assistant_text = _safe_assistant_text(getattr(message, "content", None))
 
         if hasattr(message, "tool_calls") and message.tool_calls:
-            retry_feedback: tuple[Any, str] | None = None
+            retry_feedback: tuple[Any, str, str | None] | None = None
             for correction_tool_call in message.tool_calls:
-                if correction_tool_call.function.name != PROPOSE_FLOW_TOOL_NAME:
+                if correction_tool_call.function.name != target_tool_name:
                     continue
                 try:
                     arguments = json.loads(correction_tool_call.function.arguments)
                 except Exception as error:
-                    if attempts_remaining > 0:
+                    if _retry_budget_available(
+                        attempts_remaining=attempts_remaining,
+                        failure_kind="parse",
+                        extra_retry_available=extra_retry_available,
+                    ):
                         retry_feedback = (
                             correction_tool_call,
-                            f"CORRECTION STILL INVALID: Invalid flow specification: {error}. Keep valid parts, but return one complete propose_flow draft that fixes the listed issues.",
+                            _build_retry_feedback(
+                                target_tool_name=target_tool_name,
+                                feedback=_invalid_tool_arguments_message(error),
+                                failure_kind="parse",
+                            ),
+                            "parse",
                         )
                         break
                     yield build_self_correction_error_event(
-                        feedback=f"Invalid flow specification: {error}",
+                        feedback=_invalid_tool_arguments_message(error),
                         failure_kind="parse",
                     )
                     return
 
-                proposal_result = await process_proposal_arguments(
+                invocation_kwargs = _build_process_tool_kwargs(
+                    process_tool_arguments=process_tool_arguments,
+                    process_tool_kwargs=process_tool_kwargs,
+                    flow=flow,
+                )
+                tool_result = await process_tool_arguments(
                     session_id=session_id,
                     conversation=conversation,
                     new_messages_start=new_messages_start,
                     arguments=arguments,
-                    assistant_content=message.content or "Här är mitt korrigerade förslag:",
+                    assistant_content=assistant_text or "Här är mitt korrigerade förslag:",
                     tool_call_id=correction_tool_call.id,
                     available_model_refs=available_model_refs,
                     available_kb_refs=available_kb_refs,
-                    flow=flow,
+                    **invocation_kwargs,
                 )
-                if proposal_result.plan_event is None:
-                    if attempts_remaining > 0:
+                if tool_result.event is None:
+                    if _retry_budget_available(
+                        attempts_remaining=attempts_remaining,
+                        failure_kind=tool_result.failure_kind,
+                        extra_retry_available=extra_retry_available,
+                    ):
                         retry_feedback = (
                             correction_tool_call,
-                            "CORRECTION STILL INVALID: "
-                            f"{proposal_result.feedback or 'Invalid flow specification.'}\n"
-                            "Keep valid parts and fix only the listed issues. Return one complete propose_flow draft.",
+                            _build_retry_feedback(
+                                target_tool_name=target_tool_name,
+                                feedback=tool_result.feedback or "Invalid tool payload.",
+                                failure_kind=tool_result.failure_kind,
+                            ),
+                            tool_result.failure_kind,
                         )
                         break
                     yield build_self_correction_error_event(
-                        feedback=proposal_result.feedback,
-                        failure_kind=proposal_result.failure_kind,
+                        feedback=tool_result.feedback,
+                        failure_kind=tool_result.failure_kind,
                     )
                     return
 
-                yield proposal_result.plan_event
+                yield tool_result.event
                 return
 
             if retry_feedback is not None:
-                attempts_remaining -= 1
-                correction_tool_call, feedback = retry_feedback
+                correction_tool_call, feedback, failure_kind = retry_feedback
+                attempts_remaining, extra_retry_available = _consume_retry_budget(
+                    attempts_remaining=attempts_remaining,
+                    failure_kind=failure_kind,
+                    extra_retry_available=extra_retry_available,
+                )
                 correction_messages = append_retry_feedback_turn(
                     llm_messages=correction_messages,
                     tool_call=correction_tool_call,
-                    assistant_content=message.content,
+                    assistant_content=assistant_text,
                     tool_feedback=feedback,
                 )
                 continue
 
-        if message.content:
-            forced_plan = await retry_forced_proposal_after_text(
+        if assistant_text:
+            forced_event = await retry_forced_tool_after_text(
                 correction_messages=correction_messages,
-                assistant_text=message.content,
+                assistant_text=assistant_text,
                 tool_schemas=tool_schemas,
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
@@ -189,17 +292,28 @@ async def request_self_correction(
                 available_model_refs=available_model_refs,
                 available_kb_refs=available_kb_refs,
                 max_output_tokens=max_output_tokens,
+                target_tool_name=target_tool_name,
+                forced_tool_prompt=forced_tool_prompt,
+                process_tool_arguments=process_tool_arguments,
+                process_tool_kwargs=process_tool_kwargs,
                 flow=flow,
             )
-            if forced_plan is not None:
-                yield forced_plan
+            if forced_event is not None:
+                yield forced_event
                 return
 
-            yield build_text_event(message.content)
+            yield build_text_event(assistant_text)
+            return
+
+        yield build_error_event(
+            message="The AI planner failed. Please try again.",
+            code="planner_invalid_repair_response",
+            phase="self_correction",
+        )
         return
 
 
-async def retry_forced_proposal_after_text(
+async def retry_forced_tool_after_text(
     *,
     correction_messages: list[dict[str, Any]],
     assistant_text: str,
@@ -212,9 +326,12 @@ async def retry_forced_proposal_after_text(
     available_model_refs: set[str] | None,
     available_kb_refs: set[str] | None,
     max_output_tokens: int,
+    target_tool_name: str,
+    forced_tool_prompt: str,
     forced_proposal_temperature: float,
     call_repair_completion: Callable[..., Awaitable[Any]],
-    process_proposal_arguments: Callable[..., Awaitable[Any]],
+    process_tool_arguments: Callable[..., Awaitable[Any]],
+    process_tool_kwargs: dict[str, Any] | None = None,
     flow: Any = None,
 ) -> dict[str, str] | None:
     if looks_like_information_request(assistant_text):
@@ -224,11 +341,7 @@ async def retry_forced_proposal_after_text(
         {"role": "assistant", "content": assistant_text},
         {
             "role": "user",
-            "content": (
-                "Your previous reply was prose only. "
-                "Now call propose_flow with a complete flow draft that includes steps. "
-                "Do not answer with prose."
-            ),
+            "content": forced_tool_prompt,
         },
     ]
 
@@ -242,7 +355,7 @@ async def retry_forced_proposal_after_text(
             temperature=forced_proposal_temperature,
             tool_choice={
                 "type": "function",
-                "function": {"name": PROPOSE_FLOW_TOOL_NAME},
+                "function": {"name": target_tool_name},
             },
         )
     except Exception as error:
@@ -255,7 +368,7 @@ async def retry_forced_proposal_after_text(
         return None
 
     for tool_call in message.tool_calls:
-        if tool_call.function.name != PROPOSE_FLOW_TOOL_NAME:
+        if tool_call.function.name != target_tool_name:
             continue
         try:
             arguments = json.loads(tool_call.function.arguments)
@@ -263,7 +376,12 @@ async def retry_forced_proposal_after_text(
             logger.warning("Forced proposal retry returned invalid payload: %s", error)
             return None
 
-        proposal_result = await process_proposal_arguments(
+        invocation_kwargs = _build_process_tool_kwargs(
+            process_tool_arguments=process_tool_arguments,
+            process_tool_kwargs=process_tool_kwargs,
+            flow=flow,
+        )
+        tool_result = await process_tool_arguments(
             session_id=session_id,
             conversation=conversation,
             new_messages_start=new_messages_start,
@@ -272,16 +390,20 @@ async def retry_forced_proposal_after_text(
             tool_call_id=tool_call.id,
             available_model_refs=available_model_refs,
             available_kb_refs=available_kb_refs,
-            flow=flow,
+            **invocation_kwargs,
         )
-        if proposal_result.plan_event is None:
+        if tool_result.event is None:
             logger.warning(
-                "Forced proposal retry returned %s issue: %s",
-                proposal_result.failure_kind or "unknown",
-                proposal_result.feedback or "missing feedback",
+                "Forced tool retry returned %s issue: %s",
+                tool_result.failure_kind or "unknown",
+                tool_result.feedback or "missing feedback",
             )
             return None
 
-        return proposal_result.plan_event
+        return tool_result.event
 
     return None
+
+
+def _safe_assistant_text(value: Any) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None

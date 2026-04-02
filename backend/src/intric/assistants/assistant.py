@@ -308,6 +308,7 @@ class Assistant(Entity):
         extended_logging: bool = False,
         prompt_override: str | None = None,
         prompt: str | None = None,
+        version: int = 1,
     ):
         if self.completion_model is None:
             raise NoModelSelectedException()
@@ -329,6 +330,7 @@ class Assistant(Entity):
             stream=stream,
             extended_logging=extended_logging,
             model_kwargs=model_kwargs,
+            version=version,
         )
 
     async def ask(

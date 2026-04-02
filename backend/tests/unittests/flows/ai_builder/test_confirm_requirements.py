@@ -11,6 +11,7 @@ from intric.flows.ai_builder.ai_builder_events import (
 from intric.flows.ai_builder.ai_builder_models import RequirementsSummaryPayload
 from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
+    CREATE_FLOW_TOOL_NAME,
     build_all_tool_schemas,
     build_confirm_requirements_tool_schema,
     parse_confirm_requirements,
@@ -55,6 +56,7 @@ class TestBuildAllToolSchemasIncludesConfirmRequirements:
         schemas = build_all_tool_schemas()
         names = {s["function"]["name"] for s in schemas}
         assert CONFIRM_REQUIREMENTS_TOOL_NAME in names
+        assert CREATE_FLOW_TOOL_NAME in names
 
     def test_returns_three_tools(self) -> None:
         schemas = build_all_tool_schemas()

@@ -22,8 +22,24 @@ from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
+    InputType,
     StepSpec,
 )
+
+
+def _make_add_payload(
+    *,
+    name: str,
+    instructions: str,
+    input_source: InputSource = InputSource.PREVIOUS_STEP,
+    input_type: InputType = InputType.TEXT,
+) -> AddStepPayload:
+    return AddStepPayload(
+        name=name,
+        instructions=instructions,
+        input_source=input_source,
+        input_type=input_type,
+    )
 
 
 class TestStepEditOperation:
@@ -31,9 +47,9 @@ class TestStepEditOperation:
         op = StepEditOperation(
             op="add",
             placement=StepPlacement(position="before", anchor_ref="existing_step_1"),
-            add_payload=AddStepPayload(
+            add_payload=_make_add_payload(
                 name="Transcription",
-                assistant_spec=AssistantSpec(instructions="Transcribe audio."),
+                instructions="Transcribe audio.",
                 input_source=InputSource.FLOW_INPUT,
             ),
         )
@@ -74,9 +90,9 @@ class TestFlowEditDraft:
                 StepEditOperation(
                     op="add",
                     placement=StepPlacement(position="append"),
-                    add_payload=AddStepPayload(
+                    add_payload=_make_add_payload(
                         name="Summary",
-                        assistant_spec=AssistantSpec(instructions="Summarize."),
+                        instructions="Summarize.",
                     ),
                 )
             ],
@@ -95,9 +111,9 @@ class TestFlowEditDraft:
                 StepEditOperation(
                     op="add",
                     placement=StepPlacement(position="before", anchor_ref="existing_step_1"),
-                    add_payload=AddStepPayload(
+                    add_payload=_make_add_payload(
                         name="Transcription",
-                        assistant_spec=AssistantSpec(instructions="Transcribe."),
+                        instructions="Transcribe.",
                         input_source=InputSource.FLOW_INPUT,
                     ),
                 ),
@@ -171,9 +187,9 @@ class TestCompiledEditResult:
                 StepEditOperation(
                     op="add",
                     placement=StepPlacement(position="append"),
-                    add_payload=AddStepPayload(
+                    add_payload=_make_add_payload(
                         name="Step A",
-                        assistant_spec=AssistantSpec(instructions="Do."),
+                        instructions="Do.",
                     ),
                 ),
             ],

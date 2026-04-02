@@ -8,6 +8,12 @@ from typing import Any, Awaitable, Protocol
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import Completion
+from intric.flows.citation_sidecar import (
+    CITATION_MODE_INLINE_INREF_SIDECAR,
+    build_citation_sidecar,
+    resolve_citation_mode,
+    strip_inline_reference_tags,
+)
 from intric.flows.domain.flow import FlowRun, FlowStepResultStatus
 from intric.flows.output_modes import transcribe_only_violation
 from intric.flows.runtime.models import (
@@ -16,6 +22,10 @@ from intric.flows.runtime.models import (
     StepDiagnostic,
     StepExecutionOutput,
     StepInputValue,
+)
+from intric.flows.runtime.inherited_citations import (
+    build_inherited_citation_prompt_appendix,
+    collect_inherited_citation_context,
 )
 from intric.flows.runtime.step_input_validation import (
     validate_input_contract,
@@ -355,6 +365,85 @@ def requested_model_name(assistant: Any) -> str | None:
     return model_name if isinstance(model_name, str) and model_name else None
 
 
+def citation_mode_for_step(step: RuntimeStep) -> str:
+    citation_mode = resolve_citation_mode(step.output_config)
+    if citation_mode != CITATION_MODE_INLINE_INREF_SIDECAR:
+        return citation_mode
+    if step.output_type != "text":
+        return "off"
+    if step.output_mode in {"template_fill", "transcribe_only"}:
+        return "off"
+    return citation_mode
+
+
+def build_runtime_citation_sidecar(
+    *,
+    raw_completion_text: str,
+    rag_metadata: dict[str, Any] | None,
+    citation_mode: str,
+    inherited_context: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    if citation_mode != CITATION_MODE_INLINE_INREF_SIDECAR:
+        return None
+    references = rag_metadata.get("references") if isinstance(rag_metadata, dict) else None
+    prompt_context = rag_metadata.get("prompt_context") if isinstance(rag_metadata, dict) else None
+    included_source_ids = (
+        prompt_context.get("included_source_ids")
+        if isinstance(prompt_context, dict)
+        else []
+    )
+    inherited_references = (
+        inherited_context.get("available_sources")
+        if isinstance(inherited_context, dict)
+        else []
+    )
+    inherited_source_ids = (
+        inherited_context.get("available_source_ids")
+        if isinstance(inherited_context, dict)
+        else []
+    )
+    return build_citation_sidecar(
+        raw_completion_text,
+        references=references if isinstance(references, list) else None,
+        included_source_ids=included_source_ids if isinstance(included_source_ids, list) else None,
+        inherited_references=inherited_references if isinstance(inherited_references, list) else None,
+        inherited_source_ids=inherited_source_ids if isinstance(inherited_source_ids, list) else None,
+        citation_mode_requested=True,
+        upstream_grounded_step_orders=(
+            inherited_context.get("upstream_step_orders")
+            if isinstance(inherited_context, dict)
+            else None
+        ),
+        upstream_grounded_step_labels=(
+            inherited_context.get("upstream_step_labels")
+            if isinstance(inherited_context, dict)
+            else None
+        ),
+        raw_completion_text=raw_completion_text,
+    )
+
+
+def apply_citation_tracking(
+    rag_metadata: dict[str, Any] | None,
+    *,
+    citation_mode: str,
+) -> dict[str, Any] | None:
+    if citation_mode != CITATION_MODE_INLINE_INREF_SIDECAR or not isinstance(rag_metadata, dict):
+        return rag_metadata
+    payload = dict(rag_metadata)
+    tracking = payload.get("tracking")
+    if not isinstance(tracking, dict):
+        tracking = {}
+    tracking = dict(tracking)
+    tracking["citation_tracked"] = True
+    tracking["note"] = (
+        "References record retrieved candidates, exact prompt inclusion, and explicit inline "
+        "citations when citation mode is enabled. Material influence is not currently tracked."
+    )
+    payload["tracking"] = tracking
+    return payload
+
+
 def infer_finish_reason(
     *,
     completion: Completion | str | Any,
@@ -572,6 +661,12 @@ async def complete_step_execution(
     deps: StepExecutionRuntimeDeps,
 ) -> StepExecutionOutput:
     diagnostics = list(prepared.diagnostics)
+    citation_mode = citation_mode_for_step(step)
+    inherited_citation_context = (
+        collect_inherited_citation_context(step=step, state=state)
+        if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR
+        else None
+    )
     if step.output_mode == "transcribe_only":
         mode_error = transcribe_only_violation(
             step_order=step.step_order,
@@ -666,6 +761,17 @@ async def complete_step_execution(
 
     if deps.logger is not None:
         deps.logger.info("flow_executor.llm_call run_id=%s step_order=%d", run.id, step.step_order)
+    prompt_override = prepared.effective_prompt
+    if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR:
+        inherited_appendix = build_inherited_citation_prompt_appendix(
+            inherited_citation_context or {}
+        )
+        if isinstance(inherited_appendix, str) and inherited_appendix.strip():
+            prompt_override = (
+                f"{prepared.effective_prompt}\n\n{inherited_appendix}"
+                if prepared.effective_prompt.strip()
+                else inherited_appendix
+            )
     try:
         response = await prepared.assistant.get_response(
             question=prepared.step_input.text,
@@ -674,7 +780,8 @@ async def complete_step_execution(
             files=prepared.llm_files,
             info_blob_chunks=info_blob_chunks,
             stream=False,
-            prompt_override=prepared.effective_prompt,
+            prompt_override=prompt_override,
+            version=2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1,
         )
     except Exception as model_exc:
         if step.output_type == "json" and deps.is_json_mode_rejection(model_exc):
@@ -686,7 +793,8 @@ async def complete_step_execution(
                 files=prepared.llm_files,
                 info_blob_chunks=info_blob_chunks,
                 stream=False,
-                prompt_override=prepared.effective_prompt,
+                prompt_override=prompt_override,
+                version=2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1,
             )
         else:
             raise
@@ -701,18 +809,35 @@ async def complete_step_execution(
 
     completion = response.completion
     if isinstance(completion, str):
-        full_text = completion
+        raw_full_text = completion
         tool_calls = None
         reasoning_tokens = 0
     else:
         completion = completion if isinstance(completion, Completion) else Completion(text=str(completion))
-        full_text = completion.text or ""
+        raw_full_text = completion.text or ""
         tool_calls = (
             [tc.__dict__ for tc in completion.tool_calls_metadata]
             if completion.tool_calls_metadata
             else None
         )
         reasoning_tokens = completion.reasoning_token_count or 0
+
+    rag_metadata = apply_prompt_context_trace(
+        rag_metadata,
+        knowledge_trace=getattr(response, "knowledge_trace", None),
+    )
+    rag_metadata = apply_citation_tracking(rag_metadata, citation_mode=citation_mode)
+    citation_sidecar = build_runtime_citation_sidecar(
+        raw_completion_text=raw_full_text,
+        rag_metadata=rag_metadata,
+        citation_mode=citation_mode,
+        inherited_context=inherited_citation_context,
+    )
+    full_text = (
+        strip_inline_reference_tags(raw_full_text)
+        if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR
+        else raw_full_text
+    )
 
     if deps.logger is not None:
         deps.logger.info(
@@ -731,7 +856,7 @@ async def complete_step_execution(
         raise deps.attach_typed_failure_context(
             exc,
             input_payload_for_result=prepared.input_payload_for_result,
-            effective_prompt=prepared.effective_prompt,
+            effective_prompt=prompt_override,
         ) from exc
 
     if deps.logger is not None:
@@ -749,10 +874,6 @@ async def complete_step_execution(
         step=step,
     )
     response_model_info = getattr(response, "model", None)
-    rag_metadata = apply_prompt_context_trace(
-        rag_metadata,
-        knowledge_trace=getattr(response, "knowledge_trace", None),
-    )
     return StepExecutionOutput(
         input_text=prepared.step_input.text,
         source_text=prepared.step_input.source_text,
@@ -764,8 +885,8 @@ async def complete_step_execution(
         generated_file_ids=generated_file_ids,
         tool_calls_metadata=tool_calls,
         num_tokens_input=response.total_token_count,
-        num_tokens_output=deps.count_tokens(full_text) + reasoning_tokens,
-        effective_prompt=prepared.effective_prompt,
+        num_tokens_output=deps.count_tokens(raw_full_text) + reasoning_tokens,
+        effective_prompt=prompt_override,
         model_parameters_json=deps.effective_model_parameters(prepared.assistant),
         requested_model=requested_model_name(prepared.assistant),
         response_model=getattr(response_model_info, "name", None),
@@ -779,4 +900,10 @@ async def complete_step_execution(
         rag_metadata=rag_metadata,
         transcription_metadata=prepared.step_input.transcription_metadata,
         runtime_input_metadata=prepared.step_input.runtime_input_metadata,
+        citation_sidecar=citation_sidecar,
+        raw_completion_text=(
+            raw_full_text
+            if citation_sidecar is not None and bool(citation_sidecar.get("citation_observed"))
+            else None
+        ),
     )

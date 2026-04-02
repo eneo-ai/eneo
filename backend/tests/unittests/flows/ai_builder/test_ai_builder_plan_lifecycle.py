@@ -45,6 +45,25 @@ def _make_spec(*, input_type: InputType = InputType.TEXT) -> FlowDraftSpecCore:
     )
 
 
+def _make_grounded_spec(*, model_ref: str | None, knowledge_refs: list[str]) -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(
+        flow_name="Flow",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Step A",
+                assistant_spec=AssistantSpec(
+                    instructions="Do something.",
+                    model_ref=model_ref,
+                    knowledge_refs=knowledge_refs,
+                ),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+            )
+        ],
+    )
+
+
 def _make_plan(
     *,
     session_id,
@@ -257,3 +276,104 @@ class TestAIBuilderPlanLifecycle:
             status=SessionStatus.AWAITING_APPROVAL,
         )
         flow_service.list_flows.assert_not_awaited()
+
+    @pytest.mark.anyio
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
+    async def test_apply_plan_canonicalizes_unique_model_and_kb_aliases_before_compile(
+        self,
+        mock_compile,
+        mock_execute,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+        space_service = AsyncMock()
+
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=_make_grounded_spec(
+                model_ref="gpt-5.4-nano",
+                knowledge_refs=["socio"],
+            ),
+        )
+        space = MagicMock()
+        space.get_default_transcription_model.return_value = None
+        space.completion_models = [
+            SimpleNamespace(id=uuid4(), name="gpt-5.4-nano", provider_type="openai")
+        ]
+        space.collections = [
+            SimpleNamespace(id=uuid4(), name="socio", description="Sociologi")
+        ]
+        space_service.get_space.return_value = space
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+        mock_compile.return_value = MagicMock()
+        mock_execute.return_value = SimpleNamespace(
+            flow_id=uuid4(),
+            flow_name="Flow",
+            steps_created=1,
+            steps_updated=0,
+            steps_removed=0,
+        )
+
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+            space_service=space_service,
+        )
+        await lifecycle.apply_plan(plan_id=plan.id)
+
+        compiled_spec = mock_compile.call_args.args[0]
+        assistant_spec = compiled_spec.steps[0].assistant_spec
+        assert assistant_spec.model_ref == str(space.completion_models[0].id)
+        assert assistant_spec.knowledge_refs == [str(space.collections[0].id)]
+
+    @pytest.mark.anyio
+    async def test_apply_plan_rejects_ambiguous_kb_alias_before_compile(self) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+        space_service = AsyncMock()
+
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=_make_grounded_spec(model_ref=None, knowledge_refs=["socio"]),
+        )
+        space = MagicMock()
+        space.get_default_transcription_model.return_value = None
+        space.completion_models = []
+        space.collections = [
+            SimpleNamespace(id=uuid4(), name="Socio", description="A"),
+            SimpleNamespace(id=uuid4(), name="socio", description="B"),
+        ]
+        space_service.get_space.return_value = space
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+            space_service=space_service,
+        )
+
+        with pytest.raises(BadRequestException, match="Ambiguous knowledge base reference 'socio'"):
+            await lifecycle.apply_plan(plan_id=plan.id)
+
+        flow_service.create_flow.assert_not_awaited()

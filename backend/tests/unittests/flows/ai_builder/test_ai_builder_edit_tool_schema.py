@@ -59,7 +59,7 @@ class TestBuildEditFlowToolSchema:
         schema = build_edit_flow_tool_schema([_make_step(1)], available_models=models)
 
         add_payload = schema["function"]["parameters"]["properties"]["operations"]["items"]["properties"]["add_payload"]
-        model_ref = add_payload["properties"]["assistant_spec"]["properties"]["model_ref"]
+        model_ref = add_payload["properties"]["model_ref"]
         assert "enum" in model_ref
         assert "model_a" in model_ref["enum"]
 
@@ -68,7 +68,7 @@ class TestBuildEditFlowToolSchema:
         schema = build_edit_flow_tool_schema([_make_step(1)], available_models=models)
 
         add_payload = schema["function"]["parameters"]["properties"]["operations"]["items"]["properties"]["add_payload"]
-        model_ref = add_payload["properties"]["assistant_spec"]["properties"]["model_ref"]
+        model_ref = add_payload["properties"]["model_ref"]
         assert "enum" not in model_ref
 
     def test_op_enum_is_add_modify_remove(self):
@@ -76,6 +76,22 @@ class TestBuildEditFlowToolSchema:
         ops_schema = schema["function"]["parameters"]["properties"]["operations"]
         op_field = ops_schema["items"]["properties"]["op"]
         assert op_field["enum"] == ["add", "modify", "remove"]
+
+    def test_add_payload_uses_shared_new_step_authoring_shape(self):
+        schema = build_edit_flow_tool_schema([_make_step(1)])
+
+        add_payload = schema["function"]["parameters"]["properties"]["operations"]["items"][
+            "properties"
+        ]["add_payload"]
+
+        assert "assistant_spec" not in add_payload["properties"]
+        assert "output_mode" not in add_payload["properties"]
+        assert "input_bindings" not in add_payload["properties"]
+        assert "output_contract" not in add_payload["properties"]
+        assert "output_config" not in add_payload["properties"]
+        assert "instructions" in add_payload["properties"]
+        assert "document_delivery_mode" in add_payload["properties"]
+        assert "output_fields" in add_payload["properties"]
 
 
 class TestBuildEditModeToolSchemas:

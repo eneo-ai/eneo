@@ -59,15 +59,24 @@ describe("hasAdvancedSettingsActive", () => {
   });
 
   test("returns true when input_contract is set", () => {
-    expect(
-      hasAdvancedSettingsActive(makeStep({ input_contract: { type: "object" } }), false)
-    ).toBe(true);
+    expect(hasAdvancedSettingsActive(makeStep({ input_contract: { type: "object" } }), false)).toBe(
+      true
+    );
   });
 
   test("returns true when output_contract is set", () => {
     expect(
       hasAdvancedSettingsActive(makeStep({ output_contract: { type: "object" } }), false)
     ).toBe(true);
+  });
+
+  test("returns false when output_config only contains citation mode", () => {
+    expect(
+      hasAdvancedSettingsActive(
+        makeStep({ output_config: { citation_mode: "inline_inref_sidecar" } }),
+        false
+      )
+    ).toBe(false);
   });
 
   test("returns true when hasInputTemplateOverride is true", () => {

@@ -99,6 +99,13 @@ def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
                 user_description=str(item.get("user_description")).strip()
                 if isinstance(item.get("user_description"), str)
                 else None,
+                plan_step_ref=str(item.get("plan_step_ref")).strip()
+                if isinstance(item.get("plan_step_ref"), str) and str(item.get("plan_step_ref")).strip()
+                else None,
+                existing_step_ref=str(item.get("existing_step_ref")).strip()
+                if isinstance(item.get("existing_step_ref"), str)
+                and str(item.get("existing_step_ref")).strip()
+                else None,
                 input_source=input_source,
                 input_bindings=item.get("input_bindings"),
                 input_config=raw_input_config,

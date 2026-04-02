@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from intric.flows.source_display import (
+    format_source_container_label,
+    format_source_display_name,
+)
+from intric.flows.runtime.rag_reference_quality import choose_display_chunk
+
 
 def build_chunk_snippet(text: str, *, max_chars: int = 200) -> str:
     normalized = text.strip()
@@ -37,9 +43,11 @@ def build_rag_references(
                 "id": source_id,
                 "id_short": source_id[:8],
                 "title": reference_title,
+                "source_title_raw": reference_title,
                 "hit_count": 0,
                 "best_score": 0.0,
                 "chunks": [],
+                "_display_candidates": [],
                 "usage_state": "retrieved_candidate",
             }
             _attach_source_metadata(entry, source_metadata)
@@ -53,11 +61,22 @@ def build_rag_references(
             continue
 
         chunk_text = str(getattr(chunk, "text", "") or "")
+        chunk_payload = {
+            "chunk_no": int(getattr(chunk, "chunk_no", 0) or 0),
+            "score": round(score_value, 4),
+            "snippet": build_chunk_snippet(chunk_text, max_chars=snippet_chars),
+            "text": chunk_text,
+        }
+        entry["_display_candidates"].append(chunk_payload)
+
+        if len(entry["chunks"]) >= max_chunks_per_source:
+            continue
+
         entry["chunks"].append(
             {
-                "chunk_no": int(getattr(chunk, "chunk_no", 0) or 0),
-                "score": round(score_value, 4),
-                "snippet": build_chunk_snippet(chunk_text, max_chars=snippet_chars),
+                "chunk_no": chunk_payload["chunk_no"],
+                "score": chunk_payload["score"],
+                "snippet": chunk_payload["snippet"],
             }
         )
 
@@ -77,6 +96,9 @@ def build_rag_references(
         reference["chunks"].sort(
             key=lambda chunk: (-float(chunk["score"]), int(chunk["chunk_no"])),
         )
+        display_chunk = choose_display_chunk(reference.pop("_display_candidates", []))
+        if display_chunk is not None:
+            reference.update(display_chunk)
 
     return references, references_truncated
 
@@ -109,6 +131,8 @@ def _attach_source_metadata(
     source_title = _truncate_title(source_metadata.get("source_title"))
     if source_title:
         entry["source_title"] = source_title
+        entry["source_title_raw"] = source_title
+        entry["source_display_name"] = format_source_display_name(source_title)
         entry["title"] = source_title
     for key in (
         "source_url",
@@ -120,3 +144,6 @@ def _attach_source_metadata(
         value = source_metadata.get(key)
         if isinstance(value, str) and value.strip():
             entry[key] = value.strip()
+            if key == "source_container_name":
+                entry["source_container_name_raw"] = value.strip()
+                entry["source_container_label"] = format_source_container_label(entry)

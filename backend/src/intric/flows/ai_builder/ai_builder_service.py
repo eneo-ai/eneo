@@ -138,13 +138,14 @@ class AIBuilderService:
                 return existing_session
 
         if force_new:
-            await self.repo.cancel_matching_active_sessions(
+            cancelled_session_ids = await self.repo.cancel_matching_active_sessions(
                 tenant_id=self.user.tenant_id,
                 actor_user_id=self.user.id,
                 space_id=space_id,
                 target_kind=target_kind,
                 flow_id=flow_id,
             )
+            await self._supersede_cancelled_session_plans(cancelled_session_ids)
 
         return await self.repo.create_session(
             tenant_id=self.user.tenant_id,
@@ -153,6 +154,22 @@ class AIBuilderService:
             target_kind=target_kind,
             flow_id=flow_id,
         )
+
+    async def _supersede_cancelled_session_plans(
+        self,
+        cancelled_session_ids: object,
+    ) -> None:
+        """Supersede actionable plans from sessions replaced by a fresh start."""
+
+        if not isinstance(cancelled_session_ids, list | tuple | set):
+            return
+
+        for session_id in cancelled_session_ids:
+            if isinstance(session_id, UUID):
+                await self.repo.supersede_existing_plans(
+                    session_id=session_id,
+                    tenant_id=self.user.tenant_id,
+                )
 
     async def get_session(self, session_id: UUID) -> BuilderSession:
         return await self.repo.get_session(
@@ -310,6 +327,7 @@ class AIBuilderService:
         session_id: UUID,
         message: str,
         question_answer: dict[str, Any] | None = None,
+        ui_language: str | None = None,
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
         available_models: list[dict[str, Any]] | None = None,
@@ -325,6 +343,7 @@ class AIBuilderService:
             session_id=session_id,
             message=message,
             question_answer=question_answer,
+            ui_language=ui_language,
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
             available_models=available_models,

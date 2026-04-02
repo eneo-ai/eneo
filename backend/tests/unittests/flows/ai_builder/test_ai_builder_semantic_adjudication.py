@@ -148,3 +148,23 @@ def test_should_run_semantic_adjudication_requires_mvs_and_low_confidence_candid
             ),
         )
     ) is False
+
+
+def test_should_not_run_semantic_adjudication_for_docx_mode_choice() -> None:
+    assert should_run_semantic_adjudication(
+        DiscoveryAnalysis(
+            issues=(),
+            mvs_met=True,
+            candidates=(
+                DiscoveryCandidate(
+                    issue_id="docx_output_mode",
+                    question_id="docx_output_mode",
+                    confidence="low",
+                    impact="architecture",
+                    assumption_safe=False,
+                    family="output",
+                    resolved_by="heuristic_assumption",
+                ),
+            ),
+        )
+    ) is False

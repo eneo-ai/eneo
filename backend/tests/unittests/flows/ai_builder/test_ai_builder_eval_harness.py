@@ -53,6 +53,21 @@ def _step(order: int, name: str, **kwargs) -> FlowStep:
     )
 
 
+def _make_add_payload(
+    *,
+    name: str,
+    instructions: str,
+    input_source: InputSource = InputSource.PREVIOUS_STEP,
+    input_type: InputType = InputType.TEXT,
+) -> AddStepPayload:
+    return AddStepPayload(
+        name=name,
+        instructions=instructions,
+        input_source=input_source,
+        input_type=input_type,
+    )
+
+
 class TestEvalScenarioCreateMode:
     """Deterministic create-mode scenarios."""
 
@@ -138,9 +153,9 @@ class TestEvalScenarioEditMode:
                 StepEditOperation(
                     op="add",
                     placement=StepPlacement(position="before", anchor_ref="existing_step_1"),
-                    add_payload=AddStepPayload(
+                    add_payload=_make_add_payload(
                         name="Transkribera",
-                        assistant_spec=AssistantSpec(instructions="Transkribera ljud."),
+                        instructions="Transkribera ljud.",
                         input_source=InputSource.FLOW_INPUT,
                         input_type=InputType.AUDIO,
                     ),

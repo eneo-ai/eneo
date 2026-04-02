@@ -13,8 +13,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from intric.flows.ai_builder.ai_builder_flow_name import normalize_optional_flow_name
+from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -38,22 +40,6 @@ class StepPlacement(BaseModel):
     anchor_ref: str | None = None  # Required for before/after
 
 
-class AddStepPayload(BaseModel):
-    """Full step spec for new steps. All critical fields required."""
-
-    name: str
-    assistant_spec: AssistantSpec
-    input_source: InputSource = InputSource.PREVIOUS_STEP
-    input_type: InputType = InputType.TEXT
-    output_mode: OutputMode = OutputMode.PASS_THROUGH
-    output_type: OutputType = OutputType.TEXT
-    mcp_policy: MCPPolicy = MCPPolicy.INHERIT
-    input_bindings: dict[str, Any] | None = None
-    input_contract: dict[str, Any] | None = None
-    output_contract: dict[str, Any] | None = None
-    input_config: dict[str, Any] | None = None
-
-
 class StepPatch(BaseModel):
     """Partial update for existing steps. Only include fields being changed."""
 
@@ -68,6 +54,7 @@ class StepPatch(BaseModel):
     input_contract: dict[str, Any] | None = None
     output_contract: dict[str, Any] | None = None
     input_config: dict[str, Any] | None = None
+    output_config: dict[str, Any] | None = None
 
 
 class StepEditOperation(BaseModel):
@@ -76,7 +63,7 @@ class StepEditOperation(BaseModel):
     op: Literal["add", "modify", "remove"]
     target_ref: str | None = None  # Required for modify/remove
     placement: StepPlacement | None = None  # Required for add
-    add_payload: AddStepPayload | None = None  # For add ops only
+    add_payload: NewStepDraft | None = None  # For add ops only
     patch: StepPatch | None = None  # For modify ops only
 
 
@@ -141,6 +128,24 @@ class FlowEditDraft(BaseModel):
     metadata_patch: FlowMetadataPatch | None = None
     assumptions: list[str] = Field(default_factory=list)
     plan_rationale: str = ""
+
+    @field_validator("flow_name")
+    @classmethod
+    def _normalize_flow_name(cls, value: str | None) -> str | None:
+        return normalize_optional_flow_name(value)
+
+    @field_validator("flow_description")
+    @classmethod
+    def _normalize_optional_description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("plan_rationale")
+    @classmethod
+    def _normalize_plan_rationale(cls, value: str) -> str:
+        return value.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -208,3 +213,6 @@ class CompiledEditResult(BaseModel):
     advisories: list[EditAdvisory] = Field(default_factory=list)
     risk_flags: list[str] = Field(default_factory=list)  # "type_downgrade", etc.
     confidence: EditConfidence = "ready"
+
+
+AddStepPayload = NewStepDraft

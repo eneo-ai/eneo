@@ -9,6 +9,9 @@ from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
+from intric.flows.ai_builder.ai_builder_keywords import (
+    PDF_OUTPUT_CONTEXT_MARKERS,
+)
 
 
 def normalize_signal_text(value: str) -> str:
@@ -305,6 +308,8 @@ def _infer_structured_analysis_need(text: str) -> str | None:
 
 def _infer_pdf_generation_mode(text: str) -> str | None:
     if "pdf" not in text:
+        return None
+    if not _contains_any(text, PDF_OUTPUT_CONTEXT_MARKERS):
         return None
     if _contains_any(
         text,

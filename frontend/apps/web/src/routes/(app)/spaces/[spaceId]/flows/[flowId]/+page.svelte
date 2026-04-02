@@ -24,6 +24,10 @@
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import { getFlowFormStats } from "$lib/features/flows/flowFormSchema";
   import FlowAIBuilderEditHost from "$lib/features/flows/ai-builder/FlowAIBuilderEditHost.svelte";
+  import {
+    resolveAIBuilderApplyNavigation,
+    resolveApplyFocusedStepId
+  } from "$lib/features/flows/ai-builder/flowAIBuilderApplyNavigation";
 
   export let data;
   let publishLoading = false;
@@ -144,9 +148,8 @@
     typeof (wizardMetadata as FlowWizardMetadata).transcription_model?.id === "string"
       ? (wizardMetadata as FlowWizardMetadata).transcription_model?.id
       : null;
-  let transcriptionModel:
-    | { id?: string; name?: string | null; nickname?: string | null }
-    | null = null;
+  let transcriptionModel: { id?: string; name?: string | null; nickname?: string | null } | null =
+    null;
   $: resolvedTranscriptionModel =
     ($currentSpace.transcription_models ?? []).find((model) => model.id === transcriptionModelId) ??
     null;
@@ -1046,15 +1049,22 @@
             try {
               const updated = await data.intric.flows.get({ id: detail.flow_id });
               flowEditor.setResource(updated);
-              // Select first step for immediate visibility
-              const firstStep = updated.steps?.[0];
-              if (firstStep?.id) {
-                $activeStepId = firstStep.id;
+              const navigation = resolveAIBuilderApplyNavigation({
+                stepCount: updated.steps?.length ?? 0,
+                requestedFocusStepIndex: detail.focusStepIndex
+              });
+              activeTab = navigation.activeTab;
+              builderStage = navigation.builderStage;
+              const focusedStepId = resolveApplyFocusedStepId(
+                updated.steps ?? [],
+                navigation.focusStepIndex
+              );
+              if (focusedStepId) {
+                activeStepId.set(focusedStepId);
               }
             } catch (err) {
               console.error("Failed to refresh flow after apply:", err);
             }
-            // Stay in AI builder tab — user can click "Continue editing" or switch manually
           }}
         />
       </div>

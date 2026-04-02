@@ -10,6 +10,7 @@ from intric.database.tables.ai_models_table import TranscriptionModels
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.spaces_table import SpacesCompletionModels
 from intric.database.tables.spaces_table import SpacesTranscriptionModels
+from intric.flows.ai_builder.ai_builder_create_tool_schema import CREATE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     ConversationMessage,
@@ -809,38 +810,32 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
             "output_description": "Flödet producerar en PDF med en kort sammanfattning.",
         },
     )
-    propose_flow = _make_tool_call(
+    create_flow = _make_tool_call(
         tool_call_id="call_plan",
-        name="propose_flow",
+        name=CREATE_FLOW_TOOL_NAME,
         arguments={
             "flow_name": "Ljudtranskribering till PDF",
             "flow_description": "Transkriberar uppladdat ljud och skapar en PDF-sammanfattning.",
+            "plan_rationale": "Transkribera först och generera sedan PDF-sammanfattningen.",
             "steps": [
                 {
-                    "plan_step_ref": "step_a",
                     "name": "Transkribera ljud",
-                    "assistant_spec": {
-                        "instructions": "Transkribera den uppladdade ljudfilen ordagrant till svensk text."
-                    },
+                    "instructions": "Transkribera den uppladdade ljudfilen ordagrant till svensk text.",
                     "input_source": "flow_input",
                     "input_type": "audio",
-                    "output_mode": "transcribe_only",
                     "output_type": "text",
+                    "runtime_upload": True,
+                    "runtime_required": True,
                 },
                 {
-                    "plan_step_ref": "step_b",
                     "name": "Skapa PDF-sammanfattning",
-                    "assistant_spec": {
-                        "instructions": (
-                            "Sammanfatta transkriberingen på tydlig svenska och generera "
-                            "en läsbar PDF för mänskliga mottagare."
-                        )
-                    },
+                    "instructions": (
+                        "Sammanfatta transkriberingen på tydlig svenska och generera "
+                        "en läsbar PDF för mänskliga mottagare."
+                    ),
                     "input_source": "previous_step",
                     "input_type": "text",
-                    "output_mode": "pass_through",
                     "output_type": "pdf",
-                    "input_bindings": {"question": "{{ step_a.output.text }}"},
                 },
             ],
         },
@@ -850,7 +845,7 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
         side_effect=[
             _make_llm_response(tool_calls=[initial_question]),
             _make_llm_response(tool_calls=[requirements_summary]),
-            _make_llm_response(tool_calls=[propose_flow]),
+            _make_llm_response(tool_calls=[create_flow]),
         ]
     )
 
@@ -1263,13 +1258,12 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
                     "placement": {"position": "before", "anchor_ref": "existing_step_1"},
                     "add_payload": {
                         "name": "Transkribera ljudfil",
-                        "assistant_spec": {
-                            "instructions": "Transkribera ljudfilen ordagrant till svensk text."
-                        },
+                        "instructions": "Transkribera ljudfilen ordagrant till svensk text.",
                         "input_source": "flow_input",
                         "input_type": "audio",
-                        "output_mode": "transcribe_only",
                         "output_type": "text",
+                        "runtime_upload": True,
+                        "runtime_required": True,
                     },
                 },
                 {
@@ -1351,6 +1345,7 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
     assert updated.steps[0].input_config == {
         "runtime_input": {
             "enabled": True,
+            "required": True,
             "input_format": "audio",
             "description": "Ladda upp ljudfiler som detta steg ska transkribera eller analysera.",
         }
@@ -1409,38 +1404,32 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
         },
     )
 
-    propose_flow = _make_tool_call(
+    create_flow = _make_tool_call(
         tool_call_id="call_plan",
-        name="propose_flow",
+        name=CREATE_FLOW_TOOL_NAME,
         arguments={
             "flow_name": "Ljudtranskribering till PDF",
             "flow_description": "Transkriberar uppladdat ljud och skapar en PDF-sammanfattning.",
+            "plan_rationale": "Transkribera först och generera sedan PDF-sammanfattningen.",
             "steps": [
                 {
-                    "plan_step_ref": "step_a",
                     "name": "Transkribera ljud",
-                    "assistant_spec": {
-                        "instructions": "Transkribera den uppladdade ljudfilen ordagrant till svensk text."
-                    },
+                    "instructions": "Transkribera den uppladdade ljudfilen ordagrant till svensk text.",
                     "input_source": "flow_input",
                     "input_type": "audio",
-                    "output_mode": "transcribe_only",
                     "output_type": "text",
+                    "runtime_upload": True,
+                    "runtime_required": True,
                 },
                 {
-                    "plan_step_ref": "step_b",
                     "name": "Skapa PDF-sammanfattning",
-                    "assistant_spec": {
-                        "instructions": (
-                            "Sammanfatta transkriberingen på tydlig svenska och generera "
-                            "en läsbar PDF för mänskliga mottagare."
-                        )
-                    },
+                    "instructions": (
+                        "Sammanfatta transkriberingen på tydlig svenska och generera "
+                        "en läsbar PDF för mänskliga mottagare."
+                    ),
                     "input_source": "previous_step",
                     "input_type": "text",
-                    "output_mode": "pass_through",
                     "output_type": "pdf",
-                    "input_bindings": {"question": "{{ step_a.output.text }}"},
                 },
             ],
         },
@@ -1450,7 +1439,7 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
         side_effect=[
             _make_llm_response(tool_calls=[initial_question]),
             _make_llm_response(tool_calls=[requirements_summary]),
-            _make_llm_response(tool_calls=[propose_flow]),
+            _make_llm_response(tool_calls=[create_flow]),
         ]
     )
 

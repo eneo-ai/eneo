@@ -3,6 +3,13 @@
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
+  import {
+    FLOW_CITATION_MODE_INLINE_INREF_SIDECAR,
+    FLOW_CITATION_MODE_OFF,
+    resolveFlowCitationMode,
+    supportsFlowCitationMode,
+    type FlowCitationMode
+  } from "$lib/features/flows/flowCitationMode";
   import type { FlowStep } from "@intric/intric-js";
   import { Button } from "@intric/ui";
   import { createEventDispatcher } from "svelte";
@@ -26,22 +33,23 @@
     outputModeChange: { value: string };
     webhookUrlChange: { value: string };
     httpConfigChange: { config: HttpAuthoredConfig };
+    citationModeChange: { value: FlowCitationMode };
     switchToTemplateFill: void;
   }>();
 
-  $: httpConfig = step.output_mode === "http_post" && step.output_config?.auth
-    ? (step.output_config as unknown as HttpAuthoredConfig)
-    : createDefaultHttpConfig("output", "POST");
+  $: httpConfig =
+    step.output_mode === "http_post" && step.output_config?.auth
+      ? (step.output_config as unknown as HttpAuthoredConfig)
+      : createDefaultHttpConfig("output", "POST");
+  $: citationMode = resolveFlowCitationMode(step.output_config);
+  $: supportsCitationMode = supportsFlowCitationMode(step);
 </script>
 
 <Settings.Group title={m.flow_step_output_section()}>
-  <Settings.Row
-    title={m.flow_step_output_type()}
-    description={m.flow_step_output_format_desc()}
-  >
+  <Settings.Row title={m.flow_step_output_type()} description={m.flow_step_output_format_desc()}>
     <div class="flex flex-col gap-2">
       <select
-        class="border-default bg-primary w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:border-accent-default focus-within:ring-2 focus-within:ring-accent-default/20 hover:border-stronger focus-visible:outline-none disabled:opacity-50"
+        class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
         value={step.output_type}
         disabled={isPublished}
         on:change={(e) => dispatch("outputTypeChange", { value: e.currentTarget.value })}
@@ -59,9 +67,7 @@
   </Settings.Row>
 
   {#if isAdvancedMode && step.output_type === "docx"}
-    <div
-      class="border-accent-default/20 bg-accent-dimmer/30 mb-4 rounded-xl border px-4 py-3"
-    >
+    <div class="border-accent-default/20 bg-accent-dimmer/30 mb-4 rounded-xl border px-4 py-3">
       <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div class="space-y-1">
           <p class="text-accent-stronger text-sm font-medium">
@@ -85,7 +91,7 @@
 
   <Settings.Row title={m.flow_step_output_mode()} description="">
     <select
-      class="border-default bg-primary w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:border-accent-default focus-within:ring-2 focus-within:ring-accent-default/20 hover:border-stronger focus-visible:outline-none disabled:opacity-50"
+      class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
       value={step.output_mode}
       disabled={isPublished}
       on:change={(e) => dispatch("outputModeChange", { value: e.currentTarget.value })}
@@ -96,12 +102,42 @@
     </select>
   </Settings.Row>
 
+  {#if supportsCitationMode}
+    <Settings.Row
+      title={m.flow_step_citation_mode()}
+      description={m.flow_step_citation_mode_desc()}
+    >
+      <div class="flex flex-col gap-2">
+        <select
+          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+          value={citationMode}
+          disabled={isPublished}
+          on:change={(e) =>
+            dispatch("citationModeChange", {
+              value:
+                e.currentTarget.value === FLOW_CITATION_MODE_INLINE_INREF_SIDECAR
+                  ? FLOW_CITATION_MODE_INLINE_INREF_SIDECAR
+                  : FLOW_CITATION_MODE_OFF
+            })}
+        >
+          <option value={FLOW_CITATION_MODE_OFF}>{m.flow_step_citation_mode_off()}</option>
+          <option value={FLOW_CITATION_MODE_INLINE_INREF_SIDECAR}>
+            {m.flow_step_citation_mode_inline_inref_sidecar()}
+          </option>
+        </select>
+        <p class="text-muted text-xs leading-relaxed">
+          {m.flow_step_citation_mode_help()}
+        </p>
+      </div>
+    </Settings.Row>
+  {/if}
+
   {#if step.output_mode === "http_post"}
     <!-- Legacy URL-only fallback for configs without authored format -->
     {#if step.output_config && !step.output_config.auth}
       <Settings.Row title={m.flow_step_webhook_url()} description="">
         <input
-          class="border-default bg-primary w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:border-accent-default focus-within:ring-2 focus-within:ring-accent-default/20 hover:border-stronger focus-visible:outline-none disabled:opacity-50"
+          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
           value={step.output_config?.url ?? ""}
           disabled={isPublished}
           on:input={(e) => dispatch("webhookUrlChange", { value: e.currentTarget.value })}

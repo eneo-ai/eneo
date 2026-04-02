@@ -49,10 +49,12 @@ function makeDraft(overrides: Partial<AIBuilderDraftSession> = {}): AIBuilderDra
   };
 }
 
-function makeDriver(options: {
-  fetchImpl?: ReturnType<typeof vi.fn>;
-  streamImpl?: ReturnType<typeof vi.fn>;
-} = {}) {
+function makeDriver(
+  options: {
+    fetchImpl?: ReturnType<typeof vi.fn>;
+    streamImpl?: ReturnType<typeof vi.fn>;
+  } = {}
+) {
   const fetch = options.fetchImpl ?? vi.fn();
   const stream = options.streamImpl ?? vi.fn();
 
@@ -179,7 +181,9 @@ describe("FlowAIBuilderDriver", () => {
     const fetch = vi
       .fn()
       .mockResolvedValueOnce({ sessions: [] })
-      .mockResolvedValueOnce(makeSession({ session_id: "create-1", target_kind: "create", flow_id: null }))
+      .mockResolvedValueOnce(
+        makeSession({ session_id: "create-1", target_kind: "create", flow_id: null })
+      )
       .mockResolvedValueOnce({ models: [], default_model_id: null })
       .mockResolvedValueOnce(
         makeSession({ session_id: "create-1", target_kind: "create", flow_id: null })
@@ -197,11 +201,25 @@ describe("FlowAIBuilderDriver", () => {
     const fetch = vi
       .fn()
       .mockResolvedValueOnce({ sessions: [makeDraft()] })
-      .mockResolvedValueOnce(makeSession({ session_id: "session-2", latest_plan_id: "plan-9", status: "awaiting_approval" }))
+      .mockResolvedValueOnce(
+        makeSession({
+          session_id: "session-2",
+          latest_plan_id: "plan-9",
+          status: "awaiting_approval"
+        })
+      )
       .mockResolvedValueOnce({ models: [], default_model_id: null })
-      .mockResolvedValueOnce(makeSession({ session_id: "session-2", latest_plan_id: "plan-9", status: "awaiting_approval" }))
+      .mockResolvedValueOnce(
+        makeSession({
+          session_id: "session-2",
+          latest_plan_id: "plan-9",
+          status: "awaiting_approval"
+        })
+      )
       .mockResolvedValueOnce(makePlan({ plan_id: "plan-9", status: "approved" }))
-      .mockResolvedValueOnce({ sessions: [makeDraft({ session_id: "session-2", latest_plan_id: "plan-9" })] });
+      .mockResolvedValueOnce({
+        sessions: [makeDraft({ session_id: "session-2", latest_plan_id: "plan-9" })]
+      });
     const { driver } = makeDriver({ fetchImpl: fetch });
 
     await driver.initialize("edit");
@@ -222,11 +240,25 @@ describe("FlowAIBuilderDriver", () => {
   it("reuses edit session creation as resume-first and refreshes recovered plan state", async () => {
     const fetch = vi
       .fn()
-      .mockResolvedValueOnce(makeSession({ session_id: "session-2", latest_plan_id: "plan-9", status: "awaiting_approval" }))
+      .mockResolvedValueOnce(
+        makeSession({
+          session_id: "session-2",
+          latest_plan_id: "plan-9",
+          status: "awaiting_approval"
+        })
+      )
       .mockResolvedValueOnce({ models: [], default_model_id: null })
-      .mockResolvedValueOnce(makeSession({ session_id: "session-2", latest_plan_id: "plan-9", status: "awaiting_approval" }))
+      .mockResolvedValueOnce(
+        makeSession({
+          session_id: "session-2",
+          latest_plan_id: "plan-9",
+          status: "awaiting_approval"
+        })
+      )
       .mockResolvedValueOnce(makePlan({ plan_id: "plan-9", status: "approved" }))
-      .mockResolvedValueOnce({ sessions: [makeDraft({ session_id: "session-2", latest_plan_id: "plan-9" })] });
+      .mockResolvedValueOnce({
+        sessions: [makeDraft({ session_id: "session-2", latest_plan_id: "plan-9" })]
+      });
     const { driver } = makeDriver({ fetchImpl: fetch });
 
     await driver.createSession("edit");
@@ -267,6 +299,51 @@ describe("FlowAIBuilderDriver", () => {
     const createCall = fetch.mock.calls[0];
     expect(createCall?.[0]).toBe("/api/v1/flows/ai-builder/sessions");
     expect(createCall?.[1]?.requestBody["application/json"].force_new).toBe(true);
+  });
+
+  it("clears stale local chat and plan state when starting a fresh edit session", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        makeSession({
+          session_id: "session-fresh",
+          latest_plan_id: null,
+          conversation: []
+        })
+      )
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(
+        makeSession({
+          session_id: "session-fresh",
+          latest_plan_id: null,
+          conversation: []
+        })
+      )
+      .mockResolvedValueOnce({ sessions: [makeDraft({ session_id: "session-fresh" })] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({ session_id: "session-old", latest_plan_id: "plan-old" }),
+      messages: [{ role: "assistant", content: "Old conversation", timestamp: 1 }],
+      currentPlan: makePlan({ plan_id: "plan-old" }),
+      error: "Old error",
+      statusMessage: "Old status",
+      applyResult: {
+        flow_id: "flow-1",
+        flow_name: "Old flow",
+        steps_created: 1,
+        steps_updated: 0,
+        steps_removed: 0
+      }
+    });
+
+    await driver.startFreshSession("edit");
+
+    expect(driver.state.session?.session_id).toBe("session-fresh");
+    expect(driver.state.messages).toEqual([]);
+    expect(driver.state.currentPlan).toBeNull();
+    expect(driver.state.error).toBeNull();
+    expect(driver.state.statusMessage).toBeNull();
+    expect(driver.state.applyResult).toBeNull();
   });
 
   it("wires AbortController for streaming and treats abort as a non-error", async () => {
@@ -361,7 +438,9 @@ describe("FlowAIBuilderDriver", () => {
   });
 
   it("revises a plan with keep_current_description and refreshes current plan state", async () => {
-    const fetch = vi.fn().mockResolvedValueOnce(makePlan({ plan_id: "plan-2", status: "proposed" }));
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(makePlan({ plan_id: "plan-2", status: "proposed" }));
     const { driver } = makeDriver({ fetchImpl: fetch });
     driver.seedState({
       session: makeSession({ latest_plan_id: "plan-1", status: "awaiting_approval" }),
@@ -423,7 +502,12 @@ describe("FlowAIBuilderDriver", () => {
       .mockResolvedValueOnce({ sessions: [] });
     const { driver } = makeDriver({ fetchImpl: fetch });
     driver.seedState({
-      session: makeSession({ session_id: "create-session-1", target_kind: "create", flow_id: null, status: "applied" }),
+      session: makeSession({
+        session_id: "create-session-1",
+        target_kind: "create",
+        flow_id: null,
+        status: "applied"
+      }),
       currentPlan: makePlan({ status: "applied" }),
       applyResult: {
         flow_id: "flow-created-1",
@@ -447,7 +531,9 @@ describe("FlowAIBuilderDriver", () => {
   it("refreshes the latest plan so recovered sessions keep backend plan state", async () => {
     const fetch = vi
       .fn()
-      .mockResolvedValueOnce(makeSession({ latest_plan_id: "plan-77", status: "awaiting_approval" }))
+      .mockResolvedValueOnce(
+        makeSession({ latest_plan_id: "plan-77", status: "awaiting_approval" })
+      )
       .mockResolvedValueOnce(makePlan({ plan_id: "plan-77", status: "approved" }));
     const { driver } = makeDriver({ fetchImpl: fetch });
     driver.seedState({ session: makeSession({ session_id: "session-9", latest_plan_id: null }) });

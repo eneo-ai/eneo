@@ -1,0 +1,238 @@
+from __future__ import annotations
+
+import string
+from typing import Any
+
+from intric.flows.ai_builder.ai_builder_models import (
+    AssistantSpec,
+    MCPPolicy,
+    OutputMode,
+    OutputType,
+    StepSpec,
+)
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    NewStepDraft,
+    StructuredFieldDraft,
+)
+
+
+def compile_new_step_draft(
+    *,
+    step_draft: NewStepDraft,
+    step_index: int,
+    prior_steps: list[StepSpec],
+) -> StepSpec:
+    plan_step_ref = make_plan_step_ref(step_index)
+    output_mode = derive_new_step_output_mode(step_draft)
+    output_contract = compile_output_contract(step_draft.output_fields)
+    input_contract = _derive_input_contract(step_draft, prior_steps)
+    input_config = compile_input_config(step_draft)
+    input_bindings = compile_input_bindings(step_draft, prior_steps)
+    assistant_instructions = compile_assistant_instructions(
+        step_draft=step_draft,
+        input_bindings=input_bindings,
+    )
+    output_config = compile_output_config(step_draft)
+
+    return StepSpec(
+        plan_step_ref=plan_step_ref,
+        name=step_draft.name,
+        assistant_spec=AssistantSpec(
+            instructions=assistant_instructions,
+            model_ref=step_draft.model_ref,
+            knowledge_refs=list(step_draft.knowledge_refs),
+        ),
+        mcp_policy=MCPPolicy.INHERIT,
+        input_source=step_draft.input_source,
+        input_type=step_draft.input_type,
+        output_mode=output_mode,
+        output_type=step_draft.output_type,
+        input_bindings=input_bindings,
+        input_contract=input_contract,
+        output_contract=output_contract,
+        input_config=input_config,
+        output_config=output_config,
+    )
+
+
+def make_plan_step_ref(index: int) -> str:
+    if index < len(string.ascii_lowercase):
+        return f"step_{string.ascii_lowercase[index]}"
+    return f"step_{index + 1}"
+
+
+def derive_new_step_output_mode(step_draft: NewStepDraft) -> OutputMode:
+    if step_draft.input_type.value == "audio" and step_draft.output_type.value == "text":
+        return OutputMode.TRANSCRIBE_ONLY
+    if (
+        step_draft.output_type == OutputType.DOCX
+        and step_draft.document_delivery_mode == "template_fill"
+    ):
+        return OutputMode.TEMPLATE_FILL
+    return OutputMode.PASS_THROUGH
+
+
+def compile_input_config(step_draft: NewStepDraft) -> dict[str, Any] | None:
+    if not step_draft.runtime_upload:
+        return None
+
+    runtime_input: dict[str, Any] = {
+        "enabled": True,
+        "required": step_draft.runtime_required,
+        "input_format": step_draft.input_type.value,
+    }
+    if step_draft.runtime_max_files is not None:
+        runtime_input["max_files"] = step_draft.runtime_max_files
+    return {"runtime_input": runtime_input}
+
+
+def compile_output_config(step_draft: NewStepDraft) -> dict[str, Any] | None:
+    if step_draft.citations_requested:
+        return {"citation_mode": "inline_inref_sidecar"}
+    return None
+
+
+def compile_input_bindings(
+    step_draft: NewStepDraft,
+    prior_steps: list[StepSpec],
+) -> dict[str, Any] | None:
+    source_reference = _resolve_source_reference(step_draft, prior_steps)
+    if source_reference is None:
+        return None
+
+    sections: list[str] = [source_reference]
+    if step_draft.uses_form_fields:
+        form_field_lines = [
+            f"{field_name}: {{{{ {field_name} }}}}" for field_name in step_draft.uses_form_fields
+        ]
+        sections.append("\n".join(form_field_lines))
+    return {"question": "\n\n".join(sections)}
+
+
+def compile_assistant_instructions(
+    *,
+    step_draft: NewStepDraft,
+    input_bindings: dict[str, Any] | None,
+) -> str:
+    instructions = step_draft.instructions
+    if input_bindings is None and step_draft.uses_form_fields:
+        form_lines = "\n".join(
+            f"- {field_name}: {{{{ {field_name} }}}}"
+            for field_name in step_draft.uses_form_fields
+        )
+        instructions = (
+            f"{step_draft.instructions}\n\n"
+            "Beakta också följande formulärfält vid analysen:\n"
+            f"{form_lines}"
+        )
+
+    return _append_output_field_guidance(
+        instructions=instructions,
+        output_fields=step_draft.output_fields,
+    )
+
+
+def compile_output_contract(
+    output_fields: list[StructuredFieldDraft] | None,
+) -> dict[str, Any] | None:
+    if not output_fields:
+        return None
+    return _compile_object_schema(output_fields)
+
+
+def _derive_input_contract(
+    step_draft: NewStepDraft,
+    prior_steps: list[StepSpec],
+) -> dict[str, Any] | None:
+    if step_draft.input_type.value != "json":
+        return None
+    if step_draft.input_source.value != "previous_step" or not prior_steps:
+        return None
+    return prior_steps[-1].output_contract
+
+
+def _resolve_source_reference(
+    step_draft: NewStepDraft,
+    prior_steps: list[StepSpec],
+) -> str | None:
+    input_source = step_draft.input_source.value
+    input_type = step_draft.input_type.value
+
+    if input_source == "flow_input":
+        if input_type == "json":
+            return "{{ indata_json }}"
+        if input_type in {"document", "file", "audio"}:
+            return None
+        return "{{ indata_text }}"
+
+    if input_source == "previous_step":
+        if not prior_steps:
+            return None
+        if input_type == "json":
+            return f"{{{{ {prior_steps[-1].plan_step_ref}.output.structured }}}}"
+        return "{{ föregående_steg }}"
+
+    if input_source == "all_previous_steps":
+        references = [
+            f"{{{{ {step.plan_step_ref}.output.text }}}}" for step in prior_steps
+        ]
+        return "\n\n".join(references) if references else None
+
+    return None
+
+
+def _compile_object_schema(fields: list[StructuredFieldDraft]) -> dict[str, Any]:
+    properties = {field.name: _compile_field_schema(field) for field in fields}
+    required = [field.name for field in fields if field.required]
+    schema: dict[str, Any] = {
+        "type": "object",
+        "properties": properties,
+        "additionalProperties": False,
+    }
+    if required:
+        schema["required"] = required
+    return schema
+
+
+def _compile_field_schema(field: StructuredFieldDraft) -> dict[str, Any]:
+    schema: dict[str, Any] = {
+        "type": field.field_type,
+        "title": field.name.replace("_", " ").capitalize(),
+        "description": field.description,
+    }
+    if field.field_type == "object" and field.fields is not None:
+        schema.update(_compile_object_schema(field.fields))
+    elif field.field_type == "array":
+        schema["items"] = _compile_array_items_schema(field)
+    return schema
+
+
+def _compile_array_items_schema(field: StructuredFieldDraft) -> dict[str, Any]:
+    if field.item_fields:
+        return _compile_object_schema(field.item_fields)
+    return {"type": "string"}
+
+
+def _append_output_field_guidance(
+    *,
+    instructions: str,
+    output_fields: list[StructuredFieldDraft] | None,
+) -> str:
+    if not output_fields:
+        return instructions
+
+    normalized_instructions = instructions.casefold()
+    top_level_fields = [
+        field
+        for field in output_fields
+        if field.name and field.name.casefold() not in normalized_instructions
+    ]
+    if not top_level_fields:
+        return instructions
+
+    field_lines = [f"- {field.name}: {field.description}" for field in top_level_fields]
+    return (
+        f"{instructions}\n\n"
+        "Required JSON fields:\n"
+        f"{chr(10).join(field_lines)}"
+    )

@@ -175,7 +175,7 @@ async def resolve_step_input(
                 used_question_binding = True
                 references = analyze_template(
                     question_template,
-                    step_refs={},
+                    step_refs=state.step_ref_mapping if state is not None else {},
                     form_field_names=set(),
                 )
                 diagnostics.append(

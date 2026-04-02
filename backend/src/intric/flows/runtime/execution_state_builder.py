@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from intric.flows.domain.flow import FlowStepResult, FlowStepResultStatus
 from intric.flows.runtime.models import RunExecutionState, RuntimeStep
+from intric.flows.step_lineage import build_step_ref_mapping
 
 
 def build_run_execution_state(
@@ -32,4 +33,5 @@ def build_run_execution_state(
             for step in steps
             if isinstance(step.user_description, str) and step.user_description.strip()
         },
+        step_ref_mapping=build_step_ref_mapping(steps),
     )

@@ -77,7 +77,7 @@ def _validate_add_op(
         result.add_error(
             step_ref=None,
             code="add_missing_payload",
-            message=f"{label}: 'add' operations require add_payload with step spec.",
+            message=f"{label}: 'add' operations require add_payload with a typed new-step draft.",
         )
 
     if op.placement is not None and op.placement.position != "append":

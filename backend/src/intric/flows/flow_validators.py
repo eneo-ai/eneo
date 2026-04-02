@@ -18,6 +18,14 @@ from intric.flows.flow_validators_form import (
     validate_form_schema,
     validate_variable_alias_collisions,
 )
+from intric.flows.citation_sidecar import (
+    CITATION_MODE_INLINE_INREF_SIDECAR,
+    CITATION_MODE_OFF,
+    resolve_citation_mode,
+)
+from intric.flows.ai_builder.ai_builder_step_capabilities import (
+    is_citation_capable_step,
+)
 from intric.flows.flow_validators_http import (
     validate_http_input_config,
     validate_http_output_config,
@@ -91,6 +99,7 @@ def validate_steps(
     for step in sorted_steps:
         seen.add(step.step_order)
         _validate_step_enum_values(step)
+        _validate_citation_mode(step)
         if step.input_source in ("http_get", "http_post"):
             validate_http_input_config(step=step)
         if step.output_mode == "http_post":
@@ -171,6 +180,28 @@ def _validate_step_enum_values(step: FlowStep) -> None:
     if step.mcp_policy not in _ALLOWED_FLOW_MCP_POLICIES:
         raise BadRequestException(
             f"Step {step.step_order}: unsupported mcp_policy '{_enum_value(step.mcp_policy)}'."
+        )
+
+
+def _validate_citation_mode(step: FlowStep) -> None:
+    citation_mode = resolve_citation_mode(step.output_config)
+    if citation_mode == CITATION_MODE_OFF:
+        return
+    if citation_mode != CITATION_MODE_INLINE_INREF_SIDECAR:
+        raise BadRequestException(
+            f"Step {step.step_order}: unsupported output_config.citation_mode '{citation_mode}'."
+        )
+    if step.output_type != "text":
+        raise BadRequestException(
+            f"Step {step.step_order}: citation_mode 'inline_inref_sidecar' requires output_type 'text'."
+        )
+    if not is_citation_capable_step(
+        output_type=str(step.output_type),
+        output_mode=str(step.output_mode),
+        output_config=step.output_config,
+    ):
+        raise BadRequestException(
+            f"Step {step.step_order}: citation_mode 'inline_inref_sidecar' requires an LLM-backed text step."
         )
 
 

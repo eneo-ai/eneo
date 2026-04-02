@@ -654,6 +654,7 @@ class TestCompileEditFlow:
         existing_step = _make_flow_step(
             step_order=1,
             output_mode="template_fill",
+            output_type="docx",
             output_config={"template_asset_id": "keep-me"},
         )
         flow = _make_flow(steps=[existing_step])
@@ -665,6 +666,7 @@ class TestCompileEditFlow:
                     existing_step_ref="existing_step_1",
                     name="Updated",
                     output_mode=OutputMode.TEMPLATE_FILL,  # same mode
+                    output_type=OutputType.DOCX,
                 ),
             ],
         )
@@ -695,6 +697,31 @@ class TestCompileEditFlow:
         changeset = compile_changeset(spec, current_flow=flow)
         step = changeset.compiled_steps[0]
         assert step.output_config == {"new_key": "new_value"}
+
+    def test_output_type_change_strips_stale_citation_mode(self) -> None:
+        existing_step = _make_flow_step(
+            step_order=1,
+            output_type="text",
+            output_mode="pass_through",
+            output_config={"citation_mode": "inline_inref_sidecar"},
+        )
+        flow = _make_flow(steps=[existing_step])
+
+        spec = _make_spec(
+            steps=[
+                _make_step_spec(
+                    plan_step_ref="step_a",
+                    existing_step_ref="existing_step_1",
+                    name="PDF report",
+                    output_type=OutputType.PDF,
+                ),
+            ],
+        )
+
+        changeset = compile_changeset(spec, current_flow=flow)
+
+        assert changeset.compiled_steps[0].output_type == OutputType.PDF
+        assert changeset.compiled_steps[0].output_config is None
 
 
 # ---------------------------------------------------------------------------
@@ -1435,6 +1462,49 @@ class TestExecuteEditFlow:
 
         update_kwargs = mock_flow_service.update_flow_assistant.call_args.kwargs
         assert "completion_model_id" not in update_kwargs
+
+    @pytest.mark.asyncio
+    async def test_invalid_knowledge_ref_raises_instead_of_silently_skipping(self) -> None:
+        flow_id = uuid4()
+        space_id = uuid4()
+        assistant_id = uuid4()
+
+        mock_flow_service = AsyncMock()
+        updated_flow = _make_flow(flow_id=flow_id, space_id=space_id)
+        mock_flow_service.update_flow.return_value = updated_flow
+
+        changeset = FlowChangeSet(
+            flow_name="Test",
+            flow_description="",
+            assistants_to_update=[
+                AssistantToUpdate(
+                    existing_step_id=uuid4(),
+                    existing_assistant_id=assistant_id,
+                    assistant_spec=AssistantSpec(
+                        instructions="Prompt",
+                        knowledge_refs=["socio"],
+                    ),
+                ),
+            ],
+            compiled_steps=[
+                _compiled_step(
+                    plan_step_ref="step_a",
+                    step_order=1,
+                    change_kind=StepChangeKind.MODIFIED,
+                    assistant_id=assistant_id,
+                ),
+            ],
+        )
+
+        with pytest.raises(BadRequestException, match="Invalid knowledge base reference"):
+            await execute_changeset(
+                changeset=changeset,
+                flow_service=mock_flow_service,
+                space_id=space_id,
+                flow_id=flow_id,
+            )
+
+        mock_flow_service.update_flow_assistant.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

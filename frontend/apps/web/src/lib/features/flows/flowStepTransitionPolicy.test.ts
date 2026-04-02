@@ -108,12 +108,30 @@ describe("flow step transition policy", () => {
     const result = applyOutputTypeChange({
       step: makeStep({
         output_mode: "template_fill",
-        output_type: "docx"
+        output_type: "docx",
+        output_config: { citation_mode: "inline_inref_sidecar" }
       }),
       nextType: "json"
     });
 
     expect(result.output_type).toBe("json");
     expect(result.output_mode).toBe("pass_through");
+    expect(result.output_config).toBeNull();
+  });
+
+  it("clears citation mode when switching to transcribe_only", () => {
+    const result = applyOutputModeChange({
+      step: makeStep({
+        output_mode: "pass_through",
+        output_type: "text",
+        output_config: { citation_mode: "inline_inref_sidecar" }
+      }),
+      nextMode: "transcribe_only",
+      runtimeInputConfig: makeRuntimeInputConfig(),
+      templateFillConfig: getTemplateFillOutputConfig(makeStep())
+    });
+
+    expect(result.output_mode).toBe("transcribe_only");
+    expect(result.output_config).toBeNull();
   });
 });

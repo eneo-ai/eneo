@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.flow import FlowRun, FlowRunStatus
+from intric.flows.flow import FlowRun, FlowRunStatus, FlowStepResult, FlowStepResultStatus
 from intric.flows.runtime.models import RunExecutionState, RuntimeStep, StepExecutionOutput, StepInputValue
 from intric.flows.runtime.step_execution_runtime import (
     PreparedStepExecution,
@@ -53,26 +53,33 @@ def _state() -> RunExecutionState:
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
+        step_ref_mapping={},
     )
 
 
 def _step(
     *,
+    step_order: int = 1,
+    input_source: str = "flow_input",
     input_type: str = "text",
     output_type: str = "text",
     output_mode: str = "pass_through",
     input_contract: dict[str, object] | None = None,
+    output_config: dict[str, object] | None = None,
+    input_bindings: dict[str, object] | None = None,
 ) -> RuntimeStep:
     return RuntimeStep(
         step_id=uuid4(),
-        step_order=1,
+        step_order=step_order,
         assistant_id=uuid4(),
         user_description=None,
-        input_source="flow_input",
-        input_bindings=None,
+        plan_step_ref=None,
+        existing_step_ref=None,
+        input_source=input_source,
+        input_bindings=input_bindings,
         input_config=None,
         output_mode=output_mode,
-        output_config=None,
+        output_config=output_config,
         output_type=output_type,
         input_type=input_type,
         input_contract=input_contract,
@@ -567,6 +574,402 @@ async def test_complete_step_execution_transcribe_only_skips_llm_and_rag():
         "references_truncated": False,
     }
     assert any(d.code == "audio_transcribe_only_used" for d in output.diagnostics)
+
+
+@pytest.mark.asyncio
+async def test_complete_step_execution_uses_version_2_and_strips_inline_refs_for_citation_mode() -> None:
+    run = _run()
+    state = _state()
+    step = _step(
+        output_type="text",
+        output_config={"citation_mode": "inline_inref_sidecar"},
+    )
+    assistant = MagicMock()
+    assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(
+            total_token_count=4,
+            completion="Svar med kallor <inref id=\"11111111\"/><inref id=\"22222222\"/>",
+            model=SimpleNamespace(name="gpt-5.4-nano", provider_type="openai"),
+            knowledge_trace=None,
+        )
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={"text": "hello", "source_text": "hello", "input_source": "flow_input"},
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    rag_metadata = {
+        "status": "success",
+        "tracking": {
+            "retrieval_tracked": True,
+            "prompt_context_inclusion_tracked": True,
+            "citation_tracked": False,
+            "material_influence_tracked": False,
+        },
+        "prompt_context": {
+            "tracked": True,
+            "included_source_ids": [
+                "11111111-1111-1111-1111-111111111111",
+                "22222222-2222-2222-2222-222222222222",
+            ],
+        },
+        "references": [
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "id_short": "11111111",
+            },
+            {
+                "id": "22222222-2222-2222-2222-222222222222",
+                "id_short": "22222222",
+            },
+        ],
+    }
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(return_value=([], rag_metadata, [])),
+        process_typed_output=AsyncMock(return_value=(None, None)),
+        apply_output_cap=AsyncMock(return_value=("Svar med kallor", [])),
+        attach_typed_failure_context=lambda exc, **kwargs: exc,
+        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
+        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
+        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
+        count_tokens=lambda text: len(text),
+    )
+
+    output = await complete_step_execution(
+        step=step,
+        run=run,
+        state=state,
+        prepared=prepared,
+        deps=deps,
+    )
+
+    assert assistant.get_response.await_args.kwargs["version"] == 2
+    assert deps.apply_output_cap.await_args.kwargs["text"] == "Svar med kallor"
+    assert output.full_text == "Svar med kallor"
+    assert output.persisted_text == "Svar med kallor"
+    assert output.citation_sidecar is not None
+    assert output.citation_sidecar["citation_expected"] is True
+    assert output.citation_sidecar["citation_observed"] is True
+    assert output.citation_sidecar["citation_compliance"] == "observed"
+    assert output.citation_sidecar["cited_source_ids"] == [
+        "11111111-1111-1111-1111-111111111111",
+        "22222222-2222-2222-2222-222222222222",
+    ]
+    assert output.raw_completion_text is not None
+    assert output.raw_completion_text.endswith(
+        "<inref id=\"22222222\"/>"
+    )
+
+
+@pytest.mark.asyncio
+async def test_complete_step_execution_records_missing_citations_without_failing_step() -> None:
+    run = _run()
+    state = _state()
+    step = _step(
+        output_type="text",
+        output_config={"citation_mode": "inline_inref_sidecar"},
+    )
+    assistant = MagicMock()
+    assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(
+            total_token_count=4,
+            completion="Svar utan kallor",
+            model=SimpleNamespace(name="gpt-5.4-nano", provider_type="openai"),
+            knowledge_trace=None,
+        )
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={"text": "hello", "source_text": "hello", "input_source": "flow_input"},
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    rag_metadata = {
+        "status": "success",
+        "tracking": {
+            "retrieval_tracked": True,
+            "prompt_context_inclusion_tracked": True,
+            "citation_tracked": False,
+            "material_influence_tracked": False,
+        },
+        "prompt_context": {
+            "tracked": True,
+            "included_source_ids": ["11111111-1111-1111-1111-111111111111"],
+        },
+        "references": [
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "id_short": "11111111",
+            }
+        ],
+    }
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(return_value=([], rag_metadata, [])),
+        process_typed_output=AsyncMock(return_value=(None, None)),
+        apply_output_cap=AsyncMock(return_value=("Svar utan kallor", [])),
+        attach_typed_failure_context=lambda exc, **kwargs: exc,
+        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
+        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
+        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
+        count_tokens=lambda text: len(text),
+    )
+
+    output = await complete_step_execution(
+        step=step,
+        run=run,
+        state=state,
+        prepared=prepared,
+        deps=deps,
+    )
+
+    assert output.full_text == "Svar utan kallor"
+    assert output.citation_sidecar is not None
+    assert output.citation_sidecar["citation_expected"] is True
+    assert output.citation_sidecar["citation_observed"] is False
+    assert output.citation_sidecar["citation_compliance"] == (
+        "missing_required_citations"
+    )
+
+
+@pytest.mark.asyncio
+async def test_complete_step_execution_does_not_expect_citations_when_no_knowledge_was_inserted() -> None:
+    run = _run()
+    state = _state()
+    step = _step(
+        output_type="text",
+        output_config={"citation_mode": "inline_inref_sidecar"},
+    )
+    assistant = MagicMock()
+    assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(
+            total_token_count=4,
+            completion="Svar utan kallor",
+            model=SimpleNamespace(name="gpt-5.4-nano", provider_type="openai"),
+            knowledge_trace=None,
+        )
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={"text": "hello", "source_text": "hello", "input_source": "flow_input"},
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    rag_metadata = {
+        "status": "success",
+        "tracking": {
+            "retrieval_tracked": True,
+            "prompt_context_inclusion_tracked": True,
+            "citation_tracked": False,
+            "material_influence_tracked": False,
+        },
+        "prompt_context": {
+            "tracked": True,
+            "included_source_ids": [],
+        },
+        "references": [],
+    }
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(return_value=([], rag_metadata, [])),
+        process_typed_output=AsyncMock(return_value=(None, None)),
+        apply_output_cap=AsyncMock(return_value=("Svar utan kallor", [])),
+        attach_typed_failure_context=lambda exc, **kwargs: exc,
+        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
+        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
+        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
+        count_tokens=lambda text: len(text),
+    )
+
+    output = await complete_step_execution(
+        step=step,
+        run=run,
+        state=state,
+        prepared=prepared,
+        deps=deps,
+    )
+
+    assert output.citation_sidecar is not None
+    assert output.citation_sidecar["citation_mode_requested"] is True
+    assert output.citation_sidecar["citation_applicable"] is False
+    assert output.citation_sidecar["citation_context_kind"] == "none"
+    assert output.citation_sidecar["citation_expected"] is False
+    assert output.citation_sidecar["citation_compliance"] == "not_requested"
+
+
+@pytest.mark.asyncio
+async def test_complete_step_execution_tracks_inherited_citations_for_synthesis_steps() -> None:
+    run = _run()
+    source_id = "11111111-1111-1111-1111-111111111111"
+    source_title = "Sociologi och sociala institutioner"
+    prior_result = FlowStepResult(
+        id=uuid4(),
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=uuid4(),
+        step_order=2,
+        assistant_id=uuid4(),
+        input_payload_json={
+            "rag": {
+                "status": "success",
+                "tracking": {
+                    "retrieval_tracked": True,
+                    "prompt_context_inclusion_tracked": True,
+                    "citation_tracked": False,
+                    "material_influence_tracked": False,
+                },
+                "prompt_context": {
+                    "tracked": True,
+                    "included_source_ids": [source_id],
+                    "included_source_titles": [source_title],
+                    "included_groups": [
+                        {
+                            "source_id": source_id,
+                            "source_id_short": "11111111",
+                            "source_title": source_title,
+                            "chunk_count": 1,
+                        }
+                    ],
+                },
+                "references": [
+                    {
+                        "id": source_id,
+                        "id_short": "11111111",
+                        "title": source_title,
+                        "source_url": "https://example.org/sociologi",
+                    }
+                ],
+            }
+        },
+        effective_prompt=None,
+        output_payload_json={"text": "Grounded step output"},
+        model_parameters_json=None,
+        num_tokens_input=None,
+        num_tokens_output=None,
+        status=FlowStepResultStatus.COMPLETED,
+        error_message=None,
+        flow_step_execution_hash=None,
+        tool_calls_metadata=None,
+        created_at=run.created_at,
+        updated_at=run.updated_at,
+    )
+    state = RunExecutionState(
+        completed_by_order={2: prior_result},
+        prior_results=[prior_result],
+        all_previous_segments=["<step_2_output>\nGrounded step output\n</step_2_output>\n"],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+        step_names_by_order={2: "Grounded summary"},
+        step_ref_mapping={},
+    )
+    step = _step(
+        step_order=3,
+        output_type="text",
+        output_config={"citation_mode": "inline_inref_sidecar"},
+        input_bindings={"question": "{{step_2.output.text}}"},
+    )
+    assistant = MagicMock()
+    assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(
+            total_token_count=4,
+            completion='Slutrapport<inref id="11111111"/>',
+            model=SimpleNamespace(name="gpt-5.4-nano", provider_type="openai"),
+            knowledge_trace=None,
+        )
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="Grounded step output",
+            source_text="Grounded step output",
+            input_source="flow_input",
+            used_question_binding=True,
+        ),
+        effective_prompt="Skriv slutrapport",
+        input_payload_for_result={
+            "text": "Grounded step output",
+            "source_text": "Grounded step output",
+            "input_source": "flow_input",
+        },
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(return_value=([], None, [])),
+        process_typed_output=AsyncMock(return_value=(None, None)),
+        apply_output_cap=AsyncMock(return_value=("Slutrapport", [])),
+        attach_typed_failure_context=lambda exc, **kwargs: exc,
+        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
+        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
+        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
+        count_tokens=lambda text: len(text),
+    )
+
+    output = await complete_step_execution(
+        step=step,
+        run=run,
+        state=state,
+        prepared=prepared,
+        deps=deps,
+    )
+
+    assert assistant.get_response.await_args.kwargs["version"] == 2
+    assert "Inherited source catalog" in assistant.get_response.await_args.kwargs["prompt_override"]
+    assert output.full_text == "Slutrapport"
+    assert output.persisted_text == "Slutrapport"
+    assert output.citation_sidecar is not None
+    assert output.citation_sidecar["citation_mode_requested"] is True
+    assert output.citation_sidecar["citation_applicable"] is True
+    assert output.citation_sidecar["citation_context_kind"] == "inherited"
+    assert output.citation_sidecar["citation_expected"] is True
+    assert output.citation_sidecar["cited_source_ids"] == [source_id]
+    assert output.citation_sidecar["direct_cited_source_ids"] == []
+    assert output.citation_sidecar["inherited_cited_source_ids"] == [source_id]
+    assert output.citation_sidecar["inherited_available_source_ids"] == [source_id]
+    assert output.citation_sidecar["upstream_grounded_step_orders"] == [2]
 
 
 def test_attach_typed_failure_context_backfills_payload_and_prompt():

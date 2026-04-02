@@ -5,14 +5,26 @@ import hashlib
 import json
 from typing import Any
 
+from intric.flows.citation_sidecar import build_citation_sidecar
+from intric.flows.citation_sidecar import (
+    TRACKING_MODE_INLINE_INREF_REQUIRED,
+    TRACKING_MODE_PASSIVE_INLINE_SCAN,
+    normalize_citation_sidecar_payload,
+    resolve_citation_mode,
+    summarize_step_citations,
+)
 from intric.flows.flow_run_evidence_bundle import RedactedEvidenceBundle
 from intric.flows.flow_run_provenance import (
     default_rag_tracking,
-    format_source_display_name,
-    format_source_container_display_name,
     normalize_text_preview,
 )
+from intric.flows.source_display import (
+    format_source_container_display_name,
+    format_source_container_label,
+    format_source_display_name,
+)
 from intric.flows.flow_run_redaction import REDACTION_POLICY_VERSION
+from intric.flows.step_lineage import build_step_ref_mapping, resolve_upstream_step_orders
 from intric.flows.template_reference_analyzer import analyze_template, consumes_runtime_input
 
 EVIDENCE_EXPORT_SCHEMA_VERSION = "flow-evidence-export.v2"
@@ -93,6 +105,8 @@ def _build_summary(bundle_payload: dict[str, Any]) -> dict[str, Any]:
     rag_source_names = [source["name"] for source in rag_sources if isinstance(source.get("name"), str)]
     artifact_names = _collect_artifact_names(step_results, run.get("output_payload_json"))
     artifact_details = _collect_artifact_details(step_results, run.get("output_payload_json"))
+    step_overview = _build_step_overview(bundle_payload)
+    citations = _build_summary_citations(bundle_payload, step_overview=step_overview)
     return {
         "status": run.get("status"),
         "trace_id": run.get("trace_id"),
@@ -124,11 +138,12 @@ def _build_summary(bundle_payload: dict[str, Any]) -> dict[str, Any]:
         "rag_source_display_names": [format_source_display_name(name) for name in rag_source_names],
         "rag_sources": rag_sources,
         "rag_usage_tracking": _collect_rag_tracking(bundle_payload),
+        "citations": citations,
         "final_output": _build_final_output_summary(
             run.get("output_payload_json"),
             step_results=step_results,
         ),
-        "step_overview": _build_step_overview(bundle_payload),
+        "step_overview": step_overview,
     }
 
 
@@ -180,13 +195,20 @@ def _collect_rag_sources(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]
                             if isinstance(name, str) and name.strip()
                             else None
                         ),
+                        "source_title_raw": reference.get("source_title_raw"),
+                        "source_display_name": reference.get("source_display_name"),
                         "source_url": reference.get("source_url"),
                         "source_kind": reference.get("source_kind"),
                         "source_container_kind": reference.get("source_container_kind"),
                         "source_container_name": reference.get("source_container_name"),
+                        "source_container_name_raw": reference.get("source_container_name_raw"),
                         "source_container_display_name": (
                             reference.get("source_container_display_name")
                             or format_source_container_display_name(reference)
+                        ),
+                        "source_container_label": (
+                            reference.get("source_container_label")
+                            or format_source_container_label(reference)
                         ),
                         "source_container_id": reference.get("source_container_id"),
                         "usage_state": reference.get("usage_state") or "retrieved_candidate",
@@ -275,7 +297,7 @@ def _build_step_overview(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]
     )
     if not isinstance(raw_steps, list):
         return []
-    step_ref_mapping = _build_step_ref_mapping(raw_steps)
+    step_ref_mapping = build_step_ref_mapping(raw_steps)
     step_labels_by_order: dict[int, str] = {}
     for step in raw_steps:
         if not isinstance(step, dict):
@@ -326,6 +348,11 @@ def _build_step_overview(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]
                 "knowledge_sources_count": len(rag_sources),
                 "knowledge_usage_state": _resolve_step_knowledge_usage_state(rag_sources),
                 "knowledge_retrieval": _build_step_knowledge_retrieval_summary(attempts, result),
+                "citations": _build_output_citations(
+                    result.get("output_payload_json"),
+                    attempts=attempts,
+                    step=step,
+                ),
                 "artifact_names": artifact_names,
                 "artifact_details": artifact_details,
                 "result_output_kind": _build_final_output_summary(result.get("output_payload_json")).get("kind"),
@@ -538,7 +565,7 @@ def _build_input_lineage(
         if question_template is not None
         else []
     )
-    upstream_orders = _resolve_upstream_step_orders(
+    upstream_orders = resolve_upstream_step_orders(
         input_source=step.get("input_source"),
         step_order=step_order,
         references=references,
@@ -572,38 +599,6 @@ def _build_input_lineage(
             if isinstance(step_labels_by_order.get(order), str)
         ],
     }
-
-
-def _build_step_ref_mapping(raw_steps: list[dict[str, Any]]) -> dict[str, int]:
-    mapping: dict[str, int] = {}
-    for step in raw_steps:
-        step_order = step.get("step_order")
-        if not isinstance(step_order, int):
-            continue
-        for key in ("plan_step_ref", "existing_step_ref"):
-            raw_ref = step.get(key)
-            if isinstance(raw_ref, str) and raw_ref.strip():
-                mapping[raw_ref.strip()] = step_order
-    return mapping
-
-
-def _resolve_upstream_step_orders(
-    *,
-    input_source: Any,
-    step_order: int,
-    references: list[Any],
-    max_prior_step_order: int,
-) -> list[int]:
-    orders: list[int] = []
-    if input_source == "previous_step" and step_order > 1:
-        orders.append(step_order - 1)
-    elif input_source == "all_previous_steps" and step_order > 1:
-        orders.extend(range(1, step_order))
-    for reference in references:
-        referenced_order = getattr(reference, "step_order", None)
-        if isinstance(referenced_order, int) and 1 <= referenced_order <= max_prior_step_order:
-            orders.append(referenced_order)
-    return list(dict.fromkeys(sorted(orders)))
 
 
 def _build_step_knowledge_retrieval_summary(
@@ -655,6 +650,10 @@ def _build_step_knowledge_retrieval_summary(
                     for title in prompt_context.get("included_source_titles", [])
                     if isinstance(title, str) and title.strip()
                 ],
+                "summary": _build_inserted_sources_summary(
+                    prompt_context=prompt_context,
+                    references=rag_payload.get("references"),
+                ),
             }
             if prompt_context is not None
             else None
@@ -725,3 +724,199 @@ def _parse_iso_datetime(value: Any) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _build_summary_citations(
+    bundle_payload: dict[str, Any],
+    *,
+    step_overview: list[dict[str, Any]],
+) -> dict[str, Any]:
+    run = bundle_payload.get("run", {})
+    summary = _build_output_citations(
+        run.get("output_payload_json"),
+        attempts=bundle_payload.get("step_attempts", []),
+        step=_resolve_last_definition_step(bundle_payload),
+    )
+    step_citations = [
+        citations
+        for item in step_overview
+        if isinstance(item, dict)
+        and isinstance((citations := item.get("citations")), dict)
+    ]
+    summary.update(
+        summarize_step_citations(step_citations)
+    )
+    return summary
+
+
+def _build_output_citations(
+    output_payload: Any,
+    *,
+    attempts: Any,
+    step: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    rag_payload = _resolve_latest_rag_payload(attempts)
+    prompt_context = rag_payload.get("prompt_context") if isinstance(rag_payload, dict) else None
+    included_source_ids = (
+        prompt_context.get("included_source_ids")
+        if isinstance(prompt_context, dict)
+        else []
+    )
+    references = rag_payload.get("references") if isinstance(rag_payload, dict) else None
+    stored_sidecar = _resolve_latest_citation_payload(attempts)
+    if isinstance(stored_sidecar, dict):
+        return normalize_citation_sidecar_payload(stored_sidecar)
+    citation_mode = resolve_citation_mode(step.get("output_config")) if isinstance(step, dict) else "off"
+    return build_citation_sidecar(
+        output_payload,
+        references=references if isinstance(references, list) else None,
+        included_source_ids=included_source_ids if isinstance(included_source_ids, list) else None,
+        tracking_mode=(
+            TRACKING_MODE_INLINE_INREF_REQUIRED
+            if citation_mode == "inline_inref_sidecar"
+            else TRACKING_MODE_PASSIVE_INLINE_SCAN
+        ),
+        citation_mode_requested=citation_mode == "inline_inref_sidecar",
+    )
+
+
+def _resolve_latest_rag_payload(attempts: Any) -> dict[str, Any] | None:
+    if not isinstance(attempts, list):
+        return None
+    sorted_attempts = sorted(
+        [attempt for attempt in attempts if isinstance(attempt, dict)],
+        key=lambda attempt: (
+            int(attempt.get("step_order", 0) or 0),
+            int(attempt.get("attempt_no", 0) or 0),
+        ),
+        reverse=True,
+    )
+    for attempt in sorted_attempts:
+        if not isinstance(attempt, dict):
+            continue
+        provenance = attempt.get("provenance_json")
+        if not isinstance(provenance, dict):
+            continue
+        rag_payload = provenance.get("rag")
+        if isinstance(rag_payload, dict):
+            return rag_payload
+    return None
+
+
+def _resolve_latest_citation_payload(attempts: Any) -> dict[str, Any] | None:
+    if not isinstance(attempts, list):
+        return None
+    sorted_attempts = sorted(
+        [attempt for attempt in attempts if isinstance(attempt, dict)],
+        key=lambda attempt: (
+            int(attempt.get("step_order", 0) or 0),
+            int(attempt.get("attempt_no", 0) or 0),
+        ),
+        reverse=True,
+    )
+    for attempt in sorted_attempts:
+        provenance = attempt.get("provenance_json")
+        if not isinstance(provenance, dict):
+            continue
+        citations = provenance.get("citations")
+        if isinstance(citations, dict):
+            return citations
+    return None
+
+
+def _resolve_last_definition_step(bundle_payload: dict[str, Any]) -> dict[str, Any] | None:
+    definition_snapshot = bundle_payload.get("definition_snapshot")
+    raw_steps = definition_snapshot.get("steps") if isinstance(definition_snapshot, dict) else None
+    if not isinstance(raw_steps, list):
+        return None
+    typed_steps = [step for step in raw_steps if isinstance(step, dict)]
+    if not typed_steps:
+        return None
+    return max(
+        typed_steps,
+        key=lambda step: int(step.get("step_order", 0) or 0),
+    )
+
+
+def _build_inserted_sources_summary(
+    *,
+    prompt_context: dict[str, Any],
+    references: Any,
+    max_ranked_sources: int = 5,
+) -> dict[str, Any]:
+    groups = [
+        group
+        for group in prompt_context.get("included_groups", [])
+        if isinstance(group, dict)
+    ]
+    included_source_ids = [
+        source_id
+        for source_id in prompt_context.get("included_source_ids", [])
+        if isinstance(source_id, str) and source_id.strip()
+    ]
+    grouped_chunks: dict[str, int] = {}
+    grouped_titles: dict[str, str] = {}
+    grouped_scores: dict[str, float] = {}
+    grouped_counts: dict[str, int] = {}
+    for group in groups:
+        source_id = group.get("source_id")
+        if not isinstance(source_id, str) or not source_id.strip():
+            continue
+        grouped_chunks[source_id] = grouped_chunks.get(source_id, 0) + int(
+            group.get("chunk_count", 0) or 0
+        )
+        grouped_counts[source_id] = grouped_counts.get(source_id, 0) + 1
+        if isinstance(group.get("source_title"), str) and group["source_title"].strip():
+            grouped_titles[source_id] = group["source_title"].strip()
+        grouped_scores[source_id] = max(
+            grouped_scores.get(source_id, 0.0),
+            float(group.get("relevance_score", 0.0) or 0.0),
+        )
+
+    references_by_id: dict[str, dict[str, Any]] = {}
+    if isinstance(references, list):
+        for reference in references:
+            if not isinstance(reference, dict):
+                continue
+            source_id = reference.get("id")
+            if isinstance(source_id, str) and source_id.strip():
+                references_by_id[source_id] = reference
+
+    ranked_sources: list[dict[str, Any]] = []
+    for source_id in included_source_ids:
+        reference = references_by_id.get(source_id, {})
+        display_name = (
+            reference.get("source_display_name")
+            or reference.get("display_title")
+            or grouped_titles.get(source_id)
+        )
+        ranked_sources.append(
+            {
+                "source_id": source_id,
+                "display_name": display_name,
+                "source_kind": reference.get("source_kind"),
+                "included_group_count": grouped_counts.get(source_id, 0),
+                "included_chunk_count": grouped_chunks.get(source_id, 0),
+                "best_score": max(
+                    grouped_scores.get(source_id, 0.0),
+                    float(reference.get("best_score", 0.0) or 0.0),
+                ),
+            }
+        )
+    ranked_sources.sort(
+        key=lambda item: (
+            -int(item.get("included_group_count", 0) or 0),
+            -int(item.get("included_chunk_count", 0) or 0),
+            -float(item.get("best_score", 0.0) or 0.0),
+            str(item.get("source_id") or ""),
+        )
+    )
+    for index, item in enumerate(ranked_sources, start=1):
+        item["rank"] = index
+    return {
+        "total_sources": prompt_context.get("included_source_count") or len(included_source_ids),
+        "total_chunks": prompt_context.get("included_chunk_count")
+        or sum(grouped_chunks.values()),
+        "truncated_by_token_budget": bool(prompt_context.get("truncated_by_token_budget")),
+        "top_ranked_sources": ranked_sources[:max_ranked_sources],
+    }

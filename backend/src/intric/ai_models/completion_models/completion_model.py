@@ -68,6 +68,7 @@ class Completion:
     reference_chunks: Optional[list[InfoBlobChunkInDBWithScore]] = None
     tool_call: Optional[FunctionCall] = None
     tool_calls_metadata: Optional[list[ToolCallMetadata]] = None  # For TOOL_CALL events
+    provider_response_id: Optional[str] = None
     approval_id: Optional[str] = None  # For TOOL_APPROVAL_REQUIRED events
     image_data: Optional[bytes] = None
     response_type: Optional[ResponseType] = None

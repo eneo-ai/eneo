@@ -22,6 +22,9 @@ from intric.ai_models.completion_models.completion_model import (
 from intric.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
 )
+from intric.completion_models.infrastructure.provider_response_ids import (
+    extract_provider_response_id,
+)
 from intric.files.file_models import File
 from intric.logging.logging import LoggingDetails
 from intric.main.exceptions import APIKeyNotConfiguredException, OpenAIException
@@ -537,6 +540,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     completion.text = self._strip_thinking_content(msg.content)
                 if execution_metadata:
                     completion.tool_calls_metadata = execution_metadata
+                completion.provider_response_id = extract_provider_response_id(response)
                 completion.stop = choice.finish_reason == "stop"
 
             logger.info(f"[TenantModelAdapter] {self.litellm_model}: Completion successful")

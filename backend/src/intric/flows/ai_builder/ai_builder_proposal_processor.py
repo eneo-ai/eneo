@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable
 from uuid import UUID
 
+from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
+    prepare_compiled_spec_for_session,
+)
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_ERROR,
     build_error_event,
@@ -14,6 +17,13 @@ from intric.flows.ai_builder.ai_builder_events import (
     build_text_event,
     error_payload,
 )
+from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
+from intric.flows.ai_builder.ai_builder_create_feedback import (
+    format_create_argument_error,
+    format_create_quality_feedback,
+    format_create_validation_feedback,
+)
+from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
 from intric.flows.ai_builder.ai_builder_discovery import build_registry_question_followup
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     build_discovery_block_message_runtime,
@@ -39,13 +49,22 @@ from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_aware_quality_feedback,
 )
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
-    append_retry_feedback_turn as build_append_retry_feedback_turn,
-    build_tool_retry_messages as build_proposal_tool_retry_messages,
     request_self_correction as run_request_self_correction,
-    retry_forced_proposal_after_text as run_retry_forced_proposal_after_text,
+    retry_forced_tool_after_text as run_retry_forced_tool_after_text,
+)
+from intric.flows.ai_builder.ai_builder_repair_transport import (
+    append_tool_retry_feedback_turn,
+    build_persisted_tool_call_stub,
+    build_tool_retry_messages,
+    persist_tool_turn,
+)
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalog,
+    canonicalize_create_draft_resources,
+    canonicalize_edit_draft_resources,
+    format_resource_resolution_feedback,
 )
 from intric.flows.ai_builder.ai_builder_plan_store import (
-    append_session_messages,
     format_revision_feedback,
     format_validation_feedback,
     store_plan_and_update_conversation,
@@ -59,13 +78,11 @@ from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
-    PROPOSE_FLOW_TOOL_NAME,
+    CREATE_FLOW_TOOL_NAME,
+    RecoverableToolPayloadError,
     build_discovery_complete_tool_schemas,
-    extract_assumptions,
-    extract_plan_rationale,
-    extract_reasoning,
     parse_confirm_requirements,
-    parse_propose_flow_arguments,
+    parse_create_flow_arguments,
     parse_structured_question,
 )
 from intric.flows.ai_builder.ai_builder_description_semantics import (
@@ -79,11 +96,6 @@ from intric.flows.ai_builder.ai_builder_edit_repair import (
 )
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_edit_validator import validate_edit_draft
-from intric.flows.ai_builder.ai_builder_session_spec_validator import (
-    normalize_compiled_spec_for_session,
-    validate_compiled_spec_for_session,
-)
-from intric.flows.ai_builder.ai_builder_validator import validate_spec
 from intric.flows.ai_builder.ai_builder_models import TargetKind
 from intric.main.logging import get_logger
 
@@ -96,8 +108,8 @@ MAX_SELF_CORRECTION_RETRIES = 1
 
 
 @dataclass(frozen=True)
-class ProposalDraftProcessingResult:
-    plan_event: dict[str, str] | None = None
+class ToolProcessingResult:
+    event: dict[str, str] | None = None
     feedback: str | None = None
     failure_kind: str | None = None
 
@@ -113,11 +125,31 @@ class ProposalContext:
     litellm_kwargs: dict[str, Any]
     available_model_refs: set[str] | None
     available_kb_refs: set[str] | None
+    resource_catalog: AIBuilderResourceCatalog | None
     max_output_tokens: int
     request_id: str
     flow: "Flow | None" = None
     assistant_snapshots: dict[UUID, dict[str, Any]] | None = None
     text_content: str | None = None
+
+
+@dataclass(frozen=True)
+class SubmissionToolHandlerConfig:
+    target_tool_name: str
+    requirements_not_confirmed_message: str
+    parse_error_prefix: str
+    invalid_result_message: str
+    forced_tool_prompt: str
+    process_tool_arguments: Callable[..., Awaitable[ToolProcessingResult]]
+    include_flow_context: bool = False
+
+
+@dataclass(frozen=True)
+class ToolRetryConfig:
+    target_tool_name: str
+    forced_tool_prompt: str
+    process_tool_arguments: Callable[..., Awaitable[ToolProcessingResult]]
+    process_tool_kwargs: dict[str, Any]
 
 
 class AIBuilderProposalProcessor:
@@ -163,7 +195,7 @@ class AIBuilderProposalProcessor:
             flow=flow,
         )
 
-    async def _process_proposal_arguments(
+    async def _process_create_arguments(
         self,
         *,
         session_id: UUID,
@@ -174,50 +206,72 @@ class AIBuilderProposalProcessor:
         tool_call_id: str,
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
+        resource_catalog: AIBuilderResourceCatalog | None = None,
         flow=None,
-    ) -> ProposalDraftProcessingResult:
+    ) -> ToolProcessingResult:
         try:
-            spec = parse_propose_flow_arguments(arguments)
-            assumptions = extract_assumptions(arguments)
-            reasoning = extract_reasoning(arguments)
-            plan_rationale = extract_plan_rationale(arguments)
+            draft = parse_create_flow_arguments(arguments)
+        except RecoverableToolPayloadError as error:
+            return ToolProcessingResult(
+                feedback=format_create_argument_error(error),
+                failure_kind="recoverable_parse",
+            )
         except Exception as error:
-            return ProposalDraftProcessingResult(
-                feedback=f"Invalid flow specification: {error}",
+            return ToolProcessingResult(
+                feedback=format_create_argument_error(error),
                 failure_kind="parse",
             )
 
-        target_kind = TargetKind.EDIT if flow is not None else TargetKind.CREATE
-        spec = normalize_compiled_spec_for_session(
-            spec,
-            target_kind=target_kind,
-        )
-        validation = validate_spec(
-            spec,
+        if resource_catalog is not None:
+            draft, resolution_issues = canonicalize_create_draft_resources(
+                draft,
+                catalog=resource_catalog,
+            )
+            if resolution_issues:
+                return ToolProcessingResult(
+                    feedback=format_resource_resolution_feedback(resolution_issues),
+                    failure_kind="validation",
+                )
+
+        create_validation = validate_create_draft(draft)
+        if create_validation.errors:
+            return ToolProcessingResult(
+                feedback=format_create_validation_feedback(create_validation),
+                failure_kind="validation",
+            )
+
+        try:
+            spec = compile_create_draft(draft)
+        except Exception as error:
+            logger.error("Create draft compilation failed: %s", error, exc_info=error)
+            return ToolProcessingResult(
+                feedback=f"Failed to compile create_flow draft: {error}",
+                failure_kind="validation",
+            )
+
+        prepared = prepare_compiled_spec_for_session(
+            spec=spec,
+            target_kind=TargetKind.CREATE,
             available_model_refs=available_model_refs,
             available_kb_refs=available_kb_refs,
+            resource_catalog=resource_catalog,
+            valid_existing_step_refs=None,
         )
-        session_validation = validate_compiled_spec_for_session(
-            spec,
-            target_kind=target_kind,
-            valid_existing_step_refs=(
-                [f"existing_step_{step.step_order}" for step in flow.steps]
-                if flow is not None
-                else None
-            ),
-        )
-        for error in session_validation.errors:
-            validation.add_error(
-                step_ref=error.step_ref,
-                code=error.code,
-                message=error.message,
+        if prepared.failure_feedback is not None:
+            return ToolProcessingResult(
+                feedback=prepared.failure_feedback,
+                failure_kind="validation",
             )
+        assert prepared.spec is not None
+        assert prepared.validation is not None
+        spec = prepared.spec
+        validation = prepared.validation
         if not validation.valid:
             quality_hint = self._format_quality_feedback(validation)
             contextual_hint = self._format_contextual_quality_feedback(
                 conversation=conversation,
                 spec=spec,
-                flow=flow,
+                flow=None,
             )
             hard_feedback = format_validation_feedback(
                 spec=spec,
@@ -228,7 +282,8 @@ class AIBuilderProposalProcessor:
                 for feedback in (hard_feedback, quality_hint, contextual_hint)
                 if feedback
             )
-            return ProposalDraftProcessingResult(
+            combined_feedback = format_create_quality_feedback(combined_feedback)
+            return ToolProcessingResult(
                 feedback=combined_feedback,
                 failure_kind="validation",
             )
@@ -237,15 +292,18 @@ class AIBuilderProposalProcessor:
         contextual_quality_feedback = self._format_contextual_quality_feedback(
             conversation=conversation,
             spec=spec,
-            flow=flow,
+            flow=None,
         )
         combined_quality_feedback = "\n\n".join(
             feedback
             for feedback in (quality_feedback, contextual_quality_feedback)
             if feedback is not None
         ) or None
+        combined_quality_feedback = format_create_quality_feedback(
+            combined_quality_feedback
+        )
         if combined_quality_feedback is not None:
-            return ProposalDraftProcessingResult(
+            return ToolProcessingResult(
                 feedback=combined_quality_feedback,
                 failure_kind="quality",
             )
@@ -258,15 +316,16 @@ class AIBuilderProposalProcessor:
             new_messages_start=new_messages_start,
             assistant_content=assistant_content,
             tool_call_id=tool_call_id,
+            tool_name=CREATE_FLOW_TOOL_NAME,
             arguments=arguments,
             spec=spec,
-            assumptions=assumptions,
-            plan_rationale=plan_rationale,
-            reasoning=reasoning,
+            assumptions=list(draft.assumptions),
+            plan_rationale=draft.plan_rationale,
+            reasoning=None,
             validation=validation,
         )
-        return ProposalDraftProcessingResult(
-            plan_event=build_plan_event(plan_id=plan.id, envelope=envelope)
+        return ToolProcessingResult(
+            event=build_plan_event(plan_id=plan.id, envelope=envelope)
         )
 
     @staticmethod
@@ -275,7 +334,7 @@ class AIBuilderProposalProcessor:
         feedback: str | None,
         failure_kind: str | None,
     ) -> dict[str, str]:
-        if failure_kind == "parse":
+        if failure_kind in {"parse", "recoverable_parse"}:
             return build_error_event(
                 message=f"Self-correction failed: {feedback or 'Invalid flow specification.'}",
                 code="self_correction_invalid_payload",
@@ -311,6 +370,7 @@ class AIBuilderProposalProcessor:
         available_kb_refs: set[str] | None,
         max_output_tokens: int,
         request_id: str,
+        resource_catalog: AIBuilderResourceCatalog | None = None,
         flow=None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
@@ -324,6 +384,7 @@ class AIBuilderProposalProcessor:
             litellm_kwargs=litellm_kwargs,
             available_model_refs=available_model_refs,
             available_kb_refs=available_kb_refs,
+            resource_catalog=resource_catalog,
             max_output_tokens=max_output_tokens,
             request_id=request_id,
             flow=flow,
@@ -335,18 +396,9 @@ class AIBuilderProposalProcessor:
 
         for tool_call in tool_calls:
             dispatched = self._dispatch_known_tool_call(ctx=ctx, tool_call=tool_call)
-            if dispatched is not None:
-                async for event in dispatched:
-                    yield event
+            if dispatched is None:
                 continue
-
-            if tool_call.function.name != PROPOSE_FLOW_TOOL_NAME:
-                continue
-
-            async for event in self._handle_propose_flow_tool_call(
-                ctx=ctx,
-                tool_call=tool_call,
-            ):
+            async for event in dispatched:
                 yield event
 
     def _dispatch_known_tool_call(
@@ -358,6 +410,11 @@ class AIBuilderProposalProcessor:
         tool_name = tool_call.function.name
         if tool_name == ASK_STRUCTURED_QUESTION_TOOL_NAME:
             return self._handle_structured_question(
+                ctx=ctx,
+                tool_call=tool_call,
+            )
+        if tool_name == CREATE_FLOW_TOOL_NAME:
+            return self._handle_create_flow_tool_call(
                 ctx=ctx,
                 tool_call=tool_call,
             )
@@ -373,45 +430,76 @@ class AIBuilderProposalProcessor:
             )
         return None
 
-    async def _handle_propose_flow_tool_call(
+    async def _resolve_submission_prerequisite_events(
         self,
         *,
         ctx: ProposalContext,
-        tool_call: Any,
-    ) -> AsyncGenerator[dict[str, str], None]:
+        requirements_not_confirmed_message: str,
+    ) -> tuple[bool, list[dict[str, str]]]:
         requirements_state = resolve_requirements_state(ctx.conversation)
-        if not requirements_state.confirmed:
-            for event in await self.emit_discovery_followup_if_needed(
-                session_id=ctx.session_id,
-                conversation=ctx.conversation,
-                new_messages_start=ctx.new_messages_start,
-                flow=ctx.flow,
-                litellm_model=ctx.litellm_model,
-                litellm_kwargs=ctx.litellm_kwargs,
-            ):
-                yield event
-            if not analyze_discovery_ready(ctx.conversation, flow=ctx.flow):
-                return
-            yield build_error_event(
-                message="Requirements must be confirmed before proposing a flow.",
+        if requirements_state.confirmed:
+            return False, []
+
+        followup_events = await self.emit_discovery_followup_if_needed(
+            session_id=ctx.session_id,
+            conversation=ctx.conversation,
+            new_messages_start=ctx.new_messages_start,
+            flow=ctx.flow,
+            litellm_model=ctx.litellm_model,
+            litellm_kwargs=ctx.litellm_kwargs,
+        )
+        if followup_events:
+            return True, followup_events
+        if not analyze_discovery_ready(ctx.conversation, flow=ctx.flow):
+            return True, []
+        return True, [
+            build_error_event(
+                message=requirements_not_confirmed_message,
                 code="requirements_not_confirmed",
                 phase="requirements",
                 request_id=ctx.request_id,
             )
+        ]
+
+    async def _handle_submission_tool_call(
+        self,
+        *,
+        ctx: ProposalContext,
+        tool_call: Any,
+        config: SubmissionToolHandlerConfig,
+    ) -> AsyncGenerator[dict[str, str], None]:
+        blocked, prerequisite_events = await self._resolve_submission_prerequisite_events(
+            ctx=ctx,
+            requirements_not_confirmed_message=config.requirements_not_confirmed_message,
+        )
+        for event in prerequisite_events:
+            yield event
+        if blocked:
             return
 
         try:
             arguments = json.loads(tool_call.function.arguments)
-        except json.JSONDecodeError:
-            yield build_error_event(
-                message="Invalid tool call arguments.",
-                code="invalid_tool_call_arguments",
-                phase="tool_call",
-                request_id=ctx.request_id,
+        except json.JSONDecodeError as error:
+            logger.info(
+                "ai_builder_submission_first_attempt tool=%s request_id=%s success=false failure_kind=parse",
+                config.target_tool_name,
+                ctx.request_id,
             )
+            async for event in self._request_tool_self_correction(
+                ctx=ctx,
+                error_message=f"{config.parse_error_prefix}: {error}",
+                tool_call=tool_call,
+                retry_config=ToolRetryConfig(
+                    target_tool_name=config.target_tool_name,
+                    forced_tool_prompt=config.forced_tool_prompt,
+                    process_tool_arguments=config.process_tool_arguments,
+                    process_tool_kwargs={},
+                ),
+            ):
+                yield event
             return
 
-        proposal_result = await self._process_proposal_arguments(
+        submission_kwargs = self._build_submission_processing_kwargs(
             session_id=ctx.session_id,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
@@ -420,48 +508,88 @@ class AIBuilderProposalProcessor:
             tool_call_id=tool_call.id,
             available_model_refs=ctx.available_model_refs,
             available_kb_refs=ctx.available_kb_refs,
+            resource_catalog=ctx.resource_catalog,
             flow=ctx.flow,
+            include_flow_context=config.include_flow_context,
         )
-        if proposal_result.plan_event is None:
-            async for event in self._request_self_correction_with_context(
+        submission_result = await config.process_tool_arguments(**submission_kwargs)
+        logger.info(
+            "ai_builder_submission_first_attempt tool=%s request_id=%s success=%s failure_kind=%s",
+            config.target_tool_name,
+            ctx.request_id,
+            str(submission_result.event is not None).lower(),
+            submission_result.failure_kind or "none",
+        )
+        if submission_result.event is None:
+            async for event in self._request_tool_self_correction(
                 ctx=ctx,
-                error_message=proposal_result.feedback or "Invalid flow specification.",
+                error_message=submission_result.feedback or config.invalid_result_message,
                 tool_call=tool_call,
+                retry_config=ToolRetryConfig(
+                    target_tool_name=config.target_tool_name,
+                    forced_tool_prompt=config.forced_tool_prompt,
+                    process_tool_arguments=config.process_tool_arguments,
+                    process_tool_kwargs={},
+                ),
             ):
                 yield event
             return
 
-        yield proposal_result.plan_event
+        yield submission_result.event
 
     @staticmethod
-    def _build_tool_retry_messages(
+    def _build_submission_processing_kwargs(
         *,
-        llm_messages: list[dict[str, Any]],
-        tool_call: Any,
-        tool_feedback: str,
-        assistant_content: str | None = None,
-    ) -> list[dict[str, Any]]:
-        return build_proposal_tool_retry_messages(
-            llm_messages=llm_messages,
-            tool_call=tool_call,
-            tool_feedback=tool_feedback,
-            assistant_content=assistant_content,
-        )
+        session_id: UUID,
+        conversation: list[ConversationMessage],
+        new_messages_start: int,
+        arguments: dict[str, Any],
+        assistant_content: str,
+        tool_call_id: str,
+        available_model_refs: set[str] | None,
+        available_kb_refs: set[str] | None,
+        resource_catalog: AIBuilderResourceCatalog | None,
+        flow: "Flow | None",
+        include_flow_context: bool,
+    ) -> dict[str, Any]:
+        processing_kwargs: dict[str, Any] = {
+            "session_id": session_id,
+            "conversation": conversation,
+            "new_messages_start": new_messages_start,
+            "arguments": arguments,
+            "assistant_content": assistant_content,
+            "tool_call_id": tool_call_id,
+            "available_model_refs": available_model_refs,
+            "available_kb_refs": available_kb_refs,
+            "resource_catalog": resource_catalog,
+        }
+        if include_flow_context:
+            processing_kwargs["flow"] = flow
+        return processing_kwargs
 
-    @staticmethod
-    def _append_retry_feedback_turn(
+    async def _handle_create_flow_tool_call(
+        self,
         *,
-        llm_messages: list[dict[str, Any]],
+        ctx: ProposalContext,
         tool_call: Any,
-        assistant_content: str | None,
-        tool_feedback: str,
-    ) -> list[dict[str, Any]]:
-        return build_append_retry_feedback_turn(
-            llm_messages=llm_messages,
+    ) -> AsyncGenerator[dict[str, str], None]:
+        async for event in self._handle_submission_tool_call(
+            ctx=ctx,
             tool_call=tool_call,
-            assistant_content=assistant_content,
-            tool_feedback=tool_feedback,
-        )
+            config=SubmissionToolHandlerConfig(
+                target_tool_name=CREATE_FLOW_TOOL_NAME,
+                requirements_not_confirmed_message="Requirements must be confirmed before creating a flow.",
+                parse_error_prefix="Invalid create_flow arguments",
+                invalid_result_message="Invalid create_flow draft.",
+                forced_tool_prompt=(
+                    "Your previous reply was prose only. "
+                    "Now call create_flow with one complete typed draft. "
+                    "Do not answer with prose."
+                ),
+                process_tool_arguments=self._process_create_arguments,
+            ),
+        ):
+            yield event
 
     async def _call_repair_completion(
         self,
@@ -486,45 +614,6 @@ class AIBuilderProposalProcessor:
             **litellm_kwargs,
         )
 
-    async def _persist_tool_turn(
-        self,
-        *,
-        session_id: UUID,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
-        tool_call: Any,
-        arguments: dict[str, Any],
-        tool_content: str,
-        metadata: dict[str, Any] | None = None,
-        assistant_content: str | None = None,
-    ) -> None:
-        conversation.append(
-            ConversationMessage(
-                role="assistant",
-                content=assistant_content,
-                tool_calls=[{
-                    "id": tool_call.id,
-                    "name": tool_call.function.name,
-                    "arguments": arguments,
-                }],
-            )
-        )
-        conversation.append(
-            ConversationMessage(
-                role="tool",
-                content=tool_content,
-                tool_call_id=tool_call.id,
-                metadata=metadata,
-            )
-        )
-        await append_session_messages(
-            repo=self.repo,
-            tenant_id=self.user.tenant_id,
-            session_id=session_id,
-            conversation=conversation,
-            start_index=new_messages_start,
-        )
-
     async def request_self_correction(
         self,
         *,
@@ -540,7 +629,9 @@ class AIBuilderProposalProcessor:
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
         max_output_tokens: int,
+        resource_catalog: AIBuilderResourceCatalog | None = None,
         flow=None,
+        assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         ctx = ProposalContext(
             session_id=session_id,
@@ -552,24 +643,37 @@ class AIBuilderProposalProcessor:
             litellm_kwargs=litellm_kwargs,
             available_model_refs=available_model_refs,
             available_kb_refs=available_kb_refs,
+            resource_catalog=resource_catalog,
             max_output_tokens=max_output_tokens,
             request_id="self-correction",
             flow=flow,
         )
-        async for event in self._request_self_correction_with_context(
+        retry_config = self._submission_retry_config(
+            flow=flow,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            max_output_tokens=max_output_tokens,
+            assistant_snapshots=assistant_snapshots,
+            resource_catalog=resource_catalog,
+        )
+        async for event in self._request_tool_self_correction(
             ctx=ctx,
             error_message=error_message,
             tool_call=tool_call,
+            retry_config=retry_config,
         ):
             yield event
 
-    async def _request_self_correction_with_context(
+    async def _request_tool_self_correction(
         self,
         *,
         ctx: ProposalContext,
         error_message: str,
         tool_call: Any,
+        retry_config: ToolRetryConfig,
     ) -> AsyncGenerator[dict[str, str], None]:
+        merged_process_kwargs = dict(retry_config.process_tool_kwargs)
+        merged_process_kwargs.setdefault("resource_catalog", ctx.resource_catalog)
         async for event in run_request_self_correction(
             session_id=ctx.session_id,
             conversation=ctx.conversation,
@@ -586,12 +690,60 @@ class AIBuilderProposalProcessor:
             self_correction_temperature=self.self_correction_temperature,
             max_self_correction_retries=MAX_SELF_CORRECTION_RETRIES,
             call_repair_completion=self._call_repair_completion,
-            process_proposal_arguments=self._process_proposal_arguments,
+            process_tool_arguments=retry_config.process_tool_arguments,
+            target_tool_name=retry_config.target_tool_name,
+            forced_tool_prompt=retry_config.forced_tool_prompt,
             build_self_correction_error_event=self._build_self_correction_error_event,
-            retry_forced_proposal_after_text=self.retry_forced_proposal_after_text,
+            retry_forced_tool_after_text=self.retry_forced_tool_after_text,
+            process_tool_kwargs=merged_process_kwargs,
             flow=ctx.flow,
         ):
             yield event
+
+    async def retry_forced_tool_after_text(
+        self,
+        *,
+        correction_messages: list[dict[str, Any]],
+        assistant_text: str,
+        tool_schemas: list[dict[str, Any]],
+        litellm_model: str,
+        litellm_kwargs: dict[str, Any],
+        session_id: UUID,
+        conversation: list[ConversationMessage],
+        new_messages_start: int,
+        available_model_refs: set[str] | None,
+        available_kb_refs: set[str] | None,
+        max_output_tokens: int,
+        target_tool_name: str,
+        forced_tool_prompt: str,
+        process_tool_arguments: Any,
+        process_tool_kwargs: dict[str, Any] | None = None,
+        flow=None,
+        resource_catalog: AIBuilderResourceCatalog | None = None,
+    ) -> dict[str, str] | None:
+        merged_process_kwargs = dict(process_tool_kwargs or {})
+        if resource_catalog is not None:
+            merged_process_kwargs.setdefault("resource_catalog", resource_catalog)
+        return await run_retry_forced_tool_after_text(
+            correction_messages=correction_messages,
+            assistant_text=assistant_text,
+            tool_schemas=tool_schemas,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            session_id=session_id,
+            conversation=conversation,
+            new_messages_start=new_messages_start,
+            available_model_refs=available_model_refs,
+            available_kb_refs=available_kb_refs,
+            max_output_tokens=max_output_tokens,
+            target_tool_name=target_tool_name,
+            forced_tool_prompt=forced_tool_prompt,
+            forced_proposal_temperature=self.forced_proposal_temperature,
+            call_repair_completion=self._call_repair_completion,
+            process_tool_arguments=process_tool_arguments,
+            process_tool_kwargs=merged_process_kwargs,
+            flow=flow,
+        )
 
     async def retry_forced_proposal_after_text(
         self,
@@ -606,10 +758,20 @@ class AIBuilderProposalProcessor:
         new_messages_start: int,
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
+        resource_catalog: AIBuilderResourceCatalog | None = None,
         max_output_tokens: int,
         flow=None,
+        assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
     ) -> dict[str, str] | None:
-        return await run_retry_forced_proposal_after_text(
+        retry_config = self._submission_retry_config(
+            flow=flow,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            max_output_tokens=max_output_tokens,
+            assistant_snapshots=assistant_snapshots,
+            resource_catalog=resource_catalog,
+        )
+        return await self.retry_forced_tool_after_text(
             correction_messages=correction_messages,
             assistant_text=assistant_text,
             tool_schemas=tool_schemas,
@@ -621,9 +783,11 @@ class AIBuilderProposalProcessor:
             available_model_refs=available_model_refs,
             available_kb_refs=available_kb_refs,
             max_output_tokens=max_output_tokens,
-            forced_proposal_temperature=self.forced_proposal_temperature,
-            call_repair_completion=self._call_repair_completion,
-            process_proposal_arguments=self._process_proposal_arguments,
+            target_tool_name=retry_config.target_tool_name,
+            forced_tool_prompt=retry_config.forced_tool_prompt,
+            process_tool_arguments=retry_config.process_tool_arguments,
+            process_tool_kwargs=retry_config.process_tool_kwargs,
+            resource_catalog=resource_catalog,
             flow=flow,
         )
 
@@ -641,10 +805,12 @@ class AIBuilderProposalProcessor:
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
         max_output_tokens: int,
+        resource_catalog: AIBuilderResourceCatalog | None = None,
         flow=None,
         original_question_id: str | None = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
+        submission_tool_name = _active_submission_tool_name(flow)
         filtered_tool_schemas = [
             schema
             for schema in tool_schemas
@@ -684,7 +850,7 @@ class AIBuilderProposalProcessor:
             if discovery_ready
             else None
         )
-        correction_messages = self._build_tool_retry_messages(
+        correction_messages = build_tool_retry_messages(
             llm_messages=llm_messages,
             tool_call=tool_call,
             tool_feedback=(
@@ -697,7 +863,7 @@ class AIBuilderProposalProcessor:
                 )
                 + " Continue without inventing a new user-facing question. "
                 "If enough information exists, call confirm_requirements. "
-                "If requirements are already confirmed, call propose_flow. "
+                f"If requirements are already confirmed, call {submission_tool_name}. "
                 "Otherwise ask for clarification in concise free text only."
             ),
         )
@@ -747,14 +913,14 @@ class AIBuilderProposalProcessor:
                         )
                         return
                     retries_remaining -= 1
-                    active_messages = self._append_retry_feedback_turn(
+                    active_messages = append_tool_retry_feedback_turn(
                         llm_messages=active_messages,
                         tool_call=repeated_question_call,
                         assistant_content=message.content,
                         tool_feedback=(
                             "Structured discovery questions remain backend-owned. "
                             "Do not call ask_structured_question. "
-                            "Continue with confirm_requirements, propose_flow, or concise free text only."
+                            f"Continue with confirm_requirements, {submission_tool_name}, or concise free text only."
                         ),
                     )
                     continue
@@ -771,6 +937,7 @@ class AIBuilderProposalProcessor:
                     litellm_kwargs=litellm_kwargs,
                     available_model_refs=available_model_refs,
                     available_kb_refs=available_kb_refs,
+                    resource_catalog=resource_catalog,
                     max_output_tokens=max_output_tokens,
                     request_id="question-recovery",
                     flow=flow,
@@ -827,7 +994,9 @@ class AIBuilderProposalProcessor:
                 }
                 return
 
-            await self._persist_tool_turn(
+            await persist_tool_turn(
+                repo=self.repo,
+                tenant_id=self.user.tenant_id,
                 session_id=ctx.session_id,
                 conversation=ctx.conversation,
                 new_messages_start=ctx.new_messages_start,
@@ -879,6 +1048,7 @@ class AIBuilderProposalProcessor:
             litellm_kwargs=ctx.litellm_kwargs,
             available_model_refs=ctx.available_model_refs,
             available_kb_refs=ctx.available_kb_refs,
+            resource_catalog=ctx.resource_catalog,
             max_output_tokens=ctx.max_output_tokens,
             flow=ctx.flow,
             original_question_id=question_id,
@@ -886,50 +1056,43 @@ class AIBuilderProposalProcessor:
         ):
             yield event
 
-    async def _handle_confirm_requirements(
+    async def _process_confirm_requirements_arguments(
         self,
         *,
-        ctx: ProposalContext,
-        tool_call: Any,
-    ) -> AsyncGenerator[dict[str, str], None]:
-        try:
-            arguments = json.loads(tool_call.function.arguments)
-        except json.JSONDecodeError as error:
-            yield build_error_event(
-                message=f"Invalid requirements summary: {error}",
-                code="invalid_requirements_payload",
-                phase="requirements",
-            )
-            return
+        session_id: UUID,
+        conversation: list[ConversationMessage],
+        new_messages_start: int,
+        arguments: dict[str, Any],
+        assistant_content: str,
+        tool_call_id: str,
+        available_model_refs: set[str] | None,
+        available_kb_refs: set[str] | None,
+        flow=None,
+        litellm_model: str,
+        litellm_kwargs: dict[str, Any],
+    ) -> ToolProcessingResult:
+        del assistant_content, available_model_refs, available_kb_refs
 
         try:
             requirements_data = parse_confirm_requirements(arguments)
         except ValueError as error:
-            yield build_error_event(
-                message=f"Invalid requirements summary: {error}",
-                code="invalid_requirements_payload",
-                phase="requirements",
+            return ToolProcessingResult(
+                feedback=f"Invalid requirements summary: {error}",
+                failure_kind="parse",
             )
-            return
 
         discovery_block_message, discovery_analysis = await build_discovery_block_message_runtime(
-            ctx.conversation,
-            flow=ctx.flow,
+            conversation,
+            flow=flow,
             litellm_client=self.litellm_client,
-            litellm_model=ctx.litellm_model,
-            litellm_kwargs=ctx.litellm_kwargs,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
         )
         if discovery_block_message is not None:
-            for event in await self.emit_discovery_followup_if_needed(
-                session_id=ctx.session_id,
-                conversation=ctx.conversation,
-                new_messages_start=ctx.new_messages_start,
-                flow=ctx.flow,
-                litellm_model=ctx.litellm_model,
-                litellm_kwargs=ctx.litellm_kwargs,
-            ):
-                yield event
-            return
+            return ToolProcessingResult(
+                feedback=discovery_block_message,
+                failure_kind="validation",
+            )
 
         merged_assumptions = list(dict.fromkeys([
             *discovery_analysis.assumptions,
@@ -946,10 +1109,16 @@ class AIBuilderProposalProcessor:
             "requirements_version": requirements_version,
         }
 
-        await self._persist_tool_turn(
-            session_id=ctx.session_id,
-            conversation=ctx.conversation,
-            new_messages_start=ctx.new_messages_start,
+        tool_call = build_persisted_tool_call_stub(
+            tool_call_id=tool_call_id,
+            tool_name=CONFIRM_REQUIREMENTS_TOOL_NAME,
+        )
+        await persist_tool_turn(
+            repo=self.repo,
+            tenant_id=self.user.tenant_id,
+            session_id=session_id,
+            conversation=conversation,
+            new_messages_start=new_messages_start,
             tool_call=tool_call,
             arguments=arguments,
             tool_content="Requirements presented to user. Awaiting confirmation.",
@@ -958,141 +1127,166 @@ class AIBuilderProposalProcessor:
                 "requirements_version": requirements_version,
             },
         )
-        yield build_requirements_summary_event(requirements_payload)
+        return ToolProcessingResult(
+            event=build_requirements_summary_event(requirements_payload)
+        )
 
-    async def _handle_edit_flow(
+    async def _process_edit_arguments(
         self,
         *,
-        ctx: ProposalContext,
-        tool_call: Any,
-    ) -> AsyncGenerator[dict[str, str], None]:
-        """Handle the edit_flow tool call — validate, compile, store, and emit plan."""
-        if ctx.flow is None:
-            yield build_error_event(
-                message="edit_flow requires an existing flow context.",
-                code="edit_no_flow",
-                phase="proposal",
-                request_id=ctx.request_id,
+        session_id: UUID,
+        conversation: list[ConversationMessage],
+        new_messages_start: int,
+        arguments: dict[str, Any],
+        assistant_content: str,
+        tool_call_id: str,
+        available_model_refs: set[str] | None,
+        available_kb_refs: set[str] | None,
+        flow,
+        assistant_snapshots: dict[UUID, dict[str, Any]] | None,
+        litellm_model: str,
+        litellm_kwargs: dict[str, Any],
+        max_output_tokens: int,
+        resource_catalog: AIBuilderResourceCatalog | None = None,
+    ) -> ToolProcessingResult:
+        if flow is None:
+            return ToolProcessingResult(
+                feedback="edit_flow requires an existing flow context.",
+                failure_kind="validation",
             )
-            return
 
-        # Parse arguments
         try:
-            raw_args = json.loads(tool_call.function.arguments)
-            draft = FlowEditDraft.model_validate(raw_args)
+            draft = FlowEditDraft.model_validate(arguments)
         except Exception as exc:
             logger.warning("Failed to parse edit_flow arguments: %s", exc)
-            yield build_error_event(
-                message=f"Invalid edit_flow arguments: {exc}",
-                code="edit_parse_error",
-                phase="proposal",
-                request_id=ctx.request_id,
+            return ToolProcessingResult(
+                feedback=f"Invalid edit_flow arguments: {exc}",
+                failure_kind="parse",
             )
-            return
 
-        # Validate draft structure
+        if resource_catalog is not None:
+            draft, resolution_issues = canonicalize_edit_draft_resources(
+                draft,
+                catalog=resource_catalog,
+            )
+            if resolution_issues:
+                return ToolProcessingResult(
+                    feedback=format_resource_resolution_feedback(resolution_issues),
+                    failure_kind="validation",
+                )
+
         valid_step_refs = [
-            f"existing_step_{step.step_order}" for step in ctx.flow.steps
+            f"existing_step_{step.step_order}" for step in flow.steps
         ]
         edit_validation = validate_edit_draft(draft, valid_step_refs)
         if edit_validation.errors:
             error_messages = [err.message for err in edit_validation.errors]
             logger.info("Edit draft validation failed: %s", error_messages)
-            # Attempt self-correction by feeding errors back
-            yield build_error_event(
-                message=f"Edit validation failed: {'; '.join(error_messages)}",
-                code="edit_validation_error",
-                phase="proposal",
-                request_id=ctx.request_id,
+            return ToolProcessingResult(
+                feedback=f"Edit validation failed: {'; '.join(error_messages)}",
+                failure_kind="validation",
             )
-            return
 
-        # Compile draft into concrete spec
-        yield build_status_event("finalizing_plan")
         try:
             edit_result = compile_edit_draft(
                 draft,
-                current_steps=list(ctx.flow.steps),
-                base_flow_revision=ctx.flow.draft_revision,
-                flow_name=ctx.flow.name,
-                flow_description=ctx.flow.description,
-                current_metadata_json=ctx.flow.metadata_json,
-                assistant_snapshots=ctx.assistant_snapshots,
+                current_steps=list(flow.steps),
+                base_flow_revision=flow.draft_revision,
+                flow_name=flow.name,
+                flow_description=flow.description,
+                current_metadata_json=flow.metadata_json,
+                assistant_snapshots=assistant_snapshots,
             )
         except Exception as exc:
             logger.error("Edit compilation failed: %s", exc, exc_info=True)
-            yield build_error_event(
-                message=f"Failed to compile edit: {exc}",
-                code="edit_compile_error",
-                phase="proposal",
-                request_id=ctx.request_id,
+            return ToolProcessingResult(
+                feedback=f"Failed to compile edit: {exc}",
+                failure_kind="validation",
             )
-            return
 
-        # Validate the compiled spec
         compiled_spec = edit_result.compiled_spec
-        validation = validate_spec(compiled_spec)
-        session_validation = validate_compiled_spec_for_session(
-            compiled_spec,
+        prepared = prepare_compiled_spec_for_session(
+            spec=compiled_spec,
             target_kind=TargetKind.EDIT,
+            available_model_refs=available_model_refs,
+            available_kb_refs=available_kb_refs,
+            resource_catalog=None,
             valid_existing_step_refs=valid_step_refs,
         )
-        for error in session_validation.errors:
-            validation.add_error(
-                step_ref=error.step_ref,
-                code=error.code,
-                message=error.message,
+        if prepared.failure_feedback is not None:
+            return ToolProcessingResult(
+                feedback=prepared.failure_feedback,
+                failure_kind="validation",
             )
+        assert prepared.spec is not None
+        assert prepared.validation is not None
+        compiled_spec = prepared.spec
+        validation = prepared.validation
         if validation.errors:
             error_messages = [err.message for err in validation.errors]
-            yield build_error_event(
-                message=f"Compiled edit spec validation failed: {'; '.join(error_messages)}",
-                code="edit_spec_validation_error",
-                phase="proposal",
-                request_id=ctx.request_id,
+            return ToolProcessingResult(
+                feedback=(
+                    "Compiled edit spec validation failed: "
+                    + "; ".join(error_messages)
+                ),
+                failure_kind="validation",
             )
-            return
 
-        # Attempt constrained description repair if applicable
-        current_provenance = _extract_description_provenance(ctx.flow.metadata_json)
+        current_provenance = _extract_description_provenance(flow.metadata_json)
         if should_attempt_description_repair(
             advisories=edit_result.advisories,
-            current_description=ctx.flow.description,
+            current_description=flow.description,
             current_provenance=current_provenance,
         ):
-            yield build_status_event("repairing")
             repaired_spec = await self._attempt_description_repair(
                 compiled_spec=compiled_spec,
-                flow=ctx.flow,
-                llm_messages=ctx.llm_messages,
-                tool_schemas=ctx.tool_schemas,
-                litellm_model=ctx.litellm_model,
-                litellm_kwargs=ctx.litellm_kwargs,
-                max_output_tokens=ctx.max_output_tokens,
+                flow=flow,
+                llm_messages=[],
+                tool_schemas=[],
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                max_output_tokens=min(max_output_tokens, 256),
             )
             if repaired_spec is not None:
                 compiled_spec = repaired_spec
-                # Clear the advisory since description was repaired
                 edit_result = edit_result.model_copy(update={
                     "compiled_spec": compiled_spec,
                     "advisories": [
-                        a for a in edit_result.advisories
-                        if a.code != "flow_description_update_required"
+                        advisory
+                        for advisory in edit_result.advisories
+                        if advisory.code != "flow_description_update_required"
                     ],
                 })
 
-        # Store plan with the compiled spec (not the raw draft)
+        quality_feedback = self._format_quality_feedback(validation)
+        contextual_quality_feedback = self._format_contextual_quality_feedback(
+            conversation=conversation,
+            spec=compiled_spec,
+            flow=flow,
+        )
+        combined_quality_feedback = "\n\n".join(
+            feedback
+            for feedback in (quality_feedback, contextual_quality_feedback)
+            if feedback
+        )
+        if combined_quality_feedback:
+            return ToolProcessingResult(
+                feedback=combined_quality_feedback,
+                failure_kind="quality",
+            )
+
         assumptions = list(draft.assumptions) if draft.assumptions else []
         serialized_edit_result = edit_result.model_dump(mode="json")
         plan, envelope = await store_plan_and_update_conversation(
             repo=self.repo,
             tenant_id=self.user.tenant_id,
-            session_id=ctx.session_id,
-            conversation=ctx.conversation,
-            new_messages_start=ctx.new_messages_start,
-            assistant_content=ctx.text_content or "",
-            tool_call_id=tool_call.id,
-            arguments=raw_args,
+            session_id=session_id,
+            conversation=conversation,
+            new_messages_start=new_messages_start,
+            assistant_content=assistant_content,
+            tool_call_id=tool_call_id,
+            tool_name=EDIT_FLOW_TOOL_NAME,
+            arguments=arguments,
             spec=compiled_spec,
             assumptions=assumptions,
             plan_rationale=draft.plan_rationale,
@@ -1100,12 +1294,114 @@ class AIBuilderProposalProcessor:
             validation=validation,
             edit_result_json=serialized_edit_result,
         )
-
-        yield build_plan_event(
-            plan_id=plan.id,
-            envelope=envelope,
-            edit_result=edit_result,
+        return ToolProcessingResult(
+            event=build_plan_event(
+                plan_id=plan.id,
+                envelope=envelope,
+                edit_result=edit_result,
+            )
         )
+
+    async def _handle_confirm_requirements(
+        self,
+        *,
+        ctx: ProposalContext,
+        tool_call: Any,
+    ) -> AsyncGenerator[dict[str, str], None]:
+        try:
+            arguments = json.loads(tool_call.function.arguments)
+        except json.JSONDecodeError as error:
+            async for event in self._request_tool_self_correction(
+                ctx=ctx,
+                error_message=f"Invalid requirements summary: {error}",
+                tool_call=tool_call,
+                retry_config=self._confirm_requirements_retry_config(ctx),
+            ):
+                yield event
+            return
+
+        confirm_result = await self._process_confirm_requirements_arguments(
+            session_id=ctx.session_id,
+            conversation=ctx.conversation,
+            new_messages_start=ctx.new_messages_start,
+            arguments=arguments,
+            assistant_content=ctx.text_content or "",
+            tool_call_id=tool_call.id,
+            available_model_refs=ctx.available_model_refs,
+            available_kb_refs=ctx.available_kb_refs,
+            flow=ctx.flow,
+            litellm_model=ctx.litellm_model,
+            litellm_kwargs=ctx.litellm_kwargs,
+        )
+        if confirm_result.event is None:
+            if confirm_result.failure_kind == "validation":
+                for event in await self.emit_discovery_followup_if_needed(
+                    session_id=ctx.session_id,
+                    conversation=ctx.conversation,
+                    new_messages_start=ctx.new_messages_start,
+                    flow=ctx.flow,
+                    litellm_model=ctx.litellm_model,
+                    litellm_kwargs=ctx.litellm_kwargs,
+                ):
+                    yield event
+                return
+
+            async for event in self._request_tool_self_correction(
+                ctx=ctx,
+                error_message=confirm_result.feedback or "Invalid requirements summary.",
+                tool_call=tool_call,
+                retry_config=self._confirm_requirements_retry_config(ctx),
+            ):
+                yield event
+            return
+
+        yield confirm_result.event
+
+    async def _handle_edit_flow(
+        self,
+        *,
+        ctx: ProposalContext,
+        tool_call: Any,
+    ) -> AsyncGenerator[dict[str, str], None]:
+        try:
+            raw_args = json.loads(tool_call.function.arguments)
+        except json.JSONDecodeError as error:
+            async for event in self._request_tool_self_correction(
+                ctx=ctx,
+                error_message=f"Invalid edit_flow arguments: {error}",
+                tool_call=tool_call,
+                retry_config=self._edit_flow_retry_config(ctx),
+            ):
+                yield event
+            return
+
+        edit_result = await self._process_edit_arguments(
+            session_id=ctx.session_id,
+            conversation=ctx.conversation,
+            new_messages_start=ctx.new_messages_start,
+            arguments=raw_args,
+            assistant_content=ctx.text_content or "",
+            tool_call_id=tool_call.id,
+            available_model_refs=ctx.available_model_refs,
+            available_kb_refs=ctx.available_kb_refs,
+            flow=ctx.flow,
+            assistant_snapshots=ctx.assistant_snapshots,
+            litellm_model=ctx.litellm_model,
+            litellm_kwargs=ctx.litellm_kwargs,
+            max_output_tokens=ctx.max_output_tokens,
+            resource_catalog=ctx.resource_catalog,
+        )
+        if edit_result.event is None:
+            async for event in self._request_tool_self_correction(
+                ctx=ctx,
+                error_message=edit_result.feedback or "Invalid edit_flow arguments.",
+                tool_call=tool_call,
+                retry_config=self._edit_flow_retry_config(ctx),
+            ):
+                yield event
+            return
+
+        yield edit_result.event
 
     async def _attempt_description_repair(
         self,
@@ -1182,6 +1478,76 @@ class AIBuilderProposalProcessor:
             ui_language=ui_language,
         )
 
+    def _submission_retry_config(
+        self,
+        *,
+        flow,
+        litellm_model: str,
+        litellm_kwargs: dict[str, Any],
+        max_output_tokens: int,
+        assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+        resource_catalog: AIBuilderResourceCatalog | None = None,
+    ) -> ToolRetryConfig:
+        if flow is None:
+            return ToolRetryConfig(
+                target_tool_name=CREATE_FLOW_TOOL_NAME,
+                forced_tool_prompt=(
+                    "Your previous reply was prose only. "
+                    "Now call create_flow with one complete typed draft. "
+                    "Do not answer with prose."
+                ),
+                process_tool_arguments=self._process_create_arguments,
+                process_tool_kwargs={},
+            )
+
+        return ToolRetryConfig(
+            target_tool_name=EDIT_FLOW_TOOL_NAME,
+            forced_tool_prompt=(
+                "Your previous reply was prose only. "
+                "Return one valid edit_flow tool call that keeps the flow coherent. "
+                "Do not answer with prose."
+            ),
+            process_tool_arguments=self._process_edit_arguments,
+            process_tool_kwargs={
+                "assistant_snapshots": assistant_snapshots,
+                "litellm_model": litellm_model,
+                "litellm_kwargs": litellm_kwargs,
+                "max_output_tokens": max_output_tokens,
+                "resource_catalog": resource_catalog,
+            },
+        )
+
+    def _confirm_requirements_retry_config(self, ctx: ProposalContext) -> ToolRetryConfig:
+        return ToolRetryConfig(
+            target_tool_name=CONFIRM_REQUIREMENTS_TOOL_NAME,
+            forced_tool_prompt=(
+                "Return one valid confirm_requirements tool call. "
+                "Do not answer with prose."
+            ),
+            process_tool_arguments=self._process_confirm_requirements_arguments,
+            process_tool_kwargs={
+                "litellm_model": ctx.litellm_model,
+                "litellm_kwargs": ctx.litellm_kwargs,
+            },
+        )
+
+    def _edit_flow_retry_config(self, ctx: ProposalContext) -> ToolRetryConfig:
+        return ToolRetryConfig(
+            target_tool_name=EDIT_FLOW_TOOL_NAME,
+            forced_tool_prompt=(
+                "Return one valid edit_flow tool call that keeps the flow coherent. "
+                "Do not answer with prose."
+            ),
+            process_tool_arguments=self._process_edit_arguments,
+            process_tool_kwargs={
+                "assistant_snapshots": ctx.assistant_snapshots,
+                "litellm_model": ctx.litellm_model,
+                "litellm_kwargs": ctx.litellm_kwargs,
+                "max_output_tokens": ctx.max_output_tokens,
+                "resource_catalog": ctx.resource_catalog,
+            },
+        )
+
 
 def _extract_description_provenance(
     metadata_json: dict[str, Any] | None,
@@ -1199,3 +1565,7 @@ def _extract_description_provenance(
         return DescriptionProvenance.model_validate(desc_raw)
     except Exception:
         return None
+
+
+def _active_submission_tool_name(flow: Any) -> str:
+    return EDIT_FLOW_TOOL_NAME if flow is not None else CREATE_FLOW_TOOL_NAME

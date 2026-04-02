@@ -200,6 +200,44 @@ def test_validate_steps_allows_explicit_empty_template_bindings_for_publish():
     )
 
 
+def test_validate_steps_rejects_inline_citation_mode_for_non_text_output() -> None:
+    with pytest.raises(BadRequestException, match="citation_mode 'inline_inref_sidecar' requires output_type 'text'"):
+        validate_steps(
+            [
+                _step(
+                    output_type="json",
+                    output_config={"citation_mode": "inline_inref_sidecar"},
+                )
+            ]
+        )
+
+
+def test_validate_steps_rejects_inline_citation_mode_for_transcribe_only_output() -> None:
+    with pytest.raises(BadRequestException, match="citation_mode 'inline_inref_sidecar' requires an LLM-backed text step"):
+        validate_steps(
+            [
+                _step(
+                    input_type="audio",
+                    output_type="text",
+                    output_mode="transcribe_only",
+                    output_config={"citation_mode": "inline_inref_sidecar"},
+                )
+            ]
+        )
+
+
+def test_validate_steps_allows_inline_citation_mode_for_text_llm_steps() -> None:
+    validate_steps(
+        [
+            _step(
+                output_type="text",
+                output_mode="pass_through",
+                output_config={"citation_mode": "inline_inref_sidecar"},
+            )
+        ]
+    )
+
+
 def test_normalize_legacy_form_schema_maps_legacy_string_type_to_text():
     metadata_json = {
         "form_schema": {

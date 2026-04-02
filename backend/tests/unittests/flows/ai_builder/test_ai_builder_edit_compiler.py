@@ -41,6 +41,7 @@ def _make_flow_step(
     mcp_policy: str = "inherit",
     input_bindings: dict | None = None,
     output_contract: dict | None = None,
+    output_config: dict | None = None,
 ) -> FlowStep:
     return FlowStep(
         id=uuid4(),
@@ -55,6 +56,7 @@ def _make_flow_step(
         output_type=output_type,
         input_bindings=input_bindings,
         output_contract=output_contract,
+        output_config=output_config,
         mcp_policy=mcp_policy,
     )
 
@@ -68,6 +70,27 @@ def _make_assistant_snapshots(*steps: FlowStep) -> dict:
             "knowledge_refs": [f"kb-{index}"],
         }
     return snapshots
+
+
+def _make_add_payload(
+    *,
+    name: str,
+    instructions: str,
+    input_source: InputSource = InputSource.PREVIOUS_STEP,
+    input_type: InputType = InputType.TEXT,
+    output_type: OutputType = OutputType.TEXT,
+    runtime_upload: bool = False,
+    runtime_required: bool = False,
+) -> AddStepPayload:
+    return AddStepPayload(
+        name=name,
+        instructions=instructions,
+        input_source=input_source,
+        input_type=input_type,
+        output_type=output_type,
+        runtime_upload=runtime_upload,
+        runtime_required=runtime_required,
+    )
 
 
 class TestAddBeforeExistingStep:
@@ -88,9 +111,9 @@ class TestAddBeforeExistingStep:
                 StepEditOperation(
                     op="add",
                     placement=StepPlacement(position="before", anchor_ref="existing_step_1"),
-                    add_payload=AddStepPayload(
+                    add_payload=_make_add_payload(
                         name="Transkribera ljud",
-                        assistant_spec=AssistantSpec(instructions="Transkribera ljudfilen."),
+                        instructions="Transkribera ljudfilen.",
                         input_source=InputSource.FLOW_INPUT,
                         input_type=InputType.AUDIO,
                     ),
@@ -126,6 +149,60 @@ class TestAddBeforeExistingStep:
         assert len(unchanged) == 1
         assert unchanged[0].step_ref == "existing_step_1"
 
+    def test_add_step_uses_shared_new_step_draft_compilation_rules(self):
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                user_description="Analysera transkript",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+            ),
+        ]
+
+        draft = FlowEditDraft.model_validate(
+            {
+                "operations": [
+                    {
+                        "op": "add",
+                        "placement": {
+                            "position": "before",
+                            "anchor_ref": "existing_step_1",
+                        },
+                        "add_payload": {
+                            "name": "Transkribera ljud",
+                            "instructions": "Transkribera ljudfilen ordagrant.",
+                            "input_source": "flow_input",
+                            "input_type": "audio",
+                            "output_type": "text",
+                            "runtime_upload": True,
+                            "runtime_required": True,
+                        },
+                    }
+                ],
+                "plan_rationale": "Lägg till transkribering före analys.",
+            }
+        )
+
+        result = compile_edit_draft(
+            draft,
+            existing,
+            base_flow_revision=1,
+            flow_name="Ljudanalys",
+        )
+
+        step = result.compiled_spec.steps[0]
+        assert step.name == "Transkribera ljud"
+        assert step.output_mode == OutputMode.TRANSCRIBE_ONLY
+        assert step.input_config == {
+            "runtime_input": {
+                "enabled": True,
+                "required": True,
+                "input_format": "audio",
+            }
+        }
+        assert step.assistant_spec.instructions == "Transkribera ljudfilen ordagrant."
+
 
 class TestUntouchedStepsPreserved:
     def test_modify_one_step_preserves_others(self):
@@ -158,6 +235,153 @@ class TestUntouchedStepsPreserved:
 
         unchanged = [c for c in result.diff.step_changes if c.kind == "unchanged"]
         assert len(unchanged) == 2  # First and Third
+
+    def test_modify_with_no_effect_is_collapsed_to_unchanged(self):
+        existing = [
+            _make_flow_step(step_order=1, user_description="First"),
+            _make_flow_step(step_order=2, user_description="Second"),
+        ]
+
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_2",
+                    patch=StepPatch(name="Second"),
+                ),
+            ],
+        )
+
+        result = compile_edit_draft(draft, existing, base_flow_revision=2)
+
+        assert [change.kind for change in result.diff.step_changes] == ["unchanged", "unchanged"]
+        assert all(change.details is None for change in result.diff.step_changes)
+
+
+class TestTransitionNormalization:
+    def test_text_to_pdf_edit_clears_incompatible_citation_mode_and_emits_advisory(self):
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                user_description="Grounded report",
+                output_type="text",
+                output_config={"citation_mode": "inline_inref_sidecar"},
+            ),
+        ]
+
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_1",
+                    patch=StepPatch(output_type=OutputType.PDF),
+                ),
+            ],
+            plan_rationale="Convert the final step to PDF.",
+        )
+
+        result = compile_edit_draft(draft, existing, base_flow_revision=5)
+
+        step = result.compiled_spec.steps[0]
+        assert step.output_type == OutputType.PDF
+        assert step.output_config is None
+        assert [change.kind for change in result.diff.step_changes] == ["modified"]
+        assert any(
+            advisory.code == "output_config_citation_mode_cleared"
+            and advisory.field == "existing_step_1.output_config.citation_mode"
+            for advisory in result.advisories
+        )
+
+    def test_output_only_edit_does_not_flag_downstream_steps_modified_for_alias_rewrites(self):
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                user_description="Extrahera text",
+                input_source="flow_input",
+                input_type="document",
+                output_type="text",
+            ),
+            _make_flow_step(
+                step_order=2,
+                user_description="Riskanalys (JSON)",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "riskposter": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                        }
+                    },
+                },
+            ),
+            _make_flow_step(
+                step_order=3,
+                user_description="Teorikoppling",
+                input_source="previous_step",
+                input_type="json",
+                output_type="json",
+                input_bindings={
+                    "question": "{{ step_2.output.structured }}\n\närendenummer: {{ arendenummer }}"
+                },
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "teori_kopplingar": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                        }
+                    },
+                },
+            ),
+            _make_flow_step(
+                step_order=4,
+                user_description="Grounded sammanfattning",
+                input_source="all_previous_steps",
+                input_type="any",
+                output_type="text",
+                input_bindings={
+                    "question": (
+                        "{{ step_1.output.text }}\n\n"
+                        "{{ step_2.output.text }}\n\n"
+                        "{{ step_3.output.text }}"
+                    )
+                },
+            ),
+            _make_flow_step(
+                step_order=5,
+                user_description="Generera DOCX",
+                input_source="previous_step",
+                input_type="text",
+                output_type="docx",
+                input_bindings={"question": "{{ föregående_steg }}"},
+            ),
+        ]
+
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_5",
+                    patch=StepPatch(output_type=OutputType.PDF),
+                ),
+            ],
+            plan_rationale="Byt bara slutformatet till PDF.",
+        )
+
+        result = compile_edit_draft(draft, existing, base_flow_revision=3)
+
+        assert [(change.step_ref, change.kind) for change in result.diff.step_changes] == [
+            ("existing_step_1", "unchanged"),
+            ("existing_step_2", "unchanged"),
+            ("existing_step_3", "unchanged"),
+            ("existing_step_4", "unchanged"),
+            ("existing_step_5", "modified"),
+        ]
+        assert result.diff.step_changes[-1].details == "output_type → pdf"
+
 
 
 class TestRemoveStep:
@@ -199,9 +423,9 @@ class TestCompiledResultApproval:
                 StepEditOperation(
                     op="add",
                     placement=StepPlacement(position="append"),
-                    add_payload=AddStepPayload(
+                    add_payload=_make_add_payload(
                         name="Summary",
-                        assistant_spec=AssistantSpec(instructions="Summarize."),
+                        instructions="Summarize.",
                     ),
                 ),
             ],
@@ -413,12 +637,11 @@ class TestCompiledResultApproval:
                 StepEditOperation(
                     op="add",
                     placement=StepPlacement(position="before", anchor_ref="existing_step_1"),
-                    add_payload=AddStepPayload(
+                    add_payload=_make_add_payload(
                         name="Transkribera ljud",
-                        assistant_spec=AssistantSpec(instructions="Transkribera ljud."),
+                        instructions="Transkribera ljud.",
                         input_source=InputSource.FLOW_INPUT,
                         input_type=InputType.AUDIO,
-                        output_mode=OutputMode.TRANSCRIBE_ONLY,
                         output_type=OutputType.TEXT,
                     ),
                 ),
@@ -488,9 +711,9 @@ class TestConfidence:
                 StepEditOperation(
                     op="add",
                     placement=StepPlacement(position="append"),
-                    add_payload=AddStepPayload(
+                    add_payload=_make_add_payload(
                         name="New",
-                        assistant_spec=AssistantSpec(instructions="Do."),
+                        instructions="Do.",
                     ),
                 ),
             ],
@@ -526,9 +749,9 @@ class TestMixedOperations:
                 StepEditOperation(
                     op="add",
                     placement=StepPlacement(position="after", anchor_ref="existing_step_2"),
-                    add_payload=AddStepPayload(
+                    add_payload=_make_add_payload(
                         name="Classify",
-                        assistant_spec=AssistantSpec(instructions="Classify the analysis."),
+                        instructions="Classify the analysis.",
                         input_source=InputSource.PREVIOUS_STEP,
                     ),
                 ),

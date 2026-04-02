@@ -1,9 +1,7 @@
 import type { FlowStep } from "@intric/intric-js";
 
-import {
-  getSelectableInputTypeOptions,
-  type SelectableInputTypeOption
-} from "./flowStepTypes";
+import { sanitizeStepCitationMode } from "./flowCitationMode";
+import { getSelectableInputTypeOptions, type SelectableInputTypeOption } from "./flowStepTypes";
 import { getRecommendedDisplayedInputType } from "./flowStepPresentation";
 import {
   FILE_BASED_INPUT_TYPES,
@@ -12,7 +10,10 @@ import {
   type FlowRuntimeInputConfigValue,
   type FlowRuntimeInputFormat
 } from "./flowRuntimeInputConfig";
-import { createTemplateFillDraftConfig, type getTemplateFillOutputConfig } from "./templateFillConfig";
+import {
+  createTemplateFillDraftConfig,
+  type getTemplateFillOutputConfig
+} from "./templateFillConfig";
 
 type StepInputSource = FlowStep["input_source"];
 type StepInputType = FlowStep["input_type"];
@@ -172,14 +173,14 @@ export function applyInputTypeChange({
   }
 
   return {
-    step: {
+    step: sanitizeStepCitationMode({
       ...step,
       ...runtimePatch,
       input_type: nextType,
       input_source: nextInputSource,
       output_mode: nextOutputMode,
       output_type: nextOutputType
-    },
+    }),
     inputSourceAdjusted: nextInputSource !== step.input_source
   };
 }
@@ -202,27 +203,27 @@ export function applyOutputModeChange({
           { ...runtimeInputConfig, enabled: true, required: true, input_format: "audio" }
         )
       : {};
-    return {
+    return sanitizeStepCitationMode({
       ...step,
       ...audioPatch,
       input_type: "audio",
       input_source: "flow_input",
       output_mode: "transcribe_only",
       output_type: "text"
-    };
+    });
   }
 
   if (nextMode === "template_fill") {
-    return {
+    return sanitizeStepCitationMode({
       ...step,
       output_mode: "template_fill",
       output_type: "docx",
       output_contract: null,
       output_config: createTemplateFillDraftConfig(templateFillConfig)
-    };
+    });
   }
 
-  return { ...step, output_mode: nextMode };
+  return sanitizeStepCitationMode({ ...step, output_mode: nextMode });
 }
 
 export function applyOutputTypeChange({
@@ -233,20 +234,14 @@ export function applyOutputTypeChange({
   nextType: StepOutputType;
 }): FlowStep {
   const nextMode =
-    step.output_mode === "template_fill" && nextType !== "docx"
-      ? "pass_through"
-      : step.output_mode;
+    step.output_mode === "template_fill" && nextType !== "docx" ? "pass_through" : step.output_mode;
 
-  return { ...step, output_type: nextType, output_mode: nextMode };
+  return sanitizeStepCitationMode({ ...step, output_type: nextType, output_mode: nextMode });
 }
 
-function withHttpDefaults(
-  inputConfig: FlowStep["input_config"]
-): Record<string, unknown> {
+function withHttpDefaults(inputConfig: FlowStep["input_config"]): Record<string, unknown> {
   const currentConfig =
-    inputConfig && typeof inputConfig === "object"
-      ? (inputConfig as Record<string, unknown>)
-      : {};
+    inputConfig && typeof inputConfig === "object" ? (inputConfig as Record<string, unknown>) : {};
 
   // If already in authored format (has auth key), preserve as-is with defaults
   if (currentConfig.auth) {
@@ -284,8 +279,7 @@ function keepOrRecommendInputType({
 }): StepInputType {
   if (
     options.some(
-      (option) =>
-        option.value === currentInputType && !option.disabled && !option.legacyInvalid
+      (option) => option.value === currentInputType && !option.disabled && !option.legacyInvalid
     )
   ) {
     return currentInputType;

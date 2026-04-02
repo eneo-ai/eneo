@@ -58,6 +58,7 @@ from intric.flows.ai_builder.ai_builder_discovery_questions import (
     pdf_generation_mode_question,
     processing_scope_question,
     question_suggestion_for_id,
+    question_exposure_for_id,
     runtime_metadata_fields_question,
     structured_analysis_need_question,
 )
@@ -313,7 +314,10 @@ def analyze_discovery(
             )
         )
 
-    if _structured_analysis_need_is_vague(profile):
+    if (
+        _structured_analysis_need_is_vague(profile)
+        and question_exposure_for_id("structured_analysis_need") == "user_requirement"
+    ):
         raw_issues.append(
             DiscoveryIssue(
                 issue_id="structured_analysis_need",
@@ -359,7 +363,7 @@ def analyze_discovery(
                 suggestion = question_suggestion_for_id(
                     low_signal.question_id, language=profile.language
                 )
-                if suggestion is not None:
+                if suggestion is not None and suggestion.exposure == "user_requirement":
                     raw_issues.append(
                         DiscoveryIssue(
                             issue_id=f"low_confidence_{low_signal.question_id}",
@@ -440,7 +444,7 @@ def build_discovery_followup(
             pending_question_id,
             language=profile.language,
         )
-        if suggestion is not None:
+        if suggestion is not None and suggestion.exposure == "user_requirement":
             issue = next(
                 (
                     current_issue
@@ -511,7 +515,7 @@ def build_registry_question_followup(
 
     profile = _build_discovery_profile(conversation, flow=flow)
     suggestion = question_suggestion_for_id(canonical_id, language=profile.language)
-    if suggestion is None:
+    if suggestion is None or suggestion.exposure != "user_requirement":
         return None
 
     issue = next(
@@ -565,7 +569,7 @@ def build_discovery_guidance(
     suggestion = next_issue.suggestion
     lines = [
         "- Discovery protocol: there is still blocking ambiguity or a contradiction.",
-        "- Ask exactly ONE structured question now. Do not call `confirm_requirements` or `propose_flow` yet.",
+        "- Ask exactly ONE structured question now. Do not call `confirm_requirements`, `create_flow`, or `edit_flow` yet.",
         f"- Highest-priority blocker: {next_issue.message}",
         f"- Use `question_id=\"{suggestion.question_id}\"`.",
         f"- Ask this question: {suggestion.question}",

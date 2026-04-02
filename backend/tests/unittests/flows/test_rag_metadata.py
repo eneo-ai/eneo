@@ -111,3 +111,51 @@ def test_build_rag_references_enriches_source_metadata_when_available():
     assert references[0]["source_kind"] == "website"
     assert references[0]["source_container_name"] == "Kunskapsbanken"
     assert references[0]["usage_state"] == "retrieved_candidate"
+
+
+def test_build_rag_references_adds_display_quality_and_raw_display_fields() -> None:
+    source_id = uuid4()
+    references, _ = build_rag_references(
+        [
+            SimpleNamespace(
+                info_blob_id=source_id,
+                info_blob_title="https://kunskap.example.se/navigation",
+                chunk_no=1,
+                score=0.95,
+                text="Hem > Psykologi > Beslut\nMeny\nKontakt\nLogga in\nCookies\n",
+            ),
+            SimpleNamespace(
+                info_blob_id=source_id,
+                info_blob_title="https://kunskap.example.se/beslut/underlag",
+                chunk_no=2,
+                score=0.74,
+                text=(
+                    "Detta underlag beskriver hur beslut till underlag utformas i praktiken. "
+                    "Texten fokuserar pa hur professionella bedomningar dokumenteras, "
+                    "vilka kriterier som galler och hur slutsatser ska motiveras."
+                ),
+            ),
+        ],
+        source_metadata_by_id={
+            str(source_id): {
+                "source_title": "Beslut till underlag",
+                "source_url": "https://kunskap.example.se/beslut/underlag",
+                "source_kind": "website",
+                "source_container_kind": "website",
+                "source_container_name": "Kunskapsbanken",
+                "source_container_id": "website-1",
+            }
+        },
+    )
+
+    reference = references[0]
+    assert reference["source_title_raw"] == "Beslut till underlag"
+    assert reference["source_display_name"] == "Beslut till underlag"
+    assert reference["source_container_name_raw"] == "Kunskapsbanken"
+    assert reference["source_container_label"] == "Kunskapsbanken"
+    assert reference["display_chunk_no"] == 2
+    assert "professionella bedomningar" in reference["display_snippet"]
+    assert reference["snippet_quality"] in {"high", "medium"}
+    assert reference["display_selection_reason"] == "highest_signal_chunk"
+    assert isinstance(reference["quality_flags"], list)
+    assert isinstance(reference["boilerplate_likelihood"], float)

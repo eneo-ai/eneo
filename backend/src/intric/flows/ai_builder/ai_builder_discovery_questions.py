@@ -6,6 +6,7 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryLanguage,
     DiscoveryQuestionOption,
     DiscoveryQuestionSuggestion,
+    QuestionExposure,
 )
 
 
@@ -559,6 +560,7 @@ def structured_analysis_need_question(language: DiscoveryLanguage) -> DiscoveryQ
                 value="text_only_analysis",
             ),
         ),
+        exposure="planner_internal",
     )
 
 
@@ -658,3 +660,10 @@ def question_suggestion_for_id(
     if builder is None:
         return None
     return builder(language)
+
+
+def question_exposure_for_id(question_id: str) -> QuestionExposure:
+    suggestion = question_suggestion_for_id(question_id, language="sv")
+    if suggestion is None:
+        return "user_requirement"
+    return suggestion.exposure

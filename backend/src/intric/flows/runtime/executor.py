@@ -151,6 +151,9 @@ def _build_attempt_provenance(
             tool_calls=normalize_json_preview(output.tool_calls_metadata)
             if output.tool_calls_metadata is not None
             else None,
+            raw_completion_text=normalize_text_preview(output.raw_completion_text)
+            if isinstance(output.raw_completion_text, str) and output.raw_completion_text
+            else None,
         )
     ).to_payload()
     if output.rag_metadata is not None:
@@ -191,6 +194,8 @@ def _build_attempt_provenance(
             **cast(dict[str, Any], provenance.get("http", {})),
             "output_mode": step.output_mode,
         }
+    if output.citation_sidecar is not None:
+        provenance["citations"] = output.citation_sidecar
     return provenance
 
 

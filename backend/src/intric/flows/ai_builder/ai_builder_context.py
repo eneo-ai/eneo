@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalog,
+    build_ai_builder_resource_catalog,
+)
 from intric.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
     resolve_ai_builder_budget_policy,
@@ -17,6 +21,7 @@ class AIBuilderPlannerContext:
     model: Any
     available_models: list[dict[str, str]]
     available_kbs: list[dict[str, str]]
+    resource_catalog: AIBuilderResourceCatalog
     max_input_tokens: int
     max_output_tokens: int
     budget_policy: AIBuilderBudgetPolicy
@@ -27,6 +32,7 @@ def serialize_space_models(space) -> list[dict[str, str]]:
         {
             "id": str(model.id),
             "name": model.name,
+            "display_name": model.name,
             "provider": getattr(model, "provider_type", "unknown"),
         }
         for model in getattr(space, "completion_models", [])
@@ -38,6 +44,7 @@ def serialize_space_kbs(space) -> list[dict[str, str]]:
         {
             "id": str(collection.id),
             "name": getattr(collection, "name", ""),
+            "display_name": getattr(collection, "name", ""),
             "description": getattr(collection, "description", "") or "",
         }
         for collection in getattr(space, "collections", [])
@@ -102,10 +109,16 @@ def build_planner_context(
             code="planner_model_missing_output_tokens",
         )
 
+    available_models = serialize_space_models(space)
+    available_kbs = serialize_space_kbs(space)
     return AIBuilderPlannerContext(
         model=model,
-        available_models=serialize_space_models(space),
-        available_kbs=serialize_space_kbs(space),
+        available_models=available_models,
+        available_kbs=available_kbs,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=available_models,
+            available_kbs=available_kbs,
+        ),
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         budget_policy=budget_policy,

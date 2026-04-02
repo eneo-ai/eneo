@@ -8,6 +8,10 @@ from intric.flows.ai_builder.ai_builder_materializer import (
     compile_changeset,
     execute_changeset,
 )
+from intric.flows.ai_builder.ai_builder_context import (
+    serialize_space_kbs,
+    serialize_space_models,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     ApplyResultResponse,
     BuilderPlan,
@@ -19,10 +23,18 @@ from intric.flows.ai_builder.ai_builder_models import (
     SessionStatus,
     TargetKind,
 )
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
+    canonicalize_flow_spec_resources,
+    format_resource_resolution_feedback,
+)
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_session_spec_validator import (
     normalize_compiled_spec_for_session,
     validate_compiled_spec_for_session,
+)
+from intric.flows.ai_builder.ai_builder_step_transition_policy import (
+    normalize_ai_builder_spec,
 )
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.main.logging import get_logger
@@ -94,6 +106,11 @@ class AIBuilderPlanLifecycle:
         spec = normalize_compiled_spec_for_session(
             plan.spec,
             target_kind=session.target_kind,
+        )
+        spec, _ = normalize_ai_builder_spec(spec)
+        spec = await self._canonicalize_plan_spec_resources(
+            session=session,
+            spec=spec,
         )
         self._require_valid_compiled_spec_for_session(
             session=session,
@@ -175,6 +192,45 @@ class AIBuilderPlanLifecycle:
         space = await self.space_service.get_space(space_id)
         model = space.get_default_transcription_model()
         return None if model is None else model.id
+
+    async def _canonicalize_plan_spec_resources(
+        self,
+        *,
+        session: BuilderSession,
+        spec: FlowDraftSpecCore,
+    ) -> FlowDraftSpecCore:
+        if self.space_service is None:
+            return spec
+
+        space = await self.space_service.get_space(session.space_id)
+        catalog = build_ai_builder_resource_catalog(
+            available_models=serialize_space_models(space),
+            available_kbs=serialize_space_kbs(space),
+        )
+        normalized_spec, resolution_issues = canonicalize_flow_spec_resources(
+            spec,
+            catalog=catalog,
+        )
+        if not resolution_issues:
+            return normalized_spec
+
+        raise BadRequestException(
+            format_resource_resolution_feedback(resolution_issues),
+            code=resolution_issues[0].code,
+            context={
+                "session_id": str(session.id),
+                "resource_resolution_issues": [
+                    {
+                        "kind": issue.kind,
+                        "code": issue.code,
+                        "provided_value": issue.provided_value,
+                        "location": issue.location,
+                        "valid_options": list(issue.valid_options),
+                    }
+                    for issue in resolution_issues
+                ],
+            },
+        )
 
     async def _get_plan(self, plan_id: UUID) -> BuilderPlan:
         return await self.repo.get_plan(

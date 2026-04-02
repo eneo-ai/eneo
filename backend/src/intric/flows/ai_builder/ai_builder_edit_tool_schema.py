@@ -9,6 +9,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from intric.flows.ai_builder.ai_builder_flow_name import MAX_FLOW_NAME_LENGTH
+from intric.flows.ai_builder.ai_builder_new_step_schema import (
+    build_new_step_draft_schema,
+    small_ref_enums,
+)
 from intric.flows.domain.flow import FlowStep
 
 EDIT_FLOW_TOOL_NAME = "edit_flow"
@@ -31,13 +36,8 @@ def build_edit_flow_tool_schema(
     target_ref_enum: list[str | None] = valid_refs + [None]
     anchor_ref_enum: list[str | None] = valid_refs + [None]
 
-    model_refs: list[str] | None = None
-    if available_models and len(available_models) <= 15:
-        model_refs = [m["ref"] for m in available_models if "ref" in m]
-
-    kb_refs: list[str] | None = None
-    if available_kbs and len(available_kbs) <= 15:
-        kb_refs = [kb["ref"] for kb in available_kbs if "ref" in kb]
+    model_refs = small_ref_enums(available_models)
+    kb_refs = small_ref_enums(available_kbs)
 
     step_payload_schema = _build_step_payload_schema(model_refs, kb_refs)
 
@@ -46,9 +46,11 @@ def build_edit_flow_tool_schema(
         "function": {
             "name": EDIT_FLOW_TOOL_NAME,
             "description": (
-                "Edit an existing flow. Describe only the changes — "
+                "Edit an existing flow. Describe only the steps or flow properties that truly change — "
                 "the backend preserves everything else. Each operation targets "
-                "a specific step by its ref. Unmentioned steps are kept as-is."
+                "a specific step by its ref. Unmentioned steps are kept as-is. "
+                "When you change output_type or output_mode, clear or omit incompatible "
+                "output_config fields instead of rewriting unrelated step config."
             ),
             "parameters": {
                 "type": "object",
@@ -63,6 +65,7 @@ def build_edit_flow_tool_schema(
                     },
                     "flow_name": {
                         "type": ["string", "null"],
+                        "maxLength": MAX_FLOW_NAME_LENGTH,
                         "description": "New flow name, or null to keep current.",
                     },
                     "flow_description": {
@@ -160,35 +163,21 @@ def _build_step_payload_schema(
     model_refs: list[str] | None,
     kb_refs: list[str] | None,
 ) -> dict[str, Any]:
-    """Schema for add_payload (full step spec for new steps)."""
-    assistant_spec = _build_assistant_spec_schema(model_refs, kb_refs)
-
-    return {
-        "type": "object",
-        "description": "Full step specification for new steps (add operations).",
-        "required": ["name", "assistant_spec"],
-        "properties": {
-            "name": {"type": "string", "description": "User-visible step name."},
-            "assistant_spec": assistant_spec,
-            "input_source": {
-                "type": "string",
-                "enum": ["flow_input", "previous_step", "all_previous_steps"],
-                "description": "Where this step gets its input.",
-            },
-            "input_type": {
-                "type": "string",
-                "enum": ["text", "json", "audio", "document", "file", "any"],
-            },
-            "output_mode": {
-                "type": "string",
-                "enum": ["pass_through", "transcribe_only", "template_fill"],
-            },
-            "output_type": {
-                "type": "string",
-                "enum": ["text", "json", "pdf", "docx"],
-            },
-        },
-    }
+    """Schema for add_payload (shared typed draft for new steps)."""
+    return build_new_step_draft_schema(
+        model_refs=model_refs,
+        kb_refs=kb_refs,
+        description=(
+            "Typed authoring draft for a new step added to an existing flow. "
+            "Describe only the new step intent; the backend derives output_mode, "
+            "bindings, contracts, and low-level config."
+        ),
+        input_source_description=(
+            "Where the new step gets its primary input. Use 'flow_input' only when "
+            "the added step becomes the new entry step; otherwise use 'previous_step' "
+            "or 'all_previous_steps'."
+        ),
+    )
 
 
 def _build_patch_schema(
@@ -222,6 +211,14 @@ def _build_patch_schema(
             "output_type": {
                 "type": "string",
                 "enum": ["text", "json", "pdf", "docx"],
+            },
+            "output_config": {
+                "type": ["object", "null"],
+                "description": (
+                    "Optional output configuration patch. Use null when you want to clear "
+                    "the existing output_config for this step."
+                ),
+                "additionalProperties": True,
             },
         },
     }

@@ -403,24 +403,13 @@ async def send_message(
     )
 
     async def event_stream():
-        question_answer = (
-            {
-                **(body.question_answer or {}),
-                **(
-                    {"ui_language": body.ui_language}
-                    if body.ui_language is not None
-                    else {}
-                ),
-            }
-            if body.question_answer is not None or body.ui_language is not None
-            else None
-        )
         try:
             stream = await _coerce_event_stream(
                 service.send_message(
                     session_id=session_id,
                     message=body.message,
-                    question_answer=question_answer,
+                    question_answer=body.question_answer,
+                    ui_language=body.ui_language,
                     litellm_model=prepared_context.litellm_model,
                     litellm_kwargs=prepared_context.litellm_kwargs,
                     available_models=prepared_context.planner_context.available_models,

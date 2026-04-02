@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+from intric.flows.ai_builder.ai_builder_create_tool_schema import CREATE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     BuilderPlan,
@@ -191,27 +192,113 @@ def _make_llm_response(
 def _make_tool_call(
     *,
     tool_call_id: str = "call_123",
-    name: str = "propose_flow",
+    name: str = CREATE_FLOW_TOOL_NAME,
     arguments: dict[str, Any] | None = None,
 ) -> MagicMock:
     """Create a mock tool call."""
-    if arguments is None:
-        arguments = {
-            "flow_name": "Test Flow",
-            "steps": [
-                {
-                    "plan_step_ref": "step_a",
-                    "name": "Extrahera fakta",
-                    "assistant_spec": {"instructions": "Extrahera fakta."},
-                    "input_source": "flow_input",
-                }
-            ],
-        }
+    arguments = _normalize_tool_arguments(name=name, arguments=arguments)
     tc = MagicMock()
     tc.id = tool_call_id
     tc.function.name = name
     tc.function.arguments = json.dumps(arguments)
     return tc
+
+
+def _normalize_tool_arguments(
+    *,
+    name: str,
+    arguments: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if name != CREATE_FLOW_TOOL_NAME:
+        return arguments or {}
+    if arguments is None:
+        return {
+            "flow_name": "Test Flow",
+            "plan_rationale": "Extrahera först och strukturera sedan resultatet.",
+            "steps": [
+                {
+                    "name": "Extrahera fakta",
+                    "instructions": "Extrahera fakta.",
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_type": "text",
+                }
+            ],
+        }
+
+    normalized = dict(arguments)
+    normalized.setdefault(
+        "plan_rationale",
+        "Bygg flödet från tydliga steg med backend-härledda kontrakt.",
+    )
+    steps = normalized.get("steps")
+    if isinstance(steps, list):
+        normalized["steps"] = [_normalize_create_step(step) for step in steps]
+    return normalized
+
+
+def _normalize_create_step(step: Any) -> Any:
+    if not isinstance(step, dict):
+        return step
+    if "instructions" in step and "assistant_spec" not in step:
+        return step
+
+    assistant_spec = step.get("assistant_spec") or {}
+    input_source = step.get("input_source", "flow_input")
+    input_type = step.get("input_type", "text")
+    output_type = step.get("output_type", "text")
+    output_mode = step.get("output_mode")
+
+    normalized: dict[str, Any] = {
+        "name": step.get("name", "Step"),
+        "instructions": assistant_spec.get("instructions", "Do things."),
+        "input_source": input_source,
+        "input_type": "audio" if output_mode == "transcribe_only" else input_type,
+        "output_type": "text" if output_mode == "transcribe_only" else output_type,
+    }
+    if assistant_spec.get("model_ref"):
+        normalized["model_ref"] = assistant_spec["model_ref"]
+    if assistant_spec.get("knowledge_refs"):
+        normalized["knowledge_refs"] = assistant_spec["knowledge_refs"]
+    if input_source == "flow_input" and normalized["input_type"] in {"audio", "document", "file"}:
+        normalized["runtime_upload"] = True
+        normalized["runtime_required"] = True
+    if normalized["output_type"] == "docx":
+        normalized["document_delivery_mode"] = "generated"
+    output_config = step.get("output_config") or {}
+    if output_config.get("citations", {}).get("enabled"):
+        normalized["citations_requested"] = True
+    if step.get("output_contract"):
+        normalized["output_fields"] = _output_fields_from_schema(step["output_contract"])
+    return normalized
+
+
+def _output_fields_from_schema(schema: dict[str, Any]) -> list[dict[str, Any]]:
+    properties = schema.get("properties") or {}
+    required = set(schema.get("required") or [])
+    fields: list[dict[str, Any]] = []
+    for field_name, definition in properties.items():
+        field_type = definition.get("type", "string")
+        field: dict[str, Any] = {
+            "name": field_name,
+            "field_type": field_type if field_type in {"string", "number", "boolean", "object", "array"} else "string",
+            "description": definition.get("description", f"{field_name} field."),
+            "required": field_name in required,
+        }
+        if field["field_type"] == "object":
+            field["fields"] = _output_fields_from_schema(definition)
+        if field["field_type"] == "array":
+            item_schema = definition.get("items") or {"type": "string"}
+            field["item_fields"] = [
+                {
+                    "name": f"{field_name}_item",
+                    "field_type": item_schema.get("type", "string"),
+                    "description": item_schema.get("description", f"One {field_name} item."),
+                    "required": True,
+                }
+            ]
+        fields.append(field)
+    return fields
 
 
 def _make_model() -> MagicMock:
@@ -411,6 +498,42 @@ class TestCreateSession:
             flow_id=None,
         )
 
+    @pytest.mark.anyio
+    async def test_force_new_supersedes_actionable_plans_on_cancelled_sessions(self):
+        user = _make_user()
+        repo = AsyncMock()
+        repo.cancel_matching_active_sessions.return_value = [uuid4(), uuid4()]
+        repo.create_session.return_value = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            target_kind=TargetKind.EDIT,
+        )
+        flow_id = uuid4()
+        space_id = uuid4()
+        flow_service = AsyncMock()
+        flow_service.get_flow.return_value = SimpleNamespace(
+            id=flow_id,
+            space_id=space_id,
+        )
+        service = _make_service(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+        )
+
+        await service.create_session(
+            space_id=space_id,
+            target_kind=TargetKind.EDIT,
+            flow_id=flow_id,
+            force_new=True,
+        )
+
+        assert repo.supersede_existing_plans.await_count == 2
+        superseded_session_ids = {
+            call.kwargs["session_id"] for call in repo.supersede_existing_plans.await_args_list
+        }
+        assert superseded_session_ids == set(repo.cancel_matching_active_sessions.return_value)
+
 
 class TestSessionRecovery:
     @pytest.mark.anyio
@@ -451,12 +574,17 @@ class TestSessionRecovery:
         repo.get_plan.side_effect = RuntimeError("boom")
         service = _make_service(user=user, repo=repo)
 
-        caplog.set_level(logging.WARNING)
-        result = await service.list_sessions()
+        with patch("intric.flows.ai_builder.ai_builder_service.logger.warning") as mock_warning:
+            caplog.set_level(logging.WARNING)
+            result = await service.list_sessions()
 
         assert result[0].draft_title is None
         assert result[0].session_id == session.id
-        assert "Failed to resolve AI builder draft title for session list item." in caplog.text
+        mock_warning.assert_called_once()
+        assert (
+            mock_warning.call_args.args[0]
+            == "Failed to resolve AI builder draft title for session list item."
+        )
 
     @pytest.mark.anyio
     async def test_cancel_session_updates_status_and_returns_session(self):
@@ -657,7 +785,12 @@ class TestPlannerContextPreparation:
         assert result.flow is flow
         assert result.assistant_snapshots == snapshots
         assert result.planner_context.available_models == [
-            {"id": str(model.id), "name": "test-model", "provider": "openai"}
+            {
+                "id": str(model.id),
+                "name": "test-model",
+                "display_name": "test-model",
+                "provider": "openai",
+            }
         ]
         completion_service.resolve_litellm_params.assert_awaited_once_with(model)
         flow_service.get_flow.assert_awaited_once_with(session.flow_id)
@@ -1345,7 +1478,7 @@ class TestSendMessageToolCall:
             ConversationMessage(
                 role="assistant",
                 content="Här är mitt förslag:",
-                tool_calls=[{"id": "call_prior", "name": "propose_flow", "arguments": {"flow_name": "Old"}}],
+                tool_calls=[{"id": "call_prior", "name": CREATE_FLOW_TOOL_NAME, "arguments": {"flow_name": "Old"}}],
             ),
             ConversationMessage(
                 role="tool",
@@ -1383,7 +1516,7 @@ class TestSendMessageToolCall:
         # Tool call with invalid JSON
         tc = MagicMock()
         tc.id = "call_bad"
-        tc.function.name = "propose_flow"
+        tc.function.name = CREATE_FLOW_TOOL_NAME
         tc.function.arguments = "not valid json {"
 
         service = _make_service(
@@ -1411,7 +1544,7 @@ class TestSendMessageToolCall:
         assert "Invalid tool call arguments" in json.loads(error_events[0]["data"])["error"]
 
     @pytest.mark.anyio
-    async def test_non_propose_flow_tool_calls_are_ignored(self):
+    async def test_unknown_tool_calls_are_ignored(self):
         user = _make_user()
         repo = AsyncMock()
         session = _make_session(
@@ -1529,83 +1662,6 @@ class TestSendMessageToolCall:
         event_types = [e["event"] for e in events]
         assert SSE_EVENT_PLAN in event_types
         assert mock_litellm.acompletion.call_count == 2
-
-    @pytest.mark.anyio
-    async def test_step_reference_validation_feedback_guides_self_correction(self):
-        user = _make_user()
-        repo = AsyncMock()
-        session = _make_session(
-            status=SessionStatus.CHATTING,
-            tenant_id=user.tenant_id,
-            conversation=_make_confirmed_requirements_conversation(),
-        )
-        repo.get_session.return_value = session
-
-        bad_args = {
-            "flow_name": "Reference mismatch",
-            "steps": [
-                {
-                    "plan_step_ref": "extract_summary",
-                    "name": "Extrahera sammanfattning",
-                    "assistant_spec": {"instructions": "Extrahera."},
-                    "input_source": "flow_input",
-                },
-                {
-                    "plan_step_ref": "write_recommendation",
-                    "name": "Skriv rekommendation",
-                    "assistant_spec": {"instructions": "Skriv en rekommendation."},
-                    "input_source": "previous_step",
-                    "input_bindings": {"question": "{{ step_a.output.text }}"},
-                },
-            ],
-        }
-        corrected_args = {
-            "flow_name": "Reference mismatch",
-            "steps": [
-                {
-                    "plan_step_ref": "extract_summary",
-                    "name": "Extrahera sammanfattning",
-                    "assistant_spec": {"instructions": "Extrahera."},
-                    "input_source": "flow_input",
-                },
-                {
-                    "plan_step_ref": "write_recommendation",
-                    "name": "Skriv rekommendation",
-                    "assistant_spec": {"instructions": "Skriv en rekommendation."},
-                    "input_source": "previous_step",
-                    "input_bindings": {"question": "{{ extract_summary.output.text }}"},
-                },
-            ],
-        }
-        bad_tc = _make_tool_call(arguments=bad_args)
-        good_tc = _make_tool_call(tool_call_id="call_fix_refs", arguments=corrected_args)
-
-        repo.create_plan.return_value = _make_plan(session_id=session.id, tenant_id=user.tenant_id)
-        service = _make_service(user=user, repo=repo)
-
-        with patch("intric.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
-            mock_litellm.acompletion = AsyncMock(
-                side_effect=[
-                    _make_llm_response(content=None, tool_calls=[bad_tc]),
-                    _make_llm_response(content=None, tool_calls=[good_tc]),
-                ]
-            )
-            events = await _collect_events(
-                service.send_message(
-                    session_id=session.id,
-                    message="Bygg flödet",
-                    question_answer=_make_requirements_confirmation(),
-                    litellm_model="openai/gpt-4",
-                    litellm_kwargs={"api_key": "sk-test"},
-                )
-            )
-
-        correction_messages = mock_litellm.acompletion.await_args_list[1].kwargs["messages"]
-        correction_feedback = correction_messages[-1]["content"]
-        assert "Declared step refs in this draft: extract_summary, write_recommendation" in correction_feedback
-        assert "Use the exact plan_step_ref values declared in steps[*].plan_step_ref" in correction_feedback
-        assert "Do not switch to runtime aliases like step_1" in correction_feedback
-        assert any(event["event"] == SSE_EVENT_PLAN for event in events)
 
     @pytest.mark.anyio
     async def test_quality_warning_triggers_self_correction(self):
@@ -1908,7 +1964,7 @@ class TestSendMessageToolCall:
 
     @pytest.mark.anyio
     async def test_parse_failure_triggers_self_correction(self):
-        """When propose_flow misses required fields, the service asks the LLM to fix it."""
+        """When create_flow misses required fields, the service asks the LLM to fix it."""
         user = _make_user()
         repo = AsyncMock()
         session = _make_session(
@@ -1965,7 +2021,7 @@ class TestSendMessageToolCall:
                     litellm_model="openai/gpt-4",
                     litellm_kwargs={"api_key": "sk-test"},
                 )
-            )
+        )
 
         assert any(e["event"] == SSE_EVENT_PLAN for e in events)
         assert not any(
@@ -2048,55 +2104,36 @@ class TestSendMessageToolCall:
 
         initial_bad_args = {
             "flow_name": "Retry Flow",
-            "steps": [
-                {
-                    "plan_step_ref": "step_a",
-                    "name": "Extrahera",
-                    "assistant_spec": {"instructions": "Extrahera."},
-                    "input_source": "flow_input",
-                },
-                {
-                    "plan_step_ref": "step_b",
-                    "name": "Skriv",
-                    "assistant_spec": {"instructions": "Skriv."},
-                    "input_source": "previous_step",
-                    "input_bindings": {"question": "{{ step_c.output.text }}"},
-                },
-            ],
+            "flow_description": "Narrative summary only, no steps yet.",
         }
         second_bad_args = {
             "flow_name": "Retry Flow",
+            "plan_rationale": "Försöker igen med ett ofullständigt steg.",
             "steps": [
                 {
-                    "plan_step_ref": "step_a",
                     "name": "Extrahera",
-                    "assistant_spec": {"instructions": "Extrahera."},
                     "input_source": "flow_input",
-                },
-                {
-                    "plan_step_ref": "step_b",
-                    "name": "Skriv",
-                    "assistant_spec": {"instructions": "Skriv."},
-                    "input_source": "previous_step",
-                    "input_bindings": {"question": "{{ step_b.output.text }}"},
+                    "instructions": "   ",
                 },
             ],
         }
         corrected_args = {
             "flow_name": "Retry Flow",
+            "plan_rationale": "Extrahera först och skriv sedan resultatet.",
             "steps": [
                 {
-                    "plan_step_ref": "step_a",
                     "name": "Extrahera",
-                    "assistant_spec": {"instructions": "Extrahera."},
+                    "instructions": "Extrahera.",
                     "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_type": "text",
                 },
                 {
-                    "plan_step_ref": "step_b",
                     "name": "Skriv",
-                    "assistant_spec": {"instructions": "Skriv."},
+                    "instructions": "Skriv.",
                     "input_source": "previous_step",
-                    "input_bindings": {"question": "{{ step_a.output.text }}"},
+                    "input_type": "text",
+                    "output_type": "text",
                 },
             ],
         }
@@ -4128,6 +4165,7 @@ class TestReasoningLeakRegression:
             conversation=conversation,
             assistant_content="Here is a flow.",
             tool_call_id="call_123",
+            tool_name=CREATE_FLOW_TOOL_NAME,
             arguments=arguments,
             spec=spec,
             assumptions=["Test"],
@@ -4152,7 +4190,7 @@ class TestReasoningLeakRegression:
                 content="Here is a plan.",
                 tool_calls=[{
                     "id": "call_123",
-                    "name": "propose_flow",
+                    "name": CREATE_FLOW_TOOL_NAME,
                     "arguments": {
                         "flow_name": "Test",
                         "step_count": 1,

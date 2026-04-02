@@ -22,6 +22,7 @@ def _step(
     input_source: InputSource = InputSource.FLOW_INPUT,
     input_type: InputType = InputType.TEXT,
     output_type: OutputType = OutputType.TEXT,
+    output_mode: OutputMode = OutputMode.PASS_THROUGH,
     output_contract: dict | None = None,
 ) -> StepSpec:
     return StepSpec(
@@ -30,6 +31,7 @@ def _step(
         assistant_spec=AssistantSpec(instructions=instructions),
         input_source=input_source,
         input_type=input_type,
+        output_mode=output_mode,
         output_type=output_type,
         output_contract=output_contract,
     )
@@ -82,6 +84,44 @@ def test_flags_output_mismatch_against_explicit_pdf_choice() -> None:
     feedback = build_conversation_aware_quality_feedback(conversation, spec)
     assert feedback is not None
     assert "PDF" in feedback
+
+
+def test_flags_template_fill_when_generated_docx_was_explicitly_selected() -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": "ändra så att jag får ut en word dokument istället för en pdf",
+            "metadata": {"ui_language": "sv"},
+        },
+        {
+            "role": "user",
+            "content": "Genererad DOCX utan mall",
+            "metadata": {
+                "question_answer": {
+                    "question_id": "docx_output_mode",
+                    "selected_value": "generated_docx",
+                    "answer": "generated_docx",
+                }
+            }
+        },
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Rapport",
+        steps=[
+            _step(
+                "step_a",
+                "Generera rapport",
+                "Skapa ett Word-dokument.",
+                output_type=OutputType.DOCX,
+                output_mode=OutputMode.TEMPLATE_FILL,
+            )
+        ],
+    )
+
+    feedback = build_conversation_aware_quality_feedback(conversation, spec)
+    assert feedback is not None
+    assert "genererad DOCX" in feedback
+    assert "template_fill" in feedback
 
 
 def test_flags_missing_structured_extraction_when_user_asked_for_structured_fields() -> None:
@@ -481,4 +521,96 @@ def test_still_requires_template_fill_for_explicit_docx_template_request() -> No
     feedback = build_conversation_aware_quality_feedback(conversation, spec)
 
     assert feedback is not None
+    assert "template_fill" in feedback
+
+
+def test_flags_non_terminal_docx_conversion_for_output_only_edit() -> None:
+    from uuid import uuid4
+
+    from intric.flows.flow import Flow, FlowStep
+
+    flow = Flow(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Transkribering och tolkning",
+        steps=[
+            FlowStep(
+                assistant_id=uuid4(),
+                step_order=1,
+                user_description="Transkribera ljud",
+                input_source="flow_input",
+                input_type="audio",
+                output_mode="transcribe_only",
+                output_type="text",
+                mcp_policy="inherit",
+            ),
+            FlowStep(
+                assistant_id=uuid4(),
+                step_order=2,
+                user_description="Tematisk sammanfattning",
+                input_source="previous_step",
+                input_type="text",
+                output_mode="pass_through",
+                output_type="text",
+                mcp_policy="inherit",
+            ),
+            FlowStep(
+                assistant_id=uuid4(),
+                step_order=3,
+                user_description="Psykologisk och sociologisk tolkning",
+                input_source="previous_step",
+                input_type="text",
+                output_mode="pass_through",
+                output_type="pdf",
+                mcp_policy="inherit",
+            ),
+        ],
+    )
+    conversation = [
+        {
+            "role": "user",
+            "content": "ändra så att jag får ut en word dokument istället för en pdf",
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Transkribering och tolkning",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                existing_step_ref="existing_step_1",
+                name="Transkribera ljud",
+                assistant_spec=AssistantSpec(instructions="Transkribera ljudet."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.AUDIO,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+                output_type=OutputType.TEXT,
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                existing_step_ref="existing_step_2",
+                name="Tematisk sammanfattning",
+                assistant_spec=AssistantSpec(instructions="Sammanfatta transkriptionen."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.TEMPLATE_FILL,
+                output_type=OutputType.DOCX,
+            ),
+            StepSpec(
+                plan_step_ref="step_c",
+                existing_step_ref="existing_step_3",
+                name="Psykologisk och sociologisk tolkning",
+                assistant_spec=AssistantSpec(instructions="Skriv Word-dokumentet."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.TEMPLATE_FILL,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+
+    feedback = build_conversation_aware_quality_feedback(conversation, spec, flow=flow)
+
+    assert feedback is not None
+    assert "mellanliggande" in feedback.casefold()
     assert "template_fill" in feedback

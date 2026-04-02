@@ -4,6 +4,9 @@ from intric.flows.ai_builder.ai_builder_discovery_decision_engine import (
     implies_single_case,
     implies_single_primary_document,
 )
+from intric.flows.ai_builder.ai_builder_discovery_families import (
+    family_for_issue,
+)
 from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryProfile
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import mentions_any
 from intric.flows.ai_builder.ai_builder_framework_policy import (
@@ -11,7 +14,6 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     latest_pending_structured_question,
     mentions_output_change,
     mentions_runtime_metadata,
-    resolve_output_intent,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 
@@ -43,7 +45,18 @@ def latest_pending_question_id(
     return canonical_question_id(question_id) if isinstance(question_id, str) else None
 
 
+def _family_inactive(profile: DiscoveryProfile, question_id: str) -> bool:
+    if not profile.edit_mode:
+        return False
+    family = family_for_issue(question_id)
+    if family is None:
+        return False
+    return family not in profile.edit_scope.active_families
+
+
 def looks_like_case_scope_is_vague(profile: DiscoveryProfile) -> bool:
+    if _family_inactive(profile, "processing_scope"):
+        return False
     text = profile.text
     answers = profile.answers
     if "processing_scope" in answers:
@@ -64,6 +77,8 @@ def looks_like_case_scope_is_vague(profile: DiscoveryProfile) -> bool:
 
 
 def looks_like_input_mode_is_vague(profile: DiscoveryProfile) -> bool:
+    if _family_inactive(profile, "input_material_mode"):
+        return False
     if "input_material_mode" in profile.answers:
         return False
     if profile.input_intent.needs_architecture_clarification:
@@ -72,13 +87,10 @@ def looks_like_input_mode_is_vague(profile: DiscoveryProfile) -> bool:
 
 
 def looks_like_output_is_vague(profile: DiscoveryProfile) -> bool:
+    if _family_inactive(profile, "final_output_mode"):
+        return False
     text = profile.text
-    answers = profile.answers
-    if resolve_output_intent(
-        text,
-        answers,
-        flow_defaults=profile.flow_defaults,
-    ).terminal_output is not None:
+    if profile.output_intent.terminal_output is not None:
         return False
     if mentions_output_change(text):
         return False
@@ -113,11 +125,9 @@ def looks_like_output_is_vague(profile: DiscoveryProfile) -> bool:
 
 
 def needs_docx_mode_choice(profile: DiscoveryProfile) -> bool:
-    intent = resolve_output_intent(
-        profile.text,
-        profile.answers,
-        flow_defaults=profile.flow_defaults,
-    )
+    if _family_inactive(profile, "docx_output_mode"):
+        return False
+    intent = profile.output_intent
     if intent.terminal_output != "docx_document" or intent.docx_output_mode is not None:
         return False
     return mentions_any(
@@ -134,11 +144,9 @@ def needs_docx_mode_choice(profile: DiscoveryProfile) -> bool:
 
 
 def needs_pdf_generation_mode_choice(profile: DiscoveryProfile) -> bool:
-    intent = resolve_output_intent(
-        profile.text,
-        profile.answers,
-        flow_defaults=profile.flow_defaults,
-    )
+    if _family_inactive(profile, "pdf_generation_mode"):
+        return False
+    intent = profile.output_intent
     return (
         intent.terminal_output == "pdf_document"
         and intent.pdf_generation_mode == "pdf_template_requested"
@@ -230,6 +238,8 @@ def has_same_run_comparison_contradiction(
 
 
 def document_cardinality_is_vague(profile: DiscoveryProfile) -> bool:
+    if _family_inactive(profile, "document_material_scope"):
+        return False
     answers = profile.answers
     text = profile.text
     if not profile.document_like_input or profile.audio_like_input:
@@ -272,10 +282,14 @@ def mixed_input_architecture_is_vague(
 ) -> bool:
     if explicit_resolved:
         return False
+    if _family_inactive(profile, "flow_input_architecture"):
+        return False
     return profile.input_intent.needs_architecture_clarification
 
 
 def document_kind_is_vague(profile: DiscoveryProfile) -> bool:
+    if _family_inactive(profile, "document_kind"):
+        return False
     if not profile.document_like_input or profile.audio_like_input:
         return False
     answers = profile.answers
@@ -327,6 +341,8 @@ def document_kind_is_vague(profile: DiscoveryProfile) -> bool:
 
 
 def reader_and_style_is_vague(profile: DiscoveryProfile) -> bool:
+    if _family_inactive(profile, "output_reader"):
+        return False
     if not profile.final_output_text_or_docx:
         return False
     answers = profile.answers
@@ -367,6 +383,8 @@ def reader_and_style_is_vague(profile: DiscoveryProfile) -> bool:
 
 
 def decision_support_scope_is_vague(profile: DiscoveryProfile) -> bool:
+    if _family_inactive(profile, "decision_support_scope"):
+        return False
     if not profile.final_output_text_or_docx:
         return False
     answers = profile.answers
@@ -418,17 +436,15 @@ def decision_support_scope_is_vague(profile: DiscoveryProfile) -> bool:
 
 
 def final_pdf_type_is_vague(profile: DiscoveryProfile) -> bool:
+    if _family_inactive(profile, "final_pdf_type"):
+        return False
     answers = profile.answers
     text = profile.text
     if "final_pdf_type" in answers:
         return False
     if "final_output_mode" in answers:
         return False
-    output_choice = resolve_output_intent(
-        text,
-        answers,
-        flow_defaults=profile.flow_defaults,
-    ).terminal_output
+    output_choice = profile.output_intent.terminal_output
     if output_choice != "pdf_document":
         return False
     if mentions_any(
@@ -476,6 +492,8 @@ def structured_analysis_need_is_vague(profile: DiscoveryProfile) -> bool:
 
 
 def runtime_metadata_is_vague(profile: DiscoveryProfile) -> bool:
+    if _family_inactive(profile, "runtime_metadata_fields"):
+        return False
     if not profile.case_like_flow:
         return False
     answers = profile.answers

@@ -116,6 +116,13 @@ def build_conversation_aware_quality_feedback(
             "Användaren har valt DOCX som slutartefakt men sista steget producerar inte DOCX. "
             "Justera slutstegets output_type så att det matchar användarens val."
         )
+    intermediate_document_feedback = _non_terminal_document_output_feedback(
+        explicit_output=explicit_output,
+        spec=spec,
+        flow=flow,
+    )
+    if intermediate_document_feedback is not None:
+        issues.append(intermediate_document_feedback)
 
     if needs_structured_extraction(
         text,
@@ -167,6 +174,16 @@ def build_conversation_aware_quality_feedback(
         issues.append(
             "Konversationen efterfrågar mallbaserad DOCX-generering men planen saknar ett steg med "
             "`output_mode=\"template_fill\"`. Använd template_fill när ett Word-dokument ska fyllas från en mall."
+        )
+
+    if (
+        output_intent.docx_output_mode == "generated_docx"
+        and _spec_uses_template_fill(spec)
+    ):
+        issues.append(
+            "Konversationen efterfrågar genererad DOCX utan mall, men planen använder fortfarande "
+            "`output_mode=\"template_fill\"`. Använd inte template_fill när användaren uttryckligen "
+            "valt genererad DOCX utan mall."
         )
 
     if mixed_audio_document_input_requested(text, flow=flow):
@@ -262,3 +279,58 @@ def _spec_uses_all_previous_steps(spec: FlowDraftSpecCore) -> bool:
 
 def _spec_uses_template_fill(spec: FlowDraftSpecCore) -> bool:
     return any(step.output_mode == OutputMode.TEMPLATE_FILL for step in spec.steps)
+
+
+def _non_terminal_document_output_feedback(
+    *,
+    explicit_output: str | None,
+    spec: FlowDraftSpecCore,
+    flow: Flow | None,
+) -> str | None:
+    if flow is None or explicit_output not in {"pdf_document", "docx_document"}:
+        return None
+
+    original_steps = sorted(flow.steps, key=lambda step: step.step_order)
+    if len(spec.steps) != len(original_steps) or len(spec.steps) < 2:
+        return None
+
+    original_terminal_output = original_steps[-1].output_type
+    requested_terminal_output = "pdf" if explicit_output == "pdf_document" else "docx"
+    if original_terminal_output == requested_terminal_output:
+        return None
+
+    converted_non_terminal_steps: list[str] = []
+    template_fill_steps: list[str] = []
+    for original_step, planned_step in zip(original_steps[:-1], spec.steps[:-1], strict=False):
+        original_is_document_output = original_step.output_type in {"pdf", "docx"}
+        planned_is_document_output = planned_step.output_type in {
+            OutputType.PDF,
+            OutputType.DOCX,
+        }
+        if not original_is_document_output and planned_is_document_output:
+            converted_non_terminal_steps.append(planned_step.name)
+        if planned_step.output_mode == OutputMode.TEMPLATE_FILL:
+            template_fill_steps.append(planned_step.name)
+
+    if not converted_non_terminal_steps and not template_fill_steps:
+        return None
+
+    details: list[str] = []
+    if converted_non_terminal_steps:
+        details.append(
+            "mellanliggande steg har bytts till dokumentutdata: "
+            + ", ".join(converted_non_terminal_steps)
+        )
+    if template_fill_steps:
+        details.append(
+            "template_fill används på icke-terminala steg: "
+            + ", ".join(template_fill_steps)
+        )
+
+    return (
+        "Användaren verkar bara vilja ändra slutformatet. Ändra inte mellanliggande analyssteg "
+        "till DOCX/PDF eller `template_fill` när de tidigare var text/json-steg. Håll upstream-stegen "
+        "som analyssteg och lägg dokumentgenereringen på slutsteget. Problem: "
+        + "; ".join(details)
+        + "."
+    )

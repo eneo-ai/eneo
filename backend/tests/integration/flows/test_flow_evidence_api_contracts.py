@@ -484,11 +484,22 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     assert payload["summary"]["rag_usage_tracking"]["citation_tracked"] is False
     assert payload["summary"]["rag_sources"][0]["usage_state"] == "inserted_into_prompt"
     assert payload["summary"]["rag_sources"][0]["source_container_display_name"] == "kunskap.example.se"
+    assert payload["summary"]["rag_sources"][0]["source_container_label"] == "kunskap.example.se"
+    assert payload["summary"]["citations"]["tracking_mode"] == "passive_inline_scan"
+    assert payload["summary"]["citations"]["citation_expected"] is False
+    assert payload["summary"]["citations"]["citation_observed"] is False
+    assert payload["summary"]["citations"]["citation_compliance"] == "not_requested"
+    assert payload["summary"]["citations"]["cited_source_ids"] == []
+    assert payload["summary"]["citations"]["steps_with_citations_expected"] == 0
     assert payload["summary"]["final_output"]["kind"] == "structured"
     assert payload["summary"]["step_overview"][0]["step_order"] == 1
     assert payload["summary"]["step_overview"][0]["knowledge_retrieval"]["status"] == "success"
     assert payload["summary"]["step_overview"][0]["knowledge_retrieval"]["unique_sources"] == 1
     assert payload["summary"]["step_overview"][0]["knowledge_retrieval"]["prompt_context"]["included_source_ids"] == ["source-1"]
+    assert (
+        payload["summary"]["step_overview"][0]["knowledge_retrieval"]["prompt_context"]["summary"]["total_sources"]
+        == 1
+    )
     assert payload["summary"]["step_overview"][0]["input_lineage"]["runtime_file_names"] == ["underlag.pdf"]
     assert payload["summary"]["step_overview"][0]["input_lineage"]["runtime_file_checksums"] == ["input-checksum"]
     assert payload["summary"]["step_overview"][0]["output_summary"]["preview"] == "Looks good"

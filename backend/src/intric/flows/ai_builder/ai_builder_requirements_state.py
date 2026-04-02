@@ -84,7 +84,7 @@ def resolve_requirements_state(
     for message in conversation[latest_summary_index + 1 :]:
         if message.role != "user":
             # Track if a plan was proposed after confirmation (tool message
-            # from propose_flow). This means any subsequent user message is
+            # from a stored plan submission). This means any subsequent user message is
             # a revision request, not a requirements change.
             if message.role == "tool" and isinstance(message.content, str):
                 if "Plan:" in message.content:

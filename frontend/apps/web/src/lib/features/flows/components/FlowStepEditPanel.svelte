@@ -60,6 +60,11 @@
     applyOutputModeChange,
     applyOutputTypeChange
   } from "$lib/features/flows/flowStepTransitionPolicy";
+  import {
+    preserveFlowCitationMode,
+    setFlowCitationMode,
+    type FlowCitationMode
+  } from "$lib/features/flows/flowCitationMode";
 
   // Extracted helpers
   import {
@@ -67,8 +72,7 @@
     getInputSourceLabel,
     getIssueMessage,
     OUTPUT_TYPES,
-    OUTPUT_MODES,
-    hasAdvancedSettingsActive
+    OUTPUT_MODES
   } from "./flowStepEditHelpers";
   import {
     type AdvancedJsonField,
@@ -523,6 +527,11 @@
     updateStepPatch(buildRuntimeInputStepPatch(activeStep, nextConfig));
   }
 
+  function handleCitationModeChange(nextCitationMode: FlowCitationMode) {
+    if (!activeStep) return;
+    updateStep("output_config", setFlowCitationMode(activeStep.output_config, nextCitationMode));
+  }
+
   // ---------------------------------------------------------------------------
   // Template fill functions
   // ---------------------------------------------------------------------------
@@ -700,7 +709,11 @@
   $: inputTypeValidationIssue =
     currentStepIssues.find((issue) => issue.field === "input_type") ?? null;
   $: sourceValidationMessage = getIssueMessage(sourceValidationIssue, activeStep, previousStep);
-  $: inputTypeValidationMessage = getIssueMessage(inputTypeValidationIssue, activeStep, previousStep);
+  $: inputTypeValidationMessage = getIssueMessage(
+    inputTypeValidationIssue,
+    activeStep,
+    previousStep
+  );
 
   $: selectableInputSourceOptions = activeStep
     ? getSelectableInputSourceOptions({
@@ -962,7 +975,9 @@
     class:pointer-events-none={isPublished}
     class:opacity-60={isPublished}
   >
-    <div class="flow-step-editor [&_section>h2]:font-sans [&_section>h2]:uppercase [&_section>h2]:tracking-[0.04em] [&_section>div:last-child]:gap-6 [&_section>div:last-child]:pb-6">
+    <div
+      class="flow-step-editor [&_section>div:last-child]:gap-6 [&_section>div:last-child]:pb-6 [&_section>h2]:font-sans [&_section>h2]:tracking-[0.04em] [&_section>h2]:uppercase"
+    >
       <Settings.Page>
         {#if stepSummaryModel}
           <FlowStepSummaryCard
@@ -979,7 +994,7 @@
             <div class="flex flex-col gap-2">
               <input
                 {...aria}
-                class="border-default bg-primary w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:border-accent-default focus-within:ring-2 focus-within:ring-accent-default/20 hover:border-stronger focus-visible:outline-none disabled:opacity-50"
+                class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
                 value={activeStep.user_description ?? ""}
                 placeholder={m.flow_step_name_placeholder()}
                 disabled={isPublished}
@@ -989,7 +1004,7 @@
                 on:input={(e) => updateStep("user_description", e.currentTarget.value || null)}
                 on:change={() => void handleCommittedStepRename()}
               />
-              {#if shouldShowTemplateBodyTextHint({ steps, activeStep, isAdvancedMode, isTemplateFill, isTranscribeOnly })}
+              {#if shouldShowTemplateBodyTextHint( { steps, activeStep, isAdvancedMode, isTemplateFill, isTranscribeOnly } )}
                 <p
                   class="bg-accent-dimmer/30 text-accent-stronger rounded-lg px-3 py-2 text-xs leading-relaxed"
                 >
@@ -1019,8 +1034,7 @@
             on:inputSourceChange={(e) => handleInputSourceChange(e.detail.value)}
             on:inputTypeChange={(e) => handleInputTypeChange(e.detail.value)}
             on:runtimeInputChange={(e) => updateRuntimeInputSettings(e.detail.patch)}
-            on:httpConfigChange={(e) =>
-              updateStep("input_config", e.detail.config)}
+            on:httpConfigChange={(e) => updateStep("input_config", e.detail.config)}
             on:openTranscriptionSettings={() => dispatch("openTranscriptionSettings")}
           />
         {/if}
@@ -1139,7 +1153,11 @@
                 url: e.detail.value
               })}
             on:httpConfigChange={(e) =>
-              updateStep("output_config", e.detail.config)}
+              updateStep(
+                "output_config",
+                preserveFlowCitationMode(e.detail.config, activeStep?.output_config ?? null)
+              )}
+            on:citationModeChange={(e) => handleCitationModeChange(e.detail.value)}
             on:switchToTemplateFill={() => handleOutputModeChange("template_fill")}
           />
         {/if}
@@ -1191,7 +1209,8 @@
             {advancedJsonDrafts}
             {advancedJsonErrors}
             on:mcpPolicyChange={(e) => updateStep("mcp_policy", e.detail.value)}
-            on:jsonFieldUpdate={(e) => handleAdvancedJsonFieldUpdate(e.detail.field, e.detail.value)}
+            on:jsonFieldUpdate={(e) =>
+              handleAdvancedJsonFieldUpdate(e.detail.field, e.detail.value)}
           />
         {/if}
 

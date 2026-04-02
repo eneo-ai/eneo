@@ -1,236 +1,237 @@
-"""Tests for AI Builder tool schemas."""
+"""Tests for active AI Builder tool schemas and parsing helpers."""
 
 from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
-    PROPOSE_FLOW_TOOL_NAME,
-    VALIDATE_FLOW_DRAFT_TOOL_NAME,
+    CREATE_FLOW_TOOL_NAME,
     build_all_tool_schemas,
     build_ask_structured_question_tool_schema,
-    build_propose_flow_tool_schema,
-    build_validate_flow_draft_tool_schema,
+    build_create_flow_tool_schema,
     extract_assumptions,
     extract_plan_rationale,
     extract_reasoning,
-    parse_propose_flow_arguments,
+    parse_create_flow_arguments,
     parse_structured_question,
 )
 
 
 class TestBuildToolSchema:
-    def test_schema_has_function_format(self) -> None:
-        schema = build_propose_flow_tool_schema()
+    def test_create_schema_has_function_format(self) -> None:
+        schema = build_create_flow_tool_schema()
         assert schema["type"] == "function"
-        assert "function" in schema
-        assert schema["function"]["name"] == PROPOSE_FLOW_TOOL_NAME
+        assert schema["function"]["name"] == CREATE_FLOW_TOOL_NAME
 
-    def test_schema_has_parameters(self) -> None:
-        schema = build_propose_flow_tool_schema()
-        params = schema["function"]["parameters"]
-        assert params["type"] == "object"
-        assert "flow_name" in params["properties"]
-        assert "steps" in params["properties"]
-
-    def test_schema_required_fields(self) -> None:
-        schema = build_propose_flow_tool_schema()
-        required = schema["function"]["parameters"]["required"]
-        assert "flow_name" in required
-        assert "steps" in required
-
-    def test_step_schema_has_required_fields(self) -> None:
-        schema = build_propose_flow_tool_schema()
+    def test_create_schema_has_flat_step_fields(self) -> None:
+        schema = build_create_flow_tool_schema()
         step_schema = schema["function"]["parameters"]["properties"]["steps"]["items"]
-        assert "plan_step_ref" in step_schema["required"]
-        assert "name" in step_schema["required"]
-        assert "assistant_spec" in step_schema["required"]
-        assert "input_source" in step_schema["required"]
+        assert "plan_step_ref" not in step_schema["properties"]
+        assert "output_mode" not in step_schema["properties"]
+        assert "input_bindings" not in step_schema["properties"]
+        assert "output_contract" not in step_schema["properties"]
+        assert "instructions" in step_schema["properties"]
+        assert "document_delivery_mode" in step_schema["properties"]
+        assert "output_fields" in step_schema["properties"]
 
-    def test_schema_includes_enum_values(self) -> None:
-        schema = build_propose_flow_tool_schema()
-        step_props = schema["function"]["parameters"]["properties"]["steps"]["items"]["properties"]
-        assert "flow_input" in step_props["input_source"]["enum"]
-        assert "previous_step" in step_props["input_source"]["enum"]
+    def test_create_schema_requires_first_step_to_use_flow_input(self) -> None:
+        schema = build_create_flow_tool_schema()
+        steps_description = schema["function"]["parameters"]["properties"]["steps"]["description"]
+        input_source_description = schema["function"]["parameters"]["properties"]["steps"]["items"][
+            "properties"
+        ]["input_source"]["description"]
+        output_fields_description = schema["function"]["parameters"]["properties"]["steps"][
+            "items"
+        ]["properties"]["output_fields"]["description"]
 
-    def test_schema_min_items_on_steps(self) -> None:
-        schema = build_propose_flow_tool_schema()
-        steps = schema["function"]["parameters"]["properties"]["steps"]
-        assert steps["minItems"] == 1
-        assert steps["maxItems"] == 12
+        assert "First step must use 'flow_input'" in steps_description
+        assert "never directly in steps[]" in steps_description
+        assert "Only later steps may use 'previous_step' or 'all_previous_steps'" in input_source_description
+        assert "never directly in steps[]" in output_fields_description
 
-    def test_schema_has_reasoning_field(self) -> None:
-        schema = build_propose_flow_tool_schema()
-        props = schema["function"]["parameters"]["properties"]
-        assert "reasoning" in props
-        # reasoning should be first property (appears before flow_name)
-        prop_keys = list(props.keys())
-        assert prop_keys[0] == "reasoning"
+    def test_create_schema_limits_structured_field_depth_and_leaf_shape(self) -> None:
+        schema = build_create_flow_tool_schema()
+        output_fields = schema["function"]["parameters"]["properties"]["steps"]["items"][
+            "properties"
+        ]["output_fields"]
+        top_level = output_fields["items"]
+        level_2 = top_level["properties"]["fields"]["items"]
+        level_3 = level_2["properties"]["fields"]["items"]
 
-    def test_reasoning_not_required(self) -> None:
-        schema = build_propose_flow_tool_schema()
-        required = schema["function"]["parameters"]["required"]
-        assert "reasoning" not in required
-
-    def test_input_bindings_schema_is_tightened(self) -> None:
-        schema = build_propose_flow_tool_schema()
-        input_bindings = (
-            schema["function"]["parameters"]["properties"]["steps"]["items"]["properties"]["input_bindings"]
-        )
-        assert input_bindings["required"] == ["question"]
-        assert input_bindings["additionalProperties"] is False
-        assert input_bindings["properties"]["question"]["minLength"] == 1
-
-    def test_schema_descriptions_align_with_runtime_input_and_step_refs(self) -> None:
-        schema = build_propose_flow_tool_schema()
-        step_props = schema["function"]["parameters"]["properties"]["steps"]["items"]["properties"]
-        assert "Do not use runtime refs like step_1" in step_props["plan_step_ref"]["description"]
-        assert "{{ step_input.text }}" in step_props["input_bindings"]["description"]
-        assert "output.structured" in step_props["input_bindings"]["properties"]["question"]["description"]
-        assert "{{ step_input.text }}" in step_props["input_config"]["description"]
-
-    def test_knowledge_refs_require_unique_items(self) -> None:
-        schema = build_propose_flow_tool_schema()
-        knowledge_refs = (
-            schema["function"]["parameters"]["properties"]["steps"]["items"]["properties"]["assistant_spec"]["properties"]["knowledge_refs"]
-        )
-        assert knowledge_refs["uniqueItems"] is True
+        assert "max nesting depth 3" in output_fields["description"]
+        assert level_3["properties"]["field_type"]["enum"] == ["string", "number", "boolean"]
+        assert level_3["properties"]["fields"] is False
+        assert level_3["properties"]["item_fields"] is False
 
 
 class TestParseArguments:
-    def test_parse_minimal_valid(self) -> None:
-        args = {
-            "flow_name": "My Flow",
+    def test_parse_create_flow_arguments_returns_typed_draft(self) -> None:
+        draft = parse_create_flow_arguments({
+            "flow_name": "Kommunärende",
+            "plan_rationale": "Struktur först.",
             "steps": [
                 {
-                    "plan_step_ref": "step_a",
-                    "name": "Extract",
-                    "assistant_spec": {"instructions": "Extract data"},
+                    "name": "Extrahera",
+                    "instructions": "Extrahera juridiska risker.",
                     "input_source": "flow_input",
-                },
-            ],
-        }
-        spec = parse_propose_flow_arguments(args)
-        assert isinstance(spec, FlowDraftSpecCore)
-        assert spec.flow_name == "My Flow"
-        assert len(spec.steps) == 1
-
-    def test_parse_multi_step(self) -> None:
-        args = {
-            "flow_name": "Pipeline",
-            "flow_description": "A 3-step pipeline",
-            "steps": [
-                {
-                    "plan_step_ref": "step_a",
-                    "name": "Input",
-                    "assistant_spec": {"instructions": "Read"},
-                    "input_source": "flow_input",
-                    "input_type": "text",
-                },
-                {
-                    "plan_step_ref": "step_b",
-                    "name": "Process",
-                    "assistant_spec": {"instructions": "Process"},
-                    "input_source": "previous_step",
-                },
-                {
-                    "plan_step_ref": "step_c",
-                    "name": "Output",
-                    "assistant_spec": {"instructions": "Summarize"},
-                    "input_source": "previous_step",
+                    "input_type": "document",
                     "output_type": "json",
-                },
+                    "runtime_upload": True,
+                    "runtime_required": True,
+                    "output_fields": [
+                        {
+                            "name": "risknivå",
+                            "field_type": "string",
+                            "description": "Risknivå.",
+                            "required": True,
+                        }
+                    ],
+                }
             ],
-        }
-        spec = parse_propose_flow_arguments(args)
-        assert len(spec.steps) == 3
-        assert spec.steps[2].output_type.value == "json"
+        })
 
-    def test_parse_with_all_optional_fields(self) -> None:
-        args = {
-            "flow_name": "Full",
+        assert draft.flow_name == "Kommunärende"
+        assert draft.steps[0].runtime_upload is True
+        assert draft.steps[0].output_fields is not None
+        assert draft.steps[0].output_fields[0].name == "risknivå"
+
+    def test_parse_create_flow_arguments_allows_three_level_structured_fields(self) -> None:
+        draft = parse_create_flow_arguments({
+            "flow_name": "Kommunärende",
+            "plan_rationale": "Struktur först.",
             "steps": [
                 {
-                    "plan_step_ref": "step_a",
-                    "name": "Step",
-                    "assistant_spec": {
-                        "instructions": "Do it",
-                        "model_ref": "gpt-4",
-                        "knowledge_refs": ["kb1"],
-                    },
+                    "name": "Extrahera risker",
+                    "instructions": "Extrahera risker som strukturerad JSON.",
                     "input_source": "flow_input",
-                    "input_type": "audio",
-                    "output_mode": "transcribe_only",
-                    "output_type": "text",
-                    "mcp_policy": "restricted",
-                    "input_bindings": {"question": "test"},
-                },
+                    "input_type": "document",
+                    "output_type": "json",
+                    "runtime_upload": True,
+                    "runtime_required": True,
+                    "output_fields": [
+                        {
+                            "name": "risker",
+                            "field_type": "array",
+                            "description": "Identifierade risker.",
+                            "required": True,
+                            "item_fields": [
+                                {
+                                    "name": "rubrik",
+                                    "field_type": "string",
+                                    "description": "Riskrubrik.",
+                                    "required": True,
+                                },
+                                {
+                                    "name": "ekonomisk_konsekvens",
+                                    "field_type": "object",
+                                    "description": "Ekonomisk konsekvens.",
+                                    "required": False,
+                                    "fields": [
+                                        {
+                                            "name": "kort_sikt",
+                                            "field_type": "string",
+                                            "description": "Kort sikt.",
+                                            "required": False,
+                                        }
+                                    ],
+                                },
+                            ],
+                        }
+                    ],
+                }
             ],
-        }
-        spec = parse_propose_flow_arguments(args)
-        assert spec.steps[0].mcp_policy.value == "restricted"
-        assert spec.steps[0].assistant_spec.model_ref == "gpt-4"
+        })
 
-    def test_parse_invalid_raises(self) -> None:
-        with pytest.raises(Exception):
-            parse_propose_flow_arguments({"flow_name": "No steps"})
+        risk_field = draft.steps[0].output_fields[0]
+        assert risk_field.item_fields is not None
+        assert risk_field.item_fields[1].fields is not None
+        assert risk_field.item_fields[1].fields[0].name == "kort_sikt"
 
-    def test_parse_invalid_enum_raises(self) -> None:
-        args = {
-            "flow_name": "Bad",
-            "steps": [
-                {
-                    "plan_step_ref": "step_a",
-                    "name": "Step",
-                    "assistant_spec": {"instructions": "Do it"},
-                    "input_source": "nonexistent_source",
-                },
-            ],
-        }
-        with pytest.raises(Exception):
-            parse_propose_flow_arguments(args)
-
-    def test_parse_accepts_spec_wrapper(self) -> None:
-        args = {
-            "spec": {
-                "flow_name": "Wrapped Flow",
+    def test_parse_create_flow_arguments_rejects_fourth_level_structured_fields(self) -> None:
+        with pytest.raises(Exception, match="nesting depth cannot exceed 3"):
+            parse_create_flow_arguments({
+                "flow_name": "Kommunärende",
+                "plan_rationale": "Struktur först.",
                 "steps": [
                     {
-                        "plan_step_ref": "step_a",
-                        "name": "Extract",
-                        "assistant_spec": {"instructions": "Extract data"},
+                        "name": "Extrahera risker",
+                        "instructions": "Extrahera risker som strukturerad JSON.",
                         "input_source": "flow_input",
-                    },
+                        "input_type": "document",
+                        "output_type": "json",
+                        "runtime_upload": True,
+                        "runtime_required": True,
+                        "output_fields": [
+                            {
+                                "name": "risker",
+                                "field_type": "array",
+                                "description": "Identifierade risker.",
+                                "required": True,
+                                "item_fields": [
+                                    {
+                                        "name": "ekonomisk_konsekvens",
+                                        "field_type": "object",
+                                        "description": "Ekonomisk konsekvens.",
+                                        "required": False,
+                                        "fields": [
+                                            {
+                                                "name": "kort_sikt",
+                                                "field_type": "object",
+                                                "description": "Kort sikt.",
+                                                "required": False,
+                                                "fields": [
+                                                    {
+                                                        "name": "belopp",
+                                                        "field_type": "number",
+                                                        "description": "Belopp.",
+                                                        "required": False,
+                                                    }
+                                                ],
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
                 ],
-            }
-        }
+            })
 
-        spec = parse_propose_flow_arguments(args)
-
-        assert spec.flow_name == "Wrapped Flow"
-        assert len(spec.steps) == 1
-
-    def test_parse_accepts_draft_wrapper(self) -> None:
-        args = {
-            "draft": {
-                "flow_name": "Wrapped Draft",
+    def test_parse_create_flow_arguments_rejects_structured_field_entries_in_steps_array(self) -> None:
+        with pytest.raises(
+            Exception,
+            match=r"steps\[1\] looks like a structured output field, not a step",
+        ):
+            parse_create_flow_arguments({
+                "flow_name": "Kommunärende",
+                "plan_rationale": "Struktur först.",
                 "steps": [
                     {
-                        "plan_step_ref": "step_a",
-                        "name": "Extract",
-                        "assistant_spec": {"instructions": "Extract data"},
+                        "name": "Extrahera risker",
+                        "instructions": "Extrahera risker som strukturerad JSON.",
                         "input_source": "flow_input",
+                        "input_type": "document",
+                        "output_type": "json",
+                        "runtime_upload": True,
+                        "runtime_required": True,
+                        "output_fields": [
+                            {
+                                "name": "risker",
+                                "field_type": "string",
+                                "description": "Identifierade risker.",
+                                "required": True,
+                            }
+                        ],
+                    },
+                    {
+                        "name": "osakerheter_och_risker",
+                        "field_type": "string",
+                        "description": "Osäkerheter och risker.",
+                        "required": True,
                     },
                 ],
-            }
-        }
-
-        spec = parse_propose_flow_arguments(args)
-
-        assert spec.flow_name == "Wrapped Draft"
-        assert len(spec.steps) == 1
+            })
 
 
 class TestExtractAssumptions:
@@ -267,42 +268,6 @@ class TestExtractReasoning:
         assert extract_reasoning({"reasoning": 123}) is None
 
 
-class TestParseStripsNonSpecFields:
-    def test_reasoning_stripped_before_validation(self) -> None:
-        args = {
-            "reasoning": "The user wants a simple extraction flow",
-            "flow_name": "Test",
-            "steps": [
-                {
-                    "plan_step_ref": "step_a",
-                    "name": "Extract",
-                    "assistant_spec": {"instructions": "Extract data"},
-                    "input_source": "flow_input",
-                },
-            ],
-        }
-        spec = parse_propose_flow_arguments(args)
-        assert spec.flow_name == "Test"
-        # reasoning should not end up on the spec
-        assert not hasattr(spec, "reasoning")
-
-    def test_assumptions_stripped_before_validation(self) -> None:
-        args = {
-            "assumptions": ["User wants text output"],
-            "flow_name": "Test",
-            "steps": [
-                {
-                    "plan_step_ref": "step_a",
-                    "name": "Step",
-                    "assistant_spec": {"instructions": "Do it"},
-                    "input_source": "flow_input",
-                },
-            ],
-        }
-        spec = parse_propose_flow_arguments(args)
-        assert spec.flow_name == "Test"
-
-
 class TestBuildAskStructuredQuestionSchema:
     def test_schema_has_function_format(self) -> None:
         schema = build_ask_structured_question_tool_schema()
@@ -334,20 +299,6 @@ class TestBuildAskStructuredQuestionSchema:
         assert "final_output_mode" in props["question_id"]["enum"]
         assert "id" in props["options"]["items"]["properties"]
         assert "value" in props["options"]["items"]["properties"]
-
-
-class TestBuildValidateDraftToolSchema:
-    def test_schema_has_function_format(self) -> None:
-        schema = build_validate_flow_draft_tool_schema()
-        assert schema["type"] == "function"
-        assert schema["function"]["name"] == VALIDATE_FLOW_DRAFT_TOOL_NAME
-
-    def test_schema_reuses_flow_spec_shape(self) -> None:
-        schema = build_validate_flow_draft_tool_schema()
-        props = schema["function"]["parameters"]["properties"]
-        assert "flow_name" in props
-        assert "steps" in props
-        assert "form_fields" in props
 
 
 class TestParseStructuredQuestion:
@@ -492,8 +443,8 @@ class TestBuildAllToolSchemas:
     def test_returns_all_tools(self) -> None:
         schemas = build_all_tool_schemas()
         assert len(schemas) == 3
-        names = {s["function"]["name"] for s in schemas}
-        assert PROPOSE_FLOW_TOOL_NAME in names
+        names = {schema["function"]["name"] for schema in schemas}
+        assert CREATE_FLOW_TOOL_NAME in names
         assert ASK_STRUCTURED_QUESTION_TOOL_NAME in names
         assert "confirm_requirements" in names
 

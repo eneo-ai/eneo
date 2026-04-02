@@ -2137,10 +2137,11 @@ export interface paths {
   };
   "/api/v1/flows/{id}/runs/{run_id}/evidence/": {
     /**
-     * Get flow run evidence export (flow-first)
-     * @description Get redacted debug/evidence payload for one flow run.
+     * Get flow run evidence trace
+     * @description Get the redacted rich evidence trace for one flow run.
      *
-     * Prefer `.../steps/` for consumer UIs unless debug-export fields are required.
+     * Use `/steps/` for baseline consumer step inspection and `/evidence/` for rich traceability,
+     * attempt history, and debug-export provenance.
      */
     get: operations["get_flow_run_evidence_alias"];
   };
@@ -5832,9 +5833,15 @@ export interface components {
       role: string;
       /** Content */
       content?: string | null;
-      /** Tool Call Id */
+      /**
+       * Tool Call Id
+       * @description Planner-internal correlation id for a tool response turn.
+       */
       tool_call_id?: string | null;
-      /** Tool Calls */
+      /**
+       * Tool Calls
+       * @description Planner-internal tool trace metadata kept in the conversation history for debugging and replay. API consumers should not treat the exact tool trace shape as a stable business contract.
+       */
       tool_calls?:
         | {
             [key: string]: unknown;
@@ -7566,7 +7573,43 @@ export interface components {
       /** File Ids */
       file_ids?: string[] | null;
     };
-    /** FlowRunDebugAttempt */
+    /**
+     * FlowRunDebugAttempt
+     * @example {
+     *   "attempt_no": 1,
+     *   "duration_ms": 5240,
+     *   "finish_reason": "stop",
+     *   "num_tokens_input": 321,
+     *   "num_tokens_output": 118,
+     *   "provenance_json": {
+     *     "llm": {
+     *       "model_parameters": {
+     *         "model_name": "gpt-4.1-mini",
+     *         "parameter_semantics": {
+     *           "reasoning_effort": {
+     *             "mode": "model_default"
+     *           },
+     *           "temperature": {
+     *             "mode": "model_default"
+     *           },
+     *           "top_p": {
+     *             "mode": "model_default"
+     *           },
+     *           "verbosity": {
+     *             "mode": "model_default"
+     *           }
+     *         },
+     *         "provider": "openai"
+     *       }
+     *     }
+     *   },
+     *   "provider": "openai",
+     *   "provider_response_id": "resp_123",
+     *   "requested_model": "gpt-4.1",
+     *   "response_model": "gpt-4.1-mini",
+     *   "status": "completed"
+     * }
+     */
     FlowRunDebugAttempt: {
       /** Attempt No */
       attempt_no: number;
@@ -7590,6 +7633,10 @@ export interface components {
       num_tokens_input?: number | null;
       /** Num Tokens Output */
       num_tokens_output?: number | null;
+      /** Provenance Json */
+      provenance_json?: {
+        [key: string]: unknown;
+      } | null;
     };
     /** FlowRunDebugDefinition */
     FlowRunDebugDefinition: {
@@ -7602,7 +7649,47 @@ export interface components {
       /** Steps Count */
       steps_count: number;
     };
-    /** FlowRunDebugExport */
+    /**
+     * FlowRunDebugExport
+     * @example {
+     *   "definition": {
+     *     "checksum": "sha256:example",
+     *     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *     "steps_count": 1,
+     *     "version": 3
+     *   },
+     *   "definition_snapshot": {
+     *     "steps": []
+     *   },
+     *   "generated_at": "2026-03-31T12:00:00Z",
+     *   "run": {
+     *     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *     "flow_version": 3,
+     *     "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+     *     "status": "completed",
+     *     "summary": {
+     *       "artifacts_count": 0,
+     *       "attempts_count": 1,
+     *       "completed_steps": 1,
+     *       "duration_ms": 5240,
+     *       "failed_steps": 0,
+     *       "models_used": [
+     *         "gpt-4.1-mini"
+     *       ],
+     *       "steps_count": 1
+     *     },
+     *     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
+     *   },
+     *   "schema_version": "eneo.flow.debug-export.v2",
+     *   "security": {
+     *     "classification_field": "output_classification_override",
+     *     "masked_fields_count": 2,
+     *     "mcp_policy_field": "mcp_policy",
+     *     "redaction_applied": true
+     *   },
+     *   "steps": []
+     * }
+     */
     FlowRunDebugExport: {
       /** Schema Version */
       schema_version: string;
@@ -7705,6 +7792,69 @@ export interface components {
       references?: components["schemas"]["FlowRunDebugRagReference"][] | null;
       /** References Truncated */
       references_truncated?: boolean | null;
+      /** Source Names */
+      source_names?: string[] | null;
+      /** Source Display Names */
+      source_display_names?: string[] | null;
+      /** Has Named Sources */
+      has_named_sources?: boolean | null;
+      tracking?: components["schemas"]["FlowRunDebugRagTracking"] | null;
+      prompt_context?: components["schemas"]["FlowRunDebugRagPromptContext"] | null;
+    };
+    /** FlowRunDebugRagPromptContext */
+    FlowRunDebugRagPromptContext: {
+      /**
+       * Tracked
+       * @default true
+       */
+      tracked?: boolean;
+      /** Version */
+      version?: number | null;
+      /** Selection Basis */
+      selection_basis?: string | null;
+      /** Raw Source Count */
+      raw_source_count?: number | null;
+      /** Raw Chunk Count */
+      raw_chunk_count?: number | null;
+      /** Included Source Count */
+      included_source_count?: number | null;
+      /** Not Included Source Count */
+      not_included_source_count?: number | null;
+      /** Included Chunk Count */
+      included_chunk_count?: number | null;
+      /** Knowledge Tokens */
+      knowledge_tokens?: number | null;
+      /** Truncated By Token Budget */
+      truncated_by_token_budget?: boolean | null;
+      /** Included Source Ids */
+      included_source_ids?: string[];
+      /** Not Included Source Ids */
+      not_included_source_ids?: string[];
+      /** Included Source Titles */
+      included_source_titles?: string[];
+      /** Included Source Display Names */
+      included_source_display_names?: string[];
+      /** Included Groups */
+      included_groups?: components["schemas"]["FlowRunDebugRagPromptContextGroup"][];
+      /** Summary */
+      summary?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /** FlowRunDebugRagPromptContextGroup */
+    FlowRunDebugRagPromptContextGroup: {
+      /** Source Id */
+      source_id?: string | null;
+      /** Source Title */
+      source_title?: string | null;
+      /** Start Chunk */
+      start_chunk?: number | null;
+      /** End Chunk */
+      end_chunk?: number | null;
+      /** Chunk Count */
+      chunk_count?: number | null;
+      /** Relevance Score */
+      relevance_score?: number | null;
     };
     /** FlowRunDebugRagReference */
     FlowRunDebugRagReference: {
@@ -7714,6 +7864,42 @@ export interface components {
       id_short: string;
       /** Title */
       title?: string | null;
+      /** Source Title Raw */
+      source_title_raw?: string | null;
+      /** Display Title */
+      display_title?: string | null;
+      /** Source Display Name */
+      source_display_name?: string | null;
+      /** Source Url */
+      source_url?: string | null;
+      /** Source Kind */
+      source_kind?: string | null;
+      /** Source Container Kind */
+      source_container_kind?: string | null;
+      /** Source Container Name */
+      source_container_name?: string | null;
+      /** Source Container Name Raw */
+      source_container_name_raw?: string | null;
+      /** Source Container Display Name */
+      source_container_display_name?: string | null;
+      /** Source Container Label */
+      source_container_label?: string | null;
+      /** Source Container Id */
+      source_container_id?: string | null;
+      /** Usage State */
+      usage_state?: string | null;
+      /** Display Snippet */
+      display_snippet?: string | null;
+      /** Display Chunk No */
+      display_chunk_no?: number | null;
+      /** Display Selection Reason */
+      display_selection_reason?: string | null;
+      /** Quality Flags */
+      quality_flags?: string[];
+      /** Boilerplate Likelihood */
+      boilerplate_likelihood?: number | null;
+      /** Snippet Quality */
+      snippet_quality?: string | null;
       /**
        * Hit Count
        * @default 0
@@ -7745,6 +7931,33 @@ export interface components {
        */
       snippet?: string;
     };
+    /** FlowRunDebugRagTracking */
+    FlowRunDebugRagTracking: {
+      /**
+       * Retrieval Tracked
+       * @default true
+       */
+      retrieval_tracked?: boolean;
+      /**
+       * Prompt Context Inclusion Tracked
+       * @default false
+       */
+      prompt_context_inclusion_tracked?: boolean;
+      /**
+       * Citation Tracked
+       * @default false
+       */
+      citation_tracked?: boolean;
+      /**
+       * Material Influence Tracked
+       * @default false
+       */
+      material_influence_tracked?: boolean;
+      /** Selection Basis */
+      selection_basis?: string | null;
+      /** Note */
+      note?: string | null;
+    };
     /** FlowRunDebugRun */
     FlowRunDebugRun: {
       /** Run Id */
@@ -7757,6 +7970,24 @@ export interface components {
       trace_id?: string | null;
       /** Status */
       status: string;
+      summary?: components["schemas"]["FlowRunDebugRunSummary"] | null;
+    };
+    /** FlowRunDebugRunSummary */
+    FlowRunDebugRunSummary: {
+      /** Steps Count */
+      steps_count: number;
+      /** Completed Steps */
+      completed_steps: number;
+      /** Failed Steps */
+      failed_steps: number;
+      /** Attempts Count */
+      attempts_count: number;
+      /** Artifacts Count */
+      artifacts_count: number;
+      /** Duration Ms */
+      duration_ms?: number | null;
+      /** Models Used */
+      models_used?: string[];
     };
     /** FlowRunDebugSecurity */
     FlowRunDebugSecurity: {
@@ -7766,6 +7997,8 @@ export interface components {
       classification_field: string;
       /** Mcp Policy Field */
       mcp_policy_field: string;
+      /** Masked Fields Count */
+      masked_fields_count?: number | null;
     };
     /** FlowRunDebugStep */
     FlowRunDebugStep: {
@@ -7783,7 +8016,345 @@ export interface components {
       /** Attempts */
       attempts?: components["schemas"]["FlowRunDebugAttempt"][];
     };
-    /** FlowRunEvidenceExportResponse */
+    /**
+     * FlowRunEvidenceExportResponse
+     * @example {
+     *   "bundle": {
+     *     "debug_export": {
+     *       "definition": {
+     *         "checksum": "sha256:example",
+     *         "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *         "steps_count": 1,
+     *         "version": 3
+     *       },
+     *       "definition_snapshot": {
+     *         "steps": []
+     *       },
+     *       "generated_at": "2026-03-31T12:00:00Z",
+     *       "run": {
+     *         "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *         "flow_version": 3,
+     *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+     *         "status": "completed",
+     *         "summary": {
+     *           "artifacts_count": 0,
+     *           "attempts_count": 1,
+     *           "completed_steps": 1,
+     *           "duration_ms": 5240,
+     *           "failed_steps": 0,
+     *           "models_used": [
+     *             "gpt-4.1-mini"
+     *           ],
+     *           "steps_count": 1
+     *         },
+     *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
+     *       },
+     *       "schema_version": "eneo.flow.debug-export.v2",
+     *       "security": {
+     *         "classification_field": "output_classification_override",
+     *         "masked_fields_count": 2,
+     *         "mcp_policy_field": "mcp_policy",
+     *         "redaction_applied": true
+     *       },
+     *       "steps": []
+     *     },
+     *     "definition_snapshot": {
+     *       "steps": []
+     *     },
+     *     "run": {
+     *       "created_at": "2026-03-17T10:05:00Z",
+     *       "flow_id": "00000000-0000-0000-0000-000000000001",
+     *       "flow_version": 3,
+     *       "id": "00000000-0000-0000-0000-000000000301",
+     *       "input_payload_json": {
+     *         "employee_name": "Alex Example"
+     *       },
+     *       "job_id": "00000000-0000-0000-0000-000000000401",
+     *       "status": "queued",
+     *       "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *       "trace_id": "00000000-0000-0000-0000-000000000302",
+     *       "updated_at": "2026-03-17T10:05:00Z",
+     *       "user_id": "00000000-0000-0000-0000-000000000030"
+     *     },
+     *     "step_attempts": [],
+     *     "step_results": [
+     *       {
+     *         "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *         "created_at": "2026-03-17T10:05:05Z",
+     *         "diagnostics": [
+     *           {
+     *             "code": "runtime_input_consumed",
+     *             "message": "Uploaded audio file was used."
+     *           }
+     *         ],
+     *         "id": "00000000-0000-0000-0000-000000000501",
+     *         "input_payload_json": {
+     *           "diagnostics": [
+     *             {
+     *               "code": "runtime_input_consumed",
+     *               "message": "Uploaded audio file was used."
+     *             }
+     *           ]
+     *         },
+     *         "num_tokens_input": 0,
+     *         "num_tokens_output": 0,
+     *         "output_payload_json": {
+     *           "text": "Hello and welcome to the annual review..."
+     *         },
+     *         "status": "completed",
+     *         "step_id": "00000000-0000-0000-0000-000000000101",
+     *         "step_order": 1,
+     *         "updated_at": "2026-03-17T10:05:30Z"
+     *       }
+     *     ]
+     *   },
+     *   "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
+     *   "generated_at": "2026-03-31T12:00:00Z",
+     *   "manifest": {
+     *     "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
+     *     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *     "flow_version": 3,
+     *     "masked_fields_count": 2,
+     *     "redaction_applied": true,
+     *     "redaction_policy_version": "flow-evidence-redaction.v3",
+     *     "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+     *     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
+     *   },
+     *   "redaction": {
+     *     "applied": true,
+     *     "masked_fields": [
+     *       {
+     *         "key": "api_key",
+     *         "path": "bundle.run.input_payload_json.api_key",
+     *         "reason": "sensitive_key"
+     *       }
+     *     ],
+     *     "masked_fields_count": 2,
+     *     "masked_paths": [
+     *       "bundle.run.input_payload_json.api_key",
+     *       "bundle.debug_export.definition_snapshot.steps[0].output_config.headers.Authorization"
+     *     ],
+     *     "policy_version": "flow-evidence-redaction.v3"
+     *   },
+     *   "schema_version": "flow-evidence-export.v2",
+     *   "summary": {
+     *     "artifact_details": [
+     *       {
+     *         "checksum": "artifact-checksum",
+     *         "file_id": "artifact-1",
+     *         "file_type": "document",
+     *         "mimetype": "application/pdf",
+     *         "name": "case-summary.pdf",
+     *         "size": 14012
+     *       }
+     *     ],
+     *     "artifact_names": [
+     *       "case-summary.pdf"
+     *     ],
+     *     "artifacts_count": 0,
+     *     "attempts_count": 1,
+     *     "citations": {
+     *       "citation_tracked": true,
+     *       "cited_source_count": 1,
+     *       "cited_source_ids": [
+     *         "source-1"
+     *       ],
+     *       "tracking_mode": "inline_inref_sidecar",
+     *       "uncited_inserted_source_ids": [],
+     *       "unknown_citation_ids": []
+     *     },
+     *     "completed_steps": 1,
+     *     "duration_ms": 5240,
+     *     "failed_steps": 0,
+     *     "final_output": {
+     *       "artifact_count": 1,
+     *       "artifact_names": [
+     *         "case-summary.pdf"
+     *       ],
+     *       "kind": "mixed",
+     *       "structured_present": false,
+     *       "text_present": true,
+     *       "text_preview": {
+     *         "byte_size": 27,
+     *         "preview": "Decision support generated.",
+     *         "sha256": "69c2b1d5990f8f1cd6c9eaf0d6f20bc6f3ddc31a58496a49f4158a709c27a53d",
+     *         "truncated": false
+     *       }
+     *     },
+     *     "models_used": [
+     *       "gpt-4.1-mini"
+     *     ],
+     *     "rag_source_display_names": [
+     *       "Municipality policy guide"
+     *     ],
+     *     "rag_source_names": [
+     *       "Municipality policy guide"
+     *     ],
+     *     "rag_sources": [
+     *       {
+     *         "display_name": "Municipality policy guide",
+     *         "id": "source-1",
+     *         "name": "Municipality policy guide",
+     *         "source_container_display_name": "Municipality knowledge base",
+     *         "source_container_id": "website-1",
+     *         "source_container_kind": "website",
+     *         "source_container_name": "Municipality knowledge base",
+     *         "source_kind": "website",
+     *         "source_url": "https://example.se/policy-guide",
+     *         "usage_state": "inserted_into_prompt"
+     *       }
+     *     ],
+     *     "rag_sources_count": 1,
+     *     "rag_usage_tracking": {
+     *       "citation_tracked": false,
+     *       "material_influence_tracked": false,
+     *       "note": "References record retrieved candidates and exact prompt inclusion. Citations and material influence are not currently tracked.",
+     *       "prompt_context_inclusion_tracked": true,
+     *       "retrieval_tracked": true,
+     *       "selection_basis": "semantic_search_ranked_chunks_grouped_by_source"
+     *     },
+     *     "status": "completed",
+     *     "step_overview": [
+     *       {
+     *         "artifact_details": [
+     *           {
+     *             "checksum": "artifact-checksum",
+     *             "file_id": "artifact-1",
+     *             "file_type": "document",
+     *             "mimetype": "application/pdf",
+     *             "name": "case-summary.pdf",
+     *             "size": 14012
+     *           }
+     *         ],
+     *         "artifact_names": [
+     *           "case-summary.pdf"
+     *         ],
+     *         "attempts_count": 1,
+     *         "citations": {
+     *           "citation_tracked": true,
+     *           "cited_source_count": 1,
+     *           "cited_source_ids": [
+     *             "source-1"
+     *           ],
+     *           "tracking_mode": "inline_inref_sidecar",
+     *           "uncited_inserted_source_ids": [],
+     *           "unknown_citation_ids": []
+     *         },
+     *         "configured_input_type": "text",
+     *         "configured_output_type": "pdf",
+     *         "duration_ms": 5240,
+     *         "input_lineage": {
+     *           "input_source": "previous_step",
+     *           "legacy_prompt_binding_used": false,
+     *           "question_binding_expressions": [
+     *             "step_1.output.text",
+     *             "step_input.text"
+     *           ],
+     *           "question_binding_references_runtime_input": true,
+     *           "runtime_file_checksums": [
+     *             "input-checksum"
+     *           ],
+     *           "runtime_file_count": 1,
+     *           "runtime_file_ids": [
+     *             "file-1"
+     *           ],
+     *           "runtime_file_names": [
+     *             "underlag.pdf"
+     *           ],
+     *           "runtime_files": [
+     *             {
+     *               "checksum": "input-checksum",
+     *               "file_type": "document",
+     *               "has_text": true,
+     *               "has_transcription": false,
+     *               "id": "file-1",
+     *               "mimetype": "application/pdf",
+     *               "name": "underlag.pdf",
+     *               "size": 2048,
+     *               "text_length": 1024
+     *             }
+     *           ],
+     *           "runtime_input_format": "document",
+     *           "upstream_step_labels": [
+     *             "Collect the source document"
+     *           ],
+     *           "upstream_step_orders": [
+     *             1
+     *           ],
+     *           "used_question_binding": true,
+     *           "uses_runtime_input": true
+     *         },
+     *         "knowledge_retrieval": {
+     *           "attempted": true,
+     *           "prompt_context": {
+     *             "included_chunk_count": 2,
+     *             "included_source_count": 1,
+     *             "included_source_display_names": [
+     *               "Municipality policy guide"
+     *             ],
+     *             "included_source_ids": [
+     *               "source-1"
+     *             ],
+     *             "included_source_titles": [
+     *               "Municipality policy guide"
+     *             ],
+     *             "knowledge_tokens": 248,
+     *             "not_included_source_count": 0,
+     *             "summary": {
+     *               "top_ranked_sources": [
+     *                 {
+     *                   "best_score": 0.91,
+     *                   "display_name": "Municipality policy guide",
+     *                   "included_chunk_count": 2,
+     *                   "included_group_count": 1,
+     *                   "rank": 1,
+     *                   "source_id": "source-1",
+     *                   "source_kind": "website"
+     *                 }
+     *               ],
+     *               "total_chunks": 2,
+     *               "total_sources": 1,
+     *               "truncated_by_token_budget": false
+     *             },
+     *             "tracked": true,
+     *             "truncated_by_token_budget": false
+     *           },
+     *           "reference_metadata_status": "success",
+     *           "references_truncated": false,
+     *           "retrieval_duration_ms": 182,
+     *           "source_display_names": [
+     *             "Municipality policy guide"
+     *           ],
+     *           "source_names": [
+     *             "Municipality policy guide"
+     *           ],
+     *           "status": "success",
+     *           "unique_sources": 1
+     *         },
+     *         "knowledge_sources_count": 1,
+     *         "knowledge_usage_state": "inserted_into_prompt",
+     *         "models_used": [
+     *           "gpt-4.1-mini"
+     *         ],
+     *         "output_summary": {
+     *           "byte_size": 27,
+     *           "preview": "Decision support generated.",
+     *           "sha256": "69c2b1d5990f8f1cd6c9eaf0d6f20bc6f3ddc31a58496a49f4158a709c27a53d",
+     *           "truncated": false
+     *         },
+     *         "result_output_kind": "mixed",
+     *         "retries": 0,
+     *         "status": "completed",
+     *         "step_id": "step-1",
+     *         "step_order": 1,
+     *         "user_description": "Draft the decision support summary"
+     *       }
+     *     ],
+     *     "steps_count": 1,
+     *     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
+     *   }
+     * }
+     */
     FlowRunEvidenceExportResponse: {
       /** Schema Version */
       schema_version: string;
@@ -7794,9 +8365,112 @@ export interface components {
       generated_at: string;
       /** Content Hash */
       content_hash: string;
+      /** Manifest */
+      manifest: {
+        [key: string]: unknown;
+      };
+      /** Summary */
+      summary: {
+        [key: string]: unknown;
+      };
+      /** Redaction */
+      redaction: {
+        [key: string]: unknown;
+      };
       bundle: components["schemas"]["FlowRunEvidenceResponse"];
     };
-    /** FlowRunEvidenceResponse */
+    /**
+     * FlowRunEvidenceResponse
+     * @example {
+     *   "debug_export": {
+     *     "definition": {
+     *       "checksum": "sha256:example",
+     *       "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *       "steps_count": 1,
+     *       "version": 3
+     *     },
+     *     "definition_snapshot": {
+     *       "steps": []
+     *     },
+     *     "generated_at": "2026-03-31T12:00:00Z",
+     *     "run": {
+     *       "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *       "flow_version": 3,
+     *       "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+     *       "status": "completed",
+     *       "summary": {
+     *         "artifacts_count": 0,
+     *         "attempts_count": 1,
+     *         "completed_steps": 1,
+     *         "duration_ms": 5240,
+     *         "failed_steps": 0,
+     *         "models_used": [
+     *           "gpt-4.1-mini"
+     *         ],
+     *         "steps_count": 1
+     *       },
+     *       "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
+     *     },
+     *     "schema_version": "eneo.flow.debug-export.v2",
+     *     "security": {
+     *       "classification_field": "output_classification_override",
+     *       "masked_fields_count": 2,
+     *       "mcp_policy_field": "mcp_policy",
+     *       "redaction_applied": true
+     *     },
+     *     "steps": []
+     *   },
+     *   "definition_snapshot": {
+     *     "steps": []
+     *   },
+     *   "run": {
+     *     "created_at": "2026-03-17T10:05:00Z",
+     *     "flow_id": "00000000-0000-0000-0000-000000000001",
+     *     "flow_version": 3,
+     *     "id": "00000000-0000-0000-0000-000000000301",
+     *     "input_payload_json": {
+     *       "employee_name": "Alex Example"
+     *     },
+     *     "job_id": "00000000-0000-0000-0000-000000000401",
+     *     "status": "queued",
+     *     "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *     "trace_id": "00000000-0000-0000-0000-000000000302",
+     *     "updated_at": "2026-03-17T10:05:00Z",
+     *     "user_id": "00000000-0000-0000-0000-000000000030"
+     *   },
+     *   "step_attempts": [],
+     *   "step_results": [
+     *     {
+     *       "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *       "created_at": "2026-03-17T10:05:05Z",
+     *       "diagnostics": [
+     *         {
+     *           "code": "runtime_input_consumed",
+     *           "message": "Uploaded audio file was used."
+     *         }
+     *       ],
+     *       "id": "00000000-0000-0000-0000-000000000501",
+     *       "input_payload_json": {
+     *         "diagnostics": [
+     *           {
+     *             "code": "runtime_input_consumed",
+     *             "message": "Uploaded audio file was used."
+     *           }
+     *         ]
+     *       },
+     *       "num_tokens_input": 0,
+     *       "num_tokens_output": 0,
+     *       "output_payload_json": {
+     *         "text": "Hello and welcome to the annual review..."
+     *       },
+     *       "status": "completed",
+     *       "step_id": "00000000-0000-0000-0000-000000000101",
+     *       "step_order": 1,
+     *       "updated_at": "2026-03-17T10:05:30Z"
+     *     }
+     *   ]
+     * }
+     */
     FlowRunEvidenceResponse: {
       run: components["schemas"]["FlowRunPublic"];
       /** Definition Snapshot */
@@ -27036,10 +27710,11 @@ export interface operations {
     };
   };
   /**
-   * Get flow run evidence export (flow-first)
-   * @description Get redacted debug/evidence payload for one flow run.
+   * Get flow run evidence trace
+   * @description Get the redacted rich evidence trace for one flow run.
    *
-   * Prefer `.../steps/` for consumer UIs unless debug-export fields are required.
+   * Use `/steps/` for baseline consumer step inspection and `/evidence/` for rich traceability,
+   * attempt history, and debug-export provenance.
    */
   get_flow_run_evidence_alias: {
     parameters: {

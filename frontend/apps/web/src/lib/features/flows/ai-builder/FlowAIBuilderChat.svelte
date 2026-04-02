@@ -3,6 +3,7 @@
   import FlowAIBuilderMessage from "./FlowAIBuilderMessage.svelte";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
   import FlowAIBuilderPhaseIndicator from "./FlowAIBuilderPhaseIndicator.svelte";
+  import { shouldShowEditStartOver } from "./flowAIBuilderReset";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import type { StructuredQuestionAnswerPayload } from "./structuredQuestionAnswer";
 
@@ -14,21 +15,34 @@
 
   const service = getAIBuilderService();
   const isEditMode = $derived(targetKind === "edit");
+  const canStartOver = $derived(
+    shouldShowEditStartOver({
+      targetKind,
+      hasSession: service.hasSession,
+      messageCount: service.messages.length,
+      hasPlan: service.currentPlan !== null,
+      isConflict: service.isConflict,
+      statusMessage: service.statusMessage,
+      hasApplyError: service.applyError !== null,
+      hasApplyResult: service.applyResult !== null,
+      isStreaming: service.isStreaming
+    })
+  );
 
   // Only show the centered welcome state when truly empty — no messages and not streaming
   const showEmptyState = $derived(
     service.messages.length === 0 &&
-    !service.isStreaming &&
-    !service.currentPlan &&
-    !service.isConflict &&
-    !service.statusMessage
+      !service.isStreaming &&
+      !service.currentPlan &&
+      !service.isConflict &&
+      !service.statusMessage
   );
 
   function handleQuestionAnswer(answer: StructuredQuestionAnswerPayload) {
     service.sendMessage(answer.text, answer.questionAnswer);
   }
 
-  let inputRef: FlowAIBuilderInput;
+  let inputRef = $state<FlowAIBuilderInput | undefined>();
 
   // Track if a plan existed before (for context-aware generating text)
   let hadPlanBefore = $state(false);
@@ -52,7 +66,11 @@
     inputRef?.focus({ placeholder: m.ai_builder_requirements_change_hint() });
   }
 
-  let scrollContainer: HTMLDivElement;
+  function handleStartOver() {
+    void service.startFreshSession("edit");
+  }
+
+  let scrollContainer = $state<HTMLDivElement | undefined>();
 
   function scrollToBottom() {
     if (scrollContainer) {
@@ -65,10 +83,16 @@
   const answeredQuestionCount = $derived.by(() => {
     const ids = new Set<string>();
     for (const msg of service.messages) {
-      const qa = msg.metadata && typeof msg.metadata === "object" && "question_answer" in msg.metadata
-        ? msg.metadata.question_answer
-        : null;
-      if (qa && typeof qa === "object" && "question_id" in qa && typeof qa.question_id === "string") {
+      const qa =
+        msg.metadata && typeof msg.metadata === "object" && "question_answer" in msg.metadata
+          ? msg.metadata.question_answer
+          : null;
+      if (
+        qa &&
+        typeof qa === "object" &&
+        "question_id" in qa &&
+        typeof qa.question_id === "string"
+      ) {
         ids.add(qa.question_id);
       }
     }
@@ -81,13 +105,23 @@
     void service.isStreaming;
     scrollToBottom();
   });
-
 </script>
 
 <div class="chat-shell" class:chat-shell-empty={showEmptyState}>
-  <!-- Phase progress indicator -->
-  {#if service.messages.length > 0}
-    <FlowAIBuilderPhaseIndicator phase={service.phase} answeredCount={answeredQuestionCount} />
+  {#if service.messages.length > 0 || canStartOver}
+    <div class="chat-toolbar">
+      {#if service.messages.length > 0}
+        <FlowAIBuilderPhaseIndicator phase={service.phase} answeredCount={answeredQuestionCount} />
+      {:else}
+        <div class="chat-toolbar-spacer" aria-hidden="true"></div>
+      {/if}
+
+      {#if canStartOver}
+        <button class="chat-toolbar-action" onclick={handleStartOver}>
+          {m.ai_builder_start_fresh()}
+        </button>
+      {/if}
+    </div>
   {/if}
 
   {#if showEmptyState}
@@ -113,29 +147,25 @@
             isLast={i === service.messages.length - 1}
             isStreaming={service.isStreaming && i === service.messages.length - 1}
             question={message.question}
-            questionAnswered={message.question ? service.isQuestionAnswered(message.question.question_id) : false}
+            questionAnswered={message.question
+              ? service.isQuestionAnswered(message.question.question_id)
+              : false}
             requirementsSummary={message.requirementsSummary}
-            requirementsConfirmed={
-              message.requirementsSummary
-                ? service.isRequirementsSummaryConfirmed(message.requirementsSummary)
-                : false
-            }
-            requirementsActive={
-              message.requirementsSummary
-                ? service.isLatestRequirementsSummary(message.requirementsSummary)
-                : false
-            }
+            requirementsConfirmed={message.requirementsSummary
+              ? service.isRequirementsSummaryConfirmed(message.requirementsSummary)
+              : false}
+            requirementsActive={message.requirementsSummary
+              ? service.isLatestRequirementsSummary(message.requirementsSummary)
+              : false}
             onQuestionAnswer={message.question ? handleQuestionAnswer : undefined}
-            onRequirementsConfirm={
-              message.requirementsSummary && service.isLatestRequirementsSummary(message.requirementsSummary)
-                ? handleRequirementsConfirm
-                : undefined
-            }
-            onRequirementsChange={
-              message.requirementsSummary && service.isLatestRequirementsSummary(message.requirementsSummary)
-                ? handleRequirementsChange
-                : undefined
-            }
+            onRequirementsConfirm={message.requirementsSummary &&
+            service.isLatestRequirementsSummary(message.requirementsSummary)
+              ? handleRequirementsConfirm
+              : undefined}
+            onRequirementsChange={message.requirementsSummary &&
+            service.isLatestRequirementsSummary(message.requirementsSummary)
+              ? handleRequirementsChange
+              : undefined}
           />
         {/each}
         {#if service.isStreaming && service.messages[service.messages.length - 1]?.role === "user"}
@@ -189,6 +219,48 @@
     justify-content: center;
     align-items: center;
     padding: 0 1.5rem;
+  }
+
+  .chat-toolbar {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    border-bottom: 1px solid var(--border-default);
+    flex-shrink: 0;
+  }
+
+  .chat-toolbar > :global(:first-child) {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .chat-toolbar-spacer {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .chat-toolbar-action {
+    border: 1px solid var(--border-default);
+    border-radius: 999px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1;
+    padding: 0.375rem 0.75rem;
+    margin-right: 1rem;
+    flex-shrink: 0;
+    white-space: nowrap;
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease,
+      color 120ms ease;
+  }
+
+  .chat-toolbar-action:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
   }
 
   .empty-state-spacer {

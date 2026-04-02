@@ -33,6 +33,15 @@ def test_resolve_explicit_output_choice_detects_pdf_from_swedish_prompt() -> Non
     assert output == "pdf_document"
 
 
+def test_resolve_explicit_output_choice_prefers_word_target_in_substitution_phrase() -> None:
+    output = resolve_explicit_output_choice(
+        "Ändra så att jag får ut ett word dokument istället för en pdf.",
+        {},
+    )
+
+    assert output == "docx_document"
+
+
 def test_resolve_explicit_output_choice_respects_existing_flow_default_when_output_not_reopened() -> None:
     output = resolve_explicit_output_choice(
         "Behåll samma flöde men lägg till makrotrender och geopolitiska signaler.",
@@ -469,6 +478,28 @@ def test_extract_answer_signals_infers_structured_analysis_and_metadata_needs() 
     assert "detailed_case_metadata" in signals["runtime_metadata_fields"]
 
 
+def test_extract_answer_signals_does_not_treat_input_pdfs_as_pdf_output_mode() -> None:
+    prompt = (
+        "Bygg ett flöde som tar emot ett dokumentpaket med flera PDF-filer i ett kommunärende. "
+        "Steg 1 extraherar text ur alla dokument. Steg 2 identifierar juridiska risker som "
+        "strukturerad JSON. Steg 3 skriver en strukturerad DOCX-rapport utan mall."
+    )
+
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ]
+    )
+    intent = resolve_output_intent(prompt, signals)
+
+    assert "pdf_generation_mode" not in signals
+    assert intent.terminal_output == "docx_document"
+    assert intent.docx_output_mode == "generated_docx"
+
+
 def test_aggregate_freeform_user_text_ignores_structured_answer_messages() -> None:
     text = aggregate_freeform_user_text(
         [
@@ -491,6 +522,20 @@ def test_aggregate_freeform_user_text_ignores_structured_answer_messages() -> No
 
     assert "docx document" not in text
     assert "behåll samma flöde" in text
+
+
+def test_aggregate_freeform_user_text_keeps_messages_when_question_answer_lacks_real_answer() -> None:
+    text = aggregate_freeform_user_text(
+        [
+            ConversationMessage(
+                role="user",
+                content="ändra så att jag får ut en word dokument istället för en pdf",
+                metadata={"question_answer": {"ui_language": "sv"}},
+            ),
+        ]
+    )
+
+    assert "word dokument" in text
 
 
 def test_question_resolution_ignores_prior_answer_labels_when_output_not_changed() -> None:

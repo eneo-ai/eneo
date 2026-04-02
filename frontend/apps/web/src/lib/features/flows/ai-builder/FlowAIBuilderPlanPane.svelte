@@ -4,8 +4,13 @@
   import FlowAIBuilderStepCard from "./FlowAIBuilderStepCard.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import type { EditAdvisory } from "./protocol";
+  import {
+    getFirstChangedStepIndex,
+    getRemovedStepChanges,
+    getStepChangeKind
+  } from "./flowAIBuilderPlanDiff";
   interface Props {
-    onapplied?: (detail: { flow_id: string }) => void;
+    onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
     onsuggestchange?: (prefill: string) => void;
   }
 
@@ -22,17 +27,13 @@
     return { previous: String(change[0] ?? ""), proposed: String(change[1] ?? "") };
   });
 
-  let advisories = $derived<EditAdvisory[]>(
-    service.currentPlan?.edit_advisories ?? []
-  );
+  let advisories = $derived<EditAdvisory[]>(service.currentPlan?.edit_advisories ?? []);
 
   let hasDescriptionAdvisory = $derived(
     advisories.some((a) => a.code === "flow_description_update_required")
   );
 
-  let isPublishedError = $derived(
-    service.applyError?.code === "flow_is_published"
-  );
+  let isPublishedError = $derived(service.applyError?.code === "flow_is_published");
 
   let publishedVersion = $derived(
     isPublishedError ? (service.applyError?.context?.published_version as number | null) : null
@@ -45,6 +46,12 @@
 
   let isApproving = $state(false);
   let isApplying = $state(false);
+  let removedStepChanges = $derived(getRemovedStepChanges(service.currentPlan?.edit_diff ?? null));
+  let focusStepIndex = $derived.by(() => {
+    const plan = service.currentPlan;
+    if (!plan) return null;
+    return getFirstChangedStepIndex(plan.envelope.spec.steps, plan.edit_diff ?? null);
+  });
 
   // Track whether a plan existed before streaming started (for context-aware progress text)
   let hadPlanBefore = $state(false);
@@ -75,7 +82,7 @@
     isApplying = true;
     try {
       const result = await service.applyPlan();
-      onapplied?.({ flow_id: result.flow_id });
+      onapplied?.({ flow_id: result.flow_id, focusStepIndex });
     } catch {
       // Error or conflict is set on service
     } finally {
@@ -151,7 +158,11 @@
                 {advisories.find((a) => a.code === "flow_description_update_required")?.message}
               </p>
               <div class="description-diff-actions">
-                <Button variant="outlined" size="small" onclick={() => service.revisePlan("keep_current_description")}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onclick={() => service.revisePlan("keep_current_description")}
+                >
                   {m.ai_builder_description_keep_current()}
                 </Button>
               </div>
@@ -191,8 +202,12 @@
 
         {#if plan.envelope.plan_rationale}
           <div class="rationale-section">
-            <p class="text-primary mb-1.5 text-[0.8125rem] font-medium">{m.ai_builder_plan_rationale()}</p>
-            <p class="text-secondary text-[0.8125rem] leading-relaxed">{plan.envelope.plan_rationale}</p>
+            <p class="text-primary mb-1.5 text-[0.8125rem] font-medium">
+              {m.ai_builder_plan_rationale()}
+            </p>
+            <p class="text-secondary text-[0.8125rem] leading-relaxed">
+              {plan.envelope.plan_rationale}
+            </p>
           </div>
         {/if}
 
@@ -210,7 +225,11 @@
                   </div>
                   <div class="form-field-meta">
                     <span>{field.name}</span>
-                    <span>{field.required ? m.ai_builder_form_field_required() : m.ai_builder_form_field_optional()}</span>
+                    <span
+                      >{field.required
+                        ? m.ai_builder_form_field_required()
+                        : m.ai_builder_form_field_optional()}</span
+                    >
                   </div>
                   {#if field.options && field.options.length > 0}
                     <div class="form-field-options">
@@ -229,8 +248,17 @@
         {#if plan.envelope.lint_warnings.length > 0}
           <div class="lint-section">
             <div class="lint-header">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="lint-icon">
-                <path fill-rule="evenodd" d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                class="lint-icon"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
+                  clip-rule="evenodd"
+                />
               </svg>
               <span class="lint-title">{m.ai_builder_quality_warnings()}</span>
             </div>
@@ -253,6 +281,7 @@
             <FlowAIBuilderStepCard
               {step}
               stepNumber={i + 1}
+              changeKind={getStepChangeKind(step, plan.edit_diff ?? null)}
               {resolveModelName}
               isFirst={i === 0}
               isLast={i === spec.steps.length - 1}
@@ -261,6 +290,20 @@
             />
           {/each}
         </div>
+
+        {#if removedStepChanges.length > 0}
+          <div class="removed-steps-section">
+            <p class="removed-steps-title">{m.ai_builder_removed_steps_title()}</p>
+            <ul class="removed-steps-list">
+              {#each removedStepChanges as change (`${change.step_ref ?? change.step_name}-${change.kind}`)}
+                <li class="removed-step-item">
+                  <span class="removed-step-badge">{m.ai_builder_badge_removed()}</span>
+                  <span class="removed-step-name">{change.step_name}</span>
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {/if}
       </div>
 
       <!-- Applied result -->
@@ -600,6 +643,54 @@
     background: var(--bg-primary);
   }
 
+  .removed-steps-section {
+    margin-top: 1rem;
+    border-top: 1px solid var(--border-default);
+    padding-top: 1rem;
+  }
+
+  .removed-steps-title {
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .removed-steps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .removed-step-item {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    border: 1px dashed var(--border-default);
+    border-radius: 0.75rem;
+    padding: 0.75rem 0.875rem;
+    background: var(--bg-secondary);
+  }
+
+  .removed-step-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.1875rem 0.5rem;
+    background: var(--bg-warning-dimmer);
+    color: var(--text-warning-stronger);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+
+  .removed-step-name {
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
   .plan-actions::before {
     content: "";
     position: absolute;
@@ -662,8 +753,12 @@
   }
 
   @keyframes spin-slow {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   /* Description diff — flat layout, no nested cards */
@@ -718,8 +813,14 @@
   }
 
   @keyframes section-enter {
-    from { opacity: 0; transform: translateY(0.5rem); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(0.5rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   /* Advisories section — matches lint-section treatment */

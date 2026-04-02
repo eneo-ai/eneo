@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.tables.assistant_table import Assistants, AssistantsGroups
+from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.flow_tables import (
     FlowStepResults,
@@ -202,9 +203,11 @@ class FlowRepository:
                 sa.select(
                     Assistants.id,
                     Assistants.completion_model_id,
+                    CompletionModels.name.label("model_name"),
                     Prompts.text.label("instructions"),
                 )
                 .join(Users, Users.id == Assistants.user_id)
+                .outerjoin(CompletionModels, CompletionModels.id == Assistants.completion_model_id)
                 .outerjoin(
                     PromptsAssistants,
                     sa.and_(
@@ -220,9 +223,11 @@ class FlowRepository:
 
         snapshots: dict[UUID, dict[str, Any]] = {
             row.id: {
-                "instructions": row.instructions,
+                "instructions": getattr(row, "instructions", None),
                 "model_ref": str(row.completion_model_id) if row.completion_model_id else None,
+                "model_label": getattr(row, "model_name", None),
                 "knowledge_refs": [],
+                "knowledge_labels": [],
             }
             for row in assistant_rows
         }
@@ -231,6 +236,7 @@ class FlowRepository:
             await self.session.execute(
                 sa.select(
                     AssistantsGroups.assistant_id,
+                    CollectionsTable.id,
                     CollectionsTable.name,
                 )
                 .join(
@@ -248,7 +254,8 @@ class FlowRepository:
         for row in collection_rows:
             if row.assistant_id not in snapshots:
                 continue
-            snapshots[row.assistant_id]["knowledge_refs"].append(row.name)
+            snapshots[row.assistant_id]["knowledge_refs"].append(str(row.id))
+            snapshots[row.assistant_id]["knowledge_labels"].append(row.name)
 
         return {
             assistant_id: snapshots[assistant_id]

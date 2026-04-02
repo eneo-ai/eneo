@@ -9,6 +9,12 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryResolvedBy,
     SemanticAdjudicationResult,
 )
+from intric.flows.ai_builder.ai_builder_discovery_families import (
+    family_for_issue,
+)
+from intric.flows.ai_builder.ai_builder_discovery_questions import (
+    question_exposure_for_id,
+)
 from intric.flows.ai_builder.ai_builder_discovery_priority import sort_discovery_issues
 from intric.flows.ai_builder.ai_builder_discovery_questions import localized_text
 from intric.flows.ai_builder.ai_builder_framework_policy import mentions_runtime_metadata
@@ -32,25 +38,6 @@ _QUESTION_IMPACT: dict[str, DiscoveryImpact] = {
     "structured_analysis_need": "quality",
     "runtime_metadata_fields": "quality",
 }
-
-_QUESTION_FAMILY: dict[str, str] = {
-    "comparison_scope_conflict": "case_scope",
-    "case_scope": "case_scope",
-    "comparison_scope": "case_scope",
-    "input_material_mode": "input_shape",
-    "flow_input_architecture": "input_shape",
-    "document_kind": "input_shape",
-    "document_material_scope": "input_shape",
-    "final_output_mode": "output_artifact",
-    "docx_output_mode": "output_artifact",
-    "pdf_generation_mode": "output_artifact",
-    "final_pdf_type": "output_style",
-    "structured_analysis_need": "structured_reuse",
-    "runtime_metadata_fields": "runtime_metadata",
-    "output_reader": "output_style",
-    "decision_support_scope": "output_style",
-}
-
 
 def apply_discovery_decision_engine(
     *,
@@ -83,8 +70,21 @@ def apply_discovery_decision_engine(
             scored_signals=scored_signals,
             semantic_result=semantic_result,
         )
-        candidates.append(candidate)
         question_id = candidate.question_id
+
+        if question_id is not None and question_exposure_for_id(question_id) != "user_requirement":
+            suppressed.append(
+                suppressed_candidate(candidate, reason="planner_internal_question")
+            )
+            continue
+
+        if profile.edit_mode and candidate.family not in profile.edit_scope.active_families:
+            suppressed.append(
+                suppressed_candidate(candidate, reason="inactive_edit_scope")
+            )
+            continue
+
+        candidates.append(candidate)
 
         if candidate.impact == "polish":
             suppressed.append(
@@ -156,7 +156,7 @@ def build_candidate(
         impact=_QUESTION_IMPACT.get(issue.issue_id, "quality"),
         confidence=confidence,
         assumption_safe=candidate_assumption_safe(issue.issue_id, profile),
-        family=_QUESTION_FAMILY.get(issue.issue_id, issue.category),
+        family=family_for_issue(issue.issue_id, default=issue.category) or issue.category,
         resolved_by=resolved_by,
         evidence=evidence,
     )
@@ -195,7 +195,11 @@ def heuristic_confidence(issue_id: str, profile: DiscoveryProfile) -> str | None
         return "singular case phrasing suggests one case per run"
     if issue_id == "document_material_scope" and implies_single_primary_document(profile.text):
         return "singular document phrasing suggests one primary document per run"
-    if issue_id == "final_pdf_type" and implies_structured_report_pdf(profile.text):
+    if (
+        issue_id == "final_pdf_type"
+        and profile.output_intent.terminal_output == "pdf_document"
+        and implies_structured_report_pdf(profile.text)
+    ):
         return "decision-support phrasing suggests a structured report"
     if issue_id == "document_kind" and looks_like_case_document_family(profile.text):
         return "case-analysis phrasing suggests case documents"
@@ -218,6 +222,8 @@ def candidate_assumption_safe(issue_id: str, profile: DiscoveryProfile) -> bool:
     if issue_id == "document_material_scope":
         return implies_single_primary_document(profile.text)
     if issue_id == "final_pdf_type":
+        if profile.output_intent.terminal_output != "pdf_document":
+            return False
         return implies_structured_report_pdf(profile.text)
     if issue_id == "document_kind":
         return looks_like_case_document_family(profile.text)
@@ -245,7 +251,11 @@ def assumption_for_candidate(
             "Antar ett huvuddokument per körning tills du säger att ett dokumentpaket ska stödjas.",
             "Assuming one primary document per run unless you later say a document package must be supported.",
         )
-    if candidate.issue_id == "final_pdf_type" and implies_structured_report_pdf(profile.text):
+    if (
+        candidate.issue_id == "final_pdf_type"
+        and profile.output_intent.terminal_output == "pdf_document"
+        and implies_structured_report_pdf(profile.text)
+    ):
         return localized_text(
             language,
             "Antar att slut-PDF:n ska vara en strukturerad rapport snarare än en kort punktlista.",

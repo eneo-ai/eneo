@@ -22,6 +22,7 @@ class _RowsResult:
 async def test_get_assistant_snapshots_scopes_collection_query_to_tenant() -> None:
     tenant_id = uuid4()
     assistant_id = uuid4()
+    kb_id = uuid4()
     session = AsyncMock()
     session.execute = AsyncMock(
         side_effect=[
@@ -38,6 +39,7 @@ async def test_get_assistant_snapshots_scopes_collection_query_to_tenant() -> No
                 [
                     SimpleNamespace(
                         assistant_id=assistant_id,
+                        id=kb_id,
                         name="tenant-visible-kb",
                     )
                 ]
@@ -55,7 +57,9 @@ async def test_get_assistant_snapshots_scopes_collection_query_to_tenant() -> No
         assistant_id: {
             "instructions": "Do work",
             "model_ref": None,
-            "knowledge_refs": ["tenant-visible-kb"],
+            "model_label": None,
+            "knowledge_refs": [str(kb_id)],
+            "knowledge_labels": ["tenant-visible-kb"],
         }
     }
     collection_stmt = session.execute.await_args_list[1].args[0]

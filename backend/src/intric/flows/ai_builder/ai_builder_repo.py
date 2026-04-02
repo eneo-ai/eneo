@@ -155,7 +155,7 @@ class AIBuilderRepository:
         space_id: UUID,
         target_kind: TargetKind,
         flow_id: UUID | None,
-    ) -> None:
+    ) -> list[UUID]:
         async with self._transaction():
             stmt = (
                 update(BuilderSessions)
@@ -177,8 +177,10 @@ class AIBuilderRepository:
                     status=SessionStatus.CANCELLED.value,
                     updated_at=datetime.now(timezone.utc),
                 )
+                .returning(BuilderSessions.id)
             )
-            await self.session.execute(stmt)
+            result = await self.session.execute(stmt)
+            return list(result.scalars().all())
 
     async def get_session(
         self,

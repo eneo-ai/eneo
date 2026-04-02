@@ -22,6 +22,9 @@ from intric.flows.ai_builder.ai_builder_flow_context import (
 from intric.flows.ai_builder.ai_builder_discovery import (
     build_discovery_guidance,
 )
+from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
+    should_prefer_structured_intermediate,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     canonical_question_id,
@@ -36,19 +39,8 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
 from intric.flows.ai_builder.ai_builder_knowledge_pack import (
-    _KNOWLEDGE_PACK_ANTI_PATTERNS,
-    _KNOWLEDGE_PACK_CONTRACTS,
-    _KNOWLEDGE_PACK_EDIT_MODE,
-    _KNOWLEDGE_PACK_FLOW_ARCHITECTURE,
-    _KNOWLEDGE_PACK_INSTRUCTIONS_AND_UNDERLAG,
-    _KNOWLEDGE_PACK_IO_INTELLIGENCE,
-    _KNOWLEDGE_PACK_STEP_DESIGN,
-    _KNOWLEDGE_PACK_VARIABLE_SYSTEM,
-    _ROLE_AND_PROTOCOL,
-    _STRUCTURED_REFERENCE_BLOCK,
-    _VALIDATION_REPAIR_EXAMPLES,
+    build_prompt_knowledge_sections,
 )
-from intric.flows.ai_builder.ai_builder_recipe_selector import select_relevant_recipes
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     build_confirmed_requirements_prompt_block,
     build_requirements_version,
@@ -86,38 +78,11 @@ def build_system_prompt(
     - Proposal (confirmed): core + recipes + contracts + anti-patterns
     - Edit mode: core + edit-specific knowledge, skip create-only content
     """
-    # Core sections — always present
-    sections = [
-        _ROLE_AND_PROTOCOL,
-        _STRUCTURED_REFERENCE_BLOCK,
-        _KNOWLEDGE_PACK_FLOW_ARCHITECTURE,
-        build_framework_guardrails_block(),
-        _KNOWLEDGE_PACK_VARIABLE_SYSTEM,
-    ]
-
-    if is_edit_mode:
-        # Edit mode: add edit-specific knowledge, skip heavy create-only content
-        sections.append(_KNOWLEDGE_PACK_EDIT_MODE)
-        sections.append(_KNOWLEDGE_PACK_CONTRACTS)
-        sections.append(_KNOWLEDGE_PACK_STEP_DESIGN)
-    elif confirmed_requirements is not None:
-        # Proposal phase: include full recipe/pattern knowledge
-        sections.append(_KNOWLEDGE_PACK_INSTRUCTIONS_AND_UNDERLAG)
-        sections.append(_KNOWLEDGE_PACK_CONTRACTS)
-        answer_signals = _extract_signals_from_requirements(confirmed_requirements)
-        freeform_summary = (
-            confirmed_requirements.get("summary", "")
-            if isinstance(confirmed_requirements, dict)
-            else ""
-        )
-        sections.append(select_relevant_recipes(answer_signals, freeform_summary))
-        sections.append(_KNOWLEDGE_PACK_IO_INTELLIGENCE)
-        sections.append(_KNOWLEDGE_PACK_ANTI_PATTERNS)
-        sections.append(_KNOWLEDGE_PACK_STEP_DESIGN)
-        sections.append(_VALIDATION_REPAIR_EXAMPLES)
-    else:
-        # Discovery phase: lightweight — only instructions guide
-        sections.append(_KNOWLEDGE_PACK_INSTRUCTIONS_AND_UNDERLAG)
+    sections = build_prompt_knowledge_sections(
+        is_edit_mode=is_edit_mode,
+        has_confirmed_requirements=confirmed_requirements is not None,
+    )
+    sections.insert(2, build_framework_guardrails_block())
 
     if confirmed_requirements:
         requirements_payload = RequirementsSummaryPayload.model_validate(
@@ -152,18 +117,27 @@ def build_system_prompt(
 
     if available_models:
         model_lines = "\n".join(
-            f"- `{model['ref']}`: {model['name']} ({model.get('provider', 'unknown')})"
+            f"- ref=`{model['ref']}` | name=`{model.get('display_name', model['name'])}`"
+            + f" | provider=`{model.get('provider', 'unknown')}`"
             for model in available_models
         )
-        sections.append(f"\n## Tillgängliga modeller\n\n{model_lines}")
+        sections.append(
+            "\n## Tillgängliga modeller\n\n"
+            "Använd alltid det exakta `ref`-värdet i tool calls. `name` är bara läsbar etikett.\n\n"
+            f"{model_lines}"
+        )
 
     if available_knowledge_bases:
         kb_lines = "\n".join(
-            f"- `{kb['ref']}`: {kb['name']}"
+            f"- ref=`{kb['ref']}` | name=`{kb.get('display_name', kb['name'])}`"
             + (f" — {kb['description']}" if kb.get("description") else "")
             for kb in available_knowledge_bases
         )
-        sections.append(f"\n## Tillgängliga kunskapsbaser\n\n{kb_lines}")
+        sections.append(
+            "\n## Tillgängliga kunskapsbaser\n\n"
+            "Använd alltid det exakta `ref`-värdet i tool calls. `name` är bara läsbar etikett.\n\n"
+            f"{kb_lines}"
+        )
 
     if planner_hints:
         sections.append(f"\n## Planeringshintar\n\n{planner_hints}")
@@ -224,10 +198,12 @@ def build_clarification_hints(
     resolved_output = output_intent.terminal_output
     resolved_docx_mode = output_intent.docx_output_mode
     resolved_pdf_mode = output_intent.pdf_generation_mode
+    submission_tool = "edit_flow" if flow is not None else "create_flow"
+    json_contract_term = "output_contract" if flow is not None else "output_fields"
 
     if _needs_pdf_scope_question(text, answered_ids):
         hints.append(
-            "- Frågegate: använd `ask_structured_question` innan `propose_flow` för att avgöra "
+            f"- Frågegate: använd `ask_structured_question` innan `{submission_tool}` för att avgöra "
             "om flödet ska stödja en PDF i taget eller flera dokument i samma körning. "
             "Använd `question_id=\"document_material_scope\"` med tydliga alternativ för enkel respektive fler-dokument-körning."
         )
@@ -238,9 +214,21 @@ def build_clarification_hints(
         resolved_docx_mode=resolved_docx_mode,
     ):
         hints.append(
-            "- Frågegate: använd `ask_structured_question` innan `propose_flow` för att avgöra "
+            f"- Frågegate: använd `ask_structured_question` innan `{submission_tool}` för att avgöra "
             "hur DOCX-rapporten ska skapas. Använd `question_id=\"docx_output_mode\"` med alternativ "
             "för mallbaserad DOCX respektive genererad DOCX utan mall."
+        )
+
+    if (
+        flow is not None
+        and resolved_output in {"docx_document", "pdf_document"}
+        and flow_defaults.get("final_output_mode")
+        and resolved_output not in flow_defaults["final_output_mode"]
+    ):
+        hints.append(
+            "- Edit-hint: om användaren bara byter slutformat ska upstream- och analyssteg lämnas oförändrade. "
+            "Ändra dokumentformat eller `document_delivery_mode` bara på det terminala dokumentsteget, "
+            "om inte användaren uttryckligen ber om en större omstrukturering."
         )
 
     if _needs_pdf_generation_mode_question(
@@ -249,25 +237,40 @@ def build_clarification_hints(
         resolved_pdf_mode=resolved_pdf_mode,
     ):
         hints.append(
-            "- Frågegate: använd `ask_structured_question` innan `propose_flow` för att avgöra "
+            f"- Frågegate: använd `ask_structured_question` innan `{submission_tool}` för att avgöra "
             "om PDF-resultatet ska vara en vanlig genererad PDF eller om användaren egentligen "
             "efterfrågar en fast PDF-mall. Använd `question_id=\"pdf_generation_mode\"` och var "
             "tydlig med att inbyggd mallfyllning bara stöds för DOCX/Word."
         )
 
     if input_intent.primary_runtime_input in {"audio", "documents", "text_and_documents"}:
-        hints.append(
-            "- Implementationshint: eftersom användaren laddar upp PDF/dokument/filer vid körning ska "
-            "relevanta `flow_input`-steg använda `input_config.runtime_input.enabled=true` "
-            "så att 'Ta emot filer vid körning' aktiveras."
-        )
+        if flow is None:
+            hints.append(
+                "- Implementationshint: eftersom användaren laddar upp PDF/dokument/filer vid körning ska "
+                "relevanta `flow_input`-steg använda `runtime_upload=true` och vid behov "
+                "`runtime_required=true`, så att backend kan aktivera 'Ta emot filer vid körning'."
+            )
+        else:
+            hints.append(
+                "- Implementationshint: eftersom användaren laddar upp PDF/dokument/filer vid körning ska "
+                "relevanta `flow_input`-steg använda `input_config.runtime_input.enabled=true` "
+                "så att 'Ta emot filer vid körning' aktiveras."
+            )
 
     if input_intent.audio_requested:
-        hints.append(
-            "- Implementationshint: eftersom användaren nämner ljud/transkribering ska "
-            "relevanta steg använda `input_type=\"audio\"`, `output_mode=\"transcribe_only\"` "
-            "och `output_type=\"text\"`."
-        )
+        if flow is None:
+            hints.append(
+                "- Implementationshint: eftersom användaren nämner ljud/transkribering ska "
+                "relevanta steg använda `input_type=\"audio\"` och `output_type=\"text\"`. "
+                "Backend härleder sedan rätt transkriberingsläge."
+            )
+        else:
+            hints.append(
+                "- Implementationshint: eftersom användaren nämner ljud/transkribering ska "
+                "nytillagda steg använda `input_type=\"audio\"` och `output_type=\"text\"`. "
+                "Backend härleder då rätt transkriberingsläge för nya steg; patcha bara "
+                "`output_mode` direkt om du uttryckligen behöver ändra ett befintligt steg."
+            )
 
     if _mentions_form_field_needs(text):
         hints.append(
@@ -279,16 +282,39 @@ def build_clarification_hints(
     if _mentions_structured_extraction(text):
         hints.append(
             "- Designhint: om planen innehåller steg som ska extrahera namngivna fält, listor eller "
-            "objekt för senare återanvändning ska dessa steg använda `output_type=\"json\"` och ett "
-            "fullständigt `output_contract`. Presentera inte ett JSON-steg utan kontrakt."
+            "objekt för senare återanvändning ska dessa steg använda `output_type=\"json\"` och tydliga "
+            f"`{json_contract_term}`. Presentera inte ett JSON-steg utan strukturerad fältdefinition."
+        )
+
+    if should_prefer_structured_intermediate(
+        text=intent_text,
+        input_intent=input_intent,
+        output_intent=output_intent,
+        flow_defaults=flow_defaults,
+        answers=answer_signals,
+    ):
+        hints.append(
+            "- Designhint: eftersom behovet beskriver flera analyssteg och en strukturerad leverans "
+            "bör planen använda mellanliggande JSON/strukturerad data där det förbättrar kvalitet "
+            "och återanvändning mellan steg. Fråga inte användaren om detta som ett eget krav om "
+            "slutresultatet inte ändras."
         )
 
     if resolved_docx_mode == "template_fill_docx":
-        hints.append(
-            "- Implementationshint: eftersom användaren nämner mallar/template_fill ska "
-            "relevanta steg använda `output_mode=\"template_fill\"` och `output_type=\"docx\"`. "
-            "Användaren behöver koppla DOCX-mallen manuellt efter att flödet skapats."
-        )
+        if flow is None:
+            hints.append(
+                "- Implementationshint: eftersom användaren nämner mallar/template_fill ska "
+                "relevanta steg använda `document_delivery_mode=\"template_fill\"` och "
+                "`output_type=\"docx\"`. Backend härleder sedan rätt output_mode. "
+                "Användaren behöver koppla DOCX-mallen manuellt efter att flödet skapats."
+            )
+        else:
+            hints.append(
+                "- Implementationshint: eftersom användaren nämner mallar/template_fill ska "
+                "nytillagda steg använda `document_delivery_mode=\"template_fill\"` och "
+                "`output_type=\"docx\"`. Backend härleder rätt output_mode för nya steg. "
+                "Användaren behöver koppla DOCX-mallen manuellt efter att flödet skapats."
+            )
 
     if resolved_pdf_mode == "pdf_template_requested":
         hints.append(
@@ -297,11 +323,20 @@ def build_clarification_hints(
             "ärligt som genererad PDF, eller be användaren byta till en DOCX-mall om exakt mallfyllning är avgörande."
         )
     elif resolved_output is None and _mentions_template_need(text):
-        hints.append(
-            "- Designhint: om användaren menar en Word-mall ska relevanta steg använda "
-            "`output_mode=\"template_fill\"` och `output_type=\"docx\"`. Om användaren i stället menar en "
-            "PDF-mall ska du först klargöra det via `pdf_generation_mode`."
-        )
+        if flow is None:
+            hints.append(
+                "- Designhint: om användaren menar en Word-mall ska relevanta steg använda "
+                "`document_delivery_mode=\"template_fill\"` och `output_type=\"docx\"`. "
+                "Om användaren i stället menar en PDF-mall ska du först klargöra det via "
+                "`pdf_generation_mode`."
+            )
+        else:
+            hints.append(
+                "- Designhint: om användaren menar en Word-mall ska relevanta steg använda "
+                "`document_delivery_mode=\"template_fill\"` och `output_type=\"docx\"` för nya steg. "
+                "Om användaren i stället menar en PDF-mall ska du först klargöra det via "
+                "`pdf_generation_mode`."
+            )
 
     if resolved_output is not None and not mentions_output_change(text):
         hints.append(

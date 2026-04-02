@@ -1054,6 +1054,41 @@ class TestSendMessageEndpoint:
         }
 
     @pytest.mark.anyio
+    async def test_keeps_ui_language_separate_from_question_answer(self):
+        from sse_starlette import EventSourceResponse
+
+        container = _make_container()
+        _configure_space_with_planner_model(container)
+        session = _make_session_domain()
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        captured: dict[str, object] = {}
+
+        async def mock_events(*args, **kwargs):
+            captured.update(kwargs)
+            yield {"event": "done", "data": ""}
+
+        service.send_message.side_effect = mock_events
+
+        result = await send_message(
+            request=MagicMock(),
+            session_id=session.id,
+            body=SendMessageRequest(
+                message="Bygg ett flöde",
+                ui_language="sv",
+            ),
+            container=container,
+        )
+
+        assert isinstance(result, EventSourceResponse)
+        async for _chunk in result.body_iterator:
+            pass
+
+        assert captured["question_answer"] is None
+        assert captured["ui_language"] == "sv"
+
+    @pytest.mark.anyio
     async def test_streams_typed_error_and_done_when_message_stream_raises(self):
         container = _make_container()
         _configure_space_with_planner_model(container)

@@ -3,9 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 from typing import Any, TypeVar
-from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict
+from intric.flows.source_display import (
+    format_source_container_display_name,
+    format_source_container_label,
+    format_source_display_name,
+    resolve_reference_title,
+)
 
 TEXT_PREVIEW_MAX_BYTES = 16 * 1024
 JSON_PREVIEW_MAX_BYTES = 16 * 1024
@@ -28,6 +33,7 @@ class LlmProvenance(BaseModel):
     effective_prompt: PayloadPreview | None = None
     model_parameters: dict[str, Any] | None = None
     tool_calls: PayloadPreview | None = None
+    raw_completion_text: PayloadPreview | None = None
 
 
 class RagProvenance(BaseModel):
@@ -66,6 +72,10 @@ class McpProvenance(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class CitationsProvenance(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
 class FlowAttemptProvenance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -79,6 +89,7 @@ class FlowAttemptProvenance(BaseModel):
     agentic: AgenticProvenance | None = None
     guards: GuardsProvenance | None = None
     mcp: McpProvenance | None = None
+    citations: CitationsProvenance | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude_none=True)
@@ -147,6 +158,9 @@ def normalize_attempt_provenance(raw: dict[str, Any] | None) -> FlowAttemptProve
         tool_calls = llm_payload.get("tool_calls")
         if tool_calls is not None:
             llm_payload["tool_calls"] = normalize_json_preview(tool_calls)
+        raw_completion_text = llm_payload.get("raw_completion_text")
+        if isinstance(raw_completion_text, str):
+            llm_payload["raw_completion_text"] = normalize_text_preview(raw_completion_text)
         model_parameters = llm_payload.get("model_parameters")
         if isinstance(model_parameters, dict):
             llm_payload["model_parameters"] = normalize_model_parameters_payload(
@@ -165,6 +179,7 @@ def normalize_attempt_provenance(raw: dict[str, Any] | None) -> FlowAttemptProve
         agentic=_validate_extra_model(AgenticProvenance, raw.get("agentic")),
         guards=_validate_extra_model(GuardsProvenance, raw.get("guards")),
         mcp=_validate_extra_model(McpProvenance, raw.get("mcp")),
+        citations=_validate_extra_model(CitationsProvenance, raw.get("citations")),
     )
 
 
@@ -208,15 +223,13 @@ def normalize_rag_payload(value: Any) -> dict[str, Any] | None:
             normalized_reference["usage_state"] = _normalize_usage_state(
                 reference.get("usage_state")
             )
+            _normalize_reference_display_fields(normalized_reference)
             if (
                 included_source_ids
                 and str(normalized_reference.get("id")) in included_source_ids
             ):
                 normalized_reference["usage_state"] = "inserted_into_prompt"
-            container_display_name = format_source_container_display_name(normalized_reference)
-            if container_display_name is not None:
-                normalized_reference["source_container_display_name"] = container_display_name
-            raw_title = _resolve_reference_title(normalized_reference)
+            raw_title = resolve_reference_title(normalized_reference)
             if raw_title is not None:
                 source_names.append(raw_title)
                 display_name = format_source_display_name(raw_title)
@@ -289,6 +302,13 @@ def _normalize_rag_prompt_context(value: Any) -> dict[str, Any] | None:
     payload["included_groups"] = normalized_groups
     payload["included_source_titles"] = included_source_titles
     payload["included_source_display_names"] = included_source_display_names
+    payload["summary"] = {
+        "total_sources": payload.get("included_source_count") or len(included_source_ids),
+        "total_chunks": payload.get("included_chunk_count") or sum(
+            int(group.get("chunk_count", 0) or 0) for group in normalized_groups
+        ),
+        "truncated_by_token_budget": bool(payload.get("truncated_by_token_budget")),
+    }
     return payload
 
 
@@ -298,43 +318,6 @@ def _truncate_utf8(text: str, max_bytes: int) -> str:
         return text
     truncated = encoded[:max_bytes]
     return truncated.decode("utf-8", errors="ignore")
-
-
-def format_source_display_name(title: str) -> str:
-    stripped = title.strip()
-    if not stripped:
-        return stripped
-    if not stripped.startswith(("http://", "https://")):
-        return stripped
-    try:
-        parsed = urlsplit(stripped)
-    except ValueError:
-        return stripped
-    hostname = parsed.hostname or ""
-    path = parsed.path.rstrip("/")
-    if hostname and path:
-        return f"{hostname}{path}"
-    if hostname:
-        return hostname
-    return stripped
-
-
-def format_source_container_display_name(reference: dict[str, Any]) -> str | None:
-    raw_name = reference.get("source_container_name")
-    if isinstance(raw_name, str) and raw_name.strip():
-        return raw_name.strip()
-    raw_url = _resolve_reference_url(reference)
-    if raw_url is not None:
-        try:
-            parsed = urlsplit(raw_url)
-        except ValueError:
-            parsed = None
-        if parsed is not None and parsed.hostname:
-            return parsed.hostname
-    raw_kind = reference.get("source_container_kind")
-    if isinstance(raw_kind, str) and raw_kind.strip():
-        return raw_kind.strip()
-    return None
 
 
 def normalize_model_parameters_payload(model_parameters: dict[str, Any]) -> dict[str, Any]:
@@ -372,14 +355,6 @@ def _normalize_rag_tracking(value: Any) -> dict[str, Any]:
     return normalized
 
 
-def _resolve_reference_title(reference: dict[str, Any]) -> str | None:
-    for key in ("source_title", "title", "source_url"):
-        raw_value = reference.get(key)
-        if isinstance(raw_value, str) and raw_value.strip():
-            return raw_value.strip()
-    return None
-
-
 def _resolve_reference_url(reference: dict[str, Any]) -> str | None:
     for key in ("source_url", "source_title", "title"):
         raw_value = reference.get(key)
@@ -395,6 +370,22 @@ def _normalize_usage_state(value: Any) -> str:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return "retrieved_candidate"
+
+
+def _normalize_reference_display_fields(reference: dict[str, Any]) -> None:
+    raw_title = resolve_reference_title(reference)
+    if raw_title is not None:
+        reference.setdefault("source_title_raw", raw_title)
+        reference.setdefault("source_display_name", format_source_display_name(raw_title))
+    raw_container_name = reference.get("source_container_name")
+    if isinstance(raw_container_name, str) and raw_container_name.strip():
+        reference.setdefault("source_container_name_raw", raw_container_name.strip())
+    container_display_name = format_source_container_display_name(reference)
+    if container_display_name is not None:
+        reference["source_container_display_name"] = container_display_name
+    container_label = format_source_container_label(reference)
+    if container_label is not None:
+        reference["source_container_label"] = container_label
 
 
 def _normalize_parameter_semantics(

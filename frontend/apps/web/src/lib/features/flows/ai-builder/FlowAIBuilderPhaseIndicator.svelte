@@ -65,9 +65,7 @@
     display: flex;
     align-items: center;
     padding: 0.75rem 1.5rem;
-    border-bottom: 1px solid var(--border-default);
     background: var(--bg-primary);
-    flex-shrink: 0;
     gap: 0;
   }
 

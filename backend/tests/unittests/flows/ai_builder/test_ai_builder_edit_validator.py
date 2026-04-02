@@ -11,7 +11,6 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
 )
 from intric.flows.ai_builder.ai_builder_edit_validator import validate_edit_draft
 from intric.flows.ai_builder.ai_builder_models import (
-    AssistantSpec,
     InputSource,
     InputType,
 )
@@ -32,7 +31,7 @@ def _add_op(
         placement=StepPlacement(position=position, anchor_ref=anchor_ref),
         add_payload=AddStepPayload(
             name=name,
-            assistant_spec=AssistantSpec(instructions="Do something."),
+            instructions="Do something.",
             input_source=InputSource.PREVIOUS_STEP,
         ),
     )

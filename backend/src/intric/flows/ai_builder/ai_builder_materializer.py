@@ -23,10 +23,14 @@ from intric.flows.ai_builder.ai_builder_description_semantics import (
     _description_hash,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
+    FlowInputSource,
+    FlowInputType,
     InputSource,
     InputType,
+    MCPPolicy,
     OutputMode,
     OutputType,
+    FlowOutputMode,
 )
 from intric.flows.ai_builder.ai_builder_models import (
     ApplyResultResponse,
@@ -40,12 +44,16 @@ from intric.flows.ai_builder.ai_builder_models import (
     StepChangeKind,
     StepSpec,
 )
+from intric.flows.ai_builder.ai_builder_flow_name import normalize_flow_name
 from intric.flows.ai_builder.ai_builder_runtime_input_defaults import (
     resolve_runtime_input_config,
 )
 from intric.flows.ai_builder.ai_builder_reference_rewriter import (
     build_ref_to_order,
     rewrite_step_spec_variables,
+)
+from intric.flows.ai_builder.ai_builder_step_transition_policy import (
+    normalize_ai_builder_spec,
 )
 from intric.flows.ai_builder.ai_builder_transcription_defaults import (
     apply_audio_transcription_defaults,
@@ -81,6 +89,8 @@ def compile_changeset(
     Returns:
         A FlowChangeSet describing all mutations needed.
     """
+    spec, _ = normalize_ai_builder_spec(spec)
+
     # Build mapping: existing_step_ref → existing FlowStep
     existing_by_ref: dict[str, FlowStep] = {}
     if current_flow:
@@ -404,11 +414,11 @@ def _compile_new_step(
         step_order=step_order,
         user_description=step_spec.name,
         assistant_id=None,
-        input_source=step_spec.input_source.value,
-        input_type=step_spec.input_type.value,
-        output_mode=step_spec.output_mode.value,
-        output_type=step_spec.output_type.value,
-        mcp_policy=step_spec.mcp_policy.value,
+        input_source=FlowInputSource(step_spec.input_source.value),
+        input_type=FlowInputType(step_spec.input_type.value),
+        output_mode=FlowOutputMode(step_spec.output_mode.value),
+        output_type=OutputType(step_spec.output_type.value),
+        mcp_policy=MCPPolicy(step_spec.mcp_policy.value),
         input_bindings=step_spec.input_bindings,
         input_contract=step_spec.input_contract,
         output_contract=step_spec.output_contract,
@@ -430,11 +440,11 @@ def _compile_modified_step(
         step_order=step_order,
         user_description=step_spec.name,
         assistant_id=existing_step.assistant_id,
-        input_source=step_spec.input_source.value,
-        input_type=step_spec.input_type.value,
-        output_mode=step_spec.output_mode.value,
-        output_type=step_spec.output_type.value,
-        mcp_policy=step_spec.mcp_policy.value,
+        input_source=FlowInputSource(step_spec.input_source.value),
+        input_type=FlowInputType(step_spec.input_type.value),
+        output_mode=FlowOutputMode(step_spec.output_mode.value),
+        output_type=OutputType(step_spec.output_type.value),
+        mcp_policy=MCPPolicy(step_spec.mcp_policy.value),
         input_bindings=step_spec.input_bindings,
         input_contract=step_spec.input_contract,
         output_contract=step_spec.output_contract,
@@ -455,11 +465,17 @@ def _resolve_output_config(
     If the spec provides output_config, use it. Otherwise, preserve the existing
     config only if output_mode hasn't changed — a mode change invalidates the old config.
     """
-    if step_spec.output_config is not None:
-        return step_spec.output_config
-    if step_spec.output_mode.value != existing_step.output_mode:
-        return None
-    return existing_step.output_config
+    preserved_output_config = step_spec.output_config
+    if preserved_output_config is None and step_spec.output_mode.value == existing_step.output_mode:
+        preserved_output_config = existing_step.output_config
+
+    effective_step, _ = normalize_ai_builder_spec(
+        FlowDraftSpecCore(
+            flow_name="normalized-output-config",
+            steps=[step_spec.model_copy(update={"output_config": preserved_output_config})],
+        )
+    )
+    return effective_step.steps[0].output_config
 
 
 def _build_metadata_json(
@@ -663,16 +679,40 @@ async def _configure_assistant(
     if assistant_spec.model_ref is not None:
         try:
             kwargs["completion_model_id"] = UUID(assistant_spec.model_ref)
-        except (ValueError, AttributeError):
-            pass  # Invalid model ref — skip, will use space default
+        except (ValueError, AttributeError) as exc:
+            raise BadRequestException(
+                f"Invalid model reference '{assistant_spec.model_ref}'.",
+                code="invalid_model_ref",
+                context={"model_ref": assistant_spec.model_ref},
+            ) from exc
 
     if assistant_spec.knowledge_refs:
         try:
             kwargs["groups"] = [UUID(ref) for ref in assistant_spec.knowledge_refs]
-        except (ValueError, AttributeError):
-            pass  # Invalid KB refs — skip
+        except (ValueError, AttributeError) as exc:
+            invalid_ref = next(
+                (
+                    ref
+                    for ref in assistant_spec.knowledge_refs
+                    if not _looks_like_uuid(ref)
+                ),
+                assistant_spec.knowledge_refs[0],
+            )
+            raise BadRequestException(
+                f"Invalid knowledge base reference '{invalid_ref}'.",
+                code="invalid_kb_ref",
+                context={"knowledge_refs": assistant_spec.knowledge_refs},
+            ) from exc
 
     await flow_service.update_flow_assistant(**kwargs)
+
+
+def _looks_like_uuid(value: str) -> bool:
+    try:
+        UUID(value)
+    except (ValueError, AttributeError, TypeError):
+        return False
+    return True
 
 
 async def _deduplicate_flow_name(
@@ -685,6 +725,7 @@ async def _deduplicate_flow_name(
 
     If ``desired_name`` already exists, appends " (2)", " (3)", etc.
     """
+    desired_name = normalize_flow_name(desired_name)
     existing_flows = await flow_service.list_flows(space_id=space_id, sparse=True)
     existing_names: set[str] = {f.name for f in existing_flows}
 

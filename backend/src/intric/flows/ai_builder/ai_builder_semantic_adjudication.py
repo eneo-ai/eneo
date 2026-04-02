@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from intric.flows.ai_builder.ai_builder_discovery_models import (
+    DiscoveryLanguage,
     DiscoveryAnalysis,
     SemanticAdjudicationResult,
     SemanticAdjudicationSignal,
@@ -24,6 +25,11 @@ logger = get_logger(__name__)
 
 _SEMANTIC_CACHE: dict[str, SemanticAdjudicationResult] = {}
 _MAX_CACHE_ENTRIES = 128
+_NON_ADJUDICABLE_QUESTION_IDS = frozenset({
+    # DOCX generation strategy changes downstream implementation and manual setup.
+    # Keep it as an explicit user choice instead of letting semantic adjudication guess.
+    "docx_output_mode",
+})
 
 
 def should_run_semantic_adjudication(analysis: DiscoveryAnalysis) -> bool:
@@ -38,6 +44,8 @@ def should_run_semantic_adjudication(analysis: DiscoveryAnalysis) -> bool:
         if candidate.confidence != "low":
             continue
         if candidate.question_id is None:
+            continue
+        if candidate.question_id in _NON_ADJUDICABLE_QUESTION_IDS:
             continue
         return True
     return False
@@ -56,6 +64,7 @@ async def adjudicate_discovery_semantics(
         candidate.question_id
         for candidate in analysis.candidates
         if candidate.question_id is not None
+        and candidate.question_id not in _NON_ADJUDICABLE_QUESTION_IDS
         and candidate.impact in {"architecture", "quality"}
         and candidate.confidence == "low"
     ]
@@ -196,8 +205,9 @@ def _build_semantic_prompt(
     ui_language: str | None,
 ) -> list[dict[str, str]]:
     dimension_lines: list[str] = []
+    language: DiscoveryLanguage = "en" if ui_language == "en" else "sv"
     for question_id in question_ids:
-        suggestion = question_suggestion_for_id(question_id, language=ui_language or "sv")
+        suggestion = question_suggestion_for_id(question_id, language=language)
         if suggestion is None:
             continue
         options = ", ".join(

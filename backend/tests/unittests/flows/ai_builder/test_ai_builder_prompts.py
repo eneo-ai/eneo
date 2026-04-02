@@ -11,6 +11,15 @@ from intric.flows.ai_builder.ai_builder_models import (
     FormFieldSpec,
     StepSpec,
 )
+from intric.flows.ai_builder.ai_builder_create_tool_schema import (
+    CREATE_FLOW_TOOL_NAME,
+)
+from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
+    build_flow_capability_profile,
+)
+from intric.flows.ai_builder.ai_builder_edit_scope import (
+    EditScopeResolution,
+)
 from intric.flows.ai_builder.ai_builder_prompts import (
     _extract_signals_from_requirements,
     build_available_kbs_context,
@@ -86,14 +95,14 @@ class TestBuildSystemPrompt:
     def test_basic_prompt_contains_role(self) -> None:
         prompt = build_system_prompt()
         assert "expert" in prompt.lower()
-        assert "propose_flow" in prompt
+        assert CREATE_FLOW_TOOL_NAME in prompt
+        assert "propose_flow" not in prompt
 
     def test_prompt_contains_knowledge_pack_sections(self) -> None:
         # Discovery phase (no confirmed requirements) — core sections only
         prompt = build_system_prompt()
-        assert "Flödesarkitektur" in prompt
-        assert "Variabelsystemet" in prompt
-        assert "Instruktioner vs Underlag" in prompt
+        assert "Create-flow-kompilering" in prompt
+        assert "Instruktioner vs Underlag" not in prompt
 
         # Proposal phase (confirmed requirements) — full content
         prompt_confirmed = build_system_prompt(
@@ -104,38 +113,10 @@ class TestBuildSystemPrompt:
                 "output_description": "Test",
             },
         )
-        assert "Kontrakt" in prompt_confirmed or "kontrakt" in prompt_confirmed
-        assert "Antimönster" in prompt_confirmed
-        assert "Stegdesignprinciper" in prompt_confirmed
+        assert "Create-läge: kompilerad datamodell" in prompt_confirmed
+        assert "Create-läge: vanliga mönster" in prompt_confirmed
 
-    def test_prompt_contains_variable_documentation(self) -> None:
-        prompt = build_system_prompt()
-        assert "{{ step_a.output.text }}" in prompt
-        assert "{{ föregående_steg }}" in prompt
-        assert "{{ step_input.text }}" in prompt
-        assert "input_bindings" in prompt
-        assert "question" in prompt
-        assert "plan_step_ref" in prompt
-        assert "Blanda inte `step_a` och `step_1`" in prompt
-        assert "Använd inte stegnamn" in prompt
-        assert "runtime_input" in prompt
-        assert "Ta emot filer vid körning" in prompt
-
-    def test_prompt_contains_chaining_rules(self) -> None:
-        prompt = build_system_prompt()
-        assert "flow_input" in prompt
-        assert "previous_step" in prompt
-        assert "all_previous_steps" in prompt
-        assert "document" in prompt
-        assert "input_config.runtime_input.enabled=true" in prompt
-
-    def test_prompt_does_not_contain_validate_flow_draft(self) -> None:
-        """validate_flow_draft was removed as an LLM-facing tool to prevent incremental validation."""
-        prompt = build_system_prompt()
-        assert "validate_flow_draft" not in prompt
-
-    def test_prompt_contains_contract_documentation(self) -> None:
-        # Contracts are only included in proposal phase (confirmed requirements)
+    def test_create_mode_prompt_stays_on_ir_surface(self) -> None:
         prompt = build_system_prompt(
             confirmed_requirements={
                 "summary": "Test",
@@ -144,9 +125,63 @@ class TestBuildSystemPrompt:
                 "output_description": "Test",
             },
         )
-        assert "input_contract" in prompt
-        assert "output_contract" in prompt
-        assert "JSON Schema" in prompt
+        assert "input_bindings.question" not in prompt
+        assert "input_contract" not in prompt
+        assert "output_contract" not in prompt
+        assert "{{ step_a.output.text }}" not in prompt
+        assert "do not emit plan_step_ref values" in prompt
+        assert "output_fields" in prompt
+        assert "runtime_upload" in prompt
+
+    def test_edit_mode_prompt_keeps_canonical_variable_documentation(self) -> None:
+        prompt = build_system_prompt(
+            flow_context="Namn: Test\nAntal steg: 2",
+            is_edit_mode=True,
+        )
+        assert "{{ step_a.output.text }}" in prompt
+        assert "{{ föregående_steg }}" in prompt
+        assert "{{ step_input.text }}" in prompt
+        assert "input_bindings" in prompt
+        assert "question" in prompt
+        assert "plan_step_ref" in prompt
+        assert "Blanda inte `step_a` och `step_1`" in prompt
+        assert "Använd inte stegnamn" in prompt
+
+    def test_prompt_contains_chaining_rules(self) -> None:
+        prompt = build_system_prompt()
+        assert "flow_input" in prompt
+        assert "previous_step" in prompt
+        assert "all_previous_steps" in prompt
+        assert "document" in prompt
+        assert "runtime_upload=true" in prompt
+
+    def test_prompt_does_not_contain_validate_flow_draft(self) -> None:
+        """validate_flow_draft was removed as an LLM-facing tool to prevent incremental validation."""
+        prompt = build_system_prompt()
+        assert "validate_flow_draft" not in prompt
+
+    def test_prompt_contains_contract_documentation(self) -> None:
+        prompt = build_system_prompt(
+            confirmed_requirements={
+                "summary": "Test",
+                "key_decisions": [],
+                "input_description": "Test",
+                "output_description": "Test",
+            },
+        )
+        assert "output_fields" in prompt
+        assert "nesting depth" in prompt
+        assert "3" in prompt
+        assert "do not emit raw JSON Schema" in prompt
+
+    def test_edit_mode_prompt_uses_edit_flow_contract(self) -> None:
+        prompt = build_system_prompt(
+            flow_context="Namn: Test\nAntal steg: 2",
+            is_edit_mode=True,
+        )
+
+        assert "edit_flow" in prompt
+        assert CREATE_FLOW_TOOL_NAME not in prompt
 
     def test_prompt_with_flow_context(self) -> None:
         flow = _make_flow(
@@ -197,17 +232,18 @@ class TestBuildSystemPrompt:
         assert "Aktuellt flöde" not in prompt
 
     def test_prompt_deeply_covers_underlag(self) -> None:
-        """The AI must deeply understand how 'underlag' (input_bindings.question) works."""
-        prompt = build_system_prompt()
-        # Must explain that underlag is where you compose text from variables
-        assert "Underlag" in prompt
-        # Must explain the difference between instructions and underlag
-        assert "Instruktioner" in prompt
-        # Must have concrete examples with variable syntax
-        assert "{{ step_a.output." in prompt
-        assert "{{ step_input.text }}" in prompt
-        # Must explain form field variables
-        assert "Ärendenummer" in prompt or "formulärfält" in prompt.lower()
+        """Create mode should teach compiler-owned underlag behavior without raw bindings."""
+        prompt = build_system_prompt(
+            confirmed_requirements={
+                "summary": "Test",
+                "key_decisions": [],
+                "input_description": "Test",
+                "output_description": "Test",
+            },
+        )
+        assert "backend kompilerar underlaget" in prompt.lower()
+        assert "uses_form_fields" in prompt
+        assert "input_bindings.question" not in prompt
 
     def test_prompt_demotes_runtime_only_aliases_and_raw_json_blobs(self) -> None:
         prompt = build_system_prompt(
@@ -218,12 +254,11 @@ class TestBuildSystemPrompt:
                 "output_description": "Test",
             },
         )
-        assert "inte primär AI-authoring" in prompt
-        assert "hela JSON-blobs" in prompt
-        assert "output.structured" in prompt
+        assert "kompilerar" in prompt
+        assert "råa config-dicts" in prompt or "raw input_config" in prompt
 
     def test_prompt_covers_json_pipeline_patterns(self) -> None:
-        """The AI must understand when to use JSON input/output with contracts."""
+        """Create mode should understand JSON extraction via output_fields only."""
         prompt = build_system_prompt(
             confirmed_requirements={
                 "summary": "Test", "key_decisions": [],
@@ -231,8 +266,8 @@ class TestBuildSystemPrompt:
             },
         )
         assert "json" in prompt.lower()
-        assert "output_contract" in prompt
-        assert "input_contract" in prompt
+        assert "output_fields" in prompt
+        assert "input_contract" not in prompt
 
     def test_prompt_has_long_instruction_examples(self) -> None:
         """Per user request — AI must write long, detailed instructions."""
@@ -242,7 +277,7 @@ class TestBuildSystemPrompt:
                 "input_description": "Test", "output_description": "Test",
             },
         )
-        assert "500+" in prompt or "flera hundra" in prompt or "LÅNGA" in prompt
+        assert "LÅNGA" in prompt or "långa" in prompt
 
     def test_prompt_contains_validation_repair_examples(self) -> None:
         prompt = build_system_prompt(
@@ -371,6 +406,27 @@ class TestBuildClarificationHints:
         assert hints is not None
         assert "document_material_scope" in hints
 
+    def test_includes_structured_intermediate_hint_for_complex_analysis_reports(self) -> None:
+        hints = build_clarification_hints(
+            conversation=[],
+            latest_user_message=(
+                "Bygg ett flöde som tar emot officiella ärendedokument, extraherar centrala fakta, "
+                "gör en sociologisk och psykologisk analys och genererar en strukturerad PDF-rapport."
+            ),
+        )
+
+        assert hints is not None
+        assert "mellanliggande" in hints.lower()
+        assert "json" in hints.lower()
+
+    def test_does_not_include_structured_intermediate_hint_for_simple_summary(self) -> None:
+        hints = build_clarification_hints(
+            conversation=[],
+            latest_user_message="Bygg ett flöde som sammanfattar ett dokument och genererar en PDF.",
+        )
+
+        assert hints is None or "mellanliggande" not in hints.lower()
+
     def test_skips_multi_pdf_scope_when_already_answered(self) -> None:
         hints = build_clarification_hints(
             conversation=[
@@ -401,6 +457,45 @@ class TestBuildClarificationHints:
 
         assert hints is not None
         assert "docx_output_mode" in hints
+
+    def test_flags_docx_mode_for_word_instead_of_pdf_edit(self) -> None:
+        flow = Flow(
+            id=uuid4(),
+            name="Ljudrapport",
+            description="",
+            tenant_id=uuid4(),
+            user_id=uuid4(),
+            space_id=uuid4(),
+            steps=[
+                FlowStep(
+                    id=uuid4(),
+                    flow_id=uuid4(),
+                    tenant_id=uuid4(),
+                    assistant_id=uuid4(),
+                    step_order=1,
+                    user_description="Skriv slutrapport",
+                    input_source="flow_input",
+                    input_type="document",
+                    output_mode="pass_through",
+                    output_type="pdf",
+                    mcp_policy="inherit",
+                )
+            ],
+            metadata_json=None,
+            published=False,
+            published_version=None,
+            draft_revision=1,
+        )
+
+        hints = build_clarification_hints(
+            conversation=[],
+            latest_user_message="ändra så att jag får ut en word dokument istället för en pdf",
+            flow=flow,
+        )
+
+        assert hints is not None
+        assert "docx_output_mode" in hints
+        assert "terminala dokumentsteget" in hints
 
     def test_pdf_clarification_does_not_emit_docx_template_hints_from_stale_template_wording(self) -> None:
         conversation = [
@@ -487,7 +582,17 @@ class TestBuildClarificationHints:
 
         assert hints is not None
         assert "form_fields" in hints
-        assert "output_contract" in hints
+        assert "output_fields" in hints
+
+    def test_create_mode_hints_reference_create_flow_instead_of_legacy_submission_tool(self) -> None:
+        hints = build_clarification_hints(
+            conversation=[],
+            latest_user_message="Skapa en färdig DOCX-rapport av analysen.",
+        )
+
+        assert hints is not None
+        assert CREATE_FLOW_TOOL_NAME in hints
+        assert "propose_flow" not in hints
 
     def test_flow_with_form_fields(self) -> None:
         flow = _make_flow(
@@ -577,16 +682,70 @@ class TestBuildClarificationHints:
             assistant_snapshots={
                 step.assistant_id: {
                     "instructions": "Extrahera summary, keywords och teman.",
-                    "model_ref": "gpt-4",
+                    "model_ref": "model-uuid-1",
+                    "model_label": "GPT-4",
                     "knowledge_refs": ["kb-policy", "kb-archive"],
+                    "knowledge_labels": ["Policy", "Archive"],
                 }
             },
         )
         assert "Syfte:" in ctx
         assert "Extrahera summary" in ctx
-        assert "Modell: gpt-4" in ctx
-        assert "Kunskapsbaser: kb-policy, kb-archive" in ctx
+        assert "Modell: GPT-4 [model-uuid-1]" in ctx
+        assert "Kunskapsbaser: Policy [kb-policy], Archive [kb-archive]" in ctx
         assert "Output config" in ctx
+
+    def test_edit_mode_flow_context_uses_structured_capability_brief(self) -> None:
+        step_one = _make_step(
+            step_order=1,
+            user_description="Extrahera text",
+            input_source="flow_input",
+            input_type="file",
+            output_mode="pass_through",
+            output_type="text",
+        )
+        step_one.input_config = {"runtime_input": {"enabled": True, "max_files": 3}}
+        step_one.output_config = {"citation_mode": "inline_inref_sidecar"}
+        step_two = _make_step(
+            step_order=2,
+            user_description="Generera rapport",
+            input_source="previous_step",
+            input_type="text",
+            output_mode="pass_through",
+            output_type="pdf",
+        )
+        flow = _make_flow(
+            name="Rapportflöde",
+            steps=[step_one, step_two],
+            metadata_json={"form_schema": {"fields": [{"name": "Ärendenummer", "type": "text"}]}},
+        )
+
+        ctx = build_flow_context(
+            flow,
+            assistant_snapshots={
+                step_two.assistant_id: {
+                    "knowledge_refs": ["kb-policy"],
+                    "knowledge_labels": ["Policy"],
+                }
+            },
+            is_edit_mode=True,
+            capabilities=build_flow_capability_profile(flow),
+            edit_scope=EditScopeResolution(
+                settled_families=frozenset({"input_shape", "output_artifact"}),
+                active_families=frozenset({"output_artifact"}),
+                requested_output_artifact="docx_document",
+            ),
+        )
+
+        assert "Flödets nuvarande profil" in ctx
+        assert "Indata: dokument via steg 1" in ctx
+        assert "Utdata: PDF via steg 2" in ctx
+        assert "Formulär: Ärendenummer" in ctx
+        assert "Kunskapsbaser: steg 2 (Policy)" in ctx
+        assert "Källhänvisningar: steg 1" in ctx
+        assert "Aktiv familj: output_artifact" in ctx
+        assert "Begärd ändring: PDF -> DOCX" in ctx
+        assert "Draft-revision" not in ctx
 
 
 # ---------------------------------------------------------------------------
@@ -607,6 +766,7 @@ class TestContextBuilders:
         result = build_available_kbs_context(kbs)
         assert len(result) == 1
         assert result[0]["ref"] == "kb-1"
+        assert result[0]["display_name"] == "Policy"
         assert result[0]["description"] == "Company policies"
 
     def test_build_kbs_context_no_description(self) -> None:
@@ -792,7 +952,7 @@ class TestTrimConversation:
             {
                 "role": "assistant",
                 "content": None,
-                "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "propose_flow", "arguments": "{}"}}],
+                "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "create_flow", "arguments": "{}"}}],
             },
             {"role": "tool", "content": "Plan: Test flow", "tool_call_id": "call_1"},
             {"role": "user", "content": "Change step 2"},
@@ -816,7 +976,7 @@ class TestTrimConversation:
             {
                 "role": "assistant",
                 "content": None,
-                "tool_calls": [{"id": "call_x", "type": "function", "function": {"name": "propose_flow", "arguments": "{}"}}],
+                "tool_calls": [{"id": "call_x", "type": "function", "function": {"name": "create_flow", "arguments": "{}"}}],
             },
             {"role": "tool", "content": "Plan summary", "tool_call_id": "call_x"},
             {"role": "user", "content": "Final msg"},
@@ -850,7 +1010,7 @@ class TestTrimConversation:
                     {
                         "id": "call_latest",
                         "type": "function",
-                        "function": {"name": "propose_flow", "arguments": "{}"},
+                        "function": {"name": "create_flow", "arguments": "{}"},
                     }
                 ],
             },

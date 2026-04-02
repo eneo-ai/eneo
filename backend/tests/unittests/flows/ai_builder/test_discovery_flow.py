@@ -35,7 +35,7 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
 )
 from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
-    PROPOSE_FLOW_TOOL_NAME,
+    CREATE_FLOW_TOOL_NAME,
 )
 from intric.flows.flow import Flow, FlowStep
 
@@ -234,7 +234,7 @@ class TestHandleConfirmRequirements:
 
 class TestProposalGating:
     @pytest.mark.asyncio
-    async def test_propose_flow_is_rejected_until_latest_requirements_are_confirmed(self) -> None:
+    async def test_create_flow_is_rejected_until_latest_requirements_are_confirmed(self) -> None:
         processor = _make_processor()
         conversation = [
             ConversationMessage(
@@ -263,14 +263,14 @@ class TestProposalGating:
             ),
         ]
         tool_call = _make_tool_call(
-            PROPOSE_FLOW_TOOL_NAME,
+            CREATE_FLOW_TOOL_NAME,
             {
                 "flow_name": "Test Flow",
+                "plan_rationale": "Extraktion först.",
                 "steps": [
                     {
-                        "plan_step_ref": "step_a",
                         "name": "Extract",
-                        "assistant_spec": {"instructions": "Extract the text."},
+                        "instructions": "Extract the text.",
                         "input_source": "flow_input",
                         "input_type": "text",
                         "output_type": "text",
@@ -1271,6 +1271,152 @@ class TestExtendedClarificationHints:
         assert "structured_analysis_need" not in question_ids
         assert "runtime_metadata_fields" not in question_ids
 
+    def test_complex_pdf_analysis_prompt_does_not_surface_structured_analysis_question(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde som tar emot ett eller flera PDF-dokument i ett ärende, "
+                    "extraherar centrala fakta, gör en sociologisk och psykologisk analys, "
+                    "och genererar en slutrapport som PDF med tydlig struktur."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "structured_analysis_need" not in question_ids
+
+    def test_complex_pdf_analysis_prompt_records_structured_intermediate_assumption(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde som tar emot officiella ärendedokument, extraherar centrala fakta, "
+                    "gör en sociologisk och psykologisk analys och genererar en strukturerad PDF-rapport."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert any(
+            "strukturerad" in assumption.lower() and "mellanliggande" in assumption.lower()
+            for assumption in analysis.assumptions
+        )
+
+    def test_docx_create_prompt_with_pdf_input_does_not_emit_pdf_assumption(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde som tar emot ett dokumentpaket med flera PDF-filer i ett kommunärende. "
+                    "Steg 1 extraherar text ur alla dokument. Steg 2 identifierar juridiska risker och "
+                    "ekonomiska konsekvenser som strukturerad JSON. Steg 3 kopplar riskerna till "
+                    "sociologiska och psykologiska teorier med hjälp av en kunskapsbas. Steg 4 skriver "
+                    "en grounded sammanfattning med källhänvisningar. Steg 5 genererar en strukturerad "
+                    "DOCX-rapport utan mall. Flödet ska ha formulärfält för ärendenummer och ansvarig nämnd."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "final_pdf_type" not in question_ids
+        assert all(candidate.issue_id != "final_pdf_type" for candidate in analysis.candidates)
+        assert all("slut-pdf" not in assumption.casefold() for assumption in analysis.assumptions)
+
+    def test_explicit_plain_text_preference_disables_structured_intermediate_assumption(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde som analyserar officiella dokument och genererar en PDF-rapport, "
+                    "men håll analysen som vanlig text och undvik extra struktur."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert all(
+            "mellanliggande" not in assumption.lower()
+            for assumption in analysis.assumptions
+        )
+
+    def test_simple_single_verb_summary_prompt_does_not_assume_structured_intermediate(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Bygg ett flöde som sammanfattar ett dokument och genererar en PDF.",
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert all(
+            "mellanliggande" not in assumption.lower()
+            for assumption in analysis.assumptions
+        )
+
+    def test_pending_question_is_reoffered_even_when_latest_turn_is_short(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="assistant",
+                content=None,
+                tool_calls=[
+                    {
+                        "id": "call_docx_mode",
+                        "name": "ask_structured_question",
+                        "arguments": {
+                            "question_id": "docx_output_mode",
+                            "question": "Hur ska DOCX-resultatet skapas?",
+                            "options": [
+                                {
+                                    "id": "generated_docx",
+                                    "label": "Genererad DOCX",
+                                    "description": "Skapa dokumentet direkt.",
+                                    "value": "generated_docx",
+                                },
+                                {
+                                    "id": "template_fill_docx",
+                                    "label": "DOCX från mall",
+                                    "description": "Fyll en mall.",
+                                    "value": "template_fill_docx",
+                                },
+                            ],
+                        },
+                    }
+                ],
+            ),
+            ConversationMessage(
+                role="user",
+                content="Kortare.",
+                metadata={"ui_language": "sv"},
+            ),
+        ]
+
+        followup = build_discovery_followup(conversation)
+
+        assert followup is not None
+        _, question_data, _ = followup
+        assert question_data["question_id"] == "docx_output_mode"
+
     def test_pdf_output_with_explicit_answer_resolves_without_pdf_type_question(self) -> None:
         """When the user explicitly selects pdf_document as output mode, the
         auto-inference resolves enough context that final_pdf_type (high_value)
@@ -1311,7 +1457,9 @@ class TestExtendedClarificationHints:
             latest_user_message="Jag vill transkribera ljud och sedan sammanfatta.",
         )
         assert hints is not None
-        assert "transcribe_only" in hints
+        assert 'input_type="audio"' in hints
+        assert 'output_type="text"' in hints
+        assert "Backend härleder" in hints
 
     def test_template_hint(self) -> None:
         hints = build_clarification_hints(
@@ -1372,7 +1520,7 @@ class TestPlannerDiscoveryShortCircuit:
             async for event in planner.send_message(
                 session_id=session_id,
                 message="Jag vill bygga ett flöde som hjälper mig att förstå kommunala underlag.",
-                question_answer={"ui_language": "sv"},
+                ui_language="sv",
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
                 available_models=None,
@@ -1453,7 +1601,7 @@ class TestPlannerDiscoveryShortCircuit:
             async for event in planner.send_message(
                 session_id=session_id,
                 message="Build a flow that summarizes one uploaded PDF into a short plain-English summary.",
-                question_answer={"ui_language": "en"},
+                ui_language="en",
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
                 available_models=None,

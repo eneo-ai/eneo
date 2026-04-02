@@ -1,7 +1,11 @@
 import { m } from "$lib/paraglide/messages";
 import type { FlowStep } from "@intric/intric-js";
 import type { FlowStepValidationIssue } from "$lib/features/flows/flowStepTypes";
-import type { FlowSourceHintKind, FlowOutputHintKind } from "$lib/features/flows/flowStepPresentation";
+import type {
+  FlowSourceHintKind,
+  FlowOutputHintKind
+} from "$lib/features/flows/flowStepPresentation";
+import { hasAdvancedOutputConfig } from "$lib/features/flows/flowCitationMode";
 
 // ---------------------------------------------------------------------------
 // Label arrays & lookup maps
@@ -228,7 +232,7 @@ export function hasAdvancedSettingsActive(
       step.input_contract ||
       step.output_contract ||
       step.input_config ||
-      step.output_config ||
+      hasAdvancedOutputConfig(step) ||
       hasInputTemplateOverride
   );
 }

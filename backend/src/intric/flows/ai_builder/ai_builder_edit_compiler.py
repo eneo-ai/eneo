@@ -15,8 +15,8 @@ from uuid import UUID
 from intric.flows.ai_builder.ai_builder_description_semantics import (
     FlowSemanticSignature,
 )
+from intric.flows.ai_builder.ai_builder_flow_name import normalize_flow_name
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    AddStepPayload,
     CompiledEditResult,
     EditAdvisory,
     EditConfidence,
@@ -38,6 +38,13 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputMode,
     OutputType,
     StepSpec,
+)
+from intric.flows.ai_builder.ai_builder_new_step_compiler import compile_new_step_draft
+from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+from intric.flows.ai_builder.ai_builder_step_transition_policy import (
+    StepNormalizationChange,
+    normalize_ai_builder_spec,
+    normalize_ai_builder_step,
 )
 from intric.flows.domain.flow import FlowStep
 
@@ -66,17 +73,11 @@ def compile_edit_draft(
         flow_description: Current flow description.
     """
     # Build ref mapping: existing_step_{order} → FlowStep
-    steps_by_ref: dict[str, FlowStep] = {}
-    for step in current_steps:
-        ref = f"existing_step_{step.step_order}"
-        steps_by_ref[ref] = step
-
     # Work on a mutable ordered list of (ref_or_None, FlowStep_or_AddPayload)
-    working: list[tuple[str | None, FlowStep | AddStepPayload]] = [
+    working: list[tuple[str | None, FlowStep | NewStepDraft]] = [
         (f"existing_step_{s.step_order}", s) for s in current_steps
     ]
 
-    step_changes: list[StepChange] = []
     form_changes = []
     removed_refs: set[str] = set()
     modified_refs: dict[str, StepPatch] = {}
@@ -85,29 +86,25 @@ def compile_edit_draft(
     # Process operations in order
     for op in edit_draft.operations:
         if op.op == "remove":
-            _apply_remove(op, working, step_changes, removed_refs)
+            _apply_remove(op, working, removed_refs)
         elif op.op == "modify":
-            _apply_modify(op, step_changes, modified_refs)
+            _apply_modify(op, modified_refs)
         elif op.op == "add":
-            _apply_add(op, working, step_changes, steps_by_ref)
-
-    # Mark unchanged steps
-    touched_refs = removed_refs | set(modified_refs.keys())
-    for ref, item in working:
-        if ref is not None and ref not in touched_refs and isinstance(item, FlowStep):
-            step_changes.append(StepChange(
-                kind="unchanged",
-                step_name=item.user_description or f"Step {item.step_order}",
-                step_ref=ref,
-            ))
+            _apply_add(op, working)
 
     # Build compiled StepSpec list from working order
     compiled_steps: list[StepSpec] = []
     for i, (ref, item) in enumerate(working):
         plan_ref = f"step_{chr(ord('a') + i)}" if i < 26 else f"step_{i + 1}"
 
-        if isinstance(item, AddStepPayload):
-            compiled_steps.append(_payload_to_step_spec(item, plan_ref))
+        if isinstance(item, NewStepDraft):
+            compiled_steps.append(
+                compile_new_step_draft(
+                    step_draft=item,
+                    step_index=i,
+                    prior_steps=compiled_steps,
+                )
+            )
         elif isinstance(item, FlowStep):
             patch = modified_refs.get(ref)  # type: ignore[arg-type]
             compiled_steps.append(
@@ -120,6 +117,18 @@ def compile_edit_draft(
             )
 
     compiled_steps = _canonicalize_existing_runtime_aliases(compiled_steps)
+    normalized_spec, normalization_changes = normalize_ai_builder_spec(
+        FlowDraftSpecCore(
+            flow_name=normalize_flow_name(edit_draft.flow_name or flow_name or "Unnamed Flow"),
+            flow_description=_resolve_flow_description(
+                edit_draft=edit_draft,
+                current_description=flow_description,
+            ),
+            steps=compiled_steps,
+            form_fields=None,
+        )
+    )
+    compiled_steps = normalized_spec.steps
 
     compiled_form_fields, form_changes = _compile_form_fields(
         edit_draft,
@@ -127,11 +136,8 @@ def compile_edit_draft(
     )
 
     # Resolve flow name/description — no regex mutation, just pass-through
-    final_name = edit_draft.flow_name or flow_name or "Unnamed Flow"
-    final_description = _resolve_flow_description(
-        edit_draft=edit_draft,
-        current_description=flow_description,
-    )
+    final_name = normalized_spec.flow_name
+    final_description = normalized_spec.flow_description
 
     compiled_spec = FlowDraftSpecCore(
         flow_name=final_name,
@@ -141,11 +147,19 @@ def compile_edit_draft(
     )
 
     # Build advisories from semantic signature comparison
-    advisories: list[EditAdvisory] = _build_description_advisories(
+    advisories: list[EditAdvisory] = _build_normalization_advisories(normalization_changes)
+    advisories.extend(_build_description_advisories(
         edit_draft=edit_draft,
         current_steps=current_steps,
         compiled_steps=compiled_steps,
         current_description=flow_description,
+    ))
+
+    step_changes = _build_step_changes(
+        current_steps=current_steps,
+        compiled_steps=compiled_steps,
+        removed_refs=removed_refs,
+        assistant_snapshots=assistant_snapshots,
     )
 
     # Build diff
@@ -194,19 +208,13 @@ def compile_edit_draft(
 
 def _apply_remove(
     op: StepEditOperation,
-    working: list[tuple[str | None, FlowStep | AddStepPayload]],
-    step_changes: list[StepChange],
+    working: list[tuple[str | None, FlowStep | NewStepDraft]],
     removed_refs: set[str],
 ) -> None:
     if op.target_ref is None:
         return
     for i, (ref, item) in enumerate(working):
         if ref == op.target_ref and isinstance(item, FlowStep):
-            step_changes.append(StepChange(
-                kind="removed",
-                step_name=item.user_description or f"Step {item.step_order}",
-                step_ref=op.target_ref,
-            ))
             removed_refs.add(op.target_ref)
             working.pop(i)
             return
@@ -214,43 +222,21 @@ def _apply_remove(
 
 def _apply_modify(
     op: StepEditOperation,
-    step_changes: list[StepChange],
     modified_refs: dict[str, StepPatch],
 ) -> None:
     if op.target_ref is None or op.patch is None:
         return
     modified_refs[op.target_ref] = op.patch
-    details_parts: list[str] = []
-    if op.patch.name is not None:
-        details_parts.append(f"name → '{op.patch.name}'")
-    if op.patch.input_source is not None:
-        details_parts.append(f"input_source → {op.patch.input_source.value}")
-    if op.patch.assistant_spec is not None:
-        details_parts.append("instructions updated")
-    step_changes.append(StepChange(
-        kind="modified",
-        step_name=op.patch.name or op.target_ref,
-        step_ref=op.target_ref,
-        details=", ".join(details_parts) if details_parts else None,
-    ))
 
 
 def _apply_add(
     op: StepEditOperation,
-    working: list[tuple[str | None, FlowStep | AddStepPayload]],
-    step_changes: list[StepChange],
-    steps_by_ref: dict[str, FlowStep],
+    working: list[tuple[str | None, FlowStep | NewStepDraft]],
 ) -> None:
     if op.add_payload is None:
         return
 
-    step_changes.append(StepChange(
-        kind="added",
-        step_name=op.add_payload.name,
-        step_ref=None,
-    ))
-
-    new_entry: tuple[str | None, AddStepPayload] = (None, op.add_payload)
+    new_entry: tuple[str | None, NewStepDraft] = (None, op.add_payload)
 
     if op.placement is None or op.placement.position == "append":
         working.append(new_entry)
@@ -267,28 +253,6 @@ def _apply_add(
 
     # Fallback: append
     working.append(new_entry)
-
-
-# ---------------------------------------------------------------------------
-# Conversion helpers
-# ---------------------------------------------------------------------------
-
-
-def _payload_to_step_spec(payload: AddStepPayload, plan_ref: str) -> StepSpec:
-    return StepSpec(
-        plan_step_ref=plan_ref,
-        name=payload.name,
-        assistant_spec=payload.assistant_spec,
-        input_source=payload.input_source,
-        input_type=payload.input_type,
-        output_mode=payload.output_mode,
-        output_type=payload.output_type,
-        mcp_policy=payload.mcp_policy,
-        input_bindings=payload.input_bindings,
-        input_contract=payload.input_contract,
-        output_contract=payload.output_contract,
-        input_config=payload.input_config,
-    )
 
 
 def _flow_step_to_spec(
@@ -320,6 +284,7 @@ def _flow_step_to_spec(
         input_contract=step.input_contract,
         output_contract=step.output_contract,
         input_config=step.input_config,
+        output_config=step.output_config,
     )
 
     if patch is not None:
@@ -341,14 +306,16 @@ def _flow_step_to_spec(
                 base_assistant_spec,
                 patch.assistant_spec,
             )
-        if patch.input_bindings is not None:
+        if "input_bindings" in patch.model_fields_set:
             updates["input_bindings"] = patch.input_bindings
-        if patch.input_contract is not None:
+        if "input_contract" in patch.model_fields_set:
             updates["input_contract"] = patch.input_contract
-        if patch.output_contract is not None:
+        if "output_contract" in patch.model_fields_set:
             updates["output_contract"] = patch.output_contract
-        if patch.input_config is not None:
+        if "input_config" in patch.model_fields_set:
             updates["input_config"] = patch.input_config
+        if "output_config" in patch.model_fields_set:
+            updates["output_config"] = patch.output_config
         if updates:
             spec = spec.model_copy(update=updates)
 
@@ -385,14 +352,159 @@ def _merge_assistant_specs(
     existing: AssistantSpec,
     patch: AssistantSpec,
 ) -> AssistantSpec:
-    instructions = patch.instructions.strip() or existing.instructions
-    model_ref = patch.model_ref if patch.model_ref is not None else existing.model_ref
-    knowledge_refs = patch.knowledge_refs or existing.knowledge_refs
+    instructions = existing.instructions
+    if "instructions" in patch.model_fields_set:
+        instructions = patch.instructions.strip() or existing.instructions
+
+    model_ref = existing.model_ref
+    if "model_ref" in patch.model_fields_set:
+        model_ref = patch.model_ref
+
+    knowledge_refs = existing.knowledge_refs
+    if "knowledge_refs" in patch.model_fields_set:
+        knowledge_refs = patch.knowledge_refs
+
     return AssistantSpec(
         instructions=instructions,
         model_ref=model_ref,
         knowledge_refs=knowledge_refs,
     )
+
+
+def _build_normalization_advisories(
+    normalization_changes: list[tuple[StepSpec, StepNormalizationChange]],
+) -> list[EditAdvisory]:
+    advisories: list[EditAdvisory] = []
+    for step, change in normalization_changes:
+        step_ref = step.existing_step_ref or step.plan_step_ref
+        advisories.append(
+            EditAdvisory(
+                code=change.code,
+                message=change.message,
+                severity=change.severity,
+                field=f"{step_ref}.{change.field_suffix}",
+            )
+        )
+    return advisories
+
+
+def _build_step_changes(
+    *,
+    current_steps: list[FlowStep],
+    compiled_steps: list[StepSpec],
+    removed_refs: set[str],
+    assistant_snapshots: dict[UUID, dict[str, Any]] | None,
+) -> list[StepChange]:
+    existing_order_to_plan_ref = {
+        existing_order: step.plan_step_ref
+        for step in compiled_steps
+        if (existing_order := _existing_step_order(step.existing_step_ref)) is not None
+    }
+    baseline_specs: dict[str, StepSpec] = {}
+    removed_names: dict[str, str] = {}
+    for step in current_steps:
+        ref = f"existing_step_{step.step_order}"
+        baseline_spec = _flow_step_to_spec(
+            step,
+            ref,
+            assistant_snapshots=assistant_snapshots,
+        )
+        baseline_specs[ref] = _canonicalize_step_for_diff(
+            baseline_spec,
+            existing_order_to_plan_ref,
+        )
+        removed_names[ref] = step.user_description or f"Step {step.step_order}"
+
+    step_changes: list[StepChange] = []
+    for step in compiled_steps:
+        if step.existing_step_ref is None:
+            step_changes.append(
+                StepChange(
+                    kind="added",
+                    step_name=step.name,
+                    step_ref=None,
+                )
+            )
+            continue
+
+        previous = baseline_specs.get(step.existing_step_ref)
+        if previous is None or not _step_specs_equivalent(previous, step):
+            step_changes.append(
+                StepChange(
+                    kind="modified",
+                    step_name=step.name,
+                    step_ref=step.existing_step_ref,
+                    details=_describe_step_change(previous, step),
+                )
+            )
+            continue
+
+        step_changes.append(
+            StepChange(
+                kind="unchanged",
+                step_name=step.name,
+                step_ref=step.existing_step_ref,
+            )
+        )
+
+    for step in current_steps:
+        ref = f"existing_step_{step.step_order}"
+        if ref not in removed_refs:
+            continue
+        step_changes.append(
+            StepChange(
+                kind="removed",
+                step_name=removed_names[ref],
+                step_ref=ref,
+            )
+        )
+    return step_changes
+
+
+def _step_specs_equivalent(previous: StepSpec, current: StepSpec) -> bool:
+    return _comparable_step_payload(previous) == _comparable_step_payload(current)
+
+
+def _canonicalize_step_for_diff(
+    step: StepSpec,
+    existing_order_to_plan_ref: dict[int, str],
+) -> StepSpec:
+    canonical_step = _rewrite_runtime_aliases_for_existing_step(
+        step,
+        existing_order_to_plan_ref,
+    )
+    return normalize_ai_builder_step(canonical_step)[0]
+
+
+def _comparable_step_payload(step: StepSpec) -> dict[str, Any]:
+    payload = step.model_dump(mode="json")
+    payload.pop("plan_step_ref", None)
+    payload.pop("existing_step_ref", None)
+    return payload
+
+
+def _describe_step_change(previous: StepSpec | None, current: StepSpec) -> str | None:
+    if previous is None:
+        return None
+
+    details: list[str] = []
+    if previous.name != current.name:
+        details.append(f"name → '{current.name}'")
+    if previous.input_source != current.input_source:
+        details.append(f"input_source → {current.input_source.value}")
+    if previous.input_type != current.input_type:
+        details.append(f"input_type → {current.input_type.value}")
+    if previous.output_mode != current.output_mode:
+        details.append(f"output_mode → {current.output_mode.value}")
+    if previous.output_type != current.output_type:
+        details.append(f"output_type → {current.output_type.value}")
+    if previous.assistant_spec.instructions != current.assistant_spec.instructions:
+        details.append("instructions updated")
+    if previous.assistant_spec.model_ref != current.assistant_spec.model_ref:
+        details.append("model updated")
+    if previous.assistant_spec.knowledge_refs != current.assistant_spec.knowledge_refs:
+        details.append("knowledge updated")
+    return ", ".join(details) if details else None
 
 
 def _compute_confidence(

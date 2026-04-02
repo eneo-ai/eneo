@@ -11,6 +11,7 @@ from intric.assistants.api.assistant_models import AssistantResponse
 from intric.assistants.assistant import Assistant, AssistantOrigin
 from intric.assistants.assistant_factory import AssistantFactory
 from intric.assistants.assistant_repo import AssistantRepository
+from intric.assistants.reference_tags import extract_inline_reference_ids
 from intric.authentication.auth_service import AuthService
 from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.completion_models.infrastructure.web_search import WebSearch
@@ -68,8 +69,6 @@ if TYPE_CHECKING:
     from intric.spaces.space_repo import SpaceRepository
 
 AT_TAG_PATTERN = r"<intric-at-tag: @[^>]+>"
-REFERENCE_PATTERN = r'<inref id="([0-9a-f]{8})"/>'  # noqa
-
 
 def clean_intric_tag(input_string: str):
     return re.sub(AT_TAG_PATTERN, "", input_string)
@@ -85,7 +84,7 @@ def get_references(
         return info_blobs
 
     # Preserve order, remove duplicates
-    info_blob_ids = list(dict.fromkeys(re.findall(REFERENCE_PATTERN, response_string)))
+    info_blob_ids = extract_inline_reference_ids(response_string)
 
     def _get_blob(blob_id):
         return next(
