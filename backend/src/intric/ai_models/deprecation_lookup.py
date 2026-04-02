@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Optional
+from typing import Any, Dict, Optional
 
 
 def get_litellm_deprecation_date(
@@ -18,20 +18,23 @@ def get_litellm_deprecation_date(
     """
     import litellm
 
-    info = None
+    cost_map: Dict[str, Any] = litellm.model_cost  # type: ignore[assignment]
+
+    info: Optional[Dict[str, Any]] = None
 
     # Try prefixed key first (matches how TenantModelAdapter constructs litellm keys)
     if provider_type:
-        info = litellm.model_cost.get(f"{provider_type}/{model_name}")
+        info = cost_map.get(f"{provider_type}/{model_name}")
 
     # Fallback: try bare model name
     if info is None:
-        info = litellm.model_cost.get(model_name)
+        info = cost_map.get(model_name)
 
     if info is None:
         return None
 
-    return info.get("deprecation_date")
+    result: Optional[str] = info.get("deprecation_date")
+    return result
 
 
 def is_model_deprecated(
