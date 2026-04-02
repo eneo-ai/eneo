@@ -52,6 +52,7 @@ class CompletionModelMigrationHistoryRepo:
             )
         )
 
+
         self.session.add(migration_history)
         await self.session.flush()
         return migration_history
