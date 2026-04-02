@@ -92,6 +92,7 @@
       dimensions?: number;
       maxInput?: number;
       hosting?: string;
+      securityClassification?: { id: string; name: string } | null;
     }>;
   }
 
@@ -295,9 +296,17 @@
 
   async function createModels(modelsToCreate: typeof $wizardData.models, providerId: string) {
     // Create models based on type
+    const modelTypeKey =
+      modelType === "completion"
+        ? "completionModel"
+        : modelType === "embedding"
+          ? "embeddingModel"
+          : "transcriptionModel";
+
     for (const model of modelsToCreate) {
+      let created: any;
       if (modelType === "completion") {
-        await intric.tenantModels.createCompletion({
+        created = await intric.tenantModels.createCompletion({
           provider_id: providerId,
           name: model.name,
           display_name: model.displayName,
@@ -311,7 +320,7 @@
           is_active: true
         });
       } else if (modelType === "embedding") {
-        await intric.tenantModels.createEmbedding({
+        created = await intric.tenantModels.createEmbedding({
           provider_id: providerId,
           name: model.name,
           display_name: model.displayName,
@@ -322,7 +331,7 @@
           is_active: true
         });
       } else if (modelType === "transcription") {
-        await intric.tenantModels.createTranscription({
+        created = await intric.tenantModels.createTranscription({
           provider_id: providerId,
           name: model.name,
           display_name: model.displayName,
@@ -330,6 +339,14 @@
           hosting: model.hosting ?? "swe",
           is_active: true
         });
+      }
+
+      // Set security classification if selected (requires separate API call)
+      if (model.securityClassification && created?.id) {
+        await intric.models.update({
+          [modelTypeKey]: created,
+          update: { security_classification: model.securityClassification }
+        } as any);
       }
     }
 

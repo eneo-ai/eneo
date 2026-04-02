@@ -19,8 +19,12 @@
   import HelpTooltip from "../components/HelpTooltip.svelte";
   import { getIntric } from "$lib/core/Intric";
   import { toast } from "$lib/components/toast";
+  import { getSecurityContext } from "$lib/features/security-classifications/SecurityContext";
+  import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
+  import type { SecurityClassification } from "@intric/intric-js";
 
   const intric = getIntric();
+  const classifications = getSecurityContext().security_classifications;
 
   import type { ModelProviderCapabilities } from "../modelProviderCapabilities";
 
@@ -84,6 +88,7 @@
     dimensions?: number;
     maxInput?: number;
     hosting?: string;
+    securityClassification?: SecurityClassification | null;
   }> = [];
 
   const dispatch = createEventDispatcher<{
@@ -278,7 +283,8 @@
       family: modelType === "embedding" ? "openai" : providerType || "openai",
       dimensionsStr: "",
       maxInputStr: "",
-      hosting: providerDefaultHosting[providerType] ?? "swe"
+      hosting: providerDefaultHosting[providerType] ?? "swe",
+      securityClassification: null as SecurityClassification | null
     };
   }
 
@@ -309,7 +315,8 @@
         family: currentModel.family,
         dimensions,
         maxInput,
-        hosting: currentModel.hosting
+        hosting: currentModel.hosting,
+        securityClassification: currentModel.securityClassification
       }
     ];
     currentModel = createEmptyModel();
@@ -733,6 +740,16 @@
         {/each}
       </select>
     </div>
+
+    <!-- Security Classification -->
+    {#if classifications.length > 0}
+      <div class="flex flex-col gap-2">
+        <span class="text-sm font-medium">{m.security()}</span>
+        <div class="max-h-48 overflow-y-auto rounded-md border border-dimmer">
+          <SelectSecurityClassification {classifications} bind:value={currentModel.securityClassification} />
+        </div>
+      </div>
+    {/if}
 
     <!-- Action Buttons -->
     <div class="border-dimmer/40 mt-2 border-t pt-4">
