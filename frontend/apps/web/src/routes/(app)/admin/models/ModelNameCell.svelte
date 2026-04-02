@@ -7,6 +7,7 @@
   import ModelNameAndVendor from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import ModelDetailDialog from "./ModelDetailDialog.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { TriangleAlert, Clock } from "lucide-svelte";
 
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
   export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
@@ -25,14 +26,6 @@
     model.deprecation_date &&
     model.deprecation_date > new Date().toISOString().slice(0, 10);
 
-  $: statusColor = isDeprecated
-    ? "bg-negative-default"
-    : isRetiring
-      ? "bg-warning-default"
-      : !model.is_org_enabled
-        ? "bg-muted/30"
-        : "bg-positive-default";
-
   $: statusKey = isDeprecated ? "deprecated" : isRetiring ? "retiring" : "ok";
 
   $: statusLabel = isDeprecated
@@ -46,12 +39,22 @@
 
 <div class="flex items-center gap-3">
   <Tooltip text={statusLabel}>
-    <span
-      class="block h-2 w-2 rounded-full flex-shrink-0 {statusColor}"
-      role="img"
-      aria-label={statusLabel}
-      data-status={statusKey}
-    ></span>
+    {#if isDeprecated}
+      <span class="flex-shrink-0 text-negative-default" role="img" aria-label={statusLabel} data-status="deprecated">
+        <TriangleAlert size={14} />
+      </span>
+    {:else if isRetiring}
+      <span class="flex-shrink-0 text-warning-default" role="img" aria-label={statusLabel} data-status="retiring">
+        <Clock size={14} />
+      </span>
+    {:else}
+      <span
+        class="block h-2 w-2 rounded-full flex-shrink-0 {!model.is_org_enabled ? 'bg-negative-default' : 'bg-positive-default'}"
+        role="img"
+        aria-label={statusLabel}
+        data-status={statusKey}
+      ></span>
+    {/if}
   </Tooltip>
 
   {#if isTenantModel}

@@ -136,7 +136,7 @@
                 </tr>
               {/if}
 
-              <!-- Security -->
+              <!-- Security classification (read-only) -->
               <tr>
                 <td class="py-2.5 pr-8 text-muted align-top whitespace-nowrap">{m.security()}</td>
                 <td class="py-2.5">

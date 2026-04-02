@@ -9,12 +9,6 @@
   import EditModelDialog from "./EditModelDialog.svelte";
   import { writable } from "svelte/store";
   import { Pencil, Trash2, AlertTriangle, Loader2, ArrowRight } from "lucide-svelte";
-  import { IconCancel } from "@intric/icons/cancel";
-  import { IconCheck } from "@intric/icons/check";
-  import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
-  import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
-  import ModelClassificationDialog from "$lib/features/security-classifications/components/ModelClassificationDialog.svelte";
-  import { IconLockClosed } from "@intric/icons/lock-closed";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
   import MigrateModelDialog from "./MigrateModelDialog.svelte";
@@ -25,43 +19,7 @@
 
   const intric = getIntric();
 
-  async function togglePreferred() {
-    if (!("is_org_default" in model)) return;
-    try {
-      model = await intric.models.update(
-        //@ts-expect-error ts doesn't understand this
-        {
-          [type]: model,
-          update: {
-            is_org_default: !model.is_org_default
-          }
-        }
-      );
-      invalidate("admin:models:load");
-    } catch (e) {
-      toastError(e, m.error_changing_model_status());
-    }
-  }
-
-  async function toggleEnabled() {
-    try {
-      model = await intric.models.update(
-        //@ts-expect-error ts doesn't understand this
-        {
-          [type]: model,
-          update: {
-            is_org_enabled: !model.is_org_enabled
-          }
-        }
-      );
-      invalidate("admin:models:load");
-    } catch (e) {
-      toastError(e, m.error_changing_model_status());
-    }
-  }
-
   const showEditDialog = writable(false);
-  const showSecurityDialog = writable(false);
   const showDeleteConfirm = writable(false);
   const showMigrateDialog = writable(false);
   let isDeleting = false;
@@ -109,7 +67,6 @@
     </Button>
   </Dropdown.Trigger>
   <Dropdown.Menu let:item>
-    <!-- Neutral actions -->
     <Button
       is={item}
       padding="icon-leading"
@@ -119,24 +76,6 @@
     >
       <Pencil class="h-4 w-4" />{m.edit_model()}
     </Button>
-    <Button
-      is={item}
-      padding="icon-leading"
-      on:click={() => {
-        $showSecurityDialog = true;
-      }}
-    >
-      <IconLockClosed></IconLockClosed>{m.edit_security_classification()}
-    </Button>
-    {#if "is_org_default" in model}
-      <Button is={item} on:click={togglePreferred} padding="icon-leading">
-        {#if model.is_org_default}
-          <IconArrowDownToLine></IconArrowDownToLine>{m.unset_default_status()}
-        {:else}
-          <IconArrowUpToLine></IconArrowUpToLine>{m.set_as_default_model()}
-        {/if}
-      </Button>
-    {/if}
     {#if type === "completionModel"}
       <Button
         is={item}
@@ -148,22 +87,6 @@
         <ArrowRight class="h-4 w-4" />{m.migrate_model_usage()}
       </Button>
     {/if}
-    <!-- Destructive actions last -->
-    <Button
-      is={item}
-      padding="icon-leading"
-      on:click={toggleEnabled}
-      variant={model.is_org_enabled ? "destructive" : "positive-outlined"}
-      disabled={model.is_locked && !model.is_org_enabled}
-    >
-      {#if model.is_org_enabled}
-        <IconCancel></IconCancel>
-        <span>{m.disable_model()}</span>
-      {:else}
-        <IconCheck></IconCheck>
-        {m.enable_model()}
-      {/if}
-    </Button>
     <Button
       is={item}
       padding="icon-leading"
@@ -181,9 +104,6 @@
 </Dropdown.Root>
 
 <EditModelDialog {model} {type} openController={showEditDialog} />
-
-<ModelClassificationDialog {model} {type} openController={showSecurityDialog}
-></ModelClassificationDialog>
 
 <Dialog.Root openController={showDeleteConfirm}>
   <Dialog.Content width="small">

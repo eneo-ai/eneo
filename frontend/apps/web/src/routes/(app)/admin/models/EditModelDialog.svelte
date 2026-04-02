@@ -17,12 +17,16 @@
   import { Loader2 } from "lucide-svelte";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
+  import { getSecurityContext } from "$lib/features/security-classifications/SecurityContext";
+  import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
+  import type { SecurityClassification } from "@intric/intric-js";
 
   export let openController: Writable<boolean>;
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
   export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
 
   const intric = getIntric();
+  const classifications = getSecurityContext().security_classifications;
 
   // Form state - initialized from model
   let modelIdentifier = "";
@@ -36,6 +40,8 @@
   let family = "";
   let hosting: "swe" | "eu" | "usa" = "swe";
   let openSource = false;
+  let isDefault = false;
+  let securityClassification: SecurityClassification | null = null;
   let isSubmitting = false;
   let isLoadingDefaults = false;
   let error: string | null = null;
@@ -66,6 +72,8 @@
     description = model.description || "";
     hosting = model.hosting as "swe" | "eu" | "usa";
     openSource = model.open_source ?? false;
+    isDefault = "is_org_default" in model ? Boolean(model.is_org_default) : false;
+    securityClassification = model.security_classification ?? null;
 
     if ("max_input_tokens" in model && model.max_input_tokens != null) {
       maxInputTokensStr = String(model.max_input_tokens);
@@ -155,6 +163,22 @@
           open_source: openSource
         };
         await intric.tenantModels.updateTranscription({ id: model.id }, update);
+      }
+
+      // Update security classification and default status if changed
+      const classificationChanged = securityClassification?.id !== model.security_classification?.id;
+      const defaultChanged = "is_org_default" in model && isDefault !== model.is_org_default;
+      if (classificationChanged || defaultChanged) {
+        const update: Record<string, unknown> = {};
+        if (classificationChanged) update.security_classification = securityClassification;
+        if (defaultChanged) update.is_org_default = isDefault;
+        await intric.models.update(
+          //@ts-expect-error ts doesn't understand this
+          {
+            [type]: model,
+            update
+          }
+        );
       }
 
       // Invalidate to reload data
@@ -368,8 +392,19 @@
             </select>
           </div>
 
-          <!-- Open source -->
-          <div class="mt-4">
+          <!-- Security classification -->
+          <div class="mt-4 flex flex-col gap-2">
+            <span class="text-secondary text-sm font-medium">{m.security()}</span>
+            <div class="border-stronger max-h-48 overflow-y-auto rounded-lg border">
+              <SelectSecurityClassification
+                {classifications}
+                bind:value={securityClassification}
+              />
+            </div>
+          </div>
+
+          <!-- Toggles -->
+          <div class="mt-4 flex gap-6">
             <label class="group flex cursor-pointer items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -380,6 +415,17 @@
                 >{m.model_label_open_source()}</span
               >
             </label>
+
+            {#if "is_org_default" in model}
+              <label class="flex items-center gap-2 text-sm cursor-pointer group">
+                <input
+                  type="checkbox"
+                  bind:checked={isDefault}
+                  class="h-4 w-4 rounded border-stronger accent-accent-default cursor-pointer"
+                />
+                <span class="group-hover:text-primary transition-colors">{m.default_model()}</span>
+              </label>
+            {/if}
           </div>
         </div>
       </form>
