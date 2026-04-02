@@ -32,7 +32,6 @@
 <script lang="ts">
   import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
   import { Tooltip } from "@intric/ui";
-  import { m } from "$lib/paraglide/messages";
 
   export let model:
     | CompletionModel
@@ -40,17 +39,6 @@
     | TranscriptionModel
     | { org: string; nickname: string; name: string; description: string };
   export let size: "card" | "table" = "table";
-  export let showTokenLimit: boolean = true;
-
-  // Format token limit for display (e.g., 128000 -> "128K", 1000000 -> "1M")
-  function formatTokenLimit(limit: number): string {
-    if (limit >= 1_000_000 || (limit >= 1_000 && Math.round(limit / 1_000) >= 1_000)) {
-      const val = limit / 1_000_000;
-      return `${val % 1 === 0 ? val.toFixed(0) : val.toFixed(1)}M`;
-    }
-    if (limit >= 1_000) return `${Math.round(limit / 1_000)}K`;
-    return limit.toString();
-  }
 </script>
 
 {#if size === "card"}
@@ -66,15 +54,5 @@
         {"nickname" in model ? model.nickname : model.name}
       </h4>
     </Tooltip>
-    {#if "nickname" in model && model.name !== model.nickname}
-      <span class="text-muted max-w-48 truncate text-xs leading-tight" title={model.name}>
-        {model.name}
-      </span>
-    {/if}
-    {#if showTokenLimit && "token_limit" in model && model.token_limit}
-      <span class="text-muted/70 text-[11px] leading-none tabular-nums">
-        {m.token_limit_context({ limit: formatTokenLimit(model.token_limit) })}
-      </span>
-    {/if}
   </div>
 {/if}

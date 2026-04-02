@@ -89,13 +89,15 @@
         <div class="px-6 py-5">
           <table class="w-full">
             <tbody class="text-[15px]">
-              <!-- Model identifier -->
-              {#if model.nickname && model.name !== model.nickname}
-                <tr>
-                  <td class="py-2.5 pr-8 text-muted align-top whitespace-nowrap w-40">{m.name()}</td>
-                  <td class="py-2.5 font-mono text-sm">{model.name}</td>
-                </tr>
-              {/if}
+              <!-- Display name + model identifier -->
+              <tr>
+                <td class="py-2.5 pr-8 text-muted align-top whitespace-nowrap w-40">{m.display_name()}</td>
+                <td class="py-2.5">{model.nickname ?? model.name}</td>
+              </tr>
+              <tr>
+                <td class="py-2.5 pr-8 text-muted align-top whitespace-nowrap w-40">{m.model_identifier()}</td>
+                <td class="py-2.5">{model.name}</td>
+              </tr>
 
               <!-- Context window -->
               {#if "max_input_tokens" in model}
