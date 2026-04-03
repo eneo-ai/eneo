@@ -9005,6 +9005,8 @@ export interface components {
       provider_type?: string | null;
       /** Deprecation Date */
       deprecation_date?: string | null;
+      /** Migrated To Model Id */
+      migrated_to_model_id?: string | null;
       /**
        * Token Limit
        * @description Backward-compat: exposed in JSON responses for frontend.

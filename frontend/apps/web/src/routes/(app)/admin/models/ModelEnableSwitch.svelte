@@ -37,8 +37,11 @@
     }
   }
 
-  $: tooltip =
-    model.lock_reason === "credentials"
+  $: isMigrated = "migrated_to_model_id" in model && !!model.migrated_to_model_id;
+  $: isDisabled = (model.is_locked ?? false) || isMigrated;
+  $: tooltip = isMigrated
+    ? m.model_tooltip_migrated()
+    : model.lock_reason === "credentials"
       ? m.api_credentials_required_for_provider()
       : model.is_org_enabled
         ? m.toggle_to_disable_model()
@@ -50,7 +53,7 @@
     <Input.Switch
       sideEffect={toggleEnabled}
       value={model.is_org_enabled}
-      disabled={model.is_locked ?? false}
+      disabled={isDisabled}
     ></Input.Switch>
   </Tooltip>
 </div>

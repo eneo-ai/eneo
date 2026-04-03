@@ -7,7 +7,8 @@ from intric.database.tables.assistant_template_table import AssistantTemplates
 from intric.database.tables.questions_table import Questions
 from intric.database.tables.service_table import Services
 
-# Mapping of entity types to their corresponding database tables
+# All entity types that have a completion_model_id column.
+# Used for usage counting and statistics.
 ENTITY_TABLE_MAP = {
     "assistants": Assistants,
     "apps": Apps,
@@ -20,6 +21,15 @@ ENTITY_TABLE_MAP = {
 # List of all entity types that use completion models
 ENTITY_TYPES = list(ENTITY_TABLE_MAP.keys())
 
-# Entity types supported by the migration service, including many-to-many space
-# availability relationships.
-MIGRATABLE_ENTITY_TYPES = [*ENTITY_TYPES, "spaces"]
+# Active configuration entities that should be migrated when switching models.
+# Questions are historical records (which model generated each answer) and must
+# NOT be migrated — doing so falsely attributes answers to the target model and
+# corrupts token usage analytics.
+MIGRATABLE_ENTITY_TYPES = [
+    "assistants",
+    "apps",
+    "services",
+    "assistant_templates",
+    "app_templates",
+    "spaces",
+]

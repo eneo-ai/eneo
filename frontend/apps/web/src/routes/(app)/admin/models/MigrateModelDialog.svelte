@@ -7,7 +7,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  import { Loader2, Bot, AppWindow, MessageSquare, LayoutGrid, ChevronDown, AlertTriangle, ShieldAlert } from "lucide-svelte";
+  import { Loader2, Bot, AppWindow, LayoutGrid, ChevronDown, AlertTriangle, ShieldAlert } from "lucide-svelte";
   import type { Writable } from "svelte/store";
   import { bumpModelMigrationHistoryVersion } from "./migrationHistoryRefresh";
 
@@ -40,7 +40,8 @@
   $: availableTargets = models
     .filter((mod) => mod.id !== sourceModel.id)
     .filter((mod) => mod.provider_id != null)
-    .filter((mod) => mod.is_org_enabled);
+    .filter((mod) => mod.is_org_enabled)
+    .filter((mod) => !mod.migrated_to_model_id);
 
   $: targetOptions = availableTargets.map((mod) => ({
     value: mod.id,
@@ -164,13 +165,7 @@
         confirmMigration: acknowledged || !hasWarnings
       });
 
-      // Success — delete source model
-      try {
-        await intric.tenantModels.deleteCompletion({ id: sourceModel.id });
-        toast.success(m.migration_success());
-      } catch {
-        toast.warning(m.migration_success_delete_failed());
-      }
+      toast.success(m.migration_success());
 
       bumpModelMigrationHistoryVersion();
       await invalidate("admin:model-providers:load");
@@ -204,7 +199,6 @@
     assistant: { label: () => m.migration_summary_assistants(), icon: Bot },
     app: { label: () => m.migration_summary_apps(), icon: AppWindow },
     service: { label: () => m.migration_summary_services(), icon: LayoutGrid },
-    question: { label: () => m.migration_summary_questions(), icon: MessageSquare },
     assistant_template: { label: () => m.migration_summary_assistants(), icon: Bot },
     app_template: { label: () => m.migration_summary_apps(), icon: AppWindow }
   };

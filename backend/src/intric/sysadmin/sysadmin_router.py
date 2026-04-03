@@ -1284,17 +1284,31 @@ async def delete_completion_model(
     force: Annotated[bool, Query(description="Force delete even if in use")] = False,
 ):
     """
-    Delete a completion model (system-wide operation).
+    Soft-delete a completion model (system-wide operation).
 
     Requires: X-API-Key header with ENEO_SUPER_API_KEY
 
-    WARNING: Deletion affects all tenants. Use with caution.
-    Set force=true to delete even if model is in use (may break references).
+    WARNING: Affects all tenants. Use with caution.
+    Set force=true to hard-delete (may break references).
     """
     session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = CompletionModelsRepository(session=session)
-        await repo.delete_model(id)
+        if force:
+            # Hard-delete: will fail with IntegrityError if model has
+            # question references (FK RESTRICT)
+            from intric.database.tables.ai_models_table import CompletionModels
+            import sqlalchemy as sa
+
+            stmt = (
+                sa.delete(CompletionModels)
+                .where(CompletionModels.id == id)
+            )
+            await session.execute(stmt)
+        else:
+            if await repo.has_active_references(id):
+                raise BadRequestException("MODEL_IN_USE")
+            await repo.delete_model(id)
 
     return {"success": True, "message": f"Model {id} deleted successfully"}
 

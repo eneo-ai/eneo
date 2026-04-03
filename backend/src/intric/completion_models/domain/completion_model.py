@@ -56,6 +56,8 @@ class CompletionModel(AIModel):
         provider_id: Optional["UUID"] = None,
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
+        migrated_to_model_id: Optional["UUID"] = None,
+        deleted_at: Optional["datetime"] = None,
     ):
         super().__init__(
             user=user,
@@ -95,6 +97,16 @@ class CompletionModel(AIModel):
         self.provider_id = provider_id
         self.provider_name = provider_name
         self.provider_type = provider_type
+        self.migrated_to_model_id = migrated_to_model_id
+        self.deleted_at = deleted_at
+
+    @property
+    def can_access(self):
+        return (
+            super().can_access
+            and self.migrated_to_model_id is None
+            and self.deleted_at is None
+        )
 
     @property
     def token_limit(self) -> int:
@@ -164,4 +176,6 @@ class CompletionModel(AIModel):
             provider_id=completion_model_db.provider_id,
             provider_name=provider_name,
             provider_type=provider_type,
+            migrated_to_model_id=completion_model_db.migrated_to_model_id,
+            deleted_at=completion_model_db.deleted_at,
         )

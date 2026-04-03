@@ -142,6 +142,8 @@ class CompletionModelMigrationService:
                     f"Migration requires different source and target models."
                 )
 
+            self._ensure_source_model_not_already_migrated(from_model)
+
             # For single-tenant deployment, check if models are enabled for the tenant
             # Settings are now stored directly on the model table
             from intric.database.tables.ai_models_table import CompletionModels
@@ -496,12 +498,21 @@ class CompletionModelMigrationService:
 
             raise ValidationException(f"Migration failed: {str(e)}")
 
+    @staticmethod
+    def _ensure_source_model_not_already_migrated(from_model: Any) -> None:
+        if getattr(from_model, "migrated_to_model_id", None) is not None:
+            raise ValidationException(
+                f"Source model '{from_model.name}' has already been migrated. "
+                f"A model can only be migrated once."
+            )
+
     async def _validate_migration_compatibility(
         self, from_model_id: UUID, to_model_id: UUID, tenant_id: UUID
     ) -> ValidationResult:
         """Check if models are compatible for migration."""
         from_model = await self.completion_model_repo.one(model_id=from_model_id)
         to_model = await self.completion_model_repo.one(model_id=to_model_id)
+        self._ensure_source_model_not_already_migrated(from_model)
 
         issues: list[str] = []  # Human-readable
         issue_codes: list[str] = []  # Machine-readable
@@ -705,6 +716,21 @@ class CompletionModelMigrationService:
 
                 # Calculate total
                 results["total"] = sum(results.values())
+
+                # Mark source model as migrated (stays in DB for historical
+                # question references and token usage analytics)
+                from intric.database.tables.ai_models_table import CompletionModels
+
+                mark_stmt = (
+                    update(CompletionModels)
+                    .where(CompletionModels.id == from_model_id)
+                    .values(migrated_to_model_id=to_model_id)
+                )
+                await self.session.execute(mark_stmt)
+
+                self.logger.info(
+                    f"Marked source model {from_model_id} as migrated to {to_model_id}"
+                )
 
                 # Commit all changes
                 await savepoint.commit()

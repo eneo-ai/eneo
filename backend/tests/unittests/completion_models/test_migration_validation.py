@@ -174,6 +174,23 @@ class TestTargetDeprecated:
         assert "kwargs_reset" in result.warning_codes
 
 
+class TestAlreadyMigratedSource:
+    @pytest.mark.asyncio
+    async def test_validate_migration_rejects_already_migrated_source(self):
+        from_model = _make_model(name="gpt-4o")
+        from_model.migrated_to_model_id = uuid4()
+        to_model = _make_model(name="gpt-4o-mini")
+
+        service = _build_service(repo_side_effect=[from_model, from_model, to_model])
+
+        with pytest.raises(Exception) as exc_info:
+            await service.validate_migration(
+                from_model.id, to_model.id, uuid4()
+            )
+
+        assert "already been migrated" in str(exc_info.value)
+
+
 class TestLowerTokenLimit:
     @pytest.mark.asyncio
     async def test_lower_token_limit_yields_warning(self):

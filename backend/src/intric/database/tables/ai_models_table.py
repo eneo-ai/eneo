@@ -65,6 +65,14 @@ class CompletionModels(BasePublic):
     )
     provider: Mapped[Optional[ModelProviders]] = relationship()
 
+    # Lifecycle: migration tracking and soft-delete
+    migrated_to_model_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("completion_models.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True, index=True)
+
     __table_args__ = (
         CheckConstraint(
             "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",

@@ -227,10 +227,16 @@ async def delete_tenant_completion_model(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session_with_transaction)],
 ):
-    """Delete a tenant-specific completion model."""
+    """Soft-delete a tenant-specific completion model."""
     validate_permission(user, Permission.ADMIN)
+
+    from datetime import datetime
+
     import sqlalchemy as sa
 
+    from intric.ai_models.completion_models.completion_models_repo import (
+        CompletionModelsRepository,
+    )
     from intric.database.tables.ai_models_table import CompletionModels
     from intric.main.exceptions import (
         BadRequestException,
@@ -242,6 +248,7 @@ async def delete_tenant_completion_model(
     stmt = sa.select(CompletionModels).where(
         CompletionModels.id == model_id,
         CompletionModels.tenant_id == user.tenant_id,
+        CompletionModels.deleted_at.is_(None),
     )
     result = await session.execute(stmt)
     model = result.scalar_one_or_none()
@@ -255,12 +262,13 @@ async def delete_tenant_completion_model(
     if model.tenant_id is None:
         raise UnauthorizedException("Cannot delete global models")
 
-    # Delete the model (settings are now on the model itself)
-    try:
-        await session.delete(model)
-        await session.commit()
-    except sa.exc.IntegrityError:
-        await session.rollback()
+    repo = CompletionModelsRepository(session=session)
+    if await repo.has_active_references(model_id, tenant_id=user.tenant_id):
         raise BadRequestException("MODEL_IN_USE")
+
+    # Soft-delete: mark with deleted_at timestamp (model stays in DB
+    # so historical question references and token usage remain intact)
+    model.deleted_at = datetime.utcnow()
+    await session.commit()
 
     return {"success": True}

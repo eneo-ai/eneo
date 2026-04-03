@@ -52,6 +52,9 @@ class AIModelsService:
             and not model.is_deprecated
             and model.is_org_enabled
         ):
+            # Migrated completion models should not be accessible
+            if getattr(model, "migrated_to_model_id", None) is not None:
+                return False
             return True
 
         return False

@@ -11,6 +11,14 @@
       tooltip: string;
     }[] = [];
 
+    if ("migrated_to_model_id" in model && model.migrated_to_model_id) {
+      labels.push({
+        tooltip: m.model_tooltip_migrated(),
+        label: m.model_label_migrated(),
+        color: "gray"
+      });
+    }
+
     if ("deprecation_date" in model && model.deprecation_date) {
       const today = new Date().toISOString().slice(0, 10);
       if (model.deprecation_date <= today) {

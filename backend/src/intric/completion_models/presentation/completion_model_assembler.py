@@ -65,6 +65,7 @@ class CompletionModelAssembler:
             provider_name=completion_model.provider_name,
             provider_type=completion_model.provider_type,
             deprecation_date=dep_date,
+            migrated_to_model_id=completion_model.migrated_to_model_id,
         )
 
     @staticmethod

@@ -192,6 +192,7 @@ class CompletionModel(CompletionModelBase, InDB):
     tenant_id: Optional[UUID] = None
     provider_id: Optional[UUID] = None
     provider_type: Optional[str] = None
+    migrated_to_model_id: Optional[UUID] = None
 
     def _provider_type(self) -> str | None:
         return self.provider_type
@@ -205,6 +206,7 @@ class CompletionModelPublic(CompletionModel):
     security_classification: Optional[SecurityClassificationPublic] = None
     provider_name: Optional[str] = None
     deprecation_date: Optional[str] = None
+    migrated_to_model_id: Optional[UUID] = None
 
     @classmethod
     def from_domain(cls, completion_model: CompletionModelDomain):
@@ -259,6 +261,7 @@ class CompletionModelPublic(CompletionModel):
             provider_name=completion_model.provider_name,
             provider_type=completion_model.provider_type,
             deprecation_date=dep_date,
+            migrated_to_model_id=getattr(completion_model, "migrated_to_model_id", None),
         )
 
 
