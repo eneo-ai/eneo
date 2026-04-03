@@ -21,11 +21,13 @@ even if the checks above have a bug, the database will refuse the delete.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, TypedDict, cast
+from uuid import UUID
 
 import sqlalchemy as sa
 from dependency_injector import providers
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
@@ -37,10 +39,17 @@ from intric.main.container.container import Container
 from intric.worker.worker import Worker
 
 logger = logging.getLogger(__name__)
-worker = Worker()
+worker: Any = Worker()
 
 
-async def _find_removable_models(session) -> list[dict]:
+class RemovableModel(TypedDict):
+    id: UUID
+    name: str
+    deleted_at: datetime | None
+    migrated_to_model_id: UUID | None
+
+
+async def _find_removable_models(session: AsyncSession) -> list[RemovableModel]:
     """
     Return completion models whose lifecycle has ended and which have no
     remaining historical or active references.
@@ -91,27 +100,33 @@ async def _find_removable_models(session) -> list[dict]:
     )
 
     result = await session.execute(stmt)
-    return [
-        {
-            "id": row.id,
-            "name": row.name,
-            "deleted_at": row.deleted_at,
-            "migrated_to_model_id": row.migrated_to_model_id,
-        }
-        for row in result.all()
-    ]
+    removable_models: list[RemovableModel] = []
+
+    for row in result.all():
+        removable_models.append(
+            {
+                "id": cast(UUID, row.id),
+                "name": cast(str, row.name),
+                "deleted_at": cast(datetime | None, row.deleted_at),
+                "migrated_to_model_id": cast(UUID | None, row.migrated_to_model_id),
+            }
+        )
+
+    return removable_models
 
 
-async def _has_active_entity_references(session, model_id) -> bool:
+async def _has_active_entity_references(
+    session: AsyncSession, model_id: UUID
+) -> bool:
     """Check if any active configuration entities still reference this model."""
     repo = CompletionModelsRepository(session=session)
     return await repo.has_active_references(model_id)
 
 
 async def _reconcile_deleted_template_references(
-    session,
-    model_id,
-    replacement_model_id,
+    session: AsyncSession,
+    model_id: UUID,
+    replacement_model_id: UUID | None,
 ) -> None:
     """
     Remove stale references from soft-deleted templates before hard-delete.
@@ -134,19 +149,20 @@ async def _reconcile_deleted_template_references(
             )
         )
         result = await session.execute(stmt)
-        templates = result.scalars().all()
+        templates = cast(list[Any], result.scalars().all())
 
         for template in templates:
             template.completion_model_id = replacement_model_id
-            if template.original_snapshot is not None:
+            snapshot = cast(dict[str, Any] | None, template.original_snapshot)
+            if snapshot is not None:
                 template.original_snapshot = {
-                    **template.original_snapshot,
+                    **snapshot,
                     "completion_model_id": replacement_value,
                 }
 
 
 @worker.cron_job(hour=4, minute=0, weekday={6})  # Sunday 4 AM
-async def cleanup_orphaned_models(container: Container) -> Dict[str, Any]:
+async def cleanup_orphaned_models(container: Container) -> dict[str, Any]:
     """
     Weekly lifecycle cleanup: hard-delete completion models that no longer
     have any historical or active references.
@@ -157,7 +173,7 @@ async def cleanup_orphaned_models(container: Container) -> Dict[str, Any]:
     """
     start_time = datetime.now(timezone.utc)
 
-    results: Dict[str, Any] = {
+    results: dict[str, Any] = {
         "start_time": start_time.isoformat(),
         "removed_models": [],
         "skipped_models": [],
@@ -168,7 +184,8 @@ async def cleanup_orphaned_models(container: Container) -> Dict[str, Any]:
     logger.info("Starting weekly model lifecycle cleanup job")
 
     async with sessionmanager.session() as session:
-        container.session.override(providers.Object(session))
+        session_provider = cast(Any, container.session)
+        session_provider.override(providers.Object(session))
         try:
             # Step 1: Find lifecycle candidates (no questions, no incoming migration refs)
             async with session.begin():
@@ -235,7 +252,7 @@ async def cleanup_orphaned_models(container: Container) -> Dict[str, Any]:
                     results["success"] = False
 
         finally:
-            container.session.reset_override()
+            session_provider.reset_override()
 
     end_time = datetime.now(timezone.utc)
     duration = (end_time - start_time).total_seconds()
