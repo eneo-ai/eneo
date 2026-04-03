@@ -33,6 +33,8 @@ class CompletionModelMigrationHistory(BasePublic):
         nullable=True,
         index=True,
     )
+    from_model_original_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    to_model_original_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     from_model_name = Column(String(255), nullable=True)
     to_model_name = Column(String(255), nullable=True)
     initiated_by = Column(

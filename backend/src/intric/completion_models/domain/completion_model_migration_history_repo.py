@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.tables.completion_model_migration_history_table import (
@@ -40,6 +40,8 @@ class CompletionModelMigrationHistoryRepo:
                 tenant_id=tenant_id,
                 from_model_id=from_model_id,
                 to_model_id=to_model_id,
+                from_model_original_id=from_model_id,
+                to_model_original_id=to_model_id,
                 from_model_name=from_model_name,
                 to_model_name=to_model_name,
                 initiated_by=initiated_by,
@@ -132,9 +134,11 @@ class CompletionModelMigrationHistoryRepo:
             select(CompletionModelMigrationHistory)
             .where(
                 CompletionModelMigrationHistory.tenant_id == tenant_id,
-                (
-                    (CompletionModelMigrationHistory.from_model_id == model_id)
-                    | (CompletionModelMigrationHistory.to_model_id == model_id)
+                or_(
+                    CompletionModelMigrationHistory.from_model_id == model_id,
+                    CompletionModelMigrationHistory.to_model_id == model_id,
+                    CompletionModelMigrationHistory.from_model_original_id == model_id,
+                    CompletionModelMigrationHistory.to_model_original_id == model_id,
                 ),
             )
             .order_by(desc(CompletionModelMigrationHistory.created_at))
@@ -169,13 +173,13 @@ class CompletionModelMigrationHistoryRepo:
         tenant_id: UUID,
     ) -> int:
         """Count migration history records for a specific model."""
-        from sqlalchemy import func
-
         stmt = select(func.count(CompletionModelMigrationHistory.id)).where(
             CompletionModelMigrationHistory.tenant_id == tenant_id,
-            (
-                (CompletionModelMigrationHistory.from_model_id == model_id)
-                | (CompletionModelMigrationHistory.to_model_id == model_id)
+            or_(
+                CompletionModelMigrationHistory.from_model_id == model_id,
+                CompletionModelMigrationHistory.to_model_id == model_id,
+                CompletionModelMigrationHistory.from_model_original_id == model_id,
+                CompletionModelMigrationHistory.to_model_original_id == model_id,
             ),
         )
 
@@ -187,8 +191,6 @@ class CompletionModelMigrationHistoryRepo:
         tenant_id: UUID,
     ) -> int:
         """Count all migration history records for a tenant."""
-        from sqlalchemy import func
-
         stmt = select(func.count(CompletionModelMigrationHistory.id)).where(
             CompletionModelMigrationHistory.tenant_id == tenant_id
         )

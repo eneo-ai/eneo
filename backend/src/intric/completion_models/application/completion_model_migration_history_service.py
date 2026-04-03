@@ -130,6 +130,17 @@ class CompletionModelMigrationHistoryService:
                 else "Deleted model"
             )
             initiated_by_name = user_names.get(initiated_by, "Unknown User")
+            # Fall back to original IDs preserved at migration time when the FK was
+            # nulled by a later cleanup, so the public response still references the
+            # historical model.
+            from_original_id = cast(
+                UUID | None, getattr(record, "from_model_original_id", None)
+            )
+            to_original_id = cast(
+                UUID | None, getattr(record, "to_model_original_id", None)
+            )
+            from_model_id = from_model_id or from_original_id
+            to_model_id = to_model_id or to_original_id
 
             public_model = ModelMigrationHistory(
                 id=record.id,
