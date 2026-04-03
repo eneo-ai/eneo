@@ -35,7 +35,7 @@ class CompletionModelMigrationHistoryService:
         limit: int = 50,
         offset: int = 0,
     ) -> list[ModelMigrationHistory]:
-        """Get migration history for a specific model with model names and user info."""
+        """Get migration history for a specific live model with names and user info."""
         migration_records = await self.repo.get_migration_history_for_model(
             model_id, tenant_id, limit, offset
         )
@@ -130,23 +130,12 @@ class CompletionModelMigrationHistoryService:
                 else "Deleted model"
             )
             initiated_by_name = user_names.get(initiated_by, "Unknown User")
-            # Fall back to original IDs preserved at migration time when the FK was
-            # nulled by a later cleanup, so the public response still references the
-            # historical model.
-            from_original_id = cast(
-                UUID | None, getattr(record, "from_model_original_id", None)
-            )
-            to_original_id = cast(
-                UUID | None, getattr(record, "to_model_original_id", None)
-            )
-            from_model_id = from_model_id or from_original_id
-            to_model_id = to_model_id or to_original_id
 
             public_model = ModelMigrationHistory(
                 id=record.id,
-                from_model_id=from_model_id,
+                from_model_id=record.from_model_id,
                 from_model_name=from_model_name,
-                to_model_id=to_model_id,
+                to_model_id=record.to_model_id,
                 to_model_name=to_model_name,
                 migrated_count=migrated_count,
                 status=status,

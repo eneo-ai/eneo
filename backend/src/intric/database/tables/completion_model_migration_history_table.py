@@ -14,7 +14,6 @@ class CompletionModelMigrationHistory(BasePublic):
 
     __tablename__ = "completion_model_migration_history"  # type: ignore[assignment]
 
-    migration_id = Column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
     tenant_id = Column(
         UUID(as_uuid=True),
         ForeignKey("tenants.id", ondelete="CASCADE"),
@@ -33,10 +32,10 @@ class CompletionModelMigrationHistory(BasePublic):
         nullable=True,
         index=True,
     )
-    from_model_original_id = Column(UUID(as_uuid=True), nullable=True, index=True)
-    to_model_original_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     from_model_name = Column(String(255), nullable=True)
     to_model_name = Column(String(255), nullable=True)
+    from_provider_type = Column(String(255), nullable=True)
+    to_provider_type = Column(String(255), nullable=True)
     initiated_by = Column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )

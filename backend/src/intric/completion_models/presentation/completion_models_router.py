@@ -471,7 +471,7 @@ async def get_model_migration_history(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> list[ModelMigrationHistory]:
-    """Get migration history for a specific model (from or to this model)"""
+    """Get migration history for a specific live model (from or to this model)"""
     validate_permission(user, Permission.ADMIN)
     service = container.completion_model_migration_history_service()
     return await service.get_migration_history_for_model(

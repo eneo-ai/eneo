@@ -8,6 +8,7 @@ These tests verify end-to-end that:
 4. The RESTRICT FK on questions prevents hard-delete of referenced models
 5. Already-migrated models are rejected for re-migration
 6. Lifecycle cleanup removes migrated or soft-deleted models only when safe
+7. Migration history remains readable after cleanup via tenant/migration history
 """
 
 from datetime import datetime
@@ -20,6 +21,9 @@ from intric.completion_models.infrastructure.model_cleanup_worker import (
 )
 from intric.database.tables.app_template_table import AppTemplates
 from intric.database.tables.ai_models_table import CompletionModels
+from intric.database.tables.completion_model_migration_history_table import (
+    CompletionModelMigrationHistory,
+)
 from intric.database.tables.questions_table import Questions
 from intric.database.tables.sessions_table import Sessions
 from intric.database.tables.assistant_template_table import AssistantTemplates
@@ -472,7 +476,7 @@ class TestLifecycleCleanup:
             stmt = select(CompletionModels).where(CompletionModels.id == model_id)
             assert (await session.execute(stmt)).scalar_one_or_none() is None
 
-    async def test_migration_history_lookup_survives_cleanup(
+    async def test_migration_history_record_survives_cleanup_via_migration_id(
         self,
         db_container,
         completion_model_factory,
@@ -482,6 +486,7 @@ class TestLifecycleCleanup:
         old_model_id = None
         new_model_id = None
         old_model_name = None
+        migration_id = None
 
         async with db_container() as container:
             session = container.session()
@@ -502,6 +507,7 @@ class TestLifecycleCleanup:
             old_model_id = old_model.id
             new_model_id = new_model.id
             old_model_name = old_model.name
+            migration_id = result.migration_id
 
         async with db_container() as container:
             cleanup_result = await cleanup_orphaned_models(container)
@@ -511,17 +517,25 @@ class TestLifecycleCleanup:
             )
 
         async with db_container() as container:
+            session = container.session()
             history_service = container.completion_model_migration_history_service()
 
-            history = await history_service.get_migration_history_for_model(
-                old_model_id, admin_user.tenant_id
+            by_id = await history_service.get_migration_history_by_id(
+                migration_id, admin_user.tenant_id
             )
             count = await history_service.count_migration_history_for_model(
                 old_model_id, admin_user.tenant_id
             )
 
-            assert count == 1
-            assert len(history) == 1
-            assert history[0].from_model_id == old_model_id
-            assert history[0].to_model_id == new_model_id
-            assert history[0].from_model_name == old_model_name
+            assert count == 0
+            assert by_id is not None
+            assert by_id.from_model_id is None
+            assert by_id.to_model_id == new_model_id
+            assert by_id.from_model_name == old_model_name
+
+            stmt = select(CompletionModelMigrationHistory).where(
+                CompletionModelMigrationHistory.migration_id == migration_id
+            )
+            record = (await session.execute(stmt)).scalar_one()
+            assert record.from_model_name == old_model_name
+            assert record.from_provider_type == "openai"

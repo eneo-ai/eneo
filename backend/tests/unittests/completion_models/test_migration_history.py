@@ -2,7 +2,7 @@
 Tests for migration history persistence and name resolution.
 
 Verifies that:
-- create_migration_history stores from_model_name and to_model_name
+- create_migration_history stores technical model names and provider types
 - _convert_to_public_models resolves names correctly in all scenarios
 - ModelMigrationHistory Pydantic model handles nullable foreign keys
 """
@@ -29,10 +29,10 @@ def _make_db_record(
     *,
     from_model_id=None,
     to_model_id=None,
-    from_model_original_id=None,
-    to_model_original_id=None,
     from_model_name=None,
     to_model_name=None,
+    from_provider_type=None,
+    to_provider_type=None,
     initiated_by=None,
     status="completed",
     migrated_count=5,
@@ -48,10 +48,10 @@ def _make_db_record(
         tenant_id=uuid4(),
         from_model_id=from_model_id,
         to_model_id=to_model_id,
-        from_model_original_id=from_model_original_id,
-        to_model_original_id=to_model_original_id,
         from_model_name=from_model_name,
         to_model_name=to_model_name,
+        from_provider_type=from_provider_type,
+        to_provider_type=to_provider_type,
         initiated_by=initiated_by or uuid4(),
         status=status,
         entity_types=["assistants", "apps"],
@@ -74,8 +74,8 @@ class TestCreateMigrationHistory:
     """Tests for the repo's create_migration_history method."""
 
     @pytest.mark.asyncio
-    async def test_create_stores_model_names(self):
-        """create_migration_history should store from_model_name and to_model_name."""
+    async def test_create_stores_model_names_and_provider_types(self):
+        """create_migration_history should store technical model names and provider types."""
         session = AsyncMock()
         session.add = MagicMock()
         repo = CompletionModelMigrationHistoryRepo(session)
@@ -95,6 +95,8 @@ class TestCreateMigrationHistory:
             status="pending",
             from_model_name="gpt-4o",
             to_model_name="gpt-4o-mini",
+            from_provider_type="openai",
+            to_provider_type="anthropic",
         )
 
         # Verify session.add was called
@@ -103,10 +105,10 @@ class TestCreateMigrationHistory:
 
         assert added_record.from_model_name == "gpt-4o"
         assert added_record.to_model_name == "gpt-4o-mini"
+        assert added_record.from_provider_type == "openai"
+        assert added_record.to_provider_type == "anthropic"
         assert added_record.from_model_id == from_model_id
         assert added_record.to_model_id == to_model_id
-        assert added_record.from_model_original_id == from_model_id
-        assert added_record.to_model_original_id == to_model_id
         assert added_record.migration_id == migration_id
 
     @pytest.mark.asyncio
@@ -128,8 +130,8 @@ class TestCreateMigrationHistory:
         added_record = session.add.call_args[0][0]
         assert added_record.from_model_name is None
         assert added_record.to_model_name is None
-        assert added_record.from_model_original_id == added_record.from_model_id
-        assert added_record.to_model_original_id == added_record.to_model_id
+        assert added_record.from_provider_type is None
+        assert added_record.to_provider_type is None
 
     @pytest.mark.asyncio
     async def test_create_record_contains_all_expected_fields(self):
@@ -158,6 +160,8 @@ class TestCreateMigrationHistory:
             started_at=started_at,
             from_model_name="claude-3-opus",
             to_model_name="claude-3.5-sonnet",
+            from_provider_type="anthropic",
+            to_provider_type="anthropic",
         )
 
         added_record = session.add.call_args[0][0]
@@ -166,10 +170,10 @@ class TestCreateMigrationHistory:
         assert added_record.tenant_id == tenant_id
         assert added_record.from_model_id == from_model_id
         assert added_record.to_model_id == to_model_id
-        assert added_record.from_model_original_id == from_model_id
-        assert added_record.to_model_original_id == to_model_id
         assert added_record.from_model_name == "claude-3-opus"
         assert added_record.to_model_name == "claude-3.5-sonnet"
+        assert added_record.from_provider_type == "anthropic"
+        assert added_record.to_provider_type == "anthropic"
         assert added_record.initiated_by == initiated_by
         assert added_record.status == "in_progress"
         assert added_record.entity_types == entity_types
@@ -190,16 +194,12 @@ class TestConvertToPublicModels:
 
     @pytest.mark.asyncio
     async def test_uses_stored_name_when_model_deleted(self):
-        """Should use stored from_model_name/to_model_name when model_id is None (model deleted)."""
+        """Deleted models keep readable names, but not dead UUID fallbacks."""
         service = self._make_service()
-        from_original_id = uuid4()
-        to_original_id = uuid4()
 
         record = _make_db_record(
             from_model_id=None,
             to_model_id=None,
-            from_model_original_id=from_original_id,
-            to_model_original_id=to_original_id,
             from_model_name="gpt-4-0613",
             to_model_name="gpt-4o",
         )
@@ -215,8 +215,8 @@ class TestConvertToPublicModels:
         assert len(result) == 1
         assert result[0].from_model_name == "gpt-4-0613"
         assert result[0].to_model_name == "gpt-4o"
-        assert result[0].from_model_id == from_original_id
-        assert result[0].to_model_id == to_original_id
+        assert result[0].from_model_id is None
+        assert result[0].to_model_id is None
 
     @pytest.mark.asyncio
     async def test_uses_stored_name_as_primary_source_even_when_model_exists(self):
@@ -368,19 +368,17 @@ class TestConvertToPublicModels:
         assert public.error_message is None
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_original_ids_after_model_cleanup(self):
-        """Deleted models should still expose stable IDs via original-id fallback."""
+    async def test_deleted_models_keep_null_ids_after_cleanup(self):
+        """Deleted models should expose readable snapshots, not stale UUIDs."""
         service = self._make_service()
 
-        from_original_id = uuid4()
-        to_original_id = uuid4()
         record = _make_db_record(
             from_model_id=None,
             to_model_id=None,
-            from_model_original_id=from_original_id,
-            to_model_original_id=to_original_id,
             from_model_name="old-source",
             to_model_name="target-model",
+            from_provider_type="openai",
+            to_provider_type="anthropic",
         )
 
         service._get_model_names = AsyncMock(return_value={})
@@ -390,8 +388,8 @@ class TestConvertToPublicModels:
 
         result = await service._convert_to_public_models([record])
 
-        assert result[0].from_model_id == from_original_id
-        assert result[0].to_model_id == to_original_id
+        assert result[0].from_model_id is None
+        assert result[0].to_model_id is None
 
     @pytest.mark.asyncio
     async def test_convert_multiple_records(self):

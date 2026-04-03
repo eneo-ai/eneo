@@ -225,6 +225,8 @@ class CompletionModelMigrationService:
             to_model_id=to_model_id,
             from_model_name=from_model.name,
             to_model_name=to_model.name,
+            from_provider_type=from_model.provider_type,
+            to_provider_type=to_model.provider_type,
             initiated_by=user.id,
             status="in_progress",
             entity_types=normalized_entity_types,
