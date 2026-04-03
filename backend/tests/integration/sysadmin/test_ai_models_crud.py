@@ -217,7 +217,7 @@ async def test_update_nonexistent_completion_model(client, super_admin_token):
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_delete_completion_model(client, super_admin_token, db_container):
-    """Test deleting a completion model."""
+    """Test soft-deleting a completion model."""
     # First create a model
     create_data = {
         "name": "model-to-delete",
@@ -248,14 +248,15 @@ async def test_delete_completion_model(client, super_admin_token, db_container):
 
     assert response.status_code == 200
 
-    # Verify model was deleted from database
+    # Verify model was soft-deleted in database
     async with db_container() as container:
         session = container.session()
         stmt = sa.select(CompletionModels).where(CompletionModels.id == model_id)
         result = await session.execute(stmt)
         db_model = result.scalar_one_or_none()
 
-        assert db_model is None
+        assert db_model is not None
+        assert db_model.deleted_at is not None
 
 
 @pytest.mark.integration
