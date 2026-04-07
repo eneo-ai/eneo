@@ -128,7 +128,7 @@ class UsersRepository:
 
     async def get_all_users(
         self,
-        tenant_id: UUID = None,
+        tenant_id: UUID | None = None,
         limit: Optional[int] = None,
         cursor: Optional[str] = None,
         previous: bool = False,
@@ -241,10 +241,10 @@ class UsersRepository:
 
         return UserInDB.model_validate(entry_in_db)
 
-    async def hard_delete(self, id: int):
+    async def hard_delete(self, id: UUID):
         return await self.delegate.delete(id)
 
-    async def soft_delete(self, id: int):
+    async def soft_delete(self, id: UUID):
         # Cleanup personal space
         stmt = sa.delete(Spaces).where(Spaces.user_id == id)
         await self.session.execute(stmt)
@@ -257,7 +257,7 @@ class UsersRepository:
         )
         return await self.delegate.get_model_from_query(stmt)
 
-    async def delete(self, id: int, soft_delete: bool = True):
+    async def delete(self, id: UUID, soft_delete: bool = True):
         if soft_delete:
             return await self.soft_delete(id=id)
 

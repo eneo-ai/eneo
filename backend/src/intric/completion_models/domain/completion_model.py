@@ -1,4 +1,6 @@
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, cast
+
+from typing_extensions import override
 
 from intric.ai_models.ai_model import AIModel
 from intric.security_classifications.domain.entities.security_classification import (
@@ -86,6 +88,7 @@ class CompletionModel(AIModel):
         """Backward-compat alias: returns max_input_tokens."""
         return self.max_input_tokens
 
+    @override
     def get_credential_provider_name(self) -> str:
         """Get the credential provider name for this model."""
         # If litellm_model_name is set, extract provider from prefix (e.g. "azure/gpt-4" → "azure")
@@ -102,13 +105,13 @@ class CompletionModel(AIModel):
         user: "UserInDB",
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
-    ):
+    ) -> "CompletionModel":
         # Settings are now directly on the model table
         return cls(
             user=user,
-            id=completion_model_db.id,
-            created_at=completion_model_db.created_at,
-            updated_at=completion_model_db.updated_at,
+            id=cast("UUID", completion_model_db.id),
+            created_at=cast("datetime", completion_model_db.created_at),
+            updated_at=cast("datetime", completion_model_db.updated_at),
             nickname=completion_model_db.nickname,
             name=completion_model_db.name,
             max_input_tokens=completion_model_db.max_input_tokens,
@@ -118,7 +121,7 @@ class CompletionModel(AIModel):
             hosting=completion_model_db.hosting,
             org=completion_model_db.org,
             stability=completion_model_db.stability,
-            open_source=completion_model_db.open_source,
+            open_source=bool(completion_model_db.open_source),
             description=completion_model_db.description,
             nr_billion_parameters=completion_model_db.nr_billion_parameters,
             hf_link=completion_model_db.hf_link,

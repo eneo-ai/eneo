@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Callable
+from typing import Any, Callable
 from uuid import UUID
 
 from intric.jobs.job_service import JobService
@@ -15,9 +15,10 @@ logger = get_logger(__name__)
 
 class WorkerConfig:
     def __init__(self, task_manager: TaskManager):
+        super().__init__()
         self.task_manager = task_manager
 
-    def set_additional_data(self, data: dict):
+    def set_additional_data(self, data: dict[str, Any]) -> None:
         self.task_manager.additional_data = data  # type: ignore[attr-defined]
 
 
@@ -30,6 +31,7 @@ class TaskManager:
         channel_type: ChannelType | None = None,
         resource_id: UUID | None = None,
     ):
+        super().__init__()
         # job_service is optional for crawl_task which handles its own job status
         # via execute_with_recovery() and sets _job_already_handled=True.
         # All other tasks (upload, transcription) provide job_service via container.
@@ -39,27 +41,27 @@ class TaskManager:
         self.channel_type = channel_type
         self.resource_id = resource_id
 
-        self.success = None
-        self._result_location = None
-        self._cleanup_func = None
-        self.additional_data = None
+        self.success: bool | None = None
+        self._result_location: str | None = None
+        self._cleanup_func: Callable[[], None] | None = None
+        self.additional_data: dict[str, Any] | None = None
         # Flag for crawl_task to skip complete_job/fail_job (it handles them itself)
         self._job_already_handled = False
 
     @property
-    def result_location(self):
+    def result_location(self) -> str | None:
         return self._result_location
 
     @result_location.setter
-    def result_location(self, result_location: str):
+    def result_location(self, result_location: str) -> None:
         self._result_location = result_location
 
     @property
-    def cleanup_func(self):
+    def cleanup_func(self) -> Callable[[], None] | None:
         return self._cleanup_func
 
     @cleanup_func.setter
-    def cleanup_func(self, cleanup_func: Callable):
+    def cleanup_func(self, cleanup_func: Callable[[], None] | None) -> None:
         self._cleanup_func = cleanup_func
 
     def _log_status(self, status: Status):
@@ -67,11 +69,19 @@ class TaskManager:
 
     async def _publish_status(self, status: Status):
         if self.channel_type is not None:
-            channel = Channel(type=self.channel_type, user_id=self.user.id)
-            await r.publish(
+            user_id = self.user.id
+            channel = Channel(
+                type=self.channel_type,
+                user_id=user_id,
+            )
+            message_id = (
+                self.resource_id if self.resource_id is not None else self.job_id
+            )
+            redis_client: Any = r
+            await redis_client.publish(
                 channel.channel_string,
                 RedisMessage(
-                    id=self.resource_id,
+                    id=message_id,
                     status=status,
                     additional_data=self.additional_data,
                 ).model_dump_json(),
@@ -117,7 +127,7 @@ class TaskManager:
             if self._cleanup_func is not None:
                 self._cleanup_func()
 
-    def successful(self):
+    def successful(self) -> bool | None:
         return self.success
 
     async def set_status(self, status: Status):

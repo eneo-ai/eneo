@@ -61,6 +61,7 @@ class WebsiteCRUDService:
         http_auth_password: Optional[str] = None,
     ) -> Website:
         space = await self.space_service.get_space(space_id)
+        assert space.id is not None
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_create_websites():
@@ -107,7 +108,7 @@ class WebsiteCRUDService:
         self,
         id: UUID,
         url: Union[str, NotProvided] = NOT_PROVIDED,
-        name: Union[str, NotProvided] = NOT_PROVIDED,
+        name: Union[str, None, NotProvided] = NOT_PROVIDED,
         download_files: Union[bool, NotProvided] = NOT_PROVIDED,
         crawl_type: Union["CrawlType", NotProvided] = NOT_PROVIDED,
         update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED,
@@ -138,6 +139,7 @@ class WebsiteCRUDService:
 
     async def delete_website(self, id: UUID) -> None:
         owner_space = await self.space_service.get_space_by_website(id)
+        assert owner_space.id is not None
         owner_actor = self.actor_manager.get_space_actor_from_space(space=owner_space)
 
         if not owner_actor.can_delete_websites():
@@ -147,7 +149,7 @@ class WebsiteCRUDService:
             website_id=id, owner_space_id=owner_space.id
         )
 
-    async def crawl_website(self, id: UUID) -> bool:
+    async def crawl_website(self, id: UUID) -> "CrawlRun":
         space = await self.space_service.get_space_by_website(id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
@@ -167,7 +169,7 @@ class WebsiteCRUDService:
                 raise CrawlAlreadyRunningException()
             # Job was stale and preempted, proceed with new crawl
 
-        return await self.crawl_service.crawl(website=website)  # type: ignore[return-value]
+        return await self.crawl_service.crawl(website=website)
 
     async def _try_preempt_stale_job(self, website: Website) -> bool:
         """Check if existing crawl job is stale and preempt it if so.

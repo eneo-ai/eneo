@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from starlette.responses import Response
 from starlette.types import ASGIApp
+from typing_extensions import override
 
 from intric.main.request_context import clear_request_context, set_request_context
 
@@ -15,7 +19,12 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp):
         super().__init__(app)
 
-    async def dispatch(self, request: Request, call_next):
+    @override
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
         clear_request_context()
         correlation_id = request.headers.get("x-correlation-id") or request.headers.get(
             "x-request-id"

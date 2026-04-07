@@ -32,6 +32,7 @@ class RetentionService:
     """Service for managing audit log retention policies."""
 
     def __init__(self, session: AsyncSession):
+        super().__init__()
         self.session = session
 
     async def get_policy(self, tenant_id: UUID) -> RetentionPolicyModel:

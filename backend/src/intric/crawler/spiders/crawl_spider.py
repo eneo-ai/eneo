@@ -14,8 +14,8 @@ class CrawlSpider(scrapy.spiders.CrawlSpider):  # type: ignore[attr-defined]
     def __init__(
         self,
         url: str,
-        http_user: str = None,
-        http_pass: str = None,
+        http_user: str | None = None,
+        http_pass: str | None = None,
         *args,
         **kwargs,
     ):

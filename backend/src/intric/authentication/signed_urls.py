@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import json
 import time
-from typing import Optional
+from typing import Any
 from uuid import UUID
 
 from intric.files.file_models import ContentDisposition
@@ -39,7 +39,7 @@ def generate_signed_token(
     return f"{message}.{signature_b64}"
 
 
-def verify_signed_token(token: str) -> Optional[dict]:
+def verify_signed_token(token: str) -> dict[str, Any] | None:
     """Verify a signed token and return the payload if valid."""
     try:
         # Split the token into message and signature parts

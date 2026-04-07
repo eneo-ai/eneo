@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from intric.main.exceptions import BadRequestException
@@ -27,18 +28,19 @@ class AssistantTemplate:
         created_at: "datetime",
         updated_at: "datetime",
         completion_model: "CompletionModelPublic",
-        completion_model_kwargs: dict,
+        completion_model_kwargs: dict[str, object],
         wizard: "AssistantTemplateWizard",
         organization: str,
         tenant_id: Optional["UUID"] = None,
         deleted_at: Optional["datetime"] = None,
-        original_snapshot: Optional[dict] = None,
+        original_snapshot: Optional[dict[str, object]] = None,
         deleted_by_user_id: Optional["UUID"] = None,
         restored_by_user_id: Optional["UUID"] = None,
         restored_at: Optional["datetime"] = None,
         is_default: bool = False,
         icon_name: Optional[str] = None,
     ):
+        super().__init__()
         self.id = id
         self.name = name
         self.description = description
@@ -105,7 +107,7 @@ class AssistantTemplate:
         return self.tenant_id is None
 
     @classmethod
-    def create_snapshot(cls, template_data: dict) -> dict:
+    def create_snapshot(cls, template_data: dict[str, object]) -> dict[str, object]:
         """Create original_snapshot from template data for rollback functionality.
 
         Args:
@@ -128,13 +130,10 @@ class AssistantTemplate:
             else None,
         }
 
-        # Add created_at if available (should be datetime object)
         created_at = template_data.get("created_at")
-        if created_at is not None:
-            # Convert to ISO format string if datetime object
-            if hasattr(created_at, "isoformat"):
-                snapshot["created_at"] = created_at.isoformat()
-            else:
-                snapshot["created_at"] = created_at
+        if isinstance(created_at, datetime):
+            snapshot["created_at"] = created_at.isoformat()
+        elif created_at is not None:
+            snapshot["created_at"] = created_at
 
         return snapshot

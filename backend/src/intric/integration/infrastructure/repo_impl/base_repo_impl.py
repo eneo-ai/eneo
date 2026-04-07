@@ -1,4 +1,5 @@
-from typing import TYPE_CHECKING, Generic, Type, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Type, TypeVar, cast
+from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.future import select
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
 
 T = TypeVar("T", bound=Entity)
 DB = TypeVar("DB", bound=BasePublic)
-M = TypeVar("M", bound=EntityMapper)
+M = TypeVar("M", bound=EntityMapper[Any, Any])
 
 
 class BaseRepoImpl(Generic[T, DB, M]):
@@ -26,7 +27,7 @@ class BaseRepoImpl(Generic[T, DB, M]):
 
         self._options = []
 
-    async def query(self, **filters) -> list[T]:
+    async def query(self, **filters: object) -> list[T]:
         if not filters:
             return []
 
@@ -39,7 +40,9 @@ class BaseRepoImpl(Generic[T, DB, M]):
 
         return self.mapper.to_entities(result)
 
-    async def one_or_none(self, id: "UUID | None" = None, **filters) -> T | None:
+    async def one_or_none(
+        self, id: "UUID | None" = None, **filters: object
+    ) -> T | None:
         if not filters:
             if id is None:
                 raise ValueError("No filter is specified")
@@ -53,7 +56,7 @@ class BaseRepoImpl(Generic[T, DB, M]):
 
         return self.mapper.to_entity(record)
 
-    async def one(self, id: "UUID | None" = None, **filters) -> T:
+    async def one(self, id: "UUID | None" = None, **filters: object) -> T:
         entity = await self.one_or_none(id=id, **filters)
         if not entity:
             raise NotFoundException(f"{self._db_model.__name__} not found")
@@ -66,7 +69,7 @@ class BaseRepoImpl(Generic[T, DB, M]):
         result = await self.session.execute(query)
         _record = result.scalar_one()
 
-        return await self.one(id=_record.id)
+        return await self.one(id=cast(UUID, _record.id))
 
     async def update(self, obj: T) -> T:
         assert not obj.is_new
@@ -82,13 +85,14 @@ class BaseRepoImpl(Generic[T, DB, M]):
         result = await self.session.execute(query)
         _record = result.scalar_one()
 
-        return await self.one(id=_record.id)
+        return await self.one(id=cast(UUID, _record.id))
 
-    async def delete(self, id: "UUID") -> None:
+    async def delete(self, id: "UUID") -> bool:
         stmt = sa.delete(self._db_model).where(self._db_model.id == id)
-        await self.session.execute(stmt)
+        result = await self.session.execute(stmt)
+        return (result.rowcount or 0) > 0
 
-    async def lookup(self, keys: list) -> list[Entity]:
+    async def lookup(self, keys: list[UUID]) -> list[Entity]:
         if not keys:
             return []
 

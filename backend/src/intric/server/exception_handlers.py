@@ -1,11 +1,18 @@
 import logging
+from typing import Protocol, cast
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from intric.main.exceptions import EXCEPTION_MAP, UnauthorizedException
+from intric.main.exceptions import EXCEPTION_MAP, ErrorCodes, UnauthorizedException
 from intric.main.models import GeneralError
 from intric.main.request_context import get_request_context
+
+
+class ExceptionContext(Protocol):
+    context: dict[str, object] | None
+    details: dict[str, object] | None
+    code: str | None
 
 
 def _default_message_for_status(status_code: int) -> str:
@@ -24,7 +31,7 @@ def _default_message_for_status(status_code: int) -> str:
     return "Request failed."
 
 
-def _extract_request_id(request) -> str | None:
+def _extract_request_id(request: Request) -> str | None:
     request_id = request.headers.get("x-correlation-id") or request.headers.get(
         "x-request-id"
     )
@@ -38,7 +45,8 @@ def _exception_context(
     status_code: int,
     exc: Exception,
 ) -> dict[str, object] | None:
-    context = getattr(exc, "context", None)
+    typed_exc = cast(ExceptionContext, exc)
+    context = typed_exc.context
     if isinstance(context, dict):
         result = dict(context)
     else:
@@ -60,18 +68,18 @@ def add_exception_handlers(app: FastAPI):
     for exception, (status_code, error_message, error_code) in EXCEPTION_MAP.items():
 
         def handler(
-            request,
-            exc,
-            status_code=status_code,
-            error_message=error_message,
-            error_code=error_code,
-        ):
+            request: Request,
+            exc: Exception,
+            status_code: int = status_code,
+            error_message: str | None = error_message,
+            error_code: ErrorCodes = error_code,
+        ) -> JSONResponse:
             message = error_message or str(exc)
             if not message or not message.strip():
                 message = _default_message_for_status(status_code)
             request_id = _extract_request_id(request)
             context = _exception_context(status_code=status_code, exc=exc)
-            details = getattr(exc, "details", None)
+            details = cast(ExceptionContext, exc).details
             if not isinstance(details, dict) or len(details) == 0:
                 details = None
 

@@ -49,7 +49,7 @@ class Oauth2Service:
         self,
         tenant_integration_id: "UUID",
         state: str | None = None,
-    ) -> dict:
+    ) -> dict[str, str]:
         tenant_integration = await self.tenant_integration_repo.one(
             id=tenant_integration_id
         )
@@ -63,7 +63,7 @@ class Oauth2Service:
                 state, tenant_id=tenant_integration.tenant_id
             )
         if integration_type == IntegrationType.Confluence.value:
-            return self.confluence_auth_service.gen_auth_url(state)
+            return await self.confluence_auth_service.gen_auth_url(state)
 
         raise BadRequestException("Invalid integration type")
 

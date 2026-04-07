@@ -46,6 +46,7 @@ class ApiKeyLifecycleService:
         audit_service: "AuditService | None",
         user: "UserInDB | None" = None,
     ):
+        super().__init__()
         self.api_key_repo = api_key_repo
         self.policy_service = policy_service
         self.audit_service = audit_service

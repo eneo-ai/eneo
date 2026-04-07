@@ -158,6 +158,7 @@ class ApiKeyAuthResolver:
         legacy_repo: ApiKeysRepository,
         audit_service: "AuditService | None",
     ):
+        super().__init__()
         self.api_key_repo = api_key_repo
         self.legacy_repo = legacy_repo
         self.audit_service = audit_service

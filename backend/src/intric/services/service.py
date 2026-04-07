@@ -24,12 +24,13 @@ from intric.info_blobs.info_blob import (
     InfoBlobPublic,
 )
 from intric.main.models import InDB, ModelId, ResourcePermissionsMixin, partial_model
+from intric.services.output_parsing.pydantic_model_factory import JSONSchemaDefinition
 from intric.users.user import UserInDBBase, UserPublicBase
 
 
 class OutputValidation(BaseModel):
     output_format: Optional[Literal["json", "list", "boolean"]] = None
-    json_schema: Optional[dict] = None
+    json_schema: Optional[JSONSchemaDefinition] = None
 
     @model_validator(mode="after")
     def require_json_schema_if_output_format_is_json(self):
@@ -71,7 +72,7 @@ class ServiceUpdate(ServiceCreate):
 
 
 class ServiceInDBBase(InDB, ServiceBase):
-    tenant_id: UUID = Field(validation_alias=AliasPath(["user", "tenant_id"]))
+    tenant_id: UUID = Field(validation_alias=AliasPath("user", "tenant_id"))
 
 
 class Service(InDB, ServiceBase, ResourcePermissionsMixin):
@@ -114,7 +115,7 @@ class ServiceOutput(BaseModel):
 class ServiceRun(BaseModel):
     id: UUID
     input: str
-    output: dict | list | str
+    output: dict[str, object] | list[object] | str
     completion_model: CompletionModelPublic
     references: list[InfoBlobPublic]
 
@@ -126,7 +127,7 @@ class DatastoreResult(BaseModel):
 
 
 class RunnerResult(BaseModel):
-    result: bool | list | dict | str
+    result: bool | list[object] | dict[str, object] | str
     datastore_result: DatastoreResult
     files: list[FilePublic] = []
 
@@ -135,6 +136,7 @@ class ServiceSparse(ResourcePermissionsMixin, ServiceBase, InDB):
     user_id: UUID
 
 
-class CreateSpaceService(ServiceCreate):
+class CreateSpaceService(ServiceBase):
+    user_id: UUID
     space_id: UUID
     completion_model_id: Optional[UUID] = None

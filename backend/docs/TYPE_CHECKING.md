@@ -5,16 +5,16 @@ Pyright is the source of truth for backend type checking. We do not run `mypy` i
 ## Current Policy
 
 - Global config uses `standard` mode from `backend/pyrightconfig.json`.
-- A small legacy backlog still remains as warnings globally:
-  - `reportArgumentType`
-  - `reportGeneralTypeIssues`
-  - `reportIncompatibleMethodOverride`
-  - `reportIncompatibleVariableOverride`
-  - `reportPossiblyUnboundVariable`
-  - `reportUnknownVariableType`
+- Global config also enables a broad warning baseline for type-related diagnostics that are disabled by default in `standard`, including:
+  - missing and unknown parameter, argument, member, lambda, and variable types
+  - missing generic type arguments
+  - assignment, return, operator, index, overload, and optional-access issues
+  - untyped decorators and base classes
+  - `TypedDict` unsafe access, uninitialized instance attributes, and missing `super()` calls
+  - match exhaustiveness, unnecessary casts/comparisons, and default-initializer call checks
 - Selected backend modules are enforced with real Pyright `strict` mode through the `strict` path list in `backend/pyrightconfig.json`.
 - New modules should be added to the `strict` list as soon as they are clean enough to carry it.
-- `reportUnknownArgumentType` and `reportUnknownMemberType` are intentionally not enabled globally yet because they currently explode into downstream follow-on noise. Fix the sources first, then enable the downstream rules.
+- The current policy is intentional backlog visibility: the repo should show the real typing debt as warnings rather than hiding it behind disabled rules.
 
 ## What It Checks
 
@@ -59,7 +59,7 @@ Install the VS Code Pylance extension. It uses the same engine as Pyright and re
 
 - Add explicit return types on public router, service, repository, and adapter methods.
 - Keep `Unknown` from leaking across boundaries. Prefer `TypedDict`, Pydantic models, or narrow casts at integration edges.
-- Treat `reportUnknownVariableType` warnings as backlog to eliminate, not as acceptable steady-state noise.
+- Treat all type warnings as backlog to eliminate, not as acceptable steady-state noise.
 - Use SQLAlchemy 2.0 typed patterns (`Mapped[...]`, `mapped_column()`) when touching ORM models.
 - Use `# pyright: ignore[...]` only with a specific rule and only when the escape hatch is justified.
 - When you clean up a module enough that it passes strict, add its path to the `strict` list in `backend/pyrightconfig.json`.

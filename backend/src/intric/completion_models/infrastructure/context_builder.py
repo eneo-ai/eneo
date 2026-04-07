@@ -1,7 +1,10 @@
 import json
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import Optional, Protocol, Sequence
+from uuid import UUID
+
+from typing_extensions import override
 
 from intric.ai_models.completion_models.completion_model import (
     Context,
@@ -20,18 +23,25 @@ from intric.tokens.token_utils import (
     count_tokens,  # noqa: F401 — re-exported for external callers
 )
 
-if TYPE_CHECKING:
-    from uuid import UUID
-
-    from intric.completion_models.infrastructure.web_search import WebSearchResult
-    from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
-
 MIN_PERCENTAGE_KNOWLEDGE = (
     0.8  # Strive towards a minimum of 80% of the context as knowledge
 )
 
 
-def _build_files_string(files: list[File]):
+class _InfoBlobChunkLike(Protocol):
+    text: str
+    chunk_no: int
+    info_blob_id: UUID
+    info_blob_title: str | None
+
+
+class _InformationChunkLike(Protocol):
+    id: UUID
+    title: str
+    content: str
+
+
+def _build_files_string(files: list[File]) -> str:
     if files:
         # Use json.dumps() to properly escape special characters in filenames and text
         # This prevents broken JSON if the content contains quotes or other special chars
@@ -52,27 +62,29 @@ def _build_files_string(files: list[File]):
 
 @dataclass
 class ChunkGrouping:
-    id: "UUID"
+    id: UUID
     title: str
     start_chunk: int
     end_chunk: int
     content: str
     chunk_count: int
-    relevance_score: Optional[float] = None
+    relevance_score: float = 0.0
 
 
 class _Prompt:
     def __init__(self, version: int = 1, model_name: str = ""):
-        self.prompt = None
-        self.knowledge = None
-        self.web_search_result = None
-        self.attachments = None
-        self._knowledge_tokens = 0
-        self.version = version
-        self.model_name = model_name
+        super().__init__()
+        self.prompt: str | None = None
+        self.knowledge: str | None = None
+        self.web_search_result: str | None = None
+        self.attachments: str | None = None
+        self._knowledge_tokens: int = 0
+        self.version: int = version
+        self.model_name: str = model_name
 
+    @override
     def __str__(self):
-        components = []
+        components: list[str] = []
 
         if self.prompt:
             components.append(self.prompt)
@@ -98,7 +110,7 @@ class _Prompt:
         return "\n\n".join(components)
 
     @staticmethod
-    def _common_overlap(text1: str, text2: str):
+    def _common_overlap(text1: str, text2: str) -> int:
         # Cache the text lengths to prevent multiple calls.
         text1_length = len(text1)
         text2_length = len(text2)
@@ -128,7 +140,7 @@ class _Prompt:
                 best = length
                 length += 1
 
-    def _join_overlapping_text(self, chunks: list["InfoBlobChunkInDBWithScore"]):
+    def _join_overlapping_text(self, chunks: list[_InfoBlobChunkLike]) -> str:
         if not chunks:
             return ""
 
@@ -146,14 +158,14 @@ class _Prompt:
 
     def _reconstruct_and_order_chunks(
         self,
-        chunks: list["InfoBlobChunkInDBWithScore"],
+        chunks: list[_InfoBlobChunkLike],
         max_tokens: int,
-    ):
+    ) -> str:
         # Create a dictionary to store chunk indices
         chunk_indices = {id(chunk): i for i, chunk in enumerate(chunks)}
 
         # Group chunks by info_blob
-        chunks_by_info_blob = {}
+        chunks_by_info_blob: dict[UUID, list[_InfoBlobChunkLike]] = {}
         used_tokens = 0
         for chunk in chunks:
             chunk_tokens = count_tokens(chunk.text, self.model_name)
@@ -179,8 +191,8 @@ class _Prompt:
         self._knowledge_tokens = used_tokens
 
         # Process each document
-        chunk_groupings = []
-        grouping_scores = defaultdict(float)
+        chunk_groupings: list[ChunkGrouping] = []
+        grouping_scores: defaultdict[int, float] = defaultdict(float)
 
         for doc_id, doc_chunks in chunks_by_info_blob.items():
             # Edgecase if the first chunk of a new info-blob is the cutoff point
@@ -191,8 +203,8 @@ class _Prompt:
             doc_chunks.sort(key=lambda x: x.chunk_no)
 
             # Group coherent chunks
-            coherent_groups = []
-            current_group = [doc_chunks[0]]
+            coherent_groups: list[list[_InfoBlobChunkLike]] = []
+            current_group: list[_InfoBlobChunkLike] = [doc_chunks[0]]
 
             for i in range(1, len(doc_chunks)):
                 if doc_chunks[i].chunk_no == current_group[-1].chunk_no + 1:
@@ -209,7 +221,7 @@ class _Prompt:
 
                 chunk_grouping = ChunkGrouping(
                     id=doc_id,
-                    title=group[0].info_blob_title,
+                    title=group[0].info_blob_title or "",
                     start_chunk=group[0].chunk_no,
                     end_chunk=group[-1].chunk_no,
                     content=full_text,
@@ -217,7 +229,7 @@ class _Prompt:
                 )
 
                 # Calculate score based on the position of chunks in the original input
-                score = sum(1 / (chunk_indices[id(chunk)] + 1) for chunk in group)
+                score = sum(1.0 / (chunk_indices[id(chunk)] + 1) for chunk in group)
                 grouping_scores[id(chunk_grouping)] = score
 
                 chunk_groupings.append(chunk_grouping)
@@ -236,10 +248,14 @@ class _Prompt:
         elif self.version == 2:
             return self._create_information_string(information_chunks=chunk_groupings)
 
+        raise ValueError(f"Unsupported prompt version: {self.version}")
+
     @staticmethod
     def _create_information_string(
-        information_chunks: list[ChunkGrouping] | list["WebSearchResult"] = [],
-    ):
+        information_chunks: Sequence[_InformationChunkLike] | None = None,
+    ) -> str:
+        if information_chunks is None:
+            information_chunks = []
         if not information_chunks:
             return ""
 
@@ -253,45 +269,46 @@ class _Prompt:
         )
 
     @property
-    def num_tokens(self):
+    def num_tokens(self) -> int:
         return count_tokens(str(self), self.model_name)
 
-    def add_prompt(
-        self,
-        prompt: str,
-        transcription: bool,
-    ):
+    def add_prompt(self, prompt: str, transcription: bool) -> None:
         if transcription and not prompt:
             prompt = TRANSCRIPTION_PROMPT
 
         self.prompt = prompt
 
-    def add_web_search_result(self, web_search_results: list["WebSearchResult"] = []):
+    def add_web_search_result(
+        self, web_search_results: Sequence[_InformationChunkLike] | None = None
+    ) -> None:
+        if web_search_results is None:
+            web_search_results = []
         self.web_search_result = self._create_information_string(
             information_chunks=web_search_results
         )
 
     def add_knowledge(
-        self, chunks: list["InfoBlobChunkInDBWithScore"], max_tokens: int
-    ):
+        self, chunks: Sequence[_InfoBlobChunkLike], max_tokens: int
+    ) -> None:
         if not chunks:
             return
 
+        chunk_list = list(chunks)
         self.knowledge = self._reconstruct_and_order_chunks(
-            chunks=chunks,
+            chunks=chunk_list,
             max_tokens=max_tokens - self.num_tokens,
         )
 
-    def add_attachments(self, files: list[File]):
+    def add_attachments(self, files: list[File]) -> None:
         self.attachments = _build_files_string(files=files)
 
-    def get_tokens_of_knowledge(self):
+    def get_tokens_of_knowledge(self) -> int:
         return self._knowledge_tokens
 
 
 class ContextBuilder:
     @staticmethod
-    def _functions():
+    def _functions() -> list[FunctionDefinition]:
         return [
             FunctionDefinition(
                 name="generate_image",
@@ -315,9 +332,13 @@ class ContextBuilder:
     def _build_input(
         self,
         input_str: str,
-        files: list[File] = [],
-        transcription_inputs: list[str] = [],
-    ):
+        files: list[File] | None = None,
+        transcription_inputs: list[str] | None = None,
+    ) -> str:
+        if files is None:
+            files = []
+        if transcription_inputs is None:
+            transcription_inputs = []
         if files:
             files_string = _build_files_string(files)
             input_str = f"{files_string}\n\n{input_str}"
@@ -334,7 +355,7 @@ class ContextBuilder:
         return input_str.strip()
 
     @staticmethod
-    def _get_files_by_type(files: list[File], file_type: FileType):
+    def _get_files_by_type(files: list[File], file_type: FileType) -> list[File]:
         return [file for file in files if file.file_type == file_type]
 
     def _build_messages(
@@ -343,11 +364,11 @@ class ContextBuilder:
         max_tokens: int,
         min_len: int = 3,
         model_name: str = "",
-    ):
+    ) -> tuple[list[Message], int]:
         if session is None:
             return [], 0
 
-        messages = []
+        messages: list[Message] = []
         total_tokens = 0
 
         for message in reversed(session.questions):
@@ -388,17 +409,29 @@ class ContextBuilder:
         *,
         max_tokens: int,
         model_name: str = "",
-        files: list[File] = [],
+        files: list[File] | None = None,
         prompt: str = "",
-        prompt_files: list[File] = [],
-        transcription_inputs: list[str] = [],
-        info_blob_chunks: list["InfoBlobChunkInDBWithScore"] = [],
+        prompt_files: list[File] | None = None,
+        transcription_inputs: list[str] | None = None,
+        info_blob_chunks: Sequence[_InfoBlobChunkLike] | None = None,
         session: Optional[SessionInDB] = None,
         version: int = 1,
         use_image_generation: bool = False,
-        web_search_results: list["WebSearchResult"] = [],
-        mcp_tools: list[FunctionDefinition] = [],
-    ):
+        web_search_results: Sequence[_InformationChunkLike] | None = None,
+        mcp_tools: list[FunctionDefinition] | None = None,
+    ) -> Context:
+        if files is None:
+            files = []
+        if prompt_files is None:
+            prompt_files = []
+        if transcription_inputs is None:
+            transcription_inputs = []
+        if info_blob_chunks is None:
+            info_blob_chunks = []
+        if web_search_results is None:
+            web_search_results = []
+        if mcp_tools is None:
+            mcp_tools = []
         tokens_used = 0
 
         # Create the input, count the tokens.
@@ -456,7 +489,7 @@ class ContextBuilder:
         tokens_used += _prompt.get_tokens_of_knowledge()
 
         # Combine image generation tools with MCP tools
-        functions = []
+        functions: list[FunctionDefinition] = []
         if use_image_generation:
             functions.extend(self._functions())
         functions.extend(mcp_tools)

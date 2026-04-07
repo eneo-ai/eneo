@@ -8,6 +8,8 @@ from intric.templates.assistant_template.api.assistant_template_models import (
 )
 
 router = APIRouter()
+WITH_USER_CONTAINER = get_container(with_user=True)
+USER_CONTAINER = Depends(WITH_USER_CONTAINER)
 
 
 @router.get(
@@ -32,7 +34,7 @@ Returns paginated list of templates with basic information for gallery display.
     responses=responses.get_responses([401]),
     response_model_exclude_none=True,
 )
-async def get_templates(container: Container = Depends(get_container(with_user=True))):
+async def get_templates(container: Container = USER_CONTAINER):
     """
     Get assistant templates for gallery.
 

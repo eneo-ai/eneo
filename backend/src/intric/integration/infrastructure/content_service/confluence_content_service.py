@@ -5,7 +5,7 @@ import aiohttp
 
 from intric.embedding_models.infrastructure.datastore import Datastore
 from intric.info_blobs.info_blob import InfoBlobAdd
-from intric.integration.domain.entities.oauth_token import ConfluenceToken
+from intric.integration.domain.entities.oauth_token import ConfluenceToken, OauthToken
 from intric.integration.infrastructure.clients.confluence_content_client import (
     ConfluenceContentClient,
 )
@@ -59,7 +59,9 @@ class ConfluenceContentService:
         space_key: str,
         integration_knowledge_id: UUID,
     ):
-        token = await self.oauth_token_repo.one(id=token_id)
+        token = self._require_confluence_token(
+            await self.oauth_token_repo.one(id=token_id)
+        )
 
         async def fetch_space_content(
             token: "ConfluenceToken", start: int, space_key: str
@@ -79,8 +81,10 @@ class ConfluenceContentService:
                     token=token, start=start, space_key=space_key
                 )
             except aiohttp.ClientResponseError:
-                token = await self.oauth_token_service.refresh_and_update_token(
-                    token_id=token.id
+                token = self._require_confluence_token(
+                    await self.oauth_token_service.refresh_and_update_token(
+                        token_id=token.id
+                    )
                 )
                 content = await fetch_space_content(
                     token=token, start=start, space_key=space_key
@@ -132,3 +136,9 @@ class ConfluenceContentService:
 
         integration_knowledge.size = integration_knowledge_size
         await self.integration_knowledge_repo.update(obj=integration_knowledge)
+
+    @staticmethod
+    def _require_confluence_token(token: OauthToken) -> ConfluenceToken:
+        if not isinstance(token, ConfluenceToken):
+            raise ValueError("Expected a Confluence token")
+        return token

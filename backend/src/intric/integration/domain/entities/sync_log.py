@@ -3,6 +3,7 @@ from typing import Optional
 from uuid import UUID
 
 from intric.base.base_entity import Entity
+from intric.integration.infrastructure.content_service.types import SyncMetadata
 
 
 class SyncLog(Entity):
@@ -20,7 +21,7 @@ class SyncLog(Entity):
         folders_processed: int = 0,
         skipped_items: int = 0,
         error_message: Optional[str] = None,
-        metadata: Optional[dict] = None,
+        metadata: SyncMetadata | None = None,
         completed_at: Optional[datetime] = None,
         id: Optional[UUID] = None,
         created_at: Optional[datetime] = None,
@@ -35,7 +36,7 @@ class SyncLog(Entity):
         self.completed_at = completed_at
 
         # Initialize metadata with count fields
-        self.metadata = metadata or {}
+        self.metadata: SyncMetadata = metadata or {}
         self.metadata.setdefault("files_processed", files_processed)
         self.metadata.setdefault("files_deleted", files_deleted)
         self.metadata.setdefault("pages_processed", pages_processed)
@@ -45,7 +46,7 @@ class SyncLog(Entity):
     @property
     def files_processed(self) -> int:
         """Get files_processed from metadata."""
-        return self.metadata.get("files_processed", 0)
+        return int(self.metadata.get("files_processed", 0))
 
     @files_processed.setter
     def files_processed(self, value: int) -> None:
@@ -55,7 +56,7 @@ class SyncLog(Entity):
     @property
     def files_deleted(self) -> int:
         """Get files_deleted from metadata."""
-        return self.metadata.get("files_deleted", 0)
+        return int(self.metadata.get("files_deleted", 0))
 
     @files_deleted.setter
     def files_deleted(self, value: int) -> None:
@@ -65,7 +66,7 @@ class SyncLog(Entity):
     @property
     def pages_processed(self) -> int:
         """Get pages_processed from metadata."""
-        return self.metadata.get("pages_processed", 0)
+        return int(self.metadata.get("pages_processed", 0))
 
     @pages_processed.setter
     def pages_processed(self, value: int) -> None:
@@ -75,7 +76,7 @@ class SyncLog(Entity):
     @property
     def folders_processed(self) -> int:
         """Get folders_processed from metadata."""
-        return self.metadata.get("folders_processed", 0)
+        return int(self.metadata.get("folders_processed", 0))
 
     @folders_processed.setter
     def folders_processed(self, value: int) -> None:
@@ -85,7 +86,7 @@ class SyncLog(Entity):
     @property
     def skipped_items(self) -> int:
         """Get skipped_items from metadata."""
-        return self.metadata.get("skipped_items", 0)
+        return int(self.metadata.get("skipped_items", 0))
 
     @skipped_items.setter
     def skipped_items(self, value: int) -> None:

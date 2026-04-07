@@ -18,6 +18,8 @@ from intric.templates.assistant_template.api.assistant_template_models import (
 )
 
 router = APIRouter(prefix="/admin/templates/assistants", tags=["admin-templates"])
+WITH_USER_CONTAINER = get_container(with_user=True)
+USER_CONTAINER = Depends(WITH_USER_CONTAINER)
 
 
 @router.get(
@@ -39,7 +41,7 @@ Use this endpoint for the admin template management page.
     """,
     responses=responses.get_responses([401, 403]),
 )
-async def list_templates(container: Container = Depends(get_container(with_user=True))):
+async def list_templates(container: Container = USER_CONTAINER):
     """List all active assistant templates for the tenant with usage counts."""
     service = container.assistant_template_service()
     user = container.user()
@@ -119,7 +121,7 @@ Create a new assistant template for your tenant.
 )
 async def create_template(
     data: AssistantTemplateAdminCreate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """Create a new assistant template for the tenant."""
     service = container.assistant_template_service()

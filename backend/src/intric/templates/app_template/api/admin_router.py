@@ -18,6 +18,8 @@ from intric.templates.app_template.api.app_template_models import (
 )
 
 router = APIRouter(prefix="/admin/templates/apps", tags=["admin-templates"])
+WITH_USER_CONTAINER = get_container(with_user=True)
+USER_CONTAINER = Depends(WITH_USER_CONTAINER)
 
 
 @router.get(
@@ -28,7 +30,7 @@ router = APIRouter(prefix="/admin/templates/apps", tags=["admin-templates"])
     description="Returns all active app templates for your tenant (admin only)",
     responses=responses.get_responses([401, 403]),
 )
-async def list_templates(container: Container = Depends(get_container(with_user=True))):
+async def list_templates(container: Container = USER_CONTAINER):
     """List all active app templates for the tenant with usage counts."""
     service = container.app_template_service()
     user = container.user()
@@ -111,7 +113,7 @@ Create a new app template for your tenant.
 )
 async def create_template(
     data: AppTemplateAdminCreate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """Create a new app template for the tenant."""
     service = container.app_template_service()

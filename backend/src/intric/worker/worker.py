@@ -5,7 +5,7 @@ import inspect
 import os
 from datetime import datetime, timezone
 from functools import wraps
-from typing import Callable
+from typing import Any, Callable, cast
 from uuid import UUID
 
 import crochet
@@ -15,7 +15,7 @@ from dependency_injector import providers
 
 from intric.database.database import AsyncSession, sessionmanager
 from intric.jobs.task_models import ResourceTaskParams
-from intric.main.config import get_settings
+from intric.main.config import Settings, get_settings
 from intric.main.container.container import Container, SessionProxy
 from intric.main.container.container_overrides import override_user
 from intric.main.logging import get_logger
@@ -26,8 +26,17 @@ from intric.worker.task_manager import TaskManager, WorkerConfig
 
 logger = get_logger(__name__)
 
+ARQContext = dict[str, object]
 
-def _log_startup_diagnostics(settings) -> None:
+
+def _job_id_from_ctx(ctx: ARQContext) -> UUID | None:
+    job_id = cast(UUID | str | None, ctx.get("job_id"))
+    if job_id is None:
+        return None
+    return job_id if isinstance(job_id, UUID) else UUID(str(job_id))
+
+
+def _log_startup_diagnostics(settings: Settings) -> None:
     """Log effective worker settings and detect common env var typos.
 
     Why: Prevents config drift and helps diagnose issues caused by
@@ -43,7 +52,7 @@ def _log_startup_diagnostics(settings) -> None:
     ]
 
     # Check for typos in environment
-    typos_found = []
+    typos_found: list[str] = []
     for typo, correct in typo_checks:
         if typo in os.environ:
             typos_found.append(f"{typo} (should be {correct})")
@@ -129,9 +138,10 @@ class Worker:
     """
 
     def __init__(self):
+        super().__init__()
         settings = get_settings()
-        self.functions = []
-        self.cron_jobs = []
+        self.functions: list[Callable[..., Any]] = []
+        self.cron_jobs: list[Any] = []
         self.redis_settings = build_arq_redis_settings(settings)
         self.on_startup = self.startup
         self.on_shutdown = self.shutdown
@@ -162,7 +172,7 @@ class Worker:
         # after_job_end is safe - runs AFTER job completes, no CAS conflict
         self.after_job_end = self._after_job_end
 
-    async def _on_job_start(self, ctx: dict) -> None:
+    async def _on_job_start(self, ctx: ARQContext) -> None:
         """ARQ hook: Called before each job starts.
 
         Updates job status to IN_PROGRESS in the database.
@@ -171,7 +181,7 @@ class Worker:
         Args:
             ctx: ARQ context containing job_id, job_try, enqueue_time
         """
-        job_id = ctx.get("job_id")
+        job_id = _job_id_from_ctx(ctx)
         if not job_id:
             return
 
@@ -184,7 +194,7 @@ class Worker:
                     # Use direct SQL to avoid session lifecycle issues
                     stmt = (
                         sa.update(Jobs)
-                        .where(Jobs.id == UUID(job_id))
+                        .where(Jobs.id == job_id)
                         .values(
                             status=Status.IN_PROGRESS.value,
                             updated_at=datetime.now(timezone.utc),
@@ -194,16 +204,16 @@ class Worker:
 
             logger.debug(
                 "Job started (ARQ hook)",
-                extra={"job_id": job_id, "job_try": ctx.get("job_try", 1)},
+                extra={"job_id": str(job_id), "job_try": ctx.get("job_try", 1)},
             )
         except Exception as exc:
             # Don't fail the job if status update fails
             logger.warning(
                 "Failed to update job status on start",
-                extra={"job_id": job_id, "error": str(exc)},
+                extra={"job_id": str(job_id), "error": str(exc)},
             )
 
-    async def _after_job_end(self, ctx: dict) -> None:
+    async def _after_job_end(self, ctx: ARQContext) -> None:
         """ARQ hook: Called after each job ends AND result is recorded.
 
         This is the final hook in the job lifecycle. The job's actual status
@@ -213,7 +223,7 @@ class Worker:
         Args:
             ctx: ARQ context containing job_id, result, and any exception
         """
-        job_id = ctx.get("job_id")
+        job_id = _job_id_from_ctx(ctx)
         if not job_id:
             return
 
@@ -222,7 +232,7 @@ class Worker:
         logger.debug(
             "Job ended (ARQ hook)",
             extra={
-                "job_id": job_id,
+                "job_id": str(job_id),
                 "job_try": ctx.get("job_try", 1),
                 "success": not isinstance(result, Exception),
             },
@@ -241,19 +251,22 @@ class Worker:
     async def _override_user(self, container: Container, user_id: UUID):
         user_repo = container.user_repo()
         user = await user_repo.get_user_by_id(id=user_id)
+        assert user is not None
         override_user(container=container, user=user)
 
-    def _get_kwargs(self, func: Callable, task_manager: TaskManager):
+    def _get_kwargs(
+        self, func: Callable[..., Any], task_manager: TaskManager
+    ) -> dict[str, Any]:
         sig = inspect.signature(func)
         parameters = {k for k in sig.parameters if k not in {"params", "container"}}
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
 
         if "worker_config" in parameters:
             kwargs["worker_config"] = WorkerConfig(task_manager=task_manager)
 
         return kwargs
 
-    async def startup(self, ctx):
+    async def startup(self, ctx: ARQContext) -> None:
         await lifespan.startup()
         crochet.setup()
 
@@ -292,16 +305,16 @@ class Worker:
                     extra={"feeder_enabled": False},
                 )
 
-    async def shutdown(self, ctx):
+    async def shutdown(self, ctx: ARQContext) -> None:
         # Stop feeder gracefully if running
         # Why: Prevents orphaned background tasks and closes Redis connection
         if "feeder" in ctx:
-            feeder = ctx["feeder"]
+            feeder = cast(Any, ctx["feeder"])
             logger.info("Stopping crawl feeder background task")
             await feeder.stop()  # Gracefully stop and close Redis
 
         if "feeder_task" in ctx:
-            task = ctx["feeder_task"]
+            task = cast(asyncio.Task[Any], ctx["feeder_task"])
             if not task.done():
                 task.cancel()
                 try:
@@ -312,18 +325,23 @@ class Worker:
         await lifespan.shutdown()
 
     def function(self, with_user: bool = True):
-        def decorator(func):
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
-            async def wrapper(*args):
-                ctx, params = args[0], args[1]
+            async def wrapper(ctx: ARQContext, params: object) -> Any:
                 logger.debug(
                     f"Executing {func.__name__} with context {ctx} and params {params}"
                 )
 
                 async with sessionmanager.session() as session, session.begin():
-                    user_id = params.user_id if with_user else None
+                    user_id = (
+                        cast(UUID | None, getattr(params, "user_id", None))
+                        if with_user
+                        else None
+                    )
                     container = await self._create_container(session, user_id=user_id)
-                    return await func(ctx["job_id"], params, container=container)
+                    job_id = _job_id_from_ctx(ctx)
+                    assert job_id is not None
+                    return await func(job_id, params, container=container)
 
             self.functions.append(wrapper)
             return wrapper
@@ -353,10 +371,9 @@ class Worker:
                 # Session returned to pool immediately
         """
 
-        def decorator(func):
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
-            async def wrapper(*args):
-                ctx, params = args[0], args[1]
+            async def wrapper(ctx: ARQContext, params: object) -> Any:
                 logger.debug(
                     f"Executing long-running {func.__name__} with context {ctx}"
                 )
@@ -365,7 +382,8 @@ class Worker:
                 # Pattern: Query ORM → Convert to Pydantic INSIDE session → Return pure Python data
                 # Why: Pydantic model is session-independent, safe to use after session closes
                 user = None
-                if with_user and hasattr(params, "user_id") and params.user_id:
+                params_user_id = cast(UUID | None, getattr(params, "user_id", None))
+                if with_user and params_user_id:
                     async with sessionmanager.session() as session:
                         async with session.begin():
                             # Import here to avoid circular imports at module level
@@ -381,7 +399,7 @@ class Worker:
                             # when Pydantic tries to validate (triggers lazy load in async context).
                             stmt = (
                                 sa.select(Users)
-                                .where(Users.id == params.user_id)
+                                .where(Users.id == params_user_id)
                                 .where(Users.deleted_at.is_(None))  # Soft-delete safety
                                 .options(
                                     selectinload(Users.roles),
@@ -418,11 +436,13 @@ class Worker:
 
                 # PHASE 3: Execute task - NO session held
                 # Task uses Container.session_scope() for DB operations
+                job_id = _job_id_from_ctx(ctx)
                 logger.debug(
                     f"Starting long-running task {func.__name__} (sessionless)",
-                    extra={"job_id": ctx.get("job_id")},
+                    extra={"job_id": str(job_id) if job_id else None},
                 )
-                return await func(ctx["job_id"], params, container=container)
+                assert job_id is not None
+                return await func(job_id, params, container=container)
 
             self.functions.append(wrapper)
             return wrapper
@@ -434,11 +454,9 @@ class Worker:
         with_user: bool = True,
         channel_type: ChannelType | None = None,
     ):
-        def decorator(func):
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
-            async def wrapper(*args):
-                ctx: dict = args[0]
-                params: ResourceTaskParams = args[1]
+            async def wrapper(ctx: ARQContext, params: ResourceTaskParams) -> Any:
                 logger.debug(
                     f"Executing {func.__name__} with context {ctx} and params {params}"
                 )
@@ -447,8 +465,10 @@ class Worker:
                     user_id = params.user_id if with_user else None
                     container = await self._create_container(session, user_id=user_id)
 
+                    job_id = _job_id_from_ctx(ctx)
+                    assert job_id is not None
                     task_manager = container.task_manager(
-                        job_id=ctx["job_id"],
+                        job_id=job_id,
                         resource_id=params.id,
                         channel_type=channel_type,
                     )
@@ -466,10 +486,10 @@ class Worker:
 
         return decorator
 
-    def cron_job(self, **decorator_kwargs):
-        def decorator(func):
+    def cron_job(self, **decorator_kwargs: Any):
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
-            async def wrapper(*args):
+            async def wrapper(ctx: ARQContext) -> Any:
                 logger.debug(f"Executing {func.__name__}")
 
                 async with sessionmanager.session() as session, session.begin():
@@ -482,7 +502,7 @@ class Worker:
 
         return decorator
 
-    def include_subworker(self, sub_worker: Worker):
+    def include_subworker(self, sub_worker: "Worker") -> None:
         self.functions.extend(sub_worker.functions)
         self.cron_jobs.extend(sub_worker.cron_jobs)
 

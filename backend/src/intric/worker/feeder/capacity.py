@@ -6,10 +6,10 @@ Uses Lua scripts for atomic Redis operations to prevent race conditions.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from intric.main.config import get_settings
+from intric.main.config import Settings, get_settings
 from intric.main.logging import get_logger
 from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.worker.redis.lua_scripts import LuaScripts
@@ -34,12 +34,13 @@ class CapacityManager:
     def __init__(
         self,
         redis_client: aioredis.Redis,
-        settings=None,
+        settings: Settings | None = None,
     ) -> None:
+        super().__init__()
         self._redis = redis_client
         self._settings = settings or get_settings()
 
-    async def get_tenant_settings(self, tenant_id: UUID) -> dict | None:
+    async def get_tenant_settings(self, tenant_id: UUID) -> dict[str, Any] | None:
         """Fetch tenant's crawler_settings from the database.
 
         Uses a fresh session to avoid lifecycle issues in long-running services.
@@ -68,7 +69,7 @@ class CapacityManager:
             )
             return None
 
-    def get_max_concurrent(self, tenant_settings: dict | None = None) -> int:
+    def get_max_concurrent(self, tenant_settings: dict[str, Any] | None = None) -> int:
         """Get maximum concurrent jobs limit for a tenant.
 
         Args:
@@ -83,7 +84,7 @@ class CapacityManager:
             default=self._settings.tenant_worker_concurrency_limit,
         )
 
-    def get_slot_ttl(self, tenant_settings: dict | None = None) -> int:
+    def get_slot_ttl(self, tenant_settings: dict[str, Any] | None = None) -> int:
         """Get slot TTL in seconds for a tenant.
 
         Args:
@@ -101,7 +102,7 @@ class CapacityManager:
     async def try_acquire_slot(
         self,
         tenant_id: UUID,
-        tenant_settings: dict | None = None,
+        tenant_settings: dict[str, Any] | None = None,
     ) -> bool:
         """Atomically acquire a concurrency slot for a tenant.
 
@@ -144,7 +145,7 @@ class CapacityManager:
     async def release_slot(
         self,
         tenant_id: UUID,
-        tenant_settings: dict | None = None,
+        tenant_settings: dict[str, Any] | None = None,
     ) -> None:
         """Release a previously acquired slot.
 
@@ -165,7 +166,7 @@ class CapacityManager:
     async def get_available_capacity(
         self,
         tenant_id: UUID,
-        tenant_settings: dict | None = None,
+        tenant_settings: dict[str, Any] | None = None,
     ) -> int:
         """Check available crawl capacity for a tenant (read-only).
 
@@ -204,7 +205,7 @@ class CapacityManager:
         self,
         job_id: UUID,
         tenant_id: UUID,
-        tenant_settings: dict | None = None,
+        tenant_settings: dict[str, Any] | None = None,
     ) -> None:
         """Mark that a slot was pre-acquired for a job.
 
@@ -266,11 +267,14 @@ class CapacityManager:
         tenant_ids: list[UUID] = []
 
         try:
+            redis_client_any: Any = self._redis
             cursor = 0
             while True:
-                cursor, keys = await self._redis.scan(
+                scan_result = await redis_client_any.scan(
                     cursor=cursor, match=pattern, count=100
                 )
+                cursor = int(scan_result[0])
+                keys = scan_result[1]
                 for key_bytes in keys:
                     key = (
                         key_bytes.decode()

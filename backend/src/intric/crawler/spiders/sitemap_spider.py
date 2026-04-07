@@ -12,8 +12,8 @@ class SitemapSpider(scrapy.spiders.SitemapSpider):  # type: ignore[attr-defined]
     def __init__(
         self,
         sitemap_url: str,
-        http_user: str = None,
-        http_pass: str = None,
+        http_user: str | None = None,
+        http_pass: str | None = None,
         *args,
         **kwargs,
     ):

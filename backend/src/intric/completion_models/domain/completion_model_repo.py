@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 class CompletionModelRepository:
     def __init__(self, session: "AsyncSession", user: "UserInDB"):
+        super().__init__()
         self.session = session
         self.user = user
 

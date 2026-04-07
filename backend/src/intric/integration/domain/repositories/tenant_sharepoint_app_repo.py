@@ -12,6 +12,13 @@ class TenantSharePointAppRepository(ABC):
     """Repository for managing tenant SharePoint application credentials."""
 
     @abstractmethod
+    async def one(
+        self, id: UUID | None = None, **filters: object
+    ) -> "TenantSharePointApp":
+        """Get a single SharePoint app configuration or raise if missing."""
+        ...
+
+    @abstractmethod
     async def get_by_tenant(self, tenant_id: UUID) -> "Optional[TenantSharePointApp]":
         """Get the SharePoint app configuration for a tenant.
 
@@ -34,12 +41,12 @@ class TenantSharePointAppRepository(ABC):
         ...
 
     @abstractmethod
-    async def update(self, app: "TenantSharePointApp") -> "TenantSharePointApp":
+    async def update(self, obj: "TenantSharePointApp") -> "TenantSharePointApp":
         """Update an existing tenant SharePoint app configuration."""
         ...
 
     @abstractmethod
-    async def delete(self, app_id: UUID) -> bool:
+    async def delete(self, id: UUID) -> bool:
         """Delete a tenant SharePoint app configuration.
 
         Returns:

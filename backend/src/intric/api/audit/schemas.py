@@ -22,7 +22,7 @@ class AuditLogCreate(BaseModel):
     entity_type: EntityType
     entity_id: UUID
     description: str = Field(min_length=1, max_length=500)
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, object] = Field(default_factory=dict)
     outcome: Outcome = Outcome.SUCCESS
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
@@ -42,7 +42,7 @@ class AuditLogResponse(BaseModel):
     entity_id: UUID
     timestamp: datetime
     description: str
-    metadata: dict
+    metadata: dict[str, object]
     outcome: Outcome
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None

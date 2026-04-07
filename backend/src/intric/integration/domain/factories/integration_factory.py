@@ -1,4 +1,5 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence, cast
+from uuid import UUID
 
 from intric.integration.domain.entities.integration import Integration
 
@@ -12,7 +13,7 @@ class IntegrationFactory:
     @classmethod
     def create_entity(cls, record: "IntegrationDBModel") -> "Integration":
         return Integration(
-            id=record.id,
+            id=cast(UUID, record.id),
             name=record.name,
             description=record.description,
             integration_type=record.integration_type,
@@ -20,6 +21,6 @@ class IntegrationFactory:
 
     @classmethod
     def create_entities(
-        cls, records: list["IntegrationDBModel"]
+        cls, records: Sequence["IntegrationDBModel"]
     ) -> list["Integration"]:
         return [cls.create_entity(record=record) for record in records]

@@ -1,17 +1,25 @@
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Generic, Literal, Optional, TypeVar
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, computed_field
 
 from intric.ai_models.embedding_models.embedding_model import (
     EmbeddingModelPublicLegacy,
 )
+from intric.integration.infrastructure.content_service.types import (
+    SkippedDetail,
+    SyncMetadata,
+)
 from intric.jobs.task_models import ResourceTaskParams
 from intric.main.models import ResourcePermission
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _empty_resource_permissions() -> list[ResourcePermission]:
+    return []
 
 
 class BaseListModel(BaseModel, Generic[T]):
@@ -47,12 +55,12 @@ class IntegrationList(BaseListModel[Integration]):
 
 
 class TenantIntegration(Integration):
-    id: Optional[UUID] = None
+    id: UUID = Field(default_factory=uuid4)
     integration_id: UUID
 
     @computed_field
     def is_linked_to_tenant(self) -> bool:
-        return self.id is not None
+        return True
 
 
 class TenantIntegrationList(BaseListModel[TenantIntegration]):
@@ -65,7 +73,7 @@ class TenantIntegrationFilter(Enum):
 
 
 class UserIntegration(Integration):
-    id: Optional[UUID] = None
+    id: UUID = Field(default_factory=uuid4)
     tenant_integration_id: UUID
     connected: bool
     auth_type: str = "user_oauth"  # "user_oauth" or "tenant_app"
@@ -110,7 +118,7 @@ class SharepointContentTaskParam(ResourceTaskParams):
 
 
 class ConfluenceContentProcessParam(ResourceTaskParams):
-    results: list
+    results: list[dict[str, Any]]
 
 
 class IntegrationPreviewData(BaseModel):
@@ -212,7 +220,9 @@ class IntegrationKnowledgePublic(BaseModel):
     selected_item_type: Optional[str] = None
     wrapper_id: Optional[UUID] = None
     wrapper_name: Optional[str] = None
-    permissions: list[ResourcePermission] = []
+    permissions: list[ResourcePermission] = Field(
+        default_factory=_empty_resource_permissions
+    )
     metadata: IntegrationKnowledgeMetaData
     integration_type: Literal["confluence", "sharepoint"]
     task: Enum
@@ -225,7 +235,7 @@ class SyncLog(BaseModel):
     integration_knowledge_id: UUID
     sync_type: str  # "full" or "delta"
     status: str  # "success", "error", "in_progress"
-    metadata: Optional[dict] = None
+    metadata: Optional[SyncMetadata] = None
     error_message: Optional[str] = None
     started_at: datetime
     completed_at: Optional[datetime] = None
@@ -234,32 +244,32 @@ class SyncLog(BaseModel):
     @computed_field
     def files_processed(self) -> int:
         """Get files_processed from metadata."""
-        return (self.metadata or {}).get("files_processed", 0)
+        return int((self.metadata or {}).get("files_processed", 0))
 
     @computed_field
     def files_deleted(self) -> int:
         """Get files_deleted from metadata."""
-        return (self.metadata or {}).get("files_deleted", 0)
+        return int((self.metadata or {}).get("files_deleted", 0))
 
     @computed_field
     def pages_processed(self) -> int:
         """Get pages_processed from metadata."""
-        return (self.metadata or {}).get("pages_processed", 0)
+        return int((self.metadata or {}).get("pages_processed", 0))
 
     @computed_field
     def folders_processed(self) -> int:
         """Get folders_processed from metadata."""
-        return (self.metadata or {}).get("folders_processed", 0)
+        return int((self.metadata or {}).get("folders_processed", 0))
 
     @computed_field
     def skipped_items(self) -> int:
         """Get skipped_items from metadata."""
-        return (self.metadata or {}).get("skipped_items", 0)
+        return int((self.metadata or {}).get("skipped_items", 0))
 
     @computed_field
-    def skipped_details(self) -> list[dict]:
+    def skipped_details(self) -> list[SkippedDetail]:
         """Get skipped file details from metadata."""
-        return (self.metadata or {}).get("skipped_details", [])
+        return list((self.metadata or {}).get("skipped_details", []))
 
     @computed_field
     def duration_seconds(self) -> Optional[float]:

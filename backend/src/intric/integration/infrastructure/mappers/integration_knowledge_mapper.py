@@ -1,4 +1,6 @@
-from typing import TYPE_CHECKING, Any, Dict, List
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Dict, List, Sequence
 
 from intric.base.base_entity import EntityMapper
 from intric.database.tables.integration_table import (
@@ -43,17 +45,25 @@ class IntegrationKnowledgeMapper(
         }
 
     def to_entity(
-        self, db_model: IntegrationKnowledgeDBModel, embedding_model: "EmbeddingModel"
+        self,
+        db_model: IntegrationKnowledgeDBModel,
+        *,
+        embedding_model: EmbeddingModel | None = None,
     ) -> IntegrationKnowledge:
+        if embedding_model is None:
+            raise ValueError("embedding_model is required")
         return IntegrationKnowledgeFactory.create_entity(
             record=db_model, embedding_model=embedding_model
         )
 
     def to_entities(
         self,
-        db_models: List[IntegrationKnowledgeDBModel],
-        embedding_models: List["EmbeddingModel"],
+        db_models: Sequence[IntegrationKnowledgeDBModel],
+        *,
+        embedding_models: Sequence[EmbeddingModel] | None = None,
     ) -> List[IntegrationKnowledge]:
+        if embedding_models is None:
+            raise ValueError("embedding_models is required")
         return IntegrationKnowledgeFactory.create_entities(
             records=db_models, embedding_models=embedding_models
         )

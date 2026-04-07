@@ -1,5 +1,8 @@
 # MIT License
 
+from datetime import datetime
+from typing import cast
+
 from intric.analysis.analysis import (
     AssistantMetadata,
     MetadataCount,
@@ -27,12 +30,18 @@ def to_metadata(
     assistants_metadata = [
         AssistantMetadata(
             id=assistant.id,
-            created_at=assistant.created_at,
+            created_at=cast(datetime, assistant.created_at),
         )
         for assistant in assistants
     ]
     sessions_metadata = [
-        SessionMetadata(**session.model_dump()) for session in sessions
+        SessionMetadata(
+            **{
+                **session.model_dump(),
+                "created_at": cast(datetime, session.created_at),
+            }
+        )
+        for session in sessions
     ]
     questions_metadata = [
         QuestionMetadata(**question.model_dump()) for question in questions
@@ -56,7 +65,8 @@ def to_metadata_from_rows(
     instead of full ORM objects.
     """
     assistants_metadata = [
-        AssistantMetadata(id=row.id, created_at=row.created_at) for row in assistants
+        AssistantMetadata(id=row.id, created_at=cast(datetime, row.created_at))
+        for row in assistants
     ]
     sessions_metadata = [
         SessionMetadata(

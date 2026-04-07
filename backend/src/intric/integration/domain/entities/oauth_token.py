@@ -2,7 +2,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
+from typing_extensions import override
+
 from intric.base.base_entity import Entity
+from intric.integration.infrastructure.content_service.types import OAuthResource
 from intric.main.exceptions import InternalServerException
 
 if TYPE_CHECKING:
@@ -18,7 +21,7 @@ class OauthToken(Entity):
         token_type: "IntegrationType",
         user_integration: "UserIntegration",
         id: Optional[UUID] = None,
-        resources: list = [],
+        resources: list[OAuthResource] | None = None,
         created_at: Optional["datetime"] = None,
         updated_at: Optional["datetime"] = None,
     ):
@@ -26,7 +29,7 @@ class OauthToken(Entity):
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.token_type = token_type
-        self.resources = resources
+        self.resources = resources or []
         self.user_integration = user_integration
 
     @property
@@ -46,7 +49,7 @@ class ConfluenceToken(OauthToken):
         token_type: "IntegrationType",
         user_integration: "UserIntegration",
         id: Optional[UUID] = None,
-        resources: list = [],
+        resources: list[OAuthResource] | None = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
     ):
@@ -64,9 +67,12 @@ class ConfluenceToken(OauthToken):
     @property
     def cloud_id(self) -> str:
         try:
-            # Always the fist one atm
-            return self.resources[0]["id"]
-        except (KeyError, IndexError):
+            resource = self.resources[0]
+            cloud_id = resource.get("id")
+            if not cloud_id:
+                raise InternalServerException()
+            return cloud_id
+        except IndexError:
             raise InternalServerException()
 
     @property
@@ -76,13 +82,16 @@ class ConfluenceToken(OauthToken):
     @property
     def base_web_url(self) -> str:
         try:
-            instance_url = self.resources[0]["url"]
+            instance_url = self.resources[0].get("url")
+            if not instance_url:
+                raise InternalServerException()
             base_web_url = f"{instance_url}/wiki"
             return base_web_url
-        except (KeyError, IndexError):
+        except IndexError:
             raise InternalServerException()
 
     @property
+    @override
     def is_confluence(self) -> bool:
         return True
 
@@ -95,7 +104,7 @@ class SharePointToken(OauthToken):
         token_type: "IntegrationType",
         user_integration: "UserIntegration",
         id: Optional[UUID] = None,
-        resources: list = [],
+        resources: list[OAuthResource] | None = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
     ):
@@ -117,6 +126,9 @@ class SharePointToken(OauthToken):
     @property
     def base_site_id(self) -> str:
         try:
-            return self.resources["id"]  # type: ignore[call-overload]
-        except (KeyError, IndexError):
+            site_id = self.resources[0].get("id")
+            if not site_id:
+                raise InternalServerException("graph site id not found")
+            return site_id
+        except IndexError:
             raise InternalServerException("graph site id not found")

@@ -1,9 +1,10 @@
 # MIT License
 
-from typing import List, Optional
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Request
+from pydantic import BaseModel
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
@@ -34,13 +35,41 @@ from intric.users.user import UserInDB
 router = APIRouter()
 
 
+class ModelUsageDetailsQuery(BaseModel):
+    entity_type: str | None = None
+    cursor: str | None = None
+    limit: int = 50
+
+
+class PaginationQuery(BaseModel):
+    limit: int = 50
+    offset: int = 0
+
+
+def get_model_usage_details_query(request: Request) -> ModelUsageDetailsQuery:
+    params = request.query_params
+    return ModelUsageDetailsQuery(
+        entity_type=params.get("entity_type") or None,
+        cursor=params.get("cursor") or None,
+        limit=int(params.get("limit", 50)),
+    )
+
+
+def get_pagination_query(request: Request) -> PaginationQuery:
+    params = request.query_params
+    return PaginationQuery(
+        limit=int(params.get("limit", 50)),
+        offset=int(params.get("offset", 0)),
+    )
+
+
 @router.get(
     "/",
     response_model=PaginatedResponse[CompletionModelPublic],
 )
 async def get_completion_models(
-    user: UserInDB = Depends(get_current_active_user),
-    container: Container = Depends(get_container(with_user=True)),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     validate_permission(user, Permission.ADMIN)
 
@@ -60,7 +89,7 @@ async def get_completion_models(
 async def update_completion_model(
     id: UUID,
     update_flags: CompletionModelUpdateFlags,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.completion_model_crud_service()
     assembler = container.completion_model_assembler()
@@ -82,7 +111,7 @@ async def update_completion_model(
     )
 
     # Build consolidated changes dict (one API call = one audit log)
-    changes = {}
+    changes: dict[str, object] = {}
 
     # Track is_org_enabled changes
     if is_provided(update_flags.is_org_enabled):
@@ -145,8 +174,8 @@ async def update_completion_model(
 )
 async def get_model_usage(
     model_id: UUID,
-    user: UserInDB = Depends(get_current_active_user),
-    container: Container = Depends(get_container(with_user=True)),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ModelUsageStatistics:
     """Get usage statistics for a specific model (pre-aggregated for performance)"""
     validate_permission(user, Permission.ADMIN)
@@ -161,11 +190,9 @@ async def get_model_usage(
 )
 async def get_model_usage_details(
     model_id: UUID,
-    entity_type: Optional[str] = Query(None, description="Filter by entity type"),
-    cursor: Optional[str] = Query(None, description="Cursor for pagination"),
-    limit: int = Query(default=50, le=100, description="Number of results per page"),
-    user: UserInDB = Depends(get_current_active_user),
-    container: Container = Depends(get_container(with_user=True)),
+    query: Annotated[ModelUsageDetailsQuery, Depends(get_model_usage_details_query)],
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ModelUsagePaginatedResponse | None:
     """Get detailed list of entities using this model with cursor pagination"""
     validate_permission(user, Permission.ADMIN)
@@ -179,9 +206,9 @@ async def get_model_usage_details(
             "model_id": str(model_id),
             "tenant_id": str(user.tenant_id),
             "user_id": str(user.id),
-            "entity_type": entity_type,
-            "cursor": cursor,
-            "limit": limit,
+            "entity_type": query.entity_type,
+            "cursor": query.cursor,
+            "limit": query.limit,
         },
     )
 
@@ -207,7 +234,7 @@ async def get_model_usage_details(
         # Call the service method
         logger.info("Calling service.get_model_usage_details")
         result = await service.get_model_usage_details(
-            model_id, user.tenant_id, entity_type, cursor, limit
+            model_id, user.tenant_id, query.entity_type, query.cursor, query.limit
         )
 
         logger.info(
@@ -230,9 +257,9 @@ async def get_model_usage_details(
                 "model_id": str(model_id),
                 "tenant_id": str(user.tenant_id),
                 "user_id": str(user.id),
-                "entity_type": entity_type,
-                "cursor": cursor,
-                "limit": limit,
+                "entity_type": query.entity_type,
+                "cursor": query.cursor,
+                "limit": query.limit,
                 "error": str(e),
                 "error_type": type(e).__name__,
             },
@@ -250,8 +277,8 @@ async def get_model_usage_details(
 async def migrate_model_usage(
     model_id: UUID,
     migration_request: ModelMigrationRequest,
-    user: UserInDB = Depends(get_current_active_user),
-    container: Container = Depends(get_container(with_user=True)),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> MigrationResult:
     """Migrate all usage from one model to another with safety checks"""
     import logging
@@ -353,12 +380,12 @@ async def migrate_model_usage(
 
 @router.get(
     "/usage-summary",
-    response_model=List[ModelUsageSummary],
+    response_model=list[ModelUsageSummary],
 )
 async def get_all_models_usage_summary(
-    user: UserInDB = Depends(get_current_active_user),
-    container: Container = Depends(get_container(with_user=True)),
-) -> List[ModelUsageSummary]:
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> list[ModelUsageSummary]:
     """Get usage summary for all models (optimized with pre-aggregation)"""
     validate_permission(user, Permission.ADMIN)
     try:
@@ -384,38 +411,38 @@ async def get_all_models_usage_summary(
 
 @router.get(
     "/{model_id}/migration-history",
-    response_model=List[ModelMigrationHistory],
+    response_model=list[ModelMigrationHistory],
     responses=responses.get_responses([404]),
 )
 async def get_model_migration_history(
     model_id: UUID,
-    limit: int = Query(default=50, le=100, description="Number of results per page"),
-    offset: int = Query(default=0, ge=0, description="Offset for pagination"),
-    user: UserInDB = Depends(get_current_active_user),
-    container: Container = Depends(get_container(with_user=True)),
-) -> List[ModelMigrationHistory]:
+    query: Annotated[PaginationQuery, Depends(get_pagination_query)],
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> list[ModelMigrationHistory]:
     """Get migration history for a specific model (from or to this model)"""
     validate_permission(user, Permission.ADMIN)
     service = container.completion_model_migration_history_service()
     return await service.get_migration_history_for_model(
-        model_id, user.tenant_id, limit, offset
+        model_id, user.tenant_id, query.limit, query.offset
     )
 
 
 @router.get(
     "/migration-history",
-    response_model=List[ModelMigrationHistory],
+    response_model=list[ModelMigrationHistory],
 )
 async def get_all_migration_history(
-    limit: int = Query(default=50, le=100, description="Number of results per page"),
-    offset: int = Query(default=0, ge=0, description="Offset for pagination"),
-    user: UserInDB = Depends(get_current_active_user),
-    container: Container = Depends(get_container(with_user=True)),
-) -> List[ModelMigrationHistory]:
+    query: Annotated[PaginationQuery, Depends(get_pagination_query)],
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> list[ModelMigrationHistory]:
     """Get all migration history for the tenant"""
     validate_permission(user, Permission.ADMIN)
     service = container.completion_model_migration_history_service()
-    return await service.get_migration_history_for_tenant(user.tenant_id, limit, offset)
+    return await service.get_migration_history_for_tenant(
+        user.tenant_id, query.limit, query.offset
+    )
 
 
 @router.get(
@@ -425,8 +452,8 @@ async def get_all_migration_history(
 )
 async def get_migration_history_by_id(
     migration_id: UUID,
-    user: UserInDB = Depends(get_current_active_user),
-    container: Container = Depends(get_container(with_user=True)),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ModelMigrationHistory:
     """Get a specific migration history record by ID"""
     validate_permission(user, Permission.ADMIN)

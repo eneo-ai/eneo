@@ -10,7 +10,7 @@ Export functionality has been extracted to AuditExportService.
 
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 from uuid import UUID, uuid4
 
 from intric.audit.application.audit_config_service import AuditConfigService
@@ -21,6 +21,8 @@ from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
 from intric.audit.domain.repositories.audit_log_repository import AuditLogRepository
 from intric.jobs.job_manager import job_manager
+from intric.jobs.job_models import Task
+from intric.jobs.task_models import TaskParams
 
 if TYPE_CHECKING:
     from intric.feature_flag.feature_flag_service import FeatureFlagService
@@ -37,6 +39,7 @@ class AuditService:
         audit_config_service: Optional[AuditConfigService] = None,
         feature_flag_service: Optional["FeatureFlagService"] = None,
     ):
+        super().__init__()
         self.repository = repository
         self.audit_config_service = audit_config_service
         self.feature_flag_service = feature_flag_service
@@ -90,7 +93,7 @@ class AuditService:
         entity_type: EntityType,
         entity_id: UUID,
         description: str,
-        metadata: Mapping[str, object],
+        metadata: dict[str, Any],
         outcome: Outcome = Outcome.SUCCESS,
         actor_type: ActorType = ActorType.USER,
         ip_address: Optional[str] = None,
@@ -231,7 +234,7 @@ class AuditService:
         entity_type: EntityType,
         entity_id: UUID,
         description: str,
-        metadata: Mapping[str, object],
+        metadata: dict[str, Any],
         outcome: Outcome = Outcome.SUCCESS,
         actor_type: ActorType = ActorType.USER,
         ip_address: Optional[str] = None,
@@ -304,6 +307,8 @@ class AuditService:
         }
 
         # Enqueue to ARQ
-        await job_manager.enqueue("log_audit_event", job_id, params)
+        await job_manager.enqueue(
+            cast(Task, "log_audit_event"), job_id, cast(TaskParams, params)
+        )
 
         return job_id

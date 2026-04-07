@@ -16,6 +16,7 @@ from intric.integration.infrastructure.auth_service.tenant_app_auth_service impo
     TenantAppAuthService,
 )
 from intric.integration.infrastructure.oauth_token_service import OauthTokenService
+from intric.integration.presentation.models import IntegrationType
 
 if TYPE_CHECKING:
     from intric.integration.domain.entities.tenant_sharepoint_app import (
@@ -261,9 +262,11 @@ class SharePointAuthRouter:
         return SharePointToken(
             access_token=access_token,
             refresh_token="",
-            token_type=user_integration.tenant_integration.integration.integration_type,
+            token_type=IntegrationType(
+                user_integration.tenant_integration.integration.integration_type
+            ),
             user_integration=user_integration,
-            resources={},
+            resources=[],
             id=None,
             created_at=None,
             updated_at=None,

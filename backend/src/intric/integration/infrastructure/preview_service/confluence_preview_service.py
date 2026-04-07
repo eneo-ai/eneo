@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, List
 import aiohttp
 
 from intric.integration.domain.entities.integration_preview import IntegrationPreview
-from intric.integration.domain.entities.oauth_token import ConfluenceToken
+from intric.integration.domain.entities.oauth_token import ConfluenceToken, OauthToken
 from intric.integration.infrastructure.clients.confluence_content_client import (
     ConfluenceContentClient,
 )
@@ -24,8 +24,10 @@ class ConfluencePreviewService(BasePreviewService):
 
     async def get_preview_info(
         self,
-        token: ConfluenceToken,
+        token: OauthToken,
     ) -> List[IntegrationPreview]:
+        confluence_token = self._require_confluence_token(token)
+
         async def fetch_spaces(token: ConfluenceToken):
             async with ConfluenceContentClient(
                 base_url=token.base_url, api_token=token.access_token
@@ -33,14 +35,21 @@ class ConfluencePreviewService(BasePreviewService):
                 return await content_client.get_spaces()
 
         try:
-            content = await fetch_spaces(token)
+            content = await fetch_spaces(confluence_token)
         except aiohttp.ClientResponseError:
-            token = await self.oauth_token_service.refresh_and_update_token(  # type: ignore[assignment]
-                token_id=token.id
+            refreshed_token = await self.oauth_token_service.refresh_and_update_token(
+                token_id=confluence_token.id
             )
-            content = await fetch_spaces(token)
+            confluence_token = self._require_confluence_token(refreshed_token)
+            content = await fetch_spaces(confluence_token)
 
-        return self._to_confluence_preview_data(content=content, token=token)
+        return self._to_confluence_preview_data(content=content, token=confluence_token)
+
+    @staticmethod
+    def _require_confluence_token(token: OauthToken) -> ConfluenceToken:
+        if not isinstance(token, ConfluenceToken):
+            raise ValueError("Expected a Confluence token")
+        return token
 
     def _to_confluence_preview_data(
         self,

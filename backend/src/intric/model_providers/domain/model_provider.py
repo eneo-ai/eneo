@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 if TYPE_CHECKING:
@@ -21,6 +21,7 @@ class ModelProvider:
         created_at: datetime,
         updated_at: datetime,
     ):
+        super().__init__()
         self.id = id
         self.tenant_id = tenant_id
         self.name = name
@@ -35,15 +36,15 @@ class ModelProvider:
     def create_from_db(cls, provider_db: "ModelProviders") -> "ModelProvider":
         """Create domain entity from database model."""
         return cls(
-            id=provider_db.id,
+            id=cast(UUID, provider_db.id),
             tenant_id=provider_db.tenant_id,
             name=provider_db.name,
             provider_type=provider_db.provider_type,
             credentials=provider_db.credentials,
             config=provider_db.config,
             is_active=provider_db.is_active,
-            created_at=provider_db.created_at,
-            updated_at=provider_db.updated_at,
+            created_at=cast(datetime, provider_db.created_at),
+            updated_at=cast(datetime, provider_db.updated_at),
         )
 
     def to_dict(self) -> dict[str, Any]:

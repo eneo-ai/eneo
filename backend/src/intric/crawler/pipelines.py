@@ -70,7 +70,7 @@ class FileNamePipeline(FilesPipeline):
     def file_path(
         self,
         request: scrapy.Request,
-        response: scrapy.http.Response = None,
+        response: scrapy.http.Response | None = None,
         info=None,
         *,
         item=None,

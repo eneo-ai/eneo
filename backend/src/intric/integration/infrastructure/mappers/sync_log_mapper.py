@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, Sequence
 
 from intric.base.base_entity import EntityMapper
 from intric.database.tables.sync_log_table import SyncLog as SyncLogDBModel
@@ -21,5 +21,5 @@ class SyncLogMapper(EntityMapper[SyncLog, SyncLogDBModel]):
     def to_entity(self, db_model: SyncLogDBModel) -> SyncLog:
         return SyncLogFactory.create_from_db(record=db_model)
 
-    def to_entities(self, db_models: List[SyncLogDBModel]) -> List[SyncLog]:
+    def to_entities(self, db_models: Sequence[SyncLogDBModel]) -> list[SyncLog]:
         return [self.to_entity(db_model) for db_model in db_models]

@@ -1,4 +1,4 @@
-from typing import Callable, Protocol, TypeVar
+from typing import Annotated, Callable, Protocol, TypeVar
 
 from fastapi import Depends
 
@@ -15,7 +15,7 @@ def get_repository(
     repo_type: RepositoryFactory[RepoT_co],
 ) -> Callable[..., RepoT_co]:
     def get_repo(
-        db: AsyncSession = Depends(get_session_with_transaction),
+        db: Annotated[AsyncSession, Depends(get_session_with_transaction)],
     ) -> RepoT_co:
         return repo_type(db)
 

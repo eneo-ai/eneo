@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import socket
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
 import aiohttp
 
-from intric.integration.domain.entities.oauth_token import SharePointToken
 from intric.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
@@ -16,6 +15,9 @@ from intric.integration.domain.repositories.sharepoint_subscription_repo import 
 )
 from intric.integration.infrastructure.clients.sharepoint_content_client import (
     SharePointContentClient,
+)
+from intric.integration.infrastructure.content_service.types import (
+    SharePointTokenProtocol,
 )
 from intric.integration.infrastructure.oauth_token_service import OauthTokenService
 from intric.main.config import get_settings
@@ -74,7 +76,7 @@ class SharePointSubscriptionService:
         self,
         user_integration_id: UUID,
         site_id: str,
-        token: SharePointToken,
+        token: SharePointTokenProtocol,
         is_onedrive: bool = False,
     ) -> Optional[SharePointSubscription]:
         """Ensure a subscription exists for this user+site/drive combination.
@@ -191,7 +193,7 @@ class SharePointSubscriptionService:
     async def recreate_expired_subscription(
         self,
         subscription: SharePointSubscription,
-        token: SharePointToken,
+        token: SharePointTokenProtocol,
         is_onedrive: bool = False,
     ) -> bool:
         """Recreate an expired subscription in-place.
@@ -257,7 +259,7 @@ class SharePointSubscriptionService:
     async def renew_subscription(
         self,
         subscription: SharePointSubscription,
-        token: SharePointToken,
+        token: SharePointTokenProtocol,
     ) -> bool:
         """Renew an existing subscription before it expires.
 
@@ -343,7 +345,7 @@ class SharePointSubscriptionService:
     async def delete_subscription_if_unused(
         self,
         subscription_id: UUID,
-        token: SharePointToken,
+        token: SharePointTokenProtocol,
     ) -> bool:
         """Delete subscription if no integration_knowledge records reference it.
 
@@ -395,7 +397,7 @@ class SharePointSubscriptionService:
 
     async def list_expiring_subscriptions(
         self, hours: int = 4
-    ) -> List[SharePointSubscription]:
+    ) -> list[SharePointSubscription]:
         """List subscriptions expiring within the specified hours.
 
         Used by renewal background job.
@@ -411,7 +413,7 @@ class SharePointSubscriptionService:
 
     async def _create_graph_subscription(
         self,
-        token: SharePointToken,
+        token: SharePointTokenProtocol,
         site_id: Optional[str],
         drive_id: str,
     ) -> Optional[str]:
@@ -497,7 +499,7 @@ class SharePointSubscriptionService:
     async def _delete_graph_subscription(
         self,
         subscription_id: str,
-        token: SharePointToken,
+        token: SharePointTokenProtocol,
     ) -> bool:
         """Delete subscription from Microsoft Graph.
 
@@ -545,7 +547,7 @@ class SharePointSubscriptionService:
 
     async def _resolve_drive_id(
         self,
-        token: SharePointToken,
+        token: SharePointTokenProtocol,
         site_id: str,
     ) -> Optional[str]:
         """Resolve drive ID for a SharePoint site.
@@ -553,9 +555,7 @@ class SharePointSubscriptionService:
         Uses SharePointContentClient to get default drive ID.
         """
         try:
-            # Extract base_url and access_token from token object
-            # Support both SharePointToken (has base_url property) and SimpleToken (just has access_token)
-            base_url = getattr(token, "base_url", "https://graph.microsoft.com")
+            base_url = token.base_url
             async with SharePointContentClient(
                 base_url=base_url,
                 api_token=token.access_token,

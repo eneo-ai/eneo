@@ -1,19 +1,21 @@
 from enum import Enum
-from typing import Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from intric.ai_models.completion_models.completion_model import (
+    CompletionModelPublic,
     CompletionModelSparse,
     ModelKwargs,
 )
 from intric.ai_models.embedding_models.embedding_model import EmbeddingModelSparse
-from intric.assistants.api.assistant_models import AssistantSparse, DefaultAssistant
-from intric.collections.presentation.collection_models import CollectionPublic
-from intric.completion_models.presentation.completion_model_models import (
-    CompletionModelPublic,
+from intric.assistants.api.assistant_models import (
+    AssistantSparse,
+    DefaultAssistant,
+    MCPServerPublicDict,
 )
+from intric.collections.presentation.collection_models import CollectionPublic
 from intric.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
 )
@@ -145,7 +147,7 @@ class UpdateSpaceDryRunResponse(BaseModel):
     completion_models: list[CompletionModelPublic]
     embedding_models: list[EmbeddingModelPublic]
     transcription_models: list[TranscriptionModelPublic]
-    mcp_servers: list[dict] = []
+    mcp_servers: list[MCPServerPublicDict] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -178,7 +180,7 @@ class SpaceSparse(InDB, ResourcePermissionsMixin):
 
 
 class SpaceDashboard(SpaceSparse):
-    applications: Applications
+    applications: Optional[Applications] = None
 
 
 class SpaceRole(BaseModel):
@@ -194,12 +196,12 @@ class SpacePublic(SpaceDashboard):
     embedding_models: list[EmbeddingModelPublic]
     completion_models: list[CompletionModelPublic]
     transcription_models: list[TranscriptionModelPublic]
-    mcp_servers: list[dict]  # Will be populated by assembler
+    mcp_servers: list[MCPServerPublicDict] = Field(default_factory=list)
     knowledge: Knowledge
     members: PaginatedPermissions[SpaceMember]
     group_members: PaginatedPermissions[SpaceGroupMember]
 
-    default_assistant: DefaultAssistant
+    default_assistant: Optional[DefaultAssistant] = None
 
     available_roles: list[SpaceRole]
     security_classification: Optional[SecurityClassificationPublic]
@@ -251,7 +253,7 @@ class CreateSpaceServiceResponse(InDB, ResourcePermissionsMixin):
     prompt: str
     completion_model_kwargs: ModelKwargs
     output_format: Optional[Literal["json", "list", "boolean"]] = None
-    json_schema: Optional[dict] = None
+    json_schema: Optional[dict[str, Any]] = None
 
     groups: list[GroupPublicWithMetadata]
     completion_model: Optional[CompletionModelSparse]

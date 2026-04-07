@@ -1,6 +1,5 @@
-import json
 import uuid
-from typing import Optional
+from typing import Optional, cast
 from urllib.parse import urlencode
 
 import httpx
@@ -10,6 +9,7 @@ from intric.integration.infrastructure.auth_service.base_auth_service import (
     BaseOauthService,
     TokenResponse,
 )
+from intric.integration.infrastructure.content_service.types import OAuthResource
 from intric.main.config import get_settings
 
 
@@ -51,7 +51,9 @@ class ConfluenceAuthService(BaseOauthService):
             raise ValueError("OAUTH_CALLBACK_URL is not set")
         return redirect_uri
 
-    def gen_auth_url(self, state: Optional[str] = None) -> dict:
+    async def gen_auth_url(
+        self, state: Optional[str] = None, tenant_id: Optional[uuid.UUID] = None
+    ) -> dict[str, str]:
         params = {
             "audience": "api.atlassian.com",
             "client_id": self._client_id,
@@ -65,7 +67,9 @@ class ConfluenceAuthService(BaseOauthService):
         url = f"{auth_base_url}?{urlencode(params)}"
         return {"auth_url": url}
 
-    async def get_resources(self, access_token: str) -> list[dict] | None:
+    async def get_resources(
+        self, access_token: str, tenant_id: Optional[uuid.UUID] = None
+    ) -> list[OAuthResource]:
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 "https://api.atlassian.com/oauth/token/accessible-resources",
@@ -76,16 +80,19 @@ class ConfluenceAuthService(BaseOauthService):
                 timeout=DEFAULT_AUTH_TIMEOUT,
             )
             if response.status_code == 200:
-                return response.json()
+                return cast(list[OAuthResource], response.json())
             else:
                 response.raise_for_status()
+                raise RuntimeError("Failed to fetch Confluence resources")
 
-    async def exchange_token(self, auth_code: str) -> TokenResponse | None:
+    async def exchange_token(
+        self, auth_code: str, tenant_id: Optional[uuid.UUID] = None
+    ) -> TokenResponse | None:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 "https://auth.atlassian.com/oauth/token",
                 headers={"Content-Type": "application/json"},
-                data=json.dumps(
+                json=(
                     {
                         "grant_type": "authorization_code",
                         "client_id": self._client_id,
@@ -102,12 +109,14 @@ class ConfluenceAuthService(BaseOauthService):
             else:
                 response.raise_for_status()
 
-    async def refresh_access_token(self, refresh_token: str) -> TokenResponse | None:
+    async def refresh_access_token(
+        self, refresh_token: str, tenant_id: Optional[uuid.UUID] = None
+    ) -> TokenResponse | None:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 "https://auth.atlassian.com/oauth/token",
                 headers={"Content-Type": "application/json"},
-                data=json.dumps(
+                json=(
                     {
                         "grant_type": "refresh_token",
                         "client_id": self._client_id,

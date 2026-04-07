@@ -33,12 +33,17 @@ class WebsiteBase(BaseModel):
     update_interval: UpdateInterval = UpdateInterval.NEVER
 
 
-class WebsiteCreateRequestDeprecated(WebsiteBase):
+class WebsiteCreateRequestDeprecated(BaseModel):
+    name: Optional[str] = None
     url: HttpUrl
+    space_id: Optional[UUID] = None
+    download_files: bool = False
+    crawl_type: CrawlType = CrawlType.CRAWL
+    update_interval: UpdateInterval = UpdateInterval.NEVER
     embedding_model: ModelId
 
     @field_serializer("url")
-    def serialize_to_string(url: HttpUrl):
+    def serialize_to_string(url: object):
         return str(url)
 
 

@@ -16,6 +16,7 @@ Reuses existing concurrency infrastructure, no parallel permit system needed.
 import asyncio
 import socket
 from datetime import datetime, timedelta, timezone
+from typing import Any, cast
 from uuid import UUID
 
 import redis.asyncio as aioredis
@@ -47,6 +48,7 @@ class CrawlFeeder:
     """
 
     def __init__(self):
+        super().__init__()
         self.settings = get_settings()
         self._running = False
         self._redis_client: aioredis.Redis | None = None
@@ -161,6 +163,7 @@ class CrawlFeeder:
 
         # pending_jobs is list of (raw_bytes, job_data) tuples
         # raw_bytes preserved for exact LREM matching
+        redis_client_any: Any = redis_client
         for raw_bytes, job_data in pending_jobs:
             # Extract job_id early for flag operations
             # Why: Need job_id before enqueue to mark flag first
@@ -180,9 +183,9 @@ class CrawlFeeder:
                 # Push to DLQ for forensics before removing
                 try:
                     dlq_key = f"tenant:{tenant_id}:crawl_pending:dlq"
-                    await redis_client.lpush(dlq_key, raw_bytes)
-                    await redis_client.ltrim(dlq_key, 0, DLQ_MAX_ENTRIES - 1)
-                    await redis_client.expire(dlq_key, DLQ_TTL_SECONDS)
+                    await redis_client_any.lpush(dlq_key, raw_bytes)
+                    await redis_client_any.ltrim(dlq_key, 0, DLQ_MAX_ENTRIES - 1)
+                    await redis_client_any.expire(dlq_key, DLQ_TTL_SECONDS)
                 except Exception:
                     pass  # Best effort DLQ push
                 # Remove poison entry to prevent infinite retry loop
@@ -258,7 +261,7 @@ class CrawlFeeder:
             else:
                 # Enqueue failed - rollback: delete flag and release slot
                 try:
-                    await redis_client.delete(f"job:{job_id}:slot_preacquired")
+                    await redis_client_any.delete(f"job:{job_id}:slot_preacquired")
                 except Exception as flag_exc:
                     logger.debug(
                         "Failed to delete slot_preacquired flag during rollback",
@@ -322,7 +325,10 @@ class CrawlFeeder:
                 decode_responses=False,
             )
 
-            self._redis_client = aioredis.Redis.from_url(redis_url, **redis_kwargs)
+            redis_client_factory: Any = aioredis.Redis
+            self._redis_client = cast(
+                aioredis.Redis, redis_client_factory.from_url(redis_url, **redis_kwargs)
+            )
             redis_client: aioredis.Redis = self._redis_client
             self._pending_queue = PendingQueue(redis_client)
             self._capacity_manager = CapacityManager(redis_client, self.settings)
@@ -346,13 +352,16 @@ class CrawlFeeder:
 
                     # Find all tenants with pending crawls (SCAN for production safety)
                     pattern = "tenant:*:crawl_pending"
-                    tenant_ids = set()
+                    tenant_ids: set[UUID] = set()
 
                     cursor = 0
+                    redis_client_any: Any = redis_client
                     while True:
-                        cursor, keys = await redis_client.scan(
+                        scan_result = await redis_client_any.scan(
                             cursor=cursor, match=pattern, count=100
                         )
+                        cursor = int(scan_result[0])
+                        keys = cast(list[bytes], scan_result[1])
 
                         for key_bytes in keys:
                             key = key_bytes.decode()

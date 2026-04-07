@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, Sequence
 
 from intric.base.base_entity import EntityMapper
 from intric.database.tables.integration_table import Integration as IntegrationDBModel
@@ -17,5 +17,5 @@ class IntegrationMapper(EntityMapper[Integration, IntegrationDBModel]):
     def to_entity(self, db_model: IntegrationDBModel) -> Integration:
         return IntegrationFactory.create_entity(record=db_model)
 
-    def to_entities(self, db_models: List[IntegrationDBModel]) -> List[Integration]:
+    def to_entities(self, db_models: Sequence[IntegrationDBModel]) -> list[Integration]:
         return IntegrationFactory.create_entities(records=db_models)

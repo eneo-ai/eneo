@@ -1,4 +1,5 @@
-from typing import TYPE_CHECKING, Iterable, Optional
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, Optional, cast
 
 from intric.apps.apps.app_factory import AppFactory
 from intric.collections.domain.collection import Collection
@@ -16,9 +17,9 @@ from intric.security_classifications.domain.entities.security_classification imp
     SecurityClassification,
 )
 from intric.services.service import Service
-from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember
+from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
 from intric.spaces.space import Space
-from intric.users.user import UserInDBBase
+from intric.users.user import UserInDBBase, UserSparse
 from intric.websites.domain.website import Website
 
 if TYPE_CHECKING:
@@ -26,6 +27,9 @@ if TYPE_CHECKING:
 
     from intric.assistants.assistant_factory import AssistantFactory
     from intric.completion_models.domain.completion_model import CompletionModel
+    from intric.database.tables.integration_table import (
+        IntegrationKnowledge as IntegrationKnowledgeDBModel,
+    )
     from intric.database.tables.websites_table import Websites
     from intric.embedding_models.domain.embedding_model import EmbeddingModel
     from intric.mcp_servers.domain.entities.mcp_server import MCPServer
@@ -44,9 +48,9 @@ class SpaceFactory:
     def create_space(
         name: str,
         tenant_id: "UUID",
-        tenant_space_id: "UUID" = None,
-        description: str = None,
-        user_id: "UUID" = None,
+        tenant_space_id: "UUID" | None = None,
+        description: str | None = None,
+        user_id: "UUID" | None = None,
     ) -> Space:
         return Space(
             id=None,
@@ -75,19 +79,30 @@ class SpaceFactory:
         self,
         space_in_db: Spaces,
         user: "UserInDB",
-        collections_in_db: list[tuple[CollectionsTable, int]] = [],
-        websites_in_db: list["Websites"] = [],
-        completion_models: list["CompletionModel"] = [],
-        embedding_models: list["EmbeddingModel"] = [],
-        transcription_models: list["TranscriptionModel"] = [],
-        mcp_servers: list["MCPServer"] = [],
-        assistants_in_db: list["Assistants"] = [],
-        group_chats_in_db: list["GroupChatsTable"] = [],
-        apps_in_db: list["Apps"] = [],
-        services_in_db: list[Services] = [],
+        collections_in_db: Sequence[tuple[CollectionsTable, int]] | None = None,
+        websites_in_db: Sequence["Websites"] | None = None,
+        completion_models: Sequence["CompletionModel"] | None = None,
+        embedding_models: Sequence["EmbeddingModel"] | None = None,
+        transcription_models: Sequence["TranscriptionModel"] | None = None,
+        mcp_servers: Sequence["MCPServer"] | None = None,
+        assistants_in_db: Sequence["Assistants"] | None = None,
+        group_chats_in_db: Sequence["GroupChatsTable"] | None = None,
+        apps_in_db: Sequence["Apps"] | None = None,
+        services_in_db: Sequence[Services] | None = None,
         security_classification: Optional[SecurityClassification] = None,
-        integration_knowledge_in_db: Optional[Iterable] = None,
+        integration_knowledge_in_db: Iterable["IntegrationKnowledgeDBModel"]
+        | None = None,
     ) -> Space:
+        collections_in_db = list(collections_in_db or [])
+        websites_in_db = list(websites_in_db or [])
+        completion_models = list(completion_models or [])
+        embedding_models = list(embedding_models or [])
+        transcription_models = list(transcription_models or [])
+        mcp_servers = list(mcp_servers or [])
+        assistants_in_db = list(assistants_in_db or [])
+        group_chats_in_db = list(group_chats_in_db or [])
+        apps_in_db = list(apps_in_db or [])
+        services_in_db = list(services_in_db or [])
         non_deprecated_completion_models = [
             completion_model
             for completion_model in completion_models
@@ -149,7 +164,8 @@ class SpaceFactory:
 
         members = {
             space_user.user_id: SpaceMember(
-                **space_user.user.to_dict(), role=space_user.role
+                **UserSparse.model_validate(space_user.user).model_dump(),
+                role=cast(SpaceRoleValue, space_user.role),
             )
             for space_user in space_in_db.members
             if space_user.user.deleted_at is None
@@ -163,7 +179,7 @@ class SpaceFactory:
                 group_members[user_group.id] = SpaceGroupMember(
                     id=user_group.id,
                     name=user_group.name,
-                    role=space_group.role,
+                    role=cast(SpaceRoleValue, space_group.role),
                     user_count=len(user_group.users) if user_group.users else 0,
                 )
 
@@ -214,7 +230,7 @@ class SpaceFactory:
             sharepoint_subscription = None
             try:
                 insp = inspect(i)
-                if "sharepoint_subscription" not in insp.unloaded:
+                if insp is not None and "sharepoint_subscription" not in insp.unloaded:
                     sharepoint_subscription = i.sharepoint_subscription
             except Exception:
                 # If inspection fails (e.g., not a SQLAlchemy model), fall back to None

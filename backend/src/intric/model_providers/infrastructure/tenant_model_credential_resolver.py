@@ -26,6 +26,7 @@ class TenantModelCredentialResolver:
         config: dict[str, Any],
         encryption_service: EncryptionService,
     ):
+        super().__init__()
         self.provider_id = provider_id
         self.provider_type = provider_type
         self.encryption = encryption_service

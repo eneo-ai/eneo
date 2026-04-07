@@ -81,11 +81,11 @@ class IntegrationKnowledgeRepoImpl(
             .where(self._db_model.id.in_(ids))
             .options(*self._options)
         )
-        records = await self.session.scalars(query)
+        records = (await self.session.scalars(query)).all()
 
         embedding_models = await self.embedding_model_repo.all()
 
-        return self.mapper.to_entities(records, embedding_models)
+        return self.mapper.to_entities(records, embedding_models=embedding_models)
 
     async def remove(self, id: "UUID") -> None:
         await self.delete(id=id)

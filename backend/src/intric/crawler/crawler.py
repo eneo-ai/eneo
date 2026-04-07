@@ -75,8 +75,8 @@ class CrawlManager:
         self,
         spider_cls,
         *,
-        filepath: str,
-        files_dir: str | None = None,
+        filepath: str | Path,
+        files_dir: str | Path | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
         **spider_kwargs,
     ):
@@ -183,8 +183,8 @@ class Crawl:
 
 
 def create_runner(
-    filepath: str,
-    files_dir: Optional[str] = None,
+    filepath: str | Path,
+    files_dir: Optional[str | Path] = None,
     tenant_crawler_settings: dict[str, Any] | None = None,
 ):
     """Create a Scrapy CrawlerRunner with tenant-aware settings.
@@ -199,8 +199,9 @@ def create_runner(
         files_dir: Optional directory for downloaded files
         tenant_crawler_settings: Optional tenant-specific settings from DB
     """
+    filepath_str = str(filepath)
     settings = {
-        "FEEDS": {filepath: {"format": "jsonl", "item_classes": [CrawledPage]}},
+        "FEEDS": {filepath_str: {"format": "jsonl", "item_classes": [CrawledPage]}},
         # All settings use get_crawler_setting() for tenant-aware resolution
         "CLOSESPIDER_ITEMCOUNT": get_crawler_setting(
             "closespider_itemcount", tenant_crawler_settings
@@ -225,7 +226,7 @@ def create_runner(
 
     if files_dir is not None:
         settings["ITEM_PIPELINES"] = {FileNamePipeline: 300}
-        settings["FILES_STORE"] = files_dir
+        settings["FILES_STORE"] = str(files_dir)
 
     return CrawlerRunner(settings=settings)
 
@@ -244,10 +245,10 @@ class Crawler:
         url: str,
         download_files: bool = False,
         *,
-        filepath: Path,
-        files_dir: Optional[Path],
-        http_user: str = None,
-        http_pass: str = None,
+        filepath: str | Path,
+        files_dir: Optional[str | Path],
+        http_user: str | None = None,
+        http_pass: str | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
     ):
         """Run crawl in Twisted reactor, returns EventualResult.
@@ -271,10 +272,10 @@ class Crawler:
     def _run_sitemap_crawl_deferred(
         sitemap_url: str,
         *,
-        filepath: Path,
-        files_dir: Optional[Path],
-        http_user: str = None,
-        http_pass: str = None,
+        filepath: str | Path,
+        files_dir: Optional[str | Path],
+        http_user: str | None = None,
+        http_pass: str | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
     ):
         """Run sitemap crawl in Twisted reactor, returns EventualResult.
@@ -299,10 +300,10 @@ class Crawler:
         url: str,
         download_files: bool = False,
         *,
-        filepath: Path,
-        files_dir: Optional[Path],
-        http_user: str = None,
-        http_pass: str = None,
+        filepath: str | Path,
+        files_dir: Optional[str | Path],
+        http_user: str | None = None,
+        http_pass: str | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
         max_length: int,
         heartbeat_callback: Optional[Any] = None,
@@ -410,10 +411,10 @@ class Crawler:
     async def _run_sitemap_crawl_with_timeout(
         sitemap_url: str,
         *,
-        filepath: Path,
-        files_dir: Optional[Path],
-        http_user: str = None,
-        http_pass: str = None,
+        filepath: str | Path,
+        files_dir: Optional[str | Path],
+        http_user: str | None = None,
+        http_pass: str | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
         max_length: int,
         heartbeat_callback: Optional[Any] = None,
@@ -636,8 +637,8 @@ class Crawler:
         url: str,
         download_files: bool = False,
         crawl_type: CrawlType = CrawlType.CRAWL,
-        http_user: str = None,
-        http_pass: str = None,
+        http_user: str | None = None,
+        http_pass: str | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
         heartbeat_callback: Optional[Any] = None,
         heartbeat_interval: float = 60.0,

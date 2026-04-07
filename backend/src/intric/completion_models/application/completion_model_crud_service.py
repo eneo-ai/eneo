@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional, Union
 
 from intric.main.config import get_settings
@@ -25,6 +26,7 @@ class CompletionModelCRUDService:
         completion_model_repo: "CompletionModelRepository",
         security_classification_repo: "SecurityClassificationRepoImpl",
     ):
+        super().__init__()
         self.completion_model_repo = completion_model_repo
         self.user = user
         self.security_classification_repo = security_classification_repo
@@ -32,7 +34,7 @@ class CompletionModelCRUDService:
     async def get_completion_models(self) -> list["CompletionModel"]:
         models = await self.completion_model_repo.all()
 
-        available_models = []
+        available_models: list["CompletionModel"] = []
         for model in models:
             if model.family == "azure" and not get_settings().using_azure_models:
                 continue
@@ -64,8 +66,10 @@ class CompletionModelCRUDService:
 
         # Otherwise get the latest model
         sorted_models = sorted(
-            completion_models, key=lambda model: model.created_at, reverse=True
-        )  # type: ignore[call-overload]
+            completion_models,
+            key=lambda model: model.created_at or datetime.min,
+            reverse=True,
+        )
 
         # If no models are available
         # let each caller handle that

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union, cast
 
 from intric.base.base_entity import Entity
 from intric.embedding_models.domain.embedding_model import EmbeddingModel
@@ -11,7 +11,12 @@ if TYPE_CHECKING:
     from datetime import datetime
     from uuid import UUID
 
-    from intric.database.tables.websites_table import Websites as WebsitesTable
+    from intric.database.tables.websites_table import (
+        CrawlRuns as CrawlRunsTable,
+    )
+    from intric.database.tables.websites_table import (
+        Websites as WebsitesTable,
+    )
     from intric.users.user import UserInDB
 
 
@@ -116,19 +121,18 @@ class Website(Entity):
         return self
 
     @classmethod
-    def create(
-        cls,
-        space_id: "UUID",
-        user: "UserInDB",
-        url: str,
-        name: Optional[str],
-        download_files: bool,
-        crawl_type: CrawlType,
-        update_interval: UpdateInterval,
-        embedding_model: "EmbeddingModel",
-        http_auth_username: Optional[str] = None,
-        http_auth_password: Optional[str] = None,
-    ) -> "Website":
+    def create(cls, **kwargs: object) -> "Website":
+        space_id = cast("UUID", kwargs["space_id"])
+        user = cast("UserInDB", kwargs["user"])
+        url = cast(str, kwargs["url"])
+        name = cast(Optional[str], kwargs.get("name"))
+        download_files = cast(bool, kwargs["download_files"])
+        crawl_type = cast(CrawlType, kwargs["crawl_type"])
+        update_interval = cast(UpdateInterval, kwargs["update_interval"])
+        embedding_model = cast("EmbeddingModel", kwargs["embedding_model"])
+        http_auth_username = cast(Optional[str], kwargs.get("http_auth_username"))
+        http_auth_password = cast(Optional[str], kwargs.get("http_auth_password"))
+
         website = cls(
             id=None,
             created_at=None,
@@ -157,37 +161,47 @@ class Website(Entity):
     @classmethod
     def to_domain(
         cls,
-        record: "WebsitesTable",
-        embedding_model: "EmbeddingModel",
-        http_auth: Optional[HttpAuthCredentials] = None,
+        db_model: Optional["WebsitesTable"] = None,
+        **kwargs: object,
     ) -> "Website":
+        record = (
+            db_model
+            if db_model is not None
+            else cast("WebsitesTable", kwargs["record"])
+        )
+        embedding_model = cast("EmbeddingModel", kwargs["embedding_model"])
+        http_auth = cast(Optional[HttpAuthCredentials], kwargs.get("http_auth"))
+        latest_crawl = cast(
+            "CrawlRunsTable | None", getattr(record, "latest_crawl", None)
+        )
+
         return cls(
-            id=record.id,
-            created_at=record.created_at,
-            updated_at=record.updated_at,
-            space_id=record.space_id,
-            user_id=record.user_id,
-            tenant_id=record.tenant_id,
-            url=record.url,
-            name=record.name,
-            download_files=record.download_files,
-            crawl_type=record.crawl_type,
-            update_interval=record.update_interval,
+            id=cast("UUID", record.id),
+            created_at=cast("datetime", record.created_at),
+            updated_at=cast("datetime", record.updated_at),
+            space_id=cast("UUID", record.space_id),
+            user_id=cast("UUID", record.user_id),
+            tenant_id=cast("UUID", record.tenant_id),
+            url=cast(str, record.url),
+            name=cast(Optional[str], record.name),
+            download_files=cast(bool, record.download_files),
+            crawl_type=cast(CrawlType, record.crawl_type),
+            update_interval=UpdateInterval(cast(str, record.update_interval)),
             embedding_model=embedding_model,
-            size=record.size,
-            latest_crawl=CrawlRun.to_domain(record.latest_crawl)  # type: ignore[attr-defined]
-            if record.latest_crawl  # type: ignore[attr-defined]
+            size=cast(int, record.size),
+            latest_crawl=CrawlRun.to_domain(db_model=latest_crawl)
+            if latest_crawl
             else None,
-            last_crawled_at=record.last_crawled_at,
+            last_crawled_at=cast(Optional["datetime"], record.last_crawled_at),
             http_auth=http_auth,
-            consecutive_failures=record.consecutive_failures,
-            next_retry_at=record.next_retry_at,
+            consecutive_failures=cast(int, record.consecutive_failures),
+            next_retry_at=cast(Optional["datetime"], record.next_retry_at),
         )
 
     def update(
         self,
         url: Union[str, NotProvided] = NOT_PROVIDED,
-        name: Union[str, NotProvided] = NOT_PROVIDED,
+        name: Union[str, None, NotProvided] = NOT_PROVIDED,
         download_files: Union[bool, NotProvided] = NOT_PROVIDED,
         crawl_type: Union[CrawlType, NotProvided] = NOT_PROVIDED,
         update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED,
@@ -275,22 +289,32 @@ class WebsiteSparse(Entity):
         self.next_retry_at = next_retry_at
 
     @classmethod
-    def to_domain(cls, record: "WebsitesTable") -> "WebsiteSparse":
+    def to_domain(
+        cls,
+        db_model: Optional["WebsitesTable"] = None,
+        **kwargs: object,
+    ) -> "WebsiteSparse":
+        record = (
+            db_model
+            if db_model is not None
+            else cast("WebsitesTable", kwargs["record"])
+        )
+
         return cls(
-            id=record.id,
-            created_at=record.created_at,
-            updated_at=record.updated_at,
-            user_id=record.user_id,
-            tenant_id=record.tenant_id,
-            embedding_model_id=record.embedding_model_id,
-            space_id=record.space_id,
-            name=record.name,
-            url=record.url,
-            download_files=record.download_files,
-            crawl_type=record.crawl_type,
-            update_interval=record.update_interval,
-            size=record.size,
-            last_crawled_at=record.last_crawled_at,
-            consecutive_failures=record.consecutive_failures,
-            next_retry_at=record.next_retry_at,
+            id=cast("UUID", record.id),
+            created_at=cast("datetime", record.created_at),
+            updated_at=cast("datetime", record.updated_at),
+            user_id=cast("UUID", record.user_id),
+            tenant_id=cast("UUID", record.tenant_id),
+            embedding_model_id=cast("UUID", record.embedding_model_id),
+            space_id=cast("UUID", record.space_id),
+            name=cast(str, record.name),
+            url=cast(str, record.url),
+            download_files=cast(bool, record.download_files),
+            crawl_type=cast(CrawlType, record.crawl_type),
+            update_interval=UpdateInterval(cast(str, record.update_interval)),
+            size=cast(int, record.size),
+            last_crawled_at=cast(Optional["datetime"], record.last_crawled_at),
+            consecutive_failures=cast(int, record.consecutive_failures),
+            next_retry_at=cast(Optional["datetime"], record.next_retry_at),
         )

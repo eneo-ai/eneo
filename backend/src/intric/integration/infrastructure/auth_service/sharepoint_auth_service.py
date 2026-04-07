@@ -1,5 +1,5 @@
 from logging import getLogger
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, cast
 from urllib.parse import urlencode
 from uuid import UUID
 
@@ -10,6 +10,7 @@ from intric.integration.infrastructure.auth_service.base_auth_service import (
     BaseOauthService,
     TokenResponse,
 )
+from intric.integration.infrastructure.content_service.types import OAuthResource
 from intric.main.config import get_settings
 
 if TYPE_CHECKING:
@@ -72,7 +73,9 @@ class SharepointAuthService(BaseOauthService):
             "authority": f"https://login.microsoftonline.com/{tenant_app.tenant_domain}",
         }
 
-    async def gen_auth_url(self, state: str, tenant_id: Optional[UUID] = None) -> dict:
+    async def gen_auth_url(
+        self, state: Optional[str] = None, tenant_id: Optional[UUID] = None
+    ) -> dict[str, str]:
         """Generate OAuth authorization URL.
 
         Args:
@@ -88,7 +91,7 @@ class SharepointAuthService(BaseOauthService):
             "redirect_uri": creds["redirect_uri"],
             "response_mode": "query",
             "scope": scope_param,
-            "state": state,
+            "state": state or "state",
             "prompt": "login",
         }
 
@@ -159,7 +162,9 @@ class SharepointAuthService(BaseOauthService):
             else:
                 response.raise_for_status()
 
-    async def get_resources(self, access_token: str):
+    async def get_resources(
+        self, access_token: str, tenant_id: Optional[UUID] = None
+    ) -> list[OAuthResource]:
         graph_endpoint = "https://graph.microsoft.com/v1.0/sites/root"
         headers = {"Authorization": f"Bearer {access_token}"}
         async with httpx.AsyncClient() as client:
@@ -168,6 +173,7 @@ class SharepointAuthService(BaseOauthService):
             )
 
             if response.status_code == 200:
-                return response.json()
+                return cast(list[OAuthResource], response.json())
             else:
                 response.raise_for_status()
+                raise RuntimeError("Failed to fetch SharePoint resources")

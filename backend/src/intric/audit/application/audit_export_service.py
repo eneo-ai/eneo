@@ -23,7 +23,10 @@ import aiofiles
 import orjson
 
 from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.repositories.audit_log_repository import AuditLogRepository
+from intric.audit.domain.repositories.audit_log_repository import (
+    AuditLogRawRow,
+    AuditLogRepository,
+)
 from intric.main.config import get_settings
 
 if TYPE_CHECKING:
@@ -145,6 +148,7 @@ class AuditExportService:
         Args:
             repository: Audit log repository for data access
         """
+        super().__init__()
         self.repository = repository
 
     def _get_log_stream(
@@ -156,7 +160,7 @@ class AuditExportService:
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
         batch_size: Optional[int] = None,
-    ) -> AsyncIterator[dict]:
+    ) -> AsyncIterator[AuditLogRawRow]:
         """Get appropriate log stream based on user_id vs actor_id filtering.
 
         Centralizes log stream selection logic to avoid 4x code duplication.
@@ -246,7 +250,7 @@ class AuditExportService:
             to_date=to_date,
         )
 
-    def _raw_dict_to_csv_row(self, log_dict: dict) -> list:
+    def _raw_dict_to_csv_row(self, log_dict: AuditLogRawRow) -> list[str]:
         """Convert raw audit log dict to CSV row with sanitization.
 
         Used with stream_logs_raw() for optimized exports without ORM overhead.
@@ -257,24 +261,24 @@ class AuditExportService:
         ts = log_dict["timestamp"]
         if isinstance(ts, datetime):
             ts = ts.isoformat()
+        else:
+            ts = str(ts)
 
         # Serialize metadata as JSON for consistent output format
         # Use orjson with _orjson_default to handle UUID/Decimal/datetime in metadata
-        metadata = log_dict.get("metadata", {})
+        metadata = log_dict["metadata"]
         metadata_json = (
             orjson.dumps(metadata, default=_orjson_default).decode("utf-8")
             if metadata
             else "{}"
         )
 
-        # Handle None description - use explicit None check to preserve empty strings
-        description = log_dict.get("description")
-        description_value = description if description is not None else ""
-        actor_id_value = log_dict.get("actor_id") or ""
+        description_value = log_dict["description"]
+        actor_id_value = log_dict["actor_id"] or ""
 
         return [
             ts,
-            actor_id_value,
+            str(actor_id_value),
             log_dict["actor_type"],
             log_dict["action"],
             log_dict["entity_type"],
@@ -493,7 +497,7 @@ class AuditExportService:
         )
 
         # Batch rows to reduce async context-switching overhead
-        batch: list = []
+        batch: list[list[str]] = []
         total_exported = 0
 
         async for log in log_stream:
@@ -559,7 +563,7 @@ class AuditExportService:
         )
 
         # Batch rows to reduce async context-switching overhead
-        batch: list = []
+        batch: list[AuditLogRawRow] = []
         total_exported = 0
 
         async for log in log_stream:
@@ -671,7 +675,7 @@ class AuditExportService:
             total_records = max_records
 
         processed = 0
-        buffer: list = []
+        buffer: list[list[str] | AuditLogRawRow] = []
         cancelled = False  # Track cancellation to handle cleanup after file closes
 
         # Use atomic file write pattern: write to temp file, then rename
@@ -788,7 +792,7 @@ class AuditExportService:
     async def _flush_buffer(
         self,
         file: aiofiles.threadpool.binary.AsyncBufferedIOBase,
-        buffer: list,
+        buffer: list[list[str] | AuditLogRawRow],
         format: str,
     ) -> None:
         """Flush buffer to file with format-specific serialization."""
@@ -796,14 +800,16 @@ class AuditExportService:
             # Use StringIO + writerows for efficient CSV batch writing
             output = StringIO()
             writer = csv.writer(output)
-            writer.writerows(buffer)  # writerows is faster than loop
+            csv_buffer = [row for row in buffer if isinstance(row, list)]
+            writer.writerows(csv_buffer)  # writerows is faster than loop
             await file.write(output.getvalue().encode("utf-8"))
         else:  # jsonl
             # Batch serialize with join - O(n) instead of O(n²) concatenation
             # Memory: ~45-50MB temporary allocation for 50k records, acceptable trade-off
+            json_buffer = [row for row in buffer if isinstance(row, dict)]
             chunk = (
                 b"\n".join(
-                    orjson.dumps(item, default=_orjson_default) for item in buffer
+                    orjson.dumps(item, default=_orjson_default) for item in json_buffer
                 )
                 + b"\n"
             )

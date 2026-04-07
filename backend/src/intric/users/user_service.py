@@ -69,7 +69,6 @@ from intric.users.user import (
     PropUserInvite,
     UserAdd,
     UserAddSuperAdmin,
-    UserBase,
     UserState,
     UserUpdate,
     UserUpdatePublic,
@@ -234,19 +233,22 @@ class UserService:
         self.feature_flag_service = feature_flag_service
         self._session = session
 
-    async def _validate_email(self, user: UserBase):
+    async def _validate_email(self, email: str | None):
+        if email is None:
+            return
+
         if (
-            await self.repo.get_user_by_email(email=user.email, with_deleted=True)
+            await self.repo.get_user_by_email(email=email, with_deleted=True)
             is not None
         ):
             raise UniqueUserException("That email is already taken.")
 
-    async def _validate_username(self, user: UserBase):
+    async def _validate_username(self, username: str | None):
+        if username is None:
+            return
+
         if (
-            user.username is not None
-            and await self.repo.get_user_by_username(
-                username=user.username, with_deleted=True
-            )
+            await self.repo.get_user_by_username(username=username, with_deleted=True)
             is not None
         ):
             raise UniqueUserException("That username is already taken.")
@@ -255,8 +257,8 @@ class UserService:
         self,
         email: str,
         password: str,
-        correlation_id: str = None,
-        source_ip: str = None,
+        correlation_id: str | None = None,
+        source_ip: str | None = None,
     ):
         """
         Authenticate user with username/password.
@@ -377,7 +379,7 @@ class UserService:
         access_token: str,
         key: jwt.PyJWK,
         signing_algos: list[str],
-        correlation_id: str = None,
+        correlation_id: str | None = None,
     ):
         # MIT License
         was_federated = False
@@ -394,12 +396,18 @@ class UserService:
         )
 
         try:
+            client_id = get_settings().oidc_client_id
+            if client_id is None:
+                raise AuthenticationException(
+                    "System configuration error: OIDC client ID not configured"
+                )
+
             username, email = self.auth_service.get_username_and_email_from_openid_jwt(
                 id_token=id_token,
                 access_token=access_token,
                 key=key.key,
                 signing_algos=signing_algos,
-                client_id=get_settings().oidc_client_id,
+                client_id=client_id,
                 options={"verify_iat": False},
                 correlation_id=correlation_id,
             )
@@ -635,8 +643,8 @@ class UserService:
         )
 
     async def register(self, new_user: UserAddSuperAdmin):
-        await self._validate_email(new_user)
-        await self._validate_username(new_user)
+        await self._validate_email(new_user.email)
+        await self._validate_username(new_user.username)
 
         tenant = await self.tenant_repo.get(new_user.tenant_id)
         if tenant is None:
@@ -677,6 +685,8 @@ class UserService:
         username = self.auth_service.get_username_from_token(
             token, get_settings().jwt_secret
         )
+        if username is None:
+            return None
         return await self.repo.get_user_by_username(username)
 
     async def _resolve_space_id_for_scope(
@@ -754,7 +764,14 @@ class UserService:
         if ownership == ApiKeyOwnership.SERVICE:
             user = await self._build_service_user(resolved.key)
         else:
-            user = await self.repo.get_user_by_id(resolved.key.owner_user_id)
+            owner_user_id = resolved.key.owner_user_id
+            if owner_user_id is None:
+                raise ApiKeyValidationError(
+                    status_code=401,
+                    code="invalid_api_key",
+                    message="API key is invalid.",
+                )
+            user = await self.repo.get_user_by_id(owner_user_id)
             if user is None:
                 raise ApiKeyValidationError(
                     status_code=401,
@@ -1688,7 +1705,7 @@ class UserService:
         return user_in_db
 
     async def _check_user_and_tenant_state(
-        self, user_in_db, correlation_id: str = None
+        self, user_in_db, correlation_id: str | None = None
     ):
         """
         Check if the user or their tenant has restrictions.
@@ -1751,7 +1768,7 @@ class UserService:
         self,
         api_key: str,
         token: str,
-        assistant_id: UUID = None,
+        assistant_id: UUID | None = None,
         request: Request | None = None,
     ):
         user_in_db = None
@@ -1818,7 +1835,7 @@ class UserService:
 
     async def get_all_users(
         self,
-        tenant_id: UUID = None,
+        tenant_id: UUID | None = None,
         cursor: Optional[str] = None,
         previous: bool = False,
         limit: Optional[int] = None,
@@ -1838,10 +1855,10 @@ class UserService:
         )
 
     async def invite_user(self, user_invite: PropUserInvite, tenant_id: UUID):
-        await self._validate_email(user_invite)
+        await self._validate_email(user_invite.email)
         username = getattr(user_invite, "username", None)
         if username is not None:
-            await self._validate_username(user_invite)
+            await self._validate_username(username)
 
         tenant = await self.tenant_repo.get(tenant_id)
         if tenant is None:
@@ -1867,8 +1884,8 @@ class UserService:
         return user_in_db
 
     async def update_user(self, user_id: UUID, user_update_public: UserUpdatePublic):
-        await self._validate_email(user_update_public)
-        await self._validate_username(user_update_public)
+        await self._validate_email(user_update_public.email)
+        await self._validate_username(user_update_public.username)
 
         user_update = UserUpdate(
             id=user_id, **user_update_public.model_dump(exclude_unset=True)

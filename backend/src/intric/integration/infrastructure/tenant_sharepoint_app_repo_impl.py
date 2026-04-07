@@ -68,19 +68,13 @@ class TenantSharePointAppRepositoryImpl(
 
         return await self.add(app)
 
-    async def update(self, app: TenantSharePointApp) -> TenantSharePointApp:
+    async def update(self, obj: TenantSharePointApp) -> TenantSharePointApp:
         """Update an existing tenant SharePoint app configuration."""
-        return await super().update(app)
+        return await super().update(obj)
 
-    async def delete(self, app_id: UUID) -> bool:
+    async def delete(self, id: UUID) -> bool:
         """Delete a tenant SharePoint app configuration."""
-        stmt = sa.delete(TenantSharePointAppDBModel).where(
-            TenantSharePointAppDBModel.id == app_id
-        )
-        result = await self.session.execute(stmt)
-        await self.session.commit()
-
-        return result.rowcount > 0
+        return await super().delete(id=id)
 
     async def deactivate(self, tenant_id: UUID) -> bool:
         """Deactivate the SharePoint app for a tenant (emergency shutoff)."""

@@ -1,3 +1,4 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -174,8 +175,8 @@ async def get_website(
     "/{id}/", response_model=WebsitePublic, responses=responses.get_responses([404])
 )
 async def update_website(
-    id: UUID = Path(description="Unique identifier of the website to update"),
-    website_update: WebsiteUpdate = ...,
+    website_update: WebsiteUpdate,
+    id: Annotated[UUID, Path(description="Unique identifier of the website to update")],
     container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.website_crud_service()
@@ -294,8 +295,10 @@ async def get_crawl_runs(
 
 @router.post("/{id}/transfer/", status_code=204)
 async def transfer_website_to_space(
-    id: UUID = Path(description="Unique identifier of the website to transfer"),
-    transfer_req: TransferRequest = ...,
+    transfer_req: TransferRequest,
+    id: Annotated[
+        UUID, Path(description="Unique identifier of the website to transfer")
+    ],
     container: Container = Depends(get_container(with_user=True)),
 ):
     # Transfer website (do this FIRST to avoid DI issues)

@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 class AppTemplateRepository:
     def __init__(self, session: "AsyncSession", factory: "AppTemplateFactory"):
+        super().__init__()
         self.session = session
         self.factory = factory
 

@@ -1,7 +1,7 @@
 # MIT License
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import AsyncIterator, Optional, cast
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Query
@@ -301,10 +301,11 @@ async def ask_question_about_questions(
     if ask_analysis.stream:
 
         async def event_stream():
-            async for chunk in ai_response.completion:
+            completion_stream = cast(AsyncIterator[Completion], ai_response.completion)
+            async for chunk in completion_stream:
                 if chunk.stop:
                     continue
-                yield AnalysisAnswer(answer=chunk.text).model_dump_json()
+                yield AnalysisAnswer(answer=chunk.text or "").model_dump_json()
 
         return EventSourceResponse(event_stream())
 
@@ -419,10 +420,11 @@ async def ask_unified_questions_about_questions(
     if ask_analysis.stream:
 
         async def event_stream():
-            async for chunk in ai_response.completion:
+            completion_stream = cast(AsyncIterator[Completion], ai_response.completion)
+            async for chunk in completion_stream:
                 if chunk.stop:
                     continue
-                yield AnalysisAnswer(answer=chunk.text).model_dump_json()
+                yield AnalysisAnswer(answer=chunk.text or "").model_dump_json()
 
         return EventSourceResponse(event_stream())
 
@@ -562,6 +564,8 @@ async def get_conversation_insight_sessions(
         end_date = end_date.replace(tzinfo=timezone.utc)
     if name_filter is not None:
         name_filter = name_filter.strip() or None
+    if limit is None:
+        limit = DEFAULT_SESSIONS_PAGE_LIMIT
 
     service = container.analysis_service()
 
@@ -576,6 +580,7 @@ async def get_conversation_insight_sessions(
             end_date=end_date,
         )
     else:
+        assert group_chat_id is not None
         sessions, total = await service.get_group_chat_insight_sessions(
             group_chat_id=group_chat_id,
             limit=limit,
@@ -590,7 +595,7 @@ async def get_conversation_insight_sessions(
         sessions=sessions,
         total_count=total,
         limit=limit,
-        cursor=cursor,
+        cursor=cast(datetime, cursor),
         previous=previous,
     )
 
@@ -625,4 +630,5 @@ async def get_conversation_insight_session(
 
     service = container.analysis_service()
     session = await service.get_insight_session(session_id=session_id)
+    assert session is not None
     return to_session_public(session=session)

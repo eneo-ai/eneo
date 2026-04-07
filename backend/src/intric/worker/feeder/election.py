@@ -37,6 +37,7 @@ class LeaderElection:
         lock_key: str = "crawl_feeder:leader",
         ttl_seconds: int = 30,
     ) -> None:
+        super().__init__()
         self._redis = redis_client
         self._worker_id = worker_id
         self._lock_key = lock_key

@@ -8,11 +8,10 @@ from uuid import UUID, uuid4
 
 import aiohttp
 import jwt
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.exceptions import HTTPException
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
@@ -104,7 +103,11 @@ async def _load_single_tenant_allowed_origins(
         )
         return origins
 
-    for allowed_origin in allowed_origins:
+    if allowed_origins is None:
+        return origins
+
+    allowed_origins_list = cast(list[object], allowed_origins)
+    for allowed_origin in allowed_origins_list:
         raw_origin = getattr(allowed_origin, "url", None)
         if not raw_origin:
             continue
@@ -664,7 +667,7 @@ async def login_with_mobilityguard(
 @users_admin_router.get("/", response_model=CursorPaginatedResponse[UserSparse])
 async def get_tenant_users(
     email: Optional[str] = Query(None, description="Email of user"),
-    limit: int = Query(None, description="Users per page", ge=1),
+    limit: int | None = Query(None, description="Users per page", ge=1),
     cursor: Optional[str] = Query(None, description="Current cursor"),
     previous: Optional[bool] = Query(False, description="Show previous page"),
     container: Container = Depends(get_container(with_user=True)),
@@ -674,6 +677,8 @@ async def get_tenant_users(
     user = container.user()
     user_assembler = container.user_assembler()
     user_service = container.user_service()
+
+    previous = bool(previous)
 
     paginated_users = await user_service.get_all_users(
         tenant_id=user.tenant_id,

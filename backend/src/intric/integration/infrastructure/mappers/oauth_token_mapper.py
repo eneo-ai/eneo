@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, Sequence
 
 from intric.base.base_entity import EntityMapper
 from intric.database.tables.integration_table import (
@@ -23,7 +23,5 @@ class OauthTokenMapper(EntityMapper[OauthToken, OauthTokenDBModel]):
     def to_entity(self, db_model: OauthTokenDBModel) -> OauthToken:
         return OauthTokenFactory.create_entity(record=db_model)
 
-    def to_entities(
-        self, db_models: List[OauthTokenDBModel]
-    ) -> List[OauthToken] | None:
-        pass
+    def to_entities(self, db_models: Sequence[OauthTokenDBModel]) -> list[OauthToken]:
+        return [self.to_entity(db_model) for db_model in db_models]

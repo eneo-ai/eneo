@@ -1,7 +1,7 @@
 # MIT License
 
 
-import datetime
+from datetime import datetime
 from typing import NamedTuple
 from uuid import UUID
 
@@ -26,14 +26,14 @@ class AssistantMetadataRow(NamedTuple):
     """Lightweight row for assistant metadata (id and created_at only)."""
 
     id: UUID
-    created_at: datetime.datetime
+    created_at: datetime
 
 
 class SessionMetadataRow(NamedTuple):
     """Lightweight row for session metadata."""
 
     id: UUID
-    created_at: datetime.datetime
+    created_at: datetime
     assistant_id: UUID | None
     group_chat_id: UUID | None
 
@@ -42,7 +42,7 @@ class QuestionMetadataRow(NamedTuple):
     """Lightweight row for question metadata."""
 
     id: UUID
-    created_at: datetime.datetime
+    created_at: datetime
     assistant_id: UUID | None
     session_id: UUID
 
@@ -50,7 +50,7 @@ class QuestionMetadataRow(NamedTuple):
 class CountBucketRow(NamedTuple):
     """Aggregated count row by hour."""
 
-    created_at: datetime.datetime
+    created_at: datetime
     total: int
 
 
@@ -58,7 +58,7 @@ class QuestionTextRow(NamedTuple):
     """Lightweight question row for insights analysis."""
 
     question: str
-    created_at: datetime.datetime
+    created_at: datetime
     session_id: UUID
 
 
@@ -67,7 +67,7 @@ class AssistantInsightQuestionRow(NamedTuple):
 
     id: UUID
     question: str
-    created_at: datetime.datetime
+    created_at: datetime
     session_id: UUID
 
 
@@ -75,7 +75,7 @@ class AnalysisRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def _get_count(self, table, tenant_id: UUID = None):
+    async def _get_count(self, table, tenant_id: UUID | None = None):
         stmt = sa.select(sa.func.count()).select_from(table)
 
         if tenant_id is not None:
@@ -88,16 +88,16 @@ class AnalysisRepository:
 
         return count
 
-    async def get_assistant_count(self, tenant_id: UUID = None):
+    async def get_assistant_count(self, tenant_id: UUID | None = None):
         return await self._get_count(Assistants, tenant_id=tenant_id)
 
-    async def get_group_chat_count(self, tenant_id: UUID = None):
+    async def get_group_chat_count(self, tenant_id: UUID | None = None):
         return await self._get_count(table=GroupChatsTable, tenant_id=tenant_id)
 
-    async def get_session_count(self, tenant_id: UUID = None):
+    async def get_session_count(self, tenant_id: UUID | None = None):
         return await self._get_count(Sessions, tenant_id=tenant_id)
 
-    async def get_question_count(self, tenant_id: UUID = None):
+    async def get_question_count(self, tenant_id: UUID | None = None):
         return await self._get_count(Questions, tenant_id=tenant_id)
 
     async def get_tenant_counts(self, tenant_id: UUID) -> tuple[int, int, int]:
@@ -132,9 +132,9 @@ class AnalysisRepository:
     async def get_assistant_sessions_since(
         self,
         assistant_id: UUID,
-        from_date: datetime = None,
-        to_date: datetime = None,
-        tenant_id: UUID = None,
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+        tenant_id: UUID | None = None,
     ):
         if tenant_id is None:
             raise ValueError("tenant_id is required for insights session queries")
@@ -205,9 +205,9 @@ class AnalysisRepository:
     async def get_group_chat_sessions_since(
         self,
         group_chat_id: UUID,
-        from_date: datetime = None,
-        to_date: datetime = None,
-        tenant_id: UUID = None,
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+        tenant_id: UUID | None = None,
     ):
         if tenant_id is None:
             raise ValueError("tenant_id is required for insights session queries")
@@ -384,7 +384,7 @@ class AnalysisRepository:
         tenant_id: UUID,
         limit: int,
         query: str | None = None,
-        cursor_created_at: datetime.datetime | None = None,
+        cursor_created_at: datetime | None = None,
         cursor_id: UUID | None = None,
     ) -> tuple[list[AssistantInsightQuestionRow], int, bool]:
         if tenant_id is None:
@@ -476,9 +476,9 @@ class AnalysisRepository:
     async def get_assistant_conversation_counts(
         self,
         assistant_id: UUID,
-        from_date: datetime = None,
-        to_date: datetime = None,
-        tenant_id: UUID = None,
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+        tenant_id: UUID | None = None,
     ) -> tuple[int, int]:
         """Get conversation and question counts for an assistant efficiently.
 
@@ -553,8 +553,8 @@ class AnalysisRepository:
     async def get_assistant_metadata_for_tenant(
         self,
         tenant_id: UUID,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> list[AssistantMetadataRow]:
         """Get lightweight assistant metadata (id, created_at only) for a tenant.
 
@@ -581,8 +581,8 @@ class AnalysisRepository:
     async def get_session_metadata_for_tenant(
         self,
         tenant_id: UUID,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> list[SessionMetadataRow]:
         """Get lightweight session metadata for a tenant.
 
@@ -621,8 +621,8 @@ class AnalysisRepository:
     async def get_question_metadata_for_tenant(
         self,
         tenant_id: UUID,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> list[QuestionMetadataRow]:
         """Get lightweight question metadata for a tenant.
 
@@ -661,8 +661,8 @@ class AnalysisRepository:
     async def get_assistant_counts_by_hour_for_tenant(
         self,
         tenant_id: UUID,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> list[CountBucketRow]:
         bucket = sa.func.date_trunc("hour", Assistants.created_at).label("created_at")
         stmt = (
@@ -686,8 +686,8 @@ class AnalysisRepository:
     async def get_session_counts_by_hour_for_tenant(
         self,
         tenant_id: UUID,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> list[CountBucketRow]:
         bucket = sa.func.date_trunc("hour", Sessions.created_at).label("created_at")
         stmt = (
@@ -711,8 +711,8 @@ class AnalysisRepository:
     async def get_question_counts_by_hour_for_tenant(
         self,
         tenant_id: UUID,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> list[CountBucketRow]:
         bucket = sa.func.date_trunc("hour", Questions.created_at).label("created_at")
         stmt = (
@@ -736,9 +736,9 @@ class AnalysisRepository:
     async def get_group_chat_conversation_counts(
         self,
         group_chat_id: UUID,
-        from_date: datetime = None,
-        to_date: datetime = None,
-        tenant_id: UUID = None,
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+        tenant_id: UUID | None = None,
     ) -> tuple[int, int]:
         """Get conversation and question counts for a group chat efficiently.
 
@@ -813,8 +813,8 @@ class AnalysisRepository:
     async def get_active_assistant_count_for_tenant(
         self,
         tenant_id: UUID,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> int:
         """Count distinct trackable assistants that have sessions in the given period.
 
@@ -866,8 +866,8 @@ class AnalysisRepository:
     async def get_active_user_count_for_tenant(
         self,
         tenant_id: UUID,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> int:
         """Count distinct non-deleted users with sessions in the given period.
 

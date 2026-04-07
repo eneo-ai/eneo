@@ -124,7 +124,7 @@ class ServiceAccountAuthService:
         client_id: str,
         client_secret: str,
         tenant_domain: str,
-    ) -> dict:
+    ) -> dict[str, str]:
         """Generate OAuth authorization URL for service account login.
 
         Args:

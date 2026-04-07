@@ -63,12 +63,12 @@ class UnsupportedFormatError(ExtractionError):
 
 class MimeTypesBase(str, Enum):
     @classmethod
-    def has_value(cls, value) -> bool:
+    def has_value(cls, value: str) -> bool:
         base_value = value.split(";")[0].strip()
         return any(base_value == item.value for item in cls)
 
     @classmethod
-    def values(cls):
+    def values(cls) -> list[str]:
         return [item.value for item in cls]
 
 

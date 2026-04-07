@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union, cast
 from uuid import UUID
 
 from intric.main.exceptions import (
@@ -59,21 +59,21 @@ class Space:
         completion_models: list["CompletionModel"],
         transcription_models: list[TranscriptionModel],
         mcp_servers: list["MCPServer"],
-        default_assistant: "Assistant",
-        assistants: list["Assistant"],
-        apps: list["App"],
-        services: list["Service"],
-        websites: list["Website"],
-        collections: list["Collection"],
-        integration_knowledge_list: list["IntegrationKnowledge"],
-        members: dict[UUID, SpaceMember],
-        created_at: datetime = None,
-        updated_at: datetime = None,
-        group_chats: Optional[list["GroupChat"]] = [],
+        default_assistant: "Assistant" | None,
+        assistants: list["Assistant"] | None,
+        apps: list["App"] | None,
+        services: list["Service"] | None,
+        websites: list["Website"] | None,
+        collections: list["Collection"] | None,
+        integration_knowledge_list: list["IntegrationKnowledge"] | None,
+        members: dict[UUID, SpaceMember] | None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        group_chats: list["GroupChat"] | None = None,
         security_classification: Optional[SecurityClassification] = None,
         data_retention_days: Optional[int] = None,
         icon_id: Optional[UUID] = None,
-        group_members: Optional[dict[UUID, SpaceGroupMember]] = None,
+        group_members: dict[UUID, SpaceGroupMember] | None = None,
     ):
         self.id = id
         self.tenant_id = tenant_id
@@ -86,14 +86,14 @@ class Space:
         self._transcription_models = transcription_models
         self._mcp_servers = mcp_servers
         self.default_assistant = default_assistant
-        self.assistants = assistants
-        self.group_chats = group_chats
-        self.apps = apps
-        self.services = services
-        self.websites = websites
-        self.collections = collections
-        self.integration_knowledge_list = integration_knowledge_list
-        self.members = members
+        self.assistants = assistants or []
+        self.group_chats = group_chats or []
+        self.apps = apps or []
+        self.services = services or []
+        self.websites = websites or []
+        self.collections = collections or []
+        self.integration_knowledge_list = integration_knowledge_list or []
+        self.members = members or {}
         self.created_at = created_at
         self.updated_at = updated_at
         self.security_classification = security_classification
@@ -308,12 +308,12 @@ class Space:
 
     def update(
         self,
-        name: str = None,
-        description: str = None,
-        embedding_models: list["EmbeddingModel"] = None,
-        completion_models: list["CompletionModel"] = None,
-        transcription_models: list[TranscriptionModel] = None,
-        mcp_servers: list["MCPServer"] = None,
+        name: str | None = None,
+        description: str | None = None,
+        embedding_models: list["EmbeddingModel"] | None = None,
+        completion_models: list["CompletionModel"] | None = None,
+        transcription_models: list[TranscriptionModel] | None = None,
+        mcp_servers: list["MCPServer"] | None = None,
         security_classification: Union[
             SecurityClassification, NotProvided, None
         ] = NOT_PROVIDED,
@@ -565,17 +565,26 @@ class Space:
                 )
 
     def can_run_app(self, app: "App") -> bool:
-        if not self.is_completion_model_available(app.completion_model.id):
+        completion_model = cast("CompletionModel", app.completion_model)
+        if completion_model is None:
             return False
-        if not self.is_transcription_model_available(app.transcription_model.id):
+        if not self.is_completion_model_available(completion_model.id):
+            return False
+        transcription_model = cast("TranscriptionModel", app.transcription_model)
+        if transcription_model is None:
+            return False
+        if not self.is_transcription_model_available(transcription_model.id):
             return False
         if self.security_classification is not None:
             if self.security_classification.is_greater_than(
-                app.completion_model.security_classification  # type: ignore[attr-defined]
+                completion_model.security_classification
             ):
                 return False
-            if self.security_classification.is_greater_than(
-                app.transcription_model.security_classification
+            if (
+                transcription_model.security_classification is not None
+                and self.security_classification.is_greater_than(
+                    transcription_model.security_classification
+                )
             ):
                 return False
 

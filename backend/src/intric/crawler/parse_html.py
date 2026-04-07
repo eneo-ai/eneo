@@ -41,7 +41,7 @@ def parse_response(response: Response):
         url["href"] = urljoin(response.url, url["href"])
 
     content = html2text(str(soup))
-    title = response.css("title::text").get()
+    title = response.css("title::text").get() or response.url
     url = response.url
 
     return CrawledPage(url=url, title=title, content=content)

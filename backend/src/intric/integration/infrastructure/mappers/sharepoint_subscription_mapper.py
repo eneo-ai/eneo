@@ -1,4 +1,6 @@
-from typing import Any, Dict, List
+from datetime import datetime
+from typing import Any, Dict, List, Sequence, cast
+from uuid import UUID
 
 from intric.base.base_entity import EntityMapper
 from intric.database.tables.sharepoint_subscription_table import (
@@ -33,17 +35,17 @@ class SharePointSubscriptionMapper(
         self, db_model: SharePointSubscriptionDBModel
     ) -> SharePointSubscription:
         return SharePointSubscription(
-            id=db_model.id,
-            user_integration_id=db_model.user_integration_id,
-            site_id=db_model.site_id,
-            subscription_id=db_model.subscription_id,
-            drive_id=db_model.drive_id,
-            expires_at=db_model.expires_at,
-            created_at=db_model.created_at,
-            updated_at=db_model.updated_at,
+            id=cast(UUID, db_model.id),
+            user_integration_id=cast(UUID, db_model.user_integration_id),
+            site_id=cast(str, db_model.site_id),
+            subscription_id=cast(str, db_model.subscription_id),
+            drive_id=cast(str, db_model.drive_id),
+            expires_at=cast(datetime, db_model.expires_at),
+            created_at=cast(datetime | None, db_model.created_at),
+            updated_at=cast(datetime | None, db_model.updated_at),
         )
 
     def to_entities(
-        self, db_models: List[SharePointSubscriptionDBModel]
+        self, db_models: Sequence[SharePointSubscriptionDBModel]
     ) -> List[SharePointSubscription]:
         return [self.to_entity(db_model) for db_model in db_models]

@@ -90,6 +90,9 @@ class SharePointTreeService:
                     extra={"drive_id": actual_drive_id},
                 )
 
+            if actual_drive_id is None:
+                raise ValueError("Could not resolve drive ID")
+
             if folder_id is None:
                 folder_id = "root"
                 logger.debug("Using root folder")

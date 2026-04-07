@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import sqlalchemy as sa
 from dependency_injector import providers
@@ -52,6 +52,11 @@ _CHUNK_OVERLAP = 40
 _EMBEDDING_SEMAPHORE: asyncio.Semaphore | None = None
 
 
+class CrawlPageData(TypedDict):
+    url: str
+    content: str
+
+
 def _get_embedding_semaphore() -> asyncio.Semaphore:
     """Get or create the module-level embedding semaphore.
 
@@ -74,7 +79,7 @@ def _get_embedding_semaphore() -> asyncio.Semaphore:
 
 
 async def persist_batch(
-    page_buffer: list[dict],
+    page_buffer: list[CrawlPageData],
     ctx: CrawlContext,
     embedding_model: EmbeddingModelSpec | None,
     container: "Container",
@@ -142,7 +147,7 @@ async def persist_batch(
             extra={"website_id": str(ctx.website_id), "batch_size": len(page_buffer)},
         )
         for page in page_buffer:
-            add_failure(FailureReason.NO_EMBEDDING_MODEL, page.get("url", "unknown"))
+            add_failure(FailureReason.NO_EMBEDDING_MODEL, page["url"])
         return 0, len(page_buffer), [], failures_by_reason
 
     # Validate embedding model has required provider_id for credential lookup
@@ -156,7 +161,7 @@ async def persist_batch(
             },
         )
         for page in page_buffer:
-            add_failure(FailureReason.MISSING_PROVIDER, page.get("url", "unknown"))
+            add_failure(FailureReason.MISSING_PROVIDER, page["url"])
         return 0, len(page_buffer), [], failures_by_reason
 
     success_count = 0
@@ -169,7 +174,8 @@ async def persist_batch(
     embedding_session = sessionmanager.create_session()
     try:
         await embedding_session.begin()
-        container.session.override(providers.Object(embedding_session))
+        session_provider = cast(Any, container.session)
+        session_provider.override(providers.Object(embedding_session))
         create_embeddings_service = container.create_embeddings_service()
     except Exception as e:
         logger.error(
@@ -182,7 +188,7 @@ async def persist_batch(
         )
         await embedding_session.close()
         for page in page_buffer:
-            add_failure(FailureReason.EMBEDDING_ERROR, page.get("url", "unknown"))
+            add_failure(FailureReason.EMBEDDING_ERROR, page["url"])
         return 0, len(page_buffer), [], failures_by_reason
 
     # Create text splitter (matching datastore.py pattern)
@@ -206,8 +212,8 @@ async def persist_batch(
 
     try:
         for page_data in page_buffer:
-            url = page_data.get("url", "unknown")
-            content = page_data.get("content", "")
+            url = page_data["url"]
+            content = page_data["content"]
 
             if not content.strip():
                 logger.warning(
@@ -265,7 +271,7 @@ async def persist_batch(
                         async with asyncio.timeout(ctx.embedding_timeout_seconds):
                             chunk_embedding_list = (
                                 await create_embeddings_service.get_embeddings(
-                                    model=embedding_model,
+                                    model=cast(Any, embedding_model),
                                     chunks=chunk_objects,
                                 )
                             )
@@ -300,6 +306,8 @@ async def persist_batch(
                 buffer_embedding_bytes += embedding_bytes
 
                 # 7. Create PreparedPage with all data needed for Phase 2
+                embedding_model_id = ctx.embedding_model_id
+                assert embedding_model_id is not None
                 prepared = PreparedPage(
                     url=url,
                     title=url,  # URL as title, matching existing crawler pattern
@@ -310,7 +318,7 @@ async def persist_batch(
                     tenant_id=ctx.tenant_id,
                     website_id=ctx.website_id,
                     user_id=ctx.user_id,
-                    embedding_model_id=ctx.embedding_model_id,
+                    embedding_model_id=embedding_model_id,
                 )
                 prepared_pages.append(prepared)
 

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import NoReturn
+from typing import Annotated, Awaitable, Callable, NoReturn
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, Security, status
@@ -10,7 +10,7 @@ from intric.authentication.api_key_resolver import (
 )
 from intric.authentication.api_key_router_helpers import raise_api_key_http_error
 from intric.authentication.auth_factory import get_auth_service
-from intric.authentication.auth_models import ApiKeyPermission
+from intric.authentication.auth_models import ApiKeyInDB, ApiKeyPermission
 from intric.authentication.auth_service import AuthService
 from intric.main.config import get_settings
 from intric.main.container.container import Container
@@ -48,9 +48,9 @@ async def _get_api_key_from_header(
 
 async def get_current_active_user(
     request: Request,
-    token: str = Security(OAUTH2_SCHEME),
-    api_key: str = Security(_get_api_key_from_header),
-    container: Container = Depends(get_container()),
+    token: Annotated[str, Security(OAUTH2_SCHEME)],
+    api_key: Annotated[str, Security(_get_api_key_from_header)],
+    container: Annotated[Container, Depends(get_container())],
 ) -> UserInDB:
     user_service = container.user_service()
     try:
@@ -61,9 +61,9 @@ async def get_current_active_user(
 
 async def get_current_active_user_with_quota(
     request: Request,
-    token: str = Security(OAUTH2_SCHEME),
-    api_key: str = Security(_get_api_key_from_header),
-    container: Container = Depends(get_container()),
+    token: Annotated[str, Security(OAUTH2_SCHEME)],
+    api_key: Annotated[str, Security(_get_api_key_from_header)],
+    container: Annotated[Container, Depends(get_container())],
 ) -> UserInDB:
     user_service = container.user_service()
     try:
@@ -77,10 +77,10 @@ async def get_current_active_user_with_quota(
 async def get_user_from_token_or_assistant_api_key(
     id: UUID,
     request: Request,
-    token: str = Security(OAUTH2_SCHEME),
-    api_key: str = Security(_get_api_key_from_header),
-    container: Container = Depends(get_container()),
-):
+    token: Annotated[str, Security(OAUTH2_SCHEME)],
+    api_key: Annotated[str, Security(_get_api_key_from_header)],
+    container: Annotated[Container, Depends(get_container())],
+) -> UserInDB:
     user_service = container.user_service()
     try:
         return await user_service.authenticate_with_assistant_api_key(
@@ -92,10 +92,10 @@ async def get_user_from_token_or_assistant_api_key(
 
 async def get_user_from_token_or_assistant_api_key_without_assistant_id(
     request: Request,
-    token: str = Security(OAUTH2_SCHEME),
-    api_key: str = Security(_get_api_key_from_header),
-    container: Container = Depends(get_container()),
-):
+    token: Annotated[str, Security(OAUTH2_SCHEME)],
+    api_key: Annotated[str, Security(_get_api_key_from_header)],
+    container: Annotated[Container, Depends(get_container())],
+) -> UserInDB:
     user_service = container.user_service()
     try:
         return await user_service.authenticate_with_assistant_api_key(
@@ -105,18 +105,20 @@ async def get_user_from_token_or_assistant_api_key_without_assistant_id(
         _raise_api_key_http_error(exc, request=request)
 
 
-def get_api_key(hashed: bool = True):
+def get_api_key(hashed: bool = True) -> Callable[..., Awaitable[ApiKeyInDB | None]]:
     async def _get_api_key(
-        api_key: str = Security(_get_api_key_from_header),
-        auth_service: AuthService = Depends(get_auth_service),
-    ):
+        api_key: Annotated[str, Security(_get_api_key_from_header)],
+        auth_service: Annotated[AuthService, Depends(get_auth_service)],
+    ) -> ApiKeyInDB | None:
         return await auth_service.get_api_key(api_key, hash_key=hashed)
 
     return _get_api_key
 
 
-def require_permission(permission: Permission):
-    async def _dep(user: UserInDB = Depends(get_current_active_user)):
+def require_permission(permission: Permission) -> Callable[..., Awaitable[None]]:
+    async def _dep(
+        user: Annotated[UserInDB, Depends(get_current_active_user)],
+    ) -> None:
         try:
             validate_permission(user, permission)
         except UnauthorizedException as e:
@@ -125,11 +127,16 @@ def require_permission(permission: Permission):
     return _dep
 
 
-def get_api_key_context(request: Request):
-    return getattr(request.state, "api_key", None)
+def get_api_key_context(request: Request) -> ApiKeyInDB | None:
+    api_key = getattr(request.state, "api_key", None)
+    if isinstance(api_key, ApiKeyInDB):
+        return api_key
+    return None
 
 
-def require_api_key_permission(required: ApiKeyPermission):
+def require_api_key_permission(
+    required: ApiKeyPermission,
+) -> Callable[..., Awaitable[None]]:
     """Endpoint-level guard: stash required API key permission for post-auth check.
 
     Like ``require_resource_permission_for_method``, this dependency runs
@@ -178,9 +185,8 @@ FILES_READ_OVERRIDES: frozenset[str] = frozenset(
 
 
 def require_resource_permission_for_method(
-    resource_type: str,
-    read_override_endpoints: frozenset[str] | None = None,
-):
+    resource_type: str, read_override_endpoints: frozenset[str] | None = None
+) -> Callable[..., Awaitable[None]]:
     """Router-level dependency: stores method→permission config for post-auth check.
 
     The actual permission check runs in ``_resolve_api_key`` (user_service)
@@ -202,7 +208,7 @@ def require_api_key_scope_check(
     resource_type: str,
     path_param: str | None = "id",
     self_filtering: bool = False,
-):
+) -> Callable[..., Awaitable[None]]:
     """Router-level dependency: stores scope check config for post-auth enforcement.
 
     The actual scope check runs in ``_resolve_api_key`` (user_service) after
@@ -229,7 +235,9 @@ def require_api_key_scope_check(
     return _scope_check_dep
 
 
-def require_resource_permission(resource_type: str, required: str):
+def require_resource_permission(
+    resource_type: str, required: str
+) -> Callable[..., Awaitable[None]]:
     """Dependency factory for fine-grained per-resource permission checks.
 
     Fail-closed: if an API key header is present but request.state.api_key
@@ -264,7 +272,7 @@ def require_resource_permission(resource_type: str, required: str):
     return _resource_check_dep
 
 
-def require_tenant_scope_for_delete():
+def require_tenant_scope_for_delete() -> Callable[..., Awaitable[None]]:
     """Block DELETE requests for non-tenant-scoped API keys.
 
     Files are user-scoped (no space_id column). GET/POST are safe for scoped keys,

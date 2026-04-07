@@ -45,6 +45,7 @@ class AdminService:
         user_service: UserService,
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
+        super().__init__()
         self.user = user
         self.user_repo = user_repo
         self.tenant_service = tenant_service
@@ -52,7 +53,7 @@ class AdminService:
         self.api_key_scope_revoker = api_key_scope_revoker
 
     @validate_permissions(Permission.ADMIN)
-    async def get_tenant_users(self):
+    async def get_tenant_users(self) -> list[UserInDB]:
         logger.info(
             f"Admin user {self.user.username} listing all users in tenant {self.user.tenant_id}"
         )
@@ -136,22 +137,26 @@ class AdminService:
 
     @validate_permissions(Permission.ADMIN)
     async def register_tenant_user(self, user: UserAddAdmin):
+        user_identifier = user.username or str(user.email)
         logger.info(
-            f"Admin user {self.user.username} creating user {user.username} in tenant {self.user.tenant_id}"
+            f"Admin user {self.user.username} creating user {user_identifier} in tenant {self.user.tenant_id}"
         )
 
         # Check for duplicate username in tenant (including soft-deleted users)
-        existing_user_by_username = await self.user_repo.get_user_by_username(
-            user.username
-        )
-        if (
-            existing_user_by_username
-            and existing_user_by_username.tenant_id == self.user.tenant_id
-        ):
-            logger.warning(
-                f"Username {user.username} already exists in tenant {self.user.tenant_id}"
+        if user.username is not None:
+            existing_user_by_username = await self.user_repo.get_user_by_username(
+                user.username
             )
-            raise UniqueUserException(f"Username '{user.username}' is already taken")
+            if (
+                existing_user_by_username
+                and existing_user_by_username.tenant_id == self.user.tenant_id
+            ):
+                logger.warning(
+                    f"Username {user.username} already exists in tenant {self.user.tenant_id}"
+                )
+                raise UniqueUserException(
+                    f"Username '{user.username}' is already taken"
+                )
 
         # Check for duplicate email in tenant (including soft-deleted users)
         existing_user_by_email = await self.user_repo.get_user_by_email(user.email)
@@ -170,12 +175,14 @@ class AdminService:
 
         result = await self.user_service.register(user_with_tenant)
         logger.info(
-            f"Successfully created user {user.username} in tenant {self.user.tenant_id}"
+            f"Successfully created user {user_identifier} in tenant {self.user.tenant_id}"
         )
         return result
 
     @validate_permissions(Permission.ADMIN)
-    async def update_tenant_user(self, username: str, user: UserUpdatePublic):
+    async def update_tenant_user(
+        self, username: str, user: UserUpdatePublic
+    ) -> UserInDB:
         logger.info(
             f"Admin user {self.user.username} updating user {username} in tenant {self.user.tenant_id}"
         )
@@ -219,7 +226,7 @@ class AdminService:
         return result
 
     @validate_permissions(Permission.ADMIN)
-    async def delete_tenant_user(self, username: str):
+    async def delete_tenant_user(self, username: str) -> bool:
         logger.info(
             f"Admin user {self.user.username} attempting to delete user {username} in tenant {self.user.tenant_id}"
         )
@@ -274,7 +281,7 @@ class AdminService:
         )
 
     @validate_permissions(Permission.ADMIN)
-    async def deactivate_tenant_user(self, username: str):
+    async def deactivate_tenant_user(self, username: str) -> UserInDB:
         """Deactivate user for temporary leave (sick, vacation, parental leave)"""
         logger.info(
             f"Admin user {self.user.username} deactivating user {username} in tenant {self.user.tenant_id}"
@@ -324,7 +331,7 @@ class AdminService:
         return result
 
     @validate_permissions(Permission.ADMIN)
-    async def reactivate_tenant_user(self, username: str):
+    async def reactivate_tenant_user(self, username: str) -> UserInDB:
         """Reactivate user from any state (INACTIVE or DELETED)"""
         logger.info(
             f"Admin user {self.user.username} reactivating user {username} in tenant {self.user.tenant_id}"
@@ -364,7 +371,7 @@ class AdminService:
         return result
 
     @validate_permissions(Permission.ADMIN)
-    async def get_inactive_tenant_users(self):
+    async def get_inactive_tenant_users(self) -> list[UserStateListItem]:
         """Get all users in INACTIVE state within tenant"""
         logger.info(
             f"Admin user {self.user.username} listing inactive users in tenant {self.user.tenant_id}"
@@ -379,7 +386,7 @@ class AdminService:
         # Convert to lightweight response format
         inactive_list = [
             UserStateListItem(
-                username=user.username,
+                username=user.username or str(user.email),
                 email=user.email,
                 state=user.state,
                 state_changed_at=user.updated_at,
@@ -393,7 +400,7 @@ class AdminService:
         return inactive_list
 
     @validate_permissions(Permission.ADMIN)
-    async def get_deleted_tenant_users(self):
+    async def get_deleted_tenant_users(self) -> list[UserDeletedListItem]:
         """Get all users in DELETED state within tenant"""
         logger.info(
             f"Admin user {self.user.username} listing deleted users in tenant {self.user.tenant_id}"
@@ -414,7 +421,7 @@ class AdminService:
         # Convert to lightweight response format
         deleted_list = [
             UserDeletedListItem(
-                username=user.username,
+                username=user.username or str(user.email),
                 email=user.email,
                 state=user.state,
                 deleted_at=user.deleted_at,
@@ -428,7 +435,7 @@ class AdminService:
         return deleted_list
 
     @validate_permissions(Permission.ADMIN)
-    async def get_tenant_user(self, username: str):
+    async def get_tenant_user(self, username: str) -> UserInDB:
         """Retrieve single user details by username within tenant"""
         logger.info(
             f"Admin user {self.user.username} retrieving user {username} in tenant {self.user.tenant_id}"

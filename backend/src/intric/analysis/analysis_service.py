@@ -1,11 +1,12 @@
 # MIT License
 import asyncio
 from collections import Counter
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from time import perf_counter
 from typing import List, Optional, Tuple, cast
 from uuid import UUID
 
+from intric.ai_models.completion_models.completion_model import Completion
 from intric.analysis.analysis import (
     AnalysisProcessingMode,
     AssistantInsightQuestion,
@@ -377,6 +378,11 @@ class AnalysisService:
             )
             return assistant, [row.question for row in rows]
 
+        if group_chat_id is None:
+            raise BadRequestException(
+                "Either assistant_id or group_chat_id must be provided"
+            )
+
         await self._check_insight_access(group_chat_id=group_chat_id)
         space = await self.space_service.get_space_by_group_chat(
             group_chat_id=group_chat_id
@@ -429,6 +435,10 @@ class AnalysisService:
                 tenant_id=self.user.tenant_id,
             )
         else:
+            if group_chat_id is None:
+                raise BadRequestException(
+                    "Either assistant_id or group_chat_id must be provided"
+                )
             await self._check_insight_access(group_chat_id=group_chat_id)
             question_count = await self.repo.count_group_chat_questions_since(
                 group_chat_id=group_chat_id,
@@ -556,8 +566,8 @@ class AnalysisService:
 
     async def _check_insight_access(
         self,
-        group_chat_id: UUID = None,
-        assistant_id: UUID = None,
+        group_chat_id: UUID | None = None,
+        assistant_id: UUID | None = None,
     ):
         if assistant_id:
             space = await self.space_service.get_space_by_assistant(
@@ -586,12 +596,16 @@ class AnalysisService:
                 raise UnauthorizedException(
                     "Insights are not enabled for this group chat"
                 )
+        else:
+            raise BadRequestException(
+                "Either assistant_id or group_chat_id must be provided"
+            )
 
     async def get_questions_since(
         self,
         assistant_id: UUID,
-        from_date: date,
-        to_date: date,
+        from_date: datetime,
+        to_date: datetime,
         include_followups: bool = False,
     ):
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
@@ -626,8 +640,8 @@ class AnalysisService:
     async def get_questions_from_group_chat(
         self,
         group_chat_id: UUID,
-        from_date: date,
-        to_date: date,
+        from_date: datetime,
+        to_date: datetime,
         include_followups: bool = False,
     ):
         """Get questions asked to a group chat within a date range"""
@@ -661,8 +675,8 @@ class AnalysisService:
         question: str,
         stream: bool,
         assistant_id: UUID,
-        from_date: date,
-        to_date: date,
+        from_date: datetime,
+        to_date: datetime,
         include_followup: bool = False,
     ):
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
@@ -691,8 +705,8 @@ class AnalysisService:
         from_date: datetime,
         to_date: datetime,
         include_followup: bool = False,
-        assistant_id: UUID = None,
-        group_chat_id: UUID = None,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
     ):
         """
         Ask a question about the questions previously asked to an assistant or group chat.
@@ -824,12 +838,12 @@ class AnalysisService:
     async def get_assistant_insight_sessions(
         self,
         assistant_id: UUID,
-        limit: int = None,
-        cursor: datetime = None,
+        limit: int | None = None,
+        cursor: datetime | None = None,
         previous: bool = False,
-        name_filter: str = None,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        name_filter: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> Tuple[List[SessionMetadataPublic], int]:
         """Get all sessions for an assistant across all users in the tenant (with insight access)
 
@@ -866,12 +880,12 @@ class AnalysisService:
     async def get_group_chat_insight_sessions(
         self,
         group_chat_id: UUID,
-        limit: int = None,
-        cursor: datetime = None,
+        limit: int | None = None,
+        cursor: datetime | None = None,
         previous: bool = False,
-        name_filter: str = None,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        name_filter: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> Tuple[List[SessionMetadataPublic], int]:
         """Get all sessions for a group chat across all users in the tenant (with insight access)
 
@@ -995,6 +1009,7 @@ class AnalysisService:
                 tenant_id=self.user.tenant_id,
             )
         else:
+            assert group_chat_id is not None
             (
                 session_count,
                 question_count,
@@ -1041,4 +1056,5 @@ class AnalysisService:
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
         )
-        return response.completion.text or ""
+        completion = cast(Completion, response.completion)
+        return completion.text or ""

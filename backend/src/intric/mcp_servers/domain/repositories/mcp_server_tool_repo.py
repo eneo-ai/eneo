@@ -57,7 +57,7 @@ class MCPServerToolRepository(ABC):
         ...
 
     @abstractmethod
-    async def delete(self, id: UUID) -> None:
+    async def delete(self, id: UUID) -> bool:
         """Delete a tool."""
         ...
 

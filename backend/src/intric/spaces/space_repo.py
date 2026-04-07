@@ -1357,7 +1357,7 @@ class SpaceRepository:
         return space
 
     async def update(
-        self, space: Space, mcp_tool_settings: list[tuple[UUID, bool]] = None
+        self, space: Space, mcp_tool_settings: list[tuple[UUID, bool]] | None = None
     ) -> Space:
         query = (
             sa.update(Spaces)

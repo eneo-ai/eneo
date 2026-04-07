@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union, cast
 
 from intric.base.base_entity import Entity
 from intric.main.models import Status
@@ -49,7 +49,8 @@ class CrawlRun(Entity):
         self.failure_summary = failure_summary
 
     @classmethod
-    def create(cls, website: Union["Website", "WebsiteSparse"]) -> "CrawlRun":
+    def create(cls, **kwargs: object) -> "CrawlRun":
+        website = cast(Union["Website", "WebsiteSparse"], kwargs["website"])
         return cls(
             id=None,
             created_at=None,
@@ -68,21 +69,32 @@ class CrawlRun(Entity):
         )
 
     @classmethod
-    def to_domain(cls, record: "CrawlRunsTable") -> "CrawlRun":
+    def to_domain(
+        cls,
+        db_model: Optional["CrawlRunsTable"] = None,
+        **kwargs: object,
+    ) -> "CrawlRun":
+        record = (
+            db_model
+            if db_model is not None
+            else cast("CrawlRunsTable", kwargs["record"])
+        )
+        job = getattr(record, "job", None)
+
         return cls(
-            id=record.id,
-            created_at=record.created_at,
-            updated_at=record.updated_at,
-            website_id=record.website_id,
-            tenant_id=record.tenant_id,
+            id=cast("UUID", record.id),
+            created_at=cast("datetime", record.created_at),
+            updated_at=cast("datetime", record.updated_at),
+            website_id=cast("UUID", record.website_id),
+            tenant_id=cast("UUID", record.tenant_id),
             pages_crawled=record.pages_crawled,
             files_downloaded=record.files_downloaded,
             pages_failed=record.pages_failed,
             files_failed=record.files_failed,
             job_id=record.job_id,
-            status=record.job.status if record.job else Status.QUEUED,
-            result_location=record.job.result_location if record.job else None,
-            finished_at=record.job.finished_at if record.job else None,
+            status=Status(cast(str, job.status)) if job else Status.QUEUED,
+            result_location=cast(Optional[str], job.result_location) if job else None,
+            finished_at=cast(Optional["datetime"], job.finished_at) if job else None,
             failure_summary=record.failure_summary,
         )
 

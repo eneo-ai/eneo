@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Sequence
+from datetime import datetime
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import ModelKwargs
@@ -8,7 +10,7 @@ from intric.assistants.assistant import Assistant
 from intric.completion_models.domain.completion_model import CompletionModel
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.prompts_table import Prompts
-from intric.files.file_models import File
+from intric.files.file_models import FileInfo
 from intric.main.logging import get_logger
 from intric.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 from intric.prompts.prompt_factory import PromptFactory
@@ -16,7 +18,6 @@ from intric.users.user import UserInDB, UserSparse
 
 if TYPE_CHECKING:
     from intric.collections.domain.collection import Collection
-    from intric.files.file_models import FileInfo
     from intric.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
         AssistantTemplateFactory,
     )
     from intric.websites.domain.website import Website
+
 logger = get_logger(__name__)
 
 
@@ -43,7 +45,7 @@ class AssistantFactory:
         name: str,
         user: UserInDB,
         space_id: UUID,
-        prompt: "Prompt" | None = None,
+        prompt: Prompt | None = None,
         completion_model: CompletionModel | None = None,
         completion_model_kwargs: ModelKwargs | None = None,
         logging_enabled: bool = False,
@@ -54,16 +56,18 @@ class AssistantFactory:
         is_default: bool = False,
         insight_enabled: bool = False,
         data_retention_days: int | None = None,
-        metadata_json: dict | None = None,
+        metadata_json: dict[str, object] | None = None,
         description: str | None = None,
     ) -> Assistant:
         # Avoid mutable default anti-pattern
         if completion_model_kwargs is None:
             completion_model_kwargs = ModelKwargs()
 
+        user_sparse = UserSparse.model_validate(user)
+
         return Assistant(
             id=None,
-            user=user,
+            user=user_sparse,
             space_id=space_id,
             name=name,
             prompt=prompt,
@@ -87,10 +91,11 @@ class AssistantFactory:
         self,
         assistant_in_db: Assistants,
         completion_model: CompletionModel | None = None,
-        completion_model_list: list[CompletionModel] = [],
+        completion_model_list: Sequence[CompletionModel] | None = None,
         prompt: Prompts | None = None,
     ) -> Assistant:
-        if completion_model is None and completion_model_list:
+        if completion_model is None and completion_model_list is not None:
+            completion_model_list = list(completion_model_list)
             completion_model = next(
                 (
                     cm
@@ -100,19 +105,23 @@ class AssistantFactory:
                 None,
             )
 
+        prompt_model = None
         if prompt is not None:
-            prompt = self.prompt_factory.create_prompt_from_db(  # type: ignore[assignment]
+            prompt_model = self.prompt_factory.create_prompt_from_db(
                 prompt_in_db=prompt, is_selected=True
             )
 
         attachments = [
-            File(**attachment.file.to_dict())
+            FileInfo.model_validate(attachment.file)
             for attachment in assistant_in_db.attachments
         ]
 
         user = UserSparse.model_validate(assistant_in_db.user)
+        completion_model_kwargs_raw = cast(
+            dict[str, object], assistant_in_db.completion_model_kwargs or {}
+        )
         completion_model_kwargs = ModelKwargs.model_validate(
-            assistant_in_db.completion_model_kwargs or {}
+            completion_model_kwargs_raw
         )
 
         source_template = (
@@ -124,11 +133,11 @@ class AssistantFactory:
         )
 
         return Assistant(
-            id=assistant_in_db.id,
+            id=cast(UUID, assistant_in_db.id),
             user=user,
-            space_id=assistant_in_db.space_id,
+            space_id=cast(UUID, assistant_in_db.space_id),
             name=assistant_in_db.name,
-            prompt=prompt,
+            prompt=prompt_model,
             completion_model=completion_model,
             completion_model_kwargs=completion_model_kwargs,
             attachments=attachments,
@@ -137,8 +146,8 @@ class AssistantFactory:
             collections=[],
             integration_knowledge_list=[],
             mcp_servers=[],
-            created_at=assistant_in_db.created_at,
-            updated_at=assistant_in_db.updated_at,
+            created_at=cast(datetime, assistant_in_db.created_at),
+            updated_at=cast(datetime, assistant_in_db.updated_at),
             published=assistant_in_db.published,
             source_template=source_template,
             is_default=assistant_in_db.is_default,
@@ -150,13 +159,17 @@ class AssistantFactory:
     def create_space_assistant_from_db(
         self,
         assistant_in_db: Assistants,
-        completion_models: list[CompletionModel] = [],
-        collections: list["Collection"] = [],
-        websites: list["Website"] = [],
-        integration_knowledge_list: list["IntegrationKnowledge"] = [],
-        user: UserInDB = None,
+        user: UserInDB,
+        completion_models: Sequence[CompletionModel] | None = None,
+        collections: Sequence["Collection"] | None = None,
+        websites: Sequence["Website"] | None = None,
+        integration_knowledge_list: Sequence["IntegrationKnowledge"] | None = None,
     ) -> Assistant:
-        user = UserSparse.model_validate(user)  # type: ignore[assignment]
+        completion_models = list(completion_models or [])
+        collections = list(collections or [])
+        websites = list(websites or [])
+        integration_knowledge_list = list(integration_knowledge_list or [])
+        user_sparse = UserSparse.model_validate(user)
         collection_ids = [
             assistant_collection.group_id
             for assistant_collection in assistant_in_db.assistant_groups
@@ -178,7 +191,7 @@ class AssistantFactory:
             )
 
         attachments = [
-            File(**attachment.file.to_dict())
+            FileInfo.model_validate(attachment.file)
             for attachment in assistant_in_db.attachments
         ]
 
@@ -203,8 +216,11 @@ class AssistantFactory:
             # Fallback: Map MCP servers from database to domain entities (without filtering)
             mcp_servers = MCPServerMapper.to_entities(assistant_in_db.mcp_servers)
 
+        completion_model_kwargs_raw = cast(
+            dict[str, object], assistant_in_db.completion_model_kwargs or {}
+        )
         completion_model_kwargs = ModelKwargs.model_validate(
-            assistant_in_db.completion_model_kwargs or {}
+            completion_model_kwargs_raw
         )
         completion_model = next(
             (
@@ -224,9 +240,9 @@ class AssistantFactory:
         )
 
         return Assistant(
-            id=assistant_in_db.id,
-            user=user,
-            space_id=assistant_in_db.space_id,
+            id=cast(UUID, assistant_in_db.id),
+            user=user_sparse,
+            space_id=cast(UUID, assistant_in_db.space_id),
             name=assistant_in_db.name,
             prompt=prompt,
             completion_model=completion_model,
@@ -237,14 +253,16 @@ class AssistantFactory:
             collections=collections,
             integration_knowledge_list=integration_knowledge_list,
             mcp_servers=mcp_servers,
-            created_at=assistant_in_db.created_at,
-            updated_at=assistant_in_db.updated_at,
+            created_at=cast(datetime, assistant_in_db.created_at),
+            updated_at=cast(datetime, assistant_in_db.updated_at),
             published=assistant_in_db.published,
             source_template=source_template,
             is_default=assistant_in_db.is_default,
             description=assistant_in_db.description,
             insight_enabled=assistant_in_db.insight_enabled,
             data_retention_days=assistant_in_db.data_retention_days,
-            metadata_json=assistant_in_db.metadata_json,
+            metadata_json=cast(
+                dict[str, object] | None, assistant_in_db.metadata_json
+            ),
             icon_id=assistant_in_db.icon_id,
         )

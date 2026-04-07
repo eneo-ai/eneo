@@ -403,7 +403,7 @@ class AssistantRepository:
     async def get_for_user(
         self,
         user_id: UUID,
-        search_query: str = None,
+        search_query: str | None = None,
         space_id: UUID | None = None,
         assistant_id: UUID | None = None,
     ):
@@ -435,9 +435,9 @@ class AssistantRepository:
     async def get_for_tenant(
         self,
         tenant_id: UUID,
-        search_query: str = None,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        search_query: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ):
         query = (
             sa.select(Assistants)

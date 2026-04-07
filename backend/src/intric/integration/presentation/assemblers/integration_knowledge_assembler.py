@@ -44,7 +44,7 @@ class IntegrationKnowledgeAssembler:
             id=item.id,
             name=item.name,
             original_name=getattr(item, "original_name", None),
-            url=item.url,
+            url=item.url or "",
             tenant_id=item.tenant_id,
             space_id=item.space_id,
             user_integration_id=item.user_integration.id,
