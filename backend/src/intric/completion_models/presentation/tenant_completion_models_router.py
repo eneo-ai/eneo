@@ -9,6 +9,7 @@ from intric.authentication.auth_dependencies import get_current_active_user
 from intric.completion_models.presentation import CompletionModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.container.container import Container
+from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.users.user import UserInDB
@@ -73,6 +74,7 @@ async def create_tenant_completion_model(
     container: Container = Depends(get_container(with_user=True)),
 ):
     """Create a new tenant-specific completion model."""
+    validate_permission(user, Permission.ADMIN)
     import sqlalchemy as sa
 
     from intric.database.tables.ai_models_table import CompletionModels
@@ -170,6 +172,7 @@ async def update_tenant_completion_model(
     container: Container = Depends(get_container(with_user=True)),
 ):
     """Update a tenant-specific completion model."""
+    validate_permission(user, Permission.ADMIN)
     import sqlalchemy as sa
 
     from intric.database.tables.ai_models_table import CompletionModels
@@ -243,6 +246,7 @@ async def delete_tenant_completion_model(
     session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Delete a tenant-specific completion model."""
+    validate_permission(user, Permission.ADMIN)
     import sqlalchemy as sa
 
     from intric.database.tables.ai_models_table import CompletionModels

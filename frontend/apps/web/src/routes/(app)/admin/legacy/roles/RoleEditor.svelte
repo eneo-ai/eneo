@@ -11,7 +11,7 @@
   import type { Permission, Role } from "@intric/intric-js";
   import { Dialog, Button, Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   const intric = getIntric();
 
@@ -53,7 +53,7 @@
       invalidate("admin:roles:load");
       $showDialog = false;
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toastError(error);
       console.error(error);
     }
     isProcessing = false;
@@ -67,7 +67,7 @@
       $showDialog = false;
       editableRole.updateWithValue(emptyRole);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toastError(error);
       console.error(error);
     }
     isProcessing = false;

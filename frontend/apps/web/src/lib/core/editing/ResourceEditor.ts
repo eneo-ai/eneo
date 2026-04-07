@@ -1,9 +1,9 @@
-import { IntricError, type Intric, type UploadedFile } from "@intric/intric-js";
+import { type Intric, type UploadedFile } from "@intric/intric-js";
 import { derived, get, readonly, writable } from "svelte/store";
 import { getAddedItems, getRemovedItems } from "./getChangedItems";
 import { getDiff, type CompareOptions, type Diff } from "./getDiff";
 import { applyDefaults, type AppliedDefaults, type Defaults } from "./applyDefaults";
-import { toast } from "$lib/components/toast";
+import { toastError } from "$lib/core/errors";
 
 type Resource = Record<string, unknown> & { id: string };
 
@@ -87,10 +87,7 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
         });
       }
     } catch (e) {
-      toast.error("Error while trying to update!");
-      if (e instanceof IntricError) {
-        console.error(e.getReadableMessage());
-      }
+      toastError(e);
     }
     isSaving.set(false);
   }

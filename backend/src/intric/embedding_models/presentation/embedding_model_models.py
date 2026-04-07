@@ -12,6 +12,7 @@ from intric.security_classifications.presentation.security_classification_models
 
 class EmbeddingModelPublic(BaseResponse):
     name: str
+    nickname: Optional[str] = None
     family: Optional[str] = None
     is_deprecated: bool
     open_source: bool
@@ -50,6 +51,7 @@ class EmbeddingModelPublic(BaseResponse):
             created_at=model.created_at,
             updated_at=model.updated_at,
             name=model.name,
+            nickname=model.nickname,
             family=model.family,
             is_deprecated=model.is_deprecated,
             open_source=model.open_source,

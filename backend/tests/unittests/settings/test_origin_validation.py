@@ -1,7 +1,11 @@
 """Tests for validate_public_origin() helper."""
 
 import pytest
-from intric.main.config import validate_public_origin
+from intric.main.config import (
+    validate_public_origin,
+    validate_redirect_path,
+    validate_redirect_uri,
+)
 
 
 def test_validates_https_required():
@@ -116,3 +120,34 @@ def test_rejects_whitespace_only():
     """Whitespace-only string is rejected."""
     with pytest.raises(ValueError, match="cannot be an empty string"):
         validate_public_origin("   ")
+
+
+@pytest.mark.parametrize(
+    ("uri", "expected", "error_match"),
+    [
+        ("https://*.example.com/callback", None, "must not include wildcards"),
+        ("http://localhost:3000/callback", "http://localhost:3000/callback", None),
+        ("http://example.com/callback", None, "must use https://"),
+        ("https://example.com", None, "must include an absolute path"),
+        ("https://Example.com/callback/", "https://example.com/callback", None),
+    ],
+)
+def test_validate_redirect_uri_branches(uri, expected, error_match):
+    if error_match:
+        with pytest.raises(ValueError, match=error_match):
+            validate_redirect_uri(uri)
+        return
+
+    assert validate_redirect_uri(uri) == expected
+
+
+@pytest.mark.parametrize("uri", ["https://example.com/callback?x=1", "https://example.com/callback#frag"])
+def test_redirect_uri_rejects_query_and_fragment(uri):
+    with pytest.raises(ValueError, match="must not include query or fragment"):
+        validate_redirect_uri(uri)
+
+
+@pytest.mark.parametrize("path", ["/auth/callback/", "/auth/callback?x=1", "/auth/callback#frag"])
+def test_redirect_path_rejects_non_canonical_variants(path):
+    with pytest.raises(ValueError):
+        validate_redirect_path(path)

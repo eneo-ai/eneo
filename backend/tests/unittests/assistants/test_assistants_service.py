@@ -6,17 +6,18 @@ from uuid import uuid4
 
 import pytest
 from intric.assistants.api.assistant_models import (
-    AskAssistant,
     AssistantBase,
     AssistantCreatePublic,
     AssistantUpdatePublic,
 )
 from intric.assistants.assistant_service import AssistantService
-from intric.main.config import get_settings
-from intric.main.exceptions import BadRequestException, UnauthorizedException
+from intric.main.exceptions import (
+    BadRequestException,
+    ModelNotAvailableException,
+    UnauthorizedException,
+)
 from intric.main.models import ModelId
 from intric.prompts.api.prompt_models import PromptCreate
-from pydantic import ValidationError
 from tests.fixtures import (
     TEST_ASSISTANT,
     TEST_COLLECTION,
@@ -36,6 +37,11 @@ class Setup:
 @pytest.fixture(name="setup")
 def setup_fixture():
     repo = AsyncMock()
+    # repo.session.execute() is used by MCP validation; return an object whose
+    # fetchall() yields an empty list so the set comprehension works.
+    mock_db_result = MagicMock()
+    mock_db_result.fetchall.return_value = []
+    repo.session.execute = AsyncMock(return_value=mock_db_result)
     user = TEST_USER
     auth_service = MagicMock()
     assistant = AssistantCreatePublic(
@@ -116,14 +122,6 @@ def with_two_different_groups(setup: Setup, attr: str, value_1: Any, value_2: An
     setup.service.user.tenant_id = 1
 
 
-async def test_ask_assistant_model():
-    files_number = get_settings().max_in_question + 1
-    files = [ModelId(id=uuid4()) for _ in range(files_number)]
-
-    with pytest.raises(ValidationError):
-        AskAssistant(question="test", files=files)
-
-
 async def test_update_space_assistant_not_member(setup: Setup):
     assistant_update = AssistantUpdatePublic(name="new name!")
 
@@ -191,6 +189,83 @@ async def test_update_assistant_completion_model_in_space(setup: Setup):
     await setup.service.update_assistant(TEST_UUID)
 
 
+@pytest.mark.parametrize("template_in_space", [True, False])
+async def test_create_from_template_prefers_template_model_when_available(
+    setup: Setup,
+    template_in_space: bool,
+):
+    fallback_model = MagicMock(id=uuid4())
+    template_model = MagicMock(id=uuid4())
+    template = MagicMock(
+        completion_model=template_model,
+        completion_model_kwargs={},
+        prompt_text=None,
+        name="Template",
+        description="Description",
+    )
+    template.validate_assistant_wizard_data = MagicMock()
+
+    template_data = MagicMock(id=uuid4())
+    template_data.get_ids_by_type.return_value = []
+
+    space = MagicMock()
+    space.id = uuid4()
+    space.is_completion_model_in_space.return_value = template_in_space
+    space.get_completion_model.return_value = template_model
+
+    created_assistant = MagicMock(id=uuid4())
+    refreshed_space = MagicMock()
+    refreshed_space.get_assistant.return_value = created_assistant
+
+    setup.service.assistant_template_service.get_assistant_template.return_value = template
+    setup.service.file_service.get_file_infos.return_value = []
+    setup.service.factory.create_assistant.return_value = created_assistant
+    setup.service.space_repo.update.return_value = refreshed_space
+
+    await setup.service._create_from_template(
+        space=space,
+        template_data=template_data,
+        completion_model=fallback_model,
+    )
+
+    expected_model = template_model if template_in_space else fallback_model
+    assert setup.service.factory.create_assistant.call_args.kwargs["completion_model"] == expected_model
+
+
+async def test_create_from_template_keeps_fallback_when_template_has_no_model(
+    setup: Setup,
+):
+    fallback_model = MagicMock(id=uuid4())
+    template = MagicMock(
+        completion_model=None,
+        completion_model_kwargs={},
+        prompt_text=None,
+        name="Template",
+        description="Description",
+    )
+    template.validate_assistant_wizard_data = MagicMock()
+
+    template_data = MagicMock(id=uuid4())
+    template_data.get_ids_by_type.return_value = []
+
+    created_assistant = MagicMock(id=uuid4())
+    refreshed_space = MagicMock()
+    refreshed_space.get_assistant.return_value = created_assistant
+
+    setup.service.assistant_template_service.get_assistant_template.return_value = template
+    setup.service.file_service.get_file_infos.return_value = []
+    setup.service.factory.create_assistant.return_value = created_assistant
+    setup.service.space_repo.update.return_value = refreshed_space
+
+    await setup.service._create_from_template(
+        space=MagicMock(id=uuid4()),
+        template_data=template_data,
+        completion_model=fallback_model,
+    )
+
+    assert setup.service.factory.create_assistant.call_args.kwargs["completion_model"] == fallback_model
+
+
 async def test_update_rejects_adding_mcp_when_knowledge_exists(setup: Setup):
     """Cannot add MCP servers when assistant already has knowledge."""
     assistant = MagicMock()
@@ -202,10 +277,16 @@ async def test_update_rejects_adding_mcp_when_knowledge_exists(setup: Setup):
     space.get_assistant.return_value = assistant
     setup.service.space_repo.get_space_by_assistant.return_value = space
 
+    mcp_id = uuid4()
+    # Mock DB to return the MCP server as tenant-enabled and space-assigned
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = [(mcp_id,)]
+    setup.service.repo.session.execute = AsyncMock(return_value=mock_result)
+
     with pytest.raises(BadRequestException, match="Knowledge and MCP servers cannot both be active"):
         await setup.service.update_assistant(
             assistant_id=TEST_UUID,
-            mcp_server_ids=[uuid4()],
+            mcp_server_ids=[mcp_id],
         )
 
 
@@ -243,10 +324,15 @@ async def test_update_rejects_keeping_both_when_legacy_assistant(setup: Setup):
     space.get_assistant.return_value = assistant
     setup.service.space_repo.get_space_by_assistant.return_value = space
 
+    mcp_id = uuid4()
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = [(mcp_id,)]
+    setup.service.repo.session.execute = AsyncMock(return_value=mock_result)
+
     with pytest.raises(BadRequestException, match="Knowledge and MCP servers cannot both be active"):
         await setup.service.update_assistant(
             assistant_id=TEST_UUID,
-            mcp_server_ids=[uuid4()],
+            mcp_server_ids=[mcp_id],
         )
 
 
@@ -293,8 +379,25 @@ async def test_error_when_assistant_cannot_be_used_in_space(setup: Setup):
     assistant = MagicMock(completion_model_id=uuid4(), space_id=uuid4())
     space = MagicMock()
     space.get_assistant.return_value = assistant
-    space.can_ask_assistant.return_value = False
+    space.can_ask_assistant.side_effect = ModelNotAvailableException(
+        "The selected AI model is not available in this space."
+    )
     setup.service.space_repo.get_space_by_assistant.return_value = space
 
-    with pytest.raises(UnauthorizedException):
+    with pytest.raises(ModelNotAvailableException):
         await setup.service.ask(question="hello", assistant_id=MagicMock())
+
+
+async def test_publish_assistant_unauthorized_has_actionable_message(setup: Setup):
+    space = MagicMock()
+    space.get_assistant.return_value = MagicMock()
+    setup.service.space_repo.get_space_by_assistant.return_value = space
+
+    actor = MagicMock()
+    actor.can_publish_assistants.return_value = False
+    setup.service.actor_manager.get_space_actor_from_space.return_value = actor
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await setup.service.publish_assistant(TEST_UUID, True)
+
+    assert "Publishing assistants" in str(exc_info.value)

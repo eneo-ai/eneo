@@ -1,7 +1,7 @@
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from intric.apps.apps.api.app_models import AppPublic
 from intric.assistants.api.assistant_models import AssistantPublic
@@ -10,7 +10,7 @@ from intric.assistants.api.assistant_models import AssistantPublic
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.authentication.auth_dependencies import require_permission
+from intric.authentication.auth_dependencies import get_scope_filter, require_permission
 from intric.collections.presentation.collection_models import CollectionPublic
 from intric.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
 from intric.integration.presentation.assemblers.integration_knowledge_assembler import (
@@ -257,17 +257,9 @@ async def update_space(
             }
 
     # Track security classification changes
-    if is_provided(security_classification):
-        old_sc = (
-            old_space.security_classification.name
-            if old_space.security_classification
-            else None
-        )
-        new_sc = (
-            space.security_classification.name
-            if space.security_classification
-            else None
-        )
+    if security_classification is not NOT_PROVIDED:
+        old_sc = getattr(old_space.security_classification, "name", None)
+        new_sc = getattr(space.security_classification, "name", None)
         if old_sc != new_sc:
             changes["security_classification"] = {"old": old_sc, "new": new_sc}
 
@@ -348,6 +340,7 @@ async def delete_space(
     status_code=200,
 )
 async def get_spaces(
+    request: Request,
     include_applications: bool = Query(
         default=False, description="Includes published applications on each space"
     ),
@@ -360,8 +353,15 @@ async def get_spaces(
     assembler = container.space_assembler()
 
     spaces = await service.get_spaces(
-        include_personal=include_personal, include_applications=include_applications
+        include_personal=include_personal,
+        include_applications=include_applications,
     )
+
+    # Scope filtering: space-scoped key sees only its scoped space
+    scope_filter = get_scope_filter(request)
+    if scope_filter.space_id is not None:
+        spaces = [s for s in spaces if s.id == scope_filter.space_id]
+
     spaces = [
         assembler.from_space_to_sparse_model(
             space, include_applications=include_applications
@@ -376,7 +376,6 @@ async def get_spaces(
     "/{id}/applications/",
     response_model=Applications,
     responses=responses.get_responses([404]),
-    dependencies=[Depends(forbid_org_space)],
 )
 async def get_space_applications(
     id: UUID, container: Container = Depends(get_container(with_user=True))

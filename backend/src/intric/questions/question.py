@@ -69,6 +69,8 @@ class ToolCallInfo(BaseModel):
     approved: Optional[bool] = (
         None  # True=approved, False=denied, None=auto-approved or pending
     )
+    # Additive execution status for newer clients. Keep `approved` for compatibility.
+    result_status: Optional[str] = None
 
 
 class QuestionAdd(QuestionBase):

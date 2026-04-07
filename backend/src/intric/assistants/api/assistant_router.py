@@ -1,8 +1,9 @@
 import logging
 from datetime import datetime
+from typing import cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from intric.assistants.api import assistant_protocol
 from intric.assistants.api.assistant_models import (
@@ -10,17 +11,21 @@ from intric.assistants.api.assistant_models import (
     AssistantCreatePublic,
     AssistantPublic,
     AssistantUpdatePublic,
-    TokenEstimateBreakdown,
-    TokenEstimateRequest,
-    TokenEstimateResponse,
 )
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.authentication.auth_models import ApiKey
-from intric.database.database import AsyncSession, get_session_with_transaction
+from intric.authentication.api_key_notification_auto_follow import (
+    auto_follow_on_publish,
+)
+from intric.authentication.api_key_router_helpers import (
+    error_responses as api_key_error_responses,
+)
+from intric.authentication.auth_dependencies import get_scope_filter
+from intric.authentication.auth_models import ApiKey, ApiKeyNotificationTargetType
+from intric.database.database import AsyncSession
 from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.models import (
@@ -48,22 +53,37 @@ from intric.spaces.api.space_models import TransferApplicationRequest
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# These limits keep the endpoint responsive while still supporting large-context models.
-DEFAULT_CHARS_PER_TOKEN = 6  # Generous factor to cover dense languages
-MAX_TOTAL_FILE_SIZE = 50_000_000  # 50 MB
-MAX_ABSOLUTE_TEXT_LENGTH = 2_000_000  # 2 MB safeguard in case of misconfigured models
+_LEGACY_ASSISTANT_API_KEY_EXAMPLE = {
+    "key": "ina_6f2c9b3a8f...7b31",
+    "truncated_key": "7b31",
+}
 
 
 @router.post(
     "/",
     response_model=AssistantPublic,
     responses=responses.get_responses([404]),
-    deprecated=True,
 )
 async def create_assistant(
+    request: Request,
     assistant: AssistantCreatePublic,
     container: Container = Depends(get_container(with_user=True)),
 ):
+    # Scope validation: scoped keys cannot create assistants outside their scope
+    scope_filter = get_scope_filter(request)
+    if scope_filter.space_id is not None and assistant.space_id is not None:
+        if scope_filter.space_id != assistant.space_id:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "insufficient_scope",
+                    "message": (
+                        f"API key is scoped to space '{scope_filter.space_id}'. "
+                        f"Cannot create assistant in space '{assistant.space_id}'."
+                    ),
+                },
+            )
+
     assistant_service = container.assistant_service()
     assembler = container.assistant_assembler()
     current_user = container.user()
@@ -124,15 +144,40 @@ async def create_assistant(
 
 @router.get("/", response_model=PaginatedResponse[AssistantPublic])
 async def get_assistants(
+    request: Request,
     name: str = None,
     for_tenant: bool = False,
     container: Container = Depends(get_container(with_user=True)),
 ):
     """Requires Admin permission if `for_tenant` is `true`."""
+    scope_filter = get_scope_filter(request)
+
+    # Assistant-scoped keys must not bypass scope via for_tenant
+    if (
+        for_tenant
+        and scope_filter.scope_type is not None
+        and scope_filter.scope_type != "tenant"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "insufficient_scope",
+                "message": (
+                    "Scoped API keys cannot use for_tenant=true. "
+                    "This parameter requires a tenant-scoped key or bearer auth."
+                ),
+            },
+        )
+
     service = container.assistant_service()
     assembler = container.assistant_assembler()
 
-    assistants = await service.get_assistants(name, for_tenant)
+    assistants = await service.get_assistants(
+        name,
+        for_tenant,
+        space_id_filter=scope_filter.space_id,
+        assistant_id_filter=scope_filter.assistant_id,
+    )
 
     assistants = [
         assembler.from_assistant_to_model(assistant)
@@ -329,16 +374,20 @@ async def update_assistant(
 
     # Description change
     if is_provided(description) and description != old_assistant.description:
-        old_desc_preview = (
-            (old_assistant.description[:50] + "...")
-            if old_assistant.description and len(old_assistant.description) > 50
-            else old_assistant.description
-        )
-        new_desc_preview = (
-            (description[:50] + "...")
-            if description and len(description) > 50
-            else description
-        )
+        if isinstance(old_assistant.description, str):
+            old_desc_preview = (
+                (old_assistant.description[:50] + "...")
+                if len(old_assistant.description) > 50
+                else old_assistant.description
+            )
+        else:
+            old_desc_preview = old_assistant.description
+        if isinstance(description, str):
+            new_desc_preview = (
+                (description[:50] + "...") if len(description) > 50 else description
+            )
+        else:
+            new_desc_preview = description
         changes["description"] = {"old": old_desc_preview, "new": new_desc_preview}
 
     # Insights change
@@ -674,7 +723,6 @@ async def ask_assistant(
     container: Container = Depends(
         get_container(with_user_from_assistant_api_key=True)
     ),
-    db_session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Streams the response as Server-Sent Events if stream == true"""
     service = container.assistant_service()
@@ -731,9 +779,7 @@ async def ask_assistant(
         ),
     )
 
-    return await assistant_protocol.to_response(
-        response=response, db_session=db_session, stream=ask.stream
-    )
+    return await assistant_protocol.to_response(response=response, stream=ask.stream)
 
 
 @router.get(
@@ -850,7 +896,6 @@ async def ask_followup(
     container: Container = Depends(
         get_container(with_user_from_assistant_api_key=True)
     ),
-    db_session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Streams the response as Server-Sent Events if stream == true"""
     service = container.assistant_service()
@@ -869,9 +914,7 @@ async def ask_followup(
         version=version,
     )
 
-    return await assistant_protocol.to_response(
-        response=response, db_session=db_session, stream=ask.stream
-    )
+    return await assistant_protocol.to_response(response=response, stream=ask.stream)
 
 
 @router.post(
@@ -895,7 +938,37 @@ async def leave_feedback(
     return to_session_public(session)
 
 
-@router.get("/{id}/api-keys/", response_model=ApiKey)
+@router.get(
+    "/{id}/api-keys/",
+    response_model=ApiKey,
+    tags=["Legacy API Keys"],
+    summary="Generate legacy assistant API key",
+    deprecated=True,
+    description=(
+        "Legacy assistant API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys."
+        " This returns a legacy assistant-scoped key."
+    ),
+    responses={
+        200: {
+            "description": "Legacy assistant API key created and returned once.",
+            "content": {
+                "application/json": {"example": _LEGACY_ASSISTANT_API_KEY_EXAMPLE}
+            },
+        },
+        410: {
+            "description": "Legacy endpoint disabled. Migrate to v2 endpoint.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": "deprecated_endpoint",
+                        "message": "Legacy assistant API key endpoint is disabled. Use /api/v1/api-keys.",
+                    }
+                }
+            },
+        },
+        **api_key_error_responses([401, 403]),
+    },
+)
 async def generate_read_only_assistant_key(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
@@ -904,6 +977,15 @@ async def generate_read_only_assistant_key(
 
     This api key can only be used on `POST /api/v1/assistants/{id}/sessions/`
     and `POST /api/v1/assistants/{id}/sessions/{session_id}/`."""
+    settings = get_settings()
+    if not settings.api_key_legacy_endpoints_enabled:
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "code": "deprecated_endpoint",
+                "message": "Legacy assistant API key endpoint is disabled. Use /api/v1/api-keys.",
+            },
+        )
     service = container.assistant_service()
     user = container.user()
 
@@ -1080,124 +1162,23 @@ async def publish_assistant(
         ),
     )
 
+    if published:
+        try:
+            session = cast(AsyncSession, container.session())
+            await auto_follow_on_publish(
+                session=session,
+                user=user,
+                target_type=ApiKeyNotificationTargetType.ASSISTANT,
+                target_id=id,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to auto-follow API key expiry notifications for published assistant %s",
+                id,
+            )
+
     return assembler.from_assistant_to_model(
         assistant=assistant, permissions=permissions
-    )
-
-
-@router.post(
-    "/{id}/token-estimate",
-    response_model=TokenEstimateResponse,
-    responses=responses.get_responses([400, 404]),
-    summary="Estimate token usage for text and files",
-)
-async def estimate_tokens(
-    id: UUID,
-    payload: TokenEstimateRequest,
-    container: Container = Depends(get_container(with_user=True)),
-) -> TokenEstimateResponse:
-    """Estimate token usage for the given text and files for this assistant.
-
-    The Space Actor + FileService stack already enforces tenant and ownership
-    boundaries; this endpoint adds lightweight guardrails to keep the operation
-    responsive while supporting large-context models.
-    """
-
-    from intric.tokens.token_utils import count_assistant_prompt_tokens, count_tokens
-
-    service = container.assistant_service()
-    file_service = container.file_service()
-
-    assistant, _ = await service.get_assistant(assistant_id=id)
-
-    if not assistant.completion_model:
-        raise HTTPException(status_code=400, detail="Assistant has no model configured")
-
-    from intric.completion_models.infrastructure.context_builder import (
-        CONTEXT_SIZE_BUFFER,
-    )
-
-    model = assistant.completion_model
-    model_name = model.name
-    effective_limit = max(
-        0, model.max_input_tokens - model.max_output_tokens - CONTEXT_SIZE_BUFFER
-    )
-
-    max_chars = min(
-        MAX_ABSOLUTE_TEXT_LENGTH,
-        int(model.max_input_tokens * DEFAULT_CHARS_PER_TOKEN),
-    )
-
-    text = payload.text or ""
-    if len(text) > max_chars:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Text input is too large for this assistant's context window. "
-                f"Reduce the size below {max_chars:,} characters."
-            ),
-        )
-
-    file_ids = payload.file_ids or []
-
-    prompt_tokens = 0
-    if assistant.prompt:
-        prompt_text = getattr(assistant.prompt, "prompt", None) or getattr(
-            assistant.prompt, "text", None
-        )
-        if prompt_text:
-            prompt_tokens = count_assistant_prompt_tokens(prompt_text, model_name)
-
-    text_tokens = count_tokens(text, model_name) if text else 0
-
-    file_tokens = 0
-    file_token_details: dict[str, int] = {}
-    if file_ids:
-        files = await file_service.get_files_for_token_estimate(file_ids)
-        accessible_ids = {file.id for file in files}
-        missing_ids = [
-            str(file_id) for file_id in file_ids if file_id not in accessible_ids
-        ]
-        if missing_ids:
-            logger.debug(
-                "Skipped token estimate for filtered file IDs: %s", missing_ids
-            )
-
-        total_file_size = sum(file.size for file in files if file.size is not None)
-        if total_file_size > MAX_TOTAL_FILE_SIZE:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Combined file content exceeds 50 MB limit. "
-                    "Remove one or more files and try again."
-                ),
-            )
-
-        for file in files:
-            tokens = 0
-            if file.text:
-                try:
-                    tokens = count_tokens(file.text, model_name)
-                except Exception as exc:  # pragma: no cover - defensive logging path
-                    logger.error("Failed to count tokens for file %s: %s", file.id, exc)
-                    tokens = len(file.text) // 4
-
-            file_tokens += tokens
-            file_token_details[str(file.id)] = tokens
-
-    total_tokens = prompt_tokens + text_tokens + file_tokens
-    percentage = (total_tokens / effective_limit) * 100 if effective_limit > 0 else 0
-
-    return TokenEstimateResponse(
-        tokens=total_tokens,
-        percentage=round(percentage, 2),
-        limit=effective_limit,
-        breakdown=TokenEstimateBreakdown(
-            prompt=prompt_tokens,
-            text=text_tokens,
-            files=file_tokens,
-            file_details=file_token_details,
-        ),
     )
 
 

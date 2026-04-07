@@ -4,12 +4,14 @@
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import ImprovedCategorySelector from "$lib/features/templates/components/admin/ImprovedCategorySelector.svelte";
   import LucideIconPicker from "$lib/features/templates/components/LucideIconPicker.svelte";
+  import HelpTooltip from "../../../models/components/HelpTooltip.svelte";
   import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
 
   let { data } = $props();
@@ -65,6 +67,7 @@
         description,
         category,
         prompt: promptText,  // Backend expects string, not object
+        completion_model_id: completionModel?.id,
         completion_model_kwargs: completionModelKwargs,
         wizard,  // Always send wizard object, never undefined
         icon_name: iconName || undefined  // Include icon if selected
@@ -74,7 +77,7 @@
       goto("/admin/templates?success=template_created");
     } catch (error) {
       console.error("Failed to create template:", error);
-      toast.error(m.failed_to_create_template());
+      toastError(error, m.failed_to_create_template());
     } finally {
       isSaving = false;
     }
@@ -215,6 +218,7 @@
           hasChanges={false}
           fullWidth
         >
+          <HelpTooltip slot="title" text={m.wizard_attachments_help()} />
           <div class="flex flex-col gap-4">
             <Input.RadioSwitch
               bind:value={wizardAttachmentsEnabled}
@@ -255,6 +259,7 @@
           hasChanges={false}
           fullWidth
         >
+          <HelpTooltip slot="title" text={m.wizard_collections_help()} />
           <div class="flex flex-col gap-4">
             <Input.RadioSwitch
               bind:value={wizardCollectionsEnabled}

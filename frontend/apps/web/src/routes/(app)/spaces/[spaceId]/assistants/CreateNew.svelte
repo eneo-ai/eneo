@@ -7,11 +7,11 @@
   import { IconAssistant } from "@intric/icons/assistant";
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { IconPeople } from "@intric/icons/people";
-  import { IntricError, type Settings } from "@intric/intric-js";
+  import { type Settings } from "@intric/intric-js";
   import { Button, Dialog, Dropdown, Input } from "@intric/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   let { data }: { data: { settings: Settings } } = $props();
 
@@ -44,8 +44,7 @@
       newGroupChatName = "";
       $showCreateGroupChatDialog = false;
     } catch (error) {
-      const message = error instanceof IntricError ? error.getReadableMessage() : String(error);
-      toast.error(message);
+      toastError(error);
     }
   }
 </script>

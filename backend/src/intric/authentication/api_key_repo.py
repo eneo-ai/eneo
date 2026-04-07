@@ -15,7 +15,7 @@ class ApiKeysRepository:
         )
         self.session = session
 
-    async def get(self, key: str):
+    async def get(self, key: str) -> ApiKeyInDB | None:
         stmt = sa.select(ApiKeys).where(ApiKeys.key == key)
         api_key = await self.session.scalar(stmt)
 

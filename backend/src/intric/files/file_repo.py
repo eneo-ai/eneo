@@ -8,6 +8,7 @@ from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
 from intric.database.tables.files_table import Files
 from intric.files.file_models import File, FileCreate, FileInfo
+from intric.main.exceptions import NotFoundException
 
 
 class FileRepository:
@@ -58,6 +59,8 @@ class FileRepository:
 
     async def get_by_id(self, file_id: UUID) -> File:
         file = await self._delegate.get(id=file_id)
+        if file is None:
+            raise NotFoundException()
         return File.model_validate(file)
 
     async def get_list_by_user(self, user_id: UUID) -> list[File]:
@@ -74,6 +77,19 @@ class FileRepository:
 
     async def delete(self, id: UUID) -> File:
         return cast(File, await self._delegate.delete(id))
+
+    async def delete_by_owner(self, id: UUID, user_id: UUID) -> File | None:
+        """Atomic owner-bound delete. Returns None if no matching row."""
+        stmt = (
+            sa.delete(Files)
+            .where(Files.id == id, Files.user_id == user_id)
+            .returning(Files)
+        )
+        result = await self.session.execute(stmt)
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        return File.model_validate(row)
 
     async def update(self, file: File) -> File:
         return cast(File, await self._delegate.update(file))

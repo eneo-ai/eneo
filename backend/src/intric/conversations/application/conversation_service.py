@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Optional
 from intric.completion_models.infrastructure.static_prompts import (
     SET_TITLE_OF_CONVERSATION_PROMPT,
 )
+from intric.main.exceptions import BadRequestException
 from intric.sessions.session import SessionUpdate
 
 if TYPE_CHECKING:
@@ -77,6 +78,9 @@ class ConversationService:
         if file_ids is None:
             file_ids = []
 
+        if require_tool_approval and group_chat_id is not None:
+            raise BadRequestException("Tool approval is not supported for group chats.")
+
         # case 1: continuing a conversation (session_id is provided)
         if session_id:
             # get session information to determine where it belongs
@@ -84,6 +88,10 @@ class ConversationService:
             assert session is not None
 
             if session.group_chat_id:
+                if require_tool_approval:
+                    raise BadRequestException(
+                        "Tool approval is not supported for group chats."
+                    )
                 # this is a group chat conversation
                 return await self.group_chat_service.ask_group_chat(  # type: ignore[return-value]
                     question=question,

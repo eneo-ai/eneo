@@ -7,15 +7,15 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import uvicorn
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from intric.allowed_origins.get_origin_callback import get_origin
-from intric.authentication import auth_dependencies
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
+from intric.main.request_context import get_request_context
 from intric.server import api_documentation
 from intric.server.dependencies.lifespan import lifespan as app_lifespan
 from intric.server.exception_handlers import add_exception_handlers
@@ -25,6 +25,21 @@ from intric.server.models.api import VersionResponse
 from intric.server.routers import router as api_router
 
 logger = get_logger(__name__)
+
+
+def _log_api_key_security_overrides() -> None:
+    settings = get_settings()
+
+    if not settings.api_key_enforce_resource_permissions:
+        logger.critical(
+            "API key resource permission enforcement is disabled by configuration"
+        )
+    if not settings.api_key_enforce_scope:
+        logger.critical("API key scope enforcement is disabled by configuration")
+    if settings.api_key_rate_limit_fail_open:
+        logger.warning(
+            "API key rate limiting is configured fail-open; requests may bypass limits when Redis is unavailable"
+        )
 
 
 # Pydantic models for /api/healthz/crawler endpoint
@@ -153,11 +168,13 @@ def get_application():
         lifespan=app_lifespan,
     )
 
+    _log_api_key_security_overrides()
+
     app.add_middleware(RequestContextMiddleware)
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=[],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -168,6 +185,28 @@ def get_application():
 
     # Add handlers of all errors except 500
     add_exception_handlers(app)
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request, exc: HTTPException):
+        detail = exc.detail
+        headers = exc.headers or None
+        request_id = request.headers.get("x-correlation-id") or request.headers.get(
+            "x-request-id"
+        )
+        if not request_id:
+            request_id = get_request_context().get("correlation_id")
+
+        if isinstance(detail, dict) and "code" in detail and "message" in detail:
+            normalized_detail = dict(detail)
+            if request_id and "request_id" not in normalized_detail:
+                normalized_detail["request_id"] = request_id
+            return JSONResponse(
+                status_code=exc.status_code, content=normalized_detail, headers=headers
+            )
+
+        return JSONResponse(
+            status_code=exc.status_code, content={"detail": detail}, headers=headers
+        )
 
     def custom_openapi():
         if app.openapi_schema:
@@ -222,13 +261,20 @@ def get_application():
                 "enum": [item.value for item in IntricEventType],
             }
 
-        # Add SSE model schemas
+        # Add SSE model schemas, hoisting nested $defs to top-level component schemas
+        # so that openapi-typescript can resolve all $ref pointers.
         for model in SSE_MODELS:
             model_name = model.__name__
             if model_name not in openapi_schema["components"]["schemas"]:
-                openapi_schema["components"]["schemas"][model_name] = (
-                    model.model_json_schema()
+                schema = model.model_json_schema(
+                    ref_template="#/components/schemas/{model}"
                 )
+                # Extract $defs and promote them to top-level schemas
+                defs = schema.pop("$defs", {})
+                for def_name, def_schema in defs.items():
+                    if def_name not in openapi_schema["components"]["schemas"]:
+                        openapi_schema["components"]["schemas"][def_name] = def_schema
+                openapi_schema["components"]["schemas"][model_name] = schema
 
         app.openapi_schema = openapi_schema
         return app.openapi_schema
@@ -284,7 +330,7 @@ def get_application():
             # all the config, then update our response headers
             cors = CORSMiddleware(
                 app=app,
-                allow_origins=["*"],
+                allow_origins=[],
                 allow_credentials=True,
                 allow_methods=["*"],
                 allow_headers=["*"],
@@ -352,7 +398,7 @@ def get_application():
         if origin:
             cors = CORSMiddleware(
                 app=app,
-                allow_origins=["*"],
+                allow_origins=[],
                 allow_credentials=True,
                 allow_methods=["*"],
                 allow_headers=["*"],
@@ -702,9 +748,7 @@ def get_application():
             ),
         )
 
-    @app.get(
-        "/version", dependencies=[Depends(auth_dependencies.get_current_active_user)]
-    )
+    @app.get("/version")
     async def get_version():
         return VersionResponse(version=get_settings().app_version)
 

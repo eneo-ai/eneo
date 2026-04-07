@@ -4,7 +4,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Button, Dialog, Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   const {
     state: { currentSpace },
@@ -33,7 +33,7 @@
         goto(`/spaces/${$currentSpace.routeId}/services/${service.id}?tab=edit`);
       }
     } catch (e) {
-      toast.error(m.error_creating_new_service());
+      toastError(e, m.error_creating_new_service());
       console.error(e);
     }
     isProcessing = false;

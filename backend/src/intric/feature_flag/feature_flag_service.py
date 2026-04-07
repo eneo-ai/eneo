@@ -44,7 +44,36 @@ class FeatureFlagService:
         feature_name: str,
         tenant_id: UUID | None = None,
     ) -> bool:
+        return await self._check_feature_enabled_with_default(
+            feature_name=feature_name,
+            tenant_id=tenant_id,
+            missing_default=False,
+        )
+
+    async def check_is_feature_enabled_fail_closed(
+        self,
+        feature_name: str,
+        tenant_id: UUID | None = None,
+    ) -> bool:
+        """Check feature state with fail-closed behavior on missing flag rows.
+
+        Security-sensitive controls should use this when missing flag records
+        must default to enabled.
+        """
+        return await self._check_feature_enabled_with_default(
+            feature_name=feature_name,
+            tenant_id=tenant_id,
+            missing_default=True,
+        )
+
+    async def _check_feature_enabled_with_default(
+        self,
+        *,
+        feature_name: str,
+        tenant_id: UUID | None,
+        missing_default: bool,
+    ) -> bool:
         feature_flag = await self.feature_flag_repo.one_or_none(name=feature_name)
         if feature_flag is None:
-            return False  # Disabled by default when flag doesn't exist
+            return missing_default
         return feature_flag.is_enabled(tenant_id=tenant_id)

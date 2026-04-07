@@ -77,7 +77,15 @@ class AppRunService:
             raise NotFoundException()
 
         if app_run.user_id != self.user.id:
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read this app run.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app_run",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return app_run
 
@@ -102,20 +110,20 @@ class AppRunService:
 
         response = await self.app_service.run_app(app_id, file_ids=file_ids, text=text)
 
-        # Prefer actual provider token counts, fall back to tiktoken estimates
+        # Prefer actual provider token counts, fall back to litellm estimates
         if response.usage and response.usage.prompt_tokens is not None:
             num_tokens_input = response.usage.prompt_tokens
             input_source = "provider"
         else:
             num_tokens_input = response.total_token_count
-            input_source = "tiktoken"
+            input_source = "litellm"
 
         if response.usage and response.usage.completion_tokens is not None:
             num_tokens_output = response.usage.completion_tokens
             output_source = "provider"
         else:
             num_tokens_output = count_tokens(response.completion.text)  # type: ignore[union-attr]
-            output_source = "tiktoken"
+            output_source = "litellm"
 
         logger.info(
             f"[TokenUsage] app_run={app_run_id} — "

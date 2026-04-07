@@ -4,8 +4,11 @@
   import UserActions from "./UserActions.svelte";
   import { createRender } from "svelte-headless-table";
   import { m } from "$lib/paraglide/messages";
+  import { onMount } from "svelte";
+  import { get } from "svelte/store";
 
   export let users: User[] = [];
+  export let initialFilterValue = "";
 
   // Use server-side filter mode: UI renders but triggers server search
   const table = Table.createWithResource(users, 100, { serverSideFilter: true });
@@ -107,6 +110,16 @@
 
   // Export filterValue so parent can watch for server-side search
   export const filterValue = viewModel.pluginStates.tableFilter.filterValue;
+
+  onMount(() => {
+    const fromUrl = initialFilterValue.trim();
+    if (!fromUrl) return;
+
+    const current = get(filterValue).trim();
+    if (!current) {
+      filterValue.set(fromUrl);
+    }
+  });
 </script>
 
 <Table.Root {viewModel} resourceName={m.user()}></Table.Root>

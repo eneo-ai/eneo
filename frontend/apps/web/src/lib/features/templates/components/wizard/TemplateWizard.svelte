@@ -11,6 +11,7 @@
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import WizardBackdrop from "./WizardBackdrop.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { BookOpen, FileUp } from "lucide-svelte";
 
   const {
     state: { selectedAttachments, selectedCollections, selectedTemplate }
@@ -45,28 +46,40 @@
       <div class="flex flex-col" in:fly|global={{ y: 5 }}>
         {#if $selectedTemplate.wizard.collections}
           <div class="flex flex-col p-4">
-            <h4 class="flex items-center gap-4 text-lg font-medium">
+            <h4 class="flex items-center gap-2 text-lg font-medium">
+              <BookOpen class="h-5 w-5 text-muted flex-shrink-0" />
               {$selectedTemplate.wizard.collections.title}
               {#if $selectedTemplate.wizard.collections.required}
-                <span class="text-muted text-base font-normal">({m.required()})</span>{/if}
+                <span class="text-muted text-base font-normal">({m.recommended()})</span>
+              {/if}
             </h4>
-            <p class="text-secondary max-w-[65ch] pt-1 pb-2">
+            <p class="text-secondary max-w-[65ch] pt-1 pb-2 pl-7">
               {$selectedTemplate.wizard.collections.description}
             </p>
 
-            <SelectKnowledgeV2 bind:selectedCollections={$selectedCollections} inDialog
-            ></SelectKnowledgeV2>
+            {#if $selectedTemplate.wizard.collections.required}
+              <SelectKnowledgeV2 bind:selectedCollections={$selectedCollections} inDialog
+              ></SelectKnowledgeV2>
+            {:else}
+              <p class="text-secondary text-sm italic pl-7">{m.knowledge_add_later_hint()}</p>
+            {/if}
           </div>
+        {/if}
+
+        {#if $selectedTemplate.wizard.collections && $selectedTemplate.wizard.attachments}
+          <div class="border-dimmer mx-4 border-t"></div>
         {/if}
 
         {#if $selectedTemplate.wizard.attachments}
           <div class="flex flex-col p-4">
-            <h4 class="flex items-center gap-4 text-lg font-medium">
+            <h4 class="flex items-center gap-2 text-lg font-medium">
+              <FileUp class="h-5 w-5 text-muted flex-shrink-0" />
               {$selectedTemplate.wizard.attachments.title}
               {#if $selectedTemplate.wizard.attachments.required}
-                <span class="text-muted text-base font-normal">({m.required()})</span>{/if}
+                <span class="text-muted text-base font-normal">({m.required()})</span>
+              {/if}
             </h4>
-            <p class="text-secondary max-w-[65ch] pt-1">
+            <p class="text-secondary max-w-[65ch] pt-1 pl-7">
               {$selectedTemplate.wizard.attachments.description}
             </p>
             <div class="flex flex-col gap-2 pt-4">

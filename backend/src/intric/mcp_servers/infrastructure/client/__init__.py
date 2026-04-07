@@ -1,9 +1,9 @@
 """MCP client infrastructure."""
 
 from intric.mcp_servers.infrastructure.client.mcp_client import (
+    MCPAuthenticationError,
     MCPClient,
     MCPClientError,
 )
-from intric.mcp_servers.infrastructure.client.mcp_manager import MCPManager
 
-__all__ = ["MCPClient", "MCPClientError", "MCPManager"]
+__all__ = ["MCPClient", "MCPClientError", "MCPAuthenticationError"]

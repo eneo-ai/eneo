@@ -16,6 +16,7 @@
   import { m } from "$lib/paraglide/messages";
   import { Loader2 } from "lucide-svelte";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   export let openController: Writable<boolean>;
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
@@ -166,7 +167,7 @@
       openController.set(false);
     } catch (e: any) {
       error = e.message || m.failed_to_update_model();
-      toast.error(m.failed_to_update_model());
+      toastError(e, m.failed_to_update_model());
     } finally {
       isSubmitting = false;
     }

@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.database.database import AsyncSession, get_session_with_transaction
+from intric.roles.permissions import Permission, validate_permission
 from intric.server.protocol import responses
 from intric.transcription_models.presentation.transcription_model_models import (
     TranscriptionModelPublic,
@@ -53,6 +54,8 @@ async def create_tenant_transcription_model(
     session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Create a new tenant-specific transcription model."""
+    validate_permission(user, Permission.ADMIN)
+
     import sqlalchemy as sa
 
     from intric.database.tables.ai_models_table import TranscriptionModels
@@ -137,6 +140,8 @@ async def update_tenant_transcription_model(
     session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Update a tenant-specific transcription model."""
+    validate_permission(user, Permission.ADMIN)
+
     import sqlalchemy as sa
 
     from intric.database.tables.ai_models_table import TranscriptionModels
@@ -196,6 +201,8 @@ async def delete_tenant_transcription_model(
     session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Delete a tenant-specific transcription model."""
+    validate_permission(user, Permission.ADMIN)
+
     import sqlalchemy as sa
 
     from intric.database.tables.ai_models_table import TranscriptionModels

@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
+from uuid import UUID as UUIDType
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -123,16 +124,21 @@ class AssistantTemplateService:
         import sqlalchemy as sa
 
         from intric.database.tables.assistant_template_table import AssistantTemplates
+        from intric.templates.assistant_template.assistant_template import (
+            AssistantTemplate,
+        )
 
-        # Create snapshot from initial data
-        snapshot = {
-            "name": data.name,
-            "description": data.description,
-            "category": data.category,
-            "prompt_text": data.prompt,
-            "completion_model_kwargs": data.completion_model_kwargs,
-            "wizard": data.wizard.model_dump() if data.wizard else None,
-        }
+        snapshot = AssistantTemplate.create_snapshot(
+            {
+                "name": data.name,
+                "description": data.description,
+                "category": data.category,
+                "prompt_text": data.prompt,
+                "completion_model_kwargs": data.completion_model_kwargs,
+                "completion_model_id": data.completion_model_id,
+                "wizard": data.wizard.model_dump() if data.wizard else None,
+            }
+        )
 
         stmt = (
             sa.insert(AssistantTemplates)
@@ -143,6 +149,7 @@ class AssistantTemplateService:
                 prompt_text=data.prompt,
                 wizard=data.wizard.model_dump() if data.wizard else None,
                 completion_model_kwargs=data.completion_model_kwargs,
+                completion_model_id=data.completion_model_id,
                 tenant_id=tenant_id,
                 deleted_at=None,
                 original_snapshot=snapshot,
@@ -388,6 +395,7 @@ class AssistantTemplateService:
         from intric.database.tables.assistant_template_table import AssistantTemplates
 
         snapshot = template.original_snapshot
+        completion_model_id = snapshot.get("completion_model_id")
 
         stmt = (
             sa.update(AssistantTemplates)
@@ -401,6 +409,9 @@ class AssistantTemplateService:
                 category=snapshot.get("category"),
                 prompt_text=snapshot.get("prompt_text"),
                 completion_model_kwargs=snapshot.get("completion_model_kwargs"),
+                completion_model_id=UUIDType(completion_model_id)
+                if completion_model_id
+                else None,
                 wizard=snapshot.get("wizard"),
                 updated_at=datetime.now(timezone.utc),
             )

@@ -42,6 +42,11 @@ def space():
 @pytest.fixture
 def integration_knowledge(space):
     """Create a mock integration knowledge entity."""
+    user_integration = MagicMock()
+    user_integration.id = uuid4()
+    user_integration.auth_type = "user_oauth"
+    user_integration.tenant_app_id = None
+
     knowledge = MagicMock(spec=IntegrationKnowledge)
     knowledge.id = uuid4()
     knowledge.name = "Original Name"
@@ -50,6 +55,7 @@ def integration_knowledge(space):
     knowledge.tenant_id = space.tenant_id
     knowledge.created_at = datetime.now()
     knowledge.updated_at = datetime.now()
+    knowledge.user_integration = user_integration
     return knowledge
 
 
@@ -81,6 +87,209 @@ def service(actor: MagicMock, space: MagicMock, integration_knowledge: MagicMock
     )
 
     return service
+
+
+class TestTenantAppAdminPermission:
+    """Tests for admin permission enforcement on tenant_app integrations.
+
+    Verifies that non-admin users (e.g. editors with space-level permissions)
+    cannot delete or rename organization-wide SharePoint integrations that
+    use tenant_app authentication.
+    """
+
+    @pytest.fixture
+    def non_admin_user(self):
+        from intric.users.user import UserInDB
+
+        user = MagicMock(spec=UserInDB)
+        user.id = uuid4()
+        user.tenant_id = TEST_USER.tenant_id
+        user.permissions = [Permission.INTEGRATIONS]  # Has integrations but NOT ADMIN
+        return user
+
+    @pytest.fixture
+    def tenant_app_knowledge(self, space):
+        """Knowledge item backed by tenant_app auth."""
+        user_integration = MagicMock()
+        user_integration.id = uuid4()
+        user_integration.auth_type = "tenant_app"
+        user_integration.tenant_app_id = uuid4()
+
+        knowledge = MagicMock(spec=IntegrationKnowledge)
+        knowledge.id = uuid4()
+        knowledge.name = "Org SharePoint Site"
+        knowledge.space_id = space.id
+        knowledge.tenant_id = space.tenant_id
+        knowledge.user_integration = user_integration
+        knowledge.integration_type = "sharepoint"
+        knowledge.sharepoint_subscription_id = None
+        return knowledge
+
+    @pytest.fixture
+    def user_oauth_knowledge(self, space):
+        """Knowledge item backed by user_oauth auth."""
+        user_integration = MagicMock()
+        user_integration.id = uuid4()
+        user_integration.auth_type = "user_oauth"
+        user_integration.tenant_app_id = None
+
+        knowledge = MagicMock(spec=IntegrationKnowledge)
+        knowledge.id = uuid4()
+        knowledge.name = "Personal SharePoint Site"
+        knowledge.space_id = space.id
+        knowledge.tenant_id = space.tenant_id
+        knowledge.user_integration = user_integration
+        knowledge.integration_type = "sharepoint"
+        knowledge.sharepoint_subscription_id = None
+        return knowledge
+
+    def _make_service(self, user, actor, space, knowledge):
+        actor.can_edit_integrations.return_value = True
+        actor.can_delete_integrations.return_value = True
+
+        actor_manager = MagicMock()
+        actor_manager.get_space_actor_from_space.return_value = actor
+
+        space.get_integration_knowledge.return_value = knowledge
+        space.tenant_space_id = uuid4()
+
+        space_repo = AsyncMock()
+        space_repo.one.return_value = space
+
+        integration_knowledge_repo = AsyncMock()
+        integration_knowledge_repo.one.return_value = knowledge
+        integration_knowledge_repo.update.return_value = knowledge
+
+        return IntegrationKnowledgeService(
+            job_service=AsyncMock(),
+            user=user,
+            oauth_token_repo=AsyncMock(),
+            space_repo=space_repo,
+            integration_knowledge_repo=integration_knowledge_repo,
+            embedding_model_repo=AsyncMock(),
+            user_integration_repo=AsyncMock(),
+            actor_manager=actor_manager,
+            sharepoint_subscription_service=AsyncMock(),
+            tenant_sharepoint_app_repo=AsyncMock(),
+            tenant_app_auth_service=AsyncMock(),
+            service_account_auth_service=AsyncMock(),
+        )
+
+    # --- remove_knowledge ---
+
+    async def test_remove_knowledge_tenant_app_requires_admin(
+        self, non_admin_user, actor, space, tenant_app_knowledge
+    ):
+        service = self._make_service(non_admin_user, actor, space, tenant_app_knowledge)
+
+        with pytest.raises(UnauthorizedException) as exc_info:
+            await service.remove_knowledge(
+                space_id=space.id,
+                integration_knowledge_id=tenant_app_knowledge.id,
+            )
+        assert "Admin permission is required" in str(exc_info.value)
+
+    async def test_remove_knowledge_tenant_app_admin_succeeds(
+        self, actor, space, tenant_app_knowledge
+    ):
+        service = self._make_service(TEST_USER, actor, space, tenant_app_knowledge)
+
+        await service.remove_knowledge(
+            space_id=space.id,
+            integration_knowledge_id=tenant_app_knowledge.id,
+        )
+        service.integration_knowledge_repo.remove.assert_called_once_with(
+            id=tenant_app_knowledge.id
+        )
+
+    async def test_remove_knowledge_user_oauth_no_admin_required(
+        self, non_admin_user, actor, space, user_oauth_knowledge
+    ):
+        service = self._make_service(non_admin_user, actor, space, user_oauth_knowledge)
+
+        await service.remove_knowledge(
+            space_id=space.id,
+            integration_knowledge_id=user_oauth_knowledge.id,
+        )
+        service.integration_knowledge_repo.remove.assert_called_once_with(
+            id=user_oauth_knowledge.id
+        )
+
+    # --- update_knowledge_name ---
+
+    async def test_rename_knowledge_tenant_app_requires_admin(
+        self, non_admin_user, actor, space, tenant_app_knowledge
+    ):
+        service = self._make_service(non_admin_user, actor, space, tenant_app_knowledge)
+
+        with pytest.raises(UnauthorizedException) as exc_info:
+            await service.update_knowledge_name(
+                space_id=space.id,
+                integration_knowledge_id=tenant_app_knowledge.id,
+                name="New Name",
+            )
+        assert "Admin permission is required" in str(exc_info.value)
+
+    async def test_rename_knowledge_tenant_app_admin_succeeds(
+        self, actor, space, tenant_app_knowledge
+    ):
+        service = self._make_service(TEST_USER, actor, space, tenant_app_knowledge)
+
+        await service.update_knowledge_name(
+            space_id=space.id,
+            integration_knowledge_id=tenant_app_knowledge.id,
+            name="New Name",
+        )
+        service.integration_knowledge_repo.update.assert_called_once()
+
+    async def test_rename_knowledge_user_oauth_no_admin_required(
+        self, non_admin_user, actor, space, user_oauth_knowledge
+    ):
+        service = self._make_service(non_admin_user, actor, space, user_oauth_knowledge)
+
+        await service.update_knowledge_name(
+            space_id=space.id,
+            integration_knowledge_id=user_oauth_knowledge.id,
+            name="New Name",
+        )
+        service.integration_knowledge_repo.update.assert_called_once()
+
+    # --- update_wrapper_name ---
+
+    async def test_update_wrapper_name_tenant_app_requires_admin(
+        self, non_admin_user, actor, space, tenant_app_knowledge
+    ):
+        wrapper_id = uuid4()
+        tenant_app_knowledge.wrapper_id = wrapper_id
+        space.integration_knowledge_list = [tenant_app_knowledge]
+
+        service = self._make_service(non_admin_user, actor, space, tenant_app_knowledge)
+
+        with pytest.raises(UnauthorizedException) as exc_info:
+            await service.update_wrapper_name(
+                space_id=space.id,
+                wrapper_id=wrapper_id,
+                name="New Wrapper Name",
+            )
+        assert "Admin permission is required" in str(exc_info.value)
+
+    # --- remove_wrapper_knowledge ---
+
+    async def test_remove_wrapper_knowledge_tenant_app_requires_admin(
+        self, non_admin_user, actor, space, tenant_app_knowledge
+    ):
+        wrapper_id = uuid4()
+        tenant_app_knowledge.wrapper_id = wrapper_id
+        space.integration_knowledge_list = [tenant_app_knowledge]
+
+        service = self._make_service(non_admin_user, actor, space, tenant_app_knowledge)
+
+        with pytest.raises(UnauthorizedException) as exc_info:
+            await service.remove_wrapper_knowledge(
+                space_id=space.id,
+                wrapper_id=wrapper_id,
+            )
+        assert "Admin permission is required" in str(exc_info.value)
 
 
 class TestUpdateKnowledgeName:
@@ -198,18 +407,23 @@ class TestWrapperOperations:
     async def test_update_wrapper_name_updates_all_owned_items(self, actor, space):
         actor.can_edit_integrations.return_value = True
 
+        user_integration = MagicMock()
+        user_integration.auth_type = "user_oauth"
+
         wrapper_id = uuid4()
         first = MagicMock(spec=IntegrationKnowledge)
         first.id = uuid4()
         first.space_id = space.id
         first.wrapper_id = wrapper_id
         first.wrapper_name = "Old"
+        first.user_integration = user_integration
 
         second = MagicMock(spec=IntegrationKnowledge)
         second.id = uuid4()
         second.space_id = space.id
         second.wrapper_id = wrapper_id
         second.wrapper_name = "Old"
+        second.user_integration = user_integration
 
         space.integration_knowledge_list = [first, second]
 
@@ -251,16 +465,21 @@ class TestWrapperOperations:
     async def test_remove_wrapper_knowledge_deletes_all_owned_items(self, actor, space):
         actor.can_delete_integrations.return_value = True
 
+        user_integration = MagicMock()
+        user_integration.auth_type = "user_oauth"
+
         wrapper_id = uuid4()
         first = MagicMock(spec=IntegrationKnowledge)
         first.id = uuid4()
         first.space_id = space.id
         first.wrapper_id = wrapper_id
+        first.user_integration = user_integration
 
         second = MagicMock(spec=IntegrationKnowledge)
         second.id = uuid4()
         second.space_id = space.id
         second.wrapper_id = wrapper_id
+        second.user_integration = user_integration
 
         space.integration_knowledge_list = [first, second]
 

@@ -9,6 +9,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { Check, Loader2, AlertTriangle } from "lucide-svelte";
   import StepProvider from "./StepProvider.svelte";
   import StepCredentials from "./StepCredentials.svelte";
@@ -255,7 +256,7 @@
       return;
     } catch (e: any) {
       error = e.message || m.failed_to_create_model();
-      toast.error(m.failed_to_create_model());
+      toastError(e, m.failed_to_create_model());
     } finally {
       isSubmitting = false;
       isValidating = false;
@@ -275,7 +276,7 @@
       await createModels(models, providerId);
     } catch (e: any) {
       error = e.message || m.failed_to_create_model();
-      toast.error(m.failed_to_create_model());
+      toastError(e, m.failed_to_create_model());
     } finally {
       isSubmitting = false;
     }

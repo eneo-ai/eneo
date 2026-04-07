@@ -14,11 +14,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from intric.allowed_origins.allowed_origin_models import AllowedOriginCreate
 from intric.main.exceptions import NotFoundException
 from intric.sysadmin.sysadmin_router import (
+    add_origin,
+    delete_origin as delete_allowed_origin,
     get_access_token,
-    get_user,
     delete_user,
+    get_user,
     update_user,
 )
 from intric.users.user import UserUpdatePublic
@@ -181,3 +184,114 @@ class TestUpdateUser:
 
         assert "No such user exists" in str(exc_info.value)
         user_service.update_user.assert_not_called()
+
+
+class TestAllowedOriginCacheInvalidation:
+    """Allowed-origin mutations should invalidate API-key origin cache immediately."""
+
+    async def test_add_origin_builds_policy_service_without_user_dependency(self, monkeypatch):
+        tenant_id = uuid.uuid4()
+        origin = AllowedOriginCreate(
+            url="https://app.example.com",
+            tenant_id=tenant_id,
+        )
+
+        container = MagicMock()
+        allowed_origin_repo = AsyncMock()
+        allowed_origin_repo.add_origin = AsyncMock(
+            return_value=MagicMock(url=origin.url, tenant_id=tenant_id)
+        )
+        container.allowed_origin_repo.return_value = allowed_origin_repo
+        container.audit_service.return_value = AsyncMock(log_async=AsyncMock())
+
+        captured_kwargs = {}
+        policy_service = MagicMock()
+
+        class _PolicyService:
+            def __init__(self, **kwargs):
+                nonlocal captured_kwargs
+                captured_kwargs = kwargs
+
+            def invalidate_tenant_origin_cache(self, tenant_id: uuid.UUID):
+                policy_service.invalidate_tenant_origin_cache(tenant_id)
+
+        monkeypatch.setattr(
+            "intric.sysadmin.sysadmin_router.ApiKeyPolicyService",
+            _PolicyService,
+        )
+
+        await add_origin(origin=origin, container=container)
+
+        assert captured_kwargs["allowed_origin_repo"] is container.allowed_origin_repo.return_value
+        assert captured_kwargs["space_service"] is None
+        assert captured_kwargs["user"] is None
+        policy_service.invalidate_tenant_origin_cache.assert_called_once_with(tenant_id)
+
+    async def test_add_origin_invalidates_api_key_origin_cache(self, monkeypatch):
+        tenant_id = uuid.uuid4()
+        origin = AllowedOriginCreate(
+            url="https://app.example.com",
+            tenant_id=tenant_id,
+        )
+
+        container = MagicMock()
+        allowed_origin_repo = AsyncMock()
+        allowed_origin_repo.add_origin = AsyncMock(
+            return_value=MagicMock(url=origin.url, tenant_id=tenant_id)
+        )
+        container.allowed_origin_repo.return_value = allowed_origin_repo
+        container.audit_service.return_value = AsyncMock(log_async=AsyncMock())
+        policy_service = MagicMock()
+        monkeypatch.setattr(
+            "intric.sysadmin.sysadmin_router.ApiKeyPolicyService",
+            MagicMock(return_value=policy_service),
+        )
+
+        await add_origin(origin=origin, container=container)
+
+        policy_service.invalidate_tenant_origin_cache.assert_called_once_with(tenant_id)
+
+    async def test_delete_origin_invalidates_api_key_origin_cache(self, monkeypatch):
+        tenant_id = uuid.uuid4()
+        origin_id = uuid.uuid4()
+
+        container = MagicMock()
+        allowed_origin_repo = AsyncMock()
+        allowed_origin_repo.get_by_id = AsyncMock(
+            return_value=MagicMock(
+                id=origin_id,
+                url="https://app.example.com",
+                tenant_id=tenant_id,
+            )
+        )
+        allowed_origin_repo.delete = AsyncMock(return_value=None)
+        container.allowed_origin_repo.return_value = allowed_origin_repo
+        container.audit_service.return_value = AsyncMock(log_async=AsyncMock())
+        policy_service = MagicMock()
+        monkeypatch.setattr(
+            "intric.sysadmin.sysadmin_router.ApiKeyPolicyService",
+            MagicMock(return_value=policy_service),
+        )
+
+        await delete_allowed_origin(id=origin_id, container=container)
+
+        policy_service.invalidate_tenant_origin_cache.assert_called_once_with(tenant_id)
+
+    async def test_delete_origin_missing_record_does_not_invalidate_cache(self, monkeypatch):
+        origin_id = uuid.uuid4()
+
+        container = MagicMock()
+        allowed_origin_repo = AsyncMock()
+        allowed_origin_repo.get_by_id = AsyncMock(return_value=None)
+        allowed_origin_repo.delete = AsyncMock(return_value=None)
+        container.allowed_origin_repo.return_value = allowed_origin_repo
+        container.audit_service.return_value = AsyncMock(log_async=AsyncMock())
+        policy_service = MagicMock()
+        monkeypatch.setattr(
+            "intric.sysadmin.sysadmin_router.ApiKeyPolicyService",
+            MagicMock(return_value=policy_service),
+        )
+
+        await delete_allowed_origin(id=origin_id, container=container)
+
+        policy_service.invalidate_tenant_origin_cache.assert_not_called()

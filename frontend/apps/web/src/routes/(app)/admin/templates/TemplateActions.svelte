@@ -9,7 +9,7 @@
   import { Button, Dropdown } from "@intric/ui";
   import { MoreVertical, Edit, Trash2, RotateCcw, ArrowUpToLine, ArrowDownToLine } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { writable } from "svelte/store";
   import { goto, invalidate } from "$app/navigation";
   import { getIntric } from "$lib/core/Intric";
@@ -44,7 +44,7 @@
       await invalidate("/admin/templates");
     } catch (e) {
       console.error("Error toggling default status:", e);
-      toast.error(m.error_changing_default_status?.() || "Error changing default status");
+      toastError(e, m.error_changing_default_status());
     }
   }
 </script>

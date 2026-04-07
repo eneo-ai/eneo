@@ -83,7 +83,15 @@ class GroupService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_create_collections():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to create groups in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "create",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         if embedding_model_id is None:
             if space.is_personal():
@@ -98,7 +106,15 @@ class GroupService:
                 )
             embedding_model_id = embedding_model.id
         elif not space.is_embedding_model_in_space(embedding_model_id):
-            raise UnauthorizedException("Embedding model is not available in the space")
+            raise UnauthorizedException(
+                "Embedding model is not available in the space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "create",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         group_create = CreateSpaceGroup(
             name=name,
@@ -114,7 +130,11 @@ class GroupService:
 
         return group
 
-    async def get_groups_for_user(self) -> list[Group]:
+    async def get_groups_for_user(
+        self, space_id_filter: UUID | None = None
+    ) -> list[Group]:
+        if space_id_filter is not None:
+            return await self.repo.get_groups_by_space(space_id_filter)
         return await self.repo.get_groups_by_user(self.user.id)
 
     async def get_group(self, group_id: UUID) -> Group:
@@ -123,7 +143,15 @@ class GroupService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_read_collections():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read this group.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return group  # type: ignore[return-value]
 
@@ -135,7 +163,15 @@ class GroupService:
             actor = self.actor_manager.get_space_actor_from_space(space)
 
             if not actor.can_read_collections():
-                raise UnauthorizedException()
+                raise UnauthorizedException(
+                    "You do not have permission to read one or more requested groups.",
+                    code="forbidden_action",
+                    context={
+                        "resource_type": "collection",
+                        "action": "read",
+                        "auth_layer": "domain_policy",
+                    },
+                )
 
         return groups
 
@@ -144,7 +180,15 @@ class GroupService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_edit_collections():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to edit this group.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "update",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         group_update = GroupUpdate(
             **group_update.model_dump(exclude_unset=True), id=group_id
@@ -165,7 +209,15 @@ class GroupService:
 
         # Adding files to a group is considered editing the group
         if not actor.can_edit_collections():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to upload files to this group.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "upload",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         if not space.is_embedding_model_in_space(group.embedding_model.id):
             raise BadRequestException(
@@ -186,7 +238,15 @@ class GroupService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_delete_collections():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to delete this group.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "delete",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         count = await self.get_count_for_group(group)
 
@@ -217,11 +277,23 @@ class GroupService:
 
         if not source_actor.can_delete_collections():
             raise UnauthorizedException(
-                "User does not have permissions to move group from space"
+                "User does not have permissions to move group from space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "move",
+                    "auth_layer": "domain_policy",
+                },
             )
         if not target_actor.can_create_collections():
             raise UnauthorizedException(
-                "User does not have permission to create groups in the space"
+                "User does not have permission to create groups in the destination space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "create",
+                    "auth_layer": "domain_policy",
+                },
             )
         if not target_space.is_embedding_model_in_space(group.embedding_model.id):
             raise BadRequestException(
@@ -250,7 +322,15 @@ class GroupService:
         space = await self.space_service.get_space(space_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_read_collections():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read groups in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
         return await self.repo.get_groups_by_space(space_id)
 
     async def import_group_to_space(
@@ -267,9 +347,25 @@ class GroupService:
         source_actor = self.actor_manager.get_space_actor_from_space(source_space)
         target_actor = self.actor_manager.get_space_actor_from_space(target_space)
         if not source_actor.can_read_collections():
-            raise UnauthorizedException("User cannot read group in source space")
+            raise UnauthorizedException(
+                "User cannot read group in source space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
         if not target_actor.can_create_collections():
-            raise UnauthorizedException("User cannot import into target space")
+            raise UnauthorizedException(
+                "User cannot import into target space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "import",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         if not target_space.is_embedding_model_in_space(group.embedding_model.id):
             raise BadRequestException(

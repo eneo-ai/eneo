@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.authentication.auth_dependencies import get_current_active_user
 from intric.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
     EmbeddingModelUpdate,
@@ -15,14 +16,18 @@ from intric.main.models import PaginatedResponse, is_provided
 from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
+from intric.users.user import UserInDB
 
 router = APIRouter()
 
 
 @router.get("/", response_model=PaginatedResponse[EmbeddingModelPublic])
 async def get_embedding_models(
+    user: UserInDB = Depends(get_current_active_user),
     container: Container = Depends(get_container(with_user=True)),
 ):
+    validate_permission(user, Permission.ADMIN)
+
     service = container.embedding_model_crud_service()
     models = await service.get_embedding_models()
 
@@ -38,8 +43,11 @@ async def get_embedding_models(
 )
 async def get_embedding_model(
     id: UUID,
+    user: UserInDB = Depends(get_current_active_user),
     container: Container = Depends(get_container(with_user=True)),
 ):
+    validate_permission(user, Permission.ADMIN)
+
     service = container.embedding_model_crud_service()
     model = await service.get_embedding_model(model_id=id)
 

@@ -1,5 +1,6 @@
 """MCP Client for connecting to and executing HTTP-based MCP servers."""
 
+import asyncio
 from datetime import timedelta
 from types import TracebackType
 from typing import Any, Optional
@@ -8,19 +9,17 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
+from intric.main.config import get_settings
+from intric.main.exceptions import MCPAuthenticationError, MCPClientError
 from intric.main.logging import get_logger
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 
 logger = get_logger(__name__)
 
-# Default connection timeout in seconds
-MCP_CONNECTION_TIMEOUT_DEFAULT = 30
-
-
-class MCPClientError(Exception):
-    """Base exception for MCP client errors."""
-
-    pass
+_settings = get_settings()
+MCP_CONNECTION_TIMEOUT_DEFAULT = _settings.mcp_client_connect_timeout_seconds
+MCP_LIST_TOOLS_TIMEOUT_DEFAULT = _settings.mcp_client_list_tools_timeout_seconds
+MCP_TOOL_CALL_TIMEOUT_DEFAULT = _settings.mcp_client_call_timeout_seconds
 
 
 def _extract_error_message(exc: BaseException) -> str:
@@ -97,6 +96,8 @@ class MCPClient:
         mcp_server: MCPServer,
         auth_credentials: dict[str, str] | None = None,
         timeout: int | None = None,
+        list_tools_timeout: int | None = None,
+        tool_call_timeout: int | None = None,
     ):
         """
         Initialize MCP client.
@@ -109,6 +110,8 @@ class MCPClient:
         self.mcp_server = mcp_server
         self.auth_credentials = auth_credentials or {}
         self.timeout = timeout or MCP_CONNECTION_TIMEOUT_DEFAULT
+        self.list_tools_timeout = list_tools_timeout or MCP_LIST_TOOLS_TIMEOUT_DEFAULT
+        self.tool_call_timeout = tool_call_timeout or MCP_TOOL_CALL_TIMEOUT_DEFAULT
         self.session: Optional[ClientSession] = None
         self._streams_context = None
         self._session_context = None
@@ -232,7 +235,10 @@ class MCPClient:
             raise MCPClientError("Not connected to MCP server")
 
         try:
-            response = await self.session.list_tools()
+            response = await asyncio.wait_for(
+                self.session.list_tools(),
+                timeout=self.list_tools_timeout,
+            )
             tools: list[dict[str, Any]] = []
 
             for tool in response.tools:
@@ -247,10 +253,22 @@ class MCPClient:
             logger.debug(f"Listed {len(tools)} tools from {self.mcp_server.name}")
             return tools
 
+        except asyncio.TimeoutError as e:
+            raise MCPClientError(
+                f"Failed to list tools: request timed out after {self.list_tools_timeout}s"
+            ) from e
         except MCPClientError:
             raise
         except BaseException as e:
             error_msg = _extract_error_message(e) or str(e)
+            lowered = error_msg.lower()
+            if any(
+                x in lowered
+                for x in ("401", "403", "unauthorized", "forbidden", "authentication")
+            ):
+                raise MCPAuthenticationError(
+                    f"Failed to list tools: {error_msg}"
+                ) from e
             logger.error(
                 f"Failed to list tools from {self.mcp_server.name}: {error_msg}"
             )
@@ -273,7 +291,10 @@ class MCPClient:
             raise MCPClientError("Not connected to MCP server")
 
         try:
-            response = await self.session.call_tool(tool_name, arguments=arguments)
+            response = await asyncio.wait_for(
+                self.session.call_tool(tool_name, arguments=arguments),
+                timeout=self.tool_call_timeout,
+            )
 
             # Extract content from response
             content_list: list[dict[str, Any]] = []
@@ -311,10 +332,20 @@ class MCPClient:
             logger.info(f"Called tool {tool_name} on {self.mcp_server.name}")
             return result
 
+        except asyncio.TimeoutError as e:
+            raise MCPClientError(
+                f"Tool call failed: request timed out after {self.tool_call_timeout}s"
+            ) from e
         except MCPClientError:
             raise
         except BaseException as e:
             error_msg = _extract_error_message(e) or str(e)
+            lowered = error_msg.lower()
+            if any(
+                x in lowered
+                for x in ("401", "403", "unauthorized", "forbidden", "authentication")
+            ):
+                raise MCPAuthenticationError(f"Tool call failed: {error_msg}") from e
             logger.error(
                 f"Failed to call tool {tool_name} on {self.mcp_server.name}: {error_msg}"
             )

@@ -212,7 +212,6 @@ def test_settings(
         upload_image_to_session_max_size=5_000_000,
         upload_max_file_size=100_000_000,
         transcription_max_file_size=25_000_000,
-        max_in_question=1000,
 
         # API settings
         api_prefix="/api/v1",
@@ -246,7 +245,7 @@ def test_settings(
         using_image_generation=False,
         using_crawl=False,
         tenant_credentials_enabled=False,  # Disable for integration tests (tests can override if needed)
-        federation_per_tenant_enabled=True,
+        federation_enabled=True,
 
         # Note: Set to False for integration tests that need full app functionality
         openapi_only_mode=False,
@@ -503,6 +502,26 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
         VALUES (gen_random_uuid(), 'audit_logging_enabled',
             'Global feature flag to enable/disable audit logging',
             true, now(), now())
+        ON CONFLICT (name) DO NOTHING
+    """)
+    # Add API key scope enforcement feature flags.
+    # These rows are NOT needed for normal scope enforcement (which fail-closed defaults
+    # to True when the row is missing). They ARE needed because the settings API
+    # (PATCH /settings/scope-enforcement, /settings/strict-mode) calls
+    # _require_feature_flag() which raises ValueError if the global row doesn't exist.
+    # The access matrix tests toggle these flags via the settings API.
+    cursor.execute("""
+        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'api_key_scope_enforcement',
+            'Enforce API key scope restrictions',
+            true, now(), now())
+        ON CONFLICT (name) DO NOTHING
+    """)
+    cursor.execute("""
+        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'api_key_strict_mode',
+            'Enable strict scope mode for API keys',
+            false, now(), now())
         ON CONFLICT (name) DO NOTHING
     """)
     conn.commit()

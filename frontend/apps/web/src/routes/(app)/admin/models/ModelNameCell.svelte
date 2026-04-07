@@ -9,19 +9,7 @@
   import { m } from "$lib/paraglide/messages";
 
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
-
-  // Determine model type from properties
-  function getModelType(): "completionModel" | "embeddingModel" | "transcriptionModel" {
-    if ("vision" in model || "reasoning" in model || "token_limit" in model) {
-      return "completionModel";
-    }
-    if ("family" in model) {
-      return "embeddingModel";
-    }
-    return "transcriptionModel";
-  }
-
-  $: modelType = getModelType();
+  export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
   $: isTenantModel = model.provider_id != null;
 
   const showEditDialog = writable(false);
@@ -56,5 +44,5 @@
 </div>
 
 {#if isTenantModel}
-  <EditModelDialog {model} type={modelType} openController={showEditDialog} />
+  <EditModelDialog {model} {type} openController={showEditDialog} />
 {/if}

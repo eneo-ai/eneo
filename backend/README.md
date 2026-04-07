@@ -50,3 +50,21 @@ Run Pyright for audit focus and new changes:
 | JWT_TOKEN_PREFIX                 | x        | In the header - eg `Bearer`                              |
 | URL_SIGNING_KEY                  | x        | Key for temporary file access URLs (use a strong random string) |
 | LOGLEVEL                         |          | one of ´INFO´, ´DEBUG´, ´WARNING´, ´ERROR´               |
+
+
+## Federation Flag
+
+- `FEDERATION_ENABLED` is the primary flag for database-configured federation.
+- `FEDERATION_PER_TENANT_ENABLED` is still accepted as a deprecated fallback alias.
+
+## Federation Migration
+
+The env-to-tenant federation migration no longer runs during app startup.
+
+Run it manually when needed:
+
+```bash
+python scripts/migrate_env_oidc_to_tenant_federation.py
+```
+
+The script uses the current backend environment and exits without changes if federation is disabled, the OIDC env config is incomplete, or the tenant state is not eligible for migration.

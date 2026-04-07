@@ -34,7 +34,7 @@ async def get_websites(
     ),
     container: Container = Depends(get_container(with_user=True)),
 ):
-    return HTTPException(status_code=410, detail="This endpoint is deprecated")
+    raise HTTPException(status_code=410, detail="This endpoint is deprecated")
 
 
 @router.post("/", response_model=WebsitePublic, deprecated=True)
@@ -42,7 +42,7 @@ async def create_website(
     crawl: WebsiteCreateRequestDeprecated,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    return HTTPException(status_code=410, detail="This endpoint is deprecated")
+    raise HTTPException(status_code=410, detail="This endpoint is deprecated")
 
 
 @router.get(

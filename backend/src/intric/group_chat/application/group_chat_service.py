@@ -68,7 +68,15 @@ class GroupChatService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_create_group_chats():
-            raise UnauthorizedException
+            raise UnauthorizedException(
+                "You do not have permission to create group chats in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "group_chat",
+                    "action": "create",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         group_chat = GroupChat.create(
             name=name, space_id=space_id, user_id=self.user.id
@@ -86,7 +94,15 @@ class GroupChatService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_delete_group_chats():
-            raise UnauthorizedException
+            raise UnauthorizedException(
+                "You do not have permission to delete this group chat.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "group_chat",
+                    "action": "delete",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         group_chat = space.get_group_chat(group_chat_id=group_chat_id)
         icon_id = group_chat.icon_id
@@ -114,7 +130,15 @@ class GroupChatService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_edit_group_chats():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to edit this group chat.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "group_chat",
+                    "action": "update",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         # Check if user has permission to toggle insights
         if insight_enabled is not None:
@@ -167,7 +191,15 @@ class GroupChatService:
         group_chat = space.get_group_chat(group_chat_id=group_chat_id)
 
         if not actor.can_read_group_chat(group_chat=group_chat):
-            raise UnauthorizedException
+            raise UnauthorizedException(
+                "You do not have permission to read this group chat.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "group_chat",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         group_chat.permissions = actor.get_group_chat_permissions(group_chat=group_chat)
 
@@ -260,7 +292,8 @@ class GroupChatService:
 
         # create the prompt for assistant selection
         selection_prompt = self._create_assistant_selection_prompt(question, assistants)
-        assistant_selector_tokens = count_tokens(selection_prompt)
+        model_name = completion_model.name if completion_model else ""
+        assistant_selector_tokens = count_tokens(selection_prompt, model_name)
         # get model's response
         response = await self.completion_service.get_response(
             model=completion_model,
@@ -320,8 +353,8 @@ class GroupChatService:
                     await asyncio.sleep(0.05)
 
                 # NOTE: refactor question_token_count to include the whole contructed prompt.
-                question_token_count = count_tokens(question)
-                token_count = count_tokens(response)
+                question_token_count = count_tokens(question, completion_model.name)
+                token_count = count_tokens(response, completion_model.name)
                 await self.session_service.add_question_to_session(
                     question=question,
                     answer=response,
@@ -338,8 +371,8 @@ class GroupChatService:
             return response_stream()
         else:
             # NOTE: refactor question_token_count to include the whole contructed prompt.
-            question_token_count = count_tokens(question)
-            token_count = count_tokens(response)
+            question_token_count = count_tokens(question, completion_model.name)
+            token_count = count_tokens(response, completion_model.name)
             await self.session_service.add_question_to_session(
                 question=question,
                 answer=response,
@@ -470,7 +503,15 @@ class GroupChatService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_publish_group_chats():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "Publishing group chats is not allowed for your current space role.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "group_chat",
+                    "action": "publish",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         group_chat = space.get_group_chat(group_chat_id=group_chat_id)
 

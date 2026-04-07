@@ -33,7 +33,7 @@ Terminology
 ---
 
 ## 2. Configure a Tenant IdP (Example: MunicipalityExampleA using Entra ID)
-1. **Create/update federation config**
+1. **Provide a new federation config**
    ```bash
    curl -X PUT "https://api.eneo.local/api/v1/sysadmin/tenants/{tenant_id}/federation" \
      -H "X-API-Key: {SUPER_API_KEY}" \
@@ -60,6 +60,19 @@ Terminology
    ```
 
 Repeat for each tenant (e.g., MunicipalityExampleB with Auth0, MunicipalityExampleC with Okta). Only the IdP-specific fields change.
+
+To update the current setup later without resending every field, use `PATCH /api/v1/sysadmin/tenants/{tenant_id}/federation`. Omitted fields stay unchanged:
+
+```bash
+curl -X PATCH "https://api.eneo.local/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+  -H "X-API-Key: {SUPER_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "allowed_domains": ["examplea.gov", "examplea.se"]
+  }'
+```
+
+Use `PUT` when you want to provide a full new federation definition or replace the current one.
 
 ---
 

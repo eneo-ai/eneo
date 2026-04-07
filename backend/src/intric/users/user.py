@@ -6,7 +6,12 @@ from uuid import UUID
 
 from pydantic import EmailStr, Field, computed_field, field_serializer, field_validator
 
-from intric.authentication.auth_models import AccessToken, ApiKey, ApiKeyInDB
+from intric.authentication.auth_models import (
+    AccessToken,
+    ApiKey,
+    ApiKeyInDB,
+    ApiKeyV2InDB,
+)
 from intric.main.models import BaseModel, InDB, ModelId, partial_model
 from intric.predefined_roles.predefined_role import (
     PredefinedRoleInDB,
@@ -256,6 +261,7 @@ class UserInDB(InDB, UserAdd):
     user_groups: list[UserGroupInDBRead] = []
     tenant: TenantInDB
     api_key: Optional[ApiKeyInDB] = None
+    active_api_key: Optional[ApiKeyV2InDB] = None
     roles: list[RoleInDB] = []
     predefined_roles: list[PredefinedRoleInDB] = []
     quota_used: int = 0
@@ -303,6 +309,7 @@ class UserPublicBase(InDB, UserBase):
 
 class UserPublic(UserPublicBase):
     truncated_api_key: Optional[str] = None
+    legacy_api_key_suffix: Optional[str] = None
     quota_limit: Optional[int] = None
     roles: list[RolePublic]
     predefined_roles: list[PredefinedRolePublic]

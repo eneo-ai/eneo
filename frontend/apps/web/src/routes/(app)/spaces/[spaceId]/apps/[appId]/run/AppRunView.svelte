@@ -3,7 +3,7 @@
   import { Button, Tooltip } from "@intric/ui";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { getIntric } from "$lib/core/Intric";
-  import { IntricError, type App, type AppRunInput } from "@intric/intric-js";
+  import { type App, type AppRunInput } from "@intric/intric-js";
   import AppIcon from "$lib/features/apps/components/AppIcon.svelte";
   import AttachmentDropArea from "$lib/features/attachments/components/AttachmentDropArea.svelte";
   import { getAppAttachmentRulesStore } from "$lib/features/attachments/getAttachmentRules";
@@ -15,6 +15,7 @@
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   const intric = getIntric();
   const {
@@ -72,9 +73,8 @@
       // Forward to the newly created run
       goto(`/spaces/${$currentSpace.routeId}/apps/${$app.id}/results/${result.id}`);
     } catch (err) {
-      const msg = err instanceof IntricError ? err.getReadableMessage() : err;
       console.error(err);
-      toast.error(m.error_running_app({ msg }));
+      toastError(err);
       isSubmitting = false;
     }
   }

@@ -72,7 +72,7 @@ class TenantService:
 
     async def update_tenant(
         self, tenant_update: TenantUpdatePublic, id: UUID
-    ) -> TenantInDB | None:
+    ) -> TenantInDB:
         tenant = await self.get_tenant_by_id(id)
         self._validate(tenant, id)
         assert tenant is not None
@@ -81,6 +81,15 @@ class TenantService:
             **tenant_update.model_dump(exclude_unset=True), id=tenant.id
         )
         return await self.repo.update_tenant(tenant_update)
+
+    async def update_api_key_policy(
+        self,
+        tenant_id: UUID,
+        policy_updates: dict[str, Any],
+    ) -> TenantInDB:
+        tenant = await self.get_tenant_by_id(tenant_id)
+        self._validate(tenant, tenant_id)
+        return await self.repo.update_api_key_policy(tenant_id, policy_updates)
 
     async def add_modules(self, list_of_module_ids: list[ModelId], tenant_id: UUID):
         return await self.repo.add_modules(list_of_module_ids, tenant_id)
@@ -269,7 +278,7 @@ class TenantService:
         for provider, metadata in credentials_metadata.items():
             credential_data = tenant_credentials.get(provider, {})
             config: dict[str, Any] = {}
-            configured_at: datetime = tenant.updated_at  # type: ignore[assignment]
+            configured_at: datetime | None = tenant.updated_at
 
             if isinstance(credential_data, dict):
                 # Extract config (all fields except sensitive ones)

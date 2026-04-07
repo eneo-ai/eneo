@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.authentication.auth_dependencies import get_current_active_user
 from intric.main.container.container import Container
 from intric.main.models import PaginatedResponse, is_provided
 from intric.roles.permissions import Permission, validate_permission
@@ -15,6 +16,7 @@ from intric.transcription_models.presentation.transcription_model_models import 
     TranscriptionModelPublic,
     TranscriptionModelUpdate,
 )
+from intric.users.user import UserInDB
 
 router = APIRouter()
 
@@ -24,8 +26,11 @@ router = APIRouter()
     response_model=PaginatedResponse[TranscriptionModelPublic],
 )
 async def get_transcription_models(
+    user: UserInDB = Depends(get_current_active_user),
     container: Container = Depends(get_container(with_user=True)),
 ):
+    validate_permission(user, Permission.ADMIN)
+
     service = container.transcription_model_crud_service()
 
     models = await service.get_transcription_models()

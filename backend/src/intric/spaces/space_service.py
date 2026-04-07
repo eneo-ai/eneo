@@ -1,9 +1,11 @@
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Union, cast
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
+from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
+from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from intric.completion_models.application.completion_model_crud_service import (
     CompletionModelCRUDService,
 )
@@ -20,6 +22,7 @@ from intric.main.exceptions import (
     UnauthorizedException,
     UniqueException,
 )
+from intric.main.logging import get_logger
 from intric.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
 from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
 from intric.spaces.space import Space
@@ -39,7 +42,7 @@ if TYPE_CHECKING:
     from intric.actors import ActorManager
     from intric.completion_models.domain import CompletionModel
     from intric.embedding_models.domain import (
-        EmbeddingModel,  # type: ignore[attr-defined]
+        EmbeddingModel,  # pyright: ignore[reportAttributeAccessIssue]
     )
     from intric.security_classifications.application.security_classification_service import (
         SecurityClassificationService,
@@ -75,6 +78,7 @@ class SpaceService:
         actor_manager: "ActorManager",
         security_classification_service: "SecurityClassificationService",
         icon_repo: IconRepository,
+        api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
         self.user = user
         self.factory = factory
@@ -89,6 +93,25 @@ class SpaceService:
         self.actor_manager = actor_manager
         self.security_classification_service = security_classification_service
         self.icon_repo = icon_repo
+        self.api_key_scope_revoker = api_key_scope_revoker
+        self._logger = get_logger(__name__)
+
+    async def is_space_member(self, space_id: UUID, user_id: UUID) -> bool:
+        """Check if user is a member of space (index-only lookup)."""
+        return await self.repo.is_member(space_id=space_id, user_id=user_id)
+
+    async def resolve_space_id_for_scope(
+        self, scope_type: str, scope_id: UUID
+    ) -> UUID | None:
+        """Resolve a key's scope to its parent space_id.
+
+        Returns space_id directly for space-scoped keys.
+        """
+        if scope_type in (ApiKeyScopeType.SPACE, ApiKeyScopeType.SPACE.value):
+            return scope_id
+        return await self.repo.get_space_id_for_resource(
+            scope_type=scope_type, resource_id=scope_id
+        )
 
     @staticmethod
     def is_org_space(space: Space) -> bool:
@@ -190,7 +213,15 @@ class SpaceService:
 
         actor = self._get_actor(space)
         if not actor.can_read_space():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "space",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return space
 
@@ -219,8 +250,9 @@ class SpaceService:
             if not self.user.tenant.security_enabled:
                 raise BadRequestException("Security is not enabled for this tenant")
             if security_classification is not None:
+                classification_id = cast(ModelId, security_classification).id
                 space_security_classification = await self.security_classification_service.get_security_classification(  # noqa: E501
-                    security_classification.id
+                    classification_id
                 )
                 if space_security_classification is None:
                     raise BadRequestException("Security classification not found")
@@ -412,9 +444,15 @@ class SpaceService:
 
         affected_apps = []
         for app in space.apps:
-            if app.completion_model.id not in remaining_completion_model_ids:
+            if (
+                app.completion_model
+                and app.completion_model.id not in remaining_completion_model_ids
+            ):
                 affected_apps.append(app)
-            if app.transcription_model.id not in remaining_transcription_model_ids:
+            if (
+                app.transcription_model
+                and app.transcription_model.id not in remaining_transcription_model_ids
+            ):
                 if app not in affected_apps:
                     affected_apps.append(app)
 
@@ -426,7 +464,11 @@ class SpaceService:
             ):
                 affected_services.append(service)
             for group in service.groups:
-                if group.embedding_model.id not in remaining_embedding_model_ids:  # type: ignore[attr-defined]
+                embedding_model = getattr(group, "embedding_model", None)
+                if (
+                    embedding_model
+                    and embedding_model.id not in remaining_embedding_model_ids
+                ):
                     if service not in affected_services:
                         affected_services.append(service)
 
@@ -447,6 +489,7 @@ class SpaceService:
         space = await self.repo.get_personal_space(user.id)
 
         if space is not None:
+            await self._revoke_space_api_keys(space)
             await self.repo.delete(space.id)
 
     async def delete_space(self, id: UUID):
@@ -458,10 +501,59 @@ class SpaceService:
 
         icon_id = space.icon_id
 
+        await self._revoke_space_api_keys(space)
         await self.repo.delete(space.id)
 
         if icon_id:
             await self.icon_repo.delete(icon_id)
+
+    async def _revoke_space_api_keys(self, space: Space) -> None:
+        if self.api_key_scope_revoker is None:
+            return
+
+        try:
+            await self.api_key_scope_revoker.revoke_scope(
+                scope_type=ApiKeyScopeType.SPACE,
+                scope_id=space.id,
+                reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
+                reason_text="Space deleted",
+            )
+        except Exception:
+            self._logger.exception(
+                "Failed to revoke API keys for deleted space",
+                extra={"space_id": str(space.id)},
+            )
+
+        for assistant in space.assistants:
+            try:
+                await self.api_key_scope_revoker.revoke_scope(
+                    scope_type=ApiKeyScopeType.ASSISTANT,
+                    scope_id=assistant.id,
+                    reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
+                    reason_text="Space deleted",
+                )
+            except Exception:
+                self._logger.exception(
+                    "Failed to revoke API keys for assistant in deleted space",
+                    extra={
+                        "space_id": str(space.id),
+                        "assistant_id": str(assistant.id),
+                    },
+                )
+
+        for app in space.apps:
+            try:
+                await self.api_key_scope_revoker.revoke_scope(
+                    scope_type=ApiKeyScopeType.APP,
+                    scope_id=app.id,
+                    reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
+                    reason_text="Space deleted",
+                )
+            except Exception:
+                self._logger.exception(
+                    "Failed to revoke API keys for app in deleted space",
+                    extra={"space_id": str(space.id), "app_id": str(app.id)},
+                )
 
     async def get_spaces(
         self, *, include_personal: bool = False, include_applications: bool = False
@@ -515,6 +607,24 @@ class SpaceService:
         space.remove_member(user_id)
 
         await self.repo.update(space)
+
+        # Revoke all API keys the removed user owns for this space and its resources
+        if self.api_key_scope_revoker is not None:
+            assistant_ids = [a.id for a in space.assistants]
+            app_ids = [a.id for a in space.apps]
+            revoked = await self.api_key_scope_revoker.revoke_member_keys(
+                tenant_id=self.user.tenant_id,
+                owner_user_id=user_id,
+                space_id=id,
+                assistant_ids=assistant_ids,
+                app_ids=app_ids,
+                reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
+                reason_text=f"User removed from space {space.name}",
+            )
+            if revoked:
+                self._logger.info(
+                    f"Revoked {revoked} API keys for user {user_id} removed from space {id}"
+                )
 
     async def get_space_member(self, space_id: UUID, user_id: UUID) -> SpaceMember:
         """Get a space member by user ID.
@@ -701,7 +811,15 @@ class SpaceService:
         actor = self._get_actor(space)
 
         if not actor.can_read_space():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "space",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return space
 
@@ -711,6 +829,10 @@ class SpaceService:
 
     async def get_space_by_assistant(self, assistant_id: UUID) -> Space:
         space = await self.repo.get_space_by_assistant(assistant_id=assistant_id)
+        return await self._get_space_by_resource(space)
+
+    async def get_space_by_app(self, app_id: UUID) -> Space:
+        space = await self.repo.get_space_by_app(app_id=app_id)
         return await self._get_space_by_resource(space)
 
     async def get_space_by_session(self, session_id: UUID) -> Space:

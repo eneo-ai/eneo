@@ -28,6 +28,13 @@ class SettingsPublic(SettingsBase):
         True  # Feature flag for audit logging (default enabled for backward compat)
     )
     provisioning: bool = False  # JIT provisioning - auto-create users on SSO login
+    api_key_scope_enforcement: bool = True  # Per-tenant scope enforcement toggle
+    api_key_strict_mode: bool = (
+        False  # Per-tenant strict mode toggle (default off for staged rollout)
+    )
+    api_key_expiry_notifications: bool = (
+        True  # Per-tenant API key expiry notifications toggle
+    )
 
 
 class GetModelsResponse(BaseModel):
@@ -35,5 +42,5 @@ class GetModelsResponse(BaseModel):
     embedding_models: list[EmbeddingModelPublicLegacy]
 
 
-class TemplateSettingUpdate(BaseModel):
+class ToggleSettingUpdate(BaseModel):
     enabled: bool

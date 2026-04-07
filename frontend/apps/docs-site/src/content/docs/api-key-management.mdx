@@ -1,0 +1,301 @@
+# API Key Management
+
+Eneo provides a comprehensive API key system for programmatic access. Keys support two ownership models (user and service), four scope levels (tenant, space, assistant, app), three permission tiers (read, write, admin), and layered security enforcement including rate limiting, IP/origin restrictions, and scope-based access control.
+
+import { Callout } from 'nextra/components'
+
+---
+
+## Key Types
+
+Every API key has a type prefix that determines its intended use and security constraints.
+
+| Aspect | `sk_` (Secret Key) | `pk_` (Public Key) |
+|--------|--------------------|--------------------|
+| **Use case** | Server-to-server, backend integrations | Browser-based, frontend apps |
+| **Access restriction** | IP allowlist (CIDR notation) | Origin allowlist (scheme required) |
+| **Max permission** | `admin` | `write` (no admin) |
+| **Resource permissions** | Supported | Not supported |
+| **Origin restrictions** | Not allowed | Required (at least one) |
+| **IP restrictions** | Optional | Not allowed |
+
+<Callout type="info">
+The key prefix (`sk_` or `pk_`) is embedded in the key string itself and validated on every request. A `pk_` key that somehow acquires admin permission will be rejected at creation time.
+</Callout>
+
+---
+
+## Ownership Model
+
+API keys have an **ownership** field that fundamentally changes how the key is authenticated and what happens when users are modified.
+
+### User Keys (`ownership: "user"`)
+
+User keys are bound to a specific user via `owner_user_id`. On every request, the system:
+
+1. Looks up the owner in the database
+2. Verifies the owner account is **active** (not deactivated or deleted)
+3. For tenant-scoped keys: verifies the owner still has **admin** permissions
+4. For space/assistant/app-scoped keys: verifies the owner is still a **member** of the target space
+
+If any of these checks fail, the request is denied. This means user keys inherit the lifecycle of their owner: if a user is deactivated, suspended, or removed from a space, all their keys stop working.
+
+### Service Keys (`ownership: "service"`)
+
+Service keys are designed for integrations, automated systems, and machine-to-machine communication. They are not tied to any user's identity or lifecycle.
+
+When a service key is used, the system constructs a **synthetic user** instead of looking up a real one:
+
+- **Unique ID per key**: Generated from `uuid5(NAMESPACE_URL, "service-key:{key_id}")` so each service key gets its own synthetic identity for audit and quota tracking
+- **Always active**: The synthetic user is always in `ACTIVE` state
+- **No real roles**: Space access is derived from the key's permission level, not from membership
+
+<Callout type="warning">
+Only tenant administrators can create service keys. Service keys with write or admin permission require either an **IP allowlist** or an **expiration date** as a guardrail against misuse, regardless of scope.
+</Callout>
+
+**Why service keys exist**: In production environments, integrations should not break when an employee leaves the organization. With user keys, deactivating a departing employee's account would silently break every integration that used their key. Service keys solve this by decoupling key validity from any individual user's lifecycle.
+
+#### What happens when the creator is deleted
+
+Service keys store `created_by_user_id` (who created the key) separately from ownership. The foreign key uses `SET NULL` on delete, so:
+
+- The key remains **fully functional** after the creator is deleted
+- `owner_user_id` is `NULL` for service keys (by design)
+- `created_by_user_id` becomes `NULL` (audit trail partially lost, but key works)
+
+---
+
+## Authentication Flow
+
+When a request arrives with an API key in the `X-API-Key` header, the following steps execute in order:
+
+### 1. Key Resolution
+
+The plain key is extracted from the header and hashed. The system supports two hash algorithms:
+
+- **HMAC-SHA256** (current standard) using a server-side secret
+- **SHA256** (legacy) as a fallback
+
+If a key is found via the legacy SHA256 hash, it is automatically upgraded to HMAC-SHA256 on use. The key hash is looked up against the `api_keys_v2` table using the `idx_api_keys_v2_key_hash` index.
+
+### 2. State Validation
+
+The key's effective state is computed with the following priority:
+
+```
+revoked_at is set    → REVOKED   (permanent, highest priority)
+expires_at < now     → EXPIRED   (time-based)
+suspended_at is set  → SUSPENDED (temporary)
+otherwise            → ACTIVE
+```
+
+Only `ACTIVE` keys proceed. Revoked and expired keys return `401`. Suspended keys return `403`.
+
+### 3. Ownership Resolution
+
+Based on the `ownership` field:
+
+- **User keys**: The owner is fetched from the database. The system verifies the owner is active, belongs to the correct tenant, and still has the required permissions for the key's scope.
+- **Service keys**: A synthetic user is constructed. No database user lookup occurs.
+
+### 4. Guardrail Checks
+
+- **IP validation** (`sk_` keys): If `allowed_ips` is configured, the client IP must match at least one CIDR block
+- **Origin validation** (`pk_` keys): If `allowed_origins` is configured, the request `Origin` header must match
+
+### 5. Rate Limiting
+
+Redis-based rate limiting with scope-aware defaults:
+
+| Scope | Default Limit |
+|-------|--------------|
+| Tenant | 10,000 req/hour |
+| Space | 5,000 req/hour |
+| Assistant | 1,000 req/hour |
+| App | 1,000 req/hour |
+
+Per-key overrides are possible via the `rate_limit` field. The tenant policy `max_rate_limit_override` acts as an absolute ceiling.
+
+### 6. Permission Enforcement
+
+**Method-level** (always enforced): HTTP methods are mapped to permission levels:
+
+| HTTP Method | Required Permission |
+|-------------|-------------------|
+| `GET`, `HEAD`, `OPTIONS` | `read` |
+| `POST`, `PUT`, `PATCH` | `write` |
+| `DELETE` | `admin` |
+
+Some endpoints override this mapping. For example, certain POST endpoints that are semantically read operations (like search) accept `read` permission.
+
+**Resource-level** (feature-gated): If the key has `resource_permissions` configured, per-resource-type overrides are checked. Each resource type (assistants, apps, spaces, knowledge) can have an independent permission ceiling that must not exceed the key's main permission.
+
+### 7. Scope Enforcement
+
+If scope enforcement is enabled (both globally and per-tenant), the system verifies that the key's scope covers the requested resource. See [Scope & Permissions](#scope--permissions) for details.
+
+### 8. Request Proceeds
+
+The authenticated user (real or synthetic) is injected into the request context. For service keys, the `active_api_key` field on the synthetic user allows downstream code (like `SpaceActor`) to derive the appropriate role.
+
+---
+
+## Scope & Permissions
+
+### Scope Types
+
+Scopes define the boundary of what a key can access, from broadest to narrowest:
+
+| Scope | Access | `scope_id` |
+|-------|--------|-----------|
+| `tenant` | All resources in the tenant | `NULL` |
+| `space` | Single space and its contents | Space UUID |
+| `assistant` | Single assistant and its conversations | Assistant UUID |
+| `app` | Single app and its runs | App UUID |
+
+### Permission Levels
+
+Permissions define what operations a key can perform within its scope:
+
+| Permission | Space Role | Can Do |
+|-----------|-----------|--------|
+| `read` | VIEWER | Read resources, list items |
+| `write` | EDITOR | Create, update resources |
+| `admin` | ADMIN | Delete resources, manage space settings |
+
+### How Service Keys Derive Space Roles
+
+Service keys are not space members, so `SpaceActor` derives a synthetic role:
+
+1. **Tenant-scoped**: The key's permission maps to a role that applies to **every space** in the tenant
+2. **Space-scoped**: The role applies only if `scope_id` matches the current space
+3. **Assistant/app-scoped**: The role applies only if the scoped resource exists in the current space
+
+This means a service key with `scope: space, permission: write` gets `EDITOR` access to exactly one space, and no access to any other space.
+
+### Scope Enforcement Details
+
+Scope enforcement distinguishes between **list endpoints** (no resource ID in URL) and **single-resource endpoints** (resource ID in URL):
+
+**List endpoints**:
+- Tenant-scoped keys: always pass
+- Space-scoped keys: pass (service layer filters by space)
+- Assistant/app-scoped keys: pass only for their resource type (e.g., an assistant-scoped key can list conversations but not apps)
+
+**Single-resource endpoints**:
+- The system resolves the target resource's parent space
+- Compares the resolved space against the key's `scope_id`
+- Denies access if the resource is outside the key's scope
+
+**Strict mode** adds additional safety for list endpoints: if the endpoint cannot deterministically filter results to the key's scope, the request is denied rather than returning potentially over-broad results.
+
+---
+
+## Key Lifecycle
+
+### Creation
+
+Keys are created via `POST /api/v1/api-keys`. The policy service validates:
+
+- Scope and permission compatibility
+- Service key guardrails (admin-only creation, IP/expiry for write/admin tenant scope)
+- `pk_` key constraints (origins required, no admin, no IPs)
+- Resource permission ceilings (cannot exceed main permission)
+- Tenant policy limits (expiration requirements, rate limit ceilings)
+
+The plain key secret is returned **exactly once** in the response. It is never stored or retrievable again.
+
+### Rotation
+
+Rotation creates a new key while keeping the old one temporarily valid:
+
+1. A new key is generated with the same scope, permission, and restrictions
+2. The old key gets a `rotation_grace_until` timestamp (default: 24 hours)
+3. Both keys work during the grace period
+4. After the grace period, the old key stops working
+
+This enables zero-downtime key rotation for integrations.
+
+### Suspension
+
+Suspension is a **temporary, reversible** state change:
+
+- Sets `suspended_at` and optional reason code/text
+- Key immediately stops working
+- Can be reactivated via the API, restoring `ACTIVE` state
+- Cannot suspend already-revoked or expired keys
+
+### Revocation
+
+Revocation is **permanent and irreversible**:
+
+- Sets `revoked_at` and optional reason code/text
+- Key immediately and permanently stops working
+- Cannot be reactivated
+- If tenant policy has `revocation_cascade_enabled`, all delegated child keys are also revoked
+
+### Expiration
+
+Keys with an `expires_at` timestamp are checked at runtime:
+
+- State is computed dynamically: if `now > expires_at`, the key is `EXPIRED`
+- Expired keys cannot be reactivated
+- Tenant policy can require expiration on all keys (`require_expiration`) and cap the maximum duration (`max_expiration_days`)
+
+### State Priority
+
+When multiple state indicators are present, the most restrictive wins:
+
+```
+REVOKED > EXPIRED > SUSPENDED > ACTIVE
+```
+
+A key that is both suspended and expired is treated as expired. A key that is both expired and revoked is treated as revoked.
+
+---
+
+## Tenant Policies
+
+Tenant administrators can configure API key policies that apply to all keys in their tenant:
+
+| Policy | Default | Description |
+|--------|---------|-------------|
+| `max_delegation_depth` | 3 | Maximum nesting for delegated keys |
+| `revocation_cascade_enabled` | false | Revoking a key also revokes its children |
+| `require_expiration` | false | All new keys must have an expiry date |
+| `max_expiration_days` | null | Maximum days until expiry (null = unlimited) |
+| `auto_expire_unused_days` | null | Auto-revoke after N days of inactivity |
+| `max_rate_limit_override` | null | Absolute ceiling on per-key rate limits |
+
+---
+
+## Security Design
+
+### Storage
+
+API key secrets are **never stored in plaintext**. They are hashed with HMAC-SHA256 using a server-side secret (`api_key_hash_secret`). Legacy SHA256-hashed keys are automatically upgraded on use.
+
+### Guardrails
+
+- Service keys with tenant-wide write/admin scope **must** have an IP allowlist or expiration date
+- `pk_` keys **cannot** have admin permission and **must** specify allowed origins
+- Each origin must include a scheme (`https://example.com`) or be a localhost address
+
+### Audit Trail
+
+Every key lifecycle event is logged to the audit system:
+
+- **Actions tracked**: creation, rotation, update, suspension, reactivation, revocation, expiration
+- **Metadata captured**: scope, permission, IP address, user agent, request ID, before/after field values, reason codes
+
+### Feature Flags
+
+Two feature flags control enforcement behavior:
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `api_key_scope_enforcement` | Enabled | Enforce scope boundaries |
+| `api_key_strict_mode` | Disabled | Deny ambiguous list requests for scoped keys |
+
+Both flags can be toggled globally and per-tenant, allowing staged rollout.

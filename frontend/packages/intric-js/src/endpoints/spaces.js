@@ -8,11 +8,13 @@ export function initSpaces(client) {
   return {
     /**
      * Lists all spaces the user can access.
+     * @param {{include_personal?: boolean, include_applications?: boolean}} [options]
      * @throws {IntricError}
      * */
-    list: async () => {
+    list: async (options) => {
       const res = await client.fetch("/api/v1/spaces/", {
-        method: "get"
+        method: "get",
+        params: { query: options }
       });
 
       return res.items;

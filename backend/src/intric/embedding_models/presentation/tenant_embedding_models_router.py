@@ -22,6 +22,7 @@ from intric.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
+from intric.roles.permissions import Permission, validate_permission
 from intric.server.protocol import responses
 from intric.users.user import UserInDB
 
@@ -70,6 +71,8 @@ async def create_tenant_embedding_model(
     session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Create a new tenant-specific embedding model."""
+    validate_permission(user, Permission.ADMIN)
+
     # Verify provider exists and belongs to user's tenant
     stmt = sa.select(ModelProviders).where(
         ModelProviders.id == model_create.provider_id,
@@ -110,7 +113,8 @@ async def create_tenant_embedding_model(
             org=None,
             stability="stable",
             open_source=False,
-            description=f"Tenant model: {model_create.display_name}",
+            nickname=model_create.display_name,
+            description=None,
             hf_link=None,
             is_deprecated=False,
             max_batch_size=None,
@@ -146,6 +150,8 @@ async def update_tenant_embedding_model(
     session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Update a tenant-specific embedding model."""
+    validate_permission(user, Permission.ADMIN)
+
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(EmbeddingModels).where(
         EmbeddingModels.id == model_id,
@@ -165,7 +171,7 @@ async def update_tenant_embedding_model(
 
     # Update fields that were provided
     if model_update.display_name is not None:
-        model.description = f"Tenant model: {model_update.display_name}"
+        model.nickname = model_update.display_name
     if model_update.description is not None:
         model.description = model_update.description
     if model_update.family is not None:
@@ -202,6 +208,8 @@ async def delete_tenant_embedding_model(
     session: AsyncSession = Depends(get_session_with_transaction),
 ):
     """Delete a tenant-specific embedding model."""
+    validate_permission(user, Permission.ADMIN)
+
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(EmbeddingModels).where(
         EmbeddingModels.id == model_id,

@@ -10,6 +10,7 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { Page } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
+  import OverviewTile from "./OverviewTile.svelte";
 
   const {
     state: { currentSpace }
@@ -45,20 +46,6 @@
   >
 </svelte:head>
 
-{#snippet tile(params: { title: string; count: number; link: string })}
-  <a
-    href="/spaces/{$currentSpace.routeId}{params.link}"
-    class="border-default bg-hover-dimmer hover:bg-hover-default flex min-h-64 cursor-pointer flex-col border-t px-4 py-2"
-  >
-    <h3 class="text-primary font-mono text-sm uppercase">{params.title}</h3>
-    <div class="flex-grow"></div>
-
-    <div class="text-primary self-end text-[4rem] font-bold">
-      {params.count}
-    </div>
-  </a>
-{/snippet}
-
 <Page.Root>
   <Page.Header>
     <Page.Title title={m.overview()}></Page.Title>
@@ -83,50 +70,49 @@
           {$currentSpace.description ?? m.welcome_to_space({ space: $currentSpace.name })}
         </p>
       {/if}
-      <!-- <div class="flex-grow"></div> -->
 
       <div class="grid gap-4 pt-4 pb-4 md:grid-cols-3">
         {#if $currentSpace.hasPermission("read", "assistant")}
-          {@render tile({
-            title: m.assistants(),
-            count: $currentSpace.applications.chat.length,
-            link: "/assistants"
-          })}
+          <OverviewTile
+            title={m.assistants()}
+            count={$currentSpace.applications.chat.length}
+            href="/spaces/{$currentSpace.routeId}/assistants"
+          />
         {/if}
         {#if $currentSpace.hasPermission("read", "app")}
-          {@render tile({
-            title: m.apps(),
-            count: $currentSpace.applications.apps.length,
-            link: "/apps"
-          })}
+          <OverviewTile
+            title={m.apps()}
+            count={$currentSpace.applications.apps.length}
+            href="/spaces/{$currentSpace.routeId}/apps"
+          />
         {/if}
         {#if $currentSpace.hasPermission("read", "service")}
-          {@render tile({
-            title: m.services(),
-            count: $currentSpace.applications.services.length,
-            link: "/services"
-          })}
+          <OverviewTile
+            title={m.services()}
+            count={$currentSpace.applications.services.length}
+            href="/spaces/{$currentSpace.routeId}/services"
+          />
         {/if}
         {#if $currentSpace.hasPermission("read", "collection")}
-          {@render tile({
-            title: m.collections(),
-            count: localCollections.length,
-            link: "/knowledge?tab=collections"
-          })}
+          <OverviewTile
+            title={m.collections()}
+            count={localCollections.length}
+            href="/spaces/{$currentSpace.routeId}/knowledge?tab=collections"
+          />
         {/if}
         {#if $currentSpace.hasPermission("read", "website")}
-          {@render tile({
-            title: m.websites(),
-            count: localWebsites.length,
-            link: "/knowledge?tab=websites"
-          })}
+          <OverviewTile
+            title={m.websites()}
+            count={localWebsites.length}
+            href="/spaces/{$currentSpace.routeId}/knowledge?tab=websites"
+          />
         {/if}
         {#if $currentSpace.hasPermission("read", "member")}
-          {@render tile({
-            title: m.members(),
-            count: $currentSpace.members.length,
-            link: "/members"
-          })}
+          <OverviewTile
+            title={m.members()}
+            count={$currentSpace.members.length}
+            href="/spaces/{$currentSpace.routeId}/members"
+          />
         {/if}
       </div>
     </div>

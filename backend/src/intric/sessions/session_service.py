@@ -1,5 +1,6 @@
+from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, AsyncIterator, Optional
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import CompletionModel
@@ -37,6 +38,17 @@ class SessionService:
         self.user = user
         self.assistant_service = assistant_service
         self.group_chat_service = group_chat_service
+
+    @asynccontextmanager
+    async def _write_transaction(self) -> AsyncIterator[None]:
+        """Open a short write transaction only when one is not already active."""
+        session = self.session_repo.session
+        if session.in_transaction():
+            yield
+            return
+
+        async with session.begin():
+            yield
 
     def _check_exists_and_belongs_to_user(
         self,
@@ -119,8 +131,8 @@ class SessionService:
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
         )
-
-        return await self.session_repo.add(session_add)
+        async with self._write_transaction():
+            return await self.session_repo.add(session_add)
 
     async def add_question_to_session(
         self,
@@ -153,13 +165,14 @@ class SessionService:
             tool_calls=tool_calls,
         )
 
-        return await self.question_repo.add(
-            question_add,
-            info_blob_chunks=info_blob_chunks,
-            files=files,
-            generated_files=generated_files,
-            web_search_results=web_search_results,
-        )
+        async with self._write_transaction():
+            return await self.question_repo.add(
+                question_add,
+                info_blob_chunks=info_blob_chunks,
+                files=files,
+                generated_files=generated_files,
+                web_search_results=web_search_results,
+            )
 
     async def leave_feedback(
         self,
