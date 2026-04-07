@@ -520,10 +520,10 @@ class AppTemplateService:
         rows = result.all()
 
         # Convert to (AppTemplate, usage_count) tuples
-        templates_with_usage = []
+        templates_with_usage: list[tuple[AppTemplate, int]] = []
         for row in rows:
-            template_record = row[0]
-            usage_count = row[1]
+            template_record: AppTemplates = row[0]
+            usage_count: int = row[1]
             template = self.factory.create_app_template(item=template_record)
             templates_with_usage.append((template, usage_count))
 
@@ -570,10 +570,10 @@ class AppTemplateService:
         rows = result.all()
 
         # Convert to (AppTemplate, usage_count) tuples
-        templates_with_usage = []
+        templates_with_usage: list[tuple[AppTemplate, int]] = []
         for row in rows:
-            template_record = row[0]
-            usage_count = row[1]
+            template_record: AppTemplates = row[0]
+            usage_count: int = row[1]
             template = self.factory.create_app_template(item=template_record)
             templates_with_usage.append((template, usage_count))
 

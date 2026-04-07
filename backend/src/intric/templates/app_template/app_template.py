@@ -8,9 +8,7 @@ if TYPE_CHECKING:
     from datetime import datetime
     from uuid import UUID
 
-    from intric.ai_models.completion_models.completion_model import (
-        CompletionModelPublic,
-    )
+    from intric.database.tables.ai_models_table import CompletionModels
     from intric.spaces.api.space_models import TemplateCreate
     from intric.templates.app_template.api.app_template_models import AppTemplateWizard
 
@@ -20,14 +18,14 @@ class AppTemplate:
         self,
         id: "UUID",
         name: str,
-        description: str,
+        description: Optional[str],
         category: str,
-        prompt_text: str,
+        prompt_text: Optional[str],
         created_at: "datetime",
         updated_at: "datetime",
-        completion_model: "CompletionModelPublic",
-        completion_model_kwargs: dict[str, object],
-        wizard: "AppTemplateWizard",
+        completion_model: Optional["CompletionModels"],
+        completion_model_kwargs: Optional[dict[str, object]],
+        wizard: Optional["AppTemplateWizard"],
         input_description: str | None,
         input_type: str,
         organization: str,
@@ -79,7 +77,8 @@ class AppTemplate:
                 raise BadRequestException("Unsupported type")
 
             if (
-                self.wizard.attachments is None
+                self.wizard is None
+                or self.wizard.attachments is None
                 or self.wizard.attachments.required is False
             ):
                 raise BadRequestException(

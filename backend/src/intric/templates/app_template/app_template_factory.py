@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 from intric.templates.app_template.api.app_template_models import AppTemplateWizard
 from intric.templates.app_template.app_template import AppTemplate
@@ -37,6 +37,6 @@ class AppTemplateFactory:
 
     @staticmethod
     def create_app_template_list(
-        items: list["AppTemplates"],
+        items: "Sequence[AppTemplates]",
     ) -> list[AppTemplate]:
         return [AppTemplateFactory.create_app_template(item=item) for item in items]

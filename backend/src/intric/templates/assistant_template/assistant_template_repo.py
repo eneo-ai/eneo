@@ -25,6 +25,8 @@ if TYPE_CHECKING:
 
 
 class AssistantTemplateRepository:
+    _db_model: type[AssistantTemplates]
+
     def __init__(self, session: "AsyncSession", factory: "AssistantTemplateFactory"):
         super().__init__()
         self.session = session
@@ -34,7 +36,9 @@ class AssistantTemplateRepository:
         # db relations
         self._options = [selectinload(self._db_model.completion_model)]
 
-    def _apply_options(self, query: "Select") -> "Select":
+    def _apply_options(
+        self, query: "Select[tuple[AssistantTemplates]]"
+    ) -> "Select[tuple[AssistantTemplates]]":
         for option in self._options:
             query = query.options(option)
 

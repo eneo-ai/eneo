@@ -524,10 +524,10 @@ class AssistantTemplateService:
         rows = result.all()
 
         # Convert to (AssistantTemplate, usage_count) tuples
-        templates_with_usage = []
+        templates_with_usage: list[tuple[AssistantTemplate, int]] = []
         for row in rows:
-            template_record = row[0]
-            usage_count = row[1]
+            template_record: AssistantTemplates = row[0]
+            usage_count: int = row[1]
             template = self.factory.create_assistant_template(item=template_record)
             templates_with_usage.append((template, usage_count))
 
@@ -568,10 +568,10 @@ class AssistantTemplateService:
         rows = result.all()
 
         # Convert to (AssistantTemplate, usage_count) tuples
-        templates_with_usage = []
+        templates_with_usage: list[tuple[AssistantTemplate, int]] = []
         for row in rows:
-            template_record = row[0]
-            usage_count = row[1]
+            template_record: AssistantTemplates = row[0]
+            usage_count: int = row[1]
             template = self.factory.create_assistant_template(item=template_record)
             templates_with_usage.append((template, usage_count))
 

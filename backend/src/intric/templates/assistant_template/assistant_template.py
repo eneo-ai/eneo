@@ -8,9 +8,7 @@ if TYPE_CHECKING:
     from datetime import datetime
     from uuid import UUID
 
-    from intric.ai_models.completion_models.completion_model import (
-        CompletionModelPublic,
-    )
+    from intric.database.tables.ai_models_table import CompletionModels
     from intric.spaces.api.space_models import TemplateCreate
     from intric.templates.assistant_template.api.assistant_template_models import (
         AssistantTemplateWizard,
@@ -24,12 +22,12 @@ class AssistantTemplate:
         name: str,
         description: str,
         category: str,
-        prompt_text: str,
+        prompt_text: Optional[str],
         created_at: "datetime",
         updated_at: "datetime",
-        completion_model: "CompletionModelPublic",
-        completion_model_kwargs: dict[str, object],
-        wizard: "AssistantTemplateWizard",
+        completion_model: Optional["CompletionModels"],
+        completion_model_kwargs: Optional[dict[str, object]],
+        wizard: Optional["AssistantTemplateWizard"],
         organization: str,
         tenant_id: Optional["UUID"] = None,
         deleted_at: Optional["datetime"] = None,
@@ -74,7 +72,8 @@ class AssistantTemplate:
         for data in template_data.additional_fields:
             if data.type == WizardType.attachments:
                 if (
-                    self.wizard.attachments is None
+                    self.wizard is None
+                    or self.wizard.attachments is None
                     or self.wizard.attachments.required is False
                 ):
                     raise BadRequestException(
@@ -82,7 +81,8 @@ class AssistantTemplate:
                     )
             elif data.type == WizardType.groups:
                 if (
-                    self.wizard.collections is None
+                    self.wizard is None
+                    or self.wizard.collections is None
                     or self.wizard.collections.required is False
                 ):
                     raise BadRequestException(
