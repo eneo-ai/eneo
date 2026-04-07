@@ -149,8 +149,31 @@ export namespace SSE {
       tool_call_id?: string;
     }>;
   };
+  export type ToolApprovalTimeout = {
+    session_id: string;
+    intric_event_type: "tool_approval_timeout";
+    approval_id: string;
+    tools: Array<{
+      server_name: string;
+      tool_name: string;
+      arguments?: Record<string, unknown>;
+      tool_call_id?: string;
+      approved?: boolean;
+      result_status?: string;
+    }>;
+  };
+  export type TokenUsage = Omit<components["schemas"]["SSETokenUsage"], "$defs">;
   export type Error = Omit<components["schemas"]["SSEError"], "$defs">;
-  export type Event = Text | FirstChunk | Files | Intric | ToolCall | ToolApprovalRequired | Error;
+  export type Event =
+    | Text
+    | FirstChunk
+    | Files
+    | Intric
+    | ToolCall
+    | ToolApprovalRequired
+    | ToolApprovalTimeout
+    | TokenUsage
+    | Error;
 }
 
 export type UserTokenUsageSummary = components["schemas"]["UserTokenUsageSummary"];

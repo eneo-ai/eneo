@@ -93,6 +93,7 @@ export function initConversations(client) {
      * @param {(data: import("../types/resources").SSE.Intric) => void} [params.callbacks.onIntricEvent] Callback to run when an intric event is received
      * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall] Callback to run when MCP tools are being executed
      * @param {(data: import("../types/resources").SSE.ToolApprovalRequired) => void} [params.callbacks.onToolApprovalRequired] Callback to run when MCP tools require user approval
+     * @param {(data: import("../types/resources").SSE.ToolApprovalTimeout) => void} [params.callbacks.onToolApprovalTimeout] Callback to run when a pending tool approval expires
      * @param {(response: Response) => Promise<void>} [params.callbacks.onOpen] Callback to run once the initial response of the backend is received
      * @param {AbortController} [params.abortController] Optionally pass in an AbortController that can abort the stream
      * @throws {IntricError}
@@ -183,6 +184,10 @@ export function initConversations(client) {
 
                 case "tool_approval_required":
                   callbacks?.onToolApprovalRequired?.(data);
+                  break;
+
+                case "tool_approval_timeout":
+                  callbacks?.onToolApprovalTimeout?.(data);
                   break;
               }
             } catch (e) {

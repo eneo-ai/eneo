@@ -351,6 +351,45 @@ export class ChatService {
                 approvalId: event.approval_id,
                 tools: event.tools
               };
+            },
+            onToolApprovalTimeout: (event) => {
+              if (isStale()) return;
+              if (!ensureCurrentSession(event)) return;
+              // Backend timed out waiting for approval — clear pending state so the
+              // approval UI no longer targets a dead approval_id, and merge the
+              // timeout_denied status into the rendered tool calls so the user sees
+              // what happened instead of stuck "Approve/Deny" buttons.
+              if (
+                this.pendingToolApproval &&
+                this.pendingToolApproval.approvalId === event.approval_id
+              ) {
+                this.pendingToolApproval = null;
+              }
+              if (ref) {
+                // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
+                if (!ref.mcp_tool_calls) {
+                  // @ts-expect-error
+                  ref.mcp_tool_calls = [];
+                }
+                for (const tool of event.tools) {
+                  // @ts-expect-error
+                  const existingIndex = ref.mcp_tool_calls.findIndex(
+                    (t: { tool_call_id?: string }) =>
+                      t.tool_call_id && t.tool_call_id === tool.tool_call_id
+                  );
+                  if (existingIndex >= 0) {
+                    // @ts-expect-error
+                    ref.mcp_tool_calls[existingIndex] = {
+                      // @ts-expect-error
+                      ...ref.mcp_tool_calls[existingIndex],
+                      ...tool
+                    };
+                  } else {
+                    // @ts-expect-error
+                    ref.mcp_tool_calls.push(tool);
+                  }
+                }
+              }
             }
           }
         });
