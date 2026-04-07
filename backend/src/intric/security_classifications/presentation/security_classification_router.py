@@ -2,6 +2,7 @@
 #
 # Licensed under the MIT License.
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -26,6 +27,8 @@ from intric.server.protocol import responses
 
 router = APIRouter()
 
+ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
+
 
 @router.post(
     "/",
@@ -35,7 +38,7 @@ router = APIRouter()
 )
 async def create_security_classification(
     request: SecurityClassificationCreatePublic,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ) -> SecurityClassificationPublic | None:
     """Create a new security classification for the current tenant.
     Args:
@@ -85,7 +88,7 @@ async def create_security_classification(
     responses=responses.get_responses([403]),
 )
 async def list_security_classifications(
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ) -> SecurityClassificationResponse:
     """List all security classifications ordered by security classification level.
     Returns:
@@ -98,9 +101,15 @@ async def list_security_classifications(
     security_classifications = await service.list_security_classifications()
     user = container.user()
 
-    scs = [
-        SecurityClassificationPublic.from_domain(sc, return_none_if_not_enabled=False)
+    scs: list[SecurityClassificationPublic] = [
+        pub
         for sc in security_classifications
+        if (
+            pub := SecurityClassificationPublic.from_domain(
+                sc, return_none_if_not_enabled=False
+            )
+        )
+        is not None
     ]
 
     return SecurityClassificationResponse(
@@ -116,7 +125,7 @@ async def list_security_classifications(
 )
 async def get_security_classification(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ) -> SecurityClassificationPublic | None:
     """Get a security classification by ID.
     Args:
@@ -141,7 +150,7 @@ async def get_security_classification(
 )
 async def update_security_classification_levels(
     request: SecurityClassificationLevelsUpdateRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ) -> SecurityClassificationsListPublic:
     """Update the security levels of security classifications.
     Args:
@@ -190,10 +199,14 @@ async def update_security_classification_levels(
 
     return SecurityClassificationsListPublic(
         security_classifications=[
-            SecurityClassificationPublic.from_domain(
-                sc, return_none_if_not_enabled=False
-            )
+            pub
             for sc in security_classifications
+            if (
+                pub := SecurityClassificationPublic.from_domain(
+                    sc, return_none_if_not_enabled=False
+                )
+            )
+            is not None
         ]
     )
 
@@ -205,7 +218,7 @@ async def update_security_classification_levels(
 )
 async def delete_security_classification(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ) -> None:
     """Delete a security classification.
     Args:
@@ -248,7 +261,7 @@ async def delete_security_classification(
 async def update_security_classification(
     id: UUID,
     request: SecurityClassificationSingleUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ) -> SecurityClassificationPublic | None:
     """Update a single security classification's name and/or description.
 
@@ -282,7 +295,7 @@ async def update_security_classification(
     assert security_classification is not None
 
     # Track changes
-    changes = {}
+    changes: dict[str, object] = {}
     if is_provided(request.name) and request.name != old_sc.name:
         changes["name"] = {"old": old_sc.name, "new": request.name}
     if is_provided(request.description) and request.description != old_sc.description:
@@ -316,7 +329,7 @@ async def update_security_classification(
 )
 async def toggle_security_classifications(
     request: SecurityEnableRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ) -> SecurityEnableResponse:
     """Enable or disable security classifications for the current tenant.
 

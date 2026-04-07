@@ -34,7 +34,8 @@ class UserTokenUsageAnalyzer:
     using a traditional repository.
     """
 
-    def __init__(self, session: "AsyncSession"):
+    def __init__(self, session: "AsyncSession") -> None:
+        super().__init__()
         self.session = session
 
     def _build_questions_query(
@@ -42,7 +43,7 @@ class UserTokenUsageAnalyzer:
         tenant_id: "UUID",
         start_date: "datetime",
         end_date: "datetime",
-        user_id: "UUID" = None,
+        user_id: "UUID | None" = None,
     ):
         """
         Build the questions query for token usage calculation.
@@ -86,7 +87,7 @@ class UserTokenUsageAnalyzer:
         tenant_id: "UUID",
         start_date: "datetime",
         end_date: "datetime",
-        user_id: "UUID" = None,
+        user_id: "UUID | None" = None,
     ):
         """
         Build the app runs query for token usage calculation.
@@ -129,7 +130,7 @@ class UserTokenUsageAnalyzer:
         tenant_id: "UUID",
         start_date: "datetime",
         end_date: "datetime",
-        user_id: "UUID" = None,
+        user_id: "UUID | None" = None,
     ):
         """
         Build the combined usage query that merges questions and app runs data.
@@ -239,7 +240,7 @@ class UserTokenUsageAnalyzer:
         rows = result.all()
 
         # Transform the result into UserTokenUsage objects
-        user_token_usages = []
+        user_token_usages: list[UserTokenUsage] = []
         for row in rows:
             if row.user_id is not None:
                 user_token_usages.append(
@@ -478,7 +479,7 @@ class UserTokenUsageAnalyzer:
         rows = result.all()
 
         # Transform the result into ModelTokenUsage objects
-        token_usage_by_model = []
+        token_usage_by_model: list[ModelTokenUsage] = []
         for row in rows:
             if row.model_id is not None:
                 token_usage_by_model.append(

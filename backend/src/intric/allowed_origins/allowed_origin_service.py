@@ -4,7 +4,8 @@ from intric.users.user import UserInDB
 
 
 class AllowedOriginService:
-    def __init__(self, user: UserInDB, repo: AllowedOriginRepository):
+    def __init__(self, user: UserInDB, repo: AllowedOriginRepository) -> None:
+        super().__init__()
         self.user = user
         self.repo = repo
 

@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Annotated, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -18,20 +18,28 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-
-@router.get("/", response_model=TokenUsageSummary)
-async def get_token_usage(
-    start_date: Optional[datetime] = Query(
-        None,
+ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
+StartDateQuery = Annotated[
+    Optional[datetime],
+    Query(
         description="Start date for token usage data (defaults to 30 days ago)."
         "Time defaults to 00:00:00.",
     ),
-    end_date: Optional[datetime] = Query(
-        None,
+]
+EndDateQuery = Annotated[
+    Optional[datetime],
+    Query(
         description="End date for token usage data (defaults to current time)."
         "Time defaults to 00:00:00.",
     ),
-    container: Container = Depends(get_container(with_user=True)),
+]
+
+
+@router.get("/", response_model=TokenUsageSummary)
+async def get_token_usage(
+    container: ContainerDep,
+    start_date: StartDateQuery = None,
+    end_date: EndDateQuery = None,
 ):
     """
     Get token usage statistics for the specified date range.
@@ -49,23 +57,15 @@ async def get_token_usage(
 
 @router.get("/users", response_model=UserTokenUsageSummary)
 async def get_user_token_usage(
-    start_date: Optional[datetime] = Query(
-        None,
-        description="Start date for token usage data (defaults to 30 days ago)."
-        "Time defaults to 00:00:00.",
-    ),
-    end_date: Optional[datetime] = Query(
-        None,
-        description="End date for token usage data (defaults to current time)."
-        "Time defaults to 00:00:00.",
-    ),
-    page: int = Query(1, description="Page number for pagination."),
-    per_page: int = Query(15, description="Number of items per page."),
-    sort_by: UserSortBy = Query(
-        UserSortBy.total_tokens, description="Field to sort by."
-    ),
-    sort_order: str = Query("desc", description="Sort order (asc or desc)."),
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
+    start_date: StartDateQuery = None,
+    end_date: EndDateQuery = None,
+    page: Annotated[int, Query(description="Page number for pagination.")] = 1,
+    per_page: Annotated[int, Query(description="Number of items per page.")] = 15,
+    sort_by: Annotated[
+        UserSortBy, Query(description="Field to sort by.")
+    ] = UserSortBy.total_tokens,
+    sort_order: Annotated[str, Query(description="Sort order (asc or desc).")] = "desc",
 ):
     """
     Get token usage statistics aggregated by user for the specified date range.
@@ -89,17 +89,9 @@ async def get_user_token_usage(
 @router.get("/users/{user_id}/summary", response_model=UserTokenUsageSummaryDetail)
 async def get_user_summary(
     user_id: UUID,
-    start_date: Optional[datetime] = Query(
-        None,
-        description="Start date for token usage data (defaults to 30 days ago)."
-        "Time defaults to 00:00:00.",
-    ),
-    end_date: Optional[datetime] = Query(
-        None,
-        description="End date for token usage data (defaults to current time)."
-        "Time defaults to 00:00:00.",
-    ),
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
+    start_date: StartDateQuery = None,
+    end_date: EndDateQuery = None,
 ):
     """
     Get summary for a specific user without fetching all users.
@@ -124,17 +116,9 @@ async def get_user_summary(
 @router.get("/users/{user_id}", response_model=TokenUsageSummary)
 async def get_user_model_breakdown(
     user_id: UUID,
-    start_date: Optional[datetime] = Query(
-        None,
-        description="Start date for token usage data (defaults to 30 days ago)."
-        "Time defaults to 00:00:00.",
-    ),
-    end_date: Optional[datetime] = Query(
-        None,
-        description="End date for token usage data (defaults to current time)."
-        "Time defaults to 00:00:00.",
-    ),
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
+    start_date: StartDateQuery = None,
+    end_date: EndDateQuery = None,
 ):
     """
     Get model breakdown for a specific user within the specified date range.

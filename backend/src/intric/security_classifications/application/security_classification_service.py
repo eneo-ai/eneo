@@ -31,7 +31,8 @@ class SecurityClassificationService:
         user: UserInDB,
         repo: "SecurityClassificationRepoImpl",
         tenant_service: TenantService,
-    ):
+    ) -> None:
+        super().__init__()
         self.user = user
         self.repo = repo
         self.tenant_service = tenant_service
@@ -95,14 +96,14 @@ class SecurityClassificationService:
                 )
 
         # Update all classifications in memory first
-        updated_domains = []
+        updated_domains: list[SecurityClassification] = []
         for i, sc_id in enumerate(security_classifications):
             existing_sc = db_classifications_map[sc_id]
             updated_domain = existing_sc.update(security_level=i)
             updated_domains.append(updated_domain)
 
         # Batch update to database
-        result = []
+        result: list[SecurityClassification] = []
         for updated_domain in updated_domains:
             updated_sc = await self.repo.update(updated_domain)
             result.append(updated_sc)
