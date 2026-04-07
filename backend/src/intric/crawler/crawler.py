@@ -691,11 +691,7 @@ class Crawler:
             from tenant settings (if provided) or falls back to environment default.
         """
         # Get tenant-aware max crawl length (resolved at runtime, not import time).
-        # get_crawler_setting is generic over T but Scrapy settings are untyped at
-        # the boundary; cast to int to pin the type for _crawl's max_length param.
-        max_length: int = cast(
-            int, get_crawler_setting("crawl_max_length", tenant_crawler_settings)
-        )
+        max_length = get_crawler_setting("crawl_max_length", tenant_crawler_settings)
 
         if crawl_type == CrawlType.CRAWL:
             async with self._crawl(
