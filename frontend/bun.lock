@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {},
     "apps/docs-site": {
@@ -47,6 +48,7 @@
         "@types/node": "^22.14.0",
         "@types/wicg-file-system-access": "^2023.10.6",
         "class-variance-authority": "^0.7.1",
+        "clsx": "^2.1.1",
         "dayjs": "^1.11.13",
         "eslint": "^9.28.0",
         "eslint-plugin-svelte": "^3.5.1",
@@ -58,6 +60,7 @@
         "svelte-check": "^4.1.5",
         "svelte-eslint-parser": "^1.1.2",
         "svelte-headless-table": "^0.18.3",
+        "tailwind-merge": "^3.5.0",
         "tailwindcss": "^4.1.4",
         "typescript": "^5.8.3",
         "typescript-eslint": "^8.58.0",
@@ -1926,6 +1929,8 @@
     "system-architecture": ["system-architecture@0.1.0", "", {}, "sha512-ulAk51I9UVUyJgxlv9M6lFot2WP3e7t8Kz9+IS6D4rVba1tR9kON+Ey69f+1R4Q8cd45Lod6a4IcJIxnzGc/zA=="],
 
     "tabbable": ["tabbable@6.4.0", "", {}, "sha512-05PUHKSNE8ou2dwIxTngl4EzcnsCDZGJ/iCLtDflR/SHB/ny14rXc+qU5P4mG9JkusiV7EivzY9Mhm55AzAvCg=="],
+
+    "tailwind-merge": ["tailwind-merge@3.5.0", "", {}, "sha512-I8K9wewnVDkL1NTGoqWmVEIlUcB9gFriAEkXkfCjX5ib8ezGxtR3xD7iZIxrfArjEsH7F1CHD4RFUtxefdqV/A=="],
 
     "tailwindcss": ["tailwindcss@4.2.2", "", {}, "sha512-KWBIxs1Xb6NoLdMVqhbhgwZf2PGBpPEiwOqgI4pFIYbNTfBXiKYyWoTsXgBQ9WFg/OlhnvHaY+AEpW7wSmFo2Q=="],
 
