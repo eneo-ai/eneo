@@ -1,3 +1,4 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -23,8 +24,8 @@ router = APIRouter()
 
 @router.get("/", response_model=PaginatedResponse[EmbeddingModelPublic])
 async def get_embedding_models(
-    user: UserInDB = Depends(get_current_active_user),
-    container: Container = Depends(get_container(with_user=True)),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     validate_permission(user, Permission.ADMIN)
 
@@ -43,8 +44,8 @@ async def get_embedding_models(
 )
 async def get_embedding_model(
     id: UUID,
-    user: UserInDB = Depends(get_current_active_user),
-    container: Container = Depends(get_container(with_user=True)),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     validate_permission(user, Permission.ADMIN)
 
@@ -62,7 +63,7 @@ async def get_embedding_model(
 async def update_embedding_model(
     id: UUID,
     update: EmbeddingModelUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.embedding_model_crud_service()
     user = container.user()
@@ -82,7 +83,7 @@ async def update_embedding_model(
     )
 
     # Build consolidated changes dict (one API call = one audit log)
-    changes = {}
+    changes: dict[str, object] = {}
 
     # Track is_org_enabled changes
     if is_provided(update.is_org_enabled):

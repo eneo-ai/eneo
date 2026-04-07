@@ -1,5 +1,6 @@
 # MIT License
 
+from typing import Annotated
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -67,8 +68,8 @@ class TenantEmbeddingModelUpdate(BaseModel):
 )
 async def create_tenant_embedding_model(
     model_create: TenantEmbeddingModelCreate,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session_with_transaction)],
 ):
     """Create a new tenant-specific embedding model."""
     validate_permission(user, Permission.ADMIN)
@@ -146,8 +147,8 @@ async def create_tenant_embedding_model(
 async def update_tenant_embedding_model(
     model_id: UUID,
     model_update: TenantEmbeddingModelUpdate,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session_with_transaction)],
 ):
     """Update a tenant-specific embedding model."""
     validate_permission(user, Permission.ADMIN)
@@ -204,8 +205,8 @@ async def update_tenant_embedding_model(
 )
 async def delete_tenant_embedding_model(
     model_id: UUID,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session_with_transaction)],
 ):
     """Delete a tenant-specific embedding model."""
     validate_permission(user, Permission.ADMIN)

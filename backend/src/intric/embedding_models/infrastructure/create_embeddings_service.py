@@ -32,7 +32,7 @@ class EmbeddingModelLike(Protocol):
     provider_id: UUID | None
     litellm_model_name: str | None
     family: str | None
-    max_input: int
+    max_input: int | None
     max_batch_size: int | None
     dimensions: int | None
     open_source: bool
@@ -45,7 +45,8 @@ class CreateEmbeddingsService:
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.tenant = tenant
         self.config = config or SETTINGS
         self.encryption_service = encryption_service
@@ -84,6 +85,10 @@ class CreateEmbeddingsService:
 
         if provider_type and provider_credentials is not None:
             # Pre-resolved path: no DB session needed
+            if self.encryption_service is None:
+                raise ValueError(
+                    "CreateEmbeddingsService requires an encryption_service to resolve credentials."
+                )
             credential_resolver = TenantModelCredentialResolver(
                 provider_id=model.provider_id,
                 provider_type=provider_type,
@@ -131,6 +136,10 @@ class CreateEmbeddingsService:
                     "Please contact your administrator to enable the provider."
                 )
 
+            if self.encryption_service is None:
+                raise ValueError(
+                    "CreateEmbeddingsService requires an encryption_service to resolve credentials."
+                )
             credential_resolver = TenantModelCredentialResolver(
                 provider_id=provider_db.id,
                 provider_type=provider_db.provider_type,
