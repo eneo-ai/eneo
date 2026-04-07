@@ -90,6 +90,7 @@ class MCPServerService:
         user: "UserInDB",
         encryption_service: "EncryptionService | None" = None,
     ):
+        super().__init__()
         self.repo = mcp_server_repo
         self.tool_repo = mcp_server_tool_repo
         self.user = user

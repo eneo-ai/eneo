@@ -39,6 +39,9 @@ from intric.server.protocol import responses
 
 router = APIRouter()
 
+_WITH_USER = Depends(get_container(with_user=True))
+_TAGS_QUERY = Query(None)
+
 
 # ============================================================================
 # Global MCP Server Catalog Endpoints (Admin)
@@ -51,8 +54,8 @@ router = APIRouter()
     responses=responses.get_responses([404]),
 )
 async def get_mcp_servers(
-    tags: list[str] | None = Query(None),
-    container: Container = Depends(get_container(with_user=True)),
+    tags: list[str] | None = _TAGS_QUERY,
+    container: Container = _WITH_USER,
 ):
     """Get all MCP servers from global catalog with optional tag filtering."""
     service = container.mcp_server_service()
@@ -73,7 +76,7 @@ async def get_mcp_servers(
     responses=responses.get_responses([404]),
 )
 async def get_tenant_mcp_settings(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Get all available MCP servers with tenant enablement status."""
     service = container.mcp_server_settings_service()
@@ -91,7 +94,7 @@ async def get_tenant_mcp_settings(
 async def enable_mcp_for_tenant(
     mcp_server_id: UUID,
     data: MCPServerSettingsCreate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Enable an MCP server for the current tenant with optional credentials."""
     service = container.mcp_server_settings_service()
@@ -127,7 +130,7 @@ async def enable_mcp_for_tenant(
 async def update_mcp_settings(
     mcp_server_id: UUID,
     data: MCPServerSettingsUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Update MCP server settings for the current tenant."""
     service = container.mcp_server_settings_service()
@@ -148,7 +151,7 @@ async def update_mcp_settings(
 )
 async def disable_mcp_for_tenant(
     mcp_server_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Disable an MCP server for the current tenant."""
     service = container.mcp_server_settings_service()
@@ -184,7 +187,7 @@ async def disable_mcp_for_tenant(
 async def update_tenant_tool_enabled(
     tool_id: UUID,
     data: MCPServerToolUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Update tenant-level enablement for a tool (admin only)."""
     service = container.mcp_server_service()
@@ -237,7 +240,7 @@ async def update_tenant_tool_enabled(
 )
 async def get_mcp_server(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Get a single MCP server by ID."""
     service = container.mcp_server_service()
@@ -254,7 +257,7 @@ async def get_mcp_server(
 )
 async def create_mcp_server(
     data: MCPServerCreate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Create a new MCP server in global catalog (admin only).
 
@@ -322,7 +325,7 @@ async def create_mcp_server(
 async def update_mcp_server(
     id: UUID,
     data: MCPServerUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Update an MCP server in global catalog (admin only)."""
     service = container.mcp_server_service()
@@ -413,7 +416,7 @@ async def update_mcp_server(
 )
 async def delete_mcp_server(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Delete an MCP server from global catalog (admin only)."""
     service = container.mcp_server_service()
@@ -449,7 +452,7 @@ async def delete_mcp_server(
 )
 async def get_mcp_server_tools(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Get all tools for an MCP server with tenant-level settings applied."""
     service = container.mcp_server_service()
@@ -467,7 +470,7 @@ async def get_mcp_server_tools(
 )
 async def sync_mcp_server_tools(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Sync tools from remote MCP server (admin only).
 
@@ -519,7 +522,7 @@ async def sync_mcp_server_tools(
 async def approve_tool_changes(
     id: UUID,
     data: ToolReviewRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Approve pending tool changes (admin only).
 
@@ -563,7 +566,7 @@ async def approve_tool_changes(
 async def reject_tool_changes(
     id: UUID,
     data: ToolReviewRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Reject pending tool changes (admin only).
 
@@ -607,7 +610,7 @@ async def reject_tool_changes(
 )
 async def approve_all_tool_changes(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Approve all pending tool changes for an MCP server (admin only)."""
     service = container.mcp_server_service()
@@ -643,7 +646,7 @@ async def update_tool_default_enabled(
     id: UUID,
     tool_id: UUID,
     data: MCPServerToolUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Update global default enabled status for a tool (admin only)."""
     service = container.mcp_server_service()

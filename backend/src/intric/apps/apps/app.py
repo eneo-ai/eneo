@@ -162,7 +162,9 @@ class App:
     @attachments.setter
     def attachments(self, attachments: list[FileInfo]):
         for attachment in attachments:
-            if not TextMimeTypes.has_value(attachment.mimetype):
+            if attachment.mimetype is None or not TextMimeTypes.has_value(
+                attachment.mimetype
+            ):
                 raise BadRequestException("Attachements can only be text files")
 
         if sum(attachment.size for attachment in attachments) > 26214400:
@@ -290,7 +292,10 @@ class App:
             )
 
         transcriptions = [
-            await transcriber.transcribe(file, transcription_model)
+            await transcriber.transcribe(
+                file,
+                transcription_model,  # pyright: ignore[reportArgumentType]  # narrowed: audio_files guard above ensures non-None
+            )
             for file in audio_files
         ]
 

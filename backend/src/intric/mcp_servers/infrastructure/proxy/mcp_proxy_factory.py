@@ -27,6 +27,7 @@ class MCPProxySessionFactory:
         self,
         encryption_service: "EncryptionService | None" = None,
     ):
+        super().__init__()
         self.encryption_service = encryption_service
 
     # Keys in http_auth_config_schema that contain secrets

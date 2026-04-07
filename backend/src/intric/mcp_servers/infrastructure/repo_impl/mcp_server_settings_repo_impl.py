@@ -4,6 +4,7 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
+from typing_extensions import override
 
 from intric.database.tables.mcp_server_table import (
     MCPServerSettings as MCPServerSettingsTable,
@@ -24,9 +25,11 @@ class MCPServerSettingsRepoImpl(MCPServerSettingsRepository):
     _db_model: Type[MCPServerSettingsTable] = MCPServerSettingsTable
 
     def __init__(self, session: "AsyncSession", mapper: MCPServerSettingsMapper):
+        super().__init__()
         self.session = session
         self.mapper = mapper
 
+    @override
     async def query(self, tenant_id: UUID) -> list[MCPServerSettings]:
         query = (
             select(self._db_model)
@@ -41,12 +44,14 @@ class MCPServerSettingsRepoImpl(MCPServerSettingsRepository):
 
         return self.mapper.to_entities(records)
 
+    @override
     async def one(self, tenant_id: UUID, mcp_server_id: UUID) -> MCPServerSettings:
         result = await self.one_or_none(tenant_id, mcp_server_id)
         if not result:
             raise ValueError("MCPServerSettings not found")
         return result
 
+    @override
     async def one_or_none(
         self, tenant_id: UUID, mcp_server_id: UUID
     ) -> MCPServerSettings | None:
@@ -62,6 +67,7 @@ class MCPServerSettingsRepoImpl(MCPServerSettingsRepository):
 
         return self.mapper.to_entity(record)
 
+    @override
     async def add(self, obj: MCPServerSettings) -> MCPServerSettings:
         db_dict = self.mapper.to_db_dict(obj)
 
@@ -71,6 +77,7 @@ class MCPServerSettingsRepoImpl(MCPServerSettingsRepository):
 
         return await self.one(_record.tenant_id, _record.mcp_server_id)
 
+    @override
     async def update(self, obj: MCPServerSettings) -> MCPServerSettings:
         db_dict = self.mapper.to_db_dict(obj)
 
@@ -91,6 +98,7 @@ class MCPServerSettingsRepoImpl(MCPServerSettingsRepository):
 
         return await self.one(_record.tenant_id, _record.mcp_server_id)
 
+    @override
     async def delete(self, tenant_id: UUID, mcp_server_id: UUID) -> None:
         stmt = sa.delete(self._db_model).where(
             sa.and_(

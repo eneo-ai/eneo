@@ -3,7 +3,8 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import selectinload
-from sqlalchemy.sql import Select
+from sqlalchemy.sql import Executable
+from sqlalchemy.sql.base import ExecutableOption
 
 from intric.apps.apps.api.app_models import InputField
 from intric.apps.apps.app import App
@@ -32,7 +33,7 @@ class AppRepository:
         self.prompt_repo = prompt_repo
         self.transcription_model_repo = transcription_model_repo
 
-    def _options(self) -> list[object]:
+    def _options(self) -> list[ExecutableOption]:
         return [
             selectinload(Apps.completion_model),
             selectinload(Apps.input_fields),
@@ -40,11 +41,11 @@ class AppRepository:
             selectinload(Apps.template),
         ]
 
-    async def _get_record_with_options(self, stmt: Select[object]) -> Apps | None:
+    async def _get_record_with_options(self, stmt: Executable) -> Apps | None:
         for option in self._options():
-            stmt = stmt.options(option)
+            stmt = stmt.options(option)  # type: ignore[union-attr]  # ORM options on DML stmts
 
-        return await self.session.scalar(stmt)
+        return await self.session.scalar(stmt)  # type: ignore[arg-type]  # Executable accepted at runtime
 
     async def _get_selected_prompt(self, app_id: UUID) -> Prompt | None:
         stmt = (
@@ -54,6 +55,9 @@ class AppRepository:
         )
 
         prompt_id = await self.session.scalar(stmt)
+
+        if prompt_id is None:
+            return None
 
         return await self.prompt_repo.get(prompt_id)
 
@@ -109,7 +113,7 @@ class AppRepository:
         await self.session.execute(stmt)
 
     async def _set_attachments(
-        self, app_in_db: App, attachments: list[FileInfo]
+        self, app_in_db: Apps, attachments: list[FileInfo]
     ) -> None:
         # Delete all
         stmt = sa.delete(AppsFiles).where(AppsFiles.app_id == app_in_db.id)
@@ -157,6 +161,7 @@ class AppRepository:
         )
 
         entry_in_db = await self._get_record_with_options(stmt)
+        assert entry_in_db is not None  # INSERT ... RETURNING always returns a row
 
         if app.prompt is not None:
             await self._set_prompt(entry_in_db, app.prompt)
@@ -221,6 +226,7 @@ class AppRepository:
         )
 
         entry_in_db = await self._get_record_with_options(stmt)
+        assert entry_in_db is not None  # UPDATE ... RETURNING always returns a row
 
         if app.prompt is not None:
             await self._set_prompt(entry_in_db, app.prompt)
