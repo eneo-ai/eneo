@@ -70,7 +70,7 @@ class GroupChatUpdateSchema(BaseModel):
             "appropriate permissions can see all sessions for this group chat."
         ),
     )
-    metadata_json: Optional[dict] = Field(  # type: ignore[assignment]
+    metadata_json: Optional[dict[str, object]] = Field(  # type: ignore[assignment]
         default=NOT_PROVIDED,
         description="Metadata for the group chat.",
     )
@@ -89,7 +89,7 @@ class GroupChatSparse(ResourcePermissionsMixin):
     user_id: UUID
     published: bool
     type: Literal["group-chat"]
-    metadata_json: Optional[dict]
+    metadata_json: Optional[dict[str, object]]
     icon_id: Optional[UUID] = None
 
 
@@ -150,5 +150,5 @@ class GroupChatPublic(BaseModel):
     # NOTE: Atm, the front-end does not check this list for permissions regarding group chats.
     # Instead it checks against assistant permissions.
     permissions: list[ResourcePermission]
-    metadata_json: Optional[dict]
+    metadata_json: Optional[dict[str, object]]
     icon_id: Optional[UUID] = None

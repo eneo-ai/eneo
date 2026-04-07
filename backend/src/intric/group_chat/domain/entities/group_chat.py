@@ -51,7 +51,7 @@ class GroupChat(Entity):
         show_response_label: bool,
         published: bool,
         insight_enabled: bool = False,
-        metadata_json: Optional[dict] = None,
+        metadata_json: Optional[dict[str, object]] = None,
         icon_id: Optional["UUID"] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
@@ -88,11 +88,11 @@ class GroupChat(Entity):
         )
 
     @property
-    def metadata_json(self) -> Optional[dict]:
+    def metadata_json(self) -> Optional[dict[str, object]]:
         return self._metadata_json
 
     @metadata_json.setter
-    def metadata_json(self, metadata_json: Optional[dict]):
+    def metadata_json(self, metadata_json: Optional[dict[str, object]]):
         self._metadata_json = metadata_json
 
     @property
@@ -119,7 +119,7 @@ class GroupChat(Entity):
         published: Optional[bool] = None,
         new_assistants: Optional[list[GroupChatAssistant]] = None,
         insight_enabled: Optional[bool] = None,
-        metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
+        metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union["UUID", None, NotProvided] = NOT_PROVIDED,
     ):
         if name is not None:

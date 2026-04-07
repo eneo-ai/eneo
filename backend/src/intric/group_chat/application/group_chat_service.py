@@ -123,7 +123,7 @@ class GroupChatService:
         show_response_label: Optional[bool] = None,
         published: Optional[bool] = None,
         insight_enabled: Optional[bool] = None,
-        metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
+        metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union["UUID", None, NotProvided] = NOT_PROVIDED,
     ) -> "GroupChat":
         space = await self.space_service.get_space_by_group_chat(group_chat_id=id)
