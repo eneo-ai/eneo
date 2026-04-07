@@ -37,7 +37,7 @@ class StepRepository(BaseRepository):
         return StepInDB.model_validate(step_record)
 
     async def update_chain_breaker_message(
-        self, filter_id: UUID, chain_breaker_message: str = None
+        self, filter_id: UUID, chain_breaker_message: str | None = None
     ):
         stmt = (
             sa.update(Filters)

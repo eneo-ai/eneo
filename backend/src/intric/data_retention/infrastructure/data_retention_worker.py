@@ -62,7 +62,7 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
 
     # Use fresh session to avoid nested transaction error from cron wrapper
     async with sessionmanager.session() as session:
-        container.session.override(providers.Object(session))
+        container.session.override(providers.Object(session))  # pyright: ignore[reportUnknownMemberType]  # dependency_injector provider stubs have partially unknown override()
         try:
             data_retention_service = container.data_retention_service()
 

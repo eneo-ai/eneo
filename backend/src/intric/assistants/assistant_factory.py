@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import ModelKwargs
@@ -121,9 +121,8 @@ class AssistantFactory:
         # cast to a concrete type so ModelKwargs.model_validate is fully typed.
         # reportUnknownMemberType is suppressed here because the root cause is the
         # unparameterised dict column in assistant_table.py (out of scope).
-        completion_model_kwargs_raw: dict[str, object] = cast(
-            dict[str, object],
-            assistant_in_db.completion_model_kwargs or {},  # pyright: ignore[reportUnknownMemberType]
+        completion_model_kwargs_raw: dict[str, object] = (
+            assistant_in_db.completion_model_kwargs or {}
         )
         completion_model_kwargs = ModelKwargs.model_validate(
             completion_model_kwargs_raw
@@ -223,12 +222,8 @@ class AssistantFactory:
             mcp_servers = MCPServerMapper.to_entities(assistant_in_db.mcp_servers)
 
         # JSONB columns are Mapped[Optional[dict]] (unparameterised) in the ORM table;
-        # cast to a concrete type so ModelKwargs.model_validate is fully typed.
-        # reportUnknownMemberType is suppressed here because the root cause is the
-        # unparameterised dict column in assistant_table.py (out of scope).
-        completion_model_kwargs_raw: dict[str, object] = cast(
-            dict[str, object],
-            assistant_in_db.completion_model_kwargs or {},  # pyright: ignore[reportUnknownMemberType]
+        completion_model_kwargs_raw: dict[str, object] = (
+            assistant_in_db.completion_model_kwargs or {}
         )
         completion_model_kwargs = ModelKwargs.model_validate(
             completion_model_kwargs_raw
@@ -273,7 +268,6 @@ class AssistantFactory:
             description=assistant_in_db.description,
             insight_enabled=assistant_in_db.insight_enabled,
             data_retention_days=assistant_in_db.data_retention_days,
-            # JSONB column is unparameterised dict in ORM (out-of-scope fix needed)
-            metadata_json=cast(dict[str, object] | None, assistant_in_db.metadata_json),  # pyright: ignore[reportUnknownMemberType]
+            metadata_json=assistant_in_db.metadata_json,
             icon_id=assistant_in_db.icon_id,
         )

@@ -3,6 +3,7 @@
 # Licensed under the MIT License.
 
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -14,15 +15,15 @@ from intric.server.protocol import responses
 
 router = APIRouter()
 
+_ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
+
 
 @router.get(
     "/{id}/",
     response_model=PromptPublic,
     responses=responses.get_responses([400, 403, 404]),
 )
-async def get_prompt(
-    id: UUID, container: Container = Depends(get_container(with_user=True))
-):
+async def get_prompt(id: UUID, container: _ContainerWithUser):
     service = container.prompt_service()
     assembler = container.prompt_assembler()
 
@@ -38,15 +39,15 @@ async def get_prompt(
 async def update_prompt_description(
     id: UUID,
     prompt: PromptUpdateRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: _ContainerWithUser,
 ):
     service = container.prompt_service()
     assembler = container.prompt_assembler()
 
-    prompt = await service.update_prompt_description(  # type: ignore[assignment]
+    updated = await service.update_prompt_description(
         id=id, description=prompt.description
     )
-    return assembler.from_prompt_to_model(prompt)
+    return assembler.from_prompt_to_model(updated)
 
 
 @router.delete(
@@ -56,7 +57,7 @@ async def update_prompt_description(
 )
 async def delete_prompt(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: _ContainerWithUser,
 ):
     service = container.prompt_service()
 

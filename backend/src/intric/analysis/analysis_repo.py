@@ -72,11 +72,14 @@ class AssistantInsightQuestionRow(NamedTuple):
 
 
 class AnalysisRepository:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
         self.session = session
 
-    async def _get_count(self, table, tenant_id: UUID | None = None):
-        stmt = sa.select(sa.func.count()).select_from(table)
+    async def _get_count(
+        self, table: type, tenant_id: UUID | None = None
+    ) -> int | None:
+        stmt = sa.select(sa.func.count()).select_from(table)  # type: ignore[arg-type]  # table is a mapped ORM class; select_from accepts Any
 
         if tenant_id is not None:
             if table == Questions:
@@ -310,9 +313,6 @@ class AnalysisRepository:
         assistant_id: UUID | None,
         group_chat_id: UUID | None,
     ) -> list[QuestionTextRow]:
-        if tenant_id is None:
-            raise ValueError("tenant_id is required for insights question queries")
-
         if assistant_id is None and group_chat_id is None:
             raise ValueError("Either assistant_id or group_chat_id is required")
 
@@ -387,9 +387,6 @@ class AnalysisRepository:
         cursor_created_at: datetime | None = None,
         cursor_id: UUID | None = None,
     ) -> tuple[list[AssistantInsightQuestionRow], int, bool]:
-        if tenant_id is None:
-            raise ValueError("tenant_id is required for insights question queries")
-
         question_rank = (
             sa.func.row_number()
             .over(

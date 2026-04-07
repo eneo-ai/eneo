@@ -16,12 +16,13 @@ from intric.prompts.prompt_factory import PromptFactory
 
 
 class PromptRepository:
-    def __init__(self, session: AsyncSession, factory: PromptFactory):
+    def __init__(self, session: AsyncSession, factory: PromptFactory) -> None:
+        super().__init__()
         self.session = session
         self.factory = factory
 
     def _to_domain(
-        self, prompt_in_db: Prompts | None, is_selected: bool
+        self, prompt_in_db: Prompts | None, is_selected: bool | None
     ) -> Prompt | None:
         if prompt_in_db is None:
             return None
@@ -99,11 +100,12 @@ class PromptRepository:
         )
 
         prompt_in_db = await self.session.scalar(stmt)
+        assert prompt_in_db is not None
 
         return self.factory.create_prompt_from_db(prompt_in_db=prompt_in_db)
 
     async def update_prompt_description(
-        self, id: UUID, description: str
+        self, id: UUID, description: str | None
     ) -> Prompt | None:
         stmt = (
             sa.update(Prompts)
@@ -119,6 +121,6 @@ class PromptRepository:
 
         return self._to_domain(updated_prompt, is_selected)
 
-    async def delete_prompt(self, id: int):
+    async def delete_prompt(self, id: UUID) -> None:
         query = sa.delete(Prompts).where(Prompts.id == id)
         await self.session.execute(query)

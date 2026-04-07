@@ -230,9 +230,8 @@ class AssistantService:
             )
 
         # TODO: Review how we get the permissions to the presentation layer
-        permissions: list[ResourcePermission] = cast(
-            list[ResourcePermission],
-            actor.get_assistant_permissions(assistant=assistant),
+        permissions: list[ResourcePermission] = actor.get_assistant_permissions(
+            assistant=assistant
         )
 
         return assistant, permissions  # type: ignore[return-value]
@@ -509,9 +508,8 @@ class AssistantService:
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
 
         # TODO: Review how we get the permissions to the presentation layer
-        permissions: list[ResourcePermission] = cast(
-            list[ResourcePermission],
-            actor.get_assistant_permissions(assistant=assistant),
+        permissions: list[ResourcePermission] = actor.get_assistant_permissions(
+            assistant=assistant
         )
 
         return assistant, permissions
@@ -535,9 +533,8 @@ class AssistantService:
             )
 
         # TODO: Review how we get the permissions to the presentation layer
-        permissions: list[ResourcePermission] = cast(
-            list[ResourcePermission],
-            actor.get_assistant_permissions(assistant=assistant),
+        permissions: list[ResourcePermission] = actor.get_assistant_permissions(
+            assistant=assistant
         )
 
         return assistant, permissions  # type: ignore[return-value]
@@ -1094,9 +1091,8 @@ class AssistantService:
         await self.space_repo.update(space)
 
         # TODO: Review how we get the permissions to the presentation layer
-        permissions = cast(
-            list[ResourcePermission],
-            actor.get_assistant_permissions(assistant=assistant),
+        permissions: list[ResourcePermission] = actor.get_assistant_permissions(
+            assistant=assistant
         )
 
         return assistant, permissions
@@ -1202,9 +1198,8 @@ class AssistantService:
             assistant_id=assistant_id
         )
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
-        permissions: list[ResourcePermission] = cast(
-            list[ResourcePermission],
-            actor.get_assistant_permissions(assistant=assistant),
+        permissions: list[ResourcePermission] = actor.get_assistant_permissions(
+            assistant=assistant
         )
 
         return assistant, permissions
@@ -1263,9 +1258,8 @@ class AssistantService:
             assistant_id=assistant_id
         )
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
-        permissions: list[ResourcePermission] = cast(
-            list[ResourcePermission],
-            actor.get_assistant_permissions(assistant=assistant),
+        permissions: list[ResourcePermission] = actor.get_assistant_permissions(
+            assistant=assistant
         )
 
         return assistant, permissions
@@ -1329,9 +1323,8 @@ class AssistantService:
             assistant_id=assistant_id
         )
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
-        permissions: list[ResourcePermission] = cast(
-            list[ResourcePermission],
-            actor.get_assistant_permissions(assistant=assistant),
+        permissions: list[ResourcePermission] = actor.get_assistant_permissions(
+            assistant=assistant
         )
 
         return assistant, permissions

@@ -10,10 +10,11 @@ from intric.users.user import UserInDB
 
 
 class PromptAssembler:
-    def __init__(self, user: UserInDB):
+    def __init__(self, user: UserInDB) -> None:
+        super().__init__()
         self.user = user
 
-    def get_prompt_permissions(self, prompt: Prompt):
+    def get_prompt_permissions(self, prompt: Prompt) -> list[ResourcePermission]:
         permissions = [ResourcePermission.READ]
 
         if prompt.user_id == self.user.id:
@@ -21,8 +22,11 @@ class PromptAssembler:
 
         return permissions
 
-    def from_prompt_to_model(self, prompt: Prompt):
+    def from_prompt_to_model(self, prompt: Prompt) -> PromptPublic:
         permissions = self.get_prompt_permissions(prompt)
+
+        assert prompt.id is not None, "Prompt must have an id before being assembled"
+        assert prompt.user is not None, "Prompt must have a user before being assembled"
 
         return PromptPublic(
             created_at=prompt.created_at,

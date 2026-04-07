@@ -10,7 +10,8 @@ from intric.modules.module import ModuleBase, ModuleInDB
 
 
 class ModuleRepository:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
         self.delegate: BaseRepositoryDelegate[ModuleInDB] = BaseRepositoryDelegate(
             session, Modules, ModuleInDB
         )
