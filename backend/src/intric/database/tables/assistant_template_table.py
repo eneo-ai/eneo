@@ -15,8 +15,8 @@ class AssistantTemplates(BasePublic):
     description: Mapped[str] = mapped_column()
     category: Mapped[str] = mapped_column()
     prompt_text: Mapped[Optional[str]] = mapped_column()
-    completion_model_kwargs: Mapped[Optional[dict]] = mapped_column(JSONB)
-    wizard: Mapped[Optional[dict]] = mapped_column(JSONB)
+    completion_model_kwargs: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
+    wizard: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
     organization: Mapped[str] = mapped_column(
         Text, server_default="default", nullable=False
     )
@@ -32,7 +32,9 @@ class AssistantTemplates(BasePublic):
     deleted_at: Mapped[Optional[datetime]] = mapped_column(
         TIMESTAMP(timezone=True), nullable=True, index=True
     )
-    original_snapshot: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    original_snapshot: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB, nullable=True
+    )
 
     # Audit trail fields for delete/restore operations
     deleted_by_user_id: Mapped[Optional[UUID]] = mapped_column(

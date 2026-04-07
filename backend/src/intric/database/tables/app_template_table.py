@@ -17,8 +17,8 @@ class AppTemplates(BasePublic):
     prompt_text: Mapped[Optional[str]] = mapped_column()
     input_description: Mapped[Optional[str]] = mapped_column()
     input_type: Mapped[str] = mapped_column()
-    completion_model_kwargs: Mapped[Optional[dict]] = mapped_column(JSONB)
-    wizard: Mapped[Optional[dict]] = mapped_column(JSONB)
+    completion_model_kwargs: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
+    wizard: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
     organization: Mapped[str] = mapped_column(
         Text, server_default="default", nullable=False
     )
@@ -34,7 +34,9 @@ class AppTemplates(BasePublic):
     deleted_at: Mapped[Optional[datetime]] = mapped_column(
         TIMESTAMP(timezone=True), nullable=True, index=True
     )
-    original_snapshot: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    original_snapshot: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB, nullable=True
+    )
 
     # Audit trail fields for delete/restore operations
     deleted_by_user_id: Mapped[Optional[UUID]] = mapped_column(

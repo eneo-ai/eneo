@@ -20,7 +20,7 @@ from intric.database.tables.websites_table import Websites
 
 class Assistants(BasePublic):
     name: Mapped[str] = mapped_column()
-    completion_model_kwargs: Mapped[Optional[dict]] = mapped_column(JSONB)
+    completion_model_kwargs: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
     guardrail_active: Mapped[Optional[bool]] = mapped_column()
     logging_enabled: Mapped[bool] = mapped_column()
     is_default: Mapped[bool] = mapped_column()
@@ -28,7 +28,7 @@ class Assistants(BasePublic):
     description: Mapped[Optional[str]] = mapped_column()
     insight_enabled: Mapped[bool] = mapped_column(default=False)
     data_retention_days: Mapped[Optional[int]] = mapped_column()
-    metadata_json: Mapped[Optional[dict]] = mapped_column(JSONB)
+    metadata_json: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
     # TODO: refactor since this is a somewhat weird solution having a
     # type column. The reason is bc front-end wants a non-nullable
     # "type" field in a bunch of models. Thus a field with a default
