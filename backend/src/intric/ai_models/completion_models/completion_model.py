@@ -37,6 +37,7 @@ class ResponseType(str, Enum):
     TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
     FILES = "image"
     FIRST_CHUNK = "first_chunk"
+    TOKEN_USAGE = "token_usage"
     ERROR = "error"
 
 

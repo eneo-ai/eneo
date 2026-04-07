@@ -74,14 +74,15 @@ class ServiceRunner:
             input_source = "provider"
         else:
             num_tokens_question = ai_response.total_token_count
-            input_source = "tiktoken"
+            input_source = "litellm"
 
         if ai_response.usage and ai_response.usage.completion_tokens is not None:
             num_tokens_answer = ai_response.usage.completion_tokens
             output_source = "provider"
         else:
-            num_tokens_answer = count_tokens(answer)
-            output_source = "tiktoken"
+            model_name = self.service.completion_model.name if self.service.completion_model else ""
+            num_tokens_answer = count_tokens(answer, model_name)
+            output_source = "litellm"
 
         logger.info(
             f"[TokenUsage] service={self.service.id} — "

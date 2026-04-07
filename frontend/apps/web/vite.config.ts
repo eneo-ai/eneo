@@ -3,8 +3,6 @@ import { defineConfig } from "vitest/config";
 import type { PluginOption } from "vite";
 import tailwindcss from "@tailwindcss/vite";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
-// Visualiser to analyse bundle sizes
-// import { visualizer } from "rollup-plugin-visualizer";
 
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
@@ -16,10 +14,6 @@ const pkg = JSON.parse(json);
 
 export default defineConfig({
   plugins: [
-    // visualizer({
-    //   emitFile: true,
-    //   filename: "stats.html"
-    // }),
     paraglideVitePlugin({
       project: "./project.inlang",
       outdir: "./src/lib/paraglide",

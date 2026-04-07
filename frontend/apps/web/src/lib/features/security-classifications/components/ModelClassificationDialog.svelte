@@ -8,7 +8,6 @@
   import { Button, Dialog } from "@intric/ui";
   import { type Writable } from "svelte/store";
   import {
-    IntricError,
     type CompletionModel,
     type EmbeddingModel,
     type TranscriptionModel
@@ -19,7 +18,7 @@
   import { invalidate } from "$app/navigation";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   type Props = {
     model: CompletionModel | EmbeddingModel | TranscriptionModel;
@@ -46,7 +45,7 @@
       invalidate("admin:models:load");
       $openController = false;
     } catch (error) {
-      toast.error(error instanceof IntricError ? error.getReadableMessage() : String(error));
+      toastError(error);
     }
   });
 </script>

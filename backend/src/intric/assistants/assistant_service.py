@@ -4,8 +4,10 @@ from typing import TYPE_CHECKING, Optional, Union
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import (
+    Completion,
     ModelKwargs,
     ResponseType,
+    TokenUsage,
 )
 from intric.main.logging import get_logger
 from intric.assistants.api.assistant_models import AssistantResponse
@@ -225,6 +227,13 @@ class AssistantService:
         template = await self.assistant_template_service.get_assistant_template(
             assistant_template_id=template_data.id
         )
+
+        if (
+            template.completion_model
+            and template.completion_model.id
+            and space.is_completion_model_in_space(template.completion_model.id)
+        ):
+            completion_model = space.get_completion_model(template.completion_model.id)
 
         # Validate incoming data
         template.validate_assistant_wizard_data(template_data=template_data)
@@ -728,20 +737,20 @@ class AssistantService:
                     version=version,
                     get_id_func=lambda chunk: chunk.info_blob_id,
                 )
-                # Prefer actual provider token counts, fall back to tiktoken estimates
+                # Prefer actual provider token counts, fall back to litellm estimates
                 if stream_usage and stream_usage.prompt_tokens is not None:
                     num_tokens_question = stream_usage.prompt_tokens + assistant_selector_tokens
                     input_source = "provider"
                 else:
                     num_tokens_question = response.total_token_count + assistant_selector_tokens
-                    input_source = "tiktoken"
+                    input_source = "litellm"
 
                 if stream_usage and stream_usage.completion_tokens is not None:
                     num_tokens_answer = stream_usage.completion_tokens
                     output_source = "provider"
                 else:
-                    num_tokens_answer = count_tokens(response_string) + reasoning_token_count
-                    output_source = "tiktoken"
+                    num_tokens_answer = count_tokens(response_string, completion_model.name) + reasoning_token_count
+                    output_source = "litellm"
 
                 logger.info(
                     f"[TokenUsage] assistant={assistant_id} streaming — "
@@ -765,6 +774,16 @@ class AssistantService:
                     tool_calls=tool_calls if tool_calls else None,
                 )
 
+                # Send token usage event to frontend
+                yield Completion(
+                    text="",
+                    response_type=ResponseType.TOKEN_USAGE,
+                    usage=TokenUsage(
+                        prompt_tokens=num_tokens_question,
+                        completion_tokens=num_tokens_answer,
+                    ),
+                )
+
             return response_stream()
         else:
             reasoning_token_count = 0
@@ -785,20 +804,20 @@ class AssistantService:
                 version=version,
                 get_id_func=lambda chunk: chunk.info_blob_id,
             )
-            # Prefer actual provider token counts, fall back to tiktoken estimates
+            # Prefer actual provider token counts, fall back to litellm estimates
             if response.usage and response.usage.prompt_tokens is not None:
                 num_tokens_question = response.usage.prompt_tokens + assistant_selector_tokens
                 input_source = "provider"
             else:
                 num_tokens_question = response.total_token_count + assistant_selector_tokens
-                input_source = "tiktoken"
+                input_source = "litellm"
 
             if response.usage and response.usage.completion_tokens is not None:
                 num_tokens_answer = response.usage.completion_tokens
                 output_source = "provider"
             else:
-                num_tokens_answer = count_tokens(final_answer) + reasoning_token_count
-                output_source = "tiktoken"
+                num_tokens_answer = count_tokens(final_answer, completion_model.name) + reasoning_token_count
+                output_source = "litellm"
 
             logger.info(
                 f"[TokenUsage] assistant={assistant_id} non-streaming — "
@@ -870,11 +889,7 @@ class AssistantService:
                 },
             )
 
-        if not space.can_ask_assistant(assistant=active_assistant):
-            raise UnauthorizedException(
-                "This assistant can not be used at this time. "
-                "Please review your assistant settings and try again."
-            )
+        space.can_ask_assistant(assistant=active_assistant)
 
         if tool_assistant_id is not None:
             tool_assistant = space.get_assistant(assistant_id=tool_assistant_id)

@@ -141,7 +141,7 @@ For each tenant, register Eneo as an application in their IdP:
 
 ### Configure the tenant via API
 
-Use the federation API to set up the tenant's OIDC configuration:
+Use the federation API to provide the tenant's OIDC configuration. `PUT` is the full-definition endpoint for a new federation setup or a full replacement of the current one.
 
 <Tabs items={['Azure Entra ID', 'MobilityGuard']}>
   <Tabs.Tab>
@@ -259,16 +259,18 @@ curl "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation
 
 ### Update tenant configuration
 
-Use the PUT endpoint to update any field. Changes take effect immediately - no restart needed.
+Use the `PATCH` endpoint to update the current federation setup without resending every field. Omitted fields stay unchanged. Use `PUT` only when you want to provide a full new federation configuration.
 
 ```bash
-curl -X PUT "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+curl -X PATCH "https://api.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
   -H "X-API-Key: your-super-admin-api-key" \
   -H "Content-Type: application/json" \
   -d '{
     "allowed_domains": ["sundsvall.se", "new-domain.se"]
   }'
 ```
+
+To replace the whole federation definition, continue to use `PUT` and send the full required payload.
 
 ### Remove tenant federation
 

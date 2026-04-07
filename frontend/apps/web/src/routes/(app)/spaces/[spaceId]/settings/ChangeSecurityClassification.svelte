@@ -6,11 +6,11 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { IconCheck } from "@intric/icons/check";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { IntricError, type Intric, type SecurityClassification } from "@intric/intric-js";
+  import { type Intric, type SecurityClassification } from "@intric/intric-js";
   import { Button, Dialog } from "@intric/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   type Props = { classifications: SecurityClassification[]; onUpdateDone: () => void };
 
@@ -69,7 +69,7 @@
       onUpdateDone?.();
       $showDryRunDialog = false;
     } catch (error) {
-      toast.error(error instanceof IntricError ? error.getReadableMessage() : String(error));
+      toastError(error);
     }
   });
 </script>

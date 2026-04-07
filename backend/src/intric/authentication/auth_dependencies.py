@@ -146,7 +146,6 @@ def require_api_key_permission(required: ApiKeyPermission):
 
 
 ASSISTANTS_READ_OVERRIDES: frozenset[str] = frozenset({
-    "estimate_tokens",
     "ask_assistant",
     "ask_followup",
     "leave_feedback",

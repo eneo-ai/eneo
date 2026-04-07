@@ -161,50 +161,50 @@ def test_number_of_files_validation(
             26214400,
             3,
             True,
-        ),  # 3 files, 25 MiB each, total 75 MiB
+        ),  # 3 files, 25 MB each, total 75 MB
         (
             InputFieldType.TEXT_UPLOAD,
             26214400,
             4,
             False,
-        ),  # 4 files, 25 MiB each, total 100 MiB
+        ),  # 4 files, 25 MB each, total 100 MB
         (
             InputFieldType.TEXT_UPLOAD,
             26214400 + 1,
             1,
             False,
-        ),  # 1 file, just over 25 MiB
-        (InputFieldType.AUDIO_UPLOAD, 209715200, 1, True),  # 1 file, 200 MiB
+        ),  # 1 file, just over 25 MB
+        (InputFieldType.AUDIO_UPLOAD, 209715200, 1, True),  # 1 file, 200 MB
         (
             InputFieldType.AUDIO_UPLOAD,
             209715200,
             2,
             False,
-        ),  # 2 files, 200 MiB each, total 400 MiB
+        ),  # 2 files, 200 MB each, total 400 MB
         (
             InputFieldType.AUDIO_UPLOAD,
             209715200 + 1,
             1,
             False,
-        ),  # 1 file, just over 200 MiB
+        ),  # 1 file, just over 200 MB
         (
             InputFieldType.IMAGE_UPLOAD,
             20971520,
             2,
             True,
-        ),  # 2 files, 20 MiB each, total 40 MiB
+        ),  # 2 files, 20 MB each, total 40 MB
         (
             InputFieldType.IMAGE_UPLOAD,
             20971520,
             3,
             False,
-        ),  # 3 files, 20 MiB each, total 60 MiB
+        ),  # 3 files, 20 MB each, total 60 MB
         (
             InputFieldType.IMAGE_UPLOAD,
             20971520 + 1,
             1,
             False,
-        ),  # 1 file, just over 20 MiB
+        ),  # 1 file, just over 20 MB
     ],
 )
 def test_total_size_of_files_validation(

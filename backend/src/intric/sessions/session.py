@@ -95,6 +95,7 @@ class IntricEventType(str, Enum):
     TOOL_CALL = "tool_call"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
     TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
+    TOKEN_USAGE = "token_usage"
 
 
 class SSEBase(BaseModel):
@@ -134,6 +135,17 @@ class SSEToolApprovalTimeout(SSEBase):
     tools: list[ToolCallInfo]
 
 
+class TokenUsageEvent(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    turn_tokens: int
+
+
+class SSETokenUsage(SSEBase):
+    intric_event_type: IntricEventType = IntricEventType.TOKEN_USAGE
+    usage: TokenUsageEvent
+
+
 class SSEFirstChunk(AskChatResponse):
     pass
 
@@ -158,6 +170,7 @@ SSE_MODELS = [
     SSEToolCall,
     SSEToolApprovalRequired,
     SSEToolApprovalTimeout,
+    SSETokenUsage,
     SSEFiles,
     SSEFirstChunk,
     SSEError,

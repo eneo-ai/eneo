@@ -13,7 +13,7 @@
   import { Settings } from "$lib/components/layout";
   import { sortModels } from "$lib/features/ai-models/sortModels";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   export let selectableModels: (EmbeddingModel & {
     meets_security_classification?: boolean | null | undefined;
@@ -52,7 +52,7 @@
         await updateSpace({ embedding_models: newModels });
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toastError(e);
     }
     loading.delete(model.id);
     loading = loading;

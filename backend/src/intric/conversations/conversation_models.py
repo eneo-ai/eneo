@@ -7,7 +7,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
-from intric.main.config import get_settings
 from intric.main.models import ModelId
 from intric.questions.question import UseTools
 
@@ -29,7 +28,7 @@ class ConversationRequest(BaseModel):
     session_id: Optional[UUID] = None
     assistant_id: Optional[UUID] = None
     group_chat_id: Optional[UUID] = None
-    files: list[ModelId] = Field(max_length=get_settings().max_in_question, default=[])
+    files: list[ModelId] = Field(default=[])
     stream: bool = False
     tools: Optional[UseTools] = None
     use_web_search: bool = False

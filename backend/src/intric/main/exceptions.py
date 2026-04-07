@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import Enum, unique
 from typing import Any
 
 from intric.files.text import (
@@ -9,6 +9,7 @@ from intric.files.text import (
 )
 
 
+@unique
 class ErrorCodes(int, Enum):
     NOT_FOUND = 9000
     UNAUTHORIZED = 9001
@@ -45,8 +46,13 @@ class ErrorCodes(int, Enum):
     # Provider errors
     PROVIDER_INACTIVE = 9031
     PROVIDER_NOT_FOUND = 9032
-    MCP_UPSTREAM_ERROR = 9033
-    MCP_UPSTREAM_AUTH_ERROR = 9034
+    # Resource configuration errors
+    MODEL_NOT_AVAILABLE = 9033
+    KNOWLEDGE_MODEL_UNAVAILABLE = 9034
+    SECURITY_CLASSIFICATION_MISMATCH = 9035
+    # MCP upstream errors
+    MCP_UPSTREAM_ERROR = 9036
+    MCP_UPSTREAM_AUTH_ERROR = 9037
 
 
 class NotFoundException(Exception):
@@ -183,7 +189,7 @@ class FileTooLargeException(Exception):
             return f"{value} bytes"
 
         size = float(value)
-        units = ("KiB", "MiB", "GiB", "TiB")
+        units = ("KB", "MB", "GB", "TB")
 
         for unit in units:
             size /= 1024
@@ -326,6 +332,24 @@ class ProviderNotFoundException(Exception):
     pass
 
 
+class ModelNotAvailableException(Exception):
+    """Raised when a model is assigned to a resource but not available in the space."""
+
+    pass
+
+
+class KnowledgeModelUnavailableException(Exception):
+    """Raised when a knowledge source uses an embedding model that is not available."""
+
+    pass
+
+
+class SecurityClassificationMismatchException(Exception):
+    """Raised when a resource does not meet the space's security classification."""
+
+    pass
+
+
 class MCPClientError(Exception):
     """Raised when an upstream MCP service fails."""
 
@@ -393,6 +417,15 @@ EXCEPTION_MAP = {
     # Provider errors - use None to pass through the exception's own message
     ProviderInactiveException: (503, None, ErrorCodes.PROVIDER_INACTIVE),
     ProviderNotFoundException: (404, None, ErrorCodes.PROVIDER_NOT_FOUND),
+    # Resource configuration errors - use None to pass through the exception's own message
+    ModelNotAvailableException: (400, None, ErrorCodes.MODEL_NOT_AVAILABLE),
+    KnowledgeModelUnavailableException: (400, None, ErrorCodes.KNOWLEDGE_MODEL_UNAVAILABLE),
+    SecurityClassificationMismatchException: (
+        400,
+        None,
+        ErrorCodes.SECURITY_CLASSIFICATION_MISMATCH,
+    ),
+    # MCP upstream errors
     MCPClientError: (
         502,
         "MCP upstream service unavailable.",

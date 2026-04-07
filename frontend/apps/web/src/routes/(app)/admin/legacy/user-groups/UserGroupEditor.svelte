@@ -11,7 +11,7 @@
   import type { UserGroup } from "@intric/intric-js";
   import { Dialog, Button, Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   const emptyUserGroup: UserGroup = {
     id: "",
@@ -49,7 +49,7 @@
       invalidate("admin:user-groups:load");
       $showDialog = false;
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toastError(error);
       console.error(error);
     }
     isProcessing = false;
@@ -63,7 +63,7 @@
       $showDialog = false;
       editableUserGroup.updateWithValue(emptyUserGroup);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toastError(error);
       console.error(error);
     }
     isProcessing = false;

@@ -7,6 +7,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { Loader2 } from "lucide-svelte";
   import type { Writable } from "svelte/store";
 
@@ -78,7 +79,7 @@
       } else {
         error = msg || m.migration_failed();
       }
-      toast.error(m.migration_failed());
+      toastError(e, m.migration_failed());
     } finally {
       isSubmitting = false;
     }

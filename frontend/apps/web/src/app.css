@@ -1,6 +1,24 @@
 @import "@intric/ui/styles";
 @source "../../../packages/ui/src/";
 
+/* ------------------------------------------------------------------ */
+/* shadcn-svelte token mappings                                       */
+/* ------------------------------------------------------------------ */
+/* Maps shadcn-svelte's semantic tokens to eneo's design system       */
+/* tokens. Keep these in sync with what the shadcn components in      */
+/* `src/lib/components/ui/` actually reference, otherwise classes     */
+/* like `text-muted-foreground` or `border-t` will silently no-op.    */
+@theme inline {
+  --color-background: var(--background-primary);
+  --color-foreground: var(--text-primary);
+  --color-card: var(--background-primary);
+  --color-card-foreground: var(--text-primary);
+  --color-muted: var(--background-tertiary);
+  --color-muted-foreground: var(--text-secondary);
+  --color-border: var(--border-default);
+  --color-ring: var(--border-stronger);
+}
+
 @font-face {
   font-family: Inter;
   font-style: normal;

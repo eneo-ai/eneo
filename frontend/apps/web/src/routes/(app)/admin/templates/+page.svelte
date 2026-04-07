@@ -18,8 +18,9 @@
 
   let { data } = $props();
 
-  // Get active tab from URL or default to assistant_templates
-  let activeTab = $derived(page.url.searchParams.get("tab") ?? "assistant_templates");
+  // Get active tab: prefer page.state.tab (set by TabTrigger via replaceState),
+  // fallback to URL param (for direct navigation), default to assistant_templates
+  let activeTab = $derived((page.state as any)?.tab ?? page.url.searchParams.get("tab") ?? "assistant_templates");
 
   function handleCreateTemplate() {
     if (activeTab === "app_templates") {

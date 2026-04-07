@@ -173,6 +173,7 @@ export function initConversations(client) {
                   break;
 
                 case "intric_event":
+                case "token_usage":
                   callbacks?.onIntricEvent?.(data);
                   break;
 

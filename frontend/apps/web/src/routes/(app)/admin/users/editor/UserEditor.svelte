@@ -15,6 +15,7 @@
   import { getAdminUserCtx } from "../ctx";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   const intric = getIntric();
 
@@ -106,7 +107,7 @@
       userPassword = "";
       showDialog.set(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toastError(e);
     }
   }
 
@@ -127,7 +128,7 @@
       invalidate("admin:users:load");
       showDialog.set(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toastError(e);
     }
   }
 </script>

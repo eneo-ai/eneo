@@ -12,7 +12,7 @@
   import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
 
   export let assistant: AssistantSparse;
@@ -31,7 +31,7 @@
       refreshCurrentSpace("applications");
       $showDeleteDialog = false;
     } catch (e) {
-      toast.error(m.could_not_delete_assistant());
+      toastError(e, m.could_not_delete_assistant());
       console.error(e);
     }
     isProcessing = false;
@@ -45,7 +45,7 @@
       refreshCurrentSpace();
       $showMoveDialog = false;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toastError(e);
       console.error(e);
     }
     isProcessing = false;

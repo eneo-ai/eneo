@@ -226,7 +226,7 @@ class TestMethodAwarePermissionCheck:
                 assistants=ResourcePermissionLevel.READ,
             ),
         )
-        request = _fake_request("POST", endpoint_name="estimate_tokens")
+        request = _fake_request("POST", endpoint_name="ask_assistant")
         _check_method_resource_permission(
             request, key,
             _config("assistants", read_override_endpoints=ASSISTANTS_READ_OVERRIDES),
@@ -1178,7 +1178,6 @@ class TestPermissionMatrix:
             ("chat", CONVERSATIONS_READ_OVERRIDES, "assistants"),
             ("run_app", APPS_READ_OVERRIDES, "apps"),
             ("run_service", APPS_READ_OVERRIDES, "apps"),
-            ("estimate_tokens", ASSISTANTS_READ_OVERRIDES, "assistants"),
         ],
     )
     def test_read_override_allows_read_key_post(

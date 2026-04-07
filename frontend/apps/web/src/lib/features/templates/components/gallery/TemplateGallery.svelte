@@ -6,6 +6,7 @@
   import { getTemplateController } from "../../TemplateController";
   import TemplateLanguageSwitcher from "./TemplateLanguageSwitcher.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { BookOpen, FileUp, Check } from "lucide-svelte";
 
   let {
     getCategorisedTemplates,
@@ -22,7 +23,7 @@
   <Dialog.Content width="large">
     <Dialog.Section class="mt-2">
       <!-- Dialog Header -->
-      <div class="flex items-center justify-between px-10 pt-12 pb-10">
+      <div class="flex items-center justify-between px-8 pt-8 pb-6">
         <div class="flex w-full flex-col">
           <h2 class="px-4 pb-1 text-2xl font-bold">{m.select_a_template()}</h2>
           <p class="text-secondary max-w-[50ch] px-4">
@@ -37,52 +38,81 @@
         <section
           role="group"
           aria-labelledby="category-{idx}"
-          class="flex w-full flex-col gap-2 p-6 pb-2 last-of-type:pb-6"
+          class="flex w-full flex-col gap-1.5 px-6 pt-4 pb-1 last-of-type:pb-4"
         >
           <!-- Category Header with Count Badge -->
-          <div class="flex items-center gap-3 px-8 pb-3 border-b border-border-dimmer">
-            <h3 id="category-{idx}" class="flex-1 text-lg font-medium">
+          <div class="flex items-center gap-3 px-2 pb-2 border-b border-border-dimmer">
+            <h3 id="category-{idx}" class="flex-1 text-base font-semibold">
               {section.title}
             </h3>
-            <span class="inline-flex items-center px-3 py-1 rounded-full bg-bg-tertiary text-sm text-text-secondary">
+            <span class="text-xs text-muted tabular-nums">
               {section.templates.length} {section.templates.length === 1 ? m.template_singular() : m.template_plural()}
             </span>
           </div>
 
           <!-- Responsive Template Grid -->
-          <div class="grid w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 lg:gap-6 px-2">
+          <div role="listbox" aria-label="{section.title}" class="grid w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 px-2 pt-1">
             {#each section.templates as template (template.id)}
               {@const isSelected = template.id === currentlySelected?.id}
+              {@const hasKnowledge = !!template.wizard?.collections}
+              {@const hasAttachments = !!template.wizard?.attachments}
+              {@const hasDescription = !!template.description}
+              {@const hasMetadata = hasKnowledge || hasAttachments}
+              {@const isCompact = !hasDescription && !hasMetadata}
               <button
                 role="option"
                 aria-selected={isSelected}
+                aria-label={formatEmojiTitle(template.name)}
                 on:click|preventDefault={() => {
                   currentlySelected = template;
                 }}
                 {...dynamicColour({ basedOn: template.category })}
                 type="button"
-                class="rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:ring-offset-2 transition-colors duration-150"
+                class="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:ring-offset-2 transition-colors duration-150"
                 data-selected={isSelected}
               >
                 <div
-                  class="tile-bg border-default flex h-full min-h-[180px] flex-col gap-4 overflow-clip rounded-2xl border p-6 transition-all relative"
+                  class="tile-bg border-default flex h-full flex-col overflow-clip rounded-xl border transition-[background,border-color,box-shadow] duration-150 relative {isCompact ? 'gap-0 p-3' : 'gap-2.5 p-4'}"
                 >
+                  {#if isSelected}
+                    <span class="absolute top-2.5 right-2.5">
+                      <Check class="h-5 w-5 text-accent-default" strokeWidth={2.5} />
+                    </span>
+                  {/if}
                   {#if template.is_default}
                     <span
-                      class="absolute top-2 right-2 px-2 py-0.5 text-xs font-medium rounded-full bg-positive-stronger/10 text-positive-stronger border border-positive-stronger/20"
+                      class="absolute top-2.5 {isSelected ? 'right-9' : 'right-2.5'} px-2 py-0.5 text-xs font-medium rounded-full bg-positive-stronger/10 text-positive-stronger border border-positive-stronger/20"
                     >
                       {m.default_model()}
                     </span>
                   {/if}
-                  <div class="flex w-full items-center gap-3">
+                  <div class="flex w-full items-center gap-2.5">
                     <TemplateIcon {template}></TemplateIcon>
-                    <h4 class="text-dynamic-stronger text-left text-base font-medium line-clamp-2">
+                    <h4 class="text-dynamic-stronger text-left text-sm font-semibold line-clamp-1">
                       {formatEmojiTitle(template.name)}
                     </h4>
                   </div>
-                  <p class="w-full flex-grow text-left text-sm line-clamp-3">
-                    {template.description}
-                  </p>
+                  {#if hasDescription}
+                    <p class="w-full text-left text-xs leading-relaxed text-muted line-clamp-2">
+                      {template.description}
+                    </p>
+                  {/if}
+                  {#if hasMetadata}
+                    <div class="flex items-center gap-3 pt-0.5">
+                      {#if hasKnowledge}
+                        <span class="flex items-center gap-1 text-xs text-muted">
+                          <BookOpen class="h-3 w-3" />
+                          {m.wizard_collections_section()}
+                        </span>
+                      {/if}
+                      {#if hasAttachments}
+                        <span class="flex items-center gap-1 text-xs text-muted">
+                          <FileUp class="h-3 w-3" />
+                          {m.wizard_attachments_section()}
+                        </span>
+                      {/if}
+                    </div>
+                  {/if}
                 </div>
               </button>
             {/each}
@@ -100,7 +130,7 @@
       <Button
         is={close}
         variant="primary"
-        class="w-40"
+        class="w-fit min-w-[10rem]"
         disabled={currentlySelected === null}
         on:click={() => {
           if (currentlySelected) {
@@ -119,7 +149,7 @@
   }
 
   button[data-selected="true"] > div {
-    @apply border-accent-default shadow-accent-dimmer outline-accent-default shadow-md outline;
+    @apply border-accent-default shadow-accent-dimmer/50 outline-accent-default shadow-md outline outline-1;
   }
 
   .tile-bg {
@@ -127,11 +157,11 @@
   }
 
   button[data-selected="true"] .tile-bg {
-    background: linear-gradient(183deg, var(--dynamic-dimmer) 0%, var(--accent-dimmer) 50%);
+    background: linear-gradient(175deg, var(--dynamic-dimmer) 0%, var(--accent-dimmer) 60%);
   }
 
   .tile-bg:hover {
     background: var(--dynamic-dimmer);
-    @apply ring-default ring-2;
+    @apply ring-default ring-1;
   }
 </style>

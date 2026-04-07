@@ -212,7 +212,6 @@ def test_settings(
         upload_image_to_session_max_size=5_000_000,
         upload_max_file_size=100_000_000,
         transcription_max_file_size=25_000_000,
-        max_in_question=1000,
 
         # API settings
         api_prefix="/api/v1",
@@ -246,7 +245,7 @@ def test_settings(
         using_image_generation=False,
         using_crawl=False,
         tenant_credentials_enabled=False,  # Disable for integration tests (tests can override if needed)
-        federation_per_tenant_enabled=True,
+        federation_enabled=True,
 
         # Note: Set to False for integration tests that need full app functionality
         openapi_only_mode=False,

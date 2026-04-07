@@ -1821,43 +1821,6 @@ async def test_method_aware_guard_blocks_write_key_on_assistant_delete(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_method_aware_guard_allows_read_override_for_assistant_token_estimate(
-    client, default_user_token
-):
-    _, assistant_id = await _create_space_and_assistant(
-        client,
-        bearer_token=default_user_token,
-    )
-
-    key_response = await client.post(
-        "/api/v1/api-keys",
-        json={
-            "name": "Assistant Estimate Key",
-            "key_type": "sk_",
-            "permission": "read",
-            "scope_type": "tenant",
-            "resource_permissions": {
-                "assistants": "read",
-                "apps": "none",
-                "spaces": "none",
-                "knowledge": "read",
-            },
-        },
-        headers={"Authorization": f"Bearer {default_user_token}"},
-    )
-    assert key_response.status_code == 201, key_response.text
-    secret = key_response.json()["secret"]
-
-    estimate_response = await client.post(
-        f"/api/v1/assistants/{assistant_id}/token-estimate",
-        json={"text": "hello world"},
-        headers={"X-API-Key": secret},
-    )
-    assert estimate_response.status_code == 200, estimate_response.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
 async def test_owner_scoped_governance_denials_follow_permission_then_scope_order(
     client, default_user_token
 ):
