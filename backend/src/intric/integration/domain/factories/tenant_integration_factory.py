@@ -1,5 +1,4 @@
-from typing import TYPE_CHECKING, Sequence, cast
-from uuid import UUID
+from typing import TYPE_CHECKING, Sequence
 
 from intric.integration.domain.entities.tenant_integration import TenantIntegration
 from intric.integration.domain.factories.integration_factory import IntegrationFactory
@@ -14,8 +13,8 @@ class TenantIntegrationFactory:
     @staticmethod
     def create_entity(record: "TenantIntegrationDBModel") -> TenantIntegration:
         return TenantIntegration(
-            id=cast(UUID, record.id),
-            tenant_id=cast(UUID, record.tenant_id),
+            id=record.id,
+            tenant_id=record.tenant_id,
             integration=IntegrationFactory.create_entity(record.integration),
         )
 

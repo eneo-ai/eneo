@@ -528,9 +528,9 @@ class SharePointContentClient(BaseClient):
                 return None
 
             # Extract just the token parameter from the deltaLink
-            from urllib.parse import parse_qs, urlparse
+            from urllib.parse import ParseResult, parse_qs, urlparse
 
-            parsed = urlparse(delta_link)
+            parsed: ParseResult = urlparse(delta_link)
             query_params: dict[str, list[str]] = parse_qs(parsed.query)
             token = query_params.get("token", [None])[0]
 
@@ -599,9 +599,9 @@ class SharePointContentClient(BaseClient):
                 # Check for new delta token
                 if "@odata.deltaLink" in response:
                     delta_link = response["@odata.deltaLink"]
-                    from urllib.parse import parse_qs, urlparse
+                    from urllib.parse import ParseResult, parse_qs, urlparse
 
-                    parsed = urlparse(delta_link)
+                    parsed: ParseResult = urlparse(delta_link)
                     query_params: dict[str, list[str]] = parse_qs(parsed.query)
                     token = query_params.get("token", [None])[0]
                     new_delta_token = token

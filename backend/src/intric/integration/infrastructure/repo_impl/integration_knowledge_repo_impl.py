@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Optional
 
 import sqlalchemy as sa
 from sqlalchemy.orm import selectinload
+from typing_extensions import override
 
 from intric.database.tables.integration_table import (
     IntegrationKnowledge as IntegrationKnowledgeDBModel,
@@ -56,8 +57,9 @@ class IntegrationKnowledgeRepoImpl(
             selectinload(self._db_model.sharepoint_subscription),
         ]
 
+    @override
     async def one_or_none(
-        self, id: Optional["UUID"] = None, **filters
+        self, id: Optional["UUID"] = None, **filters: object
     ) -> IntegrationKnowledge | None:
         query = (
             sa.select(self._db_model)
@@ -75,6 +77,7 @@ class IntegrationKnowledgeRepoImpl(
 
         return self.mapper.to_entity(db_model=record, embedding_model=embedding_model)
 
+    @override
     async def get_by_ids(self, ids: list["UUID"]) -> list[IntegrationKnowledge]:
         query = (
             sa.select(self._db_model)
@@ -87,5 +90,6 @@ class IntegrationKnowledgeRepoImpl(
 
         return self.mapper.to_entities(records, embedding_models=embedding_models)
 
+    @override
     async def remove(self, id: "UUID") -> None:
         await self.delete(id=id)

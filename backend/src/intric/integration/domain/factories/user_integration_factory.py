@@ -1,6 +1,4 @@
-from datetime import datetime
-from typing import TYPE_CHECKING, Sequence, cast
-from uuid import UUID
+from typing import TYPE_CHECKING, Sequence
 
 from intric.integration.domain.entities.user_integration import UserIntegration
 from intric.integration.domain.factories.tenant_integration_factory import (
@@ -21,12 +19,12 @@ class UserIntegrationFactory:
                 record.tenant_integration
             ),
             user_id=record.user_id,  # Can be None for tenant_app integrations
-            id=cast(UUID, record.id),
-            authenticated=cast(bool, record.authenticated),
-            auth_type=cast(str, record.auth_type),
-            tenant_app_id=cast(UUID | None, record.tenant_app_id),
-            created_at=cast(datetime | None, record.created_at),
-            updated_at=cast(datetime | None, record.updated_at),
+            id=record.id,
+            authenticated=record.authenticated,
+            auth_type=record.auth_type,
+            tenant_app_id=record.tenant_app_id,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
         )
 
     @staticmethod

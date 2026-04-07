@@ -1,5 +1,4 @@
-from typing import TYPE_CHECKING, Sequence, cast
-from uuid import UUID
+from typing import TYPE_CHECKING, Sequence
 
 from intric.integration.domain.entities.integration import Integration
 
@@ -13,7 +12,7 @@ class IntegrationFactory:
     @classmethod
     def create_entity(cls, record: "IntegrationDBModel") -> "Integration":
         return Integration(
-            id=cast(UUID, record.id),
+            id=record.id,
             name=record.name,
             description=record.description,
             integration_type=record.integration_type,

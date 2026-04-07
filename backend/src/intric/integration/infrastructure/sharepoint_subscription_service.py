@@ -46,7 +46,8 @@ class SharePointSubscriptionService:
         self,
         sharepoint_subscription_repo: SharePointSubscriptionRepository,
         oauth_token_service: OauthTokenService,
-    ):
+    ) -> None:
+        super().__init__()
         self.subscription_repo = sharepoint_subscription_repo
         self.oauth_token_service = oauth_token_service
         settings = get_settings()

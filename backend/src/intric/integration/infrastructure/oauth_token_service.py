@@ -26,7 +26,8 @@ class OauthTokenService:
         oauth_token_repo: "OauthTokenRepository",
         confluence_auth_service: "ConfluenceAuthService",
         sharepoint_auth_service: "SharepointAuthService",
-    ):
+    ) -> None:
+        super().__init__()
         self.oauth_token_repo = oauth_token_repo
         self.confluence_auth_service = confluence_auth_service
         self.sharepoint_auth_service = sharepoint_auth_service

@@ -1,8 +1,9 @@
 import uuid
-from typing import Optional, cast
+from typing import Optional
 from urllib.parse import urlencode
 
 import httpx
+from typing_extensions import override
 
 from intric.integration.infrastructure.auth_service.base_auth_service import (
     DEFAULT_AUTH_TIMEOUT,
@@ -14,7 +15,8 @@ from intric.main.config import get_settings
 
 
 class ConfluenceAuthService(BaseOauthService):
-    def __init__(self):
+    def __init__(self) -> None:
+        super().__init__()
         self.SCOPE_SEPARATOR = " "
         self._scopes = [
             "read:me",
@@ -51,6 +53,7 @@ class ConfluenceAuthService(BaseOauthService):
             raise ValueError("OAUTH_CALLBACK_URL is not set")
         return redirect_uri
 
+    @override
     async def gen_auth_url(
         self, state: Optional[str] = None, tenant_id: Optional[uuid.UUID] = None
     ) -> dict[str, str]:
@@ -67,6 +70,7 @@ class ConfluenceAuthService(BaseOauthService):
         url = f"{auth_base_url}?{urlencode(params)}"
         return {"auth_url": url}
 
+    @override
     async def get_resources(
         self, access_token: str, tenant_id: Optional[uuid.UUID] = None
     ) -> list[OAuthResource]:
@@ -80,11 +84,13 @@ class ConfluenceAuthService(BaseOauthService):
                 timeout=DEFAULT_AUTH_TIMEOUT,
             )
             if response.status_code == 200:
-                return cast(list[OAuthResource], response.json())
+                result: list[OAuthResource] = response.json()
+                return result
             else:
                 response.raise_for_status()
                 raise RuntimeError("Failed to fetch Confluence resources")
 
+    @override
     async def exchange_token(
         self, auth_code: str, tenant_id: Optional[uuid.UUID] = None
     ) -> TokenResponse | None:
@@ -109,6 +115,7 @@ class ConfluenceAuthService(BaseOauthService):
             else:
                 response.raise_for_status()
 
+    @override
     async def refresh_access_token(
         self, refresh_token: str, tenant_id: Optional[uuid.UUID] = None
     ) -> TokenResponse | None:

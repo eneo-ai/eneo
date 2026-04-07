@@ -1,8 +1,9 @@
-from typing import TYPE_CHECKING, Any, Generic, Type, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, Type, TypeVar
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.future import select
+from sqlalchemy.sql.base import ExecutableOption
 
 from intric.base.base_entity import Entity, EntityMapper
 from intric.database.tables.base_class import BasePublic
@@ -21,11 +22,12 @@ M = TypeVar("M", bound=EntityMapper[Any, Any])
 
 class BaseRepoImpl(Generic[T, DB, M]):
     def __init__(self, session: "AsyncSession", model: Type[DB], mapper: M):
+        super().__init__()
         self.session = session
         self._db_model = model
         self.mapper = mapper
 
-        self._options = []
+        self._options: list[ExecutableOption] = []
 
     async def query(self, **filters: object) -> list[T]:
         if not filters:
@@ -69,7 +71,7 @@ class BaseRepoImpl(Generic[T, DB, M]):
         result = await self.session.execute(query)
         _record = result.scalar_one()
 
-        return await self.one(id=cast(UUID, _record.id))
+        return await self.one(id=_record.id)
 
     async def update(self, obj: T) -> T:
         assert not obj.is_new
@@ -85,7 +87,7 @@ class BaseRepoImpl(Generic[T, DB, M]):
         result = await self.session.execute(query)
         _record = result.scalar_one()
 
-        return await self.one(id=cast(UUID, _record.id))
+        return await self.one(id=_record.id)
 
     async def delete(self, id: "UUID") -> bool:
         stmt = sa.delete(self._db_model).where(self._db_model.id == id)

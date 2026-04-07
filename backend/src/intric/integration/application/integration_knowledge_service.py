@@ -128,7 +128,8 @@ class IntegrationKnowledgeService:
         tenant_sharepoint_app_repo: TenantSharePointAppRepositoryProtocol,
         tenant_app_auth_service: "TenantAppAuthService",
         service_account_auth_service: "ServiceAccountAuthService | None" = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.job_service = job_service
         self.user = user
         self.oauth_token_repo = oauth_token_repo

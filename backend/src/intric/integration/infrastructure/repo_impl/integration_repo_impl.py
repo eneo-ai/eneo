@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.future import select
+from typing_extensions import override
 
 from intric.database.tables.integration_table import Integration as IntegrationDBModel
 from intric.integration.domain.entities.integration import Integration
@@ -25,6 +26,7 @@ class IntegrationRepoImpl(
     def __init__(self, session: "AsyncSession", mapper: IntegrationMapper):
         super().__init__(session=session, model=IntegrationDBModel, mapper=mapper)
 
+    @override
     async def all(self) -> list[Integration]:
         query = select(self._db_model)
         result = await self.session.scalars(query)
@@ -34,6 +36,7 @@ class IntegrationRepoImpl(
 
         return self.mapper.to_entities(result)
 
+    @override
     async def add(self, obj: Integration) -> Integration:
         try:
             return await super().add(obj)

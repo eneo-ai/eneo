@@ -33,7 +33,8 @@ class Oauth2Service:
         user_integration_repo: "UserIntegrationRepository",
         oauth_token_repo: "OauthTokenRepository",
         sharepoint_auth_service: "SharepointAuthService",
-    ):
+    ) -> None:
+        super().__init__()
         self.confluence_auth_service = confluence_auth_service
         self.tenant_integration_repo = tenant_integration_repo
         self.user_integration_repo = user_integration_repo
@@ -112,9 +113,7 @@ class Oauth2Service:
             )
             if token_result is None:
                 raise BadRequestException("Failed to exchange SharePoint auth code")
-            access_token = token_result.get("access_token")
-            if access_token is None:
-                raise BadRequestException("Missing SharePoint access token")
+            access_token = token_result["access_token"]
             resource_data = await self.sharepoint_auth_service.get_resources(
                 access_token
             )
@@ -122,17 +121,12 @@ class Oauth2Service:
             token_result = await self.confluence_auth_service.exchange_token(auth_code)
             if token_result is None:
                 raise BadRequestException("Failed to exchange Confluence auth code")
-            access_token = token_result.get("access_token")
-            if access_token is None:
-                raise BadRequestException("Missing Confluence access token")
+            access_token = token_result["access_token"]
             resource_data = await self.confluence_auth_service.get_resources(
                 access_token
             )
         else:
             raise BadRequestException("Invalid integration type")
-
-        if resource_data is None:
-            raise BadRequestException("Failed to fetch integration resources")
 
         # NOTE: build unified factory interface to construct a new entity
         # so that we do not need to manually handle the creation of entities in

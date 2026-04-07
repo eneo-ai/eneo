@@ -1,5 +1,7 @@
 import asyncio
-from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, cast
+
+from typing_extensions import override
 
 from intric.integration.domain.entities.integration_preview import IntegrationPreview
 from intric.integration.domain.entities.oauth_token import OauthToken, SharePointToken
@@ -49,6 +51,7 @@ class SharePointPreviewService(BasePreviewService):
         self.service_account_auth_service = service_account_auth_service
         self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
 
+    @override
     async def get_preview_info(
         self,
         token: OauthToken,
@@ -186,16 +189,19 @@ class SharePointPreviewService(BasePreviewService):
 
     def _to_sharepoint_preview_data(
         self,
-        data: dict,
+        data: Dict[str, Any],
     ) -> List[IntegrationPreview]:
-        results = data.get("value", [])
+        raw_value = data.get("value", [])
+        results: list[Dict[str, Any]] = (
+            cast(list[Dict[str, Any]], raw_value) if isinstance(raw_value, list) else []
+        )
 
         previews: List[IntegrationPreview] = []
         for r in results:
             item = IntegrationPreview(
-                name=r.get("displayName"),
-                key=r.get("id"),
-                url=r.get("webUrl"),
+                name=str(r.get("displayName") or ""),
+                key=str(r.get("id") or ""),
+                url=str(r.get("webUrl") or ""),
                 type="site",
                 category=self.CATEGORY_OTHER_SITES,
             )
@@ -233,7 +239,9 @@ class SharePointPreviewService(BasePreviewService):
 
         has_membership_context = True
         try:
-            member_group_ids = set(await content_client.get_my_member_group_ids())
+            member_group_ids: set[str] = set(
+                await content_client.get_my_member_group_ids()
+            )
         except Exception as e:
             logger.info(
                 "Could not load memberOf groups for SharePoint categorization, "

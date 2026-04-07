@@ -20,6 +20,7 @@ from intric.integration.infrastructure.clients.sharepoint_content_client import 
 from intric.integration.infrastructure.content_service.types import (
     SharePointItem,
     SharePointTokenProtocol,
+    SyncMetadata,
     SyncStats,
 )
 from intric.integration.infrastructure.content_service.utils import (
@@ -234,7 +235,8 @@ class SimpleSharePointToken:
     in the database, but need a token object with access_token attribute.
     """
 
-    def __init__(self, access_token: str):
+    def __init__(self, access_token: str) -> None:
+        super().__init__()
         self.access_token = access_token
         self.base_url = "https://graph.microsoft.com"
 
@@ -276,7 +278,8 @@ class SharePointContentService:
         service_account_auth_service: "ServiceAccountAuthService | None" = None,
         sync_log_repo: "SyncLogRepository | None" = None,
         change_key_service: "OfficeChangeKeyService | None" = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.job_service = job_service
         self.oauth_token_repo = oauth_token_repo
         self.user_integration_repo = user_integration_repo
@@ -363,9 +366,8 @@ class SharePointContentService:
 
             stats = self._initialize_stats()
 
-            integration_knowledge = cast(
-                "IntegrationKnowledge",
-                await self.integration_knowledge_repo.one(id=integration_knowledge_id),
+            integration_knowledge = await self.integration_knowledge_repo.one(
+                id=integration_knowledge_id
             )
             resolved_integration_knowledge_id = integration_knowledge.id
             resolved_site_id = site_id or integration_knowledge.site_id
@@ -397,11 +399,8 @@ class SharePointContentService:
             )
             summary_stats = self._build_summary_stats(stats)
 
-            integration_knowledge = cast(
-                "IntegrationKnowledge",
-                await self.integration_knowledge_repo.one(
-                    id=resolved_integration_knowledge_id
-                ),
+            integration_knowledge = await self.integration_knowledge_repo.one(
+                id=resolved_integration_knowledge_id
             )
 
             files_processed = summary_stats.get("files_processed", 0)
@@ -455,7 +454,14 @@ class SharePointContentService:
                         status="success",
                         started_at=started_at,
                         completed_at=datetime.now(timezone.utc),
-                        metadata=dict(summary_stats),
+                        metadata=SyncMetadata(
+                            files_processed=summary_stats.get("files_processed", 0),
+                            files_deleted=summary_stats.get("files_deleted", 0),
+                            pages_processed=summary_stats.get("pages_processed", 0),
+                            folders_processed=summary_stats.get("folders_processed", 0),
+                            skipped_items=summary_stats.get("skipped_items", 0),
+                            skipped_details=summary_stats.get("skipped_details", []),
+                        ),
                     )
                     await self.sync_log_repo.add(sync_log)
                 else:
@@ -524,9 +530,8 @@ class SharePointContentService:
             else:
                 raise ValueError("Either token_id or tenant_app_id must be provided")
 
-            integration_knowledge = cast(
-                "IntegrationKnowledge",
-                await self.integration_knowledge_repo.one(id=integration_knowledge_id),
+            integration_knowledge = await self.integration_knowledge_repo.one(
+                id=integration_knowledge_id
             )
             resolved_integration_knowledge_id = integration_knowledge.id
             resolved_site_id = site_id or integration_knowledge.site_id
@@ -741,7 +746,9 @@ class SharePointContentService:
                             # Update integration knowledge size to reflect deletion
                             # Filter out None values before accessing blob.size
                             valid_deleted_blobs = [
-                                blob for blob in deleted_blobs if blob is not None
+                                blob
+                                for blob in deleted_blobs
+                                if blob is not None  # pyright: ignore[reportUnnecessaryComparison]  # defensive guard
                             ]
                             if valid_deleted_blobs:
                                 current_size = _safe_int(
@@ -892,7 +899,18 @@ class SharePointContentService:
                             status="success",
                             started_at=started_at,
                             completed_at=datetime.now(timezone.utc),
-                            metadata=dict(summary_stats),
+                            metadata=SyncMetadata(
+                                files_processed=summary_stats.get("files_processed", 0),
+                                files_deleted=summary_stats.get("files_deleted", 0),
+                                pages_processed=summary_stats.get("pages_processed", 0),
+                                folders_processed=summary_stats.get(
+                                    "folders_processed", 0
+                                ),
+                                skipped_items=summary_stats.get("skipped_items", 0),
+                                skipped_details=summary_stats.get(
+                                    "skipped_details", []
+                                ),
+                            ),
                         )
                         await self.sync_log_repo.add(sync_log)
                     else:
@@ -1425,7 +1443,7 @@ class SharePointContentService:
         folders = summary.get("folders_processed", 0) or 0
         skipped = summary.get("skipped_items", 0) or 0
 
-        processed_parts = []
+        processed_parts: list[str] = []
         if files:
             processed_parts.append(f"{files} file{'s' if files != 1 else ''}")
         if deleted:
@@ -1437,7 +1455,7 @@ class SharePointContentService:
         if not processed_parts:
             processed_parts.append("0 files")
 
-        extra_parts = []
+        extra_parts: list[str] = []
         if folders:
             extra_parts.append(f"{folders} folder{'s' if folders != 1 else ''} scanned")
         if skipped:
@@ -1615,7 +1633,7 @@ class SharePointContentService:
 
     def _flatten_files(self, items: list[SharePointItem]) -> list[SharePointItem]:
         """Extract all files from a list of items (excluding folders)."""
-        files = []
+        files: list[SharePointItem] = []
         for item in items:
             if not item.get("folder", {}):
                 # It's a file

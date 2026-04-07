@@ -47,7 +47,8 @@ class SharepointWebhookService:
         job_repo: JobRepository,
         user_repo: UsersRepository,
         change_key_service: OfficeChangeKeyService,
-    ):
+    ) -> None:
+        super().__init__()
         self.session = session
         self.oauth_token_repo = oauth_token_repo
         self.job_repo = job_repo
@@ -222,7 +223,9 @@ class SharepointWebhookService:
                 continue
 
             # Validate that user_integration_db.id is not None before proceeding
-            if user_integration_db.id is None:
+            # (id is always populated from DB; this guards against unexpected None)
+            ui_id = user_integration_db.id
+            if ui_id is None:  # pyright: ignore[reportUnnecessaryComparison]  # defensive guard: DB id is non-null in practice
                 logger.error(
                     "user_integration_db.id is None for knowledge %s; skipping",
                     knowledge_db.id,
@@ -296,7 +299,7 @@ class SharepointWebhookService:
                 if user_id_str not in user_cache:
                     try:
                         loaded_user = await self.user_repo.get_user_by_id(
-                            id=cast(UUID, user_integration_db.user_id)
+                            id=user_integration_db.user_id
                         )
                         if loaded_user is None:
                             raise ValueError(
@@ -331,10 +334,10 @@ class SharepointWebhookService:
 
             params = SharepointContentTaskParam(
                 user_id=user_id_for_job,
-                id=cast(UUID, user_integration_db.id),
+                id=ui_id,
                 token_id=token_id,  # None for tenant_app, UUID for user_oauth
                 tenant_app_id=tenant_app_id,  # UUID for tenant_app, None for user_oauth
-                integration_knowledge_id=cast(UUID, knowledge_db.id),
+                integration_knowledge_id=knowledge_db.id,
                 site_id=site_id_value
                 or (resource_id if resource_type == "site" else None),
                 drive_id=drive_id_value

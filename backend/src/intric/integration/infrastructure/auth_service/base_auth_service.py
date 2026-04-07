@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, TypedDict
+from typing import Optional, TypedDict
 from uuid import UUID
+
+from intric.integration.infrastructure.content_service.types import OAuthResource
 
 DEFAULT_AUTH_TIMEOUT = 20
 
@@ -21,7 +23,7 @@ class BaseOauthService(ABC):
     @abstractmethod
     async def get_resources(
         self, access_token: str, tenant_id: Optional[UUID] = None
-    ) -> list[dict[str, Any]]: ...
+    ) -> list[OAuthResource]: ...
     @abstractmethod
     async def exchange_token(
         self, auth_code: str, tenant_id: Optional[UUID] = None

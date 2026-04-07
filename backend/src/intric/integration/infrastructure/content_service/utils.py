@@ -198,14 +198,14 @@ def extract_text_from_pptx(
 
                 for slide_num, slide in enumerate(presentation.slides, 1):
                     # Extract text from all shapes on the slide
-                    slide_content = []
+                    slide_content: list[str] = []
 
                     # Process each shape
                     for shape in slide.shapes:
                         # Extract text from text frames
                         if hasattr(shape, "text") and shape.text.strip():  # type: ignore[attr-defined]
                             # Skip template placeholders
-                            text = shape.text.strip()  # type: ignore[attr-defined]
+                            text: str = str(shape.text).strip()  # type: ignore[attr-defined]
 
                             # Skip common placeholders and formatting text
                             skip_phrases = [
@@ -255,7 +255,7 @@ def extract_text_from_pptx(
         for i, slide_file in enumerate(slide_files, 1):
             try:
                 with zip_file.open(slide_file) as f:
-                    slide_content = f.read()
+                    slide_bytes: bytes = f.read()
 
                     # Extract paragraph text using more precise targeting
                     # This focuses on actual content and avoids placeholders
@@ -263,9 +263,9 @@ def extract_text_from_pptx(
 
                     # Extract actual slide content from more specific XML paths
                     # 1. Extract text from title placeholders
-                    title_matches = re.findall(
+                    title_matches: list[bytes] = re.findall(
                         b"<p:title[^>]*>.*?<a:t[^>]*>(.*?)</a:t>",
-                        slide_content,
+                        slide_bytes,
                         re.DOTALL,
                     )
                     for match in title_matches:
@@ -277,9 +277,9 @@ def extract_text_from_pptx(
                             pass
 
                     # 2. Extract text from actual content placeholders
-                    body_matches = re.findall(
+                    body_matches: list[bytes] = re.findall(
                         b"<p:bodyPr[^>]*>.*?<a:t[^>]*>(.*?)</a:t>",
-                        slide_content,
+                        slide_bytes,
                         re.DOTALL,
                     )
                     for match in body_matches:
@@ -314,8 +314,9 @@ def extract_text_from_xlsx(binary_data: bytes) -> str:
         xls = pd.ExcelFile(excel_file)
         csv_data: list[str] = []
         for sheet_name in xls.sheet_names:
-            df: pd.DataFrame = pd.read_excel(xls, sheet_name=sheet_name)
-            csv_text: str = df.to_csv(index=False, sep="|")
+            df: pd.DataFrame = pd.read_excel(xls, sheet_name=sheet_name)  # type: ignore[assignment]  # pandas stubs return broad type
+            _csv_raw = df.to_csv(index=False, sep="|")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs incomplete
+            csv_text: str = _csv_raw if isinstance(_csv_raw, str) else str(_csv_raw)  # pyright: ignore[reportUnknownArgumentType]  # pandas stubs return unknown
             csv_data.append(f"### {sheet_name} ###\n{csv_text}")
         return "Excel sheet data: " + "\n\n".join(csv_data)
     except Exception as e:

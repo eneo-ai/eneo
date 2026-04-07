@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 class TenantSharePointAppService:
     """Service for managing tenant SharePoint application credentials."""
 
-    def __init__(self, tenant_app_repo: TenantSharePointAppRepository):
+    def __init__(self, tenant_app_repo: TenantSharePointAppRepository) -> None:
+        super().__init__()
         self.tenant_app_repo = tenant_app_repo
 
     async def get_active_app_for_tenant(

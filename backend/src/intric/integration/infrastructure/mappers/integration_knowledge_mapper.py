@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, List, Sequence
 
+from typing_extensions import override
+
 from intric.base.base_entity import EntityMapper
 from intric.database.tables.integration_table import (
     IntegrationKnowledge as IntegrationKnowledgeDBModel,
@@ -20,6 +22,7 @@ if TYPE_CHECKING:
 class IntegrationKnowledgeMapper(
     EntityMapper[IntegrationKnowledge, IntegrationKnowledgeDBModel]
 ):
+    @override
     def to_db_dict(self, entity: IntegrationKnowledge) -> Dict[str, Any]:
         return {
             "name": entity.name,
@@ -44,6 +47,7 @@ class IntegrationKnowledgeMapper(
             "wrapper_name": entity.wrapper_name,
         }
 
+    @override
     def to_entity(
         self,
         db_model: IntegrationKnowledgeDBModel,
@@ -56,6 +60,7 @@ class IntegrationKnowledgeMapper(
             record=db_model, embedding_model=embedding_model
         )
 
+    @override
     def to_entities(
         self,
         db_models: Sequence[IntegrationKnowledgeDBModel],

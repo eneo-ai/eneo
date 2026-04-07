@@ -48,7 +48,8 @@ class SharePointAuthRouter:
         tenant_app_auth_service: TenantAppAuthService,
         oauth_token_service: OauthTokenService,
         service_account_auth_service: Optional[ServiceAccountAuthService] = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.user_oauth_service = user_oauth_service
         self.tenant_app_service = tenant_app_service
         self.tenant_app_auth_service = tenant_app_auth_service

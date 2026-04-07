@@ -25,7 +25,8 @@ class TenantIntegrationService:
         tenant_integration_repo: "TenantIntegrationRepository",
         integration_repo: "IntegrationRepository",
         user: "UserInDB",
-    ):
+    ) -> None:
+        super().__init__()
         self.tenant_integration_repo = tenant_integration_repo
         self.integration_repo = integration_repo
         self.user = user

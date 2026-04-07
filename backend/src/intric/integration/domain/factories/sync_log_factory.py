@@ -1,9 +1,8 @@
-from datetime import datetime
 from typing import cast
-from uuid import UUID
 
 from intric.database.tables.sync_log_table import SyncLog as SyncLogDBModel
 from intric.integration.domain.entities.sync_log import SyncLog
+from intric.integration.infrastructure.content_service.types import SyncMetadata
 
 
 class SyncLogFactory:
@@ -12,17 +11,22 @@ class SyncLogFactory:
     @staticmethod
     def create_from_db(record: SyncLogDBModel) -> SyncLog:
         """Convert database record to domain entity."""
+        # sync_metadata comes from JSON column — cast to SyncMetadata for type safety
+        raw_metadata = record.sync_metadata
+        metadata: SyncMetadata | None = (
+            cast(SyncMetadata, raw_metadata) if isinstance(raw_metadata, dict) else None
+        )
         return SyncLog(
-            id=cast(UUID, record.id),
-            created_at=cast(datetime | None, record.created_at),
-            updated_at=cast(datetime | None, record.updated_at),
-            integration_knowledge_id=cast(UUID, record.integration_knowledge_id),
-            sync_type=cast(str, record.sync_type),
-            status=cast(str, record.status),
-            error_message=cast(str | None, record.error_message),
-            metadata=cast(dict, record.sync_metadata),
-            started_at=cast(datetime, record.started_at),
-            completed_at=cast(datetime | None, record.completed_at),
+            id=record.id,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+            integration_knowledge_id=record.integration_knowledge_id,
+            sync_type=record.sync_type,
+            status=record.status,
+            error_message=record.error_message,
+            metadata=metadata,
+            started_at=record.started_at,
+            completed_at=record.completed_at,
         )
 
     @staticmethod

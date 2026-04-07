@@ -26,7 +26,8 @@ class SharePointTreeService:
         user_integration_repo: "UserIntegrationRepository",
         sharepoint_auth_router: "SharePointAuthRouter",
         space_repo: "SpaceRepository",
-    ):
+    ) -> None:
+        super().__init__()
         self.user_integration_repo = user_integration_repo
         self.sharepoint_auth_router = sharepoint_auth_router
         self.space_repo = space_repo

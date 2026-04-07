@@ -72,14 +72,15 @@ def _require_timestamp(value: datetime | None, field_name: str) -> datetime:
 class _SimpleGraphToken:
     """Lightweight token wrapper compatible with subscription service."""
 
-    def __init__(self, access_token: str):
+    def __init__(self, access_token: str) -> None:
+        super().__init__()
         self.access_token = access_token
         self.base_url = "https://graph.microsoft.com"
 
 
 async def _get_redis_client() -> Redis:
     settings = get_settings()
-    return Redis.from_url(
+    return Redis.from_url(  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
         f"redis://{settings.redis_host}:{settings.redis_port}",
         encoding="utf8",
         decode_responses=True,

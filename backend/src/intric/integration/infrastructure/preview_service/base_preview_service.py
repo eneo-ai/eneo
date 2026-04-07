@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, List
+from uuid import UUID
 
 from intric.integration.domain.entities.integration_preview import IntegrationPreview
 from intric.integration.domain.entities.oauth_token import OauthToken
@@ -9,7 +10,8 @@ if TYPE_CHECKING:
 
 
 class BasePreviewService(ABC):
-    def __init__(self, oauth_token_service: "OauthTokenService"):
+    def __init__(self, oauth_token_service: "OauthTokenService") -> None:
+        super().__init__()
         self.oauth_token_service = oauth_token_service
 
     @abstractmethod
@@ -19,7 +21,7 @@ class BasePreviewService(ABC):
     ) -> List[IntegrationPreview]:
         pass
 
-    async def token_refresh_callback(self, token_id):
+    async def token_refresh_callback(self, token_id: UUID) -> dict[str, str]:
         token = await self.oauth_token_service.refresh_and_update_token(
             token_id=token_id
         )

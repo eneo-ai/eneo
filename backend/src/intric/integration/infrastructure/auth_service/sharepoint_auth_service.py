@@ -1,9 +1,10 @@
 from logging import getLogger
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, Optional
 from urllib.parse import urlencode
 from uuid import UUID
 
 import httpx
+from typing_extensions import override
 
 from intric.integration.infrastructure.auth_service.base_auth_service import (
     DEFAULT_AUTH_TIMEOUT,
@@ -34,7 +35,8 @@ class SharepointAuthService(BaseOauthService):
     def __init__(
         self,
         tenant_sharepoint_app_service: Optional["TenantSharePointAppService"] = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.tenant_sharepoint_app_service = tenant_sharepoint_app_service
         self.default_scopes = self.DEFAULT_SCOPES
 
@@ -73,6 +75,7 @@ class SharepointAuthService(BaseOauthService):
             "authority": f"https://login.microsoftonline.com/{tenant_app.tenant_domain}",
         }
 
+    @override
     async def gen_auth_url(
         self, state: Optional[str] = None, tenant_id: Optional[UUID] = None
     ) -> dict[str, str]:
@@ -98,6 +101,7 @@ class SharepointAuthService(BaseOauthService):
         url = f"{auth_endpoint}?{urlencode(params)}"
         return {"auth_url": url}
 
+    @override
     async def exchange_token(
         self, auth_code: str, tenant_id: Optional[UUID] = None
     ) -> TokenResponse | None:
@@ -131,6 +135,7 @@ class SharepointAuthService(BaseOauthService):
             else:
                 response.raise_for_status()
 
+    @override
     async def refresh_access_token(
         self, refresh_token: str, tenant_id: Optional[UUID] = None
     ) -> TokenResponse | None:
@@ -162,6 +167,7 @@ class SharepointAuthService(BaseOauthService):
             else:
                 response.raise_for_status()
 
+    @override
     async def get_resources(
         self, access_token: str, tenant_id: Optional[UUID] = None
     ) -> list[OAuthResource]:
@@ -173,7 +179,8 @@ class SharepointAuthService(BaseOauthService):
             )
 
             if response.status_code == 200:
-                return cast(list[OAuthResource], response.json())
+                result: list[OAuthResource] = response.json()
+                return result
             else:
                 response.raise_for_status()
                 raise RuntimeError("Failed to fetch SharePoint resources")

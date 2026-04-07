@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from sqlalchemy.orm import selectinload
+from typing_extensions import override
 
 from intric.database.tables.integration_table import (
     TenantIntegration as TenantIntegrationDBModel,
@@ -30,6 +31,7 @@ class TenantIntegrationRepoImpl(
         super().__init__(session=session, model=TenantIntegrationDBModel, mapper=mapper)
         self._options = [selectinload(self._db_model.integration)]
 
+    @override
     async def delete_by_tenant(self, id: "UUID", tenant_id: "UUID") -> None:
         """Tenant-bound delete. Returns 404 on no-match (IDOR prevention)."""
         stmt = (

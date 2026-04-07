@@ -1,5 +1,5 @@
 import asyncio
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import redis.asyncio as redis
 import sqlalchemy as sa
@@ -28,7 +28,11 @@ logger = get_logger(__name__)
 
 
 async def _get_knowledge_with_retry(
-    container: "Container", knowledge_id, *, retries: int = 20, delay: float = 1.0
+    container: "Container",
+    knowledge_id: Any,
+    *,
+    retries: int = 20,
+    delay: float = 1.0,
 ):
     repo = container.integration_knowledge_repo()
 
@@ -72,7 +76,7 @@ async def _validate_embedding_provider(
 
 @worker.task(channel_type=ChannelType.PULL_CONFLUENCE_CONTENT)
 async def pull_confluence_content(
-    params: "ConfluenceContentTaskParam", container: "Container", **kw
+    params: "ConfluenceContentTaskParam", container: "Container", **kw: Any
 ):
     knowledge = await _get_knowledge_with_retry(
         container, params.integration_knowledge_id
@@ -91,7 +95,7 @@ async def pull_confluence_content(
 
 @worker.task(channel_type=ChannelType.PULL_SHAREPOINT_CONTENT)
 async def pull_sharepoint_content(
-    params: "SharepointContentTaskParam", container: "Container", **kw
+    params: "SharepointContentTaskParam", container: "Container", **kw: Any
 ):
     # Redis-based deduplication to prevent duplicate syncs from concurrent webhooks
     knowledge_id_str = str(params.integration_knowledge_id)
@@ -101,7 +105,7 @@ async def pull_sharepoint_content(
     try:
         # Try to acquire the lock in Redis (SET only if not exists)
         settings = get_settings()
-        redis_client = await redis.from_url(
+        redis_client = await redis.from_url(  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
             f"redis://{settings.redis_host}:{settings.redis_port}",
             encoding="utf8",
             decode_responses=True,
@@ -160,7 +164,7 @@ async def pull_sharepoint_content(
 
 @worker.task(channel_type=ChannelType.SYNC_SHAREPOINT_DELTA)
 async def sync_sharepoint_delta(
-    params: "SharepointContentTaskParam", container: "Container", **kw
+    params: "SharepointContentTaskParam", container: "Container", **kw: Any
 ):
     """
     Process incremental SharePoint changes using delta query.
@@ -177,7 +181,7 @@ async def sync_sharepoint_delta(
     try:
         # Try to acquire the lock in Redis (SET only if not exists)
         settings = get_settings()
-        redis_client = await redis.from_url(
+        redis_client = await redis.from_url(  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
             f"redis://{settings.redis_host}:{settings.redis_port}",
             encoding="utf8",
             decode_responses=True,
