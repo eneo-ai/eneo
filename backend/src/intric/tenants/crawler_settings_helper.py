@@ -9,11 +9,38 @@ It defines types, validation ranges, defaults, and descriptions.
 All consumers (tenant.py validator, router Pydantic model) should import from here.
 """
 
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar, overload
 
 from intric.main.config import get_settings
 
 T = TypeVar("T")
+
+# Setting names grouped by their declared spec type. Keep in sync with
+# CRAWLER_SETTING_SPECS below — there is a unit-style assertion at module
+# import time that catches drift.
+IntCrawlerSetting = Literal[
+    "crawl_max_length",
+    "download_timeout",
+    "download_max_size",
+    "dns_timeout",
+    "retry_times",
+    "closespider_itemcount",
+    "tenant_worker_concurrency_limit",
+    "crawl_stale_threshold_minutes",
+    "queued_stale_threshold_minutes",
+    "crawl_heartbeat_interval_seconds",
+    "crawl_feeder_interval_seconds",
+    "crawl_feeder_batch_size",
+    "crawl_job_max_age_seconds",
+    "tenant_worker_semaphore_ttl_seconds",
+    "crawl_page_batch_size",
+]
+
+BoolCrawlerSetting = Literal[
+    "obey_robots",
+    "autothrottle_enabled",
+    "crawl_feeder_enabled",
+]
 
 # Buffer time (5 minutes) between semaphore TTL and job max age
 # This ensures the flag doesn't expire before watchdog can kill stale jobs
@@ -159,11 +186,33 @@ def _get_setting_default(setting_name: str, spec: dict[str, Any]) -> Any:
     raise KeyError(f"Setting {setting_name} has no default or env_attr defined")
 
 
+@overload
+def get_crawler_setting(
+    setting_name: IntCrawlerSetting,
+    tenant_crawler_settings: dict[str, Any] | None,
+) -> int: ...
+
+
+@overload
+def get_crawler_setting(
+    setting_name: BoolCrawlerSetting,
+    tenant_crawler_settings: dict[str, Any] | None,
+) -> bool: ...
+
+
+@overload
+def get_crawler_setting(
+    setting_name: str,
+    tenant_crawler_settings: dict[str, Any] | None,
+    default: T,
+) -> T: ...
+
+
 def get_crawler_setting(
     setting_name: str,
     tenant_crawler_settings: dict[str, Any] | None,
     default: T | None = None,
-) -> T:
+) -> T | int | bool:
     """
     Get a crawler setting value with tenant override support.
 
@@ -217,7 +266,7 @@ def get_all_crawler_settings(
         Complete settings dict with tenant overrides merged with defaults
     """
     # Build defaults from specs
-    result = {}
+    result: dict[str, Any] = {}
     for setting_name, spec in CRAWLER_SETTING_SPECS.items():
         result[setting_name] = _get_setting_default(setting_name, spec)
 
@@ -239,7 +288,7 @@ def validate_crawler_setting(key: str, value: Any) -> list[str]:
     Returns:
         List of validation error messages (empty if valid)
     """
-    errors = []
+    errors: list[str] = []
 
     if key not in CRAWLER_SETTING_SPECS:
         errors.append(
