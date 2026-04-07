@@ -18,6 +18,7 @@ class SpaceInitService:
         assistant_service: "AssistantService",
         space_repo: "SpaceRepository",
     ):
+        super().__init__()
         self.user = user
         self.space_service = space_service
         self.assistant_service = assistant_service

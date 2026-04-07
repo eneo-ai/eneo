@@ -14,6 +14,7 @@ from intric.assistants.api.assistant_models import (
     AssistantSparse,
     DefaultAssistant,
     MCPServerPublicDict,
+    _empty_mcp_server_public_dict_list,
 )
 from intric.collections.presentation.collection_models import CollectionPublic
 from intric.embedding_models.presentation.embedding_model_models import (
@@ -147,7 +148,9 @@ class UpdateSpaceDryRunResponse(BaseModel):
     completion_models: list[CompletionModelPublic]
     embedding_models: list[EmbeddingModelPublic]
     transcription_models: list[TranscriptionModelPublic]
-    mcp_servers: list[MCPServerPublicDict] = Field(default_factory=list)
+    mcp_servers: list[MCPServerPublicDict] = Field(
+        default_factory=_empty_mcp_server_public_dict_list
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -196,7 +199,9 @@ class SpacePublic(SpaceDashboard):
     embedding_models: list[EmbeddingModelPublic]
     completion_models: list[CompletionModelPublic]
     transcription_models: list[TranscriptionModelPublic]
-    mcp_servers: list[MCPServerPublicDict] = Field(default_factory=list)
+    mcp_servers: list[MCPServerPublicDict] = Field(
+        default_factory=_empty_mcp_server_public_dict_list
+    )
     knowledge: Knowledge
     members: PaginatedPermissions[SpaceMember]
     group_members: PaginatedPermissions[SpaceGroupMember]

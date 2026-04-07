@@ -1,5 +1,6 @@
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Optional, cast
+from uuid import UUID
 
 from intric.apps.apps.app_factory import AppFactory
 from intric.collections.domain.collection import Collection
@@ -23,8 +24,6 @@ from intric.users.user import UserInDBBase, UserSparse
 from intric.websites.domain.website import Website
 
 if TYPE_CHECKING:
-    from uuid import UUID
-
     from intric.assistants.assistant_factory import AssistantFactory
     from intric.completion_models.domain.completion_model import CompletionModel
     from intric.database.tables.integration_table import (
@@ -35,6 +34,11 @@ if TYPE_CHECKING:
     )
     from intric.database.tables.websites_table import Websites
     from intric.embedding_models.domain.embedding_model import EmbeddingModel
+    from intric.groups_legacy.api.group_models import GroupInDBBase
+    from intric.integration.domain.entities.sharepoint_subscription import (
+        SharePointSubscription as DomainSharePointSubscription,
+    )
+    from intric.integration.domain.entities.user_integration import UserIntegration
     from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.transcription_models.domain.transcription_model import (
         TranscriptionModel,
@@ -44,6 +48,7 @@ if TYPE_CHECKING:
 
 class SpaceFactory:
     def __init__(self, assistant_factory: "AssistantFactory", app_factory: AppFactory):
+        super().__init__()
         self.assistant_factory = assistant_factory
         self.app_factory = app_factory
 
@@ -51,9 +56,9 @@ class SpaceFactory:
     def create_space(
         name: str,
         tenant_id: "UUID",
-        tenant_space_id: "UUID" | None = None,
-        description: str | None = None,
-        user_id: "UUID" | None = None,
+        tenant_space_id: Optional["UUID"] = None,
+        description: Optional[str] = None,
+        user_id: Optional["UUID"] = None,
     ) -> Space:
         return Space(
             id=None,
@@ -175,7 +180,7 @@ class SpaceFactory:
         }
 
         # Build group members from database
-        group_members = {}
+        group_members: dict[UUID, SpaceGroupMember] = {}
         for space_group in getattr(space_in_db, "group_members", []) or []:
             user_group = space_group.user_group
             if user_group:
@@ -189,13 +194,16 @@ class SpaceFactory:
         space_collections = [
             Collection.to_domain(
                 record=collection,
-                embedding_model=next(
-                    (
-                        embedding_model
-                        for embedding_model in embedding_models
-                        if embedding_model.id == collection.embedding_model_id
+                embedding_model=cast(
+                    "EmbeddingModel",
+                    next(
+                        (
+                            embedding_model
+                            for embedding_model in embedding_models
+                            if embedding_model.id == collection.embedding_model_id
+                        ),
+                        None,
                     ),
-                    None,
                 ),
                 num_info_blobs=info_blob_count,
             )
@@ -217,13 +225,13 @@ class SpaceFactory:
             for website in websites_in_db
         ]
 
-        ik_source = (
+        ik_source: list["IntegrationKnowledgeDBModel"] = (
             list(integration_knowledge_in_db)
             if integration_knowledge_in_db is not None
             else list(getattr(space_in_db, "integration_knowledge_list", []) or [])
         )
 
-        integration_knowledge_list = []
+        integration_knowledge_list: list[IntegrationKnowledge] = []
         for i in ik_source:
             # Check if sharepoint_subscription was eager loaded via selectinload
             # We need to use sqlalchemy.inspect to check if the attribute was loaded
@@ -241,16 +249,22 @@ class SpaceFactory:
 
             integration_knowledge_list.append(
                 IntegrationKnowledge(
-                    name=i.name,
+                    name=cast(str, i.name),
                     original_name=getattr(i, "original_name", None),
-                    user_integration=getattr(i, "user_integration", None),
-                    embedding_model=next(
-                        (
-                            em
-                            for em in embedding_models
-                            if em.id == i.embedding_model_id
+                    user_integration=cast(
+                        "UserIntegration",
+                        getattr(i, "user_integration", None),
+                    ),
+                    embedding_model=cast(
+                        "EmbeddingModel",
+                        next(
+                            (
+                                em
+                                for em in embedding_models
+                                if em.id == i.embedding_model_id
+                            ),
+                            None,
                         ),
-                        None,
                     ),
                     tenant_id=i.tenant_id,
                     space_id=i.space_id,
@@ -263,7 +277,10 @@ class SpaceFactory:
                     sharepoint_subscription_id=getattr(
                         i, "sharepoint_subscription_id", None
                     ),
-                    sharepoint_subscription=sharepoint_subscription,
+                    sharepoint_subscription=cast(
+                        "Optional[DomainSharePointSubscription]",
+                        sharepoint_subscription,
+                    ),
                     delta_token=getattr(i, "delta_token", None),
                     folder_id=getattr(i, "folder_id", None),
                     folder_path=getattr(i, "folder_path", None),
@@ -316,7 +333,7 @@ class SpaceFactory:
 
         space_services = [
             Service(
-                **service.to_dict(),
+                **service.to_dict(),  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType] -- sqlalchemy_mixins.SerializeMixin lacks type stubs
                 user=UserInDBBase.model_validate(service.user),
                 completion_model=next(
                     (
@@ -326,15 +343,18 @@ class SpaceFactory:
                     ),
                     None,
                 ),
-                groups=[
-                    group
-                    for group in space_collections
-                    if group.id
-                    in [
-                        service_group.group_id
-                        for service_group in service.service_groups
-                    ]
-                ],
+                groups=cast(
+                    "list[GroupInDBBase]",
+                    [
+                        group
+                        for group in space_collections
+                        if group.id
+                        in [
+                            service_group.group_id
+                            for service_group in service.service_groups
+                        ]
+                    ],
+                ),
             )
             for service in services_in_db
         ]

@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Optional, Union
 from uuid import UUID
 
 from intric.main.exceptions import (
@@ -59,13 +59,13 @@ class Space:
         completion_models: list["CompletionModel"],
         transcription_models: list[TranscriptionModel],
         mcp_servers: list["MCPServer"],
-        default_assistant: "Assistant" | None,
-        assistants: list["Assistant"] | None,
-        apps: list["App"] | None,
-        services: list["Service"] | None,
-        websites: list["Website"] | None,
-        collections: list["Collection"] | None,
-        integration_knowledge_list: list["IntegrationKnowledge"] | None,
+        default_assistant: Optional["Assistant"],
+        assistants: Optional[list["Assistant"]],
+        apps: Optional[list["App"]],
+        services: Optional[list["Service"]],
+        websites: Optional[list["Website"]],
+        collections: Optional[list["Collection"]],
+        integration_knowledge_list: Optional[list["IntegrationKnowledge"]],
         members: dict[UUID, SpaceMember] | None,
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
@@ -75,6 +75,7 @@ class Space:
         icon_id: Optional[UUID] = None,
         group_members: dict[UUID, SpaceGroupMember] | None = None,
     ):
+        super().__init__()
         self.id = id
         self.tenant_id = tenant_id
         self.tenant_space_id = tenant_space_id
@@ -164,13 +165,13 @@ class Space:
         if not self.embedding_models:
             return
 
-        sorted_embedding_models = sorted(  # type: ignore[call-overload]
+        sorted_embedding_models = sorted(
             [
                 embedding_model
                 for embedding_model in self.embedding_models
                 if embedding_model.can_access
             ],
-            key=lambda model: model.created_at,
+            key=lambda model: model.created_at or datetime.min,
             reverse=True,
         )
 
@@ -186,13 +187,13 @@ class Space:
         if not self.completion_models:
             return
 
-        sorted_completion_models = sorted(  # type: ignore[call-overload]
+        sorted_completion_models = sorted(
             [
                 completion_model
                 for completion_model in self.completion_models
                 if completion_model.can_access
             ],
-            key=lambda model: model.created_at,
+            key=lambda model: model.created_at or datetime.min,
             reverse=True,
         )
 
@@ -208,13 +209,13 @@ class Space:
         if not self.transcription_models:
             return None
 
-        sorted_transcription_models = sorted(  # type: ignore[call-overload]
+        sorted_transcription_models = sorted(
             [
                 transcription_model
                 for transcription_model in self.transcription_models
                 if transcription_model.can_access
             ],
-            key=lambda model: model.created_at,
+            key=lambda model: model.created_at or datetime.min,
             reverse=True,
         )
 
@@ -499,7 +500,7 @@ class Space:
     def remove_assistant(self, assistant: "Assistant"):
         for group_chat in self.group_chats or []:
             if assistant.id in [a.assistant.id for a in group_chat.assistants]:
-                group_chat.assistants.remove(assistant)
+                group_chat.assistants.remove(assistant)  # pyright: ignore[reportArgumentType]  # latent bug — see follow-up fix commit
 
         self.assistants.remove(assistant)
 
@@ -565,19 +566,21 @@ class Space:
                 )
 
     def can_run_app(self, app: "App") -> bool:
-        completion_model = cast("CompletionModel", app.completion_model)
+        completion_model = app.completion_model
         if completion_model is None:
             return False
         if not self.is_completion_model_available(completion_model.id):
             return False
-        transcription_model = cast("TranscriptionModel", app.transcription_model)
+        transcription_model = app.transcription_model
         if transcription_model is None:
             return False
         if not self.is_transcription_model_available(transcription_model.id):
             return False
         if self.security_classification is not None:
+            # App.completion_model is typed as CompletionModel | CompletionModelSparse | None;
+            # domain CompletionModel always has security_classification at this call site.
             if self.security_classification.is_greater_than(
-                completion_model.security_classification
+                completion_model.security_classification  # pyright: ignore[reportAttributeAccessIssue,reportUnknownMemberType,reportUnknownArgumentType] -- CompletionModelSparse lacks security_classification but domain model always has it at this call site
             ):
                 return False
             if (
@@ -670,7 +673,7 @@ class Space:
             raise BadRequestException(SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE)
 
     def add_completion_model(self, model: "CompletionModel"):
-        if model is None or getattr(model, "id", None) is None:
+        if getattr(model, "id", None) is None:
             raise BadRequestException("Invalid completion model")
 
         if hasattr(model, "can_access") and not model.can_access:

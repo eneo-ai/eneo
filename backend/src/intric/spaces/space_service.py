@@ -199,7 +199,7 @@ class SpaceService:
         # Convert to domain entities
         space.mcp_servers = [
             MCPServer(
-                id=cast(UUID, server.id),
+                id=server.id,
                 tenant_id=server.tenant_id,
                 name=server.name,
                 description=server.description,
@@ -211,8 +211,8 @@ class SpaceService:
                 tags=server.tags,
                 icon_url=server.icon_url,
                 documentation_url=server.documentation_url,
-                created_at=cast(datetime, server.created_at),
-                updated_at=cast(datetime, server.updated_at),
+                created_at=server.created_at,
+                updated_at=server.updated_at,
             )
             for server in servers_db
         ]
@@ -348,7 +348,7 @@ class SpaceService:
             # Convert to domain entities
             mcp_servers = [
                 MCPServer(
-                    id=cast(UUID, server.id),
+                    id=server.id,
                     tenant_id=server.tenant_id,
                     name=server.name,
                     description=server.description,
@@ -363,8 +363,8 @@ class SpaceService:
                     security_classification=SecurityClassification.to_domain(
                         server.security_classification
                     ),
-                    created_at=cast(datetime, server.created_at),
-                    updated_at=cast(datetime, server.updated_at),
+                    created_at=server.created_at,
+                    updated_at=server.updated_at,
                 )
                 for server in servers_db
             ]

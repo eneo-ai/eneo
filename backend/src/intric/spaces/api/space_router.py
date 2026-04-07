@@ -186,7 +186,7 @@ async def update_space(
     )
 
     # Track changes
-    changes = {}
+    changes: dict[str, object] = {}
     if update_space_req.name != old_space.name:
         changes["name"] = {"old": old_space.name, "new": update_space_req.name}
     if (
@@ -507,6 +507,7 @@ async def create_app(
     )
 
     # Audit logging
+    assert app.id is not None
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
@@ -536,9 +537,11 @@ async def create_space_services(
     service_service = container.service_service()
     assembler = container.space_assembler()
 
-    service, permissions = await service_service.create_space_service(
+    result = await service_service.create_space_service(
         name=service_in.name, space_id=id
     )
+    service, permissions = result[0], list(result[1])
+    assert service is not None
 
     return assembler.from_service_to_model(service=service, permissions=permissions)
 
@@ -682,7 +685,7 @@ async def create_space_websites(
         pass
 
     # Build extra context with URL, crawl settings, and optional embedding model
-    extra = {
+    extra: dict[str, object] = {
         "url": created_website.url,
         "crawl_type": str(website.crawl_type) if website.crawl_type else None,
         "update_interval": str(website.update_interval)

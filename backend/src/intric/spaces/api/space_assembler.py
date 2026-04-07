@@ -384,6 +384,8 @@ class SpaceAssembler:
         )
 
     def _get_group_chat_model(self, group_chat: "GroupChat") -> GroupChatSparse:
+        assert group_chat.created_at is not None
+        assert group_chat.updated_at is not None
         return GroupChatSparse(
             created_at=group_chat.created_at,
             updated_at=group_chat.updated_at,
@@ -398,6 +400,7 @@ class SpaceAssembler:
         )
 
     def _get_app_model(self, app: "App") -> AppSparse:
+        assert app.id is not None
         return AppSparse(
             created_at=app.created_at,
             updated_at=app.updated_at,
@@ -543,7 +546,7 @@ class SpaceAssembler:
         ]
 
         default_assistant = None
-        if getattr(space, "default_assistant", None) is not None:
+        if space.default_assistant is not None:
             space_default_assistant = space.default_assistant
             da_permissions = self._get_default_assistant_permissions(space)
             rp = self._get_api_key_resource_permissions()
@@ -559,7 +562,7 @@ class SpaceAssembler:
             )
         available_roles = [
             SpaceRole(value=cast("SpaceRoleValue", role))
-            for role in actor.get_available_roles()
+            for role in cast(list[object], actor.get_available_roles())
         ]
         security_classification = None
         if self.user.tenant.security_enabled:
@@ -570,6 +573,7 @@ class SpaceAssembler:
             for server in space.mcp_servers
         ]
 
+        assert space.id is not None
         return SpacePublic(
             created_at=space.created_at,
             updated_at=space.updated_at,
@@ -597,6 +601,7 @@ class SpaceAssembler:
     def from_space_to_sparse_model(
         self, space: Space, include_applications: bool
     ) -> SpaceSparse:
+        assert space.id is not None
         space_sparse = SpaceSparse(
             created_at=space.created_at,
             updated_at=space.updated_at,
@@ -613,7 +618,7 @@ class SpaceAssembler:
         if include_applications:
             self._set_permissions_on_resources(space)
             default_assistant = None
-            if getattr(space, "default_assistant", None) is not None:
+            if space.default_assistant is not None:
                 space_default_assistant = space.default_assistant
                 default_assistant = (
                     self.assistant_assembler.from_assistant_to_default_assistant_model(
@@ -636,7 +641,7 @@ class SpaceAssembler:
         )
 
         default_assistant = None
-        if getattr(space, "default_assistant", None) is not None:
+        if space.default_assistant is not None:
             space_default_assistant = space.default_assistant
             default_assistant = (
                 self.assistant_assembler.from_assistant_to_default_assistant_model(
@@ -645,6 +650,7 @@ class SpaceAssembler:
                 )
             )
 
+        assert space.id is not None
         return SpaceDashboard(
             created_at=space.created_at,
             updated_at=space.updated_at,
@@ -707,7 +713,7 @@ class SpaceAssembler:
                 for tm in result.affected_transcription_models
             ],
             mcp_servers=[
-                MCPServerAssembler.to_dict_with_tools(s)
+                cast(MCPServerPublicDict, MCPServerAssembler.to_dict_with_tools(s))
                 for s in result.affected_mcp_servers
             ],
         )
