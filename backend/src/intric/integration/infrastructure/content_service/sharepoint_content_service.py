@@ -3,9 +3,10 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 import sqlalchemy as sa
+from html2text import html2text
 
-from intric.embedding_models.infrastructure.datastore import Datastore
 from intric.database.tables.info_blob_chunk_table import InfoBlobChunks
+from intric.embedding_models.infrastructure.datastore import Datastore
 from intric.info_blobs.info_blob import InfoBlobAdd
 from intric.integration.domain.entities.oauth_token import SharePointToken
 from intric.integration.domain.entities.sync_log import SyncLog
@@ -20,8 +21,6 @@ from intric.integration.infrastructure.office_change_key_service import (
     OfficeChangeKeyService,
 )
 from intric.main.logging import get_logger
-
-from html2text import html2text
 
 
 def _extract_text_from_canvas_layout(content: dict) -> str:
@@ -98,17 +97,17 @@ if TYPE_CHECKING:
     from intric.integration.domain.repositories.sync_log_repo import (
         SyncLogRepository,
     )
-    from intric.integration.domain.repositories.user_integration_repo import (
-        UserIntegrationRepository,
-    )
     from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
         TenantSharePointAppRepository,
     )
-    from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
-        TenantAppAuthService,
+    from intric.integration.domain.repositories.user_integration_repo import (
+        UserIntegrationRepository,
     )
     from intric.integration.infrastructure.auth_service.service_account_auth_service import (
         ServiceAccountAuthService,
+    )
+    from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
+        TenantAppAuthService,
     )
     from intric.integration.infrastructure.oauth_token_service import (
         OauthTokenService,

@@ -85,6 +85,7 @@ class ConversationService:
         if session_id:
             # get session information to determine where it belongs
             session = await self.session_service.get_session_by_uuid(session_id)
+            assert session is not None
 
             if session.group_chat_id:
                 if require_tool_approval:
@@ -92,7 +93,7 @@ class ConversationService:
                         "Tool approval is not supported for group chats."
                     )
                 # this is a group chat conversation
-                return await self.group_chat_service.ask_group_chat(
+                return await self.group_chat_service.ask_group_chat(  # type: ignore[return-value]
                     question=question,
                     group_chat_id=session.group_chat_id,
                     file_ids=file_ids,
@@ -103,7 +104,8 @@ class ConversationService:
                 )
             else:
                 # this is an assistant conversation
-                return await self.assistant_service.ask(
+                assert session.assistant is not None
+                return await self.assistant_service.ask(  # type: ignore[return-value]
                     question=question,
                     assistant_id=session.assistant.id,
                     file_ids=file_ids,
@@ -119,7 +121,7 @@ class ConversationService:
         else:
             if group_chat_id:
                 # starting a new group chat conversation
-                return await self.group_chat_service.ask_group_chat(
+                return await self.group_chat_service.ask_group_chat(  # type: ignore[return-value]
                     question=question,
                     group_chat_id=group_chat_id,
                     file_ids=file_ids,
@@ -130,7 +132,7 @@ class ConversationService:
                 )
             elif assistant_id:
                 # starting a new assistant conversation
-                return await self.assistant_service.ask(
+                return await self.assistant_service.ask(  # type: ignore[return-value]
                     question=question,
                     assistant_id=assistant_id,
                     file_ids=file_ids,
@@ -147,8 +149,12 @@ class ConversationService:
                     "Either session_id, assistant_id, or group_chat_id must be provided"
                 )
 
-    async def set_title_of_conversation(self, session_id: "UUID") -> "SessionInDB":
+    async def set_title_of_conversation(
+        self, session_id: "UUID"
+    ) -> "SessionInDB | None":
         session = await self.session_service.get_session_by_uuid(session_id)
+        assert session is not None
+        assert session.assistant is not None
         space = await self.space_service.get_space_by_assistant(
             assistant_id=session.assistant.id
         )
@@ -162,5 +168,5 @@ class ConversationService:
         )
 
         return await self.session_service.update_session(
-            SessionUpdate(id=session_id, name=response.completion.text)
+            SessionUpdate(id=session_id, name=response.completion.text)  # type: ignore[union-attr]
         )

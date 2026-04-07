@@ -1,22 +1,26 @@
+import logging
 from uuid import UUID
 
-import logging
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
+from intric.apps.apps.api.app_models import AppPublic
+from intric.assistants.api.assistant_models import AssistantPublic
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-
-from intric.apps.apps.api.app_models import AppPublic
-from intric.assistants.api.assistant_models import AssistantPublic
 from intric.authentication.auth_dependencies import get_scope_filter, require_permission
 from intric.collections.presentation.collection_models import CollectionPublic
 from intric.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
+from intric.integration.presentation.assemblers.integration_knowledge_assembler import (
+    IntegrationKnowledgeAssembler,
+)
+from intric.integration.presentation.models import IntegrationKnowledgePublic
 from intric.jobs.job_models import JobPublic
 from intric.main.container.container import Container
-from intric.main.models import NOT_PROVIDED, ModelId, PaginatedResponse
+from intric.main.models import NOT_PROVIDED, ModelId, PaginatedResponse, is_provided
+from intric.roles.permissions import Permission
 from intric.server import protocol
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
@@ -24,13 +28,13 @@ from intric.spaces.api.space_models import (
     AddSpaceGroupMemberRequest,
     AddSpaceMemberRequest,
     Applications,
-    CreateSpaceIntegrationKnowledgeBatchRequest,
-    CreateSpaceIntegrationKnowledgeBatchResponse,
-    CreateSpaceIntegrationKnowledgeBatchResult,
     CreateSpaceAppRequest,
     CreateSpaceAssistantRequest,
     CreateSpaceGroupsRequest,
     CreateSpaceIntegrationKnowledge,
+    CreateSpaceIntegrationKnowledgeBatchRequest,
+    CreateSpaceIntegrationKnowledgeBatchResponse,
+    CreateSpaceIntegrationKnowledgeBatchResult,
     CreateSpaceRequest,
     CreateSpaceServiceRequest,
     CreateSpaceServiceResponse,
@@ -46,13 +50,7 @@ from intric.spaces.api.space_models import (
     UpdateSpaceMemberRequest,
     UpdateSpaceRequest,
 )
-from intric.integration.presentation.models import IntegrationKnowledgePublic
-from intric.integration.presentation.assemblers.integration_knowledge_assembler import (
-    IntegrationKnowledgeAssembler,
-)
-
 from intric.websites.presentation.website_models import WebsiteCreate, WebsitePublic
-from intric.roles.permissions import Permission
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +194,7 @@ async def update_space(
             "new": update_space_req.description,
         }
     if (
-        data_retention_days is not NOT_PROVIDED
+        is_provided(data_retention_days)
         and data_retention_days != old_space.data_retention_days
     ):
         changes["data_retention_days"] = {

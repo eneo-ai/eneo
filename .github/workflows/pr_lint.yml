@@ -67,8 +67,6 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Needed for changed files detection
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -87,48 +85,21 @@ jobs:
         working-directory: ./backend
         run: uv sync --frozen
 
-      - name: Get changed Python files
-        id: changed-files
-        run: |
-          # Get changed Python files in backend directory
-          CHANGED_FILES=$(git diff --name-only --diff-filter=AM ${{ github.event.pull_request.base.sha }}...HEAD -- 'backend/**/*.py' | sed 's|^backend/||' | tr '\n' ' ')
-          echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
-          echo "Changed Python files: $CHANGED_FILES"
-          if [ -z "$CHANGED_FILES" ]; then
-            echo "No Python files changed in backend/"
-            echo "skip=true" >> $GITHUB_OUTPUT
-          else
-            echo "skip=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: 🚨 Critical Issues Check (BLOCKING)
-        if: steps.changed-files.outputs.skip == 'false'
+      - name: Ruff lint
         working-directory: ./backend
-        run: |
-          uv run ruff check ${{ steps.changed-files.outputs.files }} --config pyproject.toml --output-format github
-        # This step will FAIL the workflow for critical issues
+        run: uv run ruff check src/intric/ --output-format github
 
-      - name: 💅 Style & Format Check (NON-BLOCKING)
-        if: steps.changed-files.outputs.skip == 'false'
+      - name: Ruff format check
         working-directory: ./backend
-        run: |
-          echo "Checking style issues in: ${{ steps.changed-files.outputs.files }}"
-          uv run ruff check --config pyproject.toml --output-format github ${{ steps.changed-files.outputs.files }} || echo "⚠️ Style issues found (non-blocking)"
-        continue-on-error: true
-
-      - name: Skip message
-        if: steps.changed-files.outputs.skip == 'true'
-        run: echo "✅ No Python files changed in backend/ - skipping ruff checks"
+        run: uv run ruff format --check src/intric/
 
   backend-type-check:
     runs-on: ubuntu-latest
-    name: Backend type check (Pyright baseline)
+    name: Backend type check (Pyright)
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -147,8 +118,6 @@ jobs:
         working-directory: ./backend
         run: uv sync --frozen --group dev
 
-      - name: Run pyright on changed files
+      - name: Run pyright
         working-directory: ./backend
-        env:
-          RATCHET_IGNORE_RANGE: "1"
-        run: ./scripts/typecheck_changed.sh
+        run: uv run pyright

@@ -1,3 +1,5 @@
+from intric.audit.application.audit_worker_task import log_audit_event_task
+from intric.audit.application.export_worker_task import export_audit_logs_task
 from intric.jobs.task_models import (
     AnalyzeConversationInsightsTask,
     Transcription,
@@ -5,17 +7,15 @@ from intric.jobs.task_models import (
 )
 from intric.main.container.container import Container
 from intric.websites.crawl_dependencies.crawl_models import CrawlTask
-from intric.worker.crawl_tasks import crawl_task, queue_website_crawls
 from intric.worker.analysis_tasks import analyze_conversation_insights_task
+from intric.worker.crawl_tasks import crawl_task, queue_website_crawls
 from intric.worker.upload_tasks import transcription_task, upload_info_blob_task
-from intric.worker.worker import Worker
 from intric.worker.usage_stats_tasks import (
-    update_model_usage_stats_task,
     recalculate_all_tenants_usage_stats,
     recalculate_tenant_usage_stats,
+    update_model_usage_stats_task,
 )
-from intric.audit.application.audit_worker_task import log_audit_event_task
-from intric.audit.application.export_worker_task import export_audit_logs_task
+from intric.worker.worker import Worker
 
 worker = Worker()
 
@@ -332,11 +332,11 @@ async def purge_old_audit_logs(container: Container):
     Returns:
         Dictionary with purge statistics per tenant and any errors
     """
+    from typing import cast
     from uuid import UUID
 
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import AsyncSession
-    from typing import cast
 
     from intric.audit.application.audit_config_service import AuditConfigService
     from intric.audit.application.retention_service import RetentionService
@@ -358,7 +358,7 @@ async def purge_old_audit_logs(container: Container):
     # Uses the container's session (provided by cron_job decorator) for read-only query
     session = cast(AsyncSession, container.session())
     query = select(Tenants.id)
-    result = await session.execute(query)
+    result = await session.execute(query)  # type: ignore[union-attr]
     tenant_ids: list[UUID] = list(result.scalars().all())
 
     logger.info(f"Starting audit log retention purge for {len(tenant_ids)} tenants")

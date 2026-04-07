@@ -10,7 +10,9 @@ from intric.settings.settings import SettingsInDB, SettingsUpsert
 
 class SettingsRepository(BaseRepositoryDelegate):
     def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(session, Settings, SettingsInDB)
+        self.delegate: BaseRepositoryDelegate[SettingsInDB] = BaseRepositoryDelegate(
+            session, Settings, SettingsInDB
+        )
         self.session = session
 
     async def add(self, settings: SettingsUpsert):

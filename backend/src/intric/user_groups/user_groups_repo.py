@@ -26,7 +26,7 @@ class UserGroupsRepository:
     UNIQUE_EXCEPTION_MSG = "User group name already exists."
 
     def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(
+        self.delegate: BaseRepositoryDelegate[UserGroupInDB] = BaseRepositoryDelegate(
             session,
             UserGroups,
             UserGroupInDB,
@@ -43,7 +43,7 @@ class UserGroupsRepository:
             selectinload(UserGroups.users).selectinload(Users.api_key),
         ]
 
-    async def get_user_group(self, id: UUID) -> UserGroupInDB:
+    async def get_user_group(self, id: UUID) -> UserGroupInDB | None:
         return await self.delegate.get(id)
 
     async def create_user_group(self, user_group: UserGroupCreate) -> UserGroupInDB:
@@ -67,7 +67,9 @@ class UserGroupsRepository:
             ),
         ]
 
-    async def update_user_group(self, user_group: UserGroupUpdate) -> UserGroupInDB:
+    async def update_user_group(
+        self, user_group: UserGroupUpdate
+    ) -> UserGroupInDB | None:
         try:
             return await self.delegate.update(
                 user_group,
@@ -77,7 +79,7 @@ class UserGroupsRepository:
         except IntegrityError as e:
             raise UniqueException(self.UNIQUE_EXCEPTION_MSG) from e
 
-    async def delete_user_group(self, id: UUID) -> UserGroupInDB:
+    async def delete_user_group(self, id: UUID) -> UserGroupInDB | None:
         return await self.delegate.delete(id)
 
     async def get_all_user_groups(self, tenant_id: UUID = None) -> List[UserGroupInDB]:

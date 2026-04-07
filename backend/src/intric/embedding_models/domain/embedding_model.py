@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Optional, Union
 
 from intric.ai_models.ai_model import AIModel
-from intric.main.models import NOT_PROVIDED
+from intric.main.models import is_provided
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -121,5 +121,5 @@ class EmbeddingModel(AIModel):
         )
 
     def update(self, is_org_enabled: Union[bool, "NotProvided"]):
-        if is_org_enabled is not NOT_PROVIDED:
+        if is_provided(is_org_enabled):
             self.is_org_enabled = is_org_enabled

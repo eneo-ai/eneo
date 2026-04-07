@@ -1,7 +1,6 @@
-from datetime import datetime
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
-from typing import TYPE_CHECKING, Optional
+from datetime import datetime
+from typing import TYPE_CHECKING, AsyncIterator, Optional
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import CompletionModel
@@ -71,7 +70,11 @@ class SessionService:
             )
 
         # Verify the session belongs to the specified assistant/group chat
-        if assistant_id is not None and session.assistant.id != assistant_id:
+        if (
+            assistant_id is not None
+            and session.assistant is not None
+            and session.assistant.id != assistant_id
+        ):
             raise NotFoundException("Session belongs to another assistant")
         if group_chat_id is not None and session.group_chat_id != group_chat_id:
             raise NotFoundException("Session belongs to another group chat")
@@ -116,6 +119,7 @@ class SessionService:
         self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
+        assert session is not None
         return await self.session_repo.delete(session.id)
 
     async def create_session(
@@ -181,6 +185,7 @@ class SessionService:
         self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
+        assert session is not None
         return await self.session_repo.add_feedback(feedback=feedback, id=session.id)
 
     async def get_sessions_by_group_chat(

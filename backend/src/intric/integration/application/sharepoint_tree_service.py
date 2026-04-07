@@ -145,6 +145,7 @@ class SharePointTreeService:
             token = await self.sharepoint_auth_router.get_token_for_integration(
                 user_integration=user_integration, space=space
             )
+            assert token is not None
             logger.info(
                 "Token acquired successfully",
                 extra={

@@ -21,6 +21,7 @@ from intric.sessions.session import (
     AskResponse,
     IntricEventType,
     SessionInDB,
+    SSEError,
     SSEFiles,
     SSEFirstChunk,
     SSEIntricEvent,
@@ -29,7 +30,6 @@ from intric.sessions.session import (
     SSEToolApprovalRequired,
     SSEToolApprovalTimeout,
     SSEToolCall,
-    SSEError,
     TokenUsageEvent,
     ToolCallInfo,
 )
@@ -83,12 +83,12 @@ def to_ask_conversation_response(
     updated_at: Optional[datetime] = None,
     web_search_results: list[WebSearchResultPublic] = [],
 ):
-    return AskChatResponse(
-        created_at=created_at,
-        updated_at=updated_at,
+    return AskChatResponse(  # type: ignore[call-arg]
+        created_at=created_at,  # type: ignore[call-arg]
+        updated_at=updated_at,  # type: ignore[call-arg]
         session_id=session.id,
-        id=question_id,
-        completion_model=completion_model,
+        id=question_id,  # type: ignore[call-arg]
+        completion_model=completion_model,  # type: ignore[call-arg]
         files=[FilePublic(**file.model_dump()) for file in files],
         generated_files=[],
         question=question,
@@ -122,11 +122,12 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
                     **blob.model_dump(),
                     metadata=InfoBlobMetadata(**blob.model_dump()),
                 )
-                for blob in chunk.reference_chunks
+                for blob in (chunk.reference_chunks or [])
             ],
         )
 
     elif chunk.response_type == ResponseType.FILES:
+        assert chunk.generated_file is not None
         data = SSEFiles(
             session_id=session_id,
             generated_files=[FilePublic(**chunk.generated_file.model_dump())],

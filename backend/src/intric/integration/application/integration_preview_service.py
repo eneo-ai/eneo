@@ -8,11 +8,11 @@ if TYPE_CHECKING:
     from intric.integration.domain.repositories.oauth_token_repo import (
         OauthTokenRepository,
     )
-    from intric.integration.domain.repositories.user_integration_repo import (
-        UserIntegrationRepository,
-    )
     from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
         TenantSharePointAppRepository,
+    )
+    from intric.integration.domain.repositories.user_integration_repo import (
+        UserIntegrationRepository,
     )
     from intric.integration.infrastructure.preview_service.confluence_preview_service import (
         ConfluencePreviewService,

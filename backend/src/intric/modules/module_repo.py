@@ -8,7 +8,9 @@ from intric.modules.module import ModuleBase, ModuleInDB
 
 class ModuleRepository:
     def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(session, Modules, ModuleInDB)
+        self.delegate: BaseRepositoryDelegate[ModuleInDB] = BaseRepositoryDelegate(
+            session, Modules, ModuleInDB
+        )
         self.session = session
 
     async def add(self, module: ModuleBase):

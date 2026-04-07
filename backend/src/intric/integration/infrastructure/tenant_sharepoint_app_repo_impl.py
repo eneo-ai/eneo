@@ -1,4 +1,4 @@
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -10,10 +10,10 @@ from intric.integration.domain.entities.tenant_sharepoint_app import TenantShare
 from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
     TenantSharePointAppRepository,
 )
-from intric.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
 from intric.integration.infrastructure.mappers.tenant_sharepoint_app_mapper import (
     TenantSharePointAppMapper,
 )
+from intric.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

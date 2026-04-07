@@ -9,9 +9,9 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_models import (
+    ApiKeyScopeType,
     ApiKeyState,
     ApiKeyStateReasonCode,
-    ApiKeyScopeType,
     ApiKeyV2InDB,
 )
 from intric.main.logging import get_logger

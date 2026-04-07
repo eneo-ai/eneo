@@ -9,9 +9,9 @@ from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
 from intric.token_usage.presentation.token_usage_models import (
     TokenUsageSummary,
+    UserSortBy,
     UserTokenUsageSummary,
     UserTokenUsageSummaryDetail,
-    UserSortBy,
 )
 
 logger = logging.getLogger(__name__)

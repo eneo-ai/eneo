@@ -6,6 +6,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.main.container.container import Container
 from intric.security_classifications.presentation.security_classification_models import (
     SecurityClassificationCreatePublic,
@@ -20,11 +24,6 @@ from intric.security_classifications.presentation.security_classification_models
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 
-# Audit logging - module level imports for consistency
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
-
 router = APIRouter()
 
 
@@ -37,7 +36,7 @@ router = APIRouter()
 async def create_security_classification(
     request: SecurityClassificationCreatePublic,
     container: Container = Depends(get_container(with_user=True)),
-) -> SecurityClassificationPublic:
+) -> SecurityClassificationPublic | None:
     """Create a new security classification for the current tenant.
     Args:
         request: The security classification creation request.
@@ -87,7 +86,7 @@ async def create_security_classification(
 )
 async def list_security_classifications(
     container: Container = Depends(get_container(with_user=True)),
-) -> list[SecurityClassificationPublic]:
+) -> SecurityClassificationResponse:
     """List all security classifications ordered by security classification level.
     Returns:
         List of security classifications ordered by security classification level.
@@ -118,7 +117,7 @@ async def list_security_classifications(
 async def get_security_classification(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
-) -> SecurityClassificationPublic:
+) -> SecurityClassificationPublic | None:
     """Get a security classification by ID.
     Args:
         id: The ID of the security classification.
@@ -143,7 +142,7 @@ async def get_security_classification(
 async def update_security_classification_levels(
     request: SecurityClassificationLevelsUpdateRequest,
     container: Container = Depends(get_container(with_user=True)),
-) -> SecurityClassificationPublic:
+) -> SecurityClassificationsListPublic:
     """Update the security levels of security classifications.
     Args:
         request: Security classifications to update.
@@ -250,7 +249,7 @@ async def update_security_classification(
     id: UUID,
     request: SecurityClassificationSingleUpdate,
     container: Container = Depends(get_container(with_user=True)),
-) -> SecurityClassificationPublic:
+) -> SecurityClassificationPublic | None:
     """Update a single security classification's name and/or description.
 
     This endpoint allows updating just the name and description of a security classification
@@ -268,7 +267,7 @@ async def update_security_classification(
         403: If the user doesn't have permission to update the classification
         404: If the security classification doesn't exist
     """
-    from intric.main.models import NOT_PROVIDED
+    from intric.main.models import is_provided
 
     service = container.security_classification_service()
     user = container.user()
@@ -280,15 +279,13 @@ async def update_security_classification(
     security_classification = await service.update_security_classification(
         id=id, name=request.name, description=request.description
     )
+    assert security_classification is not None
 
     # Track changes
     changes = {}
-    if request.name is not NOT_PROVIDED and request.name != old_sc.name:
+    if is_provided(request.name) and request.name != old_sc.name:
         changes["name"] = {"old": old_sc.name, "new": request.name}
-    if (
-        request.description is not NOT_PROVIDED
-        and request.description != old_sc.description
-    ):
+    if is_provided(request.description) and request.description != old_sc.description:
         changes["description"] = {"old": old_sc.description, "new": request.description}
 
     # Audit logging
@@ -338,6 +335,7 @@ async def toggle_security_classifications(
 
     # Toggle security classifications
     tenant = await service.toggle_security_on_tenant(enabled=request.enabled)
+    assert tenant is not None
 
     # Audit logging
     audit_service = container.audit_service()
@@ -362,6 +360,8 @@ async def toggle_security_classifications(
     )
 
     return SecurityEnableResponse(
-        tenant_id=tenant.id,
-        security_enabled=tenant.security_enabled,
+        **dict(  # type: ignore[arg-type]
+            tenant_id=tenant.id,
+            security_enabled=tenant.security_enabled,
+        )
     )

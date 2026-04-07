@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, Boolean
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.base_class import BasePublic
@@ -23,7 +23,7 @@ class TenantSharePointApp(BasePublic):
     - service_account: Delegated permissions via service account OAuth
     """
 
-    __tablename__ = "tenant_sharepoint_apps"
+    __tablename__ = "tenant_sharepoint_apps"  # type: ignore[assignment]
 
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey("tenants.id", ondelete="CASCADE"),

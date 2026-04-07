@@ -61,6 +61,7 @@ class AppRunRepository:
         )
 
         app_runs_in_db = await self._get_with_options(stmt, multiple=True)
+        assert app_runs_in_db is not None
 
         return [
             self.factory.create_app_run_from_db(app_run_in_db)

@@ -65,7 +65,7 @@ class ConfluenceAuthService(BaseOauthService):
         url = f"{auth_base_url}?{urlencode(params)}"
         return {"auth_url": url}
 
-    async def get_resources(self, access_token: str) -> list[dict]:
+    async def get_resources(self, access_token: str) -> list[dict] | None:
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 "https://api.atlassian.com/oauth/token/accessible-resources",
@@ -80,7 +80,7 @@ class ConfluenceAuthService(BaseOauthService):
             else:
                 response.raise_for_status()
 
-    async def exchange_token(self, auth_code: str) -> TokenResponse:
+    async def exchange_token(self, auth_code: str) -> TokenResponse | None:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 "https://auth.atlassian.com/oauth/token",
@@ -102,7 +102,7 @@ class ConfluenceAuthService(BaseOauthService):
             else:
                 response.raise_for_status()
 
-    async def refresh_access_token(self, refresh_token: str) -> TokenResponse:
+    async def refresh_access_token(self, refresh_token: str) -> TokenResponse | None:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 "https://auth.atlassian.com/oauth/token",

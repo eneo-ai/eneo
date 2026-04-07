@@ -1,6 +1,5 @@
 from typing import TYPE_CHECKING
 
-
 if TYPE_CHECKING:
     from intric.templates.app_template.app_template import AppTemplate
     from intric.templates.assistant_template.assistant_template import AssistantTemplate

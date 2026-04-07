@@ -1,13 +1,14 @@
 import asyncio
 from typing import TYPE_CHECKING, cast
+
 import redis.asyncio as redis
 import sqlalchemy as sa
 
 from intric.database.tables.model_providers_table import ModelProviders
+from intric.main.config import get_settings
 from intric.main.exceptions import NotFoundException
 from intric.main.logging import get_logger
 from intric.main.models import ChannelType
-from intric.main.config import get_settings
 from intric.worker.worker import Worker
 
 if TYPE_CHECKING:
@@ -76,6 +77,7 @@ async def pull_confluence_content(
     knowledge = await _get_knowledge_with_retry(
         container, params.integration_knowledge_id
     )
+    assert knowledge is not None
     await _validate_embedding_provider(container, knowledge)
 
     service = container.confluence_content_service()
@@ -124,6 +126,7 @@ async def pull_sharepoint_content(
             knowledge = await _get_knowledge_with_retry(
                 container, params.integration_knowledge_id
             )
+            assert knowledge is not None
             await _validate_embedding_provider(container, knowledge)
             service = container.sharepoint_content_service()
 
@@ -199,6 +202,7 @@ async def sync_sharepoint_delta(
             knowledge = await _get_knowledge_with_retry(
                 container, params.integration_knowledge_id
             )
+            assert knowledge is not None
             await _validate_embedding_provider(container, knowledge)
             service = container.sharepoint_content_service()
 

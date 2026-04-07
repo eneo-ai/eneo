@@ -7,12 +7,11 @@ sensitive information from appearing in URLs, browser history, or server logs.
 
 import logging
 import secrets
-
-import orjson
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
+import orjson
 import redis.exceptions
 from fastapi import HTTPException
 

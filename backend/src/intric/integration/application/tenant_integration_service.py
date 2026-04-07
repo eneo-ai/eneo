@@ -2,8 +2,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from intric.integration.domain.entities.tenant_integration import TenantIntegration
-from intric.main.exceptions import BadRequestException
 from intric.integration.presentation.models import TenantIntegrationFilter
+from intric.main.exceptions import BadRequestException
 
 logger = logging.getLogger(__name__)
 

@@ -297,6 +297,7 @@ class OrphanWatchdog:
                 CrawlRuns.tenant_id == tenant_uuid,
             )
         )
+        assert actual_active is not None
 
         if redis_count <= actual_active:
             return {"reconciled": False}

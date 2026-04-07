@@ -2,6 +2,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.info_blobs import info_blob_protocol
 from intric.info_blobs.info_blob import InfoBlobPublicNoText
 from intric.main.container.container import Container
@@ -10,11 +14,6 @@ from intric.server import protocol
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses, to_paginated_response
 from intric.spaces.api.space_models import TransferRequest
-
-# Audit logging - module level imports for consistency
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
 from intric.websites.presentation.website_models import (
     BulkCrawlRequest,
     BulkCrawlResponse,

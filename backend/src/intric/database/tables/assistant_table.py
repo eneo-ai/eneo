@@ -119,7 +119,7 @@ class AssistantsFiles(BaseCrossReference):
 
 
 class AssistantIntegrationKnowledge(BasePublic):
-    __tablename__ = "assistant_integration_knowledge"
+    __tablename__ = "assistant_integration_knowledge"  # type: ignore[assignment]
 
     assistant_id: Mapped[UUID] = mapped_column(
         ForeignKey(Assistants.id, ondelete="CASCADE")

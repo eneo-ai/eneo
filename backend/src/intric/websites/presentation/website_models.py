@@ -17,6 +17,7 @@ from intric.main.models import (
     NotProvided,
     ResourcePermissionsMixin,
     Status,
+    is_provided,
 )
 from intric.websites.crawl_dependencies.crawl_models import CrawlRunSparse
 from intric.websites.domain.crawl_run import CrawlRun, CrawlType
@@ -43,10 +44,10 @@ class WebsiteCreateRequestDeprecated(WebsiteBase):
 
 class WebsiteInDBBase(InDB):
     space_id: Optional[UUID] = None
-    embedding_model_id: Optional[UUID] = None
+    embedding_model_id: Optional[UUID] = None  # type: ignore[assignment]
     user_id: UUID
     tenant_id: UUID
-    embedding_model_id: UUID
+    embedding_model_id: UUID  # type: ignore[assignment]
     size: int = 0
 
 
@@ -207,9 +208,9 @@ class WebsiteUpdate(BaseModel):
         username = info.data.get("http_auth_username")
 
         # Both must be NOT_PROVIDED, both must be None, or both must have values
-        if username is NOT_PROVIDED and v is not NOT_PROVIDED:
+        if username is NOT_PROVIDED and is_provided(v):
             raise ValueError("Cannot update password without username")
-        if v is NOT_PROVIDED and username is not NOT_PROVIDED:
+        if v is NOT_PROVIDED and is_provided(username):
             raise ValueError("Cannot update username without password")
 
         # If updating to None (removing auth), both must be None

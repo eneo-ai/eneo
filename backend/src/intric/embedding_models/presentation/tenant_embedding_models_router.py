@@ -2,13 +2,11 @@
 
 from uuid import UUID
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-import sqlalchemy as sa
-
 from intric.authentication.auth_dependencies import get_current_active_user
-from intric.roles.permissions import Permission, validate_permission
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.database.tables.ai_models_table import EmbeddingModels
 from intric.database.tables.collections_table import CollectionsTable
@@ -24,6 +22,7 @@ from intric.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
+from intric.roles.permissions import Permission, validate_permission
 from intric.server.protocol import responses
 from intric.users.user import UserInDB
 
@@ -101,27 +100,29 @@ async def create_tenant_embedding_model(
 
     # Create the embedding model with settings directly on it
     new_model = EmbeddingModels(
-        tenant_id=user.tenant_id,
-        provider_id=model_create.provider_id,
-        name=model_create.name,
-        litellm_model_name=None,  # Constructed at runtime by TenantModelAdapter
-        dimensions=model_create.dimensions,
-        max_input=model_create.max_input,
-        family=model_create.family,  # User-specified family
-        # Simplified defaults for other fields
-        hosting=model_create.hosting,
-        org=None,
-        stability="stable",
-        open_source=False,
-        nickname=model_create.display_name,
-        description=None,
-        hf_link=None,
-        is_deprecated=False,
-        max_batch_size=None,
-        # Settings (now directly on model)
-        is_enabled=model_create.is_active,
-        is_default=model_create.is_default,
-        security_classification_id=None,
+        **dict(  # type: ignore[call-arg]
+            tenant_id=user.tenant_id,
+            provider_id=model_create.provider_id,
+            name=model_create.name,
+            litellm_model_name=None,  # Constructed at runtime by TenantModelAdapter
+            dimensions=model_create.dimensions,
+            max_input=model_create.max_input,
+            family=model_create.family,  # User-specified family
+            # Simplified defaults for other fields
+            hosting=model_create.hosting,
+            org=None,
+            stability="stable",
+            open_source=False,
+            nickname=model_create.display_name,
+            description=None,
+            hf_link=None,
+            is_deprecated=False,
+            max_batch_size=None,
+            # Settings (now directly on model)
+            is_enabled=model_create.is_active,
+            is_default=model_create.is_default,
+            security_classification_id=None,
+        )
     )
 
     session.add(new_model)

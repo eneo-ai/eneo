@@ -1,37 +1,37 @@
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Optional, Any
+from typing import TYPE_CHECKING, Any, List, Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, update, select, func, delete
+from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from intric.completion_models.application.completion_model_usage_service import (
+    CompletionModelUsageService,
+)
 from intric.completion_models.constants import ENTITY_TABLE_MAP, ENTITY_TYPES
 from intric.completion_models.domain.completion_model_migration_history_repo import (
     CompletionModelMigrationHistoryRepo,
-)
-from intric.completion_models.application.completion_model_usage_service import (
-    CompletionModelUsageService,
 )
 from intric.completion_models.presentation.completion_model_models import (
     MigrationResult,
     ValidationResult,
 )
 from intric.events import (
-    ModelMigrationStarted,
     ModelMigrationCompleted,
     ModelMigrationFailed,
+    ModelMigrationStarted,
     get_event_publisher,
 )
-from intric.main.exceptions import ValidationException
 from intric.main.config import get_settings
+from intric.main.exceptions import ValidationException
 
 if TYPE_CHECKING:
     from intric.completion_models.domain.completion_model_repo import (
         CompletionModelRepository,
     )
-    from intric.users.user import User
+    from intric.users.user import User  # type: ignore[attr-defined]
 
 
 class CompletionModelMigrationService:
@@ -719,8 +719,9 @@ class CompletionModelMigrationService:
         self, from_model_id: UUID, to_model_id: UUID, tenant_id: UUID
     ) -> None:
         """Enable target model on spaces where source model is enabled."""
-        from intric.database.tables.spaces_table import Spaces, SpacesCompletionModels
         from sqlalchemy.dialects.postgresql import insert
+
+        from intric.database.tables.spaces_table import Spaces, SpacesCompletionModels
 
         self.logger.debug(
             f"Ensuring target model {to_model_id} is enabled on spaces where source model {from_model_id} is enabled for tenant {tenant_id}"
@@ -770,8 +771,9 @@ class CompletionModelMigrationService:
         self, from_model_id: UUID, to_model_id: UUID, tenant_id: UUID
     ) -> int:
         """Migrate spaces from one model to another in the many-to-many relationship."""
-        from intric.database.tables.spaces_table import Spaces, SpacesCompletionModels
         from sqlalchemy.dialects.postgresql import insert
+
+        from intric.database.tables.spaces_table import Spaces, SpacesCompletionModels
 
         self.logger.debug(
             f"Migrating spaces many-to-many relationship from {from_model_id} to {to_model_id} for tenant {tenant_id}"

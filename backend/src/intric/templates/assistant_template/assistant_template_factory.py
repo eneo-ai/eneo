@@ -1,10 +1,9 @@
 from typing import TYPE_CHECKING
 
-from intric.templates.assistant_template.assistant_template import AssistantTemplate
 from intric.templates.assistant_template.api.assistant_template_models import (
     AssistantTemplateWizard,
 )
-
+from intric.templates.assistant_template.assistant_template import AssistantTemplate
 
 if TYPE_CHECKING:
     from intric.database.tables.assistant_template_table import (
@@ -46,7 +45,7 @@ class AssistantTemplateFactory:
     def create_assistant_template_list(
         items: list["AssistantTemplateDBModel"],
     ) -> AssistantTemplate:
-        return [
+        return [  # type: ignore[return-value]
             AssistantTemplateFactory.create_assistant_template(item=item)
             for item in items
         ]

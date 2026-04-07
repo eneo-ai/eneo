@@ -25,8 +25,7 @@ from intric.main.exceptions import (
 from intric.main.logging import get_logger
 from intric.questions.questions_repo import QuestionRepository
 from intric.roles.permissions import Permission, validate_permissions
-from intric.sessions.session import SessionInDB
-from intric.sessions.session import SessionMetadataPublic
+from intric.sessions.session import SessionInDB, SessionMetadataPublic
 from intric.sessions.session_service import SessionService
 from intric.sessions.sessions_repo import SessionRepository
 from intric.spaces.space_service import SpaceService
@@ -909,7 +908,7 @@ class AnalysisService:
     async def get_insight_session(
         self,
         session_id: UUID,
-    ) -> SessionInDB:
+    ) -> SessionInDB | None:
         """Get a specific session with insight access
 
         Args:
@@ -925,6 +924,7 @@ class AnalysisService:
             BadRequestException: If neither assistant_id nor group_chat_id is provided
         """
         session = await self.session_repo.get(id=session_id)
+        assert session is not None
 
         if session.group_chat_id is not None:
             await self._check_insight_access(group_chat_id=session.group_chat_id)

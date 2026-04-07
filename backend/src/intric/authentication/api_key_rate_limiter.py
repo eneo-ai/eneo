@@ -6,6 +6,8 @@ from intric.audit.infrastructure.rate_limiting import (
     RateLimitConfig,
     RateLimitResult,
     RateLimitServiceUnavailableError,
+)
+from intric.audit.infrastructure.rate_limiting import (
     check_rate_limit as _raw_check_rate_limit,  # pyright: ignore[reportUnknownVariableType]
 )
 from intric.authentication.api_key_resolver import ApiKeyValidationError

@@ -10,8 +10,8 @@ from intric.database.tables.ai_models_table import (
     TranscriptionModels,
 )
 from intric.database.tables.base_class import BaseCrossReference, BasePublic
-from intric.database.tables.mcp_server_table import MCPServers
 from intric.database.tables.icons_table import Icons
+from intric.database.tables.mcp_server_table import MCPServers
 from intric.database.tables.security_classifications_table import SecurityClassification
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users

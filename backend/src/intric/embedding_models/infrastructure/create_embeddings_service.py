@@ -95,6 +95,7 @@ class CreateEmbeddingsService:
         else:
             # DB lookup path: requires active session
             import sqlalchemy as sa
+
             from intric.database.tables.model_providers_table import ModelProviders
 
             if not self.session:

@@ -40,6 +40,7 @@ class JobManager:
         await self._redis.enqueue_job(task, params, _job_id=str(job_id))
 
     async def enqueue_jobless(self, task: Task):
+        assert self._redis is not None
         await self._redis.enqueue_job(task)
 
     async def get_job_status(self, job_id: UUID):

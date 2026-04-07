@@ -8,11 +8,11 @@ from intric.main.exceptions import (
     UnauthorizedException,
 )
 from intric.main.logging import get_logger
-from intric.main.models import (
+from intric.main.models import (  # Status used for job status check
     NOT_PROVIDED,
     NotProvided,
     Status,
-)  # Status used for job status check
+)
 from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.websites.domain.website import UpdateInterval, Website
 
@@ -156,7 +156,10 @@ class WebsiteCRUDService:
 
         website = space.get_website(website_id=id)
 
-        if website.latest_crawl.status in [Status.QUEUED, Status.IN_PROGRESS]:
+        if website.latest_crawl is not None and website.latest_crawl.status in [
+            Status.QUEUED,
+            Status.IN_PROGRESS,
+        ]:
             # Safe preemption: Check if job is stale (no activity for threshold period)
             preempted = await self._try_preempt_stale_job(website)
             if not preempted:
@@ -164,7 +167,7 @@ class WebsiteCRUDService:
                 raise CrawlAlreadyRunningException()
             # Job was stale and preempted, proceed with new crawl
 
-        return await self.crawl_service.crawl(website=website)
+        return await self.crawl_service.crawl(website=website)  # type: ignore[return-value]
 
     async def _try_preempt_stale_job(self, website: Website) -> bool:
         """Check if existing crawl job is stale and preempt it if so.

@@ -1,8 +1,12 @@
-from uuid import UUID
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.integration.presentation.models import (
     AuthCallbackParams,
     AuthUrlPublic,
@@ -10,11 +14,6 @@ from intric.integration.presentation.models import (
 )
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
-
-# Audit logging - module level imports for consistency
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
 
 router = APIRouter()
 

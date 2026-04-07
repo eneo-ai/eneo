@@ -1,13 +1,12 @@
 """Domain events module for the Eneo application."""
 
+from .event_publisher import EventHandler, EventPublisher, get_event_publisher
 from .model_events import (
     ModelMigrationCompleted,
     ModelMigrationFailed,
     ModelMigrationStarted,
     ModelUsageStatsUpdated,
 )
-
-from .event_publisher import EventPublisher, EventHandler, get_event_publisher
 
 __all__ = [
     "ModelMigrationStarted",

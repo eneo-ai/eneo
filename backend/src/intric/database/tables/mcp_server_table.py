@@ -1,11 +1,11 @@
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, String, Text, Boolean, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from intric.database.tables.base_class import BasePublic, BaseCrossReference
+from intric.database.tables.base_class import BaseCrossReference, BasePublic
 from intric.database.tables.tenant_table import Tenants
 
 if TYPE_CHECKING:

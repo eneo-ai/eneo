@@ -1,39 +1,51 @@
+import random
 from datetime import datetime, timezone
 from enum import Enum
-import random
 from typing import TYPE_CHECKING, Optional, cast
-from uuid import UUID, uuid5, NAMESPACE_URL
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import jwt
 import sqlalchemy as sa
 from starlette.requests import Request
 
+from intric.allowed_origins.allowed_origin_repo import AllowedOriginRepository
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
-from intric.allowed_origins.allowed_origin_repo import AllowedOriginRepository
-from intric.authentication.api_key_rate_limiter import ApiKeyRateLimiter
-from intric.authentication.api_key_router_helpers import extract_audit_context
-from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.api_key_policy import ApiKeyPolicyService
+from intric.authentication.api_key_rate_limiter import ApiKeyRateLimiter
 from intric.authentication.api_key_resolver import (
     ApiKeyAuthResolver,
     ApiKeyValidationError,
     check_resource_permission,
 )
+from intric.authentication.api_key_router_helpers import extract_audit_context
+from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_models import (
+    METHOD_PERMISSION_MAP,
+    PERMISSION_LEVEL_ORDER,
     AccessToken,
     ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyV2InDB,
-    METHOD_PERMISSION_MAP,
-    PERMISSION_LEVEL_ORDER,
 )
 from intric.authentication.auth_service import AuthService
+from intric.database.tables.app_table import AppRuns, Apps
+from intric.database.tables.assistant_table import Assistants
+from intric.database.tables.collections_table import CollectionsTable
+from intric.database.tables.group_chats_table import GroupChatsTable
+from intric.database.tables.info_blobs_table import InfoBlobs
+from intric.database.tables.integration_table import IntegrationKnowledge
+from intric.database.tables.prompts_table import PromptsAssistants
+from intric.database.tables.service_table import Services
+from intric.database.tables.sessions_table import Sessions
+from intric.database.tables.spaces_table import Spaces
+from intric.database.tables.users_table import Users
+from intric.database.tables.websites_table import CrawlRuns, Websites
 from intric.info_blobs.info_blob_repo import InfoBlobRepository
 from intric.main.config import get_settings
 from intric.main.exceptions import (
@@ -47,8 +59,8 @@ from intric.main.exceptions import (
 from intric.main.logging import get_logger
 from intric.main.models import ModelId
 from intric.predefined_roles.predefined_role import PredefinedRoleName
-from intric.roles.permissions import Permission
 from intric.predefined_roles.predefined_roles_repo import PredefinedRolesRepository
+from intric.roles.permissions import Permission
 from intric.settings.settings import SettingsUpsert
 from intric.settings.settings_repo import SettingsRepository
 from intric.tenants.tenant import TenantState
@@ -63,24 +75,12 @@ from intric.users.user import (
     UserUpdatePublic,
 )
 from intric.users.user_repo import UsersRepository
-from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.collections_table import CollectionsTable
-from intric.database.tables.group_chats_table import GroupChatsTable
-from intric.database.tables.info_blobs_table import InfoBlobs
-from intric.database.tables.integration_table import IntegrationKnowledge
-from intric.database.tables.service_table import Services
-from intric.database.tables.users_table import Users
-from intric.database.tables.app_table import AppRuns, Apps
-from intric.database.tables.websites_table import CrawlRuns, Websites
-from intric.database.tables.prompts_table import PromptsAssistants
-from intric.database.tables.sessions_table import Sessions
-from intric.database.tables.spaces_table import Spaces
 
 if TYPE_CHECKING:
-    from intric.users.user import UserInDB
-    from intric.spaces.space_service import SpaceService
-    from intric.feature_flag.feature_flag_service import FeatureFlagService
     from intric.database.database import AsyncSession
+    from intric.feature_flag.feature_flag_service import FeatureFlagService
+    from intric.spaces.space_service import SpaceService
+    from intric.users.user import UserInDB
 
 
 logger = get_logger(__name__)
@@ -683,8 +683,8 @@ class UserService:
         self, scope_type: str, scope_id: UUID
     ) -> UUID | None:
         """Resolve a key's scope to its parent space_id (lightweight, no user context)."""
-        from intric.database.tables.assistant_table import Assistants  # noqa: F811
         from intric.database.tables.app_table import Apps  # noqa: F811
+        from intric.database.tables.assistant_table import Assistants  # noqa: F811
 
         if scope_type in (ApiKeyScopeType.SPACE, ApiKeyScopeType.SPACE.value):
             return scope_id
@@ -1805,6 +1805,7 @@ class UserService:
 
     async def update_used_tokens(self, user_id: UUID, tokens_to_add: int):
         user_in_db = await self.repo.get_user_by_id(user_id)
+        assert user_in_db is not None
         new_used_tokens = user_in_db.used_tokens + tokens_to_add
         user_update = UserUpdate(id=user_in_db.id, used_tokens=new_used_tokens)
         await self.repo.update(user_update)

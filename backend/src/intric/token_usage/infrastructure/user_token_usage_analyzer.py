@@ -1,7 +1,7 @@
-from typing import TYPE_CHECKING
 import logging
+from typing import TYPE_CHECKING
 
-from sqlalchemy import func, select, union_all, desc, asc
+from sqlalchemy import asc, desc, func, select, union_all
 
 from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.app_table import AppRuns

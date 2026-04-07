@@ -2,6 +2,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Union, cast
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
+
+from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
+from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from intric.completion_models.application.completion_model_crud_service import (
     CompletionModelCRUDService,
 )
@@ -12,17 +16,15 @@ from intric.embedding_models.application.embedding_model_crud_service import (
     EmbeddingModelCRUDService,
 )
 from intric.icons.icon_repo import IconRepository
-from intric.main.logging import get_logger
 from intric.main.exceptions import (
     BadRequestException,
     NotFoundException,
     UnauthorizedException,
+    UniqueException,
 )
-from sqlalchemy.exc import IntegrityError
-from intric.main.exceptions import UniqueException
-from intric.main.models import NOT_PROVIDED, ModelId, NotProvided
+from intric.main.logging import get_logger
+from intric.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
 from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
-from intric.user_groups.user_groups_repo import UserGroupsRepository
 from intric.spaces.space import Space
 from intric.spaces.space_factory import SpaceFactory
 from intric.spaces.space_repo import SpaceRepository
@@ -32,15 +34,16 @@ from intric.transcription_models.application.transcription_model_crud_service im
 from intric.transcription_models.domain.transcription_model_service import (
     TranscriptionModelService,
 )
+from intric.user_groups.user_groups_repo import UserGroupsRepository
 from intric.users.user import UserInDB
 from intric.users.user_repo import UsersRepository
-from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
-from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 
 if TYPE_CHECKING:
     from intric.actors import ActorManager
     from intric.completion_models.domain import CompletionModel
-    from intric.embedding_models.domain import EmbeddingModel  # pyright: ignore[reportAttributeAccessIssue]
+    from intric.embedding_models.domain import (
+        EmbeddingModel,  # pyright: ignore[reportAttributeAccessIssue]
+    )
     from intric.security_classifications.application.security_classification_service import (
         SecurityClassificationService,
     )
@@ -158,11 +161,12 @@ class SpaceService:
         space.transcription_models = transcription_models
 
         # Set all tenant-enabled MCP servers for new spaces
+        import sqlalchemy as sa
+
         from intric.database.tables.mcp_server_table import (
             MCPServers as MCPServersTable,
         )
         from intric.mcp_servers.domain.entities.mcp_server import MCPServer
-        import sqlalchemy as sa
 
         query = (
             sa.select(MCPServersTable)
@@ -242,7 +246,7 @@ class SpaceService:
             raise UnauthorizedException("User does not have permission to edit space")
 
         space_security_classification = None
-        if security_classification is not NOT_PROVIDED:
+        if is_provided(security_classification):
             if not self.user.tenant.security_enabled:
                 raise BadRequestException("Security is not enabled for this tenant")
             if security_classification is not None:
@@ -284,6 +288,9 @@ class SpaceService:
         mcp_servers = None
         if mcp_server_ids is not None:
             # Query tenant MCP servers directly from database
+            import sqlalchemy as sa
+            from sqlalchemy.orm import selectinload as _selectinload
+
             from intric.database.tables.mcp_server_table import (
                 MCPServers as MCPServersTable,
             )
@@ -294,8 +301,6 @@ class SpaceService:
             from intric.security_classifications.domain.entities.security_classification import (
                 SecurityClassification,
             )
-            import sqlalchemy as sa
-            from sqlalchemy.orm import selectinload as _selectinload
 
             query = (
                 sa.select(MCPServersTable)
@@ -352,7 +357,7 @@ class SpaceService:
             mcp_servers=mcp_servers,
             security_classification=(
                 space_security_classification
-                if security_classification is not NOT_PROVIDED
+                if is_provided(security_classification)
                 else NOT_PROVIDED
             ),
             data_retention_days=data_retention_days,
@@ -419,7 +424,7 @@ class SpaceService:
         affected_assistants = []
         for assistant in space.assistants:
             if (
-                assistant.completion_model
+                assistant.completion_model is not None
                 and assistant.completion_model.id not in remaining_completion_model_ids
             ):
                 affected_assistants.append(assistant)
@@ -454,7 +459,7 @@ class SpaceService:
         affected_services = []
         for service in space.services:
             if (
-                service.completion_model
+                service.completion_model is not None
                 and service.completion_model.id not in remaining_completion_model_ids
             ):
                 affected_services.append(service)
@@ -559,7 +564,7 @@ class SpaceService:
 
         if include_personal:
             personal_space = await self.get_personal_space()
-            return [personal_space] + spaces
+            return [personal_space] + spaces  # type: ignore[return-value]
 
         return spaces
 

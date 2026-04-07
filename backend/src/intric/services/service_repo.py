@@ -1,5 +1,5 @@
-from uuid import UUID
 from typing import TYPE_CHECKING, Optional
+from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.orm import selectinload
@@ -22,7 +22,7 @@ class ServiceRepository:
         completion_model_repo: "CompletionModelRepository",
     ):
         self._session = session
-        self._delegate = BaseRepositoryDelegate(
+        self._delegate: BaseRepositoryDelegate[Service] = BaseRepositoryDelegate(
             session, Services, Service, with_options=self._get_options()
         )
         self.completion_model_repo = completion_model_repo
@@ -49,17 +49,17 @@ class ServiceRepository:
 
         return service
 
-    async def add(self, service: ServiceUpdate) -> Service:
+    async def add(self, service: ServiceUpdate) -> Service | None:
         s = await self._delegate.add(service)
         return await self._set_domain_completion_model(s)
 
-    async def get_by_id(self, id: UUID) -> Service:
+    async def get_by_id(self, id: UUID) -> Service | None:
         s = await self._delegate.get(id)
         return await self._set_domain_completion_model(s)
 
     async def get_for_user(
         self, user_id: UUID, search_query: str = None
-    ) -> list[Service]:
+    ) -> list[Service | None]:
         stmt = (
             sa.select(Services)
             .where(Services.user_id == user_id)
@@ -75,7 +75,7 @@ class ServiceRepository:
             await self._set_domain_completion_model(service) for service in services
         ]
 
-    async def update(self, service: ServiceUpdate) -> Service:
+    async def update(self, service: ServiceUpdate) -> Service | None:
         s = await self._delegate.update(service)
         return await self._set_domain_completion_model(s)
 

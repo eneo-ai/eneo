@@ -3,8 +3,8 @@ from typing import Optional
 from uuid import UUID
 
 from intric.integration.domain.entities.tenant_sharepoint_app import (
-    TenantSharePointApp,
     AUTH_METHOD_SERVICE_ACCOUNT,
+    TenantSharePointApp,
 )
 from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
     TenantSharePointAppRepository,

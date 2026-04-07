@@ -9,23 +9,23 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
 from intric.authentication.api_key_repo import ApiKeysRepository
 from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_models import (
-    ApiKeyInDB,
+    PERMISSION_LEVEL_ORDER,
     ApiKeyHashVersion,
+    ApiKeyInDB,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
-    PERMISSION_LEVEL_ORDER,
     ResourcePermissions,
 )
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.actor_types import ActorType
-from intric.audit.domain.entity_types import EntityType
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.users_table import Users
 from intric.main.config import get_settings

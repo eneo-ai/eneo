@@ -14,25 +14,24 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from jwt import PyJWKClient as _PyJWKClient
 from pydantic import BaseModel
 
-from intric.main.aiohttp_client import aiohttp_client
-from intric.main.config import get_settings, validate_redirect_uri
-from intric.main.container.container import Container
-from intric.main.logging import get_logger
-from intric.main.request_context import set_request_context
-from intric.observability.debug_toggle import is_debug_enabled
-from intric.observability.redaction import sanitize_payload
-from intric.server.dependencies.container import get_container
-from intric.settings.credential_resolver import CredentialResolver
-from intric.tenants.tenant import TenantState
-
 # JIT provisioning imports
 from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
+from intric.main.aiohttp_client import aiohttp_client
+from intric.main.config import get_settings, validate_redirect_uri
+from intric.main.container.container import Container
+from intric.main.logging import get_logger
 from intric.main.models import ModelId
+from intric.main.request_context import set_request_context
+from intric.observability.debug_toggle import is_debug_enabled
+from intric.observability.redaction import sanitize_payload
 from intric.predefined_roles.predefined_role import PredefinedRoleName
+from intric.server.dependencies.container import get_container
+from intric.settings.credential_resolver import CredentialResolver
+from intric.tenants.tenant import TenantState
 from intric.users.user import UserAdd, UserInDB, UserState
 
 logger = get_logger(__name__)

@@ -117,6 +117,6 @@ class SharePointToken(OauthToken):
     @property
     def base_site_id(self) -> str:
         try:
-            return self.resources["id"]
+            return self.resources["id"]  # type: ignore[call-overload]
         except (KeyError, IndexError):
             raise InternalServerException("graph site id not found")

@@ -101,7 +101,7 @@ class AssistantFactory:
             )
 
         if prompt is not None:
-            prompt = self.prompt_factory.create_prompt_from_db(
+            prompt = self.prompt_factory.create_prompt_from_db(  # type: ignore[assignment]
                 prompt_in_db=prompt, is_selected=True
             )
 
@@ -156,7 +156,7 @@ class AssistantFactory:
         integration_knowledge_list: list["IntegrationKnowledge"] = [],
         user: UserInDB = None,
     ) -> Assistant:
-        user = UserSparse.model_validate(user)
+        user = UserSparse.model_validate(user)  # type: ignore[assignment]
         collection_ids = [
             assistant_collection.group_id
             for assistant_collection in assistant_in_db.assistant_groups
@@ -171,9 +171,10 @@ class AssistantFactory:
         ]
 
         prompt = None
-        if assistant_in_db.prompt is not None:
+        if assistant_in_db.prompt is not None:  # type: ignore[attr-defined]
             prompt = self.prompt_factory.create_prompt_from_db(
-                prompt_in_db=assistant_in_db.prompt, is_selected=True
+                prompt_in_db=assistant_in_db.prompt,  # type: ignore[attr-defined]
+                is_selected=True,
             )
 
         attachments = [

@@ -15,7 +15,7 @@ from intric.files.text import TextMimeTypes
 from intric.files.transcriber import Transcriber
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
-from intric.main.models import NOT_PROVIDED, NotProvided
+from intric.main.models import NOT_PROVIDED, NotProvided, is_provided
 from intric.prompts.prompt import Prompt
 from intric.templates.app_template.app_template import AppTemplate
 
@@ -203,10 +203,10 @@ class App:
         if published is not None:
             self.published = published
 
-        if data_retention_days is not NOT_PROVIDED:
+        if is_provided(data_retention_days):
             self.data_retention_days = data_retention_days
 
-        if icon_id is not NOT_PROVIDED:
+        if is_provided(icon_id):
             self.icon_id = icon_id
 
     def is_valid_input(self, files: list[FileInfo], text: str | None = None):

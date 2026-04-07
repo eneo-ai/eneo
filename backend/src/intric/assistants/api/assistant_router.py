@@ -12,20 +12,30 @@ from intric.assistants.api.assistant_models import (
     AssistantPublic,
     AssistantUpdatePublic,
 )
-from intric.authentication.auth_models import ApiKey, ApiKeyNotificationTargetType
+
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.authentication.api_key_notification_auto_follow import (
     auto_follow_on_publish,
 )
 from intric.authentication.api_key_router_helpers import (
     error_responses as api_key_error_responses,
 )
+from intric.authentication.auth_dependencies import get_scope_filter
+from intric.authentication.auth_models import ApiKey, ApiKeyNotificationTargetType
 from intric.database.database import AsyncSession
 from intric.main.config import get_settings
 from intric.main.container.container import Container
-from intric.main.models import NOT_PROVIDED, CursorPaginatedResponse, PaginatedResponse
+from intric.main.models import (
+    NOT_PROVIDED,
+    CursorPaginatedResponse,
+    PaginatedResponse,
+    is_provided,
+)
 from intric.prompts.api.prompt_models import PromptSparse
 from intric.server import protocol
-from intric.authentication.auth_dependencies import get_scope_filter
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.sessions.session import (
@@ -39,11 +49,6 @@ from intric.sessions.session_protocol import (
     to_sessions_paginated_response,
 )
 from intric.spaces.api.space_models import TransferApplicationRequest
-
-# Audit logging - module level imports for consistency
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -224,6 +229,7 @@ async def update_assistant(
     old_mcp_tool_overrides = None
     if assistant.mcp_tools is not None:
         import sqlalchemy as sa
+
         from intric.database.tables.assistant_table import AssistantMCPServerTools
 
         stmt = sa.select(
@@ -367,7 +373,7 @@ async def update_assistant(
         changes["top_p"] = {"old": old_top_p, "new": new_top_p}
 
     # Description change
-    if description is not NOT_PROVIDED and description != old_assistant.description:
+    if is_provided(description) and description != old_assistant.description:
         if isinstance(old_assistant.description, str):
             old_desc_preview = (
                 (old_assistant.description[:50] + "...")

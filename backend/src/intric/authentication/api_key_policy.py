@@ -12,14 +12,14 @@ from intric.allowed_origins.origin_matching import origin_matches_pattern
 from intric.authentication.api_key_request_context import resolve_client_ip
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.auth_models import (
+    PERMISSION_LEVEL_ORDER,
+    ApiKeyCreateRequest,
     ApiKeyOwnership,
     ApiKeyPermission,
-    ApiKeyCreateRequest,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
-    PERMISSION_LEVEL_ORDER,
     ResourcePermissions,
     compute_effective_state,
 )
@@ -29,6 +29,7 @@ from intric.roles.permissions import Permission
 
 if TYPE_CHECKING:
     from starlette.requests import Request
+
     from intric.spaces.space import Space
     from intric.spaces.space_service import SpaceService
     from intric.users.user import UserInDB

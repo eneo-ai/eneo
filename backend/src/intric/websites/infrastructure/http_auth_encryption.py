@@ -9,6 +9,7 @@ Why Infrastructure Layer:
 
 import base64
 from typing import Optional
+
 from cryptography.fernet import Fernet
 
 from intric.websites.domain.http_auth_credentials import HttpAuthCredentials

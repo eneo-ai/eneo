@@ -1,10 +1,10 @@
-from typing import TYPE_CHECKING, Optional
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Optional
 
 import sqlalchemy as sa
+from sqlalchemy import func, or_, update
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
-from sqlalchemy import or_, func, update
 
 from intric.database.tables.assistant_template_table import AssistantTemplates
 
@@ -99,7 +99,7 @@ class AssistantTemplateRepository:
 
         results = await self.session.scalars(query)
 
-        return self.factory.create_assistant_template_list(items=results.all())
+        return self.factory.create_assistant_template_list(items=results.all())  # type: ignore[return-value]
 
     async def add(self, obj: "AssistantTemplateCreate") -> "AssistantTemplate":
         stmt = (
@@ -128,6 +128,7 @@ class AssistantTemplateRepository:
         id: "UUID",
         obj: "AssistantTemplateUpdate",
     ) -> "AssistantTemplate":
+        assert obj.wizard is not None
         stmt = (
             sa.update(self._db_model)
             .values(
@@ -157,7 +158,7 @@ class AssistantTemplateRepository:
         )
         query = self._apply_options(query=base_query)
         results = await self.session.scalars(query)
-        return self.factory.create_assistant_template_list(items=results.all())
+        return self.factory.create_assistant_template_list(items=results.all())  # type: ignore[return-value]
 
     async def check_duplicate_name(
         self, name: str, tenant_id: Optional["UUID"] = None
@@ -181,11 +182,12 @@ class AssistantTemplateRepository:
             query = query.where(self._db_model.tenant_id.is_(None))
 
         count = await self.session.scalar(query)
+        assert count is not None
         return count > 0
 
     async def soft_delete(
         self, id: "UUID", tenant_id: "UUID", user_id: "UUID"
-    ) -> "AssistantTemplate":
+    ) -> "AssistantTemplate | None":
         """Soft-delete template (mark with deleted_at).
 
         Validates: template belongs to tenant
@@ -207,7 +209,7 @@ class AssistantTemplateRepository:
 
     async def restore(
         self, id: "UUID", tenant_id: "UUID", user_id: "UUID"
-    ) -> "AssistantTemplate":
+    ) -> "AssistantTemplate | None":
         """Restore soft-deleted template (clear deleted_at).
 
         Validates: template belongs to tenant and is deleted
@@ -274,4 +276,4 @@ class AssistantTemplateRepository:
 
         query = self._apply_options(query=base_query)
         results = await self.session.scalars(query)
-        return self.factory.create_assistant_template_list(items=results.all())
+        return self.factory.create_assistant_template_list(items=results.all())  # type: ignore[return-value]

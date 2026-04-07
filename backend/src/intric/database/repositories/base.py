@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Type
+from typing import Any, Generic, Type, TypeVar
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -11,6 +11,8 @@ from sqlalchemy.sql.base import ExecutableOption
 
 from intric.database.tables.base_class import Base
 from intric.main.models import ModelId
+
+T_Model = TypeVar("T_Model", bound=BaseModel)
 
 
 @dataclass
@@ -25,12 +27,12 @@ class BaseRepository:
         self.session = session
 
 
-class BaseRepositoryDelegate:
+class BaseRepositoryDelegate(Generic[T_Model]):
     def __init__(
         self,
         session: AsyncSession,
         table: Type[Base],
-        in_db_model: Type[BaseModel],
+        in_db_model: Type[T_Model],
         with_options: list = [],
     ):
         self.session = session
@@ -50,15 +52,15 @@ class BaseRepositoryDelegate:
 
         return await self.session.scalars(query)
 
-    async def get_model_from_query(self, query):
+    async def get_model_from_query(self, query) -> T_Model | None:
         record = await self.get_record_from_query(query=query)
 
         if record is None:
-            return
+            return None
 
         return self.in_db_model.model_validate(record)
 
-    async def get_models_from_query(self, query: sa.Select):
+    async def get_models_from_query(self, query: sa.Select) -> list[T_Model]:
         records = await self.get_records_from_query(query=query)
 
         return [self.in_db_model.model_validate(record) for record in records]
@@ -70,7 +72,7 @@ class BaseRepositoryDelegate:
         exclude: set = set(),
         relationships: list[RelationshipOption] = [],
         **extra_kwargs,
-    ):
+    ) -> T_Model:
         query = (
             sa.insert(self.table)
             .values(
@@ -99,7 +101,7 @@ class BaseRepositoryDelegate:
     def _get_query_for_related(self, table: Type[Base], id_list: list[ModelId]):
         _ids = [item.id for item in id_list]
 
-        return sa.select(table).filter(table.id.in_(_ids))
+        return sa.select(table).filter(table.id.in_(_ids))  # type: ignore[attr-defined]
 
     async def _get_related(
         self,
@@ -133,22 +135,28 @@ class BaseRepositoryDelegate:
         return entry_in_db
 
     def _get_relationships_names(self):
-        return {key for key in inspect(self.table).relationships.keys()}
+        mapper = inspect(self.table)
+        assert mapper is not None
+        return {key for key in mapper.relationships.keys()}
 
     def _get_query_with_conditions(self, conditions: dict[InstrumentedAttribute, Any]):
-        query = sa.select(self.table).order_by(self.table.created_at)
+        query = sa.select(self.table).order_by(self.table.created_at)  # type: ignore[attr-defined]
 
         for attr in conditions.keys():
             query = query.where(attr == conditions[attr])
 
         return query
 
-    async def get_by(self, conditions: dict[InstrumentedAttribute, Any]):
+    async def get_by(
+        self, conditions: dict[InstrumentedAttribute, Any]
+    ) -> T_Model | None:
         query = self._get_query_with_conditions(conditions)
 
         return await self.get_model_from_query(query)
 
-    async def filter_by(self, conditions: dict[InstrumentedAttribute, Any]):
+    async def filter_by(
+        self, conditions: dict[InstrumentedAttribute, Any]
+    ) -> list[T_Model]:
         query = self._get_query_with_conditions(conditions)
 
         return await self.get_models_from_query(query)
@@ -160,7 +168,7 @@ class BaseRepositoryDelegate:
         exclude: set = set(),
         relationships: list[RelationshipOption] = [],
         **extra_kwargs,
-    ):
+    ) -> T_Model | None:
         query = (
             sa.update(self.table)
             .values(
@@ -170,7 +178,7 @@ class BaseRepositoryDelegate:
                 ),
                 **extra_kwargs,
             )
-            .where(self.table.id == new_entry.id)
+            .where(self.table.id == new_entry.id)  # type: ignore[attr-defined]
             .returning(self.table)
         )
 
@@ -180,7 +188,7 @@ class BaseRepositoryDelegate:
         entry_in_db = await self.session.scalar(query)
 
         if entry_in_db is None:
-            return
+            return None
 
         entry_in_db = await self._assign_relationships(
             entry_in_db=entry_in_db,
@@ -190,15 +198,17 @@ class BaseRepositoryDelegate:
 
         return self.in_db_model.model_validate(entry_in_db)
 
-    async def get(self, id: UUID, user_id: UUID = None):
-        query = sa.select(self.table).where(self.table.id == id)
+    async def get(self, id: UUID, user_id: UUID = None) -> T_Model | None:
+        query = sa.select(self.table).where(self.table.id == id)  # type: ignore[attr-defined]
 
         if user_id is not None:
-            query = query.where(self.table.user_id == user_id)
+            query = query.where(self.table.user_id == user_id)  # type: ignore[attr-defined]
 
         return await self.get_model_from_query(query)
 
-    async def delete_by(self, conditions: dict[InstrumentedAttribute, Any]):
+    async def delete_by(
+        self, conditions: dict[InstrumentedAttribute, Any]
+    ) -> T_Model | None:
         query = sa.delete(self.table).returning(self.table)
 
         for attr in conditions.keys():
@@ -206,19 +216,19 @@ class BaseRepositoryDelegate:
 
         return await self.get_model_from_query(query)
 
-    async def delete(self, id: UUID):
-        return await self.delete_by(conditions={self.table.id: id})
+    async def delete(self, id: UUID) -> T_Model | None:
+        return await self.delete_by(conditions={self.table.id: id})  # type: ignore[attr-defined]
 
-    async def get_all(self):
-        query = sa.select(self.table).order_by(self.table.created_at)
+    async def get_all(self) -> list[T_Model]:
+        query = sa.select(self.table).order_by(self.table.created_at)  # type: ignore[attr-defined]
 
         return await self.get_models_from_query(query)
 
-    async def get_by_ids(self, ids: list[UUID]):
+    async def get_by_ids(self, ids: list[UUID]) -> list[T_Model]:
         query = (
             sa.select(self.table)
-            .where(self.table.id.in_(ids))
-            .order_by(self.table.created_at)
+            .where(self.table.id.in_(ids))  # type: ignore[attr-defined]
+            .order_by(self.table.created_at)  # type: ignore[attr-defined]
         )
 
         return await self.get_models_from_query(query)

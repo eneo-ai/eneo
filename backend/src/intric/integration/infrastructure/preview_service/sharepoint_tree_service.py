@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Callable, Awaitable, Dict
+from typing import TYPE_CHECKING, Awaitable, Callable, Dict, Optional
 from uuid import UUID
 
 from intric.integration.domain.entities.oauth_token import SharePointToken

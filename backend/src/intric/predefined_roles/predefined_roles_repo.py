@@ -18,14 +18,14 @@ from intric.predefined_roles.predefined_role import (
 
 class PredefinedRolesRepository:
     def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(
-            session, PredefinedRoles, PredefinedRoleInDB
+        self.delegate: BaseRepositoryDelegate[PredefinedRoleInDB] = (
+            BaseRepositoryDelegate(session, PredefinedRoles, PredefinedRoleInDB)
         )
 
-    async def get_predefined_role_by_uuid(self, id: UUID) -> PredefinedRoleInDB:
+    async def get_predefined_role_by_uuid(self, id: UUID) -> PredefinedRoleInDB | None:
         return await self.delegate.get(id)
 
-    async def get_predefined_role_by_name(self, name: str) -> PredefinedRoleInDB:
+    async def get_predefined_role_by_name(self, name: str) -> PredefinedRoleInDB | None:
         return await self.delegate.get_by(conditions={PredefinedRoles.name: name})
 
     async def create_predefined_role(
@@ -35,7 +35,7 @@ class PredefinedRolesRepository:
 
     async def update_predefined_role(
         self, role: PredefinedRoleUpdate
-    ) -> PredefinedRoleInDB:
+    ) -> PredefinedRoleInDB | None:
         return await self.delegate.update(role)
 
     async def delete_predefined_role_by_id(self, id: UUID) -> PredefinedRoleInDB:
@@ -47,14 +47,14 @@ class PredefinedRolesRepository:
 
         await self.delegate.get_record_from_query(stmt)
 
-        return True
+        return True  # type: ignore[return-value]
 
     async def get_predefined_roles(self) -> list[PredefinedRoleInDB]:
         return await self.delegate.get_all()
 
-    async def get_ids_and_names(self) -> list[(UUID, str)]:
+    async def get_ids_and_names(self) -> list[tuple[UUID, str]]:  # type: ignore[type-arg]
         stmt = sa.select(PredefinedRoles)
 
         roles = await self.delegate.get_records_from_query(stmt)
 
-        return [IdAndName(id=role.id, name=role.name) for role in roles.all()]
+        return [IdAndName(id=role.id, name=role.name) for role in roles.all()]  # type: ignore[return-value]

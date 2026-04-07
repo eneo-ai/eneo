@@ -74,12 +74,13 @@ class CompletionService:
         Uses TenantModelAdapter which routes through LiteLLM.
         """
         import sqlalchemy as sa
+
+        from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
+            TenantModelAdapter,
+        )
         from intric.database.tables.model_providers_table import ModelProviders
         from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
             TenantModelCredentialResolver,
-        )
-        from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
-            TenantModelAdapter,
         )
 
         # All models must have provider_id
@@ -196,7 +197,7 @@ class CompletionService:
                     if name == "generate_image":
                         yield Completion(response_type=ResponseType.INTRIC_EVENT)
 
-                        chunk.image_data = await generate_image(**call_args)
+                        chunk.image_data = await generate_image(**call_args)  # type: ignore[attr-defined]
                         chunk.response_type = ResponseType.FILES
 
                         yield chunk
@@ -318,9 +319,11 @@ class CompletionService:
                             "tenant_id": self.tenant.id,
                             "user_id": session.user_id,
                             "session_id": session.id,
-                            "assistant_id": session.assistant.id
-                            if session.assistant is not None
-                            else None,
+                            "assistant_id": (
+                                session.assistant.id
+                                if session.assistant is not None
+                                else None
+                            ),
                         }
 
                     async for chunk in model_adapter.iterate_stream(

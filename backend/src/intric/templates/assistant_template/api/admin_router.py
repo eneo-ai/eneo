@@ -1,18 +1,18 @@
-from fastapi import APIRouter, Depends
 from uuid import UUID
 
-from intric.main.container.container import Container
-from intric.server.dependencies.container import get_container
-from intric.server.protocol import responses
+from fastapi import APIRouter, Depends
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.main.container.container import Container
+from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 from intric.templates.assistant_template.api.assistant_template_models import (
-    AssistantTemplateAdminPublic,
-    AssistantTemplateAdminListPublic,
     AssistantTemplateAdminCreate,
+    AssistantTemplateAdminListPublic,
+    AssistantTemplateAdminPublic,
     AssistantTemplateAdminUpdate,
     AssistantTemplateToggleDefaultRequest,
 )

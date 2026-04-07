@@ -1,22 +1,14 @@
-import redis.asyncio as aioredis
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import AsyncIterator
 
+import redis.asyncio as aioredis
 from dependency_injector import containers, providers
+
 from intric.actors import ActorFactory, ActorManager
 from intric.admin.admin_service import AdminService
 from intric.admin.quota_service import QuotaService
 from intric.ai_models.ai_models_service import AIModelsService
-from intric.audit.application.audit_config_service import AuditConfigService
-from intric.audit.application.audit_export_service import AuditExportService
-from intric.audit.application.audit_service import AuditService
-from intric.audit.application.retention_service import RetentionService
-from intric.audit.infrastructure.audit_config_repository import (
-    AuditConfigRepositoryImpl,
-)
-from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-from intric.audit.infrastructure.audit_session_service import AuditSessionService
 from intric.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
 )
@@ -42,22 +34,31 @@ from intric.assistants.assistant_factory import AssistantFactory
 from intric.assistants.assistant_repo import AssistantRepository
 from intric.assistants.assistant_service import AssistantService
 from intric.assistants.references import ReferencesService
-from intric.authentication.api_key_repo import ApiKeysRepository
-from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
+from intric.audit.application.audit_config_service import AuditConfigService
+from intric.audit.application.audit_export_service import AuditExportService
+from intric.audit.application.audit_service import AuditService
+from intric.audit.application.retention_service import RetentionService
+from intric.audit.infrastructure.audit_config_repository import (
+    AuditConfigRepositoryImpl,
+)
+from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from intric.audit.infrastructure.audit_session_service import AuditSessionService
 from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
 from intric.authentication.api_key_maintenance import ApiKeyMaintenanceService
 from intric.authentication.api_key_policy import ApiKeyPolicyService
 from intric.authentication.api_key_rate_limiter import ApiKeyRateLimiter
+from intric.authentication.api_key_repo import ApiKeysRepository
 from intric.authentication.api_key_resolver import ApiKeyAuthResolver
 from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
+from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_service import AuthService
 from intric.collections.application.collection_crud_service import CollectionCRUDService
 from intric.completion_models.application import CompletionModelCRUDService
-from intric.completion_models.application.completion_model_migration_service import (
-    CompletionModelMigrationService,
-)
 from intric.completion_models.application.completion_model_migration_history_service import (
     CompletionModelMigrationHistoryService,
+)
+from intric.completion_models.application.completion_model_migration_service import (
+    CompletionModelMigrationService,
 )
 from intric.completion_models.application.completion_model_usage_service import (
     CompletionModelUsageService,
@@ -83,6 +84,9 @@ from intric.embedding_models.infrastructure.create_embeddings_service import (
     CreateEmbeddingsService,
 )
 from intric.embedding_models.infrastructure.datastore import Datastore
+from intric.feature_flag.feature_flag_factory import FeatureFlagFactory
+from intric.feature_flag.feature_flag_repo import FeatureFlagRepository
+from intric.feature_flag.feature_flag_service import FeatureFlagService
 from intric.files.file_protocol import FileProtocol
 from intric.files.file_repo import FileRepository
 from intric.files.file_service import FileService
@@ -109,12 +113,16 @@ from intric.integration.application.integration_preview_service import (
     IntegrationPreviewService,
 )
 from intric.integration.application.integration_service import IntegrationService
+from intric.integration.application.oauth2_service import Oauth2Service
+from intric.integration.application.sharepoint_auth_router import SharePointAuthRouter
 from intric.integration.application.sharepoint_tree_service import (
     SharePointTreeService as AppSharePointTreeService,
 )
-from intric.integration.application.oauth2_service import Oauth2Service
 from intric.integration.application.tenant_integration_service import (
     TenantIntegrationService,
+)
+from intric.integration.application.tenant_sharepoint_app_service import (
+    TenantSharePointAppService,
 )
 from intric.integration.application.user_integration_service import (
     UserIntegrationService,
@@ -122,36 +130,14 @@ from intric.integration.application.user_integration_service import (
 from intric.integration.infrastructure.auth_service.confluence_auth_service import (
     ConfluenceAuthService,
 )
+from intric.integration.infrastructure.auth_service.service_account_auth_service import (
+    ServiceAccountAuthService,
+)
 from intric.integration.infrastructure.auth_service.sharepoint_auth_service import (
     SharepointAuthService,
 )
 from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
     TenantAppAuthService,
-)
-from intric.integration.infrastructure.auth_service.service_account_auth_service import (
-    ServiceAccountAuthService,
-)
-from intric.integration.application.sharepoint_auth_router import SharePointAuthRouter
-from intric.integration.application.tenant_sharepoint_app_service import (
-    TenantSharePointAppService,
-)
-from intric.integration.infrastructure.tenant_sharepoint_app_repo_impl import (
-    TenantSharePointAppRepositoryImpl,
-)
-from intric.integration.infrastructure.mappers.tenant_sharepoint_app_mapper import (
-    TenantSharePointAppMapper,
-)
-from intric.integration.infrastructure.sharepoint_webhook_service import (
-    SharepointWebhookService,
-)
-from intric.integration.infrastructure.office_change_key_service import (
-    OfficeChangeKeyService,
-)
-from intric.integration.infrastructure.sharepoint_subscription_service import (
-    SharePointSubscriptionService,
-)
-from intric.integration.infrastructure.sharepoint_subscription_repo_impl import (
-    SharePointSubscriptionRepositoryImpl,
 )
 from intric.integration.infrastructure.content_service.confluence_content_service import (
     ConfluenceContentService,
@@ -177,10 +163,16 @@ from intric.integration.infrastructure.mappers.sync_log_mapper import (
 from intric.integration.infrastructure.mappers.tenant_integration_mapper import (
     TenantIntegrationMapper,
 )
+from intric.integration.infrastructure.mappers.tenant_sharepoint_app_mapper import (
+    TenantSharePointAppMapper,
+)
 from intric.integration.infrastructure.mappers.user_integration_mapper import (
     UserIntegrationMapper,
 )
 from intric.integration.infrastructure.oauth_token_service import OauthTokenService
+from intric.integration.infrastructure.office_change_key_service import (
+    OfficeChangeKeyService,
+)
 from intric.integration.infrastructure.preview_service.confluence_preview_service import (
     ConfluencePreviewService,
 )
@@ -205,6 +197,18 @@ from intric.integration.infrastructure.repo_impl.tenant_integration_repo_impl im
 from intric.integration.infrastructure.repo_impl.user_integration_repo_impl import (
     UserIntegrationRepoImpl,
 )
+from intric.integration.infrastructure.sharepoint_subscription_repo_impl import (
+    SharePointSubscriptionRepositoryImpl,
+)
+from intric.integration.infrastructure.sharepoint_subscription_service import (
+    SharePointSubscriptionService,
+)
+from intric.integration.infrastructure.sharepoint_webhook_service import (
+    SharepointWebhookService,
+)
+from intric.integration.infrastructure.tenant_sharepoint_app_repo_impl import (
+    TenantSharePointAppRepositoryImpl,
+)
 from intric.integration.presentation.assemblers.confluence_content_assembler import (
     ConfluenceContentAssembler,
 )
@@ -220,6 +224,13 @@ from intric.integration.presentation.assemblers.tenant_integration_assembler imp
 from intric.integration.presentation.assemblers.user_integration_assembler import (
     UserIntegrationAssembler,
 )
+from intric.jobs.job_repo import JobRepository
+from intric.jobs.job_service import JobService
+from intric.jobs.task_service import TaskService
+from intric.limits.limit_service import LimitService
+from intric.main.aiohttp_client import aiohttp_client
+from intric.main.config import get_settings
+from intric.main.logging import get_logger
 from intric.mcp_servers.application.mcp_server_service import MCPServerService
 from intric.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
@@ -241,11 +252,6 @@ from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
 from intric.mcp_servers.presentation.assemblers.mcp_server_tool_assembler import (
     MCPServerToolAssembler,
 )
-from intric.jobs.job_repo import JobRepository
-from intric.jobs.job_service import JobService
-from intric.jobs.task_service import TaskService
-from intric.limits.limit_service import LimitService
-from intric.main.aiohttp_client import aiohttp_client
 from intric.modules.module_repo import ModuleRepository
 from intric.predefined_roles.predefined_role_service import PredefinedRolesService
 from intric.predefined_roles.predefined_roles_repo import PredefinedRolesRepository
@@ -254,6 +260,7 @@ from intric.prompts.prompt_factory import PromptFactory
 from intric.prompts.prompt_repo import PromptRepository
 from intric.prompts.prompt_service import PromptService
 from intric.questions.questions_repo import QuestionRepository
+from intric.redis.connection import build_redis_pool_kwargs
 from intric.roles.roles_repo import RolesRepository
 from intric.roles.roles_service import RolesService
 from intric.security_classifications.application.security_classification_service import (
@@ -263,11 +270,11 @@ from intric.security_classifications.domain.repositories.security_classification
     SecurityClassificationRepoImpl,
 )
 from intric.services.service_repo import ServiceRepository
-from intric.settings.encryption_service import EncryptionService
 from intric.services.service_runner import ServiceRunner
 from intric.services.service_service import ServiceService
 from intric.sessions.session_service import SessionService
 from intric.sessions.sessions_repo import SessionRepository
+from intric.settings.encryption_service import EncryptionService
 from intric.settings.setting_service import SettingService
 from intric.settings.settings_repo import SettingsRepository
 from intric.spaces.api.space_assembler import SpaceAssembler
@@ -299,9 +306,6 @@ from intric.templates.assistant_template.assistant_template_repo import (
 from intric.templates.assistant_template.assistant_template_service import (
     AssistantTemplateService,
 )
-from intric.feature_flag.feature_flag_factory import FeatureFlagFactory
-from intric.feature_flag.feature_flag_repo import FeatureFlagRepository
-from intric.feature_flag.feature_flag_service import FeatureFlagService
 from intric.templates.templates_service import TemplateService
 from intric.tenants.tenant import TenantInDB
 from intric.tenants.tenant_repo import TenantRepository
@@ -338,9 +342,6 @@ from intric.websites.infrastructure.website_cleaner_service import WebsiteCleane
 from intric.worker.task_manager import TaskManager
 from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
 from intric.workflows.step_repo import StepRepository
-from intric.main.config import get_settings
-from intric.main.logging import get_logger
-from intric.redis.connection import build_redis_pool_kwargs
 
 _logger = get_logger(__name__)
 

@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.tables.integration_table import (
     IntegrationKnowledge as IntegrationKnowledgeDBModel,
+)
+from intric.database.tables.integration_table import (
     UserIntegration as UserIntegrationDBModel,
 )
 from intric.integration.domain.repositories.oauth_token_repo import OauthTokenRepository
@@ -18,10 +20,10 @@ from intric.integration.presentation.models import SharepointContentTaskParam
 from intric.jobs.job_models import Task
 from intric.jobs.job_repo import JobRepository
 from intric.jobs.job_service import JobService
-from intric.users.user_repo import UsersRepository
-from intric.users.user import UserInDB
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
+from intric.users.user import UserInDB
+from intric.users.user_repo import UsersRepository
 
 logger = get_logger(__name__)
 
@@ -387,7 +389,7 @@ class SharepointWebhookService:
         )
 
         result = await self.session.execute(stmt)
-        return result.all()
+        return result.all()  # type: ignore[return-value]
 
     async def _fetch_knowledge_by_drive(
         self, drive_id: str
@@ -408,7 +410,7 @@ class SharepointWebhookService:
         )
 
         result = await self.session.execute(stmt)
-        return result.all()
+        return result.all()  # type: ignore[return-value]
 
     def _is_notification_in_scope(
         self, notification: Dict, knowledge_db: IntegrationKnowledgeDBModel

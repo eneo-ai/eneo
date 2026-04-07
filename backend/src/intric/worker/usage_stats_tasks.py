@@ -4,6 +4,7 @@ import logging
 from uuid import UUID
 
 from dependency_injector import providers
+
 from intric.database.database import sessionmanager
 from intric.events import ModelUsageStatsUpdated, get_event_publisher
 from intric.jobs.job_models import Task
@@ -181,9 +182,10 @@ async def recalculate_tenant_usage_stats(container: Container, tenant_id: UUID):
     session = container.session()
 
     from sqlalchemy import select
+
     from intric.database.tables.users_table import Users
 
-    result = await session.execute(
+    result = await session.execute(  # type: ignore[union-attr]
         select(Users).where(Users.tenant_id == tenant_id).limit(1)
     )
     user_row = result.scalar_one_or_none()
@@ -296,8 +298,9 @@ async def recalculate_tenant_usage_stats_direct(container: Container, tenant_id:
                     return False
 
                 # Get a user from this tenant to set the context (needed for domain repo)
-                from intric.database.tables.users_table import Users
                 from sqlalchemy import select
+
+                from intric.database.tables.users_table import Users
 
                 stmt = select(Users).where(Users.tenant_id == tenant_id).limit(1)
                 result = await session.execute(stmt)
@@ -414,8 +417,9 @@ async def recalculate_all_tenants_usage_stats(container: Container):
                 try:
                     async with session.begin():
                         # Get a user from this tenant to set the context
-                        from intric.database.tables.users_table import Users
                         from sqlalchemy import select
+
+                        from intric.database.tables.users_table import Users
 
                         stmt = (
                             select(Users).where(Users.tenant_id == tenant.id).limit(1)

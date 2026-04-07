@@ -1,23 +1,23 @@
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
 
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
 from intric.database.tables.assistant_table import AssistantsGroups
 from intric.database.tables.collections_table import CollectionsTable
+from intric.database.tables.groups_spaces_table import GroupsSpaces
 from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.database.tables.service_table import ServicesGroups
 from intric.database.tables.users_table import Users
 from intric.groups_legacy.api.group_models import Group, GroupCreate, GroupUpdate
-from intric.database.tables.groups_spaces_table import GroupsSpaces
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 
 class GroupRepository:
     def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(
+        self.delegate: BaseRepositoryDelegate[Group] = BaseRepositoryDelegate(
             session,
             CollectionsTable,
             Group,
@@ -43,7 +43,7 @@ class GroupRepository:
 
         return await self.delegate.get_models_from_query(query)
 
-    async def get_group(self, id: UUID) -> Group:
+    async def get_group(self, id: UUID) -> Group | None:
         return await self.delegate.get(id)
 
     async def get_groups_by_ids(self, ids: list[UUID]) -> list[Group]:
@@ -52,10 +52,10 @@ class GroupRepository:
     async def create_group(self, group: GroupCreate) -> Group:
         return await self.delegate.add(group)
 
-    async def update_group(self, group: GroupUpdate) -> Group:
+    async def update_group(self, group: GroupUpdate) -> Group | None:
         return await self.delegate.update(group)
 
-    async def update_group_size(self, group_id: UUID) -> Group:
+    async def update_group_size(self, group_id: UUID) -> Group | None:
         info_blobs_size_subquery = (
             sa.select(sa.func.coalesce(sa.func.sum(InfoBlobs.size), 0))
             .where(InfoBlobs.group_id == group_id)
@@ -69,7 +69,7 @@ class GroupRepository:
             .returning(CollectionsTable)
         )
 
-        return await self.session.scalar(stmt)
+        return await self.session.scalar(stmt)  # type: ignore[return-value]
 
     async def delete_group_by_id(self, group_id: UUID) -> int:
         result = await self.session.execute(
@@ -77,7 +77,9 @@ class GroupRepository:
         )
         return result.rowcount
 
-    async def move_group_owner(self, group_id: UUID, new_owner_space_id: UUID) -> Group:
+    async def move_group_owner(
+        self, group_id: UUID, new_owner_space_id: UUID
+    ) -> Group | None:
         query = (
             sa.update(CollectionsTable)
             .where(CollectionsTable.id == group_id)

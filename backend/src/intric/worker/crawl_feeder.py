@@ -72,7 +72,7 @@ class CrawlFeeder:
         defaults to QUEUED but these are ghost records that accumulate.
         Uses same timeout threshold as job cleanup for consistency.
         """
-        from sqlalchemy import delete, and_
+        from sqlalchemy import and_, delete
 
         from intric.database.database import sessionmanager
         from intric.database.tables.websites_table import CrawlRuns
@@ -117,6 +117,8 @@ class CrawlFeeder:
             redis_client: Redis connection.
         """
         # Fetch tenant-specific crawler settings (supports per-tenant overrides)
+        assert self._capacity_manager is not None
+        assert self._pending_queue is not None
         tenant_crawler_settings = await self._capacity_manager.get_tenant_settings(
             tenant_id
         )
@@ -230,7 +232,7 @@ class CrawlFeeder:
                 continue
 
             # Enqueue to ARQ
-            success, is_duplicate, returned_job_id = await self._job_enqueuer.enqueue(
+            success, is_duplicate, _returned_job_id = await self._job_enqueuer.enqueue(
                 job_data, tenant_id
             )
 
@@ -321,7 +323,7 @@ class CrawlFeeder:
             )
 
             self._redis_client = aioredis.Redis.from_url(redis_url, **redis_kwargs)
-            redis_client = self._redis_client
+            redis_client: aioredis.Redis = self._redis_client
             self._pending_queue = PendingQueue(redis_client)
             self._capacity_manager = CapacityManager(redis_client, self.settings)
             self._leader_election = LeaderElection(redis_client, self._worker_id)

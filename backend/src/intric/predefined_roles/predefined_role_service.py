@@ -15,7 +15,7 @@ class PredefinedRolesService:
         if role is None:
             raise NotFoundException(f"PredefinedRole {role_id} not found")
 
-    async def get_predefined_role(self, role_id: UUID) -> PredefinedRoleInDB:
+    async def get_predefined_role(self, role_id: UUID) -> PredefinedRoleInDB | None:
         role = await self.repo.get_predefined_role_by_uuid(role_id)
         self._validate(role, role_id)
 

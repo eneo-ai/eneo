@@ -45,14 +45,20 @@ class PromptService:
 
     async def update_prompt_description(self, id: UUID, description: str) -> Prompt:
         prompt = await self.get_prompt(id)
+        assert prompt.user is not None
 
         if prompt.user.id != self.user.id:
             raise UnauthorizedException("Prompt belongs to other user")
 
-        return await self.repo.update_prompt_description(id=id, description=description)
+        result = await self.repo.update_prompt_description(
+            id=id, description=description
+        )
+        assert result is not None
+        return result
 
     async def delete_prompt(self, id: UUID):
         prompt = await self.get_prompt(id)
+        assert prompt.user is not None
 
         if prompt.user.id != self.user.id:
             raise UnauthorizedException("Prompt belongs to other user")

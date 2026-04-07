@@ -3,9 +3,10 @@ import json
 import time
 import traceback
 import uuid
-import uvicorn
 from datetime import datetime, timezone
 from typing import Optional
+
+import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
@@ -418,9 +419,11 @@ def get_application():
 
     @app.get("/api/healthz")
     async def get_healthz():
-        from intric.worker.redis import get_worker_health
         from datetime import datetime, timezone
+
         from fastapi import HTTPException
+
+        from intric.worker.redis import get_worker_health
 
         # Get worker health status
         worker_health = await get_worker_health()
@@ -557,6 +560,7 @@ def get_application():
 
         async def _query_db_crawl_count():
             from sqlalchemy import func, select
+
             from intric.database.tables.job_table import Jobs
             from intric.jobs.job_models import Task
             from intric.main.models import Status

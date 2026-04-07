@@ -1,15 +1,15 @@
 from typing import TYPE_CHECKING, Optional
+from uuid import UUID
 
 from intric.collections.domain.collection import Collection
 from intric.main.exceptions import UnauthorizedException
-from uuid import UUID
 
 if TYPE_CHECKING:
     from intric.actors.actor_manager import ActorManager
+    from intric.groups_legacy.group_service import GroupService
     from intric.spaces.space_repo import SpaceRepository
     from intric.spaces.space_service import SpaceService
     from intric.users.user import UserInDB
-    from intric.groups_legacy.group_service import GroupService
 
 
 class CollectionCRUDService:

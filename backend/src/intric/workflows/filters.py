@@ -4,7 +4,7 @@ from dataclasses import dataclass
 @dataclass
 class Continuation:
     cont: bool
-    chain_breaker_message: str = None
+    chain_breaker_message: str = None  # type: ignore[assignment]
 
     def __bool__(self):
         return self.cont

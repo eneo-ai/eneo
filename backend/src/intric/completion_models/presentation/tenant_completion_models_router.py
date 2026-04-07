@@ -6,10 +6,10 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from intric.authentication.auth_dependencies import get_current_active_user
-from intric.roles.permissions import Permission, validate_permission
 from intric.completion_models.presentation import CompletionModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.container.container import Container
+from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.users.user import UserInDB
@@ -75,9 +75,10 @@ async def create_tenant_completion_model(
 ):
     """Create a new tenant-specific completion model."""
     validate_permission(user, Permission.ADMIN)
+    import sqlalchemy as sa
+
     from intric.database.tables.ai_models_table import CompletionModels
     from intric.database.tables.model_providers_table import ModelProviders
-    import sqlalchemy as sa
     from intric.main.exceptions import BadRequestException, NotFoundException
 
     assembler = container.completion_model_assembler()
@@ -111,32 +112,34 @@ async def create_tenant_completion_model(
     # Note: litellm_model_name is set to None - TenantModelAdapter constructs it
     # at runtime as f"{provider.provider_type}/{model.name}"
     new_model = CompletionModels(
-        tenant_id=user.tenant_id,
-        provider_id=model_create.provider_id,
-        name=model_create.name,  # Model identifier (may contain slashes)
-        nickname=model_create.display_name,
-        litellm_model_name=None,  # Constructed at runtime by TenantModelAdapter
-        max_input_tokens=model_create.max_input_tokens,  # type: ignore[call-arg]
-        max_output_tokens=model_create.max_output_tokens,  # type: ignore[call-arg]
-        vision=model_create.vision,
-        reasoning=model_create.reasoning,
-        supports_tool_calling=model_create.supports_tool_calling,  # type: ignore[call-arg]
-        # Simplified defaults - these fields don't matter for tenant models (grouped by provider in UI)
-        family=model_create.family,
-        hosting=model_create.hosting,
-        org=None,
-        stability="stable",
-        open_source=False,
-        description=f"Tenant model: {model_create.display_name}",
-        nr_billion_parameters=None,
-        hf_link=None,
-        is_deprecated=False,
-        deployment_name=None,
-        base_url=None,
-        # Settings (now directly on model)
-        is_enabled=model_create.is_active,
-        is_default=model_create.is_default,
-        security_classification_id=None,
+        **dict(  # type: ignore[call-arg]
+            tenant_id=user.tenant_id,
+            provider_id=model_create.provider_id,
+            name=model_create.name,  # Model identifier (may contain slashes)
+            nickname=model_create.display_name,
+            litellm_model_name=None,  # Constructed at runtime by TenantModelAdapter
+            max_input_tokens=model_create.max_input_tokens,
+            max_output_tokens=model_create.max_output_tokens,
+            vision=model_create.vision,
+            reasoning=model_create.reasoning,
+            supports_tool_calling=model_create.supports_tool_calling,
+            # Simplified defaults - these fields don't matter for tenant models (grouped by provider in UI)
+            family=model_create.family,
+            hosting=model_create.hosting,
+            org=None,
+            stability="stable",
+            open_source=False,
+            description=f"Tenant model: {model_create.display_name}",
+            nr_billion_parameters=None,
+            hf_link=None,
+            is_deprecated=False,
+            deployment_name=None,
+            base_url=None,
+            # Settings (now directly on model)
+            is_enabled=model_create.is_active,
+            is_default=model_create.is_default,
+            security_classification_id=None,
+        )
     )
 
     session.add(new_model)
@@ -170,9 +173,10 @@ async def update_tenant_completion_model(
 ):
     """Update a tenant-specific completion model."""
     validate_permission(user, Permission.ADMIN)
-    from intric.database.tables.ai_models_table import CompletionModels
     import sqlalchemy as sa
-    from intric.main.exceptions import UnauthorizedException, NotFoundException
+
+    from intric.database.tables.ai_models_table import CompletionModels
+    from intric.main.exceptions import NotFoundException, UnauthorizedException
 
     assembler = container.completion_model_assembler()
 
@@ -243,12 +247,13 @@ async def delete_tenant_completion_model(
 ):
     """Delete a tenant-specific completion model."""
     validate_permission(user, Permission.ADMIN)
-    from intric.database.tables.ai_models_table import CompletionModels
     import sqlalchemy as sa
+
+    from intric.database.tables.ai_models_table import CompletionModels
     from intric.main.exceptions import (
-        UnauthorizedException,
-        NotFoundException,
         BadRequestException,
+        NotFoundException,
+        UnauthorizedException,
     )
 
     # Verify model exists and belongs to user's tenant

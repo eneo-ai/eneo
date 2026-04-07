@@ -1,13 +1,14 @@
 import os
 from typing import TYPE_CHECKING, Optional
+
 from intric.main.config import (
     Settings,
     get_settings,
     validate_redirect_path,
     validate_redirect_uri,
 )
-from intric.tenants.tenant import TenantInDB
 from intric.main.logging import get_logger
+from intric.tenants.tenant import TenantInDB
 
 if TYPE_CHECKING:
     from intric.settings.encryption_service import EncryptionService
@@ -99,7 +100,7 @@ class CredentialResolver:
                         "metric_value": 1,
                     },
                 )
-                return api_key
+                return api_key  # type: ignore[return-value]
 
         # Strict mode: When tenant credentials enabled, each tenant MUST configure their own
         # This prevents billing confusion (tenant thinks they use their own key, but actually use global)

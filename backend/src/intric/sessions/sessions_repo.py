@@ -27,7 +27,7 @@ from intric.sessions.session import (
 
 class SessionRepository:
     def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(
+        self.delegate: BaseRepositoryDelegate[SessionInDB] = BaseRepositoryDelegate(
             session, Sessions, SessionInDB, with_options=self._options()
         )
         self.session = session
@@ -63,7 +63,7 @@ class SessionRepository:
     async def add(self, session: SessionAdd) -> SessionInDB:
         return await self.delegate.add(session)
 
-    async def update(self, session: SessionUpdate) -> SessionInDB:
+    async def update(self, session: SessionUpdate) -> SessionInDB | None:
         return await self.delegate.update(session)
 
     async def add_feedback(self, feedback: SessionFeedback, id: UUID):
@@ -79,14 +79,16 @@ class SessionRepository:
 
         return SessionInDB.model_validate(session)
 
-    async def get(self, id: Optional[UUID] = None, user_id: UUID = None) -> SessionInDB:
+    async def get(
+        self, id: Optional[UUID] = None, user_id: UUID = None
+    ) -> SessionInDB | None:
         if id is None and user_id is None:
             raise ValueError("One of id and user_id is required")
 
         if id is not None:
             return await self.delegate.get(id)
 
-        return await self.delegate.filter_by(conditions={Sessions.user_id: user_id})
+        return await self.delegate.filter_by(conditions={Sessions.user_id: user_id})  # type: ignore[return-value]
 
     async def _get_total_count(
         self,

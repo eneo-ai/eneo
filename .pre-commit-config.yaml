@@ -6,9 +6,9 @@ repos:
       - id: ruff-check
         name: ruff
         args: [--fix]
-        stages: [commit]
+        stages: [pre-commit]
         files: ^backend/
-      # Auto-format Python with ruff format (Python equivalent of prettier)
+      # Auto-format Python with ruff format (Python equivalent of prettier).
       # Alembic migrations are excluded — they are historical artifacts that
       # should not change after being deployed (whitespace churn breaks
       # git blame / bisect on schema history).
@@ -17,6 +17,18 @@ repos:
         stages: [pre-commit]
         files: ^backend/.*\.py$
         exclude: ^backend/alembic/
+
+  # Pyright type checking via devcontainer
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright
+        entry: docker exec -u vscode -i eneo_devcontainer-eneo-1 bash -i -c 'cd /workspace/backend && uv run pyright'
+        language: system
+        types: [python]
+        files: ^backend/src/intric/
+        pass_filenames: false
+        stages: [pre-commit]
 
   # Keep uv.lock in sync with pyproject.toml
   - repo: https://github.com/astral-sh/uv-pre-commit

@@ -20,9 +20,11 @@ class PromptRepository:
         self.session = session
         self.factory = factory
 
-    def _to_domain(self, prompt_in_db: Prompts | None, is_selected: bool):
+    def _to_domain(
+        self, prompt_in_db: Prompts | None, is_selected: bool
+    ) -> Prompt | None:
         if prompt_in_db is None:
-            return
+            return None
 
         return self.factory.create_prompt_from_db(prompt_in_db, is_selected=is_selected)
 
@@ -45,7 +47,11 @@ class PromptRepository:
         result = await self.session.execute(stmt)
         rows = result.all()
 
-        return [self._to_domain(row[0], row[1].is_selected) for row in rows]
+        return [
+            p
+            for row in rows
+            if (p := self._to_domain(row[0], row[1].is_selected)) is not None
+        ]
 
     async def get_prompts_by_app(self, app_id: UUID) -> list[Prompt]:
         stmt = (
@@ -59,9 +65,13 @@ class PromptRepository:
         result = await self.session.execute(stmt)
         rows = result.all()
 
-        return [self._to_domain(row[0], row[1].is_selected) for row in rows]
+        return [
+            p
+            for row in rows
+            if (p := self._to_domain(row[0], row[1].is_selected)) is not None
+        ]
 
-    async def get(self, id: UUID) -> Prompt:
+    async def get(self, id: UUID) -> Prompt | None:
         stmt = (
             sa.select(Prompts)
             .where(Prompts.id == id)
@@ -71,11 +81,11 @@ class PromptRepository:
         prompt_in_db = await self.session.scalar(stmt)
 
         if prompt_in_db is None:
-            return
+            return None
 
         return self.factory.create_prompt_from_db(prompt_in_db=prompt_in_db)
 
-    async def add(self, prompt: Prompt) -> Prompt:
+    async def add(self, prompt: Prompt) -> Prompt | None:
         stmt = (
             sa.insert(Prompts)
             .values(
@@ -92,7 +102,9 @@ class PromptRepository:
 
         return self.factory.create_prompt_from_db(prompt_in_db=prompt_in_db)
 
-    async def update_prompt_description(self, id: UUID, description: str) -> Prompt:
+    async def update_prompt_description(
+        self, id: UUID, description: str
+    ) -> Prompt | None:
         stmt = (
             sa.update(Prompts)
             .values(description=description)

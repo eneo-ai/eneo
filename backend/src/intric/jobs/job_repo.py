@@ -12,7 +12,7 @@ from intric.jobs.job_models import Job, JobInDb, JobUpdate
 
 class JobRepository:
     def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(
+        self.delegate: BaseRepositoryDelegate[JobInDb] = BaseRepositoryDelegate(
             session,
             Jobs,
             JobInDb,

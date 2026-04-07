@@ -8,7 +8,6 @@ from typing import Any
 from intric.main.config import get_loglevel
 from intric.main.request_context import get_request_context
 
-
 JSON_LOGS_ENABLED = os.getenv("JSON_LOGS", "true").lower() in {"1", "true", "yes", "on"}
 
 
@@ -137,7 +136,7 @@ class SimpleLogger(logging.Logger):
             files = [files]
 
         def _add_stream(handler: logging.Handler, **kwargs):
-            handler = handler(**kwargs)
+            handler = handler(**kwargs)  # type: ignore[call-issue]
             handler.setLevel(level)
             handler.setFormatter(formatter_obj)
             self.addHandler(handler)

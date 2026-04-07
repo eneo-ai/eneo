@@ -44,13 +44,15 @@ class UserGroupsService:
     async def create_user_group(
         self, user_group: UserGroupCreateRequest
     ) -> UserGroupInDB:
-        user_group = UserGroupCreate(
+        user_group = UserGroupCreate(  # type: ignore[assignment]
             name=user_group.name, tenant_id=self.user.tenant_id
         )
         return await self.repo.create_user_group(user_group)
 
     @validate_permissions(Permission.ADMIN)
-    async def get_user_group_by_uuid(self, user_group_uuid: UUID) -> UserGroupInDB:
+    async def get_user_group_by_uuid(
+        self, user_group_uuid: UUID
+    ) -> UserGroupInDB | None:
         user_group = await self.repo.get_user_group(user_group_uuid)
         self._validate(user_group, user_group_uuid)
 
@@ -62,16 +64,18 @@ class UserGroupsService:
     ):
         user_group = await self.get_user_group_by_uuid(user_group_uuid)
         self._validate(user_group, user_group_uuid)
+        assert user_group is not None
 
         user_group_update = UserGroupUpdate(
             **user_group_update.model_dump(exclude_unset=True), id=user_group.id
         )
-        user_group = await self.repo.update_user_group(user_group_update)
+        updated_user_group = await self.repo.update_user_group(user_group_update)
+        assert updated_user_group is not None
 
         # check all the relationships and raise exceptions if needed
-        self._check_relationships(user_group)
+        self._check_relationships(updated_user_group)
 
-        return user_group
+        return updated_user_group
 
     @validate_permissions(Permission.ADMIN)
     async def delete_user_group(self, user_group_uuid: UUID):
@@ -117,12 +121,13 @@ class UserGroupsService:
         user_group_in = UserGroupUpdate(id=user_group.id)
         setattr(user_group_in, relationship, items)
 
-        user_group = await self.repo.update_user_group(user_group_in)
+        updated_user_group = await self.repo.update_user_group(user_group_in)
+        assert updated_user_group is not None
 
         # check all the relationships and raise exceptions if needed
-        self._check_relationships(user_group)
+        self._check_relationships(updated_user_group)
 
-        return user_group
+        return updated_user_group
 
     def _pop_items_list(
         self,
@@ -157,12 +162,13 @@ class UserGroupsService:
         user_group_in = UserGroupUpdate(id=user_group.id)
         setattr(user_group_in, relationship, items)
 
-        user_group = await self.repo.update_user_group(user_group_in)
+        updated_user_group = await self.repo.update_user_group(user_group_in)
+        assert updated_user_group is not None
 
         # check all the relationships and raise exceptions if needed
-        self._check_relationships(user_group)
+        self._check_relationships(updated_user_group)
 
-        return user_group
+        return updated_user_group
 
     @validate_permissions(Permission.ADMIN)
     async def add_user(self, user_group_uuid: UUID, user_id: UUID) -> UserGroupInDB:

@@ -15,7 +15,6 @@ import redis.asyncio as aioredis
 
 from intric.main.config import get_loglevel
 
-
 FLAG_KEY = "observability:oidc_debug"
 REFRESH_INTERVAL = timedelta(seconds=5)
 MAX_DURATION = timedelta(hours=2)

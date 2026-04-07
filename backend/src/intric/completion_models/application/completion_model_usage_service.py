@@ -2,7 +2,7 @@ import base64
 import json
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Optional, Dict, Any, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy import and_, func, select
@@ -17,13 +17,13 @@ from intric.completion_models.presentation.completion_model_models import (
     PaginatedResponse,
 )
 from intric.database.tables.ai_models_table import (
-    CompletionModelUsageStats,
     CompletionModels,
+    CompletionModelUsageStats,
 )
-from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.assistant_template_table import AssistantTemplates
 from intric.database.tables.app_table import Apps
 from intric.database.tables.app_template_table import AppTemplates
+from intric.database.tables.assistant_table import Assistants
+from intric.database.tables.assistant_template_table import AssistantTemplates
 from intric.database.tables.questions_table import Questions
 from intric.database.tables.service_table import Services
 from intric.database.tables.spaces_table import Spaces, SpacesCompletionModels
@@ -96,7 +96,7 @@ class CompletionModelUsageService:
         entity_type: Optional[str] = None,
         cursor: Optional[str] = None,
         limit: int = 50,
-    ) -> PaginatedResponse:
+    ) -> PaginatedResponse | None:
         """Get detailed list of entities using this model with cursor pagination."""
         # Decode cursor if provided
         cursor_data = None
@@ -148,7 +148,7 @@ class CompletionModelUsageService:
             # For multiple entity types, use simpler approach
             # This is less common and doesn't need full cursor support
             details = []
-            for entity_type_name, query_func in entity_queries.items():
+            for _entity_type_name, query_func in entity_queries.items():
                 entity_details, _ = await query_func(
                     model_id, tenant_id, limit // len(entity_queries), None
                 )
@@ -751,8 +751,10 @@ class CompletionModelUsageService:
                 f"No existing stats found for model {model_id}, creating new record"
             )
             stats = CompletionModelUsageStats(
-                model_id=model_id,
-                tenant_id=tenant_id,
+                **dict(  # type: ignore[call-arg]
+                    model_id=model_id,
+                    tenant_id=tenant_id,
+                )
             )
             self.session.add(stats)
         else:

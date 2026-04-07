@@ -2,7 +2,6 @@ from typing import TYPE_CHECKING
 
 from intric.templates.templates import Templates
 
-
 if TYPE_CHECKING:
     from intric.database.tables.app_template_table import AppTemplates
     from intric.database.tables.assistant_template_table import AssistantTemplates

@@ -1,10 +1,10 @@
-from typing import TYPE_CHECKING, Optional
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Optional
 
 import sqlalchemy as sa
+from sqlalchemy import func, or_, update
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
-from sqlalchemy import or_, func, update
 
 from intric.database.tables.app_template_table import AppTemplates
 
@@ -133,6 +133,7 @@ class AppTemplateRepository:
         id: "UUID",
         obj: "AppTemplateUpdate",
     ) -> "AppTemplate":
+        assert obj.wizard is not None
         stmt = (
             sa.update(self._db_model)
             .values(
@@ -193,6 +194,7 @@ class AppTemplateRepository:
             query = query.where(self._db_model.tenant_id.is_(None))
 
         count = await self.session.scalar(query)
+        assert count is not None
         return count > 0
 
     async def soft_delete(

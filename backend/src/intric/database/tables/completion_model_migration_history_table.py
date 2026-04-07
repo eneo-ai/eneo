@@ -1,6 +1,6 @@
 """Database table for completion model migration history."""
 
-from sqlalchemy import Column, String, Text, JSON, Integer, Float, ForeignKey, TIMESTAMP
+from sqlalchemy import JSON, TIMESTAMP, Column, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 
 from intric.database.tables.base_class import BasePublic
@@ -9,7 +9,7 @@ from intric.database.tables.base_class import BasePublic
 class CompletionModelMigrationHistory(BasePublic):
     """Table for tracking completion model migration history."""
 
-    __tablename__ = "completion_model_migration_history"
+    __tablename__ = "completion_model_migration_history"  # type: ignore[assignment]
 
     migration_id = Column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
     tenant_id = Column(

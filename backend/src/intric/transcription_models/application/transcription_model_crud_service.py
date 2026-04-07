@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Optional, Union
 
 from intric.main.exceptions import UnauthorizedException
-from intric.main.models import NOT_PROVIDED, ModelId, NotProvided
+from intric.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
 from intric.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
@@ -50,7 +50,7 @@ class TranscriptionModelCRUDService:
                 return model
 
         # Otherwise get the latest model
-        sorted_models = sorted(
+        sorted_models = sorted(  # type: ignore[call-overload]
             transcription_models, key=lambda model: model.created_at, reverse=True
         )
 
@@ -76,10 +76,11 @@ class TranscriptionModelCRUDService:
         if is_org_default is not None:
             transcription_model.is_org_default = is_org_default
 
-        if security_classification is not NOT_PROVIDED:
+        if is_provided(security_classification):
             if security_classification is None:
                 tm_security_classification = None
             else:
+                assert self.security_classification_repo is not None
                 tm_security_classification = (
                     await self.security_classification_repo.one(
                         id=security_classification.id

@@ -65,7 +65,7 @@ class WrappedAiohttpClient:
         try:
             async with self.client.get(url, headers=headers) as response:
                 response.raise_for_status()
-                return await response.read()
+                return await response.read()  # type: ignore[return-value]
         except aiohttp.ClientResponseError as http_err:
             logger.exception(f"HTTP error while downloading from {url}:")
             raise http_err

@@ -72,6 +72,7 @@ class ReferencesService:
         info_blobs = []
         for chunk in info_blob_chunks:
             info_blob = await self.info_blobs_repo.get(chunk.info_blob_id)
+            assert info_blob is not None
             info_blob = InfoBlobInDBWithScore(
                 **info_blob.model_dump(), score=chunk.score
             )
@@ -111,7 +112,7 @@ class ReferencesService:
     ):
         if files:
             files_text = (
-                "\n".join(
+                "\n".join(  # type: ignore[call-overload]
                     file.text for file in files if file.file_type == FileType.TEXT
                 )
                 + "\n"

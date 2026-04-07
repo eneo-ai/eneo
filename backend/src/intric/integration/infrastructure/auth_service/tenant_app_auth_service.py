@@ -65,12 +65,13 @@ class TenantAppAuthService:
 
         logger.info(f"Acquiring new token for tenant app {app.id}")
         token = await self._acquire_token(app)
+        assert token is not None
 
         self._token_cache[cache_key] = token
 
         return token.access_token
 
-    async def _acquire_token(self, app: TenantSharePointApp) -> TenantAppToken:
+    async def _acquire_token(self, app: TenantSharePointApp) -> TenantAppToken | None:
         """Acquire a new access token using client credentials flow.
 
         This uses the OAuth 2.0 client credentials grant type, which is designed

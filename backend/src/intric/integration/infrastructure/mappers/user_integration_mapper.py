@@ -1,4 +1,4 @@
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 from intric.base.base_entity import EntityMapper
 from intric.database.tables.integration_table import (

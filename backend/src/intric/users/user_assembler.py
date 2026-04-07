@@ -1,4 +1,5 @@
 from typing import Optional
+
 from intric.main.models import CursorPaginatedResponse
 from intric.users.user import UserInDB, UserSparse
 
@@ -50,7 +51,7 @@ class UserAssembler:
             # if length of users > limit, more users still exist.
             if len(users) > limit:
                 # last user on previous page
-                previous = users[0]
+                previous = users[0]  # type: ignore[assignment]
 
                 paginated_users = [
                     self.from_user_to_model(user)
@@ -61,7 +62,7 @@ class UserAssembler:
                     items=paginated_users,
                     total_count=total_count,
                     next_cursor=cursor,
-                    previous_cursor=previous.email,
+                    previous_cursor=previous.email,  # type: ignore[attr-defined]
                     limit=limit,
                 )
 

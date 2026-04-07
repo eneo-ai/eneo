@@ -8,6 +8,8 @@ from intric.admin.admin_models import (
     UserDeletedListItem,
     UserStateListItem,
 )
+from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
+from intric.authentication.auth_models import ApiKeyStateReasonCode
 from intric.database.tables.users_table import Users
 from intric.main.exceptions import (
     BadRequestException,
@@ -30,8 +32,6 @@ from intric.users.user import (
 )
 from intric.users.user_repo import UsersRepository
 from intric.users.user_service import UserService
-from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
-from intric.authentication.auth_models import ApiKeyStateReasonCode
 
 logger = get_logger(__name__)
 

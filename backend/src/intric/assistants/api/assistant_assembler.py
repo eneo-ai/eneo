@@ -6,7 +6,6 @@ from intric.assistants.api.assistant_models import (
     DefaultAssistant,
     ModelInfo,
 )
-from intric.tokens.token_utils import count_assistant_prompt_tokens
 from intric.assistants.assistant import Assistant
 from intric.collections.presentation.collection_models import CollectionPublic
 from intric.completion_models.presentation.completion_model_assembler import (
@@ -27,6 +26,7 @@ from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
 )
 from intric.prompts.api.prompt_assembler import PromptAssembler
 from intric.questions.question import ToolAssistant, UseTools
+from intric.tokens.token_utils import count_assistant_prompt_tokens
 from intric.users.user import UserInDB
 from intric.websites.presentation.website_models import WebsitePublic
 

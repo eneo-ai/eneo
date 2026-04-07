@@ -18,7 +18,7 @@ class WorkerConfig:
         self.task_manager = task_manager
 
     def set_additional_data(self, data: dict):
-        self.task_manager.additional_data = data
+        self.task_manager.additional_data = data  # type: ignore[attr-defined]
 
 
 class TaskManager:

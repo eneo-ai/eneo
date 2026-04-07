@@ -56,8 +56,8 @@ class AIModelsService:
 
     def _get_latest_available_model(
         self, models: list[CompletionModelPublic | EmbeddingModelPublicLegacy]
-    ) -> CompletionModelPublic | EmbeddingModelPublicLegacy:
-        sorted_models = sorted(models, key=lambda model: model.created_at, reverse=True)
+    ) -> CompletionModelPublic | EmbeddingModelPublicLegacy | None:
+        sorted_models = sorted(models, key=lambda model: model.created_at, reverse=True)  # type: ignore[call-overload]
 
         for model in sorted_models:
             if model.can_access:

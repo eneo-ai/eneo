@@ -1,17 +1,17 @@
 from datetime import datetime
-from typing import List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
 
-from intric.database.tables.sharepoint_subscription_table import (
-    SharePointSubscription as SharePointSubscriptionDBModel,
-)
 from intric.database.tables.integration_table import (
     IntegrationKnowledge as IntegrationKnowledgeDBModel,
 )
 from intric.database.tables.integration_table import (
     UserIntegration as UserIntegrationDBModel,
+)
+from intric.database.tables.sharepoint_subscription_table import (
+    SharePointSubscription as SharePointSubscriptionDBModel,
 )
 from intric.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
@@ -19,10 +19,10 @@ from intric.integration.domain.entities.sharepoint_subscription import (
 from intric.integration.domain.repositories.sharepoint_subscription_repo import (
     SharePointSubscriptionRepository,
 )
-from intric.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
 from intric.integration.infrastructure.mappers.sharepoint_subscription_mapper import (
     SharePointSubscriptionMapper,
 )
+from intric.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

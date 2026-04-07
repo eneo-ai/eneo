@@ -2,8 +2,8 @@ from datetime import datetime, timezone
 from typing import List, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 import sqlalchemy as sa
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.admin.admin_models import (
@@ -14,23 +14,11 @@ from intric.admin.admin_models import (
     UserDeletedListItem,
     UserStateListItem,
 )
-from intric.main.container.container import Container
-from intric.main.config import get_settings
-from intric.main.exceptions import BadRequestException
-from intric.main.logging import get_logger
-from intric.main.models import DeleteResponse
-from intric.predefined_roles.predefined_role import PredefinedRoleInDB
-from intric.database.tables.users_table import Users
-from intric.server.dependencies.container import get_container
-from intric.tenants.tenant import TenantPublic
-from intric.users.user import (
-    SortField,
-    SortOrder,
-    UserAddAdmin,
-    UserAdminView,
-    UserCreatedAdminView,
-    UserUpdatePublic,
-)
+
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.api_key_router import _build_expiring_summary
@@ -53,8 +41,8 @@ from intric.authentication.auth_models import (
     ApiKeyPermission,
     ApiKeyPolicyResponse,
     ApiKeyPolicyUpdate,
-    ApiKeySearchMatchReason,
     ApiKeyScopeType,
+    ApiKeySearchMatchReason,
     ApiKeyState,
     ApiKeyStateChangeRequest,
     ApiKeyType,
@@ -66,12 +54,23 @@ from intric.authentication.auth_models import (
     ExpiringKeysSummary,
     SuperApiKeyStatus,
 )
-from intric.main.models import CursorPaginatedResponse
-
-# Audit logging - module level imports for consistency
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
+from intric.database.tables.users_table import Users
+from intric.main.config import get_settings
+from intric.main.container.container import Container
+from intric.main.exceptions import BadRequestException
+from intric.main.logging import get_logger
+from intric.main.models import CursorPaginatedResponse, DeleteResponse
+from intric.predefined_roles.predefined_role import PredefinedRoleInDB
+from intric.server.dependencies.container import get_container
+from intric.tenants.tenant import TenantPublic
+from intric.users.user import (
+    SortField,
+    SortOrder,
+    UserAddAdmin,
+    UserAdminView,
+    UserCreatedAdminView,
+    UserUpdatePublic,
+)
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -329,8 +328,9 @@ async def register_user(
 
     # Add role information from the input request
     if new_user.predefined_roles:
-        from intric.database.tables.roles_table import PredefinedRoles
         import sqlalchemy as sa
+
+        from intric.database.tables.roles_table import PredefinedRoles
 
         session = cast(AsyncSession, container.session())
         role_ids = [role.id for role in new_user.predefined_roles]
@@ -349,8 +349,9 @@ async def register_user(
 
     # Add custom roles if any
     if new_user.roles:
-        from intric.database.tables.roles_table import Roles
         import sqlalchemy as sa
+
+        from intric.database.tables.roles_table import Roles
 
         session = cast(AsyncSession, container.session())
         custom_role_ids = [role.id for role in new_user.roles]

@@ -1,5 +1,5 @@
-from collections import defaultdict
 import json
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
@@ -16,7 +16,9 @@ from intric.completion_models.infrastructure.static_prompts import (
 from intric.files.file_models import File, FileType
 from intric.main.exceptions import QueryException
 from intric.sessions.session import SessionInDB
-from intric.tokens.token_utils import count_tokens  # noqa: F401 — re-exported for external callers
+from intric.tokens.token_utils import (
+    count_tokens,  # noqa: F401 — re-exported for external callers
+)
 
 if TYPE_CHECKING:
     from uuid import UUID

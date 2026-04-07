@@ -11,21 +11,21 @@ from intric.apps.app_runs.api.app_run_models import (
     RunAppRequest,
 )
 from intric.apps.apps.api.app_models import AppPublic, AppUpdateRequest
-from intric.authentication.auth_models import ApiKeyNotificationTargetType
-from intric.authentication.api_key_notification_auto_follow import (
-    auto_follow_on_publish,
-)
-from intric.main.container.container import Container
-from intric.main.models import NOT_PROVIDED, PaginatedResponse
-from intric.prompts.api.prompt_models import PromptSparse
-from intric.server import protocol
-from intric.server.dependencies.container import get_container
-from intric.server.protocol import responses
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.authentication.api_key_notification_auto_follow import (
+    auto_follow_on_publish,
+)
+from intric.authentication.auth_models import ApiKeyNotificationTargetType
+from intric.main.container.container import Container
+from intric.main.models import NOT_PROVIDED, PaginatedResponse, is_provided
+from intric.prompts.api.prompt_models import PromptSparse
+from intric.server import protocol
+from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -275,7 +275,7 @@ async def update_app(
             change_summary.append("attachments")
 
     # Data retention changes
-    if update_service_req.data_retention_days is not NOT_PROVIDED:
+    if is_provided(update_service_req.data_retention_days):
         old_retention = old_app.data_retention_days
         new_retention = update_service_req.data_retention_days
 

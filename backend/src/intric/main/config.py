@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-
 from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 

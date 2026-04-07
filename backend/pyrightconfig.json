@@ -20,6 +20,6 @@
   "reportUnknownArgumentType": false,
   "reportUnknownVariableType": false,
   "reportUnusedImport": "warning",
-  "reportUnusedVariable": "warning",
+  "reportUnusedVariable": "error",
   "reportUndefinedVariable": "error"
 }

@@ -26,6 +26,7 @@ class WorkflowRepository(BaseRepository):
         )
 
         workflow_in_db = await self.session.scalar(stmt)
+        assert workflow_in_db is not None
 
         step_records = []
         for i, step in enumerate(workflow.steps):
@@ -52,6 +53,7 @@ class WorkflowRepository(BaseRepository):
                     .returning(Filters)
                 )
                 filter_in_db = await self.session.scalar(filter_stmt)
+                assert filter_in_db is not None
 
                 step_stmt = step_stmt.values(filter_id=filter_in_db.id)
 

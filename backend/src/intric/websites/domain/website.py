@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Optional, Union
 
 from intric.base.base_entity import Entity
 from intric.embedding_models.domain.embedding_model import EmbeddingModel
-from intric.main.models import NOT_PROVIDED, NotProvided
+from intric.main.models import NOT_PROVIDED, NotProvided, is_provided
 from intric.websites.domain.crawl_run import CrawlRun, CrawlType
 from intric.websites.domain.http_auth_credentials import HttpAuthCredentials
 
@@ -175,8 +175,8 @@ class Website(Entity):
             update_interval=record.update_interval,
             embedding_model=embedding_model,
             size=record.size,
-            latest_crawl=CrawlRun.to_domain(record.latest_crawl)
-            if record.latest_crawl
+            latest_crawl=CrawlRun.to_domain(record.latest_crawl)  # type: ignore[attr-defined]
+            if record.latest_crawl  # type: ignore[attr-defined]
             else None,
             last_crawled_at=record.last_crawled_at,
             http_auth=http_auth,
@@ -194,15 +194,15 @@ class Website(Entity):
         http_auth_username: Union[str, None, NotProvided] = NOT_PROVIDED,
         http_auth_password: Union[str, None, NotProvided] = NOT_PROVIDED,
     ) -> "Website":
-        if url is not NOT_PROVIDED:
+        if is_provided(url):
             self.url = url
-        if name is not NOT_PROVIDED:
+        if is_provided(name):
             self.name = name
-        if download_files is not NOT_PROVIDED:
+        if is_provided(download_files):
             self.download_files = download_files
-        if crawl_type is not NOT_PROVIDED:
+        if is_provided(crawl_type):
             self.crawl_type = crawl_type
-        if update_interval is not NOT_PROVIDED:
+        if is_provided(update_interval):
             self.update_interval = update_interval
             # Reset circuit breaker when user manually changes schedule
             # Why: User action indicates intent to retry, regardless of past failures
@@ -211,18 +211,12 @@ class Website(Entity):
                 self.next_retry_at = None
 
         # Handle auth updates (both must be provided together or both None)
-        if (
-            http_auth_username is not NOT_PROVIDED
-            or http_auth_password is not NOT_PROVIDED
-        ):
+        if is_provided(http_auth_username) or is_provided(http_auth_password):
             # If either is explicitly None, remove auth
             if http_auth_username is None or http_auth_password is None:
                 self.remove_http_auth()
             # If both provided, set/update auth
-            elif (
-                http_auth_username is not NOT_PROVIDED
-                and http_auth_password is not NOT_PROVIDED
-            ):
+            elif is_provided(http_auth_username) and is_provided(http_auth_password):
                 self.set_http_auth(http_auth_username, http_auth_password)
             # If only one provided, that's an error
             else:

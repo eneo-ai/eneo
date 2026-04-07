@@ -16,20 +16,20 @@ from intric.authentication.auth_models import (
     ApiKey,
     ApiKeyCreated,
     ApiKeyHashVersion,
-    JWTCreds,
-    JWTMeta,
-    JWTPayload,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyType,
+    JWTCreds,
+    JWTMeta,
+    JWTPayload,
 )
+from intric.database.tables.assistant_table import Assistants
+from intric.database.tables.users_table import Users
 from intric.main.config import get_settings
 from intric.main.exceptions import AuthenticationException
 from intric.main.logging import get_logger
 from intric.users.user import UserBase, UserInDB
-from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.users_table import Users
 
 logger = get_logger(__name__)
 

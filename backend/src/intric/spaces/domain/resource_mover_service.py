@@ -6,9 +6,9 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from intric.actors import ActorManager
+    from intric.groups_legacy.group_service import GroupService
     from intric.spaces.space_repo import SpaceRepository
     from intric.spaces.space_service import SpaceService
-    from intric.groups_legacy.group_service import GroupService
 
 
 class ResourceMoverService:

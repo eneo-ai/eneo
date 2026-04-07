@@ -12,7 +12,7 @@ from intric.main.exceptions import (
     SecurityClassificationMismatchException,
     UnauthorizedException,
 )
-from intric.main.models import NOT_PROVIDED, NotProvided
+from intric.main.models import NOT_PROVIDED, NotProvided, is_provided
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -160,11 +160,11 @@ class Space:
     def get_member(self, member_id: UUID) -> SpaceMember:
         return self.members[member_id]
 
-    def get_latest_embedding_model(self) -> "EmbeddingModel":
+    def get_latest_embedding_model(self) -> "EmbeddingModel | None":
         if not self.embedding_models:
             return
 
-        sorted_embedding_models = sorted(
+        sorted_embedding_models = sorted(  # type: ignore[call-overload]
             [
                 embedding_model
                 for embedding_model in self.embedding_models
@@ -182,11 +182,11 @@ class Space:
 
         return sorted_embedding_models[0]  # type: ignore
 
-    def get_latest_completion_model(self) -> "CompletionModel":
+    def get_latest_completion_model(self) -> "CompletionModel | None":
         if not self.completion_models:
             return
 
-        sorted_completion_models = sorted(
+        sorted_completion_models = sorted(  # type: ignore[call-overload]
             [
                 completion_model
                 for completion_model in self.completion_models
@@ -208,7 +208,7 @@ class Space:
         if not self.transcription_models:
             return None
 
-        sorted_transcription_models = sorted(
+        sorted_transcription_models = sorted(  # type: ignore[call-overload]
             [
                 transcription_model
                 for transcription_model in self.transcription_models
@@ -334,7 +334,7 @@ class Space:
 
             self.description = description
         # Only if security_classification_enabled on tenant (checked in service layer)
-        if security_classification is not NOT_PROVIDED:
+        if is_provided(security_classification):
             if self.is_personal():
                 raise BadRequestException(
                     "Can not change security classification of personal space"
@@ -400,10 +400,10 @@ class Space:
 
             self.mcp_servers = mcp_servers
 
-        if data_retention_days is not NOT_PROVIDED:
+        if is_provided(data_retention_days):
             self.data_retention_days = data_retention_days
 
-        if icon_id is not NOT_PROVIDED:
+        if is_provided(icon_id):
             self.icon_id = icon_id
 
     def add_member(self, user: SpaceMember):
@@ -477,9 +477,11 @@ class Space:
         self.websites.remove(website)
 
     def add_group_chat(self, group_chat: "GroupChat"):
+        assert self.group_chats is not None
         self.group_chats.append(group_chat)
 
     def remove_group_chat(self, group_chat: "GroupChat"):
+        assert self.group_chats is not None
         self.group_chats.remove(group_chat)
 
     def add_assistant(self, assistant: "Assistant"):
@@ -495,7 +497,7 @@ class Space:
         self.assistants.append(assistant)
 
     def remove_assistant(self, assistant: "Assistant"):
-        for group_chat in self.group_chats:
+        for group_chat in self.group_chats or []:
             if assistant.id in [a.assistant.id for a in group_chat.assistants]:
                 group_chat.assistants.remove(assistant)
 
@@ -569,7 +571,7 @@ class Space:
             return False
         if self.security_classification is not None:
             if self.security_classification.is_greater_than(
-                app.completion_model.security_classification
+                app.completion_model.security_classification  # type: ignore[attr-defined]
             ):
                 return False
             if self.security_classification.is_greater_than(
@@ -580,6 +582,8 @@ class Space:
         return True
 
     def can_use_service(self, service: "Service") -> bool:
+        if service.completion_model is None:
+            return False
         if not self.is_completion_model_available(service.completion_model.id):
             return False
         if self.security_classification is not None:

@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from typing import NamedTuple
 
 import redis.asyncio as aioredis
-
 from intric.main.config import get_settings
 from intric.redis.connection import build_redis_pool_kwargs
 

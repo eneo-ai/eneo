@@ -163,7 +163,7 @@ class IntegrationKnowledgeMetaData(BaseModel):
         if not self.sharepoint_subscription_expires_at:
             return None
 
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
 
         now = datetime.now(timezone.utc)
         expires_at = self.sharepoint_subscription_expires_at
@@ -271,7 +271,7 @@ class SyncLog(BaseModel):
     @computed_field
     def total_items_processed(self) -> int:
         """Total items processed in this sync."""
-        return self.files_processed + self.pages_processed + self.folders_processed
+        return self.files_processed + self.pages_processed + self.folders_processed  # type: ignore[operator]
 
 
 class SyncLogList(BaseListModel[SyncLog]):

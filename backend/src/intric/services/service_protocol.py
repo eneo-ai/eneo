@@ -1,11 +1,11 @@
 import json
 from typing import TYPE_CHECKING
 
+from intric.ai_models.completion_models.completion_model import CompletionModelPublic
 from intric.info_blobs.info_blob import InfoBlobMetadata, InfoBlobPublic
 from intric.main.logging import get_logger
 from intric.questions.question import Question
 from intric.services.service import Service, ServicePublicWithUser, ServiceRun
-from intric.ai_models.completion_models.completion_model import CompletionModelPublic
 
 if TYPE_CHECKING:
     from intric.main.models import ResourcePermission

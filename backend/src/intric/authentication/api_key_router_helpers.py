@@ -4,9 +4,9 @@ from datetime import datetime
 from typing import Any, NoReturn, cast
 from uuid import UUID
 
+import sqlalchemy as sa
 from fastapi import HTTPException
 from pydantic import BaseModel
-import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
@@ -224,9 +224,9 @@ async def build_api_key_usage_summary(
     tenant_id: UUID,
     key_id: UUID,
 ) -> ApiKeyUsageSummary:
-    from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
+    from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 
     stmt = (
         sa.select(
@@ -276,9 +276,9 @@ async def build_api_key_usage_page(
     limit: int,
     cursor: datetime | None,
 ) -> tuple[list[ApiKeyUsageEvent], datetime | None]:
-    from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
+    from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 
     stmt = (
         sa.select(AuditLogTable)

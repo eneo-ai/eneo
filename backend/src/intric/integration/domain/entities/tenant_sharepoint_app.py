@@ -4,7 +4,6 @@ from uuid import UUID
 
 from intric.base.base_entity import Entity
 
-
 # Auth method constants
 AUTH_METHOD_TENANT_APP = "tenant_app"
 AUTH_METHOD_SERVICE_ACCOUNT = "service_account"

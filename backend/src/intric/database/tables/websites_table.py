@@ -1,8 +1,8 @@
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
-from datetime import datetime
 
-from sqlalchemy import BigInteger, ForeignKey, and_, select, TIMESTAMP, String
+from sqlalchemy import TIMESTAMP, BigInteger, ForeignKey, String, and_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship
 
@@ -96,7 +96,7 @@ class Websites(BasePublic):
             .where(CrawlRuns.website_id == cls.id)
             .order_by(CrawlRuns.created_at.desc())
             .limit(1)
-            .correlate(cls.__table__)
+            .correlate(cls.__table__)  # type: ignore[attr-defined]
             .scalar_subquery()
         )
 

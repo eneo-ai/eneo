@@ -104,6 +104,7 @@ async def delete_info_blob(
     service = container.info_blob_service()
     group_service = container.group_service()
     info_blob_deleted = await service.delete(id)
+    assert info_blob_deleted is not None
 
     # Update group size
     if info_blob_deleted.group_id is not None:

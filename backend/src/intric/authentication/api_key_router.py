@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from typing import Any, Literal, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 import sqlalchemy as sa
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
@@ -22,8 +22,8 @@ from intric.authentication.api_key_router_helpers import (
 from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_dependencies import require_api_key_permission
 from intric.authentication.auth_models import (
-    ApiKeyCreateRequest,
     ApiKeyCreatedResponse,
+    ApiKeyCreateRequest,
     ApiKeyCreationConstraints,
     ApiKeyListResponse,
     ApiKeyNotificationPolicyResponse,
@@ -42,13 +42,13 @@ from intric.authentication.auth_models import (
     ApiKeyUsageResponse,
     ApiKeyV2,
     ApiKeyV2InDB,
-    ExpiringKeySummaryItem,
     ExpiringKeysSummary,
+    ExpiringKeySummaryItem,
 )
 from intric.database.tables.settings_table import Settings
 from intric.main.container.container import Container
-from intric.server.dependencies.container import get_container
 from intric.roles.permissions import Permission
+from intric.server.dependencies.container import get_container
 from intric.users.user import UserInDB
 
 router = APIRouter(tags=["API Keys"])

@@ -1,22 +1,28 @@
-from typing import TYPE_CHECKING, Optional
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID as UUIDType
 
-from sqlalchemy import select, func
-from sqlalchemy.orm import selectinload
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
+
 from intric.main.exceptions import (
-    NotFoundException,
     BadRequestException,
     NameCollisionException,
+    NotFoundException,
 )
 from intric.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
     from uuid import UUID
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from intric.templates.app_template.api.app_template_models import AppTemplateCreate
+    from intric.feature_flag.feature_flag_service import FeatureFlagService
+    from intric.templates.app_template.api.app_template_models import (
+        AppTemplateCreate,
+        AppTemplateUpdate,
+    )
     from intric.templates.app_template.app_template import AppTemplate
     from intric.templates.app_template.app_template_factory import (
         AppTemplateFactory,
@@ -24,8 +30,6 @@ if TYPE_CHECKING:
     from intric.templates.app_template.app_template_repo import (
         AppTemplateRepository,
     )
-    from intric.templates.app_template.api.app_template_models import AppTemplateUpdate
-    from intric.feature_flag.feature_flag_service import FeatureFlagService
     from intric.users.user import UserInDB
 
 
@@ -108,9 +112,10 @@ class AppTemplateService:
             )
 
         # Create template with tenant_id
+        import sqlalchemy as sa
+
         from intric.database.tables.app_template_table import AppTemplates
         from intric.templates.app_template.app_template import AppTemplate
-        import sqlalchemy as sa
 
         snapshot = AppTemplate.create_snapshot(
             {
@@ -198,8 +203,9 @@ class AppTemplateService:
                 )
 
         # Update template (original_snapshot preserved)
-        from intric.database.tables.app_template_table import AppTemplates
         import sqlalchemy as sa
+
+        from intric.database.tables.app_template_table import AppTemplates
 
         update_values = {}
         if data.name is not None:
@@ -254,8 +260,9 @@ class AppTemplateService:
 
         Time complexity: O(log n) for ownership + count check + update
         """
-        from intric.database.tables.app_template_table import AppTemplates
         import sqlalchemy as sa
+
+        from intric.database.tables.app_template_table import AppTemplates
 
         # Verify template belongs to tenant
         template = await self.repo.get_by_id(
@@ -374,8 +381,9 @@ class AppTemplateService:
             )
 
         # Restore from snapshot
-        from intric.database.tables.app_template_table import AppTemplates
         import sqlalchemy as sa
+
+        from intric.database.tables.app_template_table import AppTemplates
 
         snapshot = template.original_snapshot
         completion_model_id = snapshot.get("completion_model_id")
@@ -475,9 +483,10 @@ class AppTemplateService:
 
         Time complexity: O(k log n) where k is number of tenant templates
         """
-        from intric.database.tables.app_template_table import AppTemplates
-        from intric.database.tables.app_table import Apps
         import sqlalchemy as sa
+
+        from intric.database.tables.app_table import Apps
+        from intric.database.tables.app_template_table import AppTemplates
 
         # Query with LEFT JOIN to get usage count
         stmt = (
@@ -522,9 +531,10 @@ class AppTemplateService:
 
         Time complexity: O(k log n) where k is number of deleted templates
         """
-        from intric.database.tables.app_template_table import AppTemplates
-        from intric.database.tables.app_table import Apps
         import sqlalchemy as sa
+
+        from intric.database.tables.app_table import Apps
+        from intric.database.tables.app_template_table import AppTemplates
 
         # Query with LEFT JOIN to get usage count for deleted templates
         stmt = (

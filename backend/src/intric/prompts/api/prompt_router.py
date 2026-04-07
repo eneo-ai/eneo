@@ -6,6 +6,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+
 from intric.main.container.container import Container
 from intric.prompts.api.prompt_models import PromptPublic, PromptUpdateRequest
 from intric.server.dependencies.container import get_container
@@ -42,7 +43,7 @@ async def update_prompt_description(
     service = container.prompt_service()
     assembler = container.prompt_assembler()
 
-    prompt = await service.update_prompt_description(
+    prompt = await service.update_prompt_description(  # type: ignore[assignment]
         id=id, description=prompt.description
     )
     return assembler.from_prompt_to_model(prompt)

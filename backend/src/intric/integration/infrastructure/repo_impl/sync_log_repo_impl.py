@@ -7,8 +7,8 @@ from sqlalchemy.future import select
 from intric.database.tables.sync_log_table import SyncLog as SyncLogDBModel
 from intric.integration.domain.entities.sync_log import SyncLog
 from intric.integration.domain.repositories.sync_log_repo import SyncLogRepository
-from intric.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
 from intric.integration.infrastructure.mappers.sync_log_mapper import SyncLogMapper
+from intric.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

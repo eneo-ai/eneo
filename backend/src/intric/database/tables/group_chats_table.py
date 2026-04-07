@@ -17,7 +17,7 @@ from intric.database.tables.users_table import Users
 
 
 class GroupChatsTable(BasePublic):
-    __tablename__ = "group_chats"
+    __tablename__ = "group_chats"  # type: ignore[assignment]
 
     name: Mapped[str] = mapped_column()
     allow_mentions: Mapped[bool] = mapped_column(Boolean, default=False)

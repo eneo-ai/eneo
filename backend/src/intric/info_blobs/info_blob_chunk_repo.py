@@ -17,8 +17,10 @@ from intric.info_blobs.info_blob import (
 
 class InfoBlobChunkRepo:
     def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(
-            session=session, table=InfoBlobChunks, in_db_model=InfoBlobChunkInDB
+        self.delegate: BaseRepositoryDelegate[InfoBlobChunkInDB] = (
+            BaseRepositoryDelegate(
+                session=session, table=InfoBlobChunks, in_db_model=InfoBlobChunkInDB
+            )
         )
         self.session = session
 
@@ -128,6 +130,6 @@ class InfoBlobChunkRepo:
         )
 
         if group_ids is not None:
-            stmt = self._filter_on_sources(stmt, group_ids)
+            stmt = self._filter_on_sources(stmt, group_ids)  # type: ignore[call-arg]
 
         return await self.delegate.get_models_from_query(stmt)

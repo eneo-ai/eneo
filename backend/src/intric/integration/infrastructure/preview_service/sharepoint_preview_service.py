@@ -12,19 +12,19 @@ from intric.integration.infrastructure.preview_service.base_preview_service impo
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
-    from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
-        TenantSharePointAppRepository,
-    )
-    from intric.integration.infrastructure.oauth_token_service import OauthTokenService
     from intric.integration.domain.entities.tenant_sharepoint_app import (
         TenantSharePointApp,
     )
-    from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
-        TenantAppAuthService,
+    from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
+        TenantSharePointAppRepository,
     )
     from intric.integration.infrastructure.auth_service.service_account_auth_service import (
         ServiceAccountAuthService,
     )
+    from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
+        TenantAppAuthService,
+    )
+    from intric.integration.infrastructure.oauth_token_service import OauthTokenService
 
 logger = get_logger(__name__)
 
@@ -181,7 +181,7 @@ class SharePointPreviewService(BasePreviewService):
     ) -> List[IntegrationPreview]:
         results = data.get("value", [])
 
-        data: List[IntegrationPreview] = []
+        previews: List[IntegrationPreview] = []
         for r in results:
             item = IntegrationPreview(
                 name=r.get("displayName"),
@@ -190,8 +190,8 @@ class SharePointPreviewService(BasePreviewService):
                 type="site",
                 category=self.CATEGORY_OTHER_SITES,
             )
-            data.append(item)
-        return data
+            previews.append(item)
+        return previews
 
     async def _classify_site_categories(
         self,

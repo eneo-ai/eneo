@@ -35,14 +35,14 @@ class TenantSharePointAppPublic(BaseModel):
     id: UUID
     tenant_id: UUID
     client_id: str
-    client_secret_masked: str = Field(
+    client_secret_masked: str = Field(  # type: ignore[call-overload]
         ...,
         description="Masked client secret (last 4 chars visible)",
         example="********xyz789",
     )
     tenant_domain: str
     is_active: bool
-    auth_method: str = Field(
+    auth_method: str = Field(  # type: ignore[call-overload]
         ...,
         description="Authentication method: 'tenant_app' or 'service_account'",
         example="service_account",

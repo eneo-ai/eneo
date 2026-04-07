@@ -130,7 +130,7 @@ class EncryptionService:
         if len(parts) != 4:
             raise ValueError(f"Invalid encrypted format: {ciphertext[:30]}...")
 
-        scheme, algorithm, version, token = parts
+        _scheme, algorithm, version, token = parts
 
         if algorithm != "fernet" or version != "v1":
             raise ValueError(

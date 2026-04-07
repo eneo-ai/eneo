@@ -58,8 +58,8 @@ class GroupService:
             )
 
     async def _validate_embedding_model(self, group: GroupCreate | GroupUpdate):
-        if group.embedding_model_id is not None:
-            await self.ai_models_service.get_embedding_model(group.embedding_model_id)
+        if group.embedding_model_id is not None:  # type: ignore[attr-defined]
+            await self.ai_models_service.get_embedding_model(group.embedding_model_id)  # type: ignore[attr-defined]
 
     @validate_permissions(Permission.COLLECTIONS)
     async def create_group(self, group: CreateGroupRequest):
@@ -153,7 +153,7 @@ class GroupService:
                 },
             )
 
-        return group
+        return group  # type: ignore[return-value]
 
     async def get_groups_by_ids(self, ids: list[UUID]) -> list[Group]:
         groups = await self.repo.get_groups_by_ids(ids)

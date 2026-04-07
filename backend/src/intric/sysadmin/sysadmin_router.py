@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from typing import cast
 from uuid import UUID
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Query, Security
 from pydantic import BaseModel, Field
 
@@ -20,24 +21,35 @@ from intric.ai_models.embedding_models.embedding_model import (
     EmbeddingModelLegacy,
     EmbeddingModelPublicLegacy,
     EmbeddingModelSparse,
-    EmbeddingModelUpdate as EmbeddingModelMetadataUpdate,
     EmbeddingModelUpdateFlags,
+)
+from intric.ai_models.embedding_models.embedding_model import (
+    EmbeddingModelUpdate as EmbeddingModelMetadataUpdate,
 )
 from intric.ai_models.embedding_models.embedding_models_repo import (
     AdminEmbeddingModelsService,
 )
-import sqlalchemy as sa
-from intric.database.tables.collections_table import CollectionsTable
-from intric.database.tables.integration_table import IntegrationKnowledge
-from intric.database.tables.websites_table import Websites
-from intric.main.exceptions import BadRequestException
 from intric.allowed_origins.allowed_origin_models import (
     AllowedOriginCreate,
     AllowedOriginInDB,
 )
+
+# Audit logging - module level imports for sysadmin operations
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
+from intric.authentication import auth
 from intric.authentication.api_key_policy import ApiKeyPolicyService
+from intric.completion_models.presentation.completion_model_models import (
+    MigrationResult,
+    ModelMigrationRequest,
+)
 from intric.database.database import AsyncSession
+from intric.database.tables.collections_table import CollectionsTable
+from intric.database.tables.integration_table import IntegrationKnowledge
+from intric.database.tables.websites_table import Websites
 from intric.main.container.container import Container
+from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse, PaginatedResponse
 from intric.observability.debug_toggle import DebugFlag, get_debug_flag, set_debug_flag
@@ -54,17 +66,7 @@ from intric.tenants.tenant import (
     TenantWithMaskedCredentials,
 )
 from intric.users.user import UserAddSuperAdmin, UserCreated, UserInDB, UserUpdatePublic
-from intric.authentication import auth
 from intric.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direct
-from intric.completion_models.presentation.completion_model_models import (
-    ModelMigrationRequest,
-    MigrationResult,
-)
-
-# Audit logging - module level imports for sysadmin operations
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.actor_types import ActorType
-from intric.audit.domain.entity_types import EntityType
 
 logger = get_logger(__name__)
 
@@ -311,6 +313,7 @@ async def create_tenant(
 
     # Create tenant
     created_tenant = await tenant_service.create_tenant(tenant)
+    assert created_tenant is not None
 
     # Audit logging (sysadmin - system actor)
     audit_service = container.audit_service()
@@ -351,9 +354,11 @@ async def update_tenant(
 
     # Get old state
     old_tenant = await tenant_service.get_tenant_by_id(id)
+    assert old_tenant is not None
 
     # Update tenant
     updated_tenant = await tenant_service.update_tenant(tenant, id)
+    assert updated_tenant is not None
 
     # Track changes
     changes = {}
@@ -402,9 +407,11 @@ async def delete_tenant_by_id(
 
     # Get tenant BEFORE deletion
     tenant_to_delete = await tenant_service.get_tenant_by_id(id)
+    assert tenant_to_delete is not None
 
     # Delete tenant
     deleted_tenant = await tenant_service.delete_tenant(id)
+    assert deleted_tenant is not None
 
     # Audit logging
     audit_service = container.audit_service()
@@ -872,11 +879,12 @@ async def migrate_completion_model_for_tenant(
             )
 
         # Get a user from this tenant to set the context (needed for domain repo)
-        from intric.database.tables.users_table import Users
         from sqlalchemy import select
 
+        from intric.database.tables.users_table import Users
+
         stmt = select(Users).where(Users.tenant_id == tenant_id).limit(1)
-        result = await session.execute(stmt)
+        result = await session.execute(stmt)  # type: ignore[union-attr]
         user_row = result.scalar_one_or_none()
 
         if not user_row:
@@ -1017,8 +1025,9 @@ async def migrate_completion_model_for_all_tenants(
                 # Process each tenant in its own transaction
                 async with session.begin():
                     # Get a user from this tenant to set the context
-                    from intric.database.tables.users_table import Users
                     from sqlalchemy import select
+
+                    from intric.database.tables.users_table import Users
 
                     stmt = select(Users).where(Users.tenant_id == tenant.id).limit(1)
                     result = await session.execute(stmt)
@@ -1333,9 +1342,9 @@ async def delete_embedding_model(
     """
     session = container.session()
 
-    async with session.begin():
+    async with session.begin():  # type: ignore[union-attr]
         if not force:
-            usage_counts = await session.execute(
+            usage_counts = await session.execute(  # type: ignore[union-attr]
                 sa.select(
                     sa.select(sa.func.count())
                     .where(CollectionsTable.embedding_model_id == id)

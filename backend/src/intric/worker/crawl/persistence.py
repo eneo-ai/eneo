@@ -288,7 +288,7 @@ async def persist_batch(
                 for _, embedding in chunk_embedding_list:
                     # ChunkEmbeddingList returns numpy arrays, convert to list
                     embeddings.append(
-                        embedding.tolist()
+                        embedding.tolist()  # type: ignore[attr-defined]
                         if hasattr(embedding, "tolist")
                         else list(embedding)
                     )

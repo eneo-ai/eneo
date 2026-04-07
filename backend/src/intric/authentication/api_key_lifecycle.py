@@ -7,30 +7,30 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
+from intric.audit.domain.entity_types import EntityType
+from intric.audit.domain.outcome import Outcome
 from intric.authentication.api_key_policy import ApiKeyPolicyService
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_models import (
     ApiKeyCreatedResponse,
     ApiKeyCreateRequest,
-    ApiKeyOwnership,
-    ApiKeyUpdateRequest,
     ApiKeyHashVersion,
+    ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyStateChangeRequest,
     ApiKeyType,
+    ApiKeyUpdateRequest,
     ApiKeyV2,
     ApiKeyV2InDB,
     ResourcePermissions,
     compute_effective_state,
 )
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.actor_types import ActorType
-from intric.audit.domain.entity_types import EntityType
-from intric.audit.domain.outcome import Outcome
 from intric.main.config import get_settings
 
 if TYPE_CHECKING:

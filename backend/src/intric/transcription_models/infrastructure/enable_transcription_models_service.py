@@ -28,7 +28,7 @@ class TranscriptionModelEnableService:
         if not result:
             raise ValueError(f"Transcription model with name '{model_name}' not found")
 
-        return result.id
+        return result.id  # type: ignore[return-value]
 
     async def enable_transcription_model(
         self,

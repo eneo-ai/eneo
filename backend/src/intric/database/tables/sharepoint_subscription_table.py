@@ -20,7 +20,7 @@ class SharePointSubscription(BasePublic):
     This reduces duplicate webhooks and simplifies subscription management.
     """
 
-    __tablename__ = "sharepoint_subscriptions"
+    __tablename__ = "sharepoint_subscriptions"  # type: ignore[assignment]
 
     # Composite key: one subscription per user+site
     user_integration_id: Mapped[UUID] = mapped_column(

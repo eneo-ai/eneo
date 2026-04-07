@@ -1,14 +1,15 @@
-from typing import TYPE_CHECKING, Optional
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID as UUIDType
 
-from sqlalchemy import select, func
-from sqlalchemy.orm import selectinload
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
+
 from intric.main.exceptions import (
-    NotFoundException,
     BadRequestException,
     NameCollisionException,
+    NotFoundException,
 )
 from intric.roles.permissions import Permission, validate_permissions
 from intric.templates.assistant_template.api.assistant_template_models import (
@@ -17,8 +18,13 @@ from intric.templates.assistant_template.api.assistant_template_models import (
 
 if TYPE_CHECKING:
     from uuid import UUID
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from intric.feature_flag.feature_flag_service import FeatureFlagService
+    from intric.templates.assistant_template.api.assistant_template_models import (
+        AssistantTemplateUpdate,
+    )
     from intric.templates.assistant_template.assistant_template import AssistantTemplate
     from intric.templates.assistant_template.assistant_template_factory import (
         AssistantTemplateFactory,
@@ -26,10 +32,6 @@ if TYPE_CHECKING:
     from intric.templates.assistant_template.assistant_template_repo import (
         AssistantTemplateRepository,
     )
-    from intric.templates.assistant_template.api.assistant_template_models import (
-        AssistantTemplateUpdate,
-    )
-    from intric.feature_flag.feature_flag_service import FeatureFlagService
     from intric.users.user import UserInDB
 
 
@@ -119,11 +121,12 @@ class AssistantTemplateService:
             )
 
         # Create template with tenant_id
+        import sqlalchemy as sa
+
         from intric.database.tables.assistant_template_table import AssistantTemplates
         from intric.templates.assistant_template.assistant_template import (
             AssistantTemplate,
         )
-        import sqlalchemy as sa
 
         snapshot = AssistantTemplate.create_snapshot(
             {
@@ -207,8 +210,9 @@ class AssistantTemplateService:
                 )
 
         # Update template (original_snapshot preserved)
-        from intric.database.tables.assistant_template_table import AssistantTemplates
         import sqlalchemy as sa
+
+        from intric.database.tables.assistant_template_table import AssistantTemplates
 
         update_values = {}
         if data.name is not None:
@@ -262,8 +266,9 @@ class AssistantTemplateService:
 
         Time complexity: O(log n) for ownership + count check + update
         """
-        from intric.database.tables.assistant_template_table import AssistantTemplates
         import sqlalchemy as sa
+
+        from intric.database.tables.assistant_template_table import AssistantTemplates
 
         # Verify template belongs to tenant
         template = await self.repo.get_by_id(
@@ -385,8 +390,9 @@ class AssistantTemplateService:
             )
 
         # Restore from snapshot
-        from intric.database.tables.assistant_template_table import AssistantTemplates
         import sqlalchemy as sa
+
+        from intric.database.tables.assistant_template_table import AssistantTemplates
 
         snapshot = template.original_snapshot
         completion_model_id = snapshot.get("completion_model_id")
@@ -488,8 +494,8 @@ class AssistantTemplateService:
 
         Time complexity: O(k log n) where k is number of tenant templates
         """
-        from intric.database.tables.assistant_template_table import AssistantTemplates
         from intric.database.tables.assistant_table import Assistants
+        from intric.database.tables.assistant_template_table import AssistantTemplates
 
         # Query with LEFT JOIN to get usage count
         # Note: Assistants don't have tenant_id (they use space_id -> Space -> Tenant)
@@ -531,8 +537,8 @@ class AssistantTemplateService:
 
         Time complexity: O(k log n) where k is number of deleted templates
         """
-        from intric.database.tables.assistant_template_table import AssistantTemplates
         from intric.database.tables.assistant_table import Assistants
+        from intric.database.tables.assistant_template_table import AssistantTemplates
 
         # Query with LEFT JOIN to get usage count for deleted templates
         # Note: Assistants don't have tenant_id (they use space_id -> Space -> Tenant)

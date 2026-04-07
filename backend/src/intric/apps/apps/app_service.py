@@ -6,18 +6,18 @@ from intric.apps.apps.api.app_models import InputField, InputFieldType
 from intric.apps.apps.app import App
 from intric.apps.apps.app_factory import AppFactory
 from intric.apps.apps.app_repo import AppRepository
+from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
+from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from intric.files.file_service import FileService
 from intric.files.transcriber import Transcriber
 from intric.icons.icon_repo import IconRepository
-from intric.main.logging import get_logger
 from intric.main.exceptions import BadRequestException, UnauthorizedException
+from intric.main.logging import get_logger
 from intric.main.models import NOT_PROVIDED, ModelId, NotProvided, ResourcePermission
 from intric.prompts.prompt_service import PromptService
 from intric.spaces.api.space_models import WizardType
 from intric.spaces.space import Space
 from intric.users.user import UserInDB
-from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
-from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 
 if TYPE_CHECKING:
     from intric.actors import ActorManager
@@ -112,7 +112,7 @@ class AppService:
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_app_permissions()
 
-        return app_in_db, permissions
+        return app_in_db, permissions  # type: ignore[return-value]
 
     async def _create_from_template(
         self,
@@ -173,7 +173,7 @@ class AppService:
             else await self.completion_model_crud_service.get_default_completion_model()
         )
 
-        return completion_model
+        return completion_model  # type: ignore[return-value]
 
     async def get_transcription_model(
         self, space: Space
@@ -303,7 +303,7 @@ class AppService:
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_app_permissions()
 
-        return app_in_db, permissions
+        return app_in_db, permissions  # type: ignore[return-value]
 
     async def delete_app(self, app_id: UUID):
         space = await self.space_repo.get_space_by_app(app_id=app_id)

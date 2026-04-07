@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
-from uuid import UUID
 from typing import Optional
+from uuid import UUID
+
 import sqlalchemy as sa
 from pydantic import EmailStr
 from sqlalchemy.exc import IntegrityError
@@ -37,7 +38,7 @@ ORG_SPACE_ROLES = {"owner", "ai configurator"}  # Temp, kan bytas senare.
 
 class UsersRepository:
     def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(
+        self.delegate: BaseRepositoryDelegate[UserInDB] = BaseRepositoryDelegate(
             session,
             Users,
             UserInDB,
@@ -68,7 +69,7 @@ class UsersRepository:
 
     async def get_user_by_email(
         self, email: EmailStr, with_deleted: bool = False
-    ) -> UserInDB:
+    ) -> UserInDB | None:
         # Allow case-insensitive matching
         query = sa.select(Users).where(
             sa.func.lower(Users.email) == sa.func.lower(email)
@@ -78,31 +79,35 @@ class UsersRepository:
 
     async def get_user_by_username(
         self, username: str, with_deleted: bool = False
-    ) -> UserInDB:
+    ) -> UserInDB | None:
         query = sa.select(Users).where(Users.username == username)
 
         return await self._get_model_from_query(query, with_deleted=with_deleted)
 
-    async def get_user_by_id(self, id: UUID, with_deleted: bool = False) -> UserInDB:
+    async def get_user_by_id(
+        self, id: UUID, with_deleted: bool = False
+    ) -> UserInDB | None:
         query = sa.select(Users).where(Users.id == id)
 
         return await self._get_model_from_query(query, with_deleted=with_deleted)
 
     async def get_user_by_assistant_id(
         self, assistant_id: UUID, with_deleted: bool = False
-    ) -> UserInDB:
+    ) -> UserInDB | None:
         query = sa.select(Users).join(Assistants).where(Assistants.id == assistant_id)
 
         return await self._get_model_from_query(query, with_deleted=with_deleted)
 
-    async def get_user_by_id_and_tenant_id(self, id: UUID, tenant_id: UUID) -> UserInDB:
+    async def get_user_by_id_and_tenant_id(
+        self, id: UUID, tenant_id: UUID
+    ) -> UserInDB | None:
         query = (
             sa.select(Users).where(Users.id == id).where(Users.tenant_id == tenant_id)
         )
 
         return await self._get_model_from_query(query, with_deleted=False)
 
-    async def get_user_by_widget_id(self, widget_id: UUID) -> UserInDB:
+    async def get_user_by_widget_id(self, widget_id: UUID) -> UserInDB | None:
         query = sa.select(Users).join(Widgets).where(Widgets.id == widget_id)
         return await self.delegate.get_model_from_query(query)
 
@@ -147,6 +152,7 @@ class UsersRepository:
             if previous:
                 query = query.where(sa.func.lower(Users.email) <= cursor.lower())
                 query = query.order_by(sa.func.lower(Users.email).desc())
+                assert limit is not None
                 query = query.limit(limit + 1)
                 users = await self._get_models_from_query(
                     query=query, with_deleted=False
@@ -171,9 +177,9 @@ class UsersRepository:
         stmt = sa.select(Roles).filter(
             Roles.id.in_(roles_ids), Roles.tenant_id == tenant_id
         )
-        roles = await self.session.scalars(stmt)
+        result = await self.session.scalars(stmt)
 
-        return roles.all()
+        return result.all()
 
     async def _get_predefined_roles(self, roles: list[ModelId] | None):
         if roles is None:
@@ -181,9 +187,9 @@ class UsersRepository:
 
         roles_ids = [role.id for role in roles]
         stmt = sa.select(PredefinedRoles).filter(PredefinedRoles.id.in_(roles_ids))
-        roles = await self.session.scalars(stmt)
+        result = await self.session.scalars(stmt)
 
-        return roles.all()
+        return result.all()
 
     async def add(self, user: UserAdd):
         try:
@@ -197,6 +203,7 @@ class UsersRepository:
                 .returning(Users)
             )
             entry_in_db = await self.delegate.get_record_from_query(query=stmt)
+            assert entry_in_db is not None
             # TODO should be refactored when we will remove int id field from tables
             entry_in_db.roles = await self._get_roles(user.roles, user.tenant_id)
             entry_in_db.predefined_roles = await self._get_predefined_roles(

@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Optional, Union
 
 from intric.base.base_entity import Entity
-from intric.main.models import NOT_PROVIDED, NotProvided
+from intric.main.models import NOT_PROVIDED, NotProvided, is_provided
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -79,5 +79,5 @@ class Collection(Entity):
         )
 
     def update(self, name: Union[str, NotProvided] = NOT_PROVIDED):
-        if name is not NOT_PROVIDED:
+        if is_provided(name):
             self.name = name

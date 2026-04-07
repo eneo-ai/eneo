@@ -22,7 +22,7 @@ class TranscriptionModelService:
         # Otherwise get the latest model
         sorted_models = sorted(
             available_models, key=lambda model: model.created_at, reverse=True
-        )
+        )  # type: ignore[call-overload]
 
         if not sorted_models:
             return None

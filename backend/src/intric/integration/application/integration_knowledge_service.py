@@ -29,23 +29,23 @@ if TYPE_CHECKING:
     from intric.integration.domain.repositories.oauth_token_repo import (
         OauthTokenRepository,
     )
-    from intric.integration.domain.repositories.user_integration_repo import (
-        UserIntegrationRepository,
-    )
     from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
         TenantSharePointAppRepository,
     )
-    from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
-        TenantAppAuthService,
+    from intric.integration.domain.repositories.user_integration_repo import (
+        UserIntegrationRepository,
     )
     from intric.integration.infrastructure.auth_service.service_account_auth_service import (
         ServiceAccountAuthService,
     )
-    from intric.jobs.job_service import JobService
-    from intric.spaces.space import Space
+    from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
+        TenantAppAuthService,
+    )
     from intric.integration.infrastructure.sharepoint_subscription_service import (
         SharePointSubscriptionService,
     )
+    from intric.jobs.job_service import JobService
+    from intric.spaces.space import Space
     from intric.spaces.space_repo import SpaceRepository
     from intric.users.user import UserInDB
 
@@ -213,7 +213,7 @@ class IntegrationKnowledgeService:
                     "Tenant app ID is required for tenant_app integrations"
                 )
 
-            tenant_app = await self.tenant_sharepoint_app_repo.one(
+            tenant_app = await self.tenant_sharepoint_app_repo.one(  # type: ignore[attr-defined]
                 id=user_integration.tenant_app_id
             )
             access_token = await self._get_tenant_app_access_token(tenant_app)
@@ -228,7 +228,7 @@ class IntegrationKnowledgeService:
             token_id = oauth_token.id
             tenant_app_id = None
 
-        if hasattr(token, "token_type") and token.token_type.is_confluence:
+        if hasattr(token, "token_type") and token.token_type.is_confluence:  # type: ignore[union-attr]
             job = await self.job_service.queue_job(
                 task=Task.PULL_CONFLUENCE_CONTENT,
                 name=name,
@@ -379,6 +379,7 @@ class IntegrationKnowledgeService:
         """
         import sqlalchemy as sa
         from sqlalchemy.dialects.postgresql import insert as pg_insert
+
         from intric.database.tables.integration_knowledge_spaces_table import (
             IntegrationKnowledgesSpaces,
         )
@@ -435,6 +436,7 @@ class IntegrationKnowledgeService:
         integration_knowledge_id: "UUID",
     ) -> None:
         import sqlalchemy as sa
+
         from intric.database.tables.integration_knowledge_spaces_table import (
             IntegrationKnowledgesSpaces,
         )
@@ -487,7 +489,7 @@ class IntegrationKnowledgeService:
                             "Tenant app ID is required for tenant_app integrations"
                         )
 
-                    tenant_app = await self.tenant_sharepoint_app_repo.one(
+                    tenant_app = await self.tenant_sharepoint_app_repo.one(  # type: ignore[attr-defined]
                         id=user_integration.tenant_app_id
                     )
                     access_token = await self._get_tenant_app_access_token(tenant_app)
@@ -593,7 +595,7 @@ class IntegrationKnowledgeService:
                     "Tenant app ID is required for tenant_app integrations"
                 )
 
-            tenant_app = await self.tenant_sharepoint_app_repo.one(
+            tenant_app = await self.tenant_sharepoint_app_repo.one(  # type: ignore[attr-defined]
                 id=user_integration.tenant_app_id
             )
             access_token = await self._get_tenant_app_access_token(tenant_app)

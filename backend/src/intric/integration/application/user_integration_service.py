@@ -19,11 +19,11 @@ if TYPE_CHECKING:
     from intric.integration.domain.repositories.tenant_integration_repo import (
         TenantIntegrationRepository,
     )
-    from intric.integration.domain.repositories.user_integration_repo import (
-        UserIntegrationRepository,
-    )
     from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
         TenantSharePointAppRepository,
+    )
+    from intric.integration.domain.repositories.user_integration_repo import (
+        UserIntegrationRepository,
     )
     from intric.integration.infrastructure.sharepoint_subscription_service import (
         SharePointSubscriptionService,
@@ -60,9 +60,12 @@ class UserIntegrationService:
 
         import sqlalchemy as sa
         from sqlalchemy.orm import selectinload
+
+        from intric.database.tables.integration_table import (
+            TenantIntegration as TenantIntegrationDB,
+        )
         from intric.database.tables.integration_table import (
             UserIntegration as UserIntegrationDB,
-            TenantIntegration as TenantIntegrationDB,
         )
         from intric.integration.domain.factories.user_integration_factory import (
             UserIntegrationFactory,
@@ -83,7 +86,7 @@ class UserIntegrationService:
                 )
             )
         )
-        tenant_app_result = await self.user_integration_repo.session.execute(
+        tenant_app_result = await self.user_integration_repo.session.execute(  # type: ignore[attr-defined]
             tenant_app_stmt
         )
         tenant_app_db_models = [row[0] for row in tenant_app_result.all()]
@@ -142,6 +145,7 @@ class UserIntegrationService:
 
         # Collect Graph subscription IDs before DB cascade deletes them
         import sqlalchemy as sa
+
         from intric.database.tables.sharepoint_subscription_table import (
             SharePointSubscription as SharePointSubscriptionDB,
         )
@@ -149,7 +153,7 @@ class UserIntegrationService:
         stmt = sa.select(SharePointSubscriptionDB.subscription_id).where(
             SharePointSubscriptionDB.user_integration_id == integration.id
         )
-        result = await self.user_integration_repo.session.execute(stmt)
+        result = await self.user_integration_repo.session.execute(stmt)  # type: ignore[attr-defined]
         graph_subscription_ids = [row[0] for row in result.all()]
 
         if not graph_subscription_ids:
@@ -207,7 +211,7 @@ class UserIntegrationService:
         tenant_app = None
         if self.tenant_sharepoint_app_repo:
             try:
-                tenant_app = await self.tenant_sharepoint_app_repo.one_or_none(
+                tenant_app = await self.tenant_sharepoint_app_repo.one_or_none(  # type: ignore[attr-defined]
                     tenant_id=self.user.tenant_id
                 )
             except Exception as e:

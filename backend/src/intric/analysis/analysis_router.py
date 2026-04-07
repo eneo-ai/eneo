@@ -16,8 +16,8 @@ from intric.analysis.analysis import (
     AnalysisJobStatusResponse,
     AnalysisProcessingMode,
     AskAnalysis,
-    AssistantInsightQuestion,
     AssistantActivityStats,
+    AssistantInsightQuestion,
     ConversationInsightRequest,
     ConversationInsightResponse,
     Counts,
@@ -28,19 +28,19 @@ from intric.analysis.analysis_job_manager import AnalysisJobManager
 from intric.jobs.job_manager import job_manager
 from intric.jobs.job_models import Task
 from intric.jobs.task_models import AnalyzeConversationInsightsTask
-from intric.sessions.session import SessionPublic, SessionMetadataPublic
-from intric.sessions.session_protocol import (
-    to_session_metadata_paginated_response,
-    to_session_public,
-)
 from intric.main.container.container import Container
 from intric.main.exceptions import BadRequestException, NotFoundException
 from intric.main.logging import get_logger
-from intric.main.models import PaginatedResponse, CursorPaginatedResponse
+from intric.main.models import CursorPaginatedResponse, PaginatedResponse
 from intric.questions import question_protocol
 from intric.questions.question import Message
 from intric.server import protocol
 from intric.server.dependencies.container import get_container
+from intric.sessions.session import SessionMetadataPublic, SessionPublic
+from intric.sessions.session_protocol import (
+    to_session_metadata_paginated_response,
+    to_session_public,
+)
 
 logger = get_logger(__name__)
 

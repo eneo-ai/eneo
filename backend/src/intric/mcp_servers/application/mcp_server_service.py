@@ -3,13 +3,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from intric.main.exceptions import UnauthorizedException
 from intric.main.models import NOT_PROVIDED, NotProvided
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from intric.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
 )
-from intric.main.exceptions import UnauthorizedException
 from intric.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
@@ -649,6 +649,7 @@ class MCPServerService:
 
         # Upsert tenant tool setting
         from datetime import datetime, timezone
+
         from sqlalchemy.dialects.postgresql import insert
 
         now = datetime.now(timezone.utc)
@@ -691,6 +692,7 @@ class MCPServerService:
         await self._get_server_for_tenant(mcp_server_id)
 
         import sqlalchemy as sa
+
         from intric.database.tables.mcp_server_table import MCPServerToolSettings
 
         # Get all tools for this server

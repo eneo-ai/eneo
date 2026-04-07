@@ -97,7 +97,7 @@ class SharepointAuthService(BaseOauthService):
 
     async def exchange_token(
         self, auth_code: str, tenant_id: Optional[UUID] = None
-    ) -> TokenResponse:
+    ) -> TokenResponse | None:
         """Exchange authorization code for access token.
 
         Args:
@@ -130,7 +130,7 @@ class SharepointAuthService(BaseOauthService):
 
     async def refresh_access_token(
         self, refresh_token: str, tenant_id: Optional[UUID] = None
-    ) -> TokenResponse:
+    ) -> TokenResponse | None:
         """Refresh access token using refresh token.
 
         Args:

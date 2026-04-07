@@ -29,7 +29,7 @@ class LoggingEventHandler(EventHandler):
             f"Domain event published: {event.__class__.__name__}",
             extra={
                 "event_type": event.__class__.__name__,
-                "event_data": event.model_dump(),
+                "event_data": event.model_dump(),  # type: ignore[attr-defined]
             },
         )
 

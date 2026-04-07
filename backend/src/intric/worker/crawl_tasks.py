@@ -6,23 +6,24 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from arq import Retry
-from dependency_injector import providers
 import redis.asyncio as aioredis
 import sqlalchemy as sa
+from arq import Retry
+from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.tables.model_providers_table import ModelProviders
-from intric.main.container.container import Container
 from intric.main.config import get_settings
+from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.tenants.crawler_settings_helper import get_crawler_setting
+from intric.websites.crawl_dependencies.crawl_models import CrawlTask
 from intric.worker.crawl import (
     HeartbeatFailedError,
     HeartbeatMonitor,
     JobPreemptedError,
-    persist_batch,
     execute_with_recovery,
+    persist_batch,
     reset_tenant_retry_delay,
     update_job_retry_stats,
 )
@@ -32,7 +33,6 @@ from intric.worker.feeder.election import LeaderElection
 from intric.worker.feeder.queues import PendingQueue
 from intric.worker.redis.lua_scripts import LuaScripts
 from intric.worker.task_manager import TaskManager
-from intric.websites.crawl_dependencies.crawl_models import CrawlTask
 
 logger = get_logger(__name__)
 
@@ -176,6 +176,7 @@ async def queue_website_crawls(container: Container):
 
                     # Get user for this website
                     user = await user_repo.get_user_by_id(website.user_id)
+                    assert user is not None
                     container.user.override(providers.Object(user))
                     container.tenant.override(providers.Object(user.tenant))
 
@@ -183,9 +184,9 @@ async def queue_website_crawls(container: Container):
                     # Why: Pre-create DB records so feeder only handles ARQ enqueueing
                     # Deterministic job_id based on run_id prevents duplicate enqueues
                     if settings.crawl_feeder_enabled and redis_client:
-                        from intric.websites.domain.crawl_run import CrawlRun
                         from intric.jobs.job_models import Job, Task
                         from intric.main.models import Status
+                        from intric.websites.domain.crawl_run import CrawlRun
 
                         # Step 1: Create crawl run record
                         crawl_run_repo = container.crawl_run_repo()
@@ -255,7 +256,7 @@ async def queue_website_crawls(container: Container):
                                 from intric.main.models import Status
 
                                 job_in_db.status = Status.FAILED
-                                await job_repo.update_job(job_in_db)
+                                await job_repo.update_job(job_in_db)  # type: ignore[call-overload]
 
                                 crawl_run.status = Status.FAILED
                                 await crawl_run_repo.update(crawl_run)
@@ -708,8 +709,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # session returns to pool immediately. This prevents holding a connection
             # for 5-30 minutes during the actual crawl operation.
             from intric.database.database import sessionmanager
-            from intric.database.tables.websites_table import Websites as WebsitesTable
             from intric.database.tables.info_blobs_table import InfoBlobs
+            from intric.database.tables.websites_table import Websites as WebsitesTable
 
             # These will be populated by bootstrap
             crawl_context: CrawlContext
@@ -725,8 +726,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             try:
                 await bootstrap_session.begin()
                 # Get website with eager loading of embedding_model
-                from intric.database.tables.websites_table import Websites
                 from sqlalchemy.orm import selectinload
+
+                from intric.database.tables.websites_table import Websites
 
                 website_stmt = (
                     sa.select(Websites)
@@ -956,7 +958,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             semaphore_ttl_seconds = get_crawler_setting(
                 "tenant_worker_semaphore_ttl_seconds",
                 tenant.crawler_settings
-                if hasattr(tenant, "crawler_settings")
+                if tenant is not None and hasattr(tenant, "crawler_settings")
                 else None,
                 default=settings.tenant_worker_semaphore_ttl_seconds,
             )
@@ -1117,7 +1119,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 file_start = time.time()
                 # Process downloaded files with content hash checking
                 # Uses session-per-file pattern: each file gets its own short-lived session
-                for file in crawl.files:
+                for file in crawl.files or []:
                     num_files += 1
                     try:
                         filename = file.stem
@@ -1330,8 +1332,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             # Preemption check: Verify job wasn't marked FAILED while we were crawling.
             # If preempted, don't write results - a new crawl is already running.
-            from intric.main.models import Status as JobStatus
             from intric.database.tables.job_table import Jobs
+            from intric.main.models import Status as JobStatus
 
             async def _do_suicide_check(sess):
                 # Session provided by execute_with_recovery (session-per-operation pattern)

@@ -4,7 +4,8 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from pydantic import HttpUrl
-from sqlalchemy import cast as sa_cast, func
+from sqlalchemy import cast as sa_cast
+from sqlalchemy import func
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
@@ -32,7 +33,7 @@ class TenantRepository:
         session: AsyncSession,
         encryption_service: Optional["EncryptionService"] = None,
     ):
-        self.delegate = BaseRepositoryDelegate(
+        self.delegate: BaseRepositoryDelegate[TenantInDB] = BaseRepositoryDelegate(
             session,
             Tenants,
             TenantInDB,
@@ -41,7 +42,7 @@ class TenantRepository:
         self.session = session
         self.encryption = encryption_service
 
-    async def add(self, tenant: TenantBase) -> TenantInDB:
+    async def add(self, tenant: TenantBase) -> TenantInDB | None:
         """Create new tenant with auto-generated slug.
 
         If the tenant doesn't have a slug, it will be auto-generated from the name.
@@ -68,6 +69,7 @@ class TenantRepository:
                     .options(selectinload(Tenants.modules))
                 )
                 tenant_in_db = await self.delegate.get_model_from_query(stmt)
+                assert tenant_in_db is not None
                 logger.info(
                     f"Generated slug '{slug}' for tenant {tenant_in_db.name}",
                     extra={"tenant_id": str(tenant_in_db.id), "slug": slug},
@@ -162,7 +164,7 @@ class TenantRepository:
         tenant_id: UUID,
         provider: str,
         credential: dict[str, Any],
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """Update or add API credential using JSONB set operation with encryption.
 
         Uses PostgreSQL's jsonb_set function to efficiently update a single
@@ -175,7 +177,7 @@ class TenantRepository:
             credential: The credential dictionary containing api_key and optional fields
 
         Returns:
-            Updated TenantInDB instance with refreshed api_credentials
+            Updated TenantInDB instance with refreshed api_credentials, or None
         """
         # DEBUG: Log encryption state
         logger.info(
@@ -223,7 +225,7 @@ class TenantRepository:
         self,
         tenant_id: UUID,
         provider: str,
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """Remove API credential using JSONB delete operator.
 
         Uses PostgreSQL's JSONB #- operator to efficiently remove a single
@@ -572,7 +574,7 @@ class TenantRepository:
         self,
         tenant_id: UUID,
         favorites: list[str],
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """Replace the tenant's favorite providers list.
 
         Args:
@@ -598,7 +600,7 @@ class TenantRepository:
         self,
         tenant_id: UUID,
         crawler_settings: dict[str, Any],
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """Atomically merge crawler settings for a tenant.
 
         Uses PostgreSQL's || operator to merge JSONB objects atomically,
@@ -630,7 +632,7 @@ class TenantRepository:
     async def clear_crawler_settings(
         self,
         tenant_id: UUID,
-    ) -> TenantInDB:
+    ) -> TenantInDB | None:
         """Clear all crawler settings for a tenant, reverting to defaults.
 
         Args:

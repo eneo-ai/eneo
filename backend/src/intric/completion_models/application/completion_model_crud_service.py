@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING, Optional, Union
 
 from intric.main.config import get_settings
 from intric.main.exceptions import UnauthorizedException
-from intric.main.models import NOT_PROVIDED, ModelId, NotProvided
+from intric.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
 from intric.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
@@ -54,7 +54,7 @@ class CompletionModelCRUDService:
 
         return [model for model in completion_models if model.can_access]
 
-    async def get_default_completion_model(self) -> "CompletionModel":
+    async def get_default_completion_model(self) -> "CompletionModel | None":
         completion_models = await self.get_available_completion_models()
 
         # First try to get the org default model
@@ -65,7 +65,7 @@ class CompletionModelCRUDService:
         # Otherwise get the latest model
         sorted_models = sorted(
             completion_models, key=lambda model: model.created_at, reverse=True
-        )
+        )  # type: ignore[call-overload]
 
         # If no models are available
         # let each caller handle that
@@ -90,7 +90,7 @@ class CompletionModelCRUDService:
         if is_org_default is not None:
             completion_model.is_org_default = is_org_default
 
-        if security_classification is not NOT_PROVIDED:
+        if is_provided(security_classification):
             if security_classification is None:
                 cm_security_classification = None
             else:

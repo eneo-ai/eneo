@@ -12,7 +12,7 @@ from intric.database.tables.users_table import Users
 
 
 class CollectionsTable(BasePublic):
-    __tablename__ = "groups"
+    __tablename__ = "groups"  # type: ignore[assignment]
 
     name: Mapped[str] = mapped_column(nullable=False)
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)

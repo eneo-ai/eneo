@@ -3,7 +3,6 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from intric.authentication.auth_dependencies import get_current_active_user
-from intric.roles.permissions import Permission, validate_permission
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.config import get_settings
 from intric.model_providers.domain.model_provider_service import ModelProviderService
@@ -17,6 +16,7 @@ from intric.model_providers.presentation.model_provider_models import (
     ModelProviderUpdate,
     ValidateModelRequest,
 )
+from intric.roles.permissions import Permission, validate_permission
 from intric.server.protocol import responses
 from intric.settings.encryption_service import EncryptionService
 from intric.tenants.tenant_repo import TenantRepository
@@ -63,10 +63,10 @@ async def get_provider_capabilities(
     - default_fields: fallback field definitions for providers without custom fields
     """
     import re
-
-    import litellm
     from collections import defaultdict
     from datetime import date
+
+    import litellm
 
     from intric.tenants.provider_field_config import (
         DEFAULT_FIELDS,
@@ -213,6 +213,7 @@ async def get_favorite_providers(
     """Get the tenant's favorite provider types."""
     repo = TenantRepository(session)
     tenant = await repo.get(user.tenant_id)
+    assert tenant is not None
     return {"providers": tenant.favorite_providers}
 
 

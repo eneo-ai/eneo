@@ -12,7 +12,7 @@ from intric.database.tables.tenant_table import Tenants
 class ModelProviders(BasePublic):
     """Table for storing tenant-specific AI model providers with credentials."""
 
-    __tablename__ = "model_providers"
+    __tablename__ = "model_providers"  # type: ignore[assignment]
 
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False, index=True

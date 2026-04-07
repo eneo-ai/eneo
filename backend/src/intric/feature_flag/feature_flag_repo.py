@@ -1,5 +1,5 @@
-from uuid import UUID
 from datetime import datetime, timezone
+from uuid import UUID
 
 from sqlalchemy import delete, insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -10,8 +10,8 @@ from intric.database.tables.feature_flag_table import (
     GlobalFeatureFlag,
     TenantFeatureFlag,
 )
-from intric.feature_flag.feature_flag_factory import FeatureFlagFactory
 from intric.feature_flag.feature_flag import FeatureFlag
+from intric.feature_flag.feature_flag_factory import FeatureFlagFactory
 from intric.main.exceptions import NotFoundException
 
 
@@ -34,7 +34,7 @@ class FeatureFlagRepository:
             .returning(GlobalFeatureFlag)
         )
         feature = await self.db_session.execute(stmt)
-        return feature.scalar_one()
+        return feature.scalar_one()  # type: ignore[return-value]
 
     async def update(self, obj: FeatureFlag) -> FeatureFlag:
         """Update tenant preferences for a feature flag.
@@ -129,4 +129,4 @@ class FeatureFlagRepository:
 
         query = select(TenantFeatureFlag).filter_by(**filters)
         result = await self.db_session.scalars(query)
-        return result.all()
+        return result.all()  # type: ignore[return-value]

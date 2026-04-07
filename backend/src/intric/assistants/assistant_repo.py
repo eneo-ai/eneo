@@ -62,7 +62,7 @@ class AssistantRepository:
             selectinload(Assistants.user).selectinload(Users.roles),
             selectinload(Assistants.user).selectinload(Users.predefined_roles),
             selectinload(Assistants.websites)
-            .selectinload(Websites.latest_crawl)
+            .selectinload(Websites.latest_crawl)  # type: ignore[attr-defined]
             .selectinload(CrawlRuns.job),
             selectinload(Assistants.websites).selectinload(Websites.embedding_model),
             selectinload(Assistants.attachments).selectinload(AssistantsFiles.file),
@@ -369,6 +369,7 @@ class AssistantRepository:
         template_id = (
             assistant.source_template.id if assistant.source_template else None
         )
+        assert assistant.user is not None
         query = (
             sa.insert(Assistants)
             .values(
@@ -389,6 +390,7 @@ class AssistantRepository:
             .returning(Assistants)
         )
         entry_in_db = await self.session.scalar(query)
+        assert entry_in_db is not None
 
         # Assign groups and websites
         await self._set_collections(entry_in_db, assistant.collections)
@@ -494,6 +496,7 @@ class AssistantRepository:
             .returning(Assistants)
         )
         entry_in_db = await self.session.scalar(query)
+        assert entry_in_db is not None
 
         # assign groups and websites
         await self._set_collections(entry_in_db, assistant.collections)

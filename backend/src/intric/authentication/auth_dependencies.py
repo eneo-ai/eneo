@@ -1,26 +1,25 @@
 from dataclasses import dataclass
-from uuid import UUID
-
 from typing import NoReturn
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, Security, status
 
-from intric.authentication.auth_factory import get_auth_service
-from intric.authentication.auth_service import AuthService
 from intric.authentication.api_key_resolver import (
     ApiKeyValidationError,
     check_resource_permission,
 )
 from intric.authentication.api_key_router_helpers import raise_api_key_http_error
+from intric.authentication.auth_factory import get_auth_service
 from intric.authentication.auth_models import ApiKeyPermission
+from intric.authentication.auth_service import AuthService
 from intric.main.config import get_settings
 from intric.main.container.container import Container
+from intric.main.exceptions import UnauthorizedException
+from intric.main.logging import get_logger
+from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.auth_definitions import OAUTH2_SCHEME
 from intric.server.dependencies.container import get_container
 from intric.users.user import UserInDB
-from intric.roles.permissions import Permission, validate_permission
-from intric.main.exceptions import UnauthorizedException
-from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
 

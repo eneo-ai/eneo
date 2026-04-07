@@ -1,7 +1,7 @@
 """Database table for audit logs."""
 
-from sqlalchemy import Column, String, Text, ForeignKey, TIMESTAMP, Index
-from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
+from sqlalchemy import TIMESTAMP, Column, ForeignKey, Index, String, Text
+from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 
 from intric.database.tables.base_class import BasePublic
 
@@ -9,7 +9,7 @@ from intric.database.tables.base_class import BasePublic
 class AuditLog(BasePublic):
     """Table for tracking audit logs with multi-tenant isolation."""
 
-    __tablename__ = "audit_logs"
+    __tablename__ = "audit_logs"  # type: ignore[assignment]
 
     # Multi-Tenant Isolation (MANDATORY)
     tenant_id = Column(

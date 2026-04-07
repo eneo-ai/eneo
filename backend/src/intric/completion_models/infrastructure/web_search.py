@@ -1,8 +1,9 @@
 import uuid
 
+from tavily import AsyncTavilyClient
+
 from intric.main.config import get_settings
 from intric.main.models import InDB
-from tavily import AsyncTavilyClient
 
 
 class WebSearchResult(InDB):

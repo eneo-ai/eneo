@@ -16,16 +16,16 @@ from intric.audit.infrastructure.rate_limiting import (
     enforce_rate_limit,
 )
 from intric.conversations.conversation_models import ConversationRequest
+from intric.database.database import AsyncSession
+from intric.main.config import get_settings
+from intric.main.container.container import Container
+from intric.main.exceptions import NotFoundException
+from intric.main.logging import get_logger
+from intric.main.models import CursorPaginatedResponse
 from intric.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     get_approval_manager,
 )
-from intric.database.database import AsyncSession
-from intric.main.container.container import Container
-from intric.main.config import get_settings
-from intric.main.exceptions import NotFoundException
-from intric.main.logging import get_logger
-from intric.main.models import CursorPaginatedResponse
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.sessions.session import (
@@ -38,8 +38,8 @@ from intric.sessions.session import (
     SSEIntricEvent,
     SSEText,
     SSEToolApprovalRequired,
-    SSEToolCall,
     SSEToolApprovalTimeout,
+    SSEToolCall,
     ToolApprovalResponse,
 )
 from intric.sessions.session_protocol import (
@@ -150,6 +150,7 @@ async def _validate_conversation_scope(
                 http_request, "Unable to verify API key scope for this session."
             )
 
+        assert session is not None
         if scope_type == "assistant":
             session_assistant_id = session.assistant.id if session.assistant else None
             if session_assistant_id != scope_id:
@@ -164,6 +165,7 @@ async def _validate_conversation_scope(
             # Resolve session to space via assistant or group_chat
             try:
                 space = await space_repo.get_space_by_session(session_id)
+                assert space is not None
                 if space.id != scope_id:
                     _raise_conversation_scope_denied(
                         http_request,
@@ -458,10 +460,12 @@ async def delete_conversation(
     session_service = container.session_service()
     # Note: We'll need to determine if this is an assistant or group chat session
     session = await session_service.get_session_by_uuid(session_id)
+    assert session is not None
 
     if session.group_chat_id:
         await session_service.delete(session_id, group_chat_id=session.group_chat_id)
     else:
+        assert session.assistant is not None
         await session_service.delete(session_id, assistant_id=session.assistant.id)
 
     # Return None to produce 204 No Content response
@@ -483,6 +487,7 @@ async def leave_feedback(
 
     # Determine if this is a group chat or assistant session
     session = await session_service.get_session_by_uuid(session_id)
+    assert session is not None
 
     if session.group_chat_id:
         updated_session = await session_service.leave_feedback(
@@ -491,6 +496,7 @@ async def leave_feedback(
             feedback=feedback,
         )
     else:
+        assert session.assistant is not None
         updated_session = await session_service.leave_feedback(
             session_id=session_id, assistant_id=session.assistant.id, feedback=feedback
         )

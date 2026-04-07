@@ -9,17 +9,19 @@ from intric.ai_models.completion_models.completion_model import (
     ResponseType,
     TokenUsage,
 )
-from intric.main.logging import get_logger
 from intric.assistants.api.assistant_models import AssistantResponse
 from intric.assistants.assistant import Assistant
 from intric.assistants.assistant_factory import AssistantFactory
 from intric.assistants.assistant_repo import AssistantRepository
+from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
+from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from intric.authentication.auth_service import AuthService
 from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.completion_models.infrastructure.web_search import WebSearch
 from intric.files.file_service import FileService
 from intric.icons.icon_repo import IconRepository
 from intric.main.exceptions import BadRequestException, UnauthorizedException
+from intric.main.logging import get_logger
 from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 from intric.prompts.api.prompt_models import PromptCreate
 from intric.prompts.prompt import Prompt
@@ -38,8 +40,6 @@ from intric.templates.assistant_template.assistant_template_service import (
 )
 from intric.users.user import UserInDB
 from intric.workflows.step_repo import StepRepository
-from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
-from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 
 logger = get_logger(__name__)
 
@@ -215,7 +215,7 @@ class AssistantService:
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_assistant_permissions(assistant=assistant)
 
-        return assistant, permissions
+        return assistant, permissions  # type: ignore[return-value]
 
     async def _create_from_template(
         self,
@@ -275,18 +275,18 @@ class AssistantService:
         """Get a completion model for the space. Returns None if no model is available."""
         model = space.get_default_completion_model()
         if model:
-            return model
+            return model  # type: ignore[return-value]
 
         if space.completion_models:
             try:
                 model = space.get_latest_completion_model()
                 if model:
-                    return model
+                    return model  # type: ignore[return-value]
             except Exception:
                 pass
 
         # Try to get tenant default model
-        return await self.completion_model_crud_service.get_default_completion_model()
+        return await self.completion_model_crud_service.get_default_completion_model()  # type: ignore[return-value]
 
     async def create_default_assistant(self, name: str, space: "Space"):
         cm = space.get_default_completion_model()
@@ -388,8 +388,11 @@ class AssistantService:
         # Validate MCP server assignments against tenant + space boundaries.
         if mcp_server_ids is not None:
             import sqlalchemy as sa
+
             from intric.database.tables.mcp_server_table import (
                 MCPServers as MCPServersTable,
+            )
+            from intric.database.tables.mcp_server_table import (
                 SpacesMCPServers as SpacesMCPServersTable,
             )
 
@@ -507,7 +510,7 @@ class AssistantService:
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_assistant_permissions(assistant=assistant)
 
-        return assistant, permissions
+        return assistant, permissions  # type: ignore[return-value]
 
     async def get_assistants(
         self,
@@ -955,6 +958,7 @@ class AssistantService:
                     name=name, assistant_id=active_assistant.id
                 )
 
+        assert session is not None
         for _question in session.questions:
             _question.question = clean_intric_tag(_question.question)
 
@@ -1091,12 +1095,15 @@ class AssistantService:
             )
 
         # Get existing associations from the database
+        import sqlalchemy as sa
+
         from intric.database.tables.assistant_table import AssistantMCPServers
         from intric.database.tables.mcp_server_table import (
             MCPServers as MCPServersTable,
+        )
+        from intric.database.tables.mcp_server_table import (
             SpacesMCPServers as SpacesMCPServersTable,
         )
-        import sqlalchemy as sa
 
         # Validate tenant ownership + enablement
         mcp_server_query = sa.select(MCPServersTable).where(
@@ -1174,11 +1181,12 @@ class AssistantService:
             )
 
         # Get existing associations from the database
+        import sqlalchemy as sa
+
         from intric.database.tables.assistant_table import (
             AssistantMCPServers,
             Assistants,
         )
-        import sqlalchemy as sa
 
         stmt = sa.select(AssistantMCPServers).where(
             AssistantMCPServers.assistant_id == assistant_id
@@ -1234,11 +1242,12 @@ class AssistantService:
             )
 
         # Get existing associations from the database
+        import sqlalchemy as sa
+
         from intric.database.tables.assistant_table import (
             AssistantMCPServers,
             Assistants,
         )
-        import sqlalchemy as sa
 
         stmt = sa.select(AssistantMCPServers).where(
             AssistantMCPServers.assistant_id == assistant_id

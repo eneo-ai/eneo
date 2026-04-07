@@ -203,6 +203,7 @@ class InfoBlobService:
 
     async def update_info_blob(self, info_blob: InfoBlobUpdate):
         current_info_blob = await self.repo.get(info_blob.id)
+        assert current_info_blob is not None
 
         if info_blob.title:
             if current_info_blob.group_id is None:
@@ -226,6 +227,7 @@ class InfoBlobService:
 
     async def update_info_blob_size(self, info_blob_id: UUID):
         updated_info_blob = await self.repo.update_size(info_blob_id=info_blob_id)
+        assert updated_info_blob is not None
 
         if updated_info_blob.group_id is not None:
             await self.group_service.update_group_size(updated_info_blob.group_id)
@@ -311,7 +313,7 @@ class InfoBlobService:
 
         space_ids = effective_space_ids(space)
 
-        return await self.repo.list_by_space_ids(
+        return await self.repo.list_by_space_ids(  # type: ignore[attr-defined]
             space_ids=space_ids,
             include_groups=True,
             include_websites=True,
