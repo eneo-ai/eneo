@@ -1,5 +1,4 @@
 # MIT License
-from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -28,8 +27,8 @@ class RoleCreate(RoleCreateRequest):
 
 
 class RoleUpdateRequest(RoleBase):
-    name: Optional[str] = None
-    permissions: Optional[list[Permission]] = None
+    name: str | None = None  # type: ignore[assignment]  # intentional widening to Optional for partial update
+    permissions: list[Permission] | None = None  # type: ignore[assignment]  # intentional widening to Optional for partial update
 
 
 class RoleUpdate(RoleUpdateRequest):

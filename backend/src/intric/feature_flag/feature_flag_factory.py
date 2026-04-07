@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from intric.database.tables.feature_flag_table import (
     GlobalFeatureFlag,
     TenantFeatureFlag,
@@ -12,8 +14,8 @@ class FeatureFlagFactory:
         global_feature_flag: GlobalFeatureFlag,
         tenant_feature_flags: list[TenantFeatureFlag],
     ) -> FeatureFlag:
-        tenant_ids = set()
-        disabled_tenant_ids = set()
+        tenant_ids: set[UUID] = set()
+        disabled_tenant_ids: set[UUID] = set()
 
         if tenant_feature_flags:
             for tf in tenant_feature_flags:
