@@ -257,10 +257,10 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         # Execute query with performance logging
         query_start = time.time()
         results = await self.session.execute(query)
-        # Convert Row objects to domain models (subquery returns rows, not ORM objects)
+        # Convert row mappings to domain models (subquery returns mappings, not ORM objects)
         logs: list[AuditLog] = []
-        for row in results:
-            # Reconstruct AuditLogTable from row columns
+        for row in results.mappings():
+            # Reconstruct AuditLogTable from mapping columns
             # Note: Column is named "metadata" in DB, but "log_metadata" in ORM
             table_obj = cast(Any, AuditLogTable)(
                 id=row.id,
@@ -272,7 +272,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 entity_id=row.entity_id,
                 timestamp=row.timestamp,
                 description=row.description,
-                log_metadata=row._mapping["metadata"],
+                log_metadata=row["metadata"],
                 outcome=row.outcome,
                 ip_address=row.ip_address,
                 user_agent=row.user_agent,
@@ -586,8 +586,8 @@ class AuditLogRepositoryImpl(AuditLogRepository):
 
         # Stream results using direct iteration pattern (per SQLAlchemy async docs)
         # Pattern: `async for row in await session.stream(query):` - WITH await, NO context manager
-        async for row in await self.session.stream(query):
-            # Reconstruct domain model from row
+        async for row in (await self.session.stream(query)).mappings():
+            # Reconstruct domain model from mapping
             table_obj = cast(Any, AuditLogTable)(
                 id=row.id,
                 tenant_id=row.tenant_id,
@@ -598,7 +598,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 entity_id=row.entity_id,
                 timestamp=row.timestamp,
                 description=row.description,
-                log_metadata=row._mapping["metadata"],
+                log_metadata=row["metadata"],
                 outcome=row.outcome,
                 ip_address=row.ip_address,
                 user_agent=row.user_agent,

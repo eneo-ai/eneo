@@ -191,7 +191,9 @@ class UserIntegrationService:
         """Fire-and-forget: delete a single subscription from Microsoft Graph."""
         try:
             assert self.sharepoint_subscription_service is not None
-            await self.sharepoint_subscription_service._delete_graph_subscription(
+            await cast(
+                Any, self.sharepoint_subscription_service
+            )._delete_graph_subscription(
                 subscription_id=graph_subscription_id,
                 token=token,
             )

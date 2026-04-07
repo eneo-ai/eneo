@@ -1,12 +1,11 @@
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Optional, Protocol
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased, selectinload
-from sqlalchemy.orm.strategy_options import _AbstractLoad
 from sqlalchemy.sql.dml import ReturningInsert, ReturningUpdate
 
 from intric.database.database import AsyncSession
@@ -138,7 +137,7 @@ class SpaceRepository:
         self.assistant_repo = assistant_repo
         self.http_auth_encryption = http_auth_encryption
 
-    def _options(self) -> list[_AbstractLoad]:
+    def _options(self) -> list[Any]:
         return [
             selectinload(Spaces.members).selectinload(SpacesUsers.user),
             selectinload(Spaces.group_members)

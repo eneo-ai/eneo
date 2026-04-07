@@ -14,7 +14,6 @@ from intric.assistants.api.assistant_models import (
     AssistantSparse,
     DefaultAssistant,
     MCPServerPublicDict,
-    _empty_mcp_server_public_dict_list,
 )
 from intric.collections.presentation.collection_models import CollectionPublic
 from intric.embedding_models.presentation.embedding_model_models import (
@@ -64,6 +63,10 @@ class TransferRequest(BaseModel):
 
 class TransferApplicationRequest(TransferRequest):
     move_resources: bool = False
+
+
+def _empty_mcp_server_public_dict_list() -> list[MCPServerPublicDict]:
+    return []
 
 
 # Members

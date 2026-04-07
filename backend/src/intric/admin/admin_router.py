@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -23,7 +23,6 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
 from intric.authentication.api_key_resolver import ApiKeyValidationError
-from intric.authentication.api_key_router import _build_expiring_summary
 from intric.authentication.api_key_router_helpers import (
     build_api_key_usage_page,
     build_api_key_usage_summary,
@@ -49,7 +48,9 @@ from intric.authentication.auth_models import (
     ApiKeyUsageResponse,
     ApiKeyUserSnapshot,
     ApiKeyV2,
+    ApiKeyV2InDB,
     ExpiringKeysSummary,
+    ExpiringKeySummaryItem,
     SuperApiKeyStatus,
 )
 from intric.database.tables.users_table import Users
@@ -74,6 +75,56 @@ AdminContainer = Annotated[Container, Depends(get_container(with_user=True))]
 AdminApiKeyGuard = Annotated[
     None, Depends(require_api_key_permission(ApiKeyPermission.ADMIN))
 ]
+
+
+def _classify_severity(
+    expires_at: datetime, now: datetime
+) -> Literal["notice", "warning", "urgent", "expired"]:
+    if expires_at <= now:
+        return "expired"
+    days = (expires_at - now).total_seconds() / 86400
+    if days <= 3:
+        return "urgent"
+    if days <= 14:
+        return "warning"
+    return "notice"
+
+
+def _build_expiring_summary(
+    items: list[ApiKeyV2InDB],
+    total_count: int,
+    now: datetime,
+    cap: int = 10,
+) -> ExpiringKeysSummary:
+    counts: dict[str, int] = {"notice": 0, "warning": 0, "urgent": 0, "expired": 0}
+    summary_items: list[ExpiringKeySummaryItem] = []
+
+    for key in items[:cap]:
+        assert key.expires_at is not None  # noqa: S101 — guaranteed by query
+        sev = _classify_severity(key.expires_at, now)
+        counts[sev] += 1
+        summary_items.append(
+            ExpiringKeySummaryItem(
+                id=key.id,
+                name=key.name,
+                key_suffix=key.key_suffix,
+                scope_type=key.scope_type,
+                scope_id=key.scope_id,
+                expires_at=key.expires_at,
+                suspended_at=key.suspended_at,
+                severity=sev,
+            )
+        )
+
+    earliest = min((i.expires_at for i in summary_items), default=None)
+    return ExpiringKeysSummary(
+        total_count=total_count,
+        counts_by_severity=counts,
+        earliest_expiration=earliest,
+        items=summary_items,
+        truncated=total_count > len(summary_items),
+        generated_at=now,
+    )
 
 
 @router.get(

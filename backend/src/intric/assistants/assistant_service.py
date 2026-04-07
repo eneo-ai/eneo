@@ -457,8 +457,8 @@ class AssistantService:
                 )
 
         # Store MCP server IDs and tool settings for repository to handle.
-        assistant._mcp_server_ids = mcp_server_ids
-        assistant._mcp_tool_settings = mcp_tools
+        setattr(assistant, "_mcp_server_ids", mcp_server_ids)
+        setattr(assistant, "_mcp_tool_settings", mcp_tools)
 
         assistant.update(
             name=name,
@@ -1191,7 +1191,7 @@ class AssistantService:
         assistant_in_db = await self.repo.session.scalar(stmt)
         assert assistant_in_db is not None
 
-        await self.repo._set_mcp_servers(assistant_in_db, existing_server_ids)
+        await self.repo.set_mcp_servers(assistant_in_db, existing_server_ids)
 
         # Refresh and return
         refreshed_space = await self.space_repo.get_space_by_assistant(
@@ -1251,7 +1251,7 @@ class AssistantService:
         assistant_in_db = await self.repo.session.scalar(stmt)
         assert assistant_in_db is not None
 
-        await self.repo._set_mcp_servers(assistant_in_db, existing_server_ids)
+        await self.repo.set_mcp_servers(assistant_in_db, existing_server_ids)
 
         # Refresh and return
         refreshed_space = await self.space_repo.get_space_by_assistant(
@@ -1316,7 +1316,7 @@ class AssistantService:
         assistant_in_db = await self.repo.session.scalar(stmt)
         assert assistant_in_db is not None
 
-        await self.repo._set_mcp_servers(assistant_in_db, existing_server_ids)
+        await self.repo.set_mcp_servers(assistant_in_db, existing_server_ids)
 
         # Refresh and return
         refreshed_space = await self.space_repo.get_space_by_assistant(

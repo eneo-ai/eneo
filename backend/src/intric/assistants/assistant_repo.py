@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -240,7 +240,7 @@ class AssistantRepository:
 
         await self.session.refresh(assistant_in_db)
 
-    async def _set_mcp_servers(
+    async def set_mcp_servers(
         self,
         assistant_in_db: Assistants,
         mcp_server_ids: list[UUID],
@@ -520,23 +520,24 @@ class AssistantRepository:
         # Set MCP servers/tool overrides explicitly when provided by caller.
         # Backward-compatible fallback to legacy side-channel attributes.
         effective_mcp_server_ids = mcp_server_ids
-        if (
-            effective_mcp_server_ids is None
-            and hasattr(assistant, "_mcp_server_ids")
-            and assistant._mcp_server_ids is not None
-        ):
-            effective_mcp_server_ids = assistant._mcp_server_ids
+        if effective_mcp_server_ids is None:
+            assistant_mcp_server_ids = cast(
+                list[UUID] | None, getattr(assistant, "_mcp_server_ids", None)
+            )
+            if assistant_mcp_server_ids is not None:
+                effective_mcp_server_ids = assistant_mcp_server_ids
 
         effective_mcp_tool_settings = mcp_tool_settings
-        if (
-            effective_mcp_tool_settings is None
-            and hasattr(assistant, "_mcp_tool_settings")
-            and assistant._mcp_tool_settings is not None
-        ):
-            effective_mcp_tool_settings = assistant._mcp_tool_settings
+        if effective_mcp_tool_settings is None:
+            assistant_mcp_tool_settings = cast(
+                list[tuple[UUID, bool]] | None,
+                getattr(assistant, "_mcp_tool_settings", None),
+            )
+            if assistant_mcp_tool_settings is not None:
+                effective_mcp_tool_settings = assistant_mcp_tool_settings
 
         if effective_mcp_server_ids is not None:
-            await self._set_mcp_servers(entry_in_db, effective_mcp_server_ids)
+            await self.set_mcp_servers(entry_in_db, effective_mcp_server_ids)
         if effective_mcp_tool_settings is not None:
             await self._set_mcp_tools(entry_in_db, effective_mcp_tool_settings)
 

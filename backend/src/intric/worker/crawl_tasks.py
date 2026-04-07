@@ -636,7 +636,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         "metric_value": 1,
                     },
                 )
-                task_manager._job_already_handled = True
+                setattr(task_manager, "_job_already_handled", True)
                 return {
                     "status": "duplicate_skipped",
                     "job_id": str(job_id),
@@ -1613,7 +1613,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # Signal task_manager to skip its complete_job() call
             # Why: We've already completed the job with a fresh session above,
             # task_manager's job_service has stale session references
-            task_manager._job_already_handled = True
+            setattr(task_manager, "_job_already_handled", True)
 
         return task_manager.successful()
     finally:
