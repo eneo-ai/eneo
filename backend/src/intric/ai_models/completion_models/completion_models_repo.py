@@ -16,7 +16,8 @@ from intric.main.models import IdAndName
 
 
 class CompletionModelsRepository:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
         self.session = session
         self.delegate: BaseRepositoryDelegate[CompletionModel] = BaseRepositoryDelegate(
             session, CompletionModels, CompletionModel
@@ -86,9 +87,9 @@ class CompletionModelsRepository:
 
     async def get_models(
         self,
-        tenant_id: UUID = None,
+        tenant_id: UUID | None = None,
         is_deprecated: bool = False,
-        id_list: list[UUID] = None,
+        id_list: list[UUID] | None = None,
     ) -> list[CompletionModel]:
         query = (
             sa.select(CompletionModels)
@@ -111,7 +112,7 @@ class CompletionModelsRepository:
         result = await self.session.execute(query)
         db_models = result.scalars().all()
 
-        models = []
+        models: list[CompletionModel] = []
         for db_model in db_models:
             model = CompletionModel.model_validate(db_model)
             model.is_org_enabled = db_model.is_enabled
