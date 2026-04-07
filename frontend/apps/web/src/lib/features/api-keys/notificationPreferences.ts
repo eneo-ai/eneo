@@ -188,17 +188,6 @@ export async function updateAdminNotificationPolicy(
   intric: Intric,
   updates: Partial<ApiKeyNotificationPolicy>
 ): Promise<ApiKeyNotificationPolicy> {
-  // Backend schema expects max_days_before_expiry as `number | undefined`,
-  // but our local type allows `null` to represent "no limit". Convert null → undefined.
-  const payload: {
-    enabled?: boolean;
-    default_days_before_expiry?: number[];
-    max_days_before_expiry?: number;
-  } = {
-    enabled: updates.enabled,
-    default_days_before_expiry: updates.default_days_before_expiry,
-    max_days_before_expiry: updates.max_days_before_expiry ?? undefined
-  };
-  const response = await intric.apiKeys.admin.updateNotificationPolicy(payload);
+  const response = await intric.apiKeys.admin.updateNotificationPolicy(updates);
   return normalizePolicy(response);
 }

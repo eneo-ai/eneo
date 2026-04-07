@@ -1261,7 +1261,7 @@
         </Settings.Row>
         <div class="px-4">
           <a
-            href={resolve("/(app)/admin/audit-logs")}
+            href={resolve("/admin/audit-logs?tab=config")}
             class="text-accent-default hover:text-accent-default/80 inline-flex items-center gap-1.5 text-sm font-medium"
           >
             {m.api_keys_admin_tracking_open_audit_config()}

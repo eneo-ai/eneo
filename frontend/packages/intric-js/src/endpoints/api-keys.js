@@ -14,7 +14,9 @@
 /** @typedef {import('../types/resources').ApiKeyType} ApiKeyType */
 /** @typedef {import('../types/schema').components['schemas']['ExpiringKeysSummary']} ExpiringKeysSummary */
 /** @typedef {import('../types/schema').components['schemas']['ApiKeyNotificationPreferencesResponse']} ApiKeyNotificationPreferences */
+/** @typedef {import('../types/schema').components['schemas']['ApiKeyNotificationPreferencesUpdate']} ApiKeyNotificationPreferencesUpdate */
 /** @typedef {import('../types/schema').components['schemas']['ApiKeyNotificationPolicyResponse']} ApiKeyNotificationPolicy */
+/** @typedef {import('../types/schema').components['schemas']['ApiKeyNotificationPolicyUpdate']} ApiKeyNotificationPolicyUpdate */
 /** @typedef {import('../types/schema').components['schemas']['ApiKeyExactLookupResponse']} ApiKeyExactLookupResponse */
 
 /**
@@ -211,7 +213,7 @@ export function initApiKeys(client) {
 
     /**
      * Update API key notification preferences for current user.
-     * @param {{enabled?: boolean, days_before_expiry?: number[]}} updates
+     * @param {ApiKeyNotificationPreferencesUpdate} updates
      * @returns {Promise<ApiKeyNotificationPreferences>}
      * @throws {IntricError}
      * */
@@ -480,7 +482,7 @@ export function initApiKeys(client) {
 
       /**
        * Update tenant API key notification policy (admin only).
-       * @param {{enabled?: boolean, default_days_before_expiry?: number[], max_days_before_expiry?: number}} updates
+       * @param {ApiKeyNotificationPolicyUpdate} updates
        * @returns {Promise<ApiKeyNotificationPolicy>}
        * @throws {IntricError}
        * */
