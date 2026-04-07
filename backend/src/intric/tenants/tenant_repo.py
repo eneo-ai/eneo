@@ -79,8 +79,8 @@ class TenantRepository:
         except IntegrityError as e:
             raise exceptions.UniqueException("Tenant name already exists.") from e
 
-    async def get(self, id: UUID) -> TenantInDB:
-        return cast(TenantInDB, await self.delegate.get(id))
+    async def get(self, id: UUID) -> TenantInDB | None:
+        return await self.delegate.get(id)
 
     async def get_all_tenants(self, domain: str | None = None) -> list[TenantInDB]:
         if domain is not None:
@@ -118,6 +118,8 @@ class TenantRepository:
         policy_updates: dict[str, Any],
     ) -> TenantInDB:
         tenant = await self.get(tenant_id)
+        if tenant is None:
+            raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
         policy = dict(tenant.api_key_policy or {})
         policy.update(policy_updates)
 

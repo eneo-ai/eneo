@@ -521,7 +521,7 @@ class UserService:
 
             # Verify tenant exists
             tenant = await self.tenant_repo.get(tenant_id)
-            if tenant is None:  # pyright: ignore[reportUnnecessaryComparison]  # repo return type not Optional
+            if tenant is None:
                 logger.error(
                     f"Tenant not found: {tenant_id}",
                     extra={
@@ -645,7 +645,7 @@ class UserService:
         await self._validate_username(new_user.username)
 
         tenant = await self.tenant_repo.get(new_user.tenant_id)
-        if tenant is None:  # pyright: ignore[reportUnnecessaryComparison]  # repo return type not Optional
+        if tenant is None:
             raise BadRequestException(f"Tenant {new_user.tenant_id} does not exist")
 
         if new_user.password is not None:
@@ -727,6 +727,10 @@ class UserService:
         from intric.users.user import UserInDB as UserInDBModel
 
         tenant = await self.tenant_repo.get(key.tenant_id)
+        if tenant is None:
+            raise BadRequestException(
+                f"Tenant {key.tenant_id} does not exist for service key {key.id}"
+            )
         synthetic_id = uuid5(NAMESPACE_URL, f"service-key:{key.id}")
 
         key_suffix = key.key_suffix or key.id.hex[:8]
@@ -1859,7 +1863,7 @@ class UserService:
             await self._validate_username(username)
 
         tenant = await self.tenant_repo.get(tenant_id)
-        if tenant is None:  # pyright: ignore[reportUnnecessaryComparison]  # repo return type not Optional
+        if tenant is None:
             raise BadRequestException(f"Tenant {tenant_id} does not exist")
 
         state = user_invite.state or UserState.INVITED
