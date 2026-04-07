@@ -89,7 +89,7 @@ class LiteLLMTranscriptionAdapter:
         text = ""
         five_minutes = 60 * 5
         chunk_index = 0
-        total_duration_seconds = int(audio_file.info.duration)
+        total_duration_seconds = int(audio_file.duration)
 
         async with audio_file.asplit_file(seconds=five_minutes) as files:
             total_chunks = len(files)

@@ -13,13 +13,14 @@ from intric.main.exceptions import NotFoundException
 
 class FileRepository:
     def __init__(self, session: AsyncSession):
+        super().__init__()
         self._delegate: BaseRepositoryDelegate[File] = BaseRepositoryDelegate(
             session=session, table=Files, in_db_model=File
         )
         self.session = session
 
     async def add(self, file: FileCreate) -> File:
-        return cast(File, await self._delegate.add(file))
+        return await self._delegate.add(file)
 
     async def get_list_by_id_and_user(
         self, ids: list[UUID], user_id: UUID, include_transcription: bool = True
@@ -64,10 +65,7 @@ class FileRepository:
         return File.model_validate(file)
 
     async def get_list_by_user(self, user_id: UUID) -> list[File]:
-        return cast(
-            list[File],
-            await self._delegate.filter_by(conditions={Files.user_id: user_id}),
-        )
+        return await self._delegate.filter_by(conditions={Files.user_id: user_id})
 
     async def get_by_checksum(self, checksum: str) -> File:
         return cast(

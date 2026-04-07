@@ -1,6 +1,6 @@
 import tempfile
 from collections.abc import Iterator
-from typing import Tuple
+from typing import IO
 
 import numpy as np
 
@@ -9,11 +9,15 @@ from intric.main.exceptions import ChunkEmbeddingMisMatchException
 
 
 class ChunkEmbeddingList:
-    def __init__(self):
+    _file: IO[bytes]
+    _chunks: list[InfoBlobChunk]
+
+    def __init__(self) -> None:
+        super().__init__()
         self._file = tempfile.TemporaryFile()
         self._chunks = []
 
-    def add(self, chunks: list[InfoBlobChunk], embeddings: list[list[float]]):
+    def add(self, chunks: list[InfoBlobChunk], embeddings: list[list[float]]) -> None:
         if len(chunks) != len(embeddings):
             raise ChunkEmbeddingMisMatchException(
                 f"Number of chunks: {len(chunks)}, Number of embeddings: {len(embeddings)}"
@@ -24,10 +28,10 @@ class ChunkEmbeddingList:
         for embedding in embeddings:
             np.save(self._file, embedding)
 
-    def __iter__(self) -> Iterator[Tuple[InfoBlobChunk, list[float]]]:
+    def __iter__(self) -> Iterator[tuple[InfoBlobChunk, list[float]]]:
         self._file.seek(0)
         for chunk in self._chunks:
-            embedding = np.load(self._file)
+            embedding: list[float] = np.load(self._file).tolist()
 
             yield chunk, embedding
 

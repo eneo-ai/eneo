@@ -14,6 +14,7 @@ from intric.users.user import UserInDB
 
 class FileService:
     def __init__(self, user: UserInDB, repo: FileRepository, protocol: FileProtocol):
+        super().__init__()
         self.user = user
         self.repo = repo
         self.protocol = protocol
