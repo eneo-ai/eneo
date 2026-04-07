@@ -15,7 +15,7 @@ class _ApiKeyAddDelegate(Protocol):
         upsert_entry: ApiKey,
         *,
         user_id: UUID | None = None,
-        assistant_id: int | None = None,
+        assistant_id: UUID | None = None,
     ) -> ApiKeyInDB: ...
 
 
@@ -40,7 +40,7 @@ class ApiKeysRepository:
         self,
         api_key: ApiKey,
         user_id: UUID | None = None,
-        assistant_id: int | None = None,
+        assistant_id: UUID | None = None,
     ) -> ApiKeyInDB:
         add_delegate = cast(_ApiKeyAddDelegate, self.delegate)
         return await add_delegate.add(
@@ -51,6 +51,6 @@ class ApiKeysRepository:
         stmt = sa.delete(ApiKeys).where(ApiKeys.user_id == user_id)
         await self.session.execute(stmt)
 
-    async def delete_by_assistant(self, assistant_id: int):
+    async def delete_by_assistant(self, assistant_id: UUID):
         stmt = sa.delete(ApiKeys).where(ApiKeys.assistant_id == assistant_id)
         await self.session.execute(stmt)

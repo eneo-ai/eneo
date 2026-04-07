@@ -162,7 +162,7 @@ class AuthService:
     async def create_assistant_api_key(
         self,
         prefix: str,
-        assistant_id: int,
+        assistant_id: UUID,
         delete_old: bool = True,
         hash_key: bool = True,
     ) -> ApiKeyCreated:
@@ -204,7 +204,7 @@ class AuthService:
         )
 
     async def _create_v2_legacy_record_for_assistant(
-        self, *, api_key: ApiKeyCreated, prefix: str, assistant_id: int
+        self, *, api_key: ApiKeyCreated, prefix: str, assistant_id: UUID
     ) -> None:
         if self.api_key_v2_repo is None:
             return
@@ -237,7 +237,7 @@ class AuthService:
         return row.tenant_id
 
     async def _get_assistant_owner_and_tenant(
-        self, assistant_id: int
+        self, assistant_id: UUID
     ) -> tuple[UUID, UUID]:
         stmt = (
             sa.select(Assistants.user_id, Users.tenant_id)
