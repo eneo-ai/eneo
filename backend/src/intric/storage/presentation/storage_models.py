@@ -4,14 +4,15 @@
 
 
 from datetime import datetime
+from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel
 
 
 class StorageSpaceMemberModel(BaseModel):
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     id: UUID
     email: str
     role: str

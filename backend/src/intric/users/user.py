@@ -303,7 +303,7 @@ class UserInDB(UserInDBBase):
     @computed_field
     @property
     def permissions(self) -> set[Permission]:
-        permissions_set = set()
+        permissions_set: set[Permission] = set()
 
         # Add permissions from roles
         for role in self.roles:
