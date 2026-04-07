@@ -107,16 +107,16 @@ export function summaryToDisplayItems(
   items: Array<{
     id: string;
     name: string;
-    key_suffix: string | null;
+    key_suffix?: string | null;
     expires_at: string;
-    suspended_at: string | null;
+    suspended_at?: string | null;
     severity: string;
   }>
 ): ExpiringKeyDisplayItem[] {
   return items.map((item) => ({
     id: item.id,
     name: item.name,
-    keySuffix: item.key_suffix,
+    keySuffix: item.key_suffix ?? null,
     daysRemaining: getDaysUntilExpiration(item.expires_at) ?? 0,
     level: item.severity as ExpiryLevel,
     suspended: item.suspended_at != null

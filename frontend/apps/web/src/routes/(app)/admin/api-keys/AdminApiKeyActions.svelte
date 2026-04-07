@@ -6,6 +6,7 @@
   import { m } from "$lib/paraglide/messages";
   import { writable } from "svelte/store";
   import TagInput from "../../account/api-keys/TagInput.svelte";
+  import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
 
   const intric = getIntric();
 
@@ -148,7 +149,7 @@
       $showEditDialog = false;
     } catch (error) {
       console.error(error);
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     }
   }
 
@@ -162,7 +163,7 @@
       onSecret(response);
     } catch (error) {
       console.error(error);
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     }
   }
 
@@ -181,7 +182,7 @@
       reasonText = "";
     } catch (error) {
       console.error(error);
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     }
   }
 
@@ -200,7 +201,7 @@
       reasonText = "";
     } catch (error) {
       console.error(error);
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     }
   }
 
@@ -211,7 +212,7 @@
       onChanged();
     } catch (error) {
       console.error(error);
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     }
   }
 </script>

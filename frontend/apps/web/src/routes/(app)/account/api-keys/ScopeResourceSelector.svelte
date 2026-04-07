@@ -32,31 +32,37 @@
   }>();
 
   // Build resource list based on scope type
-  const resources = $derived.by(() => {
+  const resources = $derived.by((): Resource[] => {
     switch (scopeType) {
       case "space":
-        return spaces.map((s) => ({ id: s.id, name: s.name, type: "space" as const }));
+        return spaces.map(
+          (s: SpaceSparse): Resource => ({ id: s.id, name: s.name, type: "space" as const })
+        );
       case "assistant":
-        return assistants.map((a) => ({
-          id: a.id,
-          name: a.name,
-          type: "assistant" as const,
-          spaceName: a.spaceName
-        }));
+        return assistants.map(
+          (a: ResourceOption): Resource => ({
+            id: a.id,
+            name: a.name,
+            type: "assistant" as const,
+            spaceName: a.spaceName
+          })
+        );
       case "app":
-        return apps.map((a) => ({
-          id: a.id,
-          name: a.name,
-          type: "app" as const,
-          spaceName: a.spaceName
-        }));
+        return apps.map(
+          (a: ResourceOption): Resource => ({
+            id: a.id,
+            name: a.name,
+            type: "app" as const,
+            spaceName: a.spaceName
+          })
+        );
       default:
         return [];
     }
   });
 
   // Find selected resource
-  const selectedResource = $derived(resources.find((r) => r.id === value));
+  const selectedResource = $derived(resources.find((r: Resource) => r.id === value));
 
   const {
     elements: { menu, input, option, label },
@@ -68,13 +74,13 @@
   });
 
   // Filter resources based on search input
-  const filteredResources = $derived.by(() => {
+  const filteredResources = $derived.by((): Resource[] => {
     if (!$touchedInput || !$inputValue) {
       return resources;
     }
     const query = $inputValue.toLowerCase();
     return resources.filter(
-      (r) =>
+      (r: Resource) =>
         r.name.toLowerCase().includes(query) ||
         r.id.toLowerCase().includes(query) ||
         r.spaceName?.toLowerCase().includes(query)

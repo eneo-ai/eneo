@@ -4,6 +4,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import type { ApiKeyPolicy } from "@intric/intric-js";
+  import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import {
     Calendar,
     Clock,
@@ -80,7 +81,7 @@
       syncFromPolicy(policy);
     } catch (error) {
       console.error(error);
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     } finally {
       loading = false;
     }
@@ -121,7 +122,7 @@
       setTimeout(() => (successMessage = null), 3000);
     } catch (error) {
       console.error(error);
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     } finally {
       saving = false;
     }
@@ -216,7 +217,7 @@
 
   {#if loading}
     <div class="animate-pulse space-y-4">
-      {#each Array(6) as _}
+      {#each Array(6) as _, i (i)}
         <div class="border-default bg-subtle/50 rounded-lg border p-4">
           <div class="flex items-center gap-4">
             <div class="bg-subtle h-10 w-10 rounded-lg"></div>
@@ -232,7 +233,7 @@
   {:else}
     <!-- Policy Items -->
     <div class="space-y-3">
-      {#each policyItems as item}
+      {#each policyItems as item (item.id)}
         {@const PolicyIcon = item.icon}
         <div
           class="border-default bg-subtle/30 hover:bg-subtle/50 rounded-lg border p-4 transition-colors"
@@ -320,7 +321,7 @@
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <Button variant="ghost" on:click={resetPolicy} disabled={saving} class="gap-2">
+            <Button variant="simple" on:click={resetPolicy} disabled={saving} class="gap-2">
               <RotateCcw class="h-4 w-4" />
               {m.api_keys_admin_discard()}
             </Button>

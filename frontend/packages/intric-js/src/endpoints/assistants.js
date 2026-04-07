@@ -149,14 +149,21 @@ export function initAssistants(client) {
       /** @type AssistantResponse */
       let response = {};
 
-      const endpoint = session_id
-        ? "/api/v1/assistants/{id}/sessions/{session_id}/"
-        : "/api/v1/assistants/{id}/sessions/";
+      // Split into two branches so the path type narrows correctly per endpoint
+      const streamArgs = session_id
+        ? /** @type {const} */ ({
+            endpoint: "/api/v1/assistants/{id}/sessions/{session_id}/",
+            path: { id, session_id }
+          })
+        : /** @type {const} */ ({
+            endpoint: "/api/v1/assistants/{id}/sessions/",
+            path: { id }
+          });
 
       await client.stream(
-        endpoint,
+        streamArgs.endpoint,
         {
-          params: { path: { id, session_id }, query: { version: 2 } },
+          params: { path: streamArgs.path, query: { version: 2 } },
           requestBody: { "application/json": { question, files, stream: true } }
         },
         {

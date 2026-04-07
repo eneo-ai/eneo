@@ -16,7 +16,7 @@
   import { toast } from "$lib/components/toast";
   import { fade } from "svelte/transition";
 
-  export let description = m.record_audio_device();
+  export let description: string | undefined = m.record_audio_device();
 
   const {
     queueValidUploadsDetailed,

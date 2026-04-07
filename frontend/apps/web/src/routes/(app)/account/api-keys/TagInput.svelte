@@ -47,7 +47,7 @@
     // Allow wildcard patterns
     if (val.includes("*")) {
       // Check if it's a valid wildcard pattern
-      if (!/^https?:\/\/(\*|[\w.-]+\*?|\*\.[\w.-]+)(:\d+|\:\*)?$/.test(val)) {
+      if (!/^https?:\/\/(\*|[\w.-]+\*?|\*\.[\w.-]+)(:\d+|:\*)?$/.test(val)) {
         return m.api_keys_tag_invalid_wildcard();
       }
       return null;
@@ -125,7 +125,7 @@
 
   // Remove tag
   function removeTag(tagToRemove: string) {
-    value = value.filter((t) => t !== tagToRemove);
+    value = value.filter((t: string) => t !== tagToRemove);
   }
 
   // Handle keyboard input
@@ -242,7 +242,7 @@
   {#if !disabled && quickAddOptions.length > 0}
     <div class="flex flex-wrap items-center gap-2">
       <span class="text-xs text-muted">{m.api_keys_tag_quick_add()}</span>
-      {#each quickAddOptions as opt}
+      {#each quickAddOptions as opt (opt.pattern)}
         <button
           type="button"
           onclick={() => addQuickPattern(opt.pattern)}

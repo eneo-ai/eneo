@@ -114,7 +114,7 @@
       },
       cell: (item) => {
         const started = dayjs(item.value.created_at);
-        let value = m.started_time_ago({ timeAgo: dayjs().to(started) });
+        let value: string = m.started_time_ago({ timeAgo: dayjs().to(started) });
 
         if (item.value.finished_at) {
           const finished = dayjs(item.value.finished_at);

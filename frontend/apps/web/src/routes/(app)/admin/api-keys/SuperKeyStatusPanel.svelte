@@ -4,6 +4,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import type { SuperApiKeyStatus } from "@intric/intric-js";
+  import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
 
   const intric = getIntric();
 
@@ -13,7 +14,7 @@
 
   const statusLabel = (configured: boolean) => ({
     label: configured ? m.api_keys_admin_status_configured() : m.api_keys_admin_status_not_configured(),
-    color: configured ? "green" : "red"
+    color: (configured ? "green" : "red") as "green" | "red"
   });
 
   async function loadStatus() {
@@ -23,7 +24,7 @@
       status = await intric.apiKeys.admin.getSuperKeyStatus();
     } catch (error) {
       console.error(error);
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     } finally {
       loading = false;
     }

@@ -308,6 +308,7 @@ export class ChatService {
               if (!ensureCurrentSession(event)) return;
 
               if (event.intric_event_type === "generating_image") {
+                if (!ref) return;
                 ref.generated_files.push({ id: "", name: "", mimetype: "", size: 0 });
               }
             },

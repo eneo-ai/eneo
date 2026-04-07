@@ -30,9 +30,12 @@ export const load = async (event) => {
   const users = response.items || [];
   const pagination =
     ((response as unknown as Record<string, unknown>).metadata as {
-      page?: number;
-      total_pages?: number;
-      total_count?: number;
+      page: number;
+      total_pages: number;
+      total_count: number;
+      page_size: number;
+      has_next: boolean;
+      has_previous: boolean;
     } | null) ?? null;
   const counts =
     ((

@@ -1,11 +1,14 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { writable } from "svelte/store";
+  import { resolve } from "$app/paths";
   import { Page, Settings } from "$lib/components/layout";
-  import { Button, Input, Select, Label } from "@intric/ui";
+  import { Button, Input, Select } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
+  import { IntricError } from "@intric/intric-js";
   import type { ApiKeyCreatedResponse, ApiKeyV2, SpaceSparse, UserSparse } from "@intric/intric-js";
+  import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import AdminApiKeyTable from "./AdminApiKeyTable.svelte";
   import ApiKeyPolicyPanel from "./ApiKeyPolicyPanel.svelte";
   import SuperKeyStatusPanel from "./SuperKeyStatusPanel.svelte";
@@ -259,12 +262,14 @@
           errorMessage = null;
           return;
         } catch (lookupError) {
-          if (lookupError?.status === 404) {
+          const isNotFound = lookupError instanceof IntricError && lookupError.status === 404;
+          if (isNotFound) {
             // Graceful fallback: if exact secret lookup misses (typo/old secret), still
             // search by key suffix so admins can locate candidate keys quickly.
             forcedSearchFallback = getSecretSuffixFallback(searchQuery);
+          } else {
+            throw lookupError;
           }
-          if (lookupError?.status !== 404) throw lookupError;
         }
       }
 
@@ -279,7 +284,7 @@
       totalCount = response.total_count ?? null;
     } catch (error) {
       console.error(error);
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     } finally {
       loading = false;
       loadingMore = false;
@@ -540,7 +545,7 @@
       console.error(error);
       apiKeyUsedTrackingEnabled = previousUsed;
       apiKeyAuthFailedTrackingEnabled = previousFailed;
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     }
   }
 
@@ -601,7 +606,7 @@
     } catch (error) {
       console.error(error);
       scopeEnforcementEnabled = current;
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     }
   }
 
@@ -619,7 +624,7 @@
     } catch (error) {
       console.error(error);
       strictModeEnabled = current;
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     }
   }
 
@@ -637,7 +642,7 @@
     } catch (error) {
       console.error(error);
       expiryNotificationsEnabled = current;
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     }
   }
 
@@ -670,7 +675,7 @@
         : "";
     } catch (error) {
       console.error(error);
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     } finally {
       notificationPolicySaving = false;
     }
@@ -696,14 +701,13 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.api_keys()}>
-      <div slot="actions" class="flex items-center gap-3">
-        <Button variant="ghost" on:click={() => loadKeys({ reset: true })} class="gap-2">
-          <RefreshCw class="h-4 w-4 {loading ? 'animate-spin' : ''}" />
-          {m.api_keys_refresh()}
-        </Button>
-      </div>
-    </Page.Title>
+    <Page.Title title={m.api_keys()}></Page.Title>
+    <div class="flex items-center gap-3">
+      <Button variant="simple" on:click={() => loadKeys({ reset: true })} class="gap-2">
+        <RefreshCw class="h-4 w-4 {loading ? 'animate-spin' : ''}" />
+        {m.api_keys_refresh()}
+      </Button>
+    </div>
   </Page.Header>
 
   <Page.Main>
@@ -867,7 +871,7 @@
                   class="bg-primary border-default absolute top-full right-0 left-0 z-20 mt-2 max-h-64 overflow-y-auto rounded-lg border shadow-xl"
                   transition:slide={{ duration: 150 }}
                 >
-                  {#each userSearchResults as user, index}
+                  {#each userSearchResults as user, index (user.id)}
                     <button
                       role="option"
                       aria-selected={false}
@@ -962,7 +966,7 @@
 
             <!-- Quick Filters -->
             <div class="flex flex-wrap gap-2">
-              {#each quickFilters as qf}
+              {#each quickFilters as qf (qf.label)}
                 {@const isActive = isQuickFilterActive(qf.filter)}
                 <button
                   type="button"
@@ -1052,7 +1056,7 @@
                   : ""}
               </p>
               <div class="flex items-center gap-2">
-                <Button variant="ghost" on:click={resetFilters} class="text-sm">
+                <Button variant="simple" on:click={resetFilters} class="text-sm">
                   <X class="mr-1.5 h-4 w-4" />
                   {m.api_keys_admin_clear_all()}
                 </Button>
@@ -1257,7 +1261,7 @@
         </Settings.Row>
         <div class="px-4">
           <a
-            href="/admin/audit-logs?tab=config"
+            href={resolve("/(app)/admin/audit-logs")}
             class="text-accent-default hover:text-accent-default/80 inline-flex items-center gap-1.5 text-sm font-medium"
           >
             {m.api_keys_admin_tracking_open_audit_config()}

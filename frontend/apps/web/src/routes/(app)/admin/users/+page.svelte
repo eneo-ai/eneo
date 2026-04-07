@@ -5,7 +5,6 @@
   import UserTable from "./UserTable.svelte";
   import { m } from "$lib/paraglide/messages";
   import { goto } from "$app/navigation";
-  import { resolve } from "$app/paths";
   import { page } from "$app/stores";
   import ServerPagination from "$lib/components/ServerPagination.svelte";
   import { SvelteURLSearchParams } from "svelte/reactivity";
@@ -39,7 +38,10 @@
     } else {
       url.searchParams.delete("page");
     }
-    goto(resolve(url.toString()), { noScroll: true });
+    // resolve() requires a typed RouteId literal — for dynamic URLs we build the
+    // URL by hand and skip resolve(), see eslint-disable below.
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
+    goto(url, { noScroll: true });
   }
 
   // Watch built-in table filter and trigger server-side search with debouncing
@@ -83,7 +85,10 @@
               return;
             }
 
-            goto(resolve(nextUrl), { noScroll: true, keepFocus: true, replaceState: true });
+            // resolve() requires a typed RouteId literal — for dynamic URLs we build the
+            // URL by hand and skip resolve().
+            // eslint-disable-next-line svelte/no-navigation-without-resolve
+            goto(nextUrl, { noScroll: true, keepFocus: true, replaceState: true });
           }
           // If 1-2 chars: silently ignore (no request, no error, better UX)
         }, 250);

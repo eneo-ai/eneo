@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@intric/intric-js";
   import { Label } from "@intric/ui";
+  import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -25,6 +26,7 @@
     AlertTriangle
   } from "lucide-svelte";
   import { slide } from "svelte/transition";
+  import { SvelteSet, SvelteURLSearchParams } from "svelte/reactivity";
   import { getDaysUntilExpiration, getExpiryLevel, getEffectiveState } from "$lib/features/api-keys/expirationUtils";
 
   type ApiKeyUsageEvent = {
@@ -79,8 +81,8 @@
     onSecret: (response: ApiKeyCreatedResponse) => void;
   }>();
 
-  // Track expanded rows
-  let expandedIds = $state<Set<string>>(new Set());
+  // Track expanded rows (SvelteSet is already reactive — no $state wrapper needed)
+  let expandedIds = new SvelteSet<string>();
   let activeTabByKey = $state<Record<string, "overview" | "usage">>({});
   let usageByKey = $state<Record<string, ApiKeyUsageResponse>>({});
   let usageErrorByKey = $state<Record<string, string | null>>({});
@@ -93,7 +95,6 @@
     } else {
       expandedIds.add(id);
     }
-    expandedIds = new Set(expandedIds);
     if (expandedIds.has(id) && !activeTabByKey[id]) {
       activeTabByKey = { ...activeTabByKey, [id]: "overview" };
     }
@@ -173,7 +174,7 @@
       console.error(error);
       usageErrorByKey = {
         ...usageErrorByKey,
-        [id]: error?.getReadableMessage?.() ?? m.something_went_wrong()
+        [id]: getErrorMessage(error)
       };
     } finally {
       usageLoadingByKey = { ...usageLoadingByKey, [id]: false };
@@ -207,7 +208,7 @@
       console.error(error);
       usageErrorByKey = {
         ...usageErrorByKey,
-        [id]: error?.getReadableMessage?.() ?? m.something_went_wrong()
+        [id]: getErrorMessage(error)
       };
     } finally {
       usageLoadingByKey = { ...usageLoadingByKey, [id]: false };
@@ -328,7 +329,7 @@
   }
 
   function openAuditLogsForKey(key: AdminApiKey): string {
-    const params = new URLSearchParams();
+    const params = new SvelteURLSearchParams();
     params.set("tab", "logs");
     params.set("search", key.key_suffix);
     params.set("actions", "api_key_used,api_key_auth_failed");
@@ -339,7 +340,7 @@
 {#if loading}
   <!-- Skeleton loader -->
   <div class="animate-pulse space-y-3">
-    {#each Array(5) as _}
+    {#each Array(5) as _, i (i)}
       <div class="border-default bg-primary rounded-xl border p-4">
         <div class="flex items-center gap-4">
           <div class="bg-subtle h-10 w-10 rounded-lg"></div>
@@ -460,7 +461,7 @@
                   </span>
                 </span>
                 {#if key.search_match_reasons?.length}
-                  {#each key.search_match_reasons as reason}
+                  {#each key.search_match_reasons as reason (reason)}
                     <span
                       class="bg-accent-default/10 text-accent-default rounded px-1.5 py-0.5 text-[11px] font-medium"
                     >
@@ -642,7 +643,7 @@
                             </tr>
                           </thead>
                           <tbody>
-                            {#each usage.items as event}
+                            {#each usage.items as event (event.id)}
                               <tr class="border-default/60 border-t">
                                 <td
                                   class="text-muted px-3 py-2 text-xs whitespace-nowrap tabular-nums"
@@ -703,6 +704,7 @@
                     </button>
                   {/if}
 
+                  <!-- eslint-disable svelte/no-navigation-without-resolve -- dynamic query string -->
                   <a
                     href={openAuditLogsForKey(key)}
                     class="text-accent-default hover:text-accent-default/80 inline-flex items-center gap-1.5 text-xs font-medium"
@@ -710,6 +712,7 @@
                     <Link class="h-3.5 w-3.5" />
                     {m.api_keys_admin_usage_open_audit_logs()}
                   </a>
+                  <!-- eslint-enable svelte/no-navigation-without-resolve -->
                 {/if}
               </div>
             {:else}
@@ -731,6 +734,7 @@
                     </p>
                     <p class="text-muted font-mono text-xs">{key.owner_user_id}</p>
                     {#if key.owner_user?.email}
+                      <!-- eslint-disable svelte/no-navigation-without-resolve -- dynamic query string -->
                       <a
                         href={`/admin/users?tab=active&search=${encodeURIComponent(key.owner_user.email)}`}
                         class="text-accent-default hover:text-accent-default/80 mt-1 inline-flex items-center gap-1 text-xs font-medium"
@@ -831,7 +835,7 @@
                       {m.api_keys_admin_allowed_origins_label()}
                     </p>
                     <div class="flex flex-wrap gap-1.5">
-                      {#each key.allowed_origins as origin}
+                      {#each key.allowed_origins as origin (origin)}
                         <span
                           class="bg-primary border-default text-default inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-xs"
                         >
@@ -847,7 +851,7 @@
                   <div class="sm:col-span-2">
                     <p class="text-muted mb-2 text-xs">{m.api_keys_admin_allowed_ips_label()}</p>
                     <div class="flex flex-wrap gap-1.5">
-                      {#each key.allowed_ips as ip}
+                      {#each key.allowed_ips as ip (ip)}
                         <span
                           class="bg-primary border-default text-default inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-xs"
                         >

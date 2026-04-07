@@ -92,15 +92,21 @@
 
   // Parse wizard configuration from template
   // Handle both object format {attachments: {...}} and array format [{type: "attachments", ...}]
-  const wizard = data.template.wizard_config || data.template.wizard || {};
+  // Schema only declares `wizard`, but backend may also send `wizard_config` — narrow to unknown.
+  type AttachmentsConfig = {
+    required?: boolean;
+    title?: string;
+    description?: string;
+    type?: string;
+  };
+  const templateWithLegacy = data.template as typeof data.template & { wizard_config?: unknown };
+  const wizard: unknown = templateWithLegacy.wizard_config ?? data.template.wizard ?? {};
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let attachmentsConfig: any;
+  let attachmentsConfig: AttachmentsConfig | undefined;
   if (Array.isArray(wizard)) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    attachmentsConfig = wizard.find((c: any) => c.type === "attachments");
+    attachmentsConfig = (wizard as AttachmentsConfig[]).find((c) => c.type === "attachments");
   } else {
-    attachmentsConfig = wizard.attachments;
+    attachmentsConfig = (wizard as { attachments?: AttachmentsConfig }).attachments;
   }
 
   let wizardAttachmentsEnabled = $state(!!attachmentsConfig);

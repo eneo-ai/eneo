@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@intric/intric-js";
-  import { Button, Label } from "@intric/ui";
+  import { SvelteSet } from "svelte/reactivity";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -23,6 +23,7 @@
   } from "lucide-svelte";
   import { slide, fade } from "svelte/transition";
   import ApiKeyActions from "./ApiKeyActions.svelte";
+  import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { getDaysUntilExpiration, getExpiryLevel, getEffectiveState } from "$lib/features/api-keys/expirationUtils";
 
   type ApiKeyUsageEvent = {
@@ -74,8 +75,8 @@
     onFollowChanged?: () => void | Promise<void>;
   }>();
 
-  // Track expanded rows
-  let expandedIds = $state<Set<string>>(new Set());
+  // Track expanded rows (SvelteSet is already reactive — no $state wrapper needed)
+  let expandedIds = new SvelteSet<string>();
   let activeTabByKey = $state<Record<string, "overview" | "usage">>({});
   let usageByKey = $state<Record<string, ApiKeyUsageResponse>>({});
   let usageErrorByKey = $state<Record<string, string | null>>({});
@@ -99,7 +100,6 @@
         }
       }, 600);
     }
-    expandedIds = new Set(expandedIds);
     if (expandedIds.has(id) && !activeTabByKey[id]) {
       activeTabByKey = { ...activeTabByKey, [id]: "overview" };
     }
@@ -129,7 +129,7 @@
       console.error(error);
       usageErrorByKey = {
         ...usageErrorByKey,
-        [id]: error?.getReadableMessage?.() ?? m.something_went_wrong()
+        [id]: getErrorMessage(error)
       };
     } finally {
       usageLoadingByKey = { ...usageLoadingByKey, [id]: false };
@@ -161,7 +161,7 @@
       console.error(error);
       usageErrorByKey = {
         ...usageErrorByKey,
-        [id]: error?.getReadableMessage?.() ?? m.something_went_wrong()
+        [id]: getErrorMessage(error)
       };
     } finally {
       usageLoadingByKey = { ...usageLoadingByKey, [id]: false };
@@ -287,7 +287,7 @@
 {#if loading}
   <!-- Skeleton loader with theme-aware colors -->
   <div class="space-y-3">
-    {#each Array(3) as _, i}
+    {#each Array(3) as _, i (i)}
       <div
         class="rounded-xl border border-default bg-primary p-4"
         style="animation: skeleton-pulse 1.5s ease-in-out infinite; animation-delay: {i * 100}ms;"
@@ -579,7 +579,7 @@
                             </tr>
                           </thead>
                           <tbody>
-                            {#each usage.items as event}
+                            {#each usage.items as event (event.id)}
                               <tr class="border-default/60 border-t hover:bg-subtle/40 transition-colors even:bg-subtle/20">
                                 <td class="text-muted px-3 py-2 text-xs whitespace-nowrap tabular-nums">
                                   {formatter.format(new Date(event.timestamp))}
@@ -713,7 +713,7 @@
                 <div class="mt-5 pt-4 border-t border-dimmer">
                   <p class="text-[11px] font-medium text-muted uppercase tracking-wider mb-2.5">{m.api_keys_allowed_origins()}</p>
                   <div class="flex flex-wrap gap-2">
-                    {#each key.allowed_origins as origin}
+                    {#each key.allowed_origins as origin (origin)}
                       <span
                         class="inline-flex items-center gap-1.5 rounded-lg bg-primary border border-default
                                px-3 py-1.5 text-xs font-mono text-default
@@ -732,7 +732,7 @@
                 <div class="mt-5 pt-4 border-t border-dimmer">
                   <p class="text-[11px] font-medium text-muted uppercase tracking-wider mb-2.5">{m.api_keys_allowed_ips()}</p>
                   <div class="flex flex-wrap gap-2">
-                    {#each key.allowed_ips as ip}
+                    {#each key.allowed_ips as ip (ip)}
                       <span
                         class="inline-flex items-center gap-1.5 rounded-lg bg-primary border border-default
                                px-3 py-1.5 text-xs font-mono text-default

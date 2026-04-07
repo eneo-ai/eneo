@@ -152,7 +152,7 @@
     <div class="flex items-center gap-3 rounded-lg border border-negative-default/20 bg-negative-dimmer px-5 py-4">
       <AlertCircle class="h-4 w-4 text-negative-default flex-shrink-0" />
       <p class="flex-1 text-sm text-negative-default">{errorMessage}</p>
-      <Button variant="ghost" on:click={loadKeys} class="gap-1.5 text-xs">
+      <Button variant="simple" on:click={loadKeys} class="gap-1.5 text-xs">
         <RefreshCw class="h-3.5 w-3.5" />
         {m.retry()}
       </Button>
@@ -259,6 +259,7 @@
           lockedScopeName={scopeName}
           triggerVariant="outlined"
         />
+        <!-- eslint-disable svelte/no-navigation-without-resolve -- linked from settings module -->
         <a
           href="/account/api-keys"
           class="flex items-center gap-1.5 text-xs text-secondary transition-colors hover:text-default"
@@ -266,6 +267,7 @@
           {m.api_keys_manage_all()}
           <ExternalLink class="h-3 w-3" />
         </a>
+        <!-- eslint-enable svelte/no-navigation-without-resolve -->
       </div>
     </div>
   {/if}

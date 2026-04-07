@@ -5,6 +5,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { writable } from "svelte/store";
+  import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import {
     followApiKeyNotifications,
     unfollowApiKeyNotifications
@@ -41,7 +42,7 @@
       onSecret(response);
     } catch (error) {
       console.error(error);
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     }
   }
 
@@ -60,7 +61,7 @@
       reasonText = "";
     } catch (error) {
       console.error(error);
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     }
   }
 
@@ -79,7 +80,7 @@
       reasonText = "";
     } catch (error) {
       console.error(error);
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     }
   }
 
@@ -90,7 +91,7 @@
       onChanged();
     } catch (error) {
       console.error(error);
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     }
   }
 
@@ -106,7 +107,7 @@
       await onFollowChanged?.();
     } catch (error) {
       console.error(error);
-      errorMessage = error?.getReadableMessage?.() ?? m.something_went_wrong();
+      errorMessage = getErrorMessage(error);
     } finally {
       followLoading = false;
     }

@@ -25,7 +25,9 @@ export function initUser(client) {
      * */
     tenant: async () => {
       const res = await client.fetch("/api/v1/users/tenant/", { method: "get" });
-      return res;
+      // Backend's TenantPublic schema omits `id`, but the actual response includes it.
+      // The Tenant type extends the schema with `id`, so we cast through unknown.
+      return /** @type {Tenant} */ (/** @type {unknown} */ (res));
     },
 
     /**

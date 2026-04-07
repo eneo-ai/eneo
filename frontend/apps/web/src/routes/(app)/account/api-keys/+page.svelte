@@ -135,7 +135,7 @@
   <Page.Header>
     <Page.Title title={m.my_api_keys()} />
     <div class="flex items-center gap-3">
-      <Button variant="ghost" on:click={loadKeys} class="gap-2">
+      <Button variant="simple" on:click={loadKeys} class="gap-2">
         <RefreshCw class="h-4 w-4 {loading ? 'animate-spin' : ''}" />
         {m.api_keys_refresh()}
       </Button>
@@ -187,7 +187,7 @@
                   {m.api_keys_legacy_recommend()}
                 </p>
                 <div class="mt-3 flex flex-wrap items-center gap-2">
-                  <Button variant="ghost" class="text-negative hover:text-negative" on:click={() => showRevokeDialog.set(true)}>
+                  <Button variant="simple" class="text-negative hover:text-negative" on:click={() => showRevokeDialog.set(true)}>
                     {m.api_keys_legacy_revoke()}
                   </Button>
                   <CreateApiKeyDialog onCreated={handleCreated} />

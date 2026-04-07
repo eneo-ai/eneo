@@ -35,6 +35,7 @@
     nextUrl.searchParams.set("from", timeframe.start.toString());
     nextUrl.searchParams.set("to", timeframe.end.toString());
     nextUrl.searchParams.set("followups", includeFollowups ? "true" : "false");
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic query string
     await goto(nextUrl.toString(), {
       replaceState: true,
       noScroll: true,
@@ -78,7 +79,7 @@
     </Page.Tab>
     <Page.Tab id="questions">
       <QuestionTable
-        assistantId={$page.params.assistantId}
+        assistantId={$page.params.assistantId ?? ""}
         intric={data.intric}
         {includeFollowups}
         {timeframe}
