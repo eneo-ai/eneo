@@ -138,11 +138,11 @@ class Assistant(Entity):
             self.websites = websites
 
     @property
-    def completion_model(self):
+    def completion_model(self) -> CompletionModel | None:
         return self._completion_model
 
     @completion_model.setter
-    def completion_model(self, model: CompletionModel):
+    def completion_model(self, model: CompletionModel) -> None:
         if not model.can_access:
             raise UnauthorizedException(UNAUTHORIZED_EXCEPTION_MESSAGE)
 
