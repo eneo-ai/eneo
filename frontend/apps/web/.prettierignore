@@ -19,3 +19,5 @@ vite.config.*.timestamp-*
 CHANGELOG.md
 README.md
 src/lib/paraglide
+project.inlang/.meta.json
+project.inlang/cache

@@ -93,6 +93,7 @@
       "name": "@intric/ui",
       "version": "1.22.0",
       "devDependencies": {
+        "@eslint/js": "^9.24.0",
         "@internationalized/date": "^3.7.0",
         "@intric/intric-js": "workspace:*",
         "@melt-ui/svelte": "^0.86.5",
