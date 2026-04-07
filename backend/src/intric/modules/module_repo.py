@@ -1,3 +1,6 @@
+from collections.abc import Awaitable, Callable
+from typing import cast
+
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,10 +16,14 @@ class ModuleRepository:
         )
         self.session = session
 
-    async def add(self, module: ModuleBase):
-        return await self.delegate.add(module)
+    async def add(self, module: ModuleBase) -> ModuleInDB:
+        add_module = cast(
+            Callable[[ModuleBase], Awaitable[ModuleInDB]],
+            self.delegate.add,
+        )
+        return await add_module(module)
 
-    async def get_all_modules(self):
+    async def get_all_modules(self) -> list[ModuleInDB]:
         stmt = sa.select(Modules).order_by(Modules.created_at)
         modules = await self.session.scalars(stmt)
 

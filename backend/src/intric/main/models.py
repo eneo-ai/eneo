@@ -140,12 +140,12 @@ class CursorPaginatedResponse(PaginatedResponse[T], Generic[T]):
     total_count: int
 
 
-class PaginatedResponseWithPublicItems(PaginatedResponse):
+class PaginatedResponseWithPublicItems(PaginatedResponse[T], Generic[T]):
     public_count: int = Field(description="Number of items returned in the response")
     public_items: list[T] = Field(description="List of items returned in the response")
 
 
-class PaginatedPermissions(PaginatedResponse, ResourcePermissionsMixin):
+class PaginatedPermissions(PaginatedResponse[T], ResourcePermissionsMixin, Generic[T]):
     pass
 
 

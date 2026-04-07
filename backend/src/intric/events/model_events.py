@@ -1,7 +1,7 @@
 """Domain events for completion model operations."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -14,6 +14,10 @@ class DomainEvent:
     pass
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 @dataclass
 class ModelMigrationStarted(DomainEvent):
     """Emitted when a model migration begins."""
@@ -23,7 +27,7 @@ class ModelMigrationStarted(DomainEvent):
     to_model_id: UUID
     affected_count: int
     initiated_by: UUID
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=_utc_now)
 
 
 @dataclass
@@ -33,7 +37,7 @@ class ModelMigrationCompleted(DomainEvent):
     migration_id: UUID
     migrated_count: int
     duration_seconds: float
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=_utc_now)
 
 
 @dataclass
@@ -43,7 +47,7 @@ class ModelMigrationFailed(DomainEvent):
     migration_id: UUID
     error_message: str
     failed_at_entity: Optional[str] = None
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=_utc_now)
 
 
 @dataclass
@@ -53,4 +57,4 @@ class ModelUsageStatsUpdated(DomainEvent):
     model_id: Optional[UUID]  # None means all models
     tenant_id: UUID
     update_type: str  # 'incremental' or 'full'
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=_utc_now)

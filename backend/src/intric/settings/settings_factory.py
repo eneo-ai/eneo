@@ -17,7 +17,7 @@ def get_settings_service_allowing_read_only_key(
     ),
     repo: SettingsRepository = Depends(get_repository(SettingsRepository)),
     container: Container = Depends(get_container(with_user=True)),
-):
+) -> SettingService:
     return SettingService(
         repo=repo,
         user=user,
