@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from pydantic import HttpUrl
@@ -37,6 +37,7 @@ class TenantService:
         embedding_model_repo: "AdminEmbeddingModelsService",
         transcription_model_enable_service: "TranscriptionModelEnableService",
     ):
+        super().__init__()
         self.repo = repo
         self.completion_model_repo = completion_model_repo
         self.embedding_model_repo = embedding_model_repo
@@ -133,7 +134,14 @@ class TenantService:
 
         # Create a simple validation object
         class CredentialData:
-            def __init__(self, api_key, endpoint, api_version, deployment_name):
+            def __init__(
+                self,
+                api_key: str,
+                endpoint: str | None,
+                api_version: str | None,
+                deployment_name: str | None,
+            ) -> None:
+                super().__init__()
                 self.api_key = api_key
                 self.endpoint = endpoint
                 self.api_version = api_version
@@ -173,16 +181,21 @@ class TenantService:
 
         # Extract timestamp from stored credential
         provider_key = provider.lower()
-        stored_credential = (
-            updated_tenant.api_credentials.get(provider_key, {})
+        raw_cred_value = (
+            updated_tenant.api_credentials.get(provider_key)
             if updated_tenant and updated_tenant.api_credentials
-            else {}
-        )
-
-        timestamp_raw = (
-            stored_credential.get("set_at")
-            if isinstance(stored_credential, dict)
             else None
+        )
+        stored_credential: dict[str, object]
+        if isinstance(raw_cred_value, dict):
+            # cast to typed dict at the JSONB boundary; keys are always str
+            stored_credential = cast(dict[str, object], raw_cred_value)
+        else:
+            stored_credential = {}
+
+        timestamp_candidate: object = stored_credential.get("set_at")
+        timestamp_raw: str | None = (
+            timestamp_candidate if isinstance(timestamp_candidate, str) else None
         )
 
         try:
@@ -276,11 +289,17 @@ class TenantService:
         tenant_credentials = tenant.api_credentials or {}
 
         for provider, metadata in credentials_metadata.items():
-            credential_data = tenant_credentials.get(provider, {})
+            raw_cred_item = tenant_credentials.get(provider)
+            credential_data: dict[str, object]
+            if isinstance(raw_cred_item, dict):
+                # cast to typed dict at the JSONB boundary; keys are always str
+                credential_data = cast(dict[str, object], raw_cred_item)
+            else:
+                credential_data = {}
             config: dict[str, Any] = {}
             configured_at: datetime | None = tenant.updated_at
 
-            if isinstance(credential_data, dict):
+            if credential_data:
                 # Extract config (all fields except sensitive ones)
                 config = {
                     k: v
@@ -288,18 +307,22 @@ class TenantService:
                     if k not in {"api_key", "encrypted_at", "set_at"}
                 }
 
-                # Extract timestamp
-                timestamp_candidate = metadata.get("set_at") or credential_data.get(
-                    "set_at"
+                # Extract timestamp - prefer metadata.set_at, fall back to credential fields
+                ts_from_metadata = metadata.get("set_at") or ""
+                ts_from_cred_raw: object = credential_data.get("set_at")
+                ts_from_cred = (
+                    ts_from_cred_raw if isinstance(ts_from_cred_raw, str) else ""
                 )
+                timestamp_candidate = ts_from_metadata or ts_from_cred
                 if not timestamp_candidate:
-                    timestamp_candidate = credential_data.get("encrypted_at")
+                    enc_raw: object = credential_data.get("encrypted_at")
+                    timestamp_candidate = enc_raw if isinstance(enc_raw, str) else ""
 
-                if isinstance(timestamp_candidate, str):
+                if timestamp_candidate:
                     try:
                         configured_at = datetime.fromisoformat(timestamp_candidate)
                     except ValueError:
-                        configured_at = tenant.updated_at  # type: ignore[assignment]
+                        configured_at = tenant.updated_at
 
             credentials.append(
                 {

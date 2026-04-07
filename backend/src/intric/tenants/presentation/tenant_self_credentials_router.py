@@ -6,7 +6,7 @@ their own tenant's LLM provider API credentials.
 """
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
@@ -21,7 +21,7 @@ from intric.tenants.provider_field_config import PROVIDER_REQUIRED_FIELDS
 
 
 def check_feature_enabled(
-    settings: Settings = Depends(get_settings),
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> None:
     if not settings.tenant_credentials_enabled:
         raise HTTPException(
@@ -119,7 +119,7 @@ class ListCredentialsResponse(BaseModel):
 async def set_credential(
     provider: Provider,
     request: SetCredentialRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> SetCredentialResponse:
     tenant_service = container.tenant_service()
     settings = get_settings()
@@ -177,7 +177,7 @@ async def set_credential(
     "Tenant admin only.",
 )
 async def list_credentials(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ListCredentialsResponse:
     tenant_service = container.tenant_service()
     user = container.user()

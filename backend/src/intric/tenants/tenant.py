@@ -1,6 +1,6 @@
 import re
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, cast
 from uuid import UUID
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
@@ -72,11 +72,6 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     @classmethod
     def validate_favorite_providers(cls, v: list[str]) -> list[str]:
         """Validate that favorite_providers is a list of strings."""
-        if not isinstance(v, list):
-            raise ValueError("favorite_providers must be a list")
-        for item in v:
-            if not isinstance(item, str):
-                raise ValueError("Each favorite provider must be a string")
         return v
 
     @field_validator("slug")
@@ -190,13 +185,15 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
                 raise ValueError("additional_redirect_uris must be a list")
 
             normalized_redirect_uris: list[str] = []
-            for redirect_uri in additional_redirect_uris:
+            for redirect_uri in cast(list[object], additional_redirect_uris):
                 if not isinstance(redirect_uri, str):
                     raise ValueError(
                         "additional_redirect_uris must contain only strings"
                     )
                 try:
-                    normalized_redirect_uris.append(validate_redirect_uri(redirect_uri))
+                    validated_uri = validate_redirect_uri(redirect_uri)
+                    if validated_uri is not None:
+                        normalized_redirect_uris.append(validated_uri)
                 except ValueError as e:
                     raise ValueError(
                         f"Invalid redirect URI in additional_redirect_uris: {e}"
@@ -208,7 +205,9 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         if "allowed_domains" in v:
             if not isinstance(v["allowed_domains"], list):
                 raise ValueError("allowed_domains must be a list")
-            if not all(isinstance(d, str) for d in v["allowed_domains"]):
+            if not all(
+                isinstance(d, str) for d in cast(list[object], v["allowed_domains"])
+            ):
                 raise ValueError("allowed_domains must contain only strings")
 
         return v
@@ -295,12 +294,15 @@ class TenantWithMaskedCredentials(TenantInDB):
 
         # Mask the api_credentials - preserve structure but mask api_key field only
         if tenant.api_credentials:
-            masked = {}
-            for provider, cred in tenant.api_credentials.items():
+            masked: dict[str, Any] = {}
+            for provider, cred_raw in tenant.api_credentials.items():
+                cred: object = cred_raw
                 if isinstance(cred, dict):
                     # Preserve structure: copy all fields except mask api_key
-                    masked_cred = cred.copy()
-                    api_key = cred.get("api_key", "")
+                    cred_typed = cast(dict[str, object], cred)
+                    masked_cred: dict[str, object] = dict(cred_typed)
+                    raw_key = cred_typed.get("api_key", "")
+                    api_key = raw_key if isinstance(raw_key, str) else str(raw_key)
 
                     # Mask the api_key field
                     if len(api_key) > 4:
