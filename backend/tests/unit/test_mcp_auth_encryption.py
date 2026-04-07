@@ -235,6 +235,7 @@ class TestAssemblerHasCredentials:
         server.tags = None
         server.icon_url = None
         server.documentation_url = None
+        server.security_classification = None
 
         assembler = MCPServerAssembler()
         dto = assembler.from_domain_to_model(server)
@@ -255,6 +256,7 @@ class TestAssemblerHasCredentials:
         server.tags = None
         server.icon_url = None
         server.documentation_url = None
+        server.security_classification = None
 
         assembler = MCPServerAssembler()
         dto = assembler.from_domain_to_model(server)
@@ -276,6 +278,7 @@ class TestAssemblerHasCredentials:
         server.tags = None
         server.icon_url = None
         server.documentation_url = None
+        server.security_classification = None
         server.is_enabled = True
         server.tools = []
 
@@ -298,6 +301,7 @@ class TestAssemblerHasCredentials:
         server.tags = None
         server.icon_url = None
         server.documentation_url = None
+        server.security_classification = None
         server.is_enabled = False
         server.tools = []
 
@@ -325,6 +329,7 @@ class TestAssemblerHasCredentials:
         server.tags = None
         server.icon_url = None
         server.documentation_url = None
+        server.security_classification = None
 
         assembler = MCPServerAssembler(encryption_service=enc)
         dto = assembler.from_domain_to_model(server)
@@ -351,6 +356,7 @@ class TestAssemblerHasCredentials:
         server.tags = None
         server.icon_url = None
         server.documentation_url = None
+        server.security_classification = None
 
         assembler = MCPServerAssembler(encryption_service=None)
         dto = assembler.from_domain_to_model(server)

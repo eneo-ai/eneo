@@ -3,11 +3,17 @@
 
   let { data, children } = $props();
 
-  // Filter out integrations that are not yet ready (e.g., Confluence)
-  const readyIntegrations = data.availableIntegrations.filter(
-    (i) => i.integration_type === "sharepoint"
+  // Initial call creates the Svelte context store (must run synchronously at init)
+  setAvailableIntegrations(
+    data.availableIntegrations.filter((i) => i.integration_type === "sharepoint")
   );
-  setAvailableIntegrations(readyIntegrations);
+
+  // Update store reactively when space (and thus data) changes
+  $effect(() => {
+    setAvailableIntegrations(
+      data.availableIntegrations.filter((i) => i.integration_type === "sharepoint")
+    );
+  });
 </script>
 
 {@render children?.()}

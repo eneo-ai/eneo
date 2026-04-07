@@ -14,6 +14,8 @@
   import { getIntric } from "$lib/core/Intric";
   import { getAdminUserCtx } from "../ctx";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   const intric = getIntric();
 
@@ -85,7 +87,7 @@
 
   async function updateUser() {
     if (!user.username) {
-      alert(m.cant_edit_user_without_username());
+      toast.warning(m.cant_edit_user_without_username());
       return;
     }
     const update = {
@@ -105,7 +107,7 @@
       userPassword = "";
       showDialog.set(false);
     } catch (e) {
-      alert(e);
+      toastError(e);
     }
   }
 
@@ -126,7 +128,7 @@
       invalidate("admin:users:load");
       showDialog.set(false);
     } catch (e) {
-      alert(e);
+      toastError(e);
     }
   }
 </script>

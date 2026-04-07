@@ -6,7 +6,6 @@
 
 <script lang="ts">
   import {
-    IntricError,
     type CompletionModel,
     type EmbeddingModel,
     type SecurityClassification,
@@ -19,6 +18,7 @@
   import { Button } from "@intric/ui";
   import { IconChevronRight } from "@intric/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
 
   type Props =
     | {
@@ -65,7 +65,7 @@
       // @ts-expect-error doesnt understand [type]
       await intric.models.update({ [type]: model, update: { security_classification } });
     } catch (error) {
-      alert(error instanceof IntricError ? error.getReadableMessage() : String(error));
+      toastError(error);
     }
   }
 
@@ -123,7 +123,7 @@
                         model.security_classification = next;
                         classifiedCount = countClassifiedModels();
                       } catch (error) {
-                        alert(error);
+                        toastError(error);
                       }
                     }}
                   ></SelectSecurityClassification>

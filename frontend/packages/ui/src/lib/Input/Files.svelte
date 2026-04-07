@@ -179,10 +179,11 @@
       <div class="text-secondary pt-2 text-sm">
         Click <button
           on:click={() => {
-            alert(
-              "Currently we support the following MIME types for uploading:\n" +
+            dispatch("showsupportedtypes", {
+              message:
+                "Currently we support the following MIME types for uploading:\n" +
                 acceptedMimeTypes.join("\n")
-            );
+            });
           }}
           class="hover:bg-hover-default pointer-events-auto underline">here</button
         > to see a list of supported filetypes.

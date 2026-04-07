@@ -403,12 +403,6 @@ async def test_get_api_credentials_masked_multiple_providers(db_container, test_
                 "deployment_name": "gpt-4",
             },
         )
-        await tenant_repo.update_api_credential(
-            tenant_id=test_tenant.id,
-            provider="berget",
-            credential={"api_key": "test"},  # Short (4 chars)
-        )
-
         # Get masked credentials
         masked = await tenant_repo.get_api_credentials_masked(test_tenant.id)
 
@@ -416,7 +410,6 @@ async def test_get_api_credentials_masked_multiple_providers(db_container, test_
         assert masked["openai"] == "sk-...3456"  # sk- prefix + last 4 of long key
         assert masked["anthropic"] == "***"  # Short key completely masked
         assert masked["azure"] == "...7890"  # No sk- prefix for azure key
-        assert masked["berget"] == "***"  # 4-char key completely masked
 
 
 @pytest.mark.asyncio

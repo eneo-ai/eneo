@@ -6,6 +6,7 @@
   import { Button, Dialog, Dropdown } from "@intric/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   type Props = {
     integration: UserIntegration;
@@ -19,7 +20,7 @@
   async function disconnect() {
     const { id } = integration;
     if (!id) {
-      alert(m.integration_not_setup_correctly());
+      toast.warning(m.integration_not_setup_correctly());
       return;
     }
     await intric.integrations.user.disconnect({ id });

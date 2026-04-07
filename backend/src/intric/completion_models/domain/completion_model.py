@@ -1,12 +1,6 @@
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional
 
 from intric.ai_models.ai_model import AIModel
-from intric.ai_models.model_enums import (
-    ModelFamily,
-    ModelHostingLocation,
-    ModelOrg,
-    ModelStability,
-)
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -28,12 +22,13 @@ class CompletionModel(AIModel):
         updated_at: "datetime",
         nickname: str,
         name: str,
-        token_limit: int,
+        max_input_tokens: int,
+        max_output_tokens: int,
         vision: bool,
-        family: Union[ModelFamily, str],
-        hosting: ModelHostingLocation,
-        org: Optional[ModelOrg],
-        stability: ModelStability,
+        family: Optional[str],
+        hosting: Optional[str],
+        org: Optional[str],
+        stability: Optional[str],
         open_source: bool,
         description: Optional[str],
         nr_billion_parameters: Optional[int],
@@ -77,13 +72,19 @@ class CompletionModel(AIModel):
         self.reasoning = reasoning
         self.vision = vision
         self.supports_tool_calling = supports_tool_calling
-        self.token_limit = token_limit
+        self.max_input_tokens = max_input_tokens
+        self.max_output_tokens = max_output_tokens
         self.deployment_name = deployment_name
         self.nr_billion_parameters = nr_billion_parameters
         self.tenant_id = tenant_id
         self.provider_id = provider_id
         self.provider_name = provider_name
         self.provider_type = provider_type
+
+    @property
+    def token_limit(self) -> int:
+        """Backward-compat alias: returns max_input_tokens."""
+        return self.max_input_tokens
 
     def get_credential_provider_name(self) -> str:
         """Get the credential provider name for this model."""
@@ -110,7 +111,8 @@ class CompletionModel(AIModel):
             updated_at=completion_model_db.updated_at,
             nickname=completion_model_db.nickname,
             name=completion_model_db.name,
-            token_limit=completion_model_db.token_limit,
+            max_input_tokens=completion_model_db.max_input_tokens,
+            max_output_tokens=completion_model_db.max_output_tokens,
             vision=completion_model_db.vision,
             family=completion_model_db.family,
             hosting=completion_model_db.hosting,

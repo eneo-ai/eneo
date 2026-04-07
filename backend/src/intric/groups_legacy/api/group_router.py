@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, UploadFile
+from fastapi.responses import JSONResponse
 
 from intric.ai_models.embedding_models.datastore.datastore_models import (
     SemanticSearchRequest,
@@ -32,7 +33,6 @@ from intric.server.models.api import InfoBlobUpsertRequest
 from intric.server.protocol import responses
 from intric.spaces.api.space_models import TransferRequest
 from intric.users.user import UserInDB
-from fastapi.responses import JSONResponse
 
 router = APIRouter()
 
@@ -303,6 +303,7 @@ async def get_info_blobs(
     "/{id}/info-blobs/upload/",
     response_model=JobPublic,
     status_code=202,
+    responses=responses.get_responses([413, 415]),
 )
 async def upload_file(
     id: UUID,

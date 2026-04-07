@@ -70,6 +70,7 @@ class GroupChatAssembler:
             allowed_attachments=empty_allowed_attachments,  # Hard-coded empty restrictions
             type=group_chat.type,
             metadata_json=group_chat.metadata_json,
+            icon_id=group_chat.icon_id,
         )
 
     @classmethod

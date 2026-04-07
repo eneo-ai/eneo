@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 from intric.group_chat.domain.entities.group_chat import GroupChatAssistantData
 from intric.group_chat.presentation.models import GroupChatPublic, GroupChatUpdateSchema
 from intric.main.container.container import Container
+from intric.main.models import NOT_PROVIDED
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 
@@ -43,6 +44,12 @@ async def update_group_chat(
                 for assistant in group_chat_upd.tools.assistants
             ]
 
+    # Handle icon_id: check if it was provided in the request
+    request_dict = group_chat_upd.model_dump(exclude_unset=True)
+    icon_id = NOT_PROVIDED
+    if "icon_id" in request_dict:
+        icon_id = group_chat_upd.icon_id
+
     # Omitted fields not updated
     updated_group_chat = await service.update_group_chat(
         id=id,
@@ -52,6 +59,7 @@ async def update_group_chat(
         show_response_label=group_chat_upd.show_response_label,
         insight_enabled=group_chat_upd.insight_enabled,
         metadata_json=group_chat_upd.metadata_json,
+        icon_id=icon_id,
     )
     return assembler.from_domain_to_model(
         group_chat=updated_group_chat, permissions=updated_group_chat.permissions

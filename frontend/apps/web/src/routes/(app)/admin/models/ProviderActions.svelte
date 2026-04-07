@@ -7,17 +7,16 @@
   import { getIntric } from "$lib/core/Intric";
   import { invalidate } from "$app/navigation";
   import { writable } from "svelte/store";
-  import { Plus, Pencil, Trash2, AlertTriangle, Loader2, Box, Sparkles, AudioLines } from "lucide-svelte";
-  import ProviderDialog from "./ProviderDialog.svelte";
+  import { Pencil, Trash2, AlertTriangle, Loader2, Box, Sparkles, AudioLines } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
 
   export let provider: ModelProviderPublic;
   /** Pass this to open AddCompletionModelDialog with this provider pre-selected */
   export let onAddModel: ((providerId: string) => void) | undefined = undefined;
+  export let onEditProvider: ((provider: ModelProviderPublic) => void) | undefined = undefined;
 
   const intric = getIntric();
 
-  const showEditDialog = writable(false);
   const showDeleteConfirm = writable(false);
   let isDeleting = false;
   let deleteError: string | null = null;
@@ -49,34 +48,20 @@
     return model.name;
   }
 
-  function getModelTypeLabel(model: any): string {
-    if ("token_limit" in model || "vision" in model || "reasoning" in model) {
-      return m.completion_model();
-    }
-    if ("family" in model) {
-      return m.embedding_model();
-    }
-    return m.transcription_model();
-  }
-
-  function getModelTypeIcon(model: any): typeof Sparkles {
-    if ("token_limit" in model || "vision" in model || "reasoning" in model) {
-      return Sparkles;
-    }
-    if ("family" in model) {
-      return Box;
-    }
-    return AudioLines;
-  }
-
-  function getModelTypeRaw(model: any): "completion" | "embedding" | "transcription" {
-    if ("token_limit" in model || "vision" in model || "reasoning" in model) {
-      return "completion";
-    }
-    if ("family" in model) {
-      return "embedding";
-    }
-    return "transcription";
+  function tagModels(
+    models: any[],
+    type: "completion" | "embedding" | "transcription",
+    label: string,
+    icon: typeof Sparkles
+  ) {
+    return models
+      .filter((model) => model.provider_id === provider.id)
+      .map((model) => ({
+        name: getModelName(model),
+        type: label,
+        typeRaw: type,
+        icon
+      }));
   }
 
   async function loadProviderModels() {
@@ -86,21 +71,12 @@
 
     try {
       const models = await intric.models.list();
-      const allModels = [
-        ...models.completionModels,
-        ...models.embeddingModels,
-        ...models.transcriptionModels
-      ];
 
-      providerModels = allModels
-        .filter((model) => model.provider_id === provider.id)
-        .map((model) => ({
-          name: getModelName(model),
-          type: getModelTypeLabel(model),
-          typeRaw: getModelTypeRaw(model),
-          icon: getModelTypeIcon(model)
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name));
+      providerModels = [
+        ...tagModels(models.completionModels, "completion", m.completion_model(), Sparkles),
+        ...tagModels(models.embeddingModels, "embedding", m.embedding_model(), Box),
+        ...tagModels(models.transcriptionModels, "transcription", m.transcription_model(), AudioLines)
+      ].sort((a, b) => a.name.localeCompare(b.name));
     } catch (e: any) {
       modelsLoadError = e.message || m.failed_to_load_models();
     } finally {
@@ -120,7 +96,7 @@
       is={item}
       padding="icon-leading"
       on:click={() => {
-        $showEditDialog = true;
+        onEditProvider?.(provider);
       }}
     >
       <Pencil class="h-4 w-4" />
@@ -141,9 +117,6 @@
     </Button>
   </Dropdown.Menu>
 </Dropdown.Root>
-
-<!-- Edit Provider Dialog -->
-<ProviderDialog openController={showEditDialog} {provider} />
 
 <!-- Delete Confirmation Dialog -->
 <Dialog.Root openController={showDeleteConfirm}>

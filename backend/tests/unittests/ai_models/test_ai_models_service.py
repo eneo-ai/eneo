@@ -4,7 +4,6 @@ from uuid import uuid4
 import pytest
 
 from intric.ai_models.ai_models_service import AIModelsService
-from intric.ai_models.completion_models.completion_model import CompletionModelFamily
 from intric.main.config import get_settings
 from intric.roles.permissions import Permission
 from intric.roles.role import RoleInDB
@@ -144,7 +143,7 @@ async def test_azure_models_with_feature_flag_off(service: AIModelsService):
     models = await service.get_completion_models()
 
     assert len(models) == 2
-    assert CompletionModelFamily.AZURE not in [model.family for model in models]
+    assert "azure" not in [model.family for model in models]
 
 
 async def test_azure_models_with_feature_flag_on(service: AIModelsService):
@@ -158,4 +157,4 @@ async def test_azure_models_with_feature_flag_on(service: AIModelsService):
     models = await service.get_completion_models()
 
     assert len(models) == 3
-    assert CompletionModelFamily.AZURE in [model.family for model in models]
+    assert "azure" in [model.family for model in models]

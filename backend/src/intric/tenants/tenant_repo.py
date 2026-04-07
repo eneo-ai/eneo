@@ -511,6 +511,7 @@ class TenantRepository:
             "masked_secret": masked_secret,
             "issuer": config.get("issuer"),
             "allowed_domains": config.get("allowed_domains", []),
+            "additional_redirect_uris": config.get("additional_redirect_uris", []),
             "encrypted_at": config.get("encrypted_at"),
             "encryption_status": encryption_status,
         }
@@ -532,6 +533,32 @@ class TenantRepository:
         tenants = result.scalars().all()
 
         return [TenantInDB.model_validate(tenant) for tenant in tenants]
+
+    async def update_favorite_providers(
+        self,
+        tenant_id: UUID,
+        favorites: list[str],
+    ) -> TenantInDB:
+        """Replace the tenant's favorite providers list.
+
+        Args:
+            tenant_id: The UUID of the tenant
+            favorites: Ordered list of provider type strings
+
+        Returns:
+            Updated TenantInDB instance
+        """
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(
+                favorite_providers=cast(favorites, JSONB),
+                updated_at=datetime.now(timezone.utc),
+            )
+            .returning(Tenants)
+            .options(selectinload(Tenants.modules))
+        )
+        return await self.delegate.get_model_from_query(stmt)
 
     async def update_crawler_settings(
         self,

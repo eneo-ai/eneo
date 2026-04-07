@@ -5,11 +5,8 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, computed_field
 
-from intric.ai_models.model_enums import ModelFamily as CompletionModelFamily
-from intric.ai_models.model_enums import ModelHostingLocation, ModelStability
-from intric.ai_models.model_enums import ModelOrg as Orgs
 from intric.files.file_models import File
 from intric.logging.logging import LoggingDetails
 from intric.main.models import NOT_PROVIDED, InDB, ModelId, NotProvided, partial_model
@@ -24,6 +21,14 @@ if TYPE_CHECKING:
     from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 
 
+class TokenUsage(BaseModel):
+    """Actual token usage as reported by the LLM provider."""
+
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    reasoning_tokens: Optional[int] = None
+
+
 class ResponseType(str, Enum):
     TEXT = "text"
     INTRIC_EVENT = "intric_event"
@@ -31,6 +36,7 @@ class ResponseType(str, Enum):
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
     FILES = "image"
     FIRST_CHUNK = "first_chunk"
+    TOKEN_USAGE = "token_usage"
     ERROR = "error"
 
 
@@ -71,28 +77,35 @@ class Completion:
     stop: bool = False
     error: Optional[str] = None
     error_code: Optional[int] = None
+    usage: Optional[TokenUsage] = None
 
 
 class CompletionModelBase(BaseModel):
     name: str
     nickname: str
-    # Allow both enum and string for tenant models with dynamic values
-    family: Union[CompletionModelFamily, str]
-    token_limit: int
+    family: Optional[str] = None
+    max_input_tokens: int
+    max_output_tokens: int
     is_deprecated: bool
     nr_billion_parameters: Optional[int] = None
     hf_link: Optional[str] = None
-    stability: Union[ModelStability, str]
-    hosting: Union[ModelHostingLocation, str]
+    stability: Optional[str] = None
+    hosting: Optional[str] = None
     open_source: Optional[bool] = None
     description: Optional[str] = None
     deployment_name: Optional[str] = None
-    org: Optional[Union[Orgs, str]] = None
+    org: Optional[str] = None
     vision: bool
     reasoning: bool
     supports_tool_calling: bool = False
     base_url: Optional[str] = None
     litellm_model_name: Optional[str] = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def token_limit(self) -> int:
+        """Backward-compat: exposed in JSON responses for frontend."""
+        return self.max_input_tokens
 
 
 class CompletionModelCreate(CompletionModelBase):
@@ -138,7 +151,8 @@ class CompletionModelPublic(CompletionModel):
             name=completion_model.name,
             nickname=completion_model.nickname,
             family=completion_model.family,
-            token_limit=completion_model.token_limit,
+            max_input_tokens=completion_model.max_input_tokens,
+            max_output_tokens=completion_model.max_output_tokens,
             is_deprecated=completion_model.is_deprecated,
             nr_billion_parameters=completion_model.nr_billion_parameters,
             hf_link=completion_model.hf_link,
@@ -175,10 +189,13 @@ class CompletionModelSecurityStatus(CompletionModelPublic):
 
 
 class CompletionModelResponse(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     completion: Union[str, Any]  # Pydantic doesn't support AsyncIterable
     model: CompletionModel
     extended_logging: Optional[LoggingDetails] = None
     total_token_count: int
+    usage: Optional[TokenUsage] = None
 
 
 class Message(BaseModel):

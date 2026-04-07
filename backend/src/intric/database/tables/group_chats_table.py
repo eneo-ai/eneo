@@ -2,6 +2,7 @@
 #
 # Licensed under the MIT License.
 
+from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import Boolean, ForeignKey
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.base_class import BaseCrossReference, BasePublic
+from intric.database.tables.icons_table import Icons
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.users_table import Users
 
@@ -30,6 +32,9 @@ class GroupChatsTable(BasePublic):
     # factories => issues with model validation.
     # This was quickest, simplest solution.
     type: Mapped[str] = mapped_column(default="group-chat")
+    icon_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Icons.id, ondelete="SET NULL"), nullable=True
+    )
 
     space_id: Mapped[UUID] = mapped_column(ForeignKey(Spaces.id, ondelete="CASCADE"))
     user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="CASCADE"))

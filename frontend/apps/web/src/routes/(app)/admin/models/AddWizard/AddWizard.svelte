@@ -9,20 +9,61 @@
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { Check, Loader2, AlertTriangle } from "lucide-svelte";
   import StepProvider from "./StepProvider.svelte";
   import StepCredentials from "./StepCredentials.svelte";
   import StepModels from "./StepModels.svelte";
   import type { ModelProviderPublic } from "@intric/intric-js";
+  import { onMount } from "svelte";
+  import {
+    getModelProviderCapabilities,
+    type ModelProviderCapabilities
+  } from "../modelProviderCapabilities";
 
   export let openController: Writable<boolean>;
   export let providers: ModelProviderPublic[] = [];
+  export let favoriteProviders: string[] = [];
   /** Pre-selected provider ID when opening wizard from a provider's "Add Model" button */
   export let preSelectedProviderId: string | null = null;
   /** Model type to add (for when starting from "Add Model" on a specific table) */
   export let modelType: "completion" | "embedding" | "transcription" = "completion";
 
   const intric = getIntric();
+
+  // --- Capabilities (loaded once, shared across steps) ---
+
+  let capabilities: ModelProviderCapabilities | null = null;
+  let capabilitiesLoading = false;
+
+  async function loadCapabilities() {
+    if (capabilities || capabilitiesLoading) return;
+    capabilitiesLoading = true;
+    try {
+      capabilities = await getModelProviderCapabilities(intric);
+    } catch {
+      // Silently fail — steps will fall back gracefully
+    } finally {
+      capabilitiesLoading = false;
+    }
+  }
+
+  onMount(() => {
+    const unsubscribe = openController.subscribe((open) => {
+      if (open) {
+        void loadCapabilities();
+      }
+    });
+
+    return unsubscribe;
+  });
+
+  // Derive provider fields for StepCredentials based on selected provider type
+  $: providerFields = (() => {
+    if (!capabilities) return null;
+    const providerCap = capabilities.providers[$wizardData.selectedProviderType];
+    return providerCap?.fields ?? capabilities.default_fields;
+  })();
 
   // Wizard state
   type WizardStep = 1 | 2 | 3;
@@ -38,18 +79,12 @@
     isCreatingNewProvider: boolean;
     selectedProviderType: string;
 
-    // Step 2: New provider credentials
-    providerName: string;
-    apiKey: string;
-    endpoint: string;
-    apiVersion: string;
-    deploymentName: string;
-
     // Step 3: Model(s) to add
     models: Array<{
       name: string;
       displayName: string;
-      tokenLimit?: number;
+      maxInputTokens?: number;
+      maxOutputTokens?: number;
       vision?: boolean;
       reasoning?: boolean;
       supportsToolCalling?: boolean;
@@ -64,11 +99,6 @@
     selectedProviderId: preSelectedProviderId,
     isCreatingNewProvider: false,
     selectedProviderType: "openai",
-    providerName: "",
-    apiKey: "",
-    endpoint: "",
-    apiVersion: "",
-    deploymentName: "",
     models: []
   });
 
@@ -226,7 +256,7 @@
       return;
     } catch (e: any) {
       error = e.message || m.failed_to_create_model();
-      toast.error(m.failed_to_create_model());
+      toastError(e, m.failed_to_create_model());
     } finally {
       isSubmitting = false;
       isValidating = false;
@@ -246,7 +276,7 @@
       await createModels(models, providerId);
     } catch (e: any) {
       error = e.message || m.failed_to_create_model();
-      toast.error(m.failed_to_create_model());
+      toastError(e, m.failed_to_create_model());
     } finally {
       isSubmitting = false;
     }
@@ -266,7 +296,8 @@
             name: model.name,
             display_name: model.displayName,
             family: model.family ?? "openai",
-            token_limit: model.tokenLimit ?? 128000,
+            max_input_tokens: model.maxInputTokens,
+            max_output_tokens: model.maxOutputTokens,
             vision: model.vision ?? false,
             reasoning: model.reasoning ?? false,
             supports_tool_calling: model.supportsToolCalling ?? false,
@@ -314,11 +345,6 @@
       selectedProviderId: null,
       isCreatingNewProvider: false,
       selectedProviderType: "openai",
-      providerName: "",
-      apiKey: "",
-      endpoint: "",
-      apiVersion: "",
-      deploymentName: "",
       models: []
     };
     error = null;
@@ -424,17 +450,15 @@
             {#if $currentStep === 1}
               <StepProvider
                 {providers}
+                {favoriteProviders}
+                {capabilities}
                 selectedProviderId={$wizardData.selectedProviderId}
                 on:select={handleProviderSelected}
               />
             {:else if $currentStep === 2}
               <StepCredentials
                 providerType={$wizardData.selectedProviderType}
-                bind:providerName={$wizardData.providerName}
-                bind:apiKey={$wizardData.apiKey}
-                bind:endpoint={$wizardData.endpoint}
-                bind:apiVersion={$wizardData.apiVersion}
-                bind:deploymentName={$wizardData.deploymentName}
+                {providerFields}
                 on:complete={handleCredentialsCompleted}
                 on:back={previousStep}
               />
@@ -442,6 +466,7 @@
               <StepModels
                 bind:this={stepModelsRef}
                 {modelType}
+                {capabilities}
                 providerType={$wizardData.selectedProviderType}
                 providerId={$wizardData.selectedProviderId}
                 bind:models={$wizardData.models}

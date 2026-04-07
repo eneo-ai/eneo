@@ -6,6 +6,7 @@
   import { type Website } from "@intric/intric-js";
   import { Dialog, Button, Input, Select, Tooltip } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
   import { tick } from "svelte";
   import { writable, type Writable } from "svelte/store";
 
@@ -199,7 +200,7 @@
       refreshCurrentSpace();
       $showDialog = false;
     } catch (e) {
-      alert(e);
+      toastError(e);
       console.error(e);
     }
     isProcessing = false;
@@ -233,7 +234,7 @@
       refreshCurrentSpace();
       $showDialog = false;
     } catch (e) {
-      alert(e);
+      toastError(e);
       console.error(e);
     }
     isProcessing = false;

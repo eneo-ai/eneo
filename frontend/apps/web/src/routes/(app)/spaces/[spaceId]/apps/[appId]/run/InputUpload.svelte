@@ -1,7 +1,9 @@
 <script lang="ts">
+  import type { AttachmentValidationError } from "$lib/features/attachments/AttachmentManager";
   import { IconUpload } from "@intric/icons/upload";
   import type { App } from "@intric/intric-js";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
+  import FileSizeValidationPanel from "$lib/features/attachments/components/FileSizeValidationPanel.svelte";
   import { getExplicitAttachmentRules } from "$lib/features/attachments/getAttachmentRules";
   import AttachmentItem from "$lib/features/attachments/components/AttachmentItem.svelte";
   import { m } from "$lib/paraglide/messages";
@@ -14,21 +16,19 @@
   let isDragging = false;
 
   const {
-    queueValidUploads,
+    queueValidUploadsDetailed,
     state: { attachments }
   } = getAttachmentManager();
 
   // Use provided description or fall back to translated default
   $: displayDescription = description ?? m.upload_files_description();
+  let validationErrors: AttachmentValidationError[] = [];
 
   function uploadFiles() {
     if (!fileInput.files) return;
 
-    const errors = queueValidUploads([...fileInput.files], attachmentRules);
-
-    if (errors) {
-      alert(errors.join("\n"));
-    }
+    const errors = queueValidUploadsDetailed([...fileInput.files], attachmentRules);
+    validationErrors = errors ?? [];
 
     fileInput.value = "";
   }
@@ -149,6 +149,8 @@
     class="pointer-events-none absolute h-11 w-11 rounded-lg file:border-none file:bg-transparent file:text-transparent"
   />
 {/if}
+
+<FileSizeValidationPanel errors={validationErrors} />
 
 <style lang="postcss">
   @reference "@intric/ui/styles";

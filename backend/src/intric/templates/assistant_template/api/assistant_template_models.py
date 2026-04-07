@@ -66,6 +66,7 @@ class AssistantTemplateCreate(BaseModel):
     prompt: str
     organization: Optional[str] = None
     completion_model_kwargs: Optional[dict] = {}
+    completion_model_id: Optional[UUID] = None
     wizard: AssistantTemplateWizard
     icon_name: Optional[str] = None
 
@@ -126,6 +127,7 @@ class AssistantTemplateAdminCreate(BaseModel):
     category: str = Field(..., min_length=1, max_length=100)
     prompt: Optional[str] = None
     completion_model_kwargs: dict = Field(default_factory=dict)
+    completion_model_id: Optional[UUID] = None
     wizard: Optional[AssistantTemplateWizard] = None
     icon_name: Optional[str] = Field(None, max_length=100)
 

@@ -1,36 +1,24 @@
-from enum import Enum
 from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel
 
-from intric.ai_models.completion_models.completion_model import (
-    ModelHostingLocation,
-    ModelStability,
-    Orgs,
-)
 from intric.main.models import InDB, partial_model
-
-
-class EmbeddingModelFamily(str, Enum):
-    OPEN_AI = "openai"
-    MINI_LM = "mini_lm"
-    E5 = "e5"
 
 
 class EmbeddingModelBase(BaseModel):
     name: str
-    family: EmbeddingModelFamily
+    family: Optional[str] = None
     is_deprecated: bool
     open_source: bool
     dimensions: Optional[int] = None
     max_input: Optional[int] = None
     max_batch_size: Optional[int] = None
     hf_link: Optional[str] = None
-    stability: ModelStability
-    hosting: ModelHostingLocation
+    stability: Optional[str] = None
+    hosting: Optional[str] = None
     description: Optional[str] = None
-    org: Optional[Orgs] = None
+    org: Optional[str] = None
     litellm_model_name: Optional[str] = None
 
     @classmethod

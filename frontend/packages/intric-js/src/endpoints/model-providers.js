@@ -112,8 +112,38 @@ export function initModelProviders(client) {
     },
 
     /**
+     * Get the tenant's favorite provider types.
+     * @returns {Promise<{providers: string[]}>}
+     * @throws {IntricError}
+     * */
+    getFavorites: async () => {
+      const res = await client.fetch("/api/v1/admin/model-providers/favorites/", {
+        method: "get"
+      });
+
+      return res;
+    },
+
+    /**
+     * Set the tenant's favorite provider types.
+     * @param {string[]} providers Ordered list of provider type strings
+     * @returns {Promise<{providers: string[]}>}
+     * @throws {IntricError}
+     * */
+    setFavorites: async (providers) => {
+      const res = await client.fetch("/api/v1/admin/model-providers/favorites/", {
+        method: "put",
+        requestBody: {
+          "application/json": { providers }
+        }
+      });
+
+      return res;
+    },
+
+    /**
      * Get supported model types and top models per provider type from LiteLLM.
-     * @returns {Promise<Record<string, {modes: string[], models: Record<string, string[]>}>>}
+     * @returns {Promise<{providers: Record<string, {modes: string[], models: Record<string, object[]>, fields: object[]}>, default_fields: object[]}>}
      * @throws {IntricError}
      * */
     getCapabilities: async () => {
@@ -138,6 +168,21 @@ export function initModelProviders(client) {
         requestBody: {
           "application/json": { model_name, model_type }
         }
+      });
+
+      return res;
+    },
+
+    /**
+     * Look up recommended default values for a model from LiteLLM.
+     * @param {string} modelName The model identifier to look up
+     * @returns {Promise<{found: boolean, max_input_tokens?: number, max_output_tokens?: number, supports_vision?: boolean, supports_function_calling?: boolean, supports_reasoning?: boolean}>}
+     * @throws {IntricError}
+     * */
+    getModelDefaults: async (modelName) => {
+      const res = await client.fetch("/api/v1/admin/model-providers/model-defaults/", {
+        method: "get",
+        params: { query: { model_name: modelName } }
       });
 
       return res;

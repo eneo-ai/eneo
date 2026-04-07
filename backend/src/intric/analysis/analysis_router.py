@@ -302,6 +302,8 @@ async def ask_question_about_questions(
 
         async def event_stream():
             async for chunk in ai_response.completion:
+                if chunk.stop:
+                    continue
                 yield AnalysisAnswer(answer=chunk.text).model_dump_json()
 
         return EventSourceResponse(event_stream())
@@ -418,6 +420,8 @@ async def ask_unified_questions_about_questions(
 
         async def event_stream():
             async for chunk in ai_response.completion:
+                if chunk.stop:
+                    continue
                 yield AnalysisAnswer(answer=chunk.text).model_dump_json()
 
         return EventSourceResponse(event_stream())

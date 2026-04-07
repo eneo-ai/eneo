@@ -6,10 +6,11 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { IconCheck } from "@intric/icons/check";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { IntricError, type Intric, type SecurityClassification } from "@intric/intric-js";
+  import { type Intric, type SecurityClassification } from "@intric/intric-js";
   import { Button, Dialog } from "@intric/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
 
   type Props = { classifications: SecurityClassification[]; onUpdateDone: () => void };
 
@@ -44,6 +45,11 @@
         })
       );
   });
+  let affectedMcpServers = $derived.by(() => {
+    if (!result) return [];
+    return (result.mcp_servers ?? []).map((s: any) => ({ name: s.name }));
+  });
+  let hasAnyImpact = $derived(affectedModels.length > 0 || affectedMcpServers.length > 0);
 
   const check = createAsyncState(async () => {
     if (!classification) {
@@ -63,7 +69,7 @@
       onUpdateDone?.();
       $showDryRunDialog = false;
     } catch (error) {
-      alert(error instanceof IntricError ? error.getReadableMessage() : String(error));
+      toastError(error);
     }
   });
 </script>
@@ -121,9 +127,10 @@
             <IconLoadingSpinner class="animate-spin"></IconLoadingSpinner>
             {m.loading_results()}
           </div>
-        {:else if affectedModels.length > 0}
+        {:else if hasAnyImpact}
           <div class="flex flex-col gap-2">
             {@render access(m.models(), affectedModels)}
+            {@render access(m.mcp_servers(), affectedMcpServers)}
             {@render access(m.assistants(), result?.assistants)}
             {@render access(m.group_chats(), result?.group_chats)}
             {@render access(m.apps(), result?.apps)}

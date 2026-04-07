@@ -3,6 +3,7 @@
   import SwedishFlag from "./SwedishFlag.svelte";
   import { IconChevronUpDown } from "@intric/icons/chevron-up-down";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   const availableLanguages = {
     sv: {
@@ -15,7 +16,7 @@
   let selectedLanguage: Language = "sv";
   function setLanguage(lang: string) {
     if (!Object.hasOwn(availableLanguages, lang)) {
-      alert(`Language ${lang} is not available.`);
+      toast.warning(`Language ${lang} is not available.`);
     }
     selectedLanguage = lang as Language;
   }

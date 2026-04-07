@@ -18,7 +18,7 @@
   import ProviderStatusBadge from "./components/ProviderStatusBadge.svelte";
   import { getChartColour } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { writable, type Writable } from "svelte/store";
+  import { writable } from "svelte/store";
   import { Button } from "@intric/ui";
   import { Plus } from "lucide-svelte";
   import { AddWizard } from "./AddWizard/index.js";
@@ -27,8 +27,7 @@
 
   export let transcriptionModels: TranscriptionModel[];
   export let providers: ModelProviderPublic[] = [];
-  export let addModelDialogOpen: Writable<boolean> | undefined = undefined;
-  export let preSelectedProviderId: Writable<string | null> | undefined = undefined;
+  export let favoriteProviders: string[] = [];
 
   const addWizardOpen = writable(false);
   // Pre-selected provider for "Add Model" from provider dropdown
@@ -49,7 +48,7 @@
       accessor: (model) => model,
       header: m.name(),
       cell: (item) => {
-        return createRender(ModelNameCell, { model: item.value });
+        return createRender(ModelNameCell, { model: item.value, type: "transcriptionModel" });
       },
       plugins: {
         sort: {
@@ -242,6 +241,7 @@
               <ProviderActions
                 {provider}
                 onAddModel={handleAddModelToProvider}
+                onEditProvider={handleEditProvider}
               />
             {/if}
           </div>
@@ -275,6 +275,7 @@
 <AddWizard
   openController={addWizardOpen}
   {providers}
+  {favoriteProviders}
   modelType="transcription"
   preSelectedProviderId={wizardPreSelectedProviderId}
 />

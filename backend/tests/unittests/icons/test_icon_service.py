@@ -67,7 +67,7 @@ async def test_create_icon_rejects_invalid_mimetype(service: IconService):
 
 
 async def test_create_icon_rejects_oversized_file(service: IconService):
-    service.file_size_service.is_too_large.return_value = True
+    service.file_size_service.get_file_size.return_value = ICON_MAX_SIZE + 1
 
     upload_file = UploadFile(
         file=BytesIO(b"x" * (ICON_MAX_SIZE + 1)),

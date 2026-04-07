@@ -5,7 +5,11 @@ from uuid import UUID
 
 from intric.main.exceptions import (
     BadRequestException,
+    KnowledgeModelUnavailableException,
+    ModelNotAvailableException,
+    NoModelSelectedException,
     NotFoundException,
+    SecurityClassificationMismatchException,
     UnauthorizedException,
 )
 from intric.main.models import NOT_PROVIDED, NotProvided
@@ -298,8 +302,8 @@ class Space:
 
     @mcp_servers.setter
     def mcp_servers(self, mcp_servers: list["MCPServer"]):
-        # For MCP servers, we may want to add similar validation
-        # For now, just set them directly
+        for server in mcp_servers:
+            self.validate_mcp_server_security_compatibility(server)
         self._mcp_servers = mcp_servers
 
     def update(
@@ -356,6 +360,13 @@ class Space:
                     for model in self.transcription_models
                     if not self.security_classification.is_greater_than(
                         model.security_classification
+                    )
+                ]
+                self._mcp_servers = [
+                    server
+                    for server in self._mcp_servers
+                    if not self.security_classification.is_greater_than(
+                        server.security_classification
                     )
                 ]
 
@@ -522,22 +533,34 @@ class Space:
 
         return True
 
-    def can_ask_assistant(self, assistant: "Assistant") -> bool:
+    def can_ask_assistant(self, assistant: "Assistant"):
+        if assistant.completion_model is None:
+            raise NoModelSelectedException(
+                "No AI model is configured for this assistant. "
+                "Please select a model in the assistant settings."
+            )
         if not self.is_completion_model_available(assistant.completion_model.id):
-            return False
+            raise ModelNotAvailableException(
+                "The selected AI model is not available in this space. "
+                "Please choose a different model or contact your administrator."
+            )
         if not self.can_use_knowledge(
             assistant.collections
             + assistant.websites
             + assistant.integration_knowledge_list
         ):
-            return False
+            raise KnowledgeModelUnavailableException(
+                "This assistant uses knowledge sources with unavailable embedding models. "
+                "Please review the assistant's knowledge settings."
+            )
         if self.security_classification is not None:
             if self.security_classification.is_greater_than(
                 assistant.completion_model.security_classification
             ):
-                return False
-
-        return True
+                raise SecurityClassificationMismatchException(
+                    "The assistant's model does not meet this space's "
+                    "security classification requirements."
+                )
 
     def can_run_app(self, app: "App") -> bool:
         if not self.is_completion_model_available(app.completion_model.id):
@@ -621,6 +644,16 @@ class Space:
         if not self.security_classification:
             return
         if self.security_classification.is_greater_than(model.security_classification):
+            raise BadRequestException(SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE)
+
+    def validate_mcp_server_security_compatibility(
+        self, mcp_server: "MCPServer"
+    ) -> None:
+        if not self.security_classification:
+            return
+        if self.security_classification.is_greater_than(
+            mcp_server.security_classification
+        ):
             raise BadRequestException(SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE)
 
     def add_completion_model(self, model: "CompletionModel"):

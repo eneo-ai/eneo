@@ -23,7 +23,8 @@ async def test_create_completion_model_success(client, super_admin_token, db_con
         "name": "gpt-4-test",
         "nickname": "GPT-4 Test",
         "family": "openai",
-        "token_limit": 8000,
+        "max_input_tokens": 8000,
+        "max_output_tokens": 4096,
         "is_deprecated": False,
         "stability": "stable",
         "hosting": "usa",
@@ -49,7 +50,7 @@ async def test_create_completion_model_success(client, super_admin_token, db_con
     assert data["name"] == "gpt-4-test"
     assert data["nickname"] == "GPT-4 Test"
     assert data["family"] == "openai"
-    assert data["token_limit"] == 8000
+    assert data["max_input_tokens"] == 8000
     assert data["vision"] is True
     assert data["reasoning"] is False
     assert "id" in data
@@ -73,7 +74,7 @@ async def test_create_completion_model_success(client, super_admin_token, db_con
         assert db_model is not None
         assert db_model.name == "gpt-4-test"
         assert db_model.nickname == "GPT-4 Test"
-        assert db_model.token_limit == 8000
+        assert db_model.max_input_tokens == 8000
 
 
 @pytest.mark.integration
@@ -84,7 +85,8 @@ async def test_create_completion_model_without_auth(client):
         "name": "test-model",
         "nickname": "Test Model",
         "family": "openai",
-        "token_limit": 8000,
+        "max_input_tokens": 8000,
+        "max_output_tokens": 4096,
         "is_deprecated": False,
         "stability": "stable",
         "hosting": "usa",
@@ -108,7 +110,8 @@ async def test_create_completion_model_with_invalid_auth(client):
         "name": "test-model",
         "nickname": "Test Model",
         "family": "openai",
-        "token_limit": 8000,
+        "max_input_tokens": 8000,
+        "max_output_tokens": 4096,
         "is_deprecated": False,
         "stability": "stable",
         "hosting": "usa",
@@ -134,7 +137,8 @@ async def test_update_completion_model_metadata(client, super_admin_token, db_co
         "name": "gpt-3.5-turbo",
         "nickname": "GPT-3.5 Turbo",
         "family": "openai",
-        "token_limit": 4000,
+        "max_input_tokens": 4000,
+        "max_output_tokens": 4096,
         "is_deprecated": False,
         "stability": "stable",
         "hosting": "usa",
@@ -155,7 +159,7 @@ async def test_update_completion_model_metadata(client, super_admin_token, db_co
         "nickname": "GPT-3.5 Turbo Updated",
         "description": "Updated description",
         "is_deprecated": True,
-        "token_limit": 16000,
+        "max_input_tokens": 16000,
     }
 
     response = await client.put(
@@ -171,7 +175,7 @@ async def test_update_completion_model_metadata(client, super_admin_token, db_co
     assert data["nickname"] == "GPT-3.5 Turbo Updated"
     assert data["description"] == "Updated description"
     assert data["is_deprecated"] is True
-    assert data["token_limit"] == 16000
+    assert data["max_input_tokens"] == 16000
 
     # Verify in database
     async with db_container() as container:
@@ -183,7 +187,7 @@ async def test_update_completion_model_metadata(client, super_admin_token, db_co
         assert db_model.nickname == "GPT-3.5 Turbo Updated"
         assert db_model.description == "Updated description"
         assert db_model.is_deprecated is True
-        assert db_model.token_limit == 16000
+        assert db_model.max_input_tokens == 16000
 
 
 @pytest.mark.integration
@@ -216,7 +220,8 @@ async def test_delete_completion_model(client, super_admin_token, db_container):
         "name": "model-to-delete",
         "nickname": "Model to Delete",
         "family": "openai",
-        "token_limit": 8000,
+        "max_input_tokens": 8000,
+        "max_output_tokens": 4096,
         "is_deprecated": False,
         "stability": "stable",
         "hosting": "usa",
@@ -275,7 +280,8 @@ async def test_create_completion_model_with_duplicate_name(client, super_admin_t
         "name": "duplicate-name-test",
         "nickname": "First Model",
         "family": "openai",
-        "token_limit": 8000,
+        "max_input_tokens": 8000,
+        "max_output_tokens": 4096,
         "is_deprecated": False,
         "stability": "stable",
         "hosting": "usa",
@@ -527,7 +533,7 @@ async def test_create_completion_model_missing_required_fields(client, super_adm
     """Test that creating a model with missing required fields fails."""
     incomplete_data = {
         "name": "incomplete-model",
-        # Missing many required fields like family, token_limit, etc.
+        # Missing many required fields like family, max_input_tokens, etc.
     }
 
     response = await client.post(
@@ -551,7 +557,8 @@ async def test_create_completion_model_accepts_custom_family(client, super_admin
         "name": "custom-family-model",
         "nickname": "Custom Family",
         "family": "custom_provider",  # Custom family string (now allowed)
-        "token_limit": 8000,
+        "max_input_tokens": 8000,
+        "max_output_tokens": 4096,
         "is_deprecated": False,
         "stability": "stable",
         "hosting": "usa",
@@ -600,7 +607,8 @@ async def test_partial_update_completion_model(client, super_admin_token):
         "name": "partial-update-test",
         "nickname": "Original Nickname",
         "family": "openai",
-        "token_limit": 8000,
+        "max_input_tokens": 8000,
+        "max_output_tokens": 4096,
         "is_deprecated": False,
         "stability": "stable",
         "hosting": "usa",
@@ -634,4 +642,4 @@ async def test_partial_update_completion_model(client, super_admin_token):
     # Verify only description changed, other fields unchanged
     assert data["description"] == "Updated description only"
     assert data["nickname"] == "Original Nickname"  # Unchanged
-    assert data["token_limit"] == 8000  # Unchanged
+    assert data["max_input_tokens"] == 8000  # Unchanged

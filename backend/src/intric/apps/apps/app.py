@@ -224,7 +224,7 @@ class App:
                     return False
 
             total_size = sum(file.size for file in files)
-            if total_size > 200 * 1024 * 1024:  # 200 MiB
+            if total_size > 200 * 1024 * 1024:  # 200 MB
                 return False
 
             for input_field in self.input_fields:

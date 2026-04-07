@@ -16,7 +16,8 @@ export const load = async (event) => {
   const promises = [
     intric.securityClassifications.list(),
     intric.models.list(),
-    intric.modelProviders.list()  // Always fetch providers
+    intric.modelProviders.list(),  // Always fetch providers
+    intric.modelProviders.getFavorites()
   ];
 
   // Add credentials fetch if feature is enabled
@@ -25,18 +26,19 @@ export const load = async (event) => {
   }
 
   const results = await Promise.all(promises);
-  let securityClassifications, models, providers, credentialsResponse;
+  let securityClassifications, models, providers, favoritesResponse, credentialsResponse;
 
   if (tenantCredentialsEnabled) {
-    [securityClassifications, models, providers, credentialsResponse] = results;
+    [securityClassifications, models, providers, favoritesResponse, credentialsResponse] = results;
   } else {
-    [securityClassifications, models, providers] = results;
+    [securityClassifications, models, providers, favoritesResponse] = results;
   }
 
   return {
     securityClassifications,
     models,
     providers: providers || [],
+    favoriteProviders: favoritesResponse?.providers || [],
     credentials: credentialsResponse?.credentials || undefined,
     tenantCredentialsEnabled
   };

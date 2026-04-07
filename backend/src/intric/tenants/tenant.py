@@ -6,6 +6,11 @@ from uuid import UUID
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from pydantic.networks import HttpUrl
 
+from intric.main.config import (
+    canonicalize_legacy_redirect_path,
+    validate_redirect_path,
+    validate_redirect_uri,
+)
 from intric.main.models import InDB
 from intric.modules.module import ModuleInDB
 
@@ -60,6 +65,18 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     api_credentials: dict[str, Any] = Field(default_factory=dict)
     federation_config: dict[str, Any] = Field(default_factory=dict)
     crawler_settings: dict[str, Any] = Field(default_factory=dict)
+    favorite_providers: list[str] = Field(default_factory=list)
+
+    @field_validator("favorite_providers")
+    @classmethod
+    def validate_favorite_providers(cls, v: list[str]) -> list[str]:
+        """Validate that favorite_providers is a list of strings."""
+        if not isinstance(v, list):
+            raise ValueError("favorite_providers must be a list")
+        for item in v:
+            if not isinstance(item, str):
+                raise ValueError("Each favorite provider must be a string")
+        return v
 
     @field_validator("slug")
     @classmethod
@@ -89,27 +106,11 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     def validate_api_credentials(cls, v: dict[str, Any]) -> dict[str, Any]:
         """Validate JSONB structure for API credentials.
 
-        Ensures provider keys are valid and credentials have required fields.
-        Azure provider requires additional fields beyond api_key.
+        Ensures credentials have required fields. Provider keys are not
+        restricted to a fixed set since providers are managed dynamically
+        via the LiteLLM provider system.
         """
-        valid_providers = {
-            "openai",
-            "azure",
-            "anthropic",
-            "berget",
-            "gdm",
-            "mistral",
-            "ovhcloud",
-            "gemini",
-            "cohere",
-        }
-
         for provider, cred in v.items():
-            if provider not in valid_providers:
-                raise ValueError(
-                    f"Invalid provider: {provider}. Must be one of: {valid_providers}"
-                )
-
             if not isinstance(cred, dict):
                 raise ValueError(f"Provider {provider} credentials must be a dict")
 
@@ -127,16 +128,30 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         if not v:
             return {}
 
-        # Required fields for federation
         required = {
             "provider",
             "client_id",
             "client_secret",
             "discovery_endpoint",
         }
-        missing = required - set(v.keys())
-        if missing:
-            raise ValueError(f"Federation config missing required fields: {missing}")
+        redirect_only_fields = {
+            "canonical_public_origin",
+            "redirect_path",
+            "additional_redirect_uris",
+        }
+
+        has_full_federation_config = any(field in v for field in required)
+        if has_full_federation_config:
+            missing = required - set(v.keys())
+            if missing:
+                raise ValueError(f"Federation config missing required fields: {missing}")
+        else:
+            unexpected_fields = set(v.keys()) - redirect_only_fields
+            if unexpected_fields:
+                raise ValueError(
+                    "Federation config without provider credentials may only contain "
+                    f"{redirect_only_fields}. Unexpected fields: {unexpected_fields}"
+                )
 
         # Provider is just a label - any string is valid (no validation needed)
         # This allows any OIDC-compliant provider (Entra ID, Auth0, Okta, Keycloak, etc.)
@@ -158,8 +173,37 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             redirect_path = v["redirect_path"]
             if not isinstance(redirect_path, str):
                 raise ValueError("redirect_path must be a string")
-            if not redirect_path.startswith("/"):
-                raise ValueError("redirect_path must start with /")
+            try:
+                v["redirect_path"] = validate_redirect_path(
+                    canonicalize_legacy_redirect_path(redirect_path)
+                )
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid redirect_path in federation_config: {e}"
+                )
+
+        if "additional_redirect_uris" in v:
+
+            additional_redirect_uris = v["additional_redirect_uris"]
+            if not isinstance(additional_redirect_uris, list):
+                raise ValueError("additional_redirect_uris must be a list")
+
+            normalized_redirect_uris: list[str] = []
+            for redirect_uri in additional_redirect_uris:
+                if not isinstance(redirect_uri, str):
+                    raise ValueError(
+                        "additional_redirect_uris must contain only strings"
+                    )
+                try:
+                    normalized_redirect_uris.append(
+                        validate_redirect_uri(redirect_uri)
+                    )
+                except ValueError as e:
+                    raise ValueError(
+                        f"Invalid redirect URI in additional_redirect_uris: {e}"
+                    )
+
+            v["additional_redirect_uris"] = normalized_redirect_uris
 
         # Validate allowed_domains (optional but recommended)
         if "allowed_domains" in v:

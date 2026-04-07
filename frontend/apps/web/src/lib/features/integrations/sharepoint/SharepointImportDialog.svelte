@@ -8,11 +8,13 @@
   import { IconSearch } from "@intric/icons/search";
   import { IconUploadCloud } from "@intric/icons/upload-cloud";
   import { IconWeb } from "@intric/icons/web";
-  import { IntricError, type IntegrationKnowledgePreview } from "@intric/intric-js";
+  import { type IntegrationKnowledgePreview } from "@intric/intric-js";
   import { Button, Dialog } from "@intric/ui";
   import { createCombobox } from "@melt-ui/svelte";
   import type { IntegrationImportDialogProps } from "../IntegrationData";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import SharePointFolderTree from "./SharePointFolderTree.svelte";
   import { buildSharePointSelectionKey, normalizeSharePointPath } from "./selectionKey";
 
@@ -95,7 +97,7 @@
   let filteredResources = $derived.by(() => {
     const search = $inputValue.toLowerCase();
     return (availableResources ?? [])
-      .filter((resource) => resource.value.name.toLowerCase().startsWith(search))
+      .filter((resource) => resource.value.name.toLowerCase().includes(search))
       .filter((resource) => {
         if (showPublicTeamsNotMember) return true;
         return getPreviewCategory(resource.value) !== "public_teams_not_member";
@@ -135,7 +137,7 @@
     const { id } = integration;
 
     if (!id) {
-      alert(m.you_need_to_configure_this_integration_before_using_it());
+      toast.warning(m.you_need_to_configure_this_integration_before_using_it());
       goBack();
       return;
     }
@@ -324,7 +326,7 @@
       startFastUpdatePolling();
 
       if (createdItems.length === 0) {
-        alert(m.sharepoint_batch_import_all_failed({ failed: failedItems.length }));
+        toast.error(m.sharepoint_batch_import_all_failed({ failed: failedItems.length }));
         return;
       }
 
@@ -342,9 +344,7 @@
       wrapperName = "";
       $openController = false;
     } catch (error) {
-      const errorMessage =
-        error instanceof IntricError ? error.getReadableMessage() : String(error);
-      alert(errorMessage);
+      toastError(error);
     }
   });
 

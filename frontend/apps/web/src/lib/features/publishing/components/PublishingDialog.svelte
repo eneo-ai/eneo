@@ -4,6 +4,7 @@
   import { writable } from "svelte/store";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
 
   const { refreshCurrentSpace } = getSpacesManager();
 
@@ -33,7 +34,7 @@
       }
       $openController = false;
     } catch (e) {
-      alert(m.could_not_change_status({ name: resource.name }));
+      toastError(e, m.could_not_change_status({ name: resource.name }));
       console.error(e);
     }
   }

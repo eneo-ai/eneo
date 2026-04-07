@@ -16,6 +16,7 @@
   import { m } from "$lib/paraglide/messages";
   import { Loader2 } from "lucide-svelte";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   export let openController: Writable<boolean>;
   export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
@@ -27,7 +28,8 @@
   let modelIdentifier = "";
   let displayName = "";
   let description = "";
-  let tokenLimitStr = "128000";
+  let maxInputTokensStr = "128000";
+  let maxOutputTokensStr = "4096";
   let vision = false;
   let reasoning = false;
   let supportsToolCalling = false;
@@ -35,6 +37,7 @@
   let hosting: "swe" | "eu" | "usa" = "swe";
   let openSource = false;
   let isSubmitting = false;
+  let isLoadingDefaults = false;
   let error: string | null = null;
 
   // Hosting options
@@ -64,8 +67,15 @@
     hosting = model.hosting as "swe" | "eu" | "usa";
     openSource = model.open_source ?? false;
 
-    if ("token_limit" in model && model.token_limit !== null) {
-      tokenLimitStr = String(model.token_limit);
+    if ("max_input_tokens" in model && model.max_input_tokens != null) {
+      maxInputTokensStr = String(model.max_input_tokens);
+    } else if ("token_limit" in model && model.token_limit != null) {
+      maxInputTokensStr = String(model.token_limit);
+    }
+    if ("max_output_tokens" in model && model.max_output_tokens != null) {
+      maxOutputTokensStr = String(model.max_output_tokens);
+    } else {
+      maxOutputTokensStr = "4096";
     }
     if ("vision" in model) {
       vision = model.vision;
@@ -78,6 +88,28 @@
     }
     if ("family" in model) {
       family = model.family || "";
+    }
+  }
+
+  async function handleResetToDefaults() {
+    if (!modelIdentifier.trim()) return;
+    isLoadingDefaults = true;
+    try {
+      const result = await intric.modelProviders.getModelDefaults(modelIdentifier.trim());
+      if (result.found) {
+        if (result.max_input_tokens != null) maxInputTokensStr = String(result.max_input_tokens);
+        if (result.max_output_tokens != null) maxOutputTokensStr = String(result.max_output_tokens);
+        vision = result.supports_vision ?? false;
+        reasoning = result.supports_reasoning ?? false;
+        supportsToolCalling = result.supports_function_calling ?? false;
+        toast.success(m.reset_to_defaults_success());
+      } else {
+        toast.info(m.reset_to_defaults_not_found({ model: modelIdentifier.trim() }));
+      }
+    } catch {
+      toast.error(m.reset_to_defaults_not_found({ model: modelIdentifier.trim() }));
+    } finally {
+      isLoadingDefaults = false;
     }
   }
 
@@ -99,7 +131,8 @@
           description: description.trim(),
           hosting,
           open_source: openSource,
-          token_limit: parseInt(tokenLimitStr, 10),
+          max_input_tokens: parseInt(maxInputTokensStr, 10),
+          max_output_tokens: parseInt(maxOutputTokensStr, 10),
           vision,
           reasoning,
           supports_tool_calling: supportsToolCalling
@@ -134,10 +167,16 @@
       openController.set(false);
     } catch (e: any) {
       error = e.message || m.failed_to_update_model();
-      toast.error(m.failed_to_update_model());
+      toastError(e, m.failed_to_update_model());
     } finally {
       isSubmitting = false;
     }
+  }
+
+  function formatTokenLimit(limit: number): string {
+    if (limit >= 1_000_000) return `${(limit / 1_000_000).toFixed(limit % 1_000_000 === 0 ? 0 : 1)}M`;
+    if (limit >= 1_000) return `${Math.round(limit / 1_000)}K`;
+    return limit.toString();
   }
 
   function handleCancel() {
@@ -205,20 +244,53 @@
 
         <!-- Completion model specific fields -->
         {#if type === "completionModel"}
-          <div class="flex flex-col gap-2">
-            <label for="token-limit" class="text-sm font-medium text-secondary">{m.token_limit()}</label>
-            <Input.Text
-              id="token-limit"
-              type="number"
-              bind:value={tokenLimitStr}
-              min="1024"
-              max="1000000"
-              required
-            />
-            <p class="text-muted-foreground text-xs mt-1">
-              {m.token_limit_hint()}
-            </p>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="flex flex-col gap-2">
+              <label for="max-input-tokens" class="text-sm font-medium text-secondary">{m.max_input_tokens()}</label>
+              <Input.Text
+                id="max-input-tokens"
+                type="number"
+                bind:value={maxInputTokensStr}
+                min="1024"
+                max="10000000"
+                required
+              />
+              <p class="text-muted-foreground text-xs mt-1">
+                {m.max_input_tokens_help()}
+              </p>
+            </div>
+
+            <div class="flex flex-col gap-2">
+              <label for="max-output-tokens" class="text-sm font-medium text-secondary">{m.max_output_tokens()}</label>
+              <Input.Text
+                id="max-output-tokens"
+                type="number"
+                bind:value={maxOutputTokensStr}
+                min="1"
+                max="10000000"
+                required
+              />
+              <p class="text-muted-foreground text-xs mt-1">
+                {m.max_output_tokens_help()}
+              </p>
+            </div>
           </div>
+
+          {#if !("provider_type" in model && model.provider_type?.startsWith("hosted_"))}
+            <div class="flex items-center justify-end">
+              <button
+                type="button"
+                class="text-xs text-accent-default hover:text-accent-stronger transition-colors underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                disabled={isLoadingDefaults || !modelIdentifier.trim()}
+                on:click={handleResetToDefaults}
+              >
+                {#if isLoadingDefaults}
+                  <Loader2 class="w-3 h-3 animate-spin" />
+                {/if}
+                {m.reset_to_defaults()}
+              </button>
+            </div>
+          {/if}
 
           <div class="flex gap-6">
             <label class="flex items-center gap-2 text-sm cursor-pointer group">

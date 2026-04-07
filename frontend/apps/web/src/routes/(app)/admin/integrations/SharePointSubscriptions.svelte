@@ -1,6 +1,8 @@
 <script lang="ts">
   import { Button } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import type { IntricClient } from "@intric/intric-js";
   import dayjs from "dayjs";
@@ -47,7 +49,7 @@
       subscriptions = Array.isArray(response) ? response : [];
     } catch (error) {
       console.error("Failed to load SharePoint subscriptions:", error);
-      alert(m.sharepoint_subscriptions_load_error());
+      toastError(error, m.sharepoint_subscriptions_load_error());
       subscriptions = [];
     } finally {
       loading = false;
@@ -66,27 +68,27 @@
       const result: SubscriptionRenewalResult = await intric.integrations.admin.sharepoint.renewExpiredSubscriptions();
 
       if (result.recreated > 0 && result.failed === 0) {
-        alert(
+        toast.success(
           m.sharepoint_subscriptions_renewed_success({
             count: result.recreated
           })
         );
       } else if (result.failed > 0) {
-        alert(
+        toast.error(
           m.sharepoint_subscriptions_renewed_partial({
             failed: result.failed,
             errors: result.errors.join(", ")
           })
         );
       } else if (result.expired_count === 0) {
-        alert(m.sharepoint_subscriptions_none_expired());
+        toast.info(m.sharepoint_subscriptions_none_expired());
       }
 
       // Reload subscriptions
       await loadSubscriptions();
     } catch (error) {
       console.error("Failed to renew expired subscriptions:", error);
-      alert(m.sharepoint_subscriptions_renew_error());
+      toastError(error, m.sharepoint_subscriptions_renew_error());
     } finally {
       renewingAll = false;
     }
@@ -99,13 +101,13 @@
 
     try {
       await intric.integrations.admin.sharepoint.recreateSubscription({ id: subscription.id });
-      alert(m.sharepoint_subscription_renewed_success());
+      toast.success(m.sharepoint_subscription_renewed_success());
 
       // Reload subscriptions
       await loadSubscriptions();
     } catch (error) {
       console.error(`Failed to renew subscription ${subscription.id}:`, error);
-      alert(m.sharepoint_subscription_renew_error());
+      toastError(error, m.sharepoint_subscription_renew_error());
     } finally {
       renewingSubscriptionIds.delete(subscription.id);
       renewingSubscriptionIds = renewingSubscriptionIds; // Trigger reactivity

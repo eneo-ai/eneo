@@ -4,9 +4,12 @@ from typing import TYPE_CHECKING, Optional, Union
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import (
+    Completion,
     ModelKwargs,
     ResponseType,
+    TokenUsage,
 )
+from intric.main.logging import get_logger
 from intric.assistants.api.assistant_models import AssistantResponse
 from intric.assistants.assistant import Assistant
 from intric.assistants.assistant_factory import AssistantFactory
@@ -38,12 +41,10 @@ from intric.workflows.step_repo import StepRepository
 
 if TYPE_CHECKING:
     from intric.actors import ActorManager
-    from intric.ai_models.completion_models.completion_model import (
-        CompletionModel,
-        CompletionModelResponse,
-    )
+    from intric.ai_models.completion_models.completion_model import CompletionModelResponse
     from intric.assistants.references import ReferencesService
     from intric.completion_models.application import CompletionModelCRUDService
+    from intric.completion_models.domain.completion_model import CompletionModel
     from intric.completion_models.infrastructure.completion_service import (
         CompletionService,
     )
@@ -61,6 +62,8 @@ if TYPE_CHECKING:
     from intric.spaces.api.space_models import TemplateCreate
     from intric.spaces.space import Space
     from intric.spaces.space_repo import SpaceRepository
+
+logger = get_logger(__name__)
 
 AT_TAG_PATTERN = r"<intric-at-tag: @[^>]+>"
 REFERENCE_PATTERN = r'<inref id="([0-9a-f]{8})"/>'  # noqa
@@ -135,21 +138,27 @@ class AssistantService:
     async def web_search(self):
         return WebSearch()
 
-    def validate_space_assistant(self, space: "Space", assistant: Assistant):
-        # validate completion model
-        if assistant.completion_model is not None:
+    def validate_space_assistant(
+        self,
+        space: "Space",
+        assistant: Assistant,
+        completion_model_changing: bool = True,
+        knowledge_changing: bool = True,
+    ):
+        # validate completion model only if it was actually updated
+        if completion_model_changing and assistant.completion_model is not None:
             if not space.is_completion_model_in_space(assistant.completion_model.id):
                 raise BadRequestException("Completion model is not in space.")
 
-        # validate groups
-        for group in assistant.collections:
-            if not space.is_group_in_space(group.id):
-                raise BadRequestException("Group is not in space.")
+        # validate groups and websites only if knowledge is changing
+        if knowledge_changing:
+            for group in assistant.collections:
+                if not space.is_group_in_space(group.id):
+                    raise BadRequestException("Group is not in space.")
 
-        # validate websites
-        for website in assistant.websites:
-            if not space.is_website_in_space(website.id):
-                raise BadRequestException("Website is not in space.")
+            for website in assistant.websites:
+                if not space.is_website_in_space(website.id):
+                    raise BadRequestException("Website is not in space.")
 
         for integration_knowledge in assistant.integration_knowledge_list:
             if not space.is_integration_knowledge_in_space(
@@ -208,6 +217,13 @@ class AssistantService:
         template = await self.assistant_template_service.get_assistant_template(
             assistant_template_id=template_data.id
         )
+
+        if (
+            template.completion_model
+            and template.completion_model.id
+            and space.is_completion_model_in_space(template.completion_model.id)
+        ):
+            completion_model = space.get_completion_model(template.completion_model.id)
 
         # Validate incoming data
         template.validate_assistant_wizard_data(template_data=template_data)
@@ -376,7 +392,13 @@ class AssistantService:
                     "Remove one before enabling the other."
                 )
 
-        self.validate_space_assistant(space=space, assistant=assistant)
+        # Only validate space references when the relevant fields are actually changing
+        self.validate_space_assistant(
+            space=space,
+            assistant=assistant,
+            completion_model_changing=completion_model is not None,
+            knowledge_changing=knowledge_changing,
+        )
 
         refreshed_space = await self.space_repo.update(space)
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
@@ -476,9 +498,12 @@ class AssistantService:
                 response_string = ""
                 generated_files = []
                 tool_calls = []
+                stream_usage = None
 
                 async for chunk in response.completion:
                     reasoning_token_count = chunk.reasoning_token_count
+                    if chunk.usage:
+                        stream_usage = chunk.usage
 
                     if chunk.response_type == ResponseType.TEXT:
                         response_string = f"{response_string}{chunk.text}"
@@ -545,12 +570,32 @@ class AssistantService:
                     version=version,
                     get_id_func=lambda chunk: chunk.info_blob_id,
                 )
-                total_response_tokens = count_tokens(response_string) + reasoning_token_count
+                # Prefer actual provider token counts, fall back to litellm estimates
+                if stream_usage and stream_usage.prompt_tokens is not None:
+                    num_tokens_question = stream_usage.prompt_tokens + assistant_selector_tokens
+                    input_source = "provider"
+                else:
+                    num_tokens_question = response.total_token_count + assistant_selector_tokens
+                    input_source = "litellm"
+
+                if stream_usage and stream_usage.completion_tokens is not None:
+                    num_tokens_answer = stream_usage.completion_tokens
+                    output_source = "provider"
+                else:
+                    num_tokens_answer = count_tokens(response_string, completion_model.name) + reasoning_token_count
+                    output_source = "litellm"
+
+                logger.info(
+                    f"[TokenUsage] assistant={assistant_id} streaming — "
+                    f"input={num_tokens_question} ({input_source}), "
+                    f"output={num_tokens_answer} ({output_source})"
+                )
+
                 await self.session_service.add_question_to_session(
                     question=question,
                     answer=response_string,
-                    num_tokens_question=response.total_token_count + assistant_selector_tokens,
-                    num_tokens_answer=total_response_tokens,
+                    num_tokens_question=num_tokens_question,
+                    num_tokens_answer=num_tokens_answer,
                     session=session,
                     completion_model=completion_model,
                     info_blob_chunks=reference_chunks,
@@ -560,6 +605,16 @@ class AssistantService:
                     assistant_id=assistant_id,
                     web_search_results=web_search_results,
                     tool_calls=tool_calls if tool_calls else None,
+                )
+
+                # Send token usage event to frontend
+                yield Completion(
+                    text="",
+                    response_type=ResponseType.TOKEN_USAGE,
+                    usage=TokenUsage(
+                        prompt_tokens=num_tokens_question,
+                        completion_tokens=num_tokens_answer,
+                    ),
                 )
 
             return response_stream()
@@ -579,12 +634,32 @@ class AssistantService:
                 version=version,
                 get_id_func=lambda chunk: chunk.info_blob_id,
             )
-            total_response_tokens = count_tokens(final_answer) + reasoning_token_count
+            # Prefer actual provider token counts, fall back to litellm estimates
+            if response.usage and response.usage.prompt_tokens is not None:
+                num_tokens_question = response.usage.prompt_tokens + assistant_selector_tokens
+                input_source = "provider"
+            else:
+                num_tokens_question = response.total_token_count + assistant_selector_tokens
+                input_source = "litellm"
+
+            if response.usage and response.usage.completion_tokens is not None:
+                num_tokens_answer = response.usage.completion_tokens
+                output_source = "provider"
+            else:
+                num_tokens_answer = count_tokens(final_answer, completion_model.name) + reasoning_token_count
+                output_source = "litellm"
+
+            logger.info(
+                f"[TokenUsage] assistant={assistant_id} non-streaming — "
+                f"input={num_tokens_question} ({input_source}), "
+                f"output={num_tokens_answer} ({output_source})"
+            )
+
             await self.session_service.add_question_to_session(
                 question=question,
                 answer=final_answer,
-                num_tokens_question=response.total_token_count + assistant_selector_tokens,
-                num_tokens_answer=total_response_tokens,
+                num_tokens_question=num_tokens_question,
+                num_tokens_answer=num_tokens_answer,
                 files=files,
                 generated_files=generated_files,
                 completion_model=completion_model,
@@ -633,11 +708,7 @@ class AssistantService:
         if not actor.can_read_assistant(assistant=active_assistant):
             raise UnauthorizedException()
 
-        if not space.can_ask_assistant(assistant=active_assistant):
-            raise UnauthorizedException(
-                "This assistant can not be used at this time. "
-                "Please review your assistant settings and try again."
-            )
+        space.can_ask_assistant(assistant=active_assistant)
 
         if tool_assistant_id is not None:
             tool_assistant = space.get_assistant(assistant_id=tool_assistant_id)

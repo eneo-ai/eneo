@@ -6,7 +6,8 @@ import fs from "fs";
 import { exec, spawn } from "node:child_process";
 
 const localUrl = "http://localhost:8123";
-const remoteUrl = process.env.ENEO_BACKEND_URL || process.env.INTRIC_BACKEND_URL || "http://localhost:8123";
+const remoteUrl =
+  process.env.ENEO_BACKEND_URL || process.env.INTRIC_BACKEND_URL || "http://localhost:8123";
 
 /** @param {string} baseUrl */
 async function updateClient(baseUrl) {
@@ -36,7 +37,8 @@ async function updateClient(baseUrl) {
 function updateSchema(baseUrl) {
   return new Promise((resolve, reject) => {
     exec(
-      `bun x openapi-typescript ${baseUrl}/openapi.json -o src/types/schema.d.ts`,
+      // --default-non-nullable=false preserves v6 behavior where properties with defaults are optional
+      `bun x openapi-typescript ${baseUrl}/openapi.json -o src/types/schema.d.ts --default-non-nullable=false`,
       (err, stdout, stderr) => {
         if (err) {
           console.log(err);

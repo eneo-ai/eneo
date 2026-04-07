@@ -10,6 +10,7 @@
   import UserConnectedSplitButton from "$lib/features/integrations/components/UserConnectedSplitButton.svelte";
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
 
   const { data }: PageProps = $props();
@@ -25,7 +26,7 @@
   const auth = new IntegrationAuthService({
     onConnected(result) {
       if (!result.success) {
-        alert(result.error);
+        toastError(result.error);
         return;
       }
 

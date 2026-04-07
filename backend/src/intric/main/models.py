@@ -136,6 +136,7 @@ class PaginatedPermissions(PaginatedResponse, ResourcePermissionsMixin):
 class GeneralError(BaseModel):
     message: str
     intric_error_code: ErrorCodes
+    details: dict[str, Any] | None = None
 
 
 class DeleteResponse(BaseModel):

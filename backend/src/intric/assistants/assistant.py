@@ -328,6 +328,9 @@ class Assistant(Entity):
         web_search_results: list["WebSearchResult"] = [],
         require_tool_approval: bool = False,
     ):
+        if self.completion_model is None:
+            raise NoModelSelectedException()
+
         if any([file.file_type == FileType.IMAGE for file in files]):
             if not self.completion_model.vision:
                 raise BadRequestException(
@@ -335,7 +338,7 @@ class Assistant(Entity):
                 )
 
         # Fill half the context
-        num_chunks = self.completion_model.token_limit // 200 // 2 if version == 2 else 30
+        num_chunks = self.completion_model.max_input_tokens // 200 // 2 if version == 2 else 30
 
         if self.has_knowledge():
             datastore_result = await references_service.get_references(

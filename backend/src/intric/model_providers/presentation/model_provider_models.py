@@ -19,7 +19,6 @@ class ModelProviderUpdate(BaseModel):
     """Request model for updating a model provider."""
 
     name: Optional[str] = Field(None, description="User-defined name for this provider instance")
-    provider_type: Optional[str] = Field(None, description="Provider type: openai, azure, or anthropic")
     credentials: Optional[dict[str, Any]] = Field(None, description="Provider credentials (will be encrypted)")
     config: Optional[dict[str, Any]] = Field(None, description="Additional configuration")
     is_active: Optional[bool] = Field(None, description="Whether the provider is active")
@@ -32,6 +31,14 @@ class ValidateModelRequest(BaseModel):
     model_type: str = Field(
         default="completion",
         description="Model type: completion, embedding, or transcription",
+    )
+
+
+class FavoriteProvidersUpdate(BaseModel):
+    """Request model for updating tenant's favorite provider types."""
+
+    providers: list[str] = Field(
+        ..., description="Ordered list of provider type strings to pin as favorites"
     )
 
 

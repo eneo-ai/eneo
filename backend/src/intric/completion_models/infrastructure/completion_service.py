@@ -158,6 +158,11 @@ class CompletionService:
         function_called = False
 
         async for chunk in completion:
+            # Pass through stop chunk (carries usage data)
+            if chunk.stop:
+                yield chunk
+                continue
+
             # Pass through MCP tool call events directly
             if chunk.response_type == ResponseType.TOOL_CALL:
                 yield chunk
@@ -228,6 +233,7 @@ class CompletionService:
         context = self.context_builder.build_context(
             input_str=text_input,
             max_tokens=max_tokens,
+            model_name=model_adapter.model.name,
             files=files,
             prompt=prompt,
             session=session,
@@ -306,6 +312,7 @@ class CompletionService:
             model=model_adapter.model,
             extended_logging=logging_details,
             total_token_count=context.token_count,
+            usage=getattr(completion, "usage", None) if not stream else None,
         )
 
 

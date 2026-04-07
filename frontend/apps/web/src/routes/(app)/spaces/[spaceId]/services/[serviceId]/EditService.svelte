@@ -14,6 +14,7 @@
   } from "$lib/features/ai-models/ModelBehaviours";
   import SelectBehaviourCustom from "$lib/features/ai-models/components/SelectBehaviourCustom.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   export let service: Service;
 
@@ -67,7 +68,7 @@
       invalidate("service:get");
     } catch (e) {
       if (e instanceof IntricError) {
-        alert(e.message);
+        toast.error(e.message);
         console.error(e);
       }
     }

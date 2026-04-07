@@ -455,8 +455,8 @@ class CompletionModelMigrationService:
             issues.append("Target model is deprecated")
 
         # Check token limits
-        if from_model.token_limit > to_model.token_limit:
-            issues.append(f"Target model has lower token limit: {to_model.token_limit}")
+        if from_model.max_input_tokens > to_model.max_input_tokens:
+            issues.append(f"Target model has lower input token limit: {to_model.max_input_tokens}")
 
         # Check model family compatibility
         if from_model.family != to_model.family:

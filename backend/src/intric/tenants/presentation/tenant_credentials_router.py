@@ -48,7 +48,7 @@ router = APIRouter(
 )
 
 # Provider enum - supported LLM providers
-Provider = Literal["openai", "anthropic", "azure", "berget", "gdm", "mistral", "ovhcloud", "gemini", "cohere"]
+Provider = Literal["openai", "anthropic", "azure", "mistral", "ovhcloud", "gemini", "cohere"]
 
 
 class SetCredentialRequest(BaseModel):
@@ -56,7 +56,7 @@ class SetCredentialRequest(BaseModel):
     Request model for setting tenant API credentials.
 
     Provider-specific field requirements:
-    - OpenAI, Anthropic, Mistral, Berget, GDM, OVHCloud: api_key only
+    - OpenAI, Anthropic, Mistral, OVHCloud: api_key only
     - vLLM: api_key + endpoint (required)
     - Azure: api_key + endpoint + api_version (required)
 
@@ -239,13 +239,13 @@ async def set_tenant_credential(
     Set or update tenant API credentials for a specific provider.
 
     Validates provider-specific field requirements:
-    - OpenAI, Anthropic, Mistral, Berget, OVHCloud: api_key (required)
+    - OpenAI, Anthropic, Mistral, OVHCloud: api_key (required)
     - vLLM: api_key + endpoint (both required when credentials enabled)
     - Azure: api_key + endpoint + api_version (all required)
 
     Args:
         tenant_id: UUID of the tenant
-        provider: LLM provider name (openai, anthropic, azure, berget, mistral, ovhcloud, vllm)
+        provider: LLM provider name (openai, anthropic, azure, mistral, ovhcloud, vllm)
         request: Credential data including required fields per provider
         container: Dependency injection container
 
@@ -322,7 +322,7 @@ async def delete_tenant_credential(
 
     Args:
         tenant_id: UUID of the tenant
-        provider: LLM provider name (openai, anthropic, azure, berget, mistral, ovhcloud)
+        provider: LLM provider name (openai, anthropic, azure, mistral, ovhcloud)
         container: Dependency injection container
 
     Returns:

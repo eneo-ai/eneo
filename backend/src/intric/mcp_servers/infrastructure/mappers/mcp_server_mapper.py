@@ -5,6 +5,9 @@ from sqlalchemy.orm.base import NEVER_SET
 
 from intric.database.tables.mcp_server_table import MCPServers as MCPServersTable
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from intric.security_classifications.domain.entities.security_classification import (
+    SecurityClassification,
+)
 
 if TYPE_CHECKING:
     from intric.database.tables.mcp_server_table import MCPServerTools as MCPServerToolsTable
@@ -26,6 +29,10 @@ class MCPServerToolMapper:
             description=db_model.description,
             input_schema=db_model.input_schema,
             is_enabled_by_default=db_model.is_enabled_by_default,
+            pending_description=db_model.pending_description,
+            pending_input_schema=db_model.pending_input_schema,
+            requires_approval=db_model.requires_approval,
+            removed_from_remote=db_model.removed_from_remote,
         )
 
     @staticmethod
@@ -43,6 +50,10 @@ class MCPServerToolMapper:
             "description": entity.description,
             "input_schema": entity.input_schema,
             "is_enabled_by_default": entity.is_enabled_by_default,
+            "pending_description": entity.pending_description,
+            "pending_input_schema": entity.pending_input_schema,
+            "requires_approval": entity.requires_approval,
+            "removed_from_remote": entity.removed_from_remote,
         }
 
 
@@ -60,6 +71,13 @@ class MCPServerMapper:
             if tools_loaded is not NEVER_SET and tools_loaded:
                 tools = MCPServerToolMapper.to_entities(tools_loaded)
 
+        # Check if security_classification relationship is loaded
+        security_classification = None
+        if inspector is not None:
+            sc_loaded = inspector.attrs.security_classification.loaded_value
+            if sc_loaded is not NEVER_SET and sc_loaded is not None:
+                security_classification = SecurityClassification.to_domain(sc_loaded)
+
         return MCPServer(
             id=db_model.id,  # type: ignore[arg-type]
             created_at=db_model.created_at,  # type: ignore[arg-type]
@@ -76,6 +94,7 @@ class MCPServerMapper:
             icon_url=db_model.icon_url,
             documentation_url=db_model.documentation_url,
             tools=tools,
+            security_classification=security_classification,
         )
 
     @staticmethod
@@ -99,4 +118,9 @@ class MCPServerMapper:
             "tags": entity.tags,
             "icon_url": entity.icon_url,
             "documentation_url": entity.documentation_url,
+            "security_classification_id": (
+                entity.security_classification.id
+                if entity.security_classification
+                else None
+            ),
         }

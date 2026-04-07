@@ -31,18 +31,22 @@ class IconService:
     def validate_size(data: bytes) -> None:
         if len(data) > ICON_MAX_SIZE:
             raise FileTooLargeException(
-                f"Icon exceeds maximum size of 256 KB (got {len(data)} bytes)"
+                file_size=len(data),
+                max_size=ICON_MAX_SIZE,
             )
 
     async def create_icon(self, upload_file: UploadFile, tenant_id: UUID) -> Icon:
         """Validates and stores an icon. Raises BadRequestException or FileTooLargeException."""
         self.validate_mimetype(upload_file.content_type)
 
-        if self.file_size_service.is_too_large(upload_file.file, ICON_MAX_SIZE):
-            raise FileTooLargeException("Icon exceeds maximum size of 256 KB")
+        file_size = self.file_size_service.get_file_size(upload_file.file)
+        if file_size > ICON_MAX_SIZE:
+            raise FileTooLargeException(
+                file_size=file_size,
+                max_size=ICON_MAX_SIZE,
+            )
 
         content = await upload_file.read()
-        self.validate_size(content)
 
         icon_create = IconCreate(
             blob=content,

@@ -212,7 +212,6 @@ def test_settings(
         upload_image_to_session_max_size=5_000_000,
         upload_max_file_size=100_000_000,
         transcription_max_file_size=25_000_000,
-        max_in_question=1000,
 
         # API settings
         api_prefix="/api/v1",
@@ -236,7 +235,6 @@ def test_settings(
         openai_api_key=None,
         anthropic_api_key=None,
         azure_api_key=None,
-        berget_api_key=None,
         mistral_api_key=None,
         ovhcloud_api_key=None,
         vllm_api_key=None,
@@ -247,7 +245,7 @@ def test_settings(
         using_image_generation=False,
         using_crawl=False,
         tenant_credentials_enabled=False,  # Disable for integration tests (tests can override if needed)
-        federation_per_tenant_enabled=True,
+        federation_enabled=True,
 
         # Note: Set to False for integration tests that need full app functionality
         openapi_only_mode=False,
@@ -685,7 +683,6 @@ def clear_api_keys_for_all_tests(request, monkeypatch):
         "OPENAI_API_KEY",
         "ANTHROPIC_API_KEY",
         "AZURE_API_KEY",
-        "BERGET_API_KEY",
         "MISTRAL_API_KEY",
         "OVHCLOUD_API_KEY",
         "VLLM_API_KEY",
@@ -1065,7 +1062,8 @@ async def seed_default_models(setup_database, monkeypatch):
                     name="fixture-gpt-4",
                     nickname="Fixture GPT-4",
                     family="openai",
-                    token_limit=8000,
+                    max_input_tokens=8000,
+                    max_output_tokens=4096,
                     is_deprecated=False,
                     stability="stable",
                     hosting="usa",
@@ -1133,7 +1131,8 @@ async def seed_default_models(setup_database, monkeypatch):
             name="fixture-gpt-4",
             nickname="Fixture GPT-4",
             family="openai",
-            token_limit=8000,
+            max_input_tokens=8000,
+            max_output_tokens=4096,
             is_deprecated=False,
             stability="stable",
             hosting="usa",
