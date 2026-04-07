@@ -194,7 +194,7 @@ class QuestionRepository:
     ):
         stmt = (
             sa.select(Questions)
-            .where(Questions.session_id is not None)  # pyright: ignore[reportUnnecessaryComparison]  # latent SQL bug — see follow-up fix commit
+            .where(Questions.session_id.is_not(None))
             .join(Sessions)
             .join(Users)
             .where(Users.tenant_id == tenant_id)
