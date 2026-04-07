@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -10,6 +10,10 @@ from intric.database.tables.base_class import BasePublic
 if TYPE_CHECKING:
     from intric.database.tables.tenant_table import Tenants
     from intric.database.tables.users_table import Users
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class TenantSharePointApp(BasePublic):
@@ -56,13 +60,13 @@ class TenantSharePointApp(BasePublic):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=_utc_now
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=_utc_now,
+        onupdate=_utc_now,
     )
 
     tenant: Mapped["Tenants"] = relationship("Tenants", back_populates="sharepoint_app")

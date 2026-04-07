@@ -49,7 +49,7 @@ _CHUNK_OVERLAP = 40
 #
 # The semaphore is created lazily on first use to ensure it uses the correct
 # concurrency limit from settings.
-_EMBEDDING_SEMAPHORE: asyncio.Semaphore | None = None
+_embedding_semaphore: asyncio.Semaphore | None = None
 
 
 class CrawlPageData(TypedDict):
@@ -66,16 +66,16 @@ def _get_embedding_semaphore() -> asyncio.Semaphore:
     Returns:
         asyncio.Semaphore with configured concurrency limit
     """
-    global _EMBEDDING_SEMAPHORE
-    if _EMBEDDING_SEMAPHORE is None:
+    global _embedding_semaphore
+    if _embedding_semaphore is None:
         settings = get_settings()
         concurrency = getattr(settings, "crawl_embedding_concurrency", 3)
-        _EMBEDDING_SEMAPHORE = asyncio.Semaphore(concurrency)
+        _embedding_semaphore = asyncio.Semaphore(concurrency)
         logger.info(
             "Created embedding semaphore",
             extra={"concurrency_limit": concurrency},
         )
-    return _EMBEDDING_SEMAPHORE
+    return _embedding_semaphore
 
 
 async def persist_batch(

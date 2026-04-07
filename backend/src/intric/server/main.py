@@ -800,6 +800,16 @@ def get_application():
     async def get_version():
         return VersionResponse(version=get_settings().app_version)
 
+    _registered_endpoints = (
+        http_exception_handler,
+        custom_http_500_exception_handler,
+        unhandled_exception_handler,
+        get_healthz,
+        crawler_health,
+        get_version,
+    )
+    del _registered_endpoints
+
     return app
 
 

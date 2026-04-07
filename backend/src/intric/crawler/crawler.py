@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
-from typing import Any, Callable, Coroutine, Iterable, Optional, cast
+from typing import Any, Callable, Coroutine, Iterable, Optional
 
 import crochet
 from scrapy.crawler import Crawler as ScrapyCrawler
@@ -104,10 +104,8 @@ class CrawlManager:
         self._crawler = self._runner.create_crawler(spider_cls)
 
         # Start crawl and store the deferred.
-        # runner.crawl() is from untyped Scrapy; cast to Any at the boundary.
-        self._crawl_deferred = cast(
-            Any,
-            self._runner.crawl(self._crawler, **spider_kwargs),  # pyright: ignore[reportUnknownMemberType]  # Scrapy has no py.typed stubs
+        self._crawl_deferred = self._runner.crawl(  # pyright: ignore[reportUnknownMemberType]  # Scrapy has no py.typed stubs
+            self._crawler, **spider_kwargs
         )
 
         # Add callback to signal completion
@@ -281,12 +279,8 @@ class Crawler:
             files_dir=files_dir,
             tenant_crawler_settings=tenant_crawler_settings,
         )
-        # runner.crawl() is from untyped Scrapy; cast pins the return to Any.
-        return cast(
-            Any,
-            runner.crawl(  # pyright: ignore[reportUnknownMemberType]  # Scrapy has no py.typed stubs
-                CrawlSpider, url=url, http_user=http_user, http_pass=http_pass
-            ),
+        return runner.crawl(  # pyright: ignore[reportUnknownMemberType]  # Scrapy has no py.typed stubs
+            CrawlSpider, url=url, http_user=http_user, http_pass=http_pass
         )
 
     @crochet.run_in_reactor
@@ -313,15 +307,11 @@ class Crawler:
             filepath=filepath,
             tenant_crawler_settings=tenant_crawler_settings,
         )
-        # runner.crawl() is from untyped Scrapy; cast pins the return to Any.
-        return cast(
-            Any,
-            runner.crawl(  # pyright: ignore[reportUnknownMemberType]
-                SitemapSpider,
-                sitemap_url=sitemap_url,
-                http_user=http_user,
-                http_pass=http_pass,
-            ),
+        return runner.crawl(  # pyright: ignore[reportUnknownMemberType]
+            SitemapSpider,
+            sitemap_url=sitemap_url,
+            http_user=http_user,
+            http_pass=http_pass,
         )
 
     @staticmethod

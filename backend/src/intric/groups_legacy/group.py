@@ -32,3 +32,6 @@ class _Group:
         self.embedding_model = embedding_model
         self.user = user
         self.num_info_blobs = num_info_blobs
+
+
+Group = _Group

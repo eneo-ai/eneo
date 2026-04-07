@@ -4,6 +4,7 @@ import scrapy
 from scrapy.http import Response
 from scrapy.linkextractors import LinkExtractor
 from scrapy.spiders import Rule
+from typing_extensions import override
 
 from intric.crawler.parse_html import parse_file, parse_response
 
@@ -41,5 +42,6 @@ class CrawlSpider(scrapy.spiders.CrawlSpider):  # type: ignore[attr-defined]
 
         super().__init__(*args, **kwargs)  # pyright: ignore[reportUnknownMemberType]  # Scrapy spider __init__ is untyped
 
+    @override
     def parse_start_url(self, response: Response):
         return parse_response(response)

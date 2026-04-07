@@ -2,7 +2,6 @@ import hashlib
 import re
 from email.message import Message
 from pathlib import PurePosixPath
-from typing import cast
 from urllib.parse import unquote, urlparse
 
 import scrapy
@@ -81,8 +80,7 @@ class FileNamePipeline(FilesPipeline):
         filename = None
 
         if response is not None:
-            # Scrapy Headers.get() is untyped; cast to bytes | None at the boundary.
-            cd_raw = cast(bytes | None, response.headers.get(b"Content-Disposition"))  # pyright: ignore[reportUnknownMemberType]  # Scrapy has no py.typed stubs
+            cd_raw = response.headers.get(b"Content-Disposition")
             if cd_raw:
                 msg = Message()
                 # Decode header bytes safely to handle non-ASCII headers

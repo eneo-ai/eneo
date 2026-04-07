@@ -1,6 +1,6 @@
 # Pyright Hardening Handoff
 
-This branch is a typing-hardening pass for the Python backend. The branch has now reached `0 errors, 0 warnings` under the current full-repo Pyright gate.
+This branch is a typing-hardening pass for the Python backend. The branch has now reached `0 errors, 0 warnings` under a global Pyright `strict` configuration.
 
 ## Current Direction
 
@@ -27,35 +27,20 @@ Result at the latest full checkpoint:
 Important note:
 
 - `uv run pyright` is now the real full-repo gate in both CI and pre-commit.
+- The project now uses global `typeCheckingMode: "strict"` rather than `standard` plus a strict allowlist.
 - A changed-file typecheck script can still be useful locally, but it is not the merge gate.
 - Full `ruff check` for the whole backend repository is still noisy because of existing import-order debt in `alembic/` and `tests/`.
 
 ## What This Branch Established
 
-- `backend/pyrightconfig.json` now exposes a much broader warning baseline.
-- `backend/docs/TYPE_CHECKING.md` now documents a zero-warning policy.
-- The following modules were verified clean under `strict` and added to the `strict` list:
-  - `src/intric/apps`
-  - `src/intric/authentication`
-  - `src/intric/collections`
-  - `src/intric/completion_models`
-  - `src/intric/dashboard`
-  - `src/intric/group_chat`
-  - `src/intric/model_providers`
-  - `src/intric/predefined_roles`
-  - `src/intric/services`
-  - `src/intric/sessions`
-  - `src/intric/sysadmin`
-  - `src/intric/websites`
-- These rule families are now `error`-level and will fail CI immediately:
-  - `reportUnknownMemberType`
-  - `reportUnknownParameterType`
-  - `reportMissingTypeArgument`
-  - `reportCallInDefaultInitializer`
+- `backend/pyrightconfig.json` now uses a minimal global `strict` configuration.
+- `backend/docs/TYPE_CHECKING.md` now documents a zero-warning global-strict policy.
+- The temporary ratcheting phase is complete. `strict` path lists and per-rule warning/error overrides are no longer needed.
+- Local stubs under `backend/typings/` were added for third-party packages without bundled typing support, so global strict can stay enabled without weakening config.
 
 ## Remaining Follow-Ups
 
-The remaining work is no longer warning cleanup. It is architecture and runtime verification:
+Typing cleanup is no longer the bottleneck. The remaining work is architecture and runtime verification:
 
 - Resolve the duplicate `CompletionModel` split between `ai_models.completion_models` and `completion_models.domain`.
 - Complete the `EmbeddingModelLegacy` → `EmbeddingModel` migration at repository/datastore boundaries.

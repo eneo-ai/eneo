@@ -315,8 +315,7 @@ def extract_text_from_xlsx(binary_data: bytes) -> str:
         csv_data: list[str] = []
         for sheet_name in xls.sheet_names:
             df: pd.DataFrame = pd.read_excel(xls, sheet_name=sheet_name)  # type: ignore[assignment]  # pandas stubs return broad type
-            _csv_raw = df.to_csv(index=False, sep="|")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs incomplete
-            csv_text: str = _csv_raw if isinstance(_csv_raw, str) else str(_csv_raw)  # pyright: ignore[reportUnknownArgumentType]  # pandas stubs return unknown
+            csv_text = df.to_csv(index=False, sep="|")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs incomplete
             csv_data.append(f"### {sheet_name} ###\n{csv_text}")
         return "Excel sheet data: " + "\n\n".join(csv_data)
     except Exception as e:

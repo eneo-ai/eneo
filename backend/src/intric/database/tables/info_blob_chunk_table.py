@@ -13,7 +13,7 @@ class InfoBlobChunks(BasePublic):
     text: Mapped[str] = mapped_column()
     chunk_no: Mapped[int] = mapped_column()
     size: Mapped[int] = mapped_column()
-    embedding: Mapped[list[float]] = mapped_column(Vector)
+    embedding: Mapped[list[float]] = mapped_column(Vector())
 
     # Foreign keys
     info_blob_id: Mapped[UUID] = mapped_column(

@@ -1,7 +1,6 @@
 import logging
 import mimetypes
 from dataclasses import dataclass
-from typing import cast
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
@@ -26,8 +25,7 @@ def parse_response(response: Response) -> CrawledPage | None:
     if not isinstance(response, TextResponse):
         return None
 
-    # Scrapy Headers.get() is untyped; cast to bytes | None at the boundary.
-    ct_raw = cast(bytes | None, response.headers.get(b"Content-Type"))  # pyright: ignore[reportUnknownMemberType]  # Scrapy has no py.typed stubs
+    ct_raw = response.headers.get(b"Content-Type")
     content_type: str = (ct_raw or b"").decode("utf-8").lower()
     if "application/json" in content_type:
         # For JSON responses, use the body as-is with URL as title
@@ -49,8 +47,7 @@ def parse_response(response: Response) -> CrawledPage | None:
 
 
 def parse_file(response: Response) -> dict[str, list[str]] | None:
-    # Scrapy Headers.get() is untyped; cast to bytes | None at the boundary.
-    ct_raw = cast(bytes | None, response.headers.get(b"Content-Type"))  # pyright: ignore[reportUnknownMemberType]  # Scrapy has no py.typed stubs
+    ct_raw = response.headers.get(b"Content-Type")
     content_type: str = ""
     if ct_raw:
         content_type = ct_raw.decode("utf-8", errors="ignore").lower()

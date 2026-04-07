@@ -2,6 +2,7 @@ from urllib.parse import urlparse
 
 import scrapy
 from scrapy.http import Response
+from typing_extensions import override
 
 from intric.crawler.parse_html import parse_response
 
@@ -28,5 +29,6 @@ class SitemapSpider(scrapy.spiders.SitemapSpider):  # type: ignore[attr-defined]
 
         super().__init__(*args, **kwargs)  # pyright: ignore[reportUnknownMemberType]  # Scrapy spider __init__ is untyped
 
+    @override
     def parse(self, response: Response):
         return parse_response(response)
