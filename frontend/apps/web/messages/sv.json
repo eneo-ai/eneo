@@ -460,6 +460,8 @@
   "eneo_error_9033": "Den valda AI-modellen är inte tillgänglig i denna yta. Välj en annan modell eller kontakta din administratör.",
   "eneo_error_9034": "Denna assistent använder kunskapskällor med otillgängliga embedding-modeller. Kontrollera kunskapsinställningarna.",
   "eneo_error_9035": "Assistentens modell uppfyller inte ytans krav på säkerhetsklassning.",
+  "eneo_error_9036": "En extern verktygstjänst är tillfälligt otillgänglig. Försök igen senare.",
+  "eneo_error_9037": "En extern verktygstjänst avvisade anslutningsuppgifterna. Kontakta din administratör för att verifiera serverkonfigurationen.",
   "exit_fullscreen": "Avsluta helskärm",
   "export": "Exportera",
   "export_data": "Exportera data",

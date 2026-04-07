@@ -463,6 +463,8 @@
   "eneo_error_9033": "The selected AI model is not available in this space. Please choose a different model or contact your administrator.",
   "eneo_error_9034": "This assistant uses knowledge sources with unavailable embedding models. Please review the knowledge settings.",
   "eneo_error_9035": "The assistant's model does not meet this space's security classification requirements.",
+  "eneo_error_9036": "An external tool service is temporarily unavailable. Please try again later.",
+  "eneo_error_9037": "An external tool service rejected the connection credentials. Contact your administrator to verify the server configuration.",
   "exit_fullscreen": "Exit fullscreen",
   "export": "Export",
   "export_data": "Export Data",
