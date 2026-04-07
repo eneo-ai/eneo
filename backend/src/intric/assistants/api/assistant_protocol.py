@@ -8,8 +8,6 @@ from intric.ai_models.completion_models.completion_model import (
     CompletionModel,
     ResponseType,
 )
-from intric.database.database import AsyncSession
-from intric.database.transaction import gen_transaction
 from intric.files.file_models import File, FilePublic
 from intric.info_blobs.info_blob import (
     InfoBlobAskAssistantPublic,
@@ -29,6 +27,7 @@ from intric.sessions.session import (
     SSEText,
     SSETokenUsage,
     SSEToolApprovalRequired,
+    SSEToolApprovalTimeout,
     SSEToolCall,
     SSEError,
     TokenUsageEvent,
@@ -127,19 +126,19 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
             ],
         )
 
-    if chunk.response_type == ResponseType.FILES:
+    elif chunk.response_type == ResponseType.FILES:
         data = SSEFiles(
             session_id=session_id,
             generated_files=[FilePublic(**chunk.generated_file.model_dump())],
         )
 
-    if chunk.response_type == ResponseType.INTRIC_EVENT:
+    elif chunk.response_type == ResponseType.INTRIC_EVENT:
         data = SSEIntricEvent(
             session_id=session_id,
             intric_event_type=IntricEventType.GENERATING_IMAGE,
         )
 
-    if chunk.response_type == ResponseType.TOOL_CALL:
+    elif chunk.response_type == ResponseType.TOOL_CALL:
         data = SSEToolCall(
             session_id=session_id,
             tools=[
@@ -149,12 +148,13 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
                     arguments=tc.arguments,
                     tool_call_id=tc.tool_call_id,
                     approved=tc.approved,
+                    result_status=tc.result_status,
                 )
                 for tc in (chunk.tool_calls_metadata or [])
             ],
         )
 
-    if chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
+    elif chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
         data = SSEToolApprovalRequired(
             session_id=session_id,
             approval_id=chunk.approval_id,
@@ -165,12 +165,30 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
                     arguments=tc.arguments,
                     tool_call_id=tc.tool_call_id,
                     approved=tc.approved,
+                    result_status=tc.result_status,
                 )
                 for tc in (chunk.tool_calls_metadata or [])
             ],
         )
 
-    if chunk.response_type == ResponseType.TOKEN_USAGE:
+    elif chunk.response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
+        data = SSEToolApprovalTimeout(
+            session_id=session_id,
+            approval_id=chunk.approval_id,
+            tools=[
+                ToolCallInfo(
+                    server_name=tc.server_name,
+                    tool_name=tc.tool_name,
+                    arguments=tc.arguments,
+                    tool_call_id=tc.tool_call_id,
+                    approved=tc.approved,
+                    result_status=tc.result_status,
+                )
+                for tc in (chunk.tool_calls_metadata or [])
+            ],
+        )
+
+    elif chunk.response_type == ResponseType.TOKEN_USAGE:
         prompt = chunk.usage.prompt_tokens or 0 if chunk.usage else 0
         completion = chunk.usage.completion_tokens or 0 if chunk.usage else 0
         data = SSETokenUsage(
@@ -182,24 +200,35 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
             ),
         )
 
-    if chunk.response_type == ResponseType.ERROR:
+    elif chunk.response_type == ResponseType.ERROR:
         data = SSEError(
             session_id=session_id,
             error=chunk.error,
             error_code=chunk.error_code,
         )
 
-    return ServerSentEvent(data.model_dump_json(), event=chunk.response_type.value)
+    else:
+        logger.warning(
+            "Unsupported SSE response type",
+            extra={"response_type": chunk.response_type.value if chunk.response_type else None},
+        )
+        data = SSEError(
+            session_id=session_id,
+            error="Unsupported response type",
+            error_code=500,
+        )
+
+    event_name = (
+        chunk.response_type.value if chunk.response_type is not None else ResponseType.ERROR.value
+    )
+    return ServerSentEvent(data.model_dump_json(), event=event_name)
 
 
 async def to_response(
     response: "AssistantResponse",
-    db_session: AsyncSession,
     stream: bool,
 ):
     if stream:
-
-        @gen_transaction(db_session)
         async def event_stream():
             async for chunk in response.answer:
 
@@ -214,7 +243,7 @@ async def to_response(
                         tools=response.tools,
                     ).model_dump_json()
 
-        return EventSourceResponse(event_stream())
+        return EventSourceResponse(event_stream(), ping=15)
 
     return to_ask_response(
         question=response.question,
@@ -229,12 +258,9 @@ async def to_response(
 
 async def to_conversation_response(
     response: "AssistantResponse",
-    db_session: AsyncSession,
     stream: bool,
 ):
     if stream:
-
-        @gen_transaction(db_session)
         async def event_stream():
             data = SSEFirstChunk(
                 **to_ask_conversation_response(
@@ -258,7 +284,7 @@ async def to_conversation_response(
             async for chunk in response.answer:
                 yield to_sse_response(chunk=chunk, session_id=response.session.id)
 
-        return EventSourceResponse(event_stream())
+        return EventSourceResponse(event_stream(), ping=15)
 
     return to_ask_conversation_response(
         question=response.question,

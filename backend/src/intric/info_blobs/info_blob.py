@@ -108,8 +108,7 @@ class InfoBlobMetadataFilterPublic(BaseModel):
 
 
 class InfoBlobMetadataFilter(InfoBlobMetadataFilterPublic):
-    user_id: Optional[int] = None
-    group_ids: Optional[list[int]] = None
+    user_id: Optional[UUID] = None
 
 
 class InfoBlobChunk(BaseModel):

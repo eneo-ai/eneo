@@ -38,8 +38,11 @@ router = APIRouter()
     response_model=PaginatedResponse[CompletionModelPublic],
 )
 async def get_completion_models(
+    user: UserInDB = Depends(get_current_active_user),
     container: Container = Depends(get_container(with_user=True)),
 ):
+    validate_permission(user, Permission.ADMIN)
+
     service = container.completion_model_crud_service()
     assembler = container.completion_model_assembler()
 
@@ -137,6 +140,7 @@ async def get_model_usage(
     container: Container = Depends(get_container(with_user=True)),
 ) -> ModelUsageStatistics:
     """Get usage statistics for a specific model (pre-aggregated for performance)"""
+    validate_permission(user, Permission.ADMIN)
     service = container.completion_model_usage_service()
     return await service.get_model_usage_statistics(model_id, user.tenant_id)
 
@@ -155,9 +159,10 @@ async def get_model_usage_details(
     container: Container = Depends(get_container(with_user=True)),
 ) -> ModelUsagePaginatedResponse:
     """Get detailed list of entities using this model with cursor pagination"""
+    validate_permission(user, Permission.ADMIN)
     import logging
     logger = logging.getLogger(__name__)
-    
+
     logger.info(
         "Starting get_model_usage_details endpoint",
         extra={
@@ -336,6 +341,7 @@ async def get_all_models_usage_summary(
     container: Container = Depends(get_container(with_user=True)),
 ) -> List[ModelUsageSummary]:
     """Get usage summary for all models (optimized with pre-aggregation)"""
+    validate_permission(user, Permission.ADMIN)
     try:
         service = container.completion_model_usage_service()
         return await service.get_all_models_usage_summary(user.tenant_id)
@@ -369,6 +375,7 @@ async def get_model_migration_history(
     container: Container = Depends(get_container(with_user=True)),
 ) -> List[ModelMigrationHistory]:
     """Get migration history for a specific model (from or to this model)"""
+    validate_permission(user, Permission.ADMIN)
     service = container.completion_model_migration_history_service()
     return await service.get_migration_history_for_model(
         model_id, user.tenant_id, limit, offset
@@ -386,6 +393,7 @@ async def get_all_migration_history(
     container: Container = Depends(get_container(with_user=True)),
 ) -> List[ModelMigrationHistory]:
     """Get all migration history for the tenant"""
+    validate_permission(user, Permission.ADMIN)
     service = container.completion_model_migration_history_service()
     return await service.get_migration_history_for_tenant(
         user.tenant_id, limit, offset
@@ -403,6 +411,7 @@ async def get_migration_history_by_id(
     container: Container = Depends(get_container(with_user=True)),
 ) -> ModelMigrationHistory:
     """Get a specific migration history record by ID"""
+    validate_permission(user, Permission.ADMIN)
     service = container.completion_model_migration_history_service()
     history = await service.get_migration_history_by_id(migration_id, user.tenant_id)
     

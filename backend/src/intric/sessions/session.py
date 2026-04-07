@@ -94,6 +94,7 @@ class IntricEventType(str, Enum):
     GENERATING_IMAGE = "generating_image"
     TOOL_CALL = "tool_call"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
+    TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
     TOKEN_USAGE = "token_usage"
 
 
@@ -127,6 +128,13 @@ class SSEToolApprovalRequired(SSEBase):
     tools: list[ToolCallInfo]  # Tools pending approval
 
 
+class SSEToolApprovalTimeout(SSEBase):
+    """Event emitted when tool approval timed out."""
+    intric_event_type: IntricEventType = IntricEventType.TOOL_APPROVAL_TIMEOUT
+    approval_id: str
+    tools: list[ToolCallInfo]
+
+
 class TokenUsageEvent(BaseModel):
     prompt_tokens: int
     completion_tokens: int
@@ -147,8 +155,26 @@ class SSEError(SSEBase):
     error_code: Optional[int] = None
 
 
+class ToolApprovalResponse(BaseModel):
+    status: str
+    approval_id: str
+    decisions_received: int
+    decisions_remaining: int
+    unrecognized_tool_call_ids: list[str] = []
+
+
 # Add the SSE models here in order to include them in the openapi schema
-SSE_MODELS = [SSEText, SSEIntricEvent, SSEToolCall, SSEToolApprovalRequired, SSEFiles, SSEFirstChunk, SSEError]
+SSE_MODELS = [
+    SSEText,
+    SSEIntricEvent,
+    SSEToolCall,
+    SSEToolApprovalRequired,
+    SSEToolApprovalTimeout,
+    SSETokenUsage,
+    SSEFiles,
+    SSEFirstChunk,
+    SSEError,
+]
 
 # Add standalone enums that need to be included in the openapi schema
 SSE_ENUMS = [IntricEventType]

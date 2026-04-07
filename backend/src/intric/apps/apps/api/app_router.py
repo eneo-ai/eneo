@@ -1,6 +1,9 @@
+import logging
+from typing import cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.apps.app_runs.api.app_run_models import (
     AppRunPublic,
@@ -8,6 +11,8 @@ from intric.apps.app_runs.api.app_run_models import (
     RunAppRequest,
 )
 from intric.apps.apps.api.app_models import AppPublic, AppUpdateRequest
+from intric.authentication.auth_models import ApiKeyNotificationTargetType
+from intric.authentication.api_key_notification_auto_follow import auto_follow_on_publish
 from intric.main.container.container import Container
 from intric.main.models import NOT_PROVIDED, PaginatedResponse
 from intric.prompts.api.prompt_models import PromptSparse
@@ -21,6 +26,7 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get(
@@ -458,5 +464,20 @@ async def publish_app(
             extra=extra,
         ),
     )
+
+    if published:
+        try:
+            session = cast(AsyncSession, container.session())
+            await auto_follow_on_publish(
+                session=session,
+                user=user,
+                target_type=ApiKeyNotificationTargetType.APP,
+                target_id=id,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to auto-follow API key expiry notifications for published app %s",
+                id,
+            )
 
     return assembler.from_app_to_model(app=app, permissions=permissions)

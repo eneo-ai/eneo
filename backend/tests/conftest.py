@@ -33,6 +33,23 @@ pytest_plugins = [
 ]
 
 
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip tests with opt-in markers unless explicitly requested via -m."""
+    OPT_IN_MARKERS = {"api_key_matrix"}
+
+    # Check if any opt-in marker was explicitly requested via -m
+    marker_expr = config.getoption("-m", default="")
+    requested = {m for m in OPT_IN_MARKERS if m in marker_expr}
+
+    skip_markers = OPT_IN_MARKERS - requested
+    for item in items:
+        for marker_name in skip_markers:
+            if marker_name in item.keywords:
+                item.add_marker(pytest.mark.skip(
+                    reason=f"'{marker_name}' tests require explicit -m {marker_name}"
+                ))
+
+
 @pytest.fixture(scope="session")
 def event_loop():
     """

@@ -17,7 +17,7 @@ CATEGORY_DESCRIPTIONS = {
 
 # Map all ActionType constants to categories (using string values as keys)
 CATEGORY_MAPPINGS = {
-    # Admin Actions (13 actions)
+    # Admin Actions (23 actions)
     ActionType.USER_CREATED.value: "admin_actions",
     ActionType.USER_DELETED.value: "admin_actions",
     ActionType.USER_UPDATED.value: "admin_actions",
@@ -26,12 +26,22 @@ CATEGORY_MAPPINGS = {
     ActionType.ROLE_DELETED.value: "admin_actions",
     ActionType.PERMISSION_CHANGED.value: "admin_actions",
     ActionType.API_KEY_GENERATED.value: "admin_actions",
+    ActionType.API_KEY_CREATED.value: "admin_actions",
+    ActionType.API_KEY_UPDATED.value: "admin_actions",
+    ActionType.API_KEY_REVOKED.value: "admin_actions",
+    ActionType.API_KEY_SUSPENDED.value: "admin_actions",
+    ActionType.API_KEY_REACTIVATED.value: "admin_actions",
+    ActionType.API_KEY_ROTATED.value: "admin_actions",
+    ActionType.API_KEY_EXPIRED.value: "admin_actions",
+    ActionType.API_KEY_USED.value: "admin_actions",
+    ActionType.API_KEY_AUTH_FAILED.value: "admin_actions",
+    ActionType.TENANT_POLICY_UPDATED.value: "admin_actions",
     ActionType.TENANT_SETTINGS_UPDATED.value: "admin_actions",
     ActionType.CREDENTIALS_UPDATED.value: "admin_actions",
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
     ActionType.MODULE_ADDED.value: "admin_actions",
     ActionType.MODULE_ADDED_TO_TENANT.value: "admin_actions",
-    # User Actions (28 actions)
+    # User Actions (29 actions)
     ActionType.ASSISTANT_CREATED.value: "user_actions",
     ActionType.ASSISTANT_UPDATED.value: "user_actions",
     ActionType.ASSISTANT_DELETED.value: "user_actions",
@@ -57,6 +67,7 @@ CATEGORY_MAPPINGS = {
     ActionType.GROUP_CHAT_CREATED.value: "user_actions",
     ActionType.SESSION_STARTED.value: "user_actions",
     ActionType.SESSION_ENDED.value: "user_actions",
+    ActionType.TOOL_APPROVAL_SUBMITTED.value: "user_actions",
     ActionType.COMPLETION_MODEL_UPDATED.value: "user_actions",
     ActionType.EMBEDDING_MODEL_UPDATED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_UPDATED.value: "user_actions",
@@ -109,7 +120,7 @@ def get_category_for_action(action: str) -> str:
         action: ActionType constant (string value)
 
     Returns:
-        Category name ('admin_actions', 'user_actions', etc.)
-        Defaults to 'user_actions' if action not found.
+        Category name (admin_actions, user_actions, etc.)
+        Defaults to user_actions if action not found.
     """
     return CATEGORY_MAPPINGS.get(action, "user_actions")

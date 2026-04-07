@@ -76,6 +76,8 @@ class CompletionModelAdapter(ABC):
         model_kwargs: "ModelKwargs | None" = None,
         require_tool_approval: bool = False,
         approval_manager=None,
+        approval_context: dict | None = None,
+        pending_approval_ids: set[str] | None = None,
     ):
         """
         Phase 2 (Iteration): Iterate pre-created stream INSIDE EventSourceResponse.

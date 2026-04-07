@@ -13,8 +13,11 @@
   // Svelte 5 runes mode: use $props() instead of export let
   let { data } = $props();
 
-  // Get search value and tab from URL params
-  const _searchValue = $derived($page.url.searchParams.get("search") || "");
+  // Get search value and tab from URL params.
+  // Support both canonical `search` and legacy `search_email` links.
+  const searchValue = $derived(
+    $page.url.searchParams.get("search") || $page.url.searchParams.get("search_email") || ""
+  );
   const currentTab = $derived($page.url.searchParams.get("tab") || "active");
 
   // Swedish number formatting for counts (e.g., 2828 → "2 828", 50000 → "50 000")
@@ -47,7 +50,16 @@
       const filterVal = userTableRef.filterValue;
 
       // Subscribe to filter changes
+      let isInitialEmission = true;
       const unsubscribe = filterVal.subscribe((value: string) => {
+        if (isInitialEmission) {
+          isInitialEmission = false;
+          // Prevent initial empty table state from wiping URL-driven searches.
+          if (!value.trim() && searchValue.trim()) {
+            return;
+          }
+        }
+
         // Debounce navigation (250ms delay)
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
@@ -65,9 +77,13 @@
             if (currentTab) params.set("tab", currentTab);
             if (trimmed) params.set("search", trimmed);
 
-            const url = params.toString() ? `/admin/users?${params.toString()}` : "/admin/users";
+            const nextUrl = params.toString() ? `/admin/users?${params.toString()}` : "/admin/users";
+            const currentUrl = `${$page.url.pathname}${$page.url.search}`;
+            if (nextUrl === currentUrl) {
+              return;
+            }
 
-            goto(resolve(url), { noScroll: true, keepFocus: true, replaceState: true });
+            goto(resolve(nextUrl), { noScroll: true, keepFocus: true, replaceState: true });
           }
           // If 1-2 chars: silently ignore (no request, no error, better UX)
         }, 250);
@@ -114,7 +130,7 @@
     <UserEditor mode="create"></UserEditor>
   </Page.Header>
   <Page.Main>
-    <UserTable bind:this={userTableRef} users={data.users ?? []} />
+    <UserTable bind:this={userTableRef} users={data.users ?? []} initialFilterValue={searchValue} />
 
     {#if data.pagination}
       <ServerPagination

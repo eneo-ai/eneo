@@ -190,5 +190,6 @@
   resource={assistant}
   endpoints={intric.assistants}
   openController={showPublishDialog}
+  resourceKind="assistant"
   awaitUpdate
 ></PublishingDialog>

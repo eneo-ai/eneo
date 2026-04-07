@@ -110,7 +110,7 @@ class GroupRepository:
             sa.select(CollectionsTable)
             .join(GroupsSpaces, GroupsSpaces.collection_id == CollectionsTable.id)
             .where(GroupsSpaces.space_id == space_id)
-            .distinct(CollectionsTable.id)
+            .distinct()
             .order_by(CollectionsTable.created_at)
         )
         return await self.delegate.get_models_from_query(query)

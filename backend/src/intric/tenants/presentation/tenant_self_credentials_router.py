@@ -144,7 +144,11 @@ async def set_credential(
     except ValueError as e:
         error_message = str(e)
         if "Credential validation failed" in error_message:
-            errors = error_message.split(": ", 1)[1].split("; ") if ": " in error_message else [error_message]
+            errors = (
+                error_message.split(": ", 1)[1].split("; ")
+                if ": " in error_message
+                else [error_message]
+            )
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={

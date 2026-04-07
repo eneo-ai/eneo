@@ -13,7 +13,8 @@
   const checked = writable(value);
 
   const {
-    elements: { root, input }
+    elements: { root, input },
+    options
   } = createSwitch({
     checked,
     onCheckedChange({ curr, next }) {
@@ -29,6 +30,7 @@
   const check_id = uid(8);
 
   $: checked.set(value);
+  $: options.disabled.set(disabled);
 </script>
 
 <fieldset class="flex items-center gap-4 {cls}">

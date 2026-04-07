@@ -9,6 +9,7 @@ from intric.users.user import SortField, SortOrder
 
 class StateFilter(str, Enum):
     """Filter for user state in admin users list"""
+
     ACTIVE = "active"  # Returns users with state='active' OR state='invited'
     INACTIVE = "inactive"  # Returns users with state='inactive'
 
@@ -19,41 +20,34 @@ class PrivacyPolicy(BaseModel):
 
 class UserStateListItem(BaseModel):
     """Minimal user information for state-based list operations"""
-    username: str = Field(
-        description="User's unique username",
-        examples=["jane.smith"]
-    )
+
+    username: str = Field(description="User's unique username", examples=["jane.smith"])
     email: str = Field(
-        description="User's email address",
-        examples=["jane.smith@municipality.se"]
+        description="User's email address", examples=["jane.smith@municipality.se"]
     )
-    state: str = Field(
-        description="User's current state",
-        examples=["inactive"]
-    )
+    state: str = Field(description="User's current state", examples=["inactive"])
     state_changed_at: datetime = Field(
         description="When the user state was last changed",
-        examples=["2025-09-10T08:30:00Z"]
+        examples=["2025-09-10T08:30:00Z"],
     )
 
 
 class UserDeletedListItem(BaseModel):
     """User information for deleted users list operations"""
+
     username: str = Field(
-        description="User's unique username",
-        examples=["former.employee"]
+        description="User's unique username", examples=["former.employee"]
     )
     email: str = Field(
-        description="User's email address",
-        examples=["former.employee@municipality.se"]
+        description="User's email address", examples=["former.employee@municipality.se"]
     )
     state: str = Field(
         description="User's current state (always 'deleted' for this list)",
-        examples=["deleted"]
+        examples=["deleted"],
     )
     deleted_at: datetime = Field(
         description="When the user was deleted (for external tracking)",
-        examples=["2025-08-15T14:20:00Z"]
+        examples=["2025-08-15T14:20:00Z"],
     )
 
 
@@ -87,44 +81,45 @@ class AdminUsersQueryParams(BaseModel):
         GET /api/v1/admin/users/?state_filter=active
         GET /api/v1/admin/users/?state_filter=inactive
     """
+
     page: int = Field(
         default=1,
         ge=1,
         le=100,
         description="Page number (1-based). Maximum 100 pages to prevent deep pagination performance issues.",
-        examples=[1]
+        examples=[1],
     )
     page_size: int = Field(
         default=100,
         ge=1,
         le=100,
         description="Number of users per page. Maximum 100 to balance performance and usability.",
-        examples=[100]
+        examples=[100],
     )
     search_email: Optional[str] = Field(
         default=None,
         description="Search users by email (case-insensitive, partial match). Uses pg_trgm fuzzy matching for efficient substring search.",
-        examples=["john.doe", "@municipality.se"]
+        examples=["john.doe", "@municipality.se"],
     )
     search_name: Optional[str] = Field(
         default=None,
         description="Search users by username (case-insensitive, partial match). Uses pg_trgm fuzzy matching.",
-        examples=["emma", "anders"]
+        examples=["emma", "anders"],
     )
     sort_by: SortField = Field(
         default=SortField.CREATED_AT,
         description="Field to sort by. Uses composite B-tree indexes for efficient tenant-scoped sorting.",
-        examples=["created_at"]
+        examples=["created_at"],
     )
     sort_order: SortOrder = Field(
         default=SortOrder.DESC,
         description="Sort order (ascending or descending)",
-        examples=["desc"]
+        examples=["desc"],
     )
     state_filter: Optional[StateFilter] = Field(
         default=None,
         description="Filter users by state. 'active' includes both active and invited users. 'inactive' shows only inactive users. Omit for all non-deleted users.",
-        examples=["active", "inactive"]
+        examples=["active", "inactive"],
     )
 
     @field_validator("page")
@@ -151,7 +146,9 @@ class AdminUsersQueryParams(BaseModel):
         if v is not None:
             trimmed = v.strip()
             if trimmed and len(trimmed) < 3:
-                raise ValueError("search_email must be at least 3 characters (prevents inefficient trigram queries)")
+                raise ValueError(
+                    "search_email must be at least 3 characters (prevents inefficient trigram queries)"
+                )
             return trimmed if trimmed else None
         return v
 
@@ -161,7 +158,9 @@ class AdminUsersQueryParams(BaseModel):
         if v is not None:
             trimmed = v.strip()
             if trimmed and len(trimmed) < 3:
-                raise ValueError("search_name must be at least 3 characters (prevents inefficient trigram queries)")
+                raise ValueError(
+                    "search_name must be at least 3 characters (prevents inefficient trigram queries)"
+                )
             return trimmed if trimmed else None
         return v
 
@@ -173,38 +172,30 @@ class PaginationMetadata(BaseModel):
     Provides all information needed to build pagination UI (page numbers, next/previous buttons).
     Includes counts by state for tab display.
     """
-    page: int = Field(
-        description="Current page number (1-based)",
-        examples=[1]
-    )
-    page_size: int = Field(
-        description="Number of items per page",
-        examples=[100]
-    )
+
+    page: int = Field(description="Current page number (1-based)", examples=[1])
+    page_size: int = Field(description="Number of items per page", examples=[100])
     total_count: int = Field(
-        description="Total number of items across all pages",
-        examples=[543]
+        description="Total number of items across all pages", examples=[543]
     )
     total_pages: int = Field(
         description="Total number of pages (calculated from total_count and page_size)",
-        examples=[6]
+        examples=[6],
     )
     has_next: bool = Field(
-        description="Whether there is a next page available",
-        examples=[True]
+        description="Whether there is a next page available", examples=[True]
     )
     has_previous: bool = Field(
-        description="Whether there is a previous page available",
-        examples=[False]
+        description="Whether there is a previous page available", examples=[False]
     )
     counts: dict[str, int] | None = Field(
         default=None,
         description="Optional counts by state (active, inactive) for tab display",
-        examples=[{"active": 2828, "inactive": 3}]
+        examples=[{"active": 2828, "inactive": 3}],
     )
 
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class PaginatedUsersResponse(BaseModel, Generic[T]):
@@ -213,9 +204,9 @@ class PaginatedUsersResponse(BaseModel, Generic[T]):
 
     Provides user data with pagination metadata for efficient large-dataset browsing.
     """
+
     items: list[T] = Field(
-        description="List of users for the current page",
-        examples=[[]]
+        description="List of users for the current page", examples=[[]]
     )
     metadata: PaginationMetadata = Field(
         description="Pagination metadata for navigation"

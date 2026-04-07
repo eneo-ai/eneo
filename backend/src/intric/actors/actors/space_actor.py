@@ -377,6 +377,11 @@ class SpaceActor:
         return permission_map.get(resource_type)
 
     def _get_role(self):
+        # 0. Service API key — derive role from key scope, no membership needed
+        service_role = self._get_service_key_role()
+        if service_role is not None:
+            return service_role
+
         # 1. Personal space → OWNER
         if self.space.is_personal():
             if self.user.id == self.space.user_id:
@@ -391,6 +396,67 @@ class SpaceActor:
 
         # 4. Return the highest role
         return self._get_highest_role(direct_role, group_role)
+
+    def _get_service_key_role(self) -> SpaceRole | None:
+        """Derive a space role from a service API key's scope.
+
+        Service keys are not tied to a real user, so there's no membership row.
+        Instead, the key's scope determines whether — and with what role — the
+        synthetic user can act within this space:
+
+        - tenant-scoped key  → access to every space in the tenant
+        - space-scoped key   → access only to the matching space
+        - assistant/app-scoped key → access only to the parent space
+
+        The key's permission level maps to a space role:
+          read  → VIEWER
+          write → EDITOR
+          admin → ADMIN
+        """
+        key = getattr(self.user, "active_api_key", None)
+        if key is None:
+            return None
+
+        # Only service keys need synthetic role derivation —
+        # user keys authenticate as a real user who has actual membership.
+        ownership_raw = getattr(key, "ownership", "user")
+        ownership = ownership_raw.value if isinstance(ownership_raw, Enum) else str(ownership_raw)
+        if ownership != "service":
+            return None
+
+        scope_type = key.scope_type
+        if hasattr(scope_type, "value"):
+            scope_type = scope_type.value
+
+        # Check if the key's scope covers this space
+        if scope_type == "tenant":
+            pass  # tenant keys cover every space
+        elif scope_type == "space":
+            if key.scope_id != self.space.id:
+                return None
+        elif scope_type in ("assistant", "app"):
+            # The key is scoped to a single resource — allow access to its
+            # parent space so the resource can actually be reached.
+            resource_ids = set()
+            if scope_type == "assistant":
+                resource_ids = {a.id for a in (self.space.assistants or [])}
+            elif scope_type == "app":
+                resource_ids = {a.id for a in (self.space.apps or [])}
+            if key.scope_id not in resource_ids:
+                return None
+        else:
+            return None
+
+        permission = key.permission
+        if hasattr(permission, "value"):
+            permission = permission.value
+
+        _PERMISSION_TO_ROLE = {
+            "read": SpaceRole.VIEWER,
+            "write": SpaceRole.EDITOR,
+            "admin": SpaceRole.ADMIN,
+        }
+        return _PERMISSION_TO_ROLE.get(permission)
 
     def _get_direct_role(self) -> SpaceRole | None:
         """Get the user's role from direct membership."""

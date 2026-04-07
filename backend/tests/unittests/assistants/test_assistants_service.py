@@ -37,6 +37,11 @@ class Setup:
 @pytest.fixture(name="setup")
 def setup_fixture():
     repo = AsyncMock()
+    # repo.session.execute() is used by MCP validation; return an object whose
+    # fetchall() yields an empty list so the set comprehension works.
+    mock_db_result = MagicMock()
+    mock_db_result.fetchall.return_value = []
+    repo.session.execute = AsyncMock(return_value=mock_db_result)
     user = TEST_USER
     auth_service = MagicMock()
     assistant = AssistantCreatePublic(
@@ -272,10 +277,16 @@ async def test_update_rejects_adding_mcp_when_knowledge_exists(setup: Setup):
     space.get_assistant.return_value = assistant
     setup.service.space_repo.get_space_by_assistant.return_value = space
 
+    mcp_id = uuid4()
+    # Mock DB to return the MCP server as tenant-enabled and space-assigned
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = [(mcp_id,)]
+    setup.service.repo.session.execute = AsyncMock(return_value=mock_result)
+
     with pytest.raises(BadRequestException, match="Knowledge and MCP servers cannot both be active"):
         await setup.service.update_assistant(
             assistant_id=TEST_UUID,
-            mcp_server_ids=[uuid4()],
+            mcp_server_ids=[mcp_id],
         )
 
 
@@ -313,10 +324,15 @@ async def test_update_rejects_keeping_both_when_legacy_assistant(setup: Setup):
     space.get_assistant.return_value = assistant
     setup.service.space_repo.get_space_by_assistant.return_value = space
 
+    mcp_id = uuid4()
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = [(mcp_id,)]
+    setup.service.repo.session.execute = AsyncMock(return_value=mock_result)
+
     with pytest.raises(BadRequestException, match="Knowledge and MCP servers cannot both be active"):
         await setup.service.update_assistant(
             assistant_id=TEST_UUID,
-            mcp_server_ids=[uuid4()],
+            mcp_server_ids=[mcp_id],
         )
 
 
@@ -370,3 +386,18 @@ async def test_error_when_assistant_cannot_be_used_in_space(setup: Setup):
 
     with pytest.raises(ModelNotAvailableException):
         await setup.service.ask(question="hello", assistant_id=MagicMock())
+
+
+async def test_publish_assistant_unauthorized_has_actionable_message(setup: Setup):
+    space = MagicMock()
+    space.get_assistant.return_value = MagicMock()
+    setup.service.space_repo.get_space_by_assistant.return_value = space
+
+    actor = MagicMock()
+    actor.can_publish_assistants.return_value = False
+    setup.service.actor_manager.get_space_actor_from_space.return_value = actor
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await setup.service.publish_assistant(TEST_UUID, True)
+
+    assert "Publishing assistants" in str(exc_info.value)

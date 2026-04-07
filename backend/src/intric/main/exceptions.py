@@ -50,6 +50,9 @@ class ErrorCodes(int, Enum):
     MODEL_NOT_AVAILABLE = 9033
     KNOWLEDGE_MODEL_UNAVAILABLE = 9034
     SECURITY_CLASSIFICATION_MISMATCH = 9035
+    # MCP upstream errors
+    MCP_UPSTREAM_ERROR = 9036
+    MCP_UPSTREAM_AUTH_ERROR = 9037
 
 
 class NotFoundException(Exception):
@@ -57,7 +60,16 @@ class NotFoundException(Exception):
 
 
 class UnauthorizedException(Exception):
-    pass
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str = "forbidden",
+        context: dict[str, object] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.context = context
 
 
 class UnsupportedModelException(Exception):
@@ -338,6 +350,18 @@ class SecurityClassificationMismatchException(Exception):
     pass
 
 
+class MCPClientError(Exception):
+    """Raised when an upstream MCP service fails."""
+
+    pass
+
+
+class MCPAuthenticationError(MCPClientError):
+    """Raised when upstream MCP authentication fails."""
+
+    pass
+
+
 # Map exceptions to response codes
 # Set message to None to use the internal message
 # Set error codes in the range 9000 - 9999
@@ -400,5 +424,16 @@ EXCEPTION_MAP = {
         400,
         None,
         ErrorCodes.SECURITY_CLASSIFICATION_MISMATCH,
+    ),
+    # MCP upstream errors
+    MCPClientError: (
+        502,
+        "MCP upstream service unavailable.",
+        ErrorCodes.MCP_UPSTREAM_ERROR,
+    ),
+    MCPAuthenticationError: (
+        502,
+        "MCP upstream authentication failed.",
+        ErrorCodes.MCP_UPSTREAM_AUTH_ERROR,
     ),
 }

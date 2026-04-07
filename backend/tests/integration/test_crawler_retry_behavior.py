@@ -10,6 +10,7 @@ Tests the new per-job retry tracking system with real Redis:
 """
 
 import asyncio
+import random
 import time
 from uuid import uuid4
 
@@ -277,6 +278,7 @@ async def test_redis_keys_have_proper_ttl(
 @pytest.mark.asyncio
 async def test_exponential_backoff_with_real_calculation(
     redis_client: aioredis.Redis,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     """Verify exponential backoff calculation with real values.
 
@@ -285,6 +287,13 @@ async def test_exponential_backoff_with_real_calculation(
     """
     base_delay = 60.0
     max_delay = 300.0
+    rng = random.Random(42)
+
+    # Use deterministic jitter source to avoid statistical flakes.
+    monkeypatch.setattr(
+        "intric.worker.crawl.recovery.random.uniform",
+        lambda low, high: rng.uniform(low, high),
+    )
 
     # Test several attempts
     attempt_1_delays = [calculate_exponential_backoff(1, base_delay, max_delay) for _ in range(100)]

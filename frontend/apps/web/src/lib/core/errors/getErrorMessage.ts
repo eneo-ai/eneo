@@ -34,6 +34,8 @@ const ERROR_CODE_MESSAGES: Record<number, () => string> = {
 	9033: () => m.eneo_error_9033(), // MODEL_NOT_AVAILABLE
 	9034: () => m.eneo_error_9034(), // KNOWLEDGE_MODEL_UNAVAILABLE
 	9035: () => m.eneo_error_9035(), // SECURITY_CLASSIFICATION_MISMATCH
+	9036: () => m.eneo_error_9036(), // MCP_UPSTREAM_ERROR
+	9037: () => m.eneo_error_9037(), // MCP_UPSTREAM_AUTH_ERROR
 
 	// --- AI service errors ---
 	9008: () => m.eneo_error_9008(), // QUOTA_EXCEEDED

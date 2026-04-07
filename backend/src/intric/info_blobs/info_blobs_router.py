@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, Depends, Path, Request
 
-from intric.authentication.auth_dependencies import get_current_active_user
+from intric.authentication.auth_dependencies import get_current_active_user, get_scope_filter
 from intric.info_blobs.info_blob import (
     InfoBlobPublic,
     InfoBlobPublicNoText,
@@ -29,14 +29,18 @@ router = APIRouter()
     response_model=PaginatedResponse[InfoBlobPublicNoText],
 )
 async def get_info_blob_ids(
+    request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
     """Returns a list of info-blobs.
 
     Does not return the text of each info-blob, 'text' will be null.
     """
+    scope_filter = get_scope_filter(request)
     service = container.info_blob_service()
-    info_blobs_in_db = await service.get_by_user()
+    info_blobs_in_db = await service.get_by_user(
+        space_id_filter=scope_filter.space_id,
+    )
 
     info_blobs_public = [to_info_blob_public_no_text(blob) for blob in info_blobs_in_db]
 

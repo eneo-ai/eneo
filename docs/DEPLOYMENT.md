@@ -415,6 +415,15 @@ curl -X PUT https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federati
   }'
 ```
 
+To update the current federation later without resending the full payload, use `PATCH` instead of `PUT`:
+
+```bash
+curl -X PATCH https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation \
+  -H "X-API-Key: ${ENEO_SUPER_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"allowed_domains": ["municipality.gov", "municipality.se"]}'
+```
+
 **⚠️ Important Notes:**
 - Backup your `ENCRYPTION_KEY` securely - lost keys make encrypted data unrecoverable
 - In strict mode (`TENANT_CREDENTIALS_ENABLED=true`), tenants without configured credentials cannot use LLM features
@@ -505,4 +514,3 @@ If you see `middleware "redirect-to-https@docker" does not exist` in Traefik log
   ```bash
   UPLOAD_MAX_FILE_SIZE=10485760
   ```
-

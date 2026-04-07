@@ -13,6 +13,7 @@ from intric.integration.presentation.models import IntegrationKnowledgePublic
 from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
     MCPServerAssembler,
 )
+from intric.authentication.auth_models import ResourcePermissions
 from intric.main.models import PaginatedPermissions, ResourcePermission
 from intric.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
@@ -82,6 +83,112 @@ class SpaceAssembler:
 
         for knowledge in space.integration_knowledge_list:
             knowledge.permissions = actor.get_integrations_permissions()
+
+    def _get_api_key_resource_permissions(self) -> ResourcePermissions | None:
+        """Return the effective fine-grained resource permissions from the API key, if any."""
+        key = getattr(self.user, "active_api_key", None)
+        if key is None:
+            return None
+        rp = key.resource_permissions
+        if rp is None:
+            return None
+        if isinstance(rp, dict):
+            return ResourcePermissions.model_validate(rp)
+        return rp
+
+    @staticmethod
+    def _cap_permissions(
+        permissions: list[ResourcePermission],
+        level: str,
+    ) -> list[ResourcePermission]:
+        """Filter a permissions list down to what the API key level allows.
+
+        Mapping from resource_permissions level to allowed actions:
+          none  → nothing
+          read  → READ, INSIGHT_VIEW
+          write → READ, CREATE, EDIT, DELETE, PUBLISH, INSIGHT_VIEW
+          admin → everything (no filtering)
+        """
+        if level == "admin":
+            return permissions
+        if level == "none":
+            return []
+
+        if level == "read":
+            allowed = {ResourcePermission.READ, ResourcePermission.INSIGHT_VIEW}
+        else:  # write
+            allowed = {
+                ResourcePermission.READ,
+                ResourcePermission.CREATE,
+                ResourcePermission.EDIT,
+                ResourcePermission.DELETE,
+                ResourcePermission.PUBLISH,
+                ResourcePermission.INSIGHT_VIEW,
+            }
+        return [p for p in permissions if p in allowed]
+
+    def _apply_api_key_resource_caps(
+        self, applications: "Applications", knowledge: "Knowledge"
+    ) -> None:
+        """Intersect reported permissions with API key resource_permissions.
+
+        Mutates the PaginatedPermissions objects in-place so the response
+        only advertises actions the caller can actually perform.
+        """
+        rp = self._get_api_key_resource_permissions()
+        if rp is None:
+            return
+
+        cap = self._cap_permissions
+
+        applications.assistants.permissions = cap(
+            applications.assistants.permissions, rp.assistants.value
+        )
+        applications.group_chats.permissions = cap(
+            applications.group_chats.permissions, rp.assistants.value
+        )
+        applications.apps.permissions = cap(
+            applications.apps.permissions, rp.apps.value
+        )
+        applications.services.permissions = cap(
+            applications.services.permissions, rp.apps.value
+        )
+
+        knowledge.groups.permissions = cap(
+            knowledge.groups.permissions, rp.knowledge.value
+        )
+        knowledge.websites.permissions = cap(
+            knowledge.websites.permissions, rp.knowledge.value
+        )
+        knowledge.integration_knowledge_list.permissions = cap(
+            knowledge.integration_knowledge_list.permissions, rp.knowledge.value
+        )
+
+        # Also cap per-item permissions
+        for assistant in applications.assistants.items:
+            assistant.permissions = cap(assistant.permissions, rp.assistants.value)
+        for group_chat in applications.group_chats.items:
+            group_chat.permissions = cap(group_chat.permissions, rp.assistants.value)
+        for app in applications.apps.items:
+            app.permissions = cap(app.permissions, rp.apps.value)
+        for service in applications.services.items:
+            service.permissions = cap(service.permissions, rp.apps.value)
+
+        for collection in knowledge.groups.items:
+            if hasattr(collection, "permissions"):
+                collection.permissions = cap(collection.permissions, rp.knowledge.value)
+        for website in knowledge.websites.items:
+            if hasattr(website, "permissions"):
+                website.permissions = cap(website.permissions, rp.knowledge.value)
+
+    def _cap_space_permissions(
+        self, permissions: list[ResourcePermission]
+    ) -> list[ResourcePermission]:
+        """Cap space-level permissions using the API key's spaces resource permission."""
+        rp = self._get_api_key_resource_permissions()
+        if rp is None:
+            return permissions
+        return self._cap_permissions(permissions, rp.spaces.value)
 
     def _get_assistant_permissions(self, space: Space):
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -364,13 +471,14 @@ class SpaceAssembler:
         self._set_permissions_on_resources(space)
         applications = self._get_applications_model(space)
         knowledge = self._get_knowledge_model(space)
+        self._apply_api_key_resource_caps(applications, knowledge)
         members = PaginatedPermissions[SpaceMember](
             items=self._sort_members(space),
-            permissions=self._get_member_permissions(space),
+            permissions=self._cap_space_permissions(self._get_member_permissions(space)),
         )
         group_members = PaginatedPermissions[SpaceGroupMember](
             items=list(space.group_members.values()),
-            permissions=self._get_group_member_permissions(space),
+            permissions=self._cap_space_permissions(self._get_group_member_permissions(space)),
         )
         embedding_models = [
             EmbeddingModelPublic.from_domain(model)
@@ -391,9 +499,13 @@ class SpaceAssembler:
 
         default_assistant = None
         if getattr(space, "default_assistant", None) is not None:
+            da_permissions = self._get_default_assistant_permissions(space)
+            rp = self._get_api_key_resource_permissions()
+            if rp is not None:
+                da_permissions = self._cap_permissions(da_permissions, rp.assistants.value)
             default_assistant = self.assistant_assembler.from_assistant_to_default_assistant_model(
                 space.default_assistant,
-                permissions=self._get_default_assistant_permissions(space),
+                permissions=da_permissions,
             )
         available_roles = [SpaceRole(value=role) for role in actor.get_available_roles()]
         security_classification = None
@@ -422,7 +534,7 @@ class SpaceAssembler:
             group_members=group_members,
             personal=space.is_personal(),
             organization=space.is_organization(),
-            permissions=self._get_space_permissions(space),
+            permissions=self._cap_space_permissions(self._get_space_permissions(space)),
             available_roles=available_roles,
             security_classification=security_classification,
             data_retention_days=space.data_retention_days,

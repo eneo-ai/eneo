@@ -1,3 +1,4 @@
+import { browser } from "$app/environment";
 import { PAGINATION } from "$lib/core/constants";
 import { toastError } from "$lib/core/errors";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
@@ -357,6 +358,45 @@ export class ChatService {
                 approvalId: event.approval_id,
                 tools: event.tools
               };
+            },
+            onToolApprovalTimeout: (event) => {
+              if (isStale()) return;
+              if (!ensureCurrentSession(event)) return;
+              // Backend timed out waiting for approval — clear pending state so the
+              // approval UI no longer targets a dead approval_id, and merge the
+              // timeout_denied status into the rendered tool calls so the user sees
+              // what happened instead of stuck "Approve/Deny" buttons.
+              if (
+                this.pendingToolApproval &&
+                this.pendingToolApproval.approvalId === event.approval_id
+              ) {
+                this.pendingToolApproval = null;
+              }
+              if (ref) {
+                // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
+                if (!ref.mcp_tool_calls) {
+                  // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
+                  ref.mcp_tool_calls = [];
+                }
+                for (const tool of event.tools) {
+                  // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
+                  const existingIndex = ref.mcp_tool_calls.findIndex(
+                    (t: { tool_call_id?: string }) =>
+                      t.tool_call_id && t.tool_call_id === tool.tool_call_id
+                  );
+                  if (existingIndex >= 0) {
+                    // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
+                    ref.mcp_tool_calls[existingIndex] = {
+                      // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
+                      ...ref.mcp_tool_calls[existingIndex],
+                      ...tool
+                    };
+                  } else {
+                    // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
+                    ref.mcp_tool_calls.push(tool);
+                  }
+                }
+              }
             }
           }
         });
@@ -389,7 +429,7 @@ export class ChatService {
         if (error instanceof IntricError) {
           message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
         } else if (error instanceof Object && "message" in error && "name" in error) {
-          message += `\n\`\`\`\n$"${error.name}: error.message}"\n\`\`\``;
+          message += `\n\`\`\`\n${error.name}: "${error.message}"\n\`\`\``;
         }
 
         this.currentConversation.messages[this.currentConversation.messages?.length - 1].answer =

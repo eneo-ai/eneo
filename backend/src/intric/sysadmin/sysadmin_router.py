@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from typing import cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Security
@@ -34,6 +35,8 @@ from intric.allowed_origins.allowed_origin_models import (
     AllowedOriginCreate,
     AllowedOriginInDB,
 )
+from intric.authentication.api_key_policy import ApiKeyPolicyService
+from intric.database.database import AsyncSession
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse, PaginatedResponse
@@ -66,6 +69,15 @@ from intric.audit.domain.entity_types import EntityType
 logger = get_logger(__name__)
 
 router = APIRouter(dependencies=[Security(auth.authenticate_super_api_key)])
+
+
+def _invalidate_api_key_origin_cache(container: Container, tenant_id: UUID) -> None:
+    policy_service = ApiKeyPolicyService(
+        allowed_origin_repo=container.allowed_origin_repo(),
+        space_service=None,
+        user=None,
+    )
+    policy_service.invalidate_tenant_origin_cache(tenant_id)
 
 
 class OIDCDebugToggleRequest(BaseModel):
@@ -587,7 +599,7 @@ async def enable_completion_model(
         },
     )
 
-    return model
+    return CompletionModelSparse.model_validate(model)
 
 
 @router.post(
@@ -635,7 +647,7 @@ async def enable_embedding_model(
         },
     )
 
-    return model
+    return CompletionModelSparse.model_validate(model)
 
 
 @router.post("/allowed-origins/", response_model=AllowedOriginInDB)
@@ -644,9 +656,27 @@ async def add_origin(
     container: Container = Depends(get_container()),
 ):
     allowed_origin_repo = container.allowed_origin_repo()
-    return await allowed_origin_repo.add_origin(
+    created = await allowed_origin_repo.add_origin(
         origin=origin.url, tenant_id=origin.tenant_id
     )
+    _invalidate_api_key_origin_cache(container, origin.tenant_id)
+    audit_service = container.audit_service()
+    if audit_service is not None:
+        await audit_service.log_async(
+            tenant_id=origin.tenant_id,
+            actor_id=None,
+            actor_type=ActorType.SYSTEM,
+            action=ActionType.TENANT_POLICY_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=origin.tenant_id,
+            description="Updated tenant API key policy (allowed origin added)",
+            metadata={
+                "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+                "target": {"tenant_id": str(origin.tenant_id)},
+                "changes": {"allowed_origins": {"added": [origin.url]}},
+            },
+        )
+    return created
 
 
 @router.get("/allowed-origins/", response_model=PaginatedResponse[AllowedOriginInDB])
@@ -670,7 +700,27 @@ async def delete_origin(
     container: Container = Depends(get_container()),
 ):
     allowed_origin_repo = container.allowed_origin_repo()
+    origin = await allowed_origin_repo.get_by_id(id)
     await allowed_origin_repo.delete(id)
+    if origin is None:
+        return
+    _invalidate_api_key_origin_cache(container, origin.tenant_id)
+    audit_service = container.audit_service()
+    if audit_service is not None:
+        await audit_service.log_async(
+            tenant_id=origin.tenant_id,
+            actor_id=None,
+            actor_type=ActorType.SYSTEM,
+            action=ActionType.TENANT_POLICY_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=origin.tenant_id,
+            description="Updated tenant API key policy (allowed origin removed)",
+            metadata={
+                "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+                "target": {"tenant_id": str(origin.tenant_id)},
+                "changes": {"allowed_origins": {"removed": [origin.url]}},
+            },
+        )
 
 
 @router.post(
@@ -804,7 +854,7 @@ async def migrate_completion_model_for_tenant(
         user_repo = container.user_repo()
 
         # Verify tenant exists and is active (without starting a transaction)
-        session = container.session()
+        session = cast(AsyncSession, container.session())
         tenant = await tenant_repo.get(tenant_id)
         if not tenant:
             from fastapi import HTTPException
@@ -956,6 +1006,7 @@ async def migrate_completion_model_for_all_tenants(
         successful_migrations = 0
         failed_migrations = 0
         migration_results = []
+        session = cast(AsyncSession, container.session())
 
         for tenant in active_tenants:
             try:
@@ -964,13 +1015,13 @@ async def migrate_completion_model_for_all_tenants(
                 )
 
                 # Process each tenant in its own transaction
-                async with container.session().begin():
+                async with session.begin():
                     # Get a user from this tenant to set the context
                     from intric.database.tables.users_table import Users
                     from sqlalchemy import select
 
                     stmt = select(Users).where(Users.tenant_id == tenant.id).limit(1)
-                    result = await container.session().execute(stmt)
+                    result = await session.execute(stmt)
                     user_row = result.scalar_one_or_none()
 
                     if not user_row:
@@ -1129,12 +1180,12 @@ async def create_completion_model(
     This creates the model metadata only. To enable it for a tenant,
     use POST /api/v1/completion-models/{id}/ with tenant credentials.
     """
-    session = container.session()
+    session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = CompletionModelsRepository(session=session)
         model = await repo.create_model(model_data)
 
-    return model
+    return CompletionModelSparse.model_validate(model)
 
 
 @router.put(
@@ -1156,7 +1207,7 @@ async def update_completion_model_metadata(
     """
     from intric.main.exceptions import NotFoundException
 
-    session = container.session()
+    session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = CompletionModelsRepository(session=session)
 
@@ -1169,7 +1220,7 @@ async def update_completion_model_metadata(
         if model is None:
             raise NotFoundException(f"Completion model with id {id} not found")
 
-    return model
+    return CompletionModelSparse.model_validate(model)
 
 
 @router.delete(
@@ -1193,7 +1244,7 @@ async def delete_completion_model(
     # For now, we allow deletion with force parameter
     # Future enhancement: Add cross-tenant usage check
 
-    session = container.session()
+    session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = CompletionModelsRepository(session=session)
         await repo.delete_model(id)
@@ -1221,12 +1272,12 @@ async def create_embedding_model(
     This creates the model metadata only. To enable it for a tenant,
     use POST /api/v1/embedding-models/{id}/ with tenant credentials.
     """
-    session = container.session()
+    session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = AdminEmbeddingModelsService(session=session)
         model = await repo.create_model(model_data)
 
-    return model
+    return EmbeddingModelSparse.model_validate(model)
 
 
 @router.put(
@@ -1248,7 +1299,7 @@ async def update_embedding_model_metadata(
     """
     from intric.main.exceptions import NotFoundException
 
-    session = container.session()
+    session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = AdminEmbeddingModelsService(session=session)
 
@@ -1261,7 +1312,7 @@ async def update_embedding_model_metadata(
         if model is None:
             raise NotFoundException(f"Embedding model with id {id} not found")
 
-    return model
+    return EmbeddingModelSparse.model_validate(model)
 
 
 @router.delete(

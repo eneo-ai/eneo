@@ -18,6 +18,7 @@
   import { m } from "$lib/paraglide/messages";
   import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
+  import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
 
   let { data } = $props();
   const {
@@ -332,6 +333,21 @@
           />
         </Settings.Row>
       </Settings.Group>
+      {#if data.app.permissions?.includes("edit")}
+        <Settings.Group title={m.api_access()}>
+          <Settings.Row
+            title={m.api_keys()}
+            description={m.api_keys_app_settings_desc()}
+            fullWidth
+          >
+            <ApiKeysSettingsSection
+              scopeType="app"
+              scopeId={data.app.id}
+              scopeName={$resource.name}
+            />
+          </Settings.Row>
+        </Settings.Group>
+      {/if}
     </Settings.Page>
   </Page.Main>
 </Page.Root>
