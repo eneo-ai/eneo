@@ -27,6 +27,7 @@ class SupportsPydanticParsing(Protocol):
 
 class ParsedOutput(abc.ABC):
     def __init__(self, parsed_output: object) -> None:
+        super().__init__()
         self.parsed_output = parsed_output
 
     @abstractmethod
@@ -71,6 +72,7 @@ class TextOutput(ParsedOutput):
 
 class ListOutputParser(OutputParserBase):
     def __init__(self) -> None:
+        super().__init__()
         self.output_parser = cast(
             SupportsListParsing, output_parsers.NumberedListOutputParser()
         )
@@ -88,6 +90,7 @@ class ListOutputParser(OutputParserBase):
 
 class PydanticOutputParser(OutputParserBase):
     def __init__(self, schema: JSONSchemaDefinition) -> None:
+        super().__init__()
         self.factory = PydanticModelFactory(schema)
         model = self.factory.create_pydantic_model()
         self.output_parser = cast(

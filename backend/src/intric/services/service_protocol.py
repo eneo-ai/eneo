@@ -14,11 +14,12 @@ logger = get_logger(__name__)
 
 
 def from_domain_service(
-    service: Service, permissions: list["ResourcePermission"] = None
+    service: Service, permissions: list["ResourcePermission"] | None = None
 ):
     permissions = permissions or []
 
     # TODO: Look into how we surface permissions to the presentation layer
+    assert service.completion_model is not None, "Service must have a completion model"
     return ServicePublicWithUser(
         **service.model_dump(exclude={"permissions", "completion_model"}),
         completion_model=CompletionModelPublic.from_domain(service.completion_model),
@@ -33,6 +34,7 @@ def to_question(question: Question, service: Service):
         logger.warning("%s is not valid JSON. Returning raw", question.answer)
         output = question.answer
 
+    assert service.completion_model is not None, "Service must have a completion model"
     return ServiceRun(
         id=question.id,
         input=question.question,

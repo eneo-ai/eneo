@@ -22,6 +22,7 @@ class BooleanOutput(ParsedOutput):
 
 class BooleanGuardOutputParser(OutputParserBase):
     def __init__(self) -> None:
+        super().__init__()
         self.true_val = "YES"
         self.false_val = "NO"
 

@@ -46,7 +46,8 @@ MODEL_NAME = "DynamicPydanticModel"
 
 
 class PydanticModelFactory:
-    def __init__(self, schema: JSONSchemaDefinition):
+    def __init__(self, schema: JSONSchemaDefinition) -> None:
+        super().__init__()
         self.schema = schema
         self._model_fields: dict[str, tuple[object, object]] = {}
 
@@ -64,8 +65,8 @@ class PydanticModelFactory:
             raise ValidationException("Schema is missing properties")
 
         typed_properties: dict[str, JSONSchemaDefinition] = {}
-        for key, value in properties.items():
-            if not isinstance(key, str) or not isinstance(value, dict):
+        for key, value in cast(dict[str, object], properties).items():
+            if not isinstance(value, dict):
                 raise ValidationException("Invalid schema property definition")
             typed_properties[key] = cast(JSONSchemaDefinition, value)
         return typed_properties
