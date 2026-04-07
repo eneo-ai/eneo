@@ -42,6 +42,7 @@ from intric.server.protocol import responses
 from intric.sessions.session import (
     AskResponse,
     SessionFeedback,
+    SessionInDB,
     SessionMetadataPublic,
     SessionPublic,
 )
@@ -835,7 +836,7 @@ async def get_assistant_session(
 ):
     session_service = container.session_service()
     session = await session_service.get_session_by_uuid(session_id, assistant_id=id)
-    return to_session_public(session)
+    return to_session_public(cast(SessionInDB, session))
 
 
 @router.delete(
@@ -854,6 +855,8 @@ async def delete_assistant_session(
 
     # Delete session
     session = await session_service.delete(session_id, assistant_id=id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
 
     # Get assistant info for audit log
     assistant, _ = await assistant_service.get_assistant(id)

@@ -105,7 +105,7 @@ class AssistantFactory:
                 None,
             )
 
-        prompt_model = None
+        prompt_model: Prompt | None = None
         if prompt is not None:
             prompt_model = self.prompt_factory.create_prompt_from_db(
                 prompt_in_db=prompt, is_selected=True
