@@ -42,7 +42,6 @@ from intric.server.protocol import responses
 from intric.sessions.session import (
     AskResponse,
     SessionFeedback,
-    SessionInDB,
     SessionMetadataPublic,
     SessionPublic,
 )
@@ -836,7 +835,7 @@ async def get_assistant_session(
 ):
     session_service = container.session_service()
     session = await session_service.get_session_by_uuid(session_id, assistant_id=id)
-    return to_session_public(cast(SessionInDB, session))
+    return to_session_public(session)
 
 
 @router.delete(

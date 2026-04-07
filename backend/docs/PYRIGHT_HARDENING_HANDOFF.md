@@ -21,7 +21,7 @@ uv run pyright
 Result at the latest full checkpoint:
 
 - `0 errors`
-- `2499 warnings`
+- `1955 warnings`
 - `681` files analyzed
 
 Important note:
@@ -49,53 +49,68 @@ These slices were either verified at `0 errors / 0 warnings` or brought material
 - `src/intric/audit`
 - `src/intric/templates` errors were eliminated
 - `src/intric/integration` repo-blocking errors were eliminated
+- `src/intric/database/tables/base_class.py` upgraded to `Mapped[]` syntax (`IdMixin`/`TimestampMixin`) — eliminated `Column[UUID]`/`Column[datetime]` warnings across all 44 ORM table modules
+- `src/intric/spaces/space_repo.py` 130 → 2 warnings
+- `src/intric/users/user_service.py` and `user_router.py` 120 → 0 warnings
+- `src/intric/analysis/analysis_service.py` and `analysis_router.py` 95 → 0 warnings
+- `src/intric/crawler/crawler.py` and `src/intric/websites/presentation/website_router.py` 83 → 0 warnings
+- `src/intric/assistants/` module 59 → 1 warning
 
 ## Biggest Remaining Warning Clusters
 
 Latest full checkpoint top rule families:
 
-- `reportCallInDefaultInitializer`: `449`
-- `reportUnknownMemberType`: `411`
-- `reportArgumentType`: `347`
-- `reportUnknownArgumentType`: `292`
-- `reportUnknownVariableType`: `287`
-- `reportMissingSuperCall`: `154`
-- `reportUnknownParameterType`: `154`
+- `reportCallInDefaultInitializer`: `353`
+- `reportUnknownMemberType`: `292`
+- `reportArgumentType`: `243`
+- `reportUnknownVariableType`: `213`
+- `reportUnknownArgumentType`: `185`
+- `reportMissingSuperCall`: `144`
+- `reportUnknownParameterType`: `118`
+- `reportUnnecessaryCast`: `114`
+- `reportImplicitOverride`: `99`
+- `reportMissingTypeArgument`: `59`
 
 Latest full checkpoint top module clusters:
 
-- `integration`: `290`
-- `spaces`: `209`
-- `users`: `147`
-- `files`: `123`
-- `websites`: `115`
-- `analysis`: `110`
-- `templates`: `107`
+- `integration`: `302`
+- `files`: `122`
+- `templates`: `101`
 - `tenants`: `96`
-- `assistants`: `88`
-- `crawler`: `74`
-
-Latest full checkpoint top files:
-
-- `src/intric/spaces/space_repo.py`
-- `src/intric/users/user_service.py`
-- `src/intric/users/user_router.py`
-- `src/intric/analysis/analysis_service.py`
-- `src/intric/analysis/analysis_router.py`
-- `src/intric/websites/presentation/website_router.py`
-- `src/intric/crawler/crawler.py`
-- `src/intric/ai_models/ai_models_service.py`
-- `src/intric/files/text.py`
-- `src/intric/mcp_servers/presentation/mcp_server_router.py`
+- `websites`: `81`
+- `services`: `70`
+- `spaces`: `67`
+- `ai_models`: `66`
+- `embedding_models`: `65`
+- `settings`: `62`
+- `group_chat`: `58`
+- `info_blobs`: `57`
+- `mcp_servers`: `56`
+- `apps`: `55`
+- `feature_flag`: `50`
 
 ## Recommended Next Order
 
-1. Finish `spaces` and `assistants`
-2. Finish `integration`
-3. Finish `sysadmin`, `api`, and router-heavy surfaces
-4. Finish `websites`, `crawler`, and `users`
+1. Finish `integration` (largest remaining cluster at 302)
+2. Finish `files` (122) and `templates` (101)
+3. Finish `tenants` (96), `websites` (81), `services` (70)
+4. Mop up remaining `spaces` (67) and `assistants` warnings (3 left, 2 require cross-file changes)
 5. Re-run full Pyright and continue ratcheting warnings down
 6. Once warning debt is materially lower, convert more warnings into errors and expand `strict` coverage further
+
+## Cross-File Follow-Ups Identified by Cleanup Pass
+
+Routed during the parallel cleanup but not yet applied (each requires touching a shared file outside the cleaned slice):
+
+- `space_factory.py`: `security_classification` parameter should accept `Optional[SecurityClassificationDBModel]` (DB type)
+- `group_chat/domain/entities/group_chat.py`: annotate `metadata_json` with concrete `dict[str, object]`
+- `assistants/assistant_table.py`: change `Mapped[Optional[dict]]` → `Mapped[Optional[dict[str, object]]]` for `completion_model_kwargs` and `metadata_json`
+- `authentication/auth_service.py`: `create_assistant_api_key(assistant_id: int)` should be `assistant_id: UUID`
+- `assistants/assistant.py:141`: `completion_model` property needs explicit `CompletionModel | None` return type
+- `tenants/tenant_repo.py`: `TenantRepository.get()` should return `TenantInDB | None`
+- `main/container/container.py`: declare `user_creation_service: providers.Factory[...]` and other untyped factory providers
+- `website_crud_service.py`: narrow `find_on_organization_space` return to `dict[str, Any] | None`
+- `crawler/crawler_settings_helper.py`: `get_crawler_setting` generic `T` is unconstrained — overloads per setting name would resolve `Unknown` at all call sites globally
 
 ## Fix Strategy
 

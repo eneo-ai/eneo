@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -27,13 +27,16 @@ from intric.websites.presentation.website_models import (
 
 router = APIRouter()
 
+ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
+
 
 @router.get("/", response_model=PaginatedResponse[WebsitePublic], deprecated=True)
 async def get_websites(
-    for_tenant: bool = Query(
-        default=False, description="Filter websites by tenant scope"
-    ),
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
+    for_tenant: Annotated[
+        bool,
+        Query(description="Filter websites by tenant scope"),
+    ] = False,
 ):
     raise HTTPException(status_code=410, detail="This endpoint is deprecated")
 
@@ -41,7 +44,7 @@ async def get_websites(
 @router.post("/", response_model=WebsitePublic, deprecated=True)
 async def create_website(
     crawl: WebsiteCreateRequestDeprecated,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ):
     raise HTTPException(status_code=410, detail="This endpoint is deprecated")
 
@@ -67,17 +70,23 @@ async def create_website(
     """,
 )
 async def check_existing_website_url(
-    url: str = Query(description="The website URL to check"),
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
+    url: Annotated[str, Query(description="The website URL to check")],
 ) -> WebsiteExistsResponse | None:
     """Check if URL exists on the Organization space."""
     service = container.website_crud_service()
-    result = await service.find_on_organization_space(url)
+    # find_on_organization_space returns dict | None; container.website_crud_service()
+    # is untyped so the method appears as Unknown member. Cast pins the return type
+    # at this boundary instead of propagating Unknown into model_validate.
+    result = cast(
+        "dict[str, Any] | None",
+        await service.find_on_organization_space(url),  # pyright: ignore[reportUnknownMemberType]
+    )
 
     if result is None:
         return None
 
-    return WebsiteExistsResponse(**result)
+    return WebsiteExistsResponse.model_validate(result)
 
 
 @router.post(
@@ -125,7 +134,7 @@ async def check_existing_website_url(
 )
 async def bulk_run_crawl(
     request: BulkCrawlRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ):
     """Trigger crawls for multiple websites in a single request."""
     import logging
@@ -162,8 +171,8 @@ async def bulk_run_crawl(
     "/{id}/", response_model=WebsitePublic, responses=responses.get_responses([404])
 )
 async def get_website(
-    id: UUID = Path(description="Unique identifier of the website"),
-    container: Container = Depends(get_container(with_user=True)),
+    id: Annotated[UUID, Path(description="Unique identifier of the website")],
+    container: ContainerDep,
 ):
     service = container.website_crud_service()
     website = await service.get_website(id)
@@ -177,7 +186,7 @@ async def get_website(
 async def update_website(
     website_update: WebsiteUpdate,
     id: Annotated[UUID, Path(description="Unique identifier of the website to update")],
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ):
     service = container.website_crud_service()
     user = container.user()
@@ -215,8 +224,8 @@ async def update_website(
 
 @router.delete("/{id}/", status_code=200, responses=responses.get_responses([404]))
 async def delete_website(
-    id: UUID = Path(description="Unique identifier of the website to delete"),
-    container: Container = Depends(get_container(with_user=True)),
+    id: Annotated[UUID, Path(description="Unique identifier of the website to delete")],
+    container: ContainerDep,
 ):
     service = container.website_crud_service()
     user = container.user()
@@ -269,8 +278,8 @@ async def delete_website(
     """,
 )
 async def run_crawl(
-    id: UUID = Path(description="Unique identifier of the website to crawl"),
-    container: Container = Depends(get_container(with_user=True)),
+    id: Annotated[UUID, Path(description="Unique identifier of the website to crawl")],
+    container: ContainerDep,
 ):
     # MIT License
 
@@ -282,8 +291,8 @@ async def run_crawl(
 
 @router.get("/{id}/runs/", response_model=PaginatedResponse[CrawlRunPublic])
 async def get_crawl_runs(
-    id: UUID = Path(description="Unique identifier of the website"),
-    container: Container = Depends(get_container(with_user=True)),
+    id: Annotated[UUID, Path(description="Unique identifier of the website")],
+    container: ContainerDep,
 ):
     service = container.website_crud_service()
     crawl_runs = await service.get_crawl_runs(id)
@@ -299,7 +308,7 @@ async def transfer_website_to_space(
     id: Annotated[
         UUID, Path(description="Unique identifier of the website to transfer")
     ],
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ):
     # Transfer website (do this FIRST to avoid DI issues)
     service = container.resource_mover_service()
@@ -338,8 +347,8 @@ async def transfer_website_to_space(
     responses=responses.get_responses([400, 404]),
 )
 async def get_info_blobs(
-    id: UUID = Path(description="Unique identifier of the website"),
-    container: Container = Depends(get_container(with_user=True)),
+    id: Annotated[UUID, Path(description="Unique identifier of the website")],
+    container: ContainerDep,
 ):
     service = container.info_blob_service()
 

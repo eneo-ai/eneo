@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
@@ -118,13 +117,14 @@ class AssistantFactory:
         ]
 
         user = UserSparse.model_validate(assistant_in_db.user)
-        completion_model_kwargs_source = assistant_in_db.completion_model_kwargs
-        if completion_model_kwargs_source is None:
-            completion_model_kwargs_raw: dict[str, object] = {}
-        else:
-            completion_model_kwargs_raw = cast(
-                dict[str, object], completion_model_kwargs_source
-            )
+        # JSONB columns are Mapped[Optional[dict]] (unparameterised) in the ORM table;
+        # cast to a concrete type so ModelKwargs.model_validate is fully typed.
+        # reportUnknownMemberType is suppressed here because the root cause is the
+        # unparameterised dict column in assistant_table.py (out of scope).
+        completion_model_kwargs_raw: dict[str, object] = cast(
+            dict[str, object],
+            assistant_in_db.completion_model_kwargs or {},  # pyright: ignore[reportUnknownMemberType]
+        )
         completion_model_kwargs = ModelKwargs.model_validate(
             completion_model_kwargs_raw
         )
@@ -137,10 +137,11 @@ class AssistantFactory:
             else None
         )
 
+        assert assistant_in_db.space_id is not None, "Assistants must belong to a space"
         return Assistant(
-            id=cast(UUID, assistant_in_db.id),
+            id=assistant_in_db.id,
             user=user,
-            space_id=cast(UUID, assistant_in_db.space_id),
+            space_id=assistant_in_db.space_id,
             name=assistant_in_db.name,
             prompt=prompt_model,
             completion_model=completion_model,
@@ -151,8 +152,8 @@ class AssistantFactory:
             collections=[],
             integration_knowledge_list=[],
             mcp_servers=[],
-            created_at=cast(datetime, assistant_in_db.created_at),
-            updated_at=cast(datetime, assistant_in_db.updated_at),
+            created_at=assistant_in_db.created_at,
+            updated_at=assistant_in_db.updated_at,
             published=assistant_in_db.published,
             source_template=source_template,
             is_default=assistant_in_db.is_default,
@@ -221,13 +222,14 @@ class AssistantFactory:
             # Fallback: Map MCP servers from database to domain entities (without filtering)
             mcp_servers = MCPServerMapper.to_entities(assistant_in_db.mcp_servers)
 
-        completion_model_kwargs_source = assistant_in_db.completion_model_kwargs
-        if completion_model_kwargs_source is None:
-            completion_model_kwargs_raw: dict[str, object] = {}
-        else:
-            completion_model_kwargs_raw = cast(
-                dict[str, object], completion_model_kwargs_source
-            )
+        # JSONB columns are Mapped[Optional[dict]] (unparameterised) in the ORM table;
+        # cast to a concrete type so ModelKwargs.model_validate is fully typed.
+        # reportUnknownMemberType is suppressed here because the root cause is the
+        # unparameterised dict column in assistant_table.py (out of scope).
+        completion_model_kwargs_raw: dict[str, object] = cast(
+            dict[str, object],
+            assistant_in_db.completion_model_kwargs or {},  # pyright: ignore[reportUnknownMemberType]
+        )
         completion_model_kwargs = ModelKwargs.model_validate(
             completion_model_kwargs_raw
         )
@@ -248,10 +250,11 @@ class AssistantFactory:
             else None
         )
 
+        assert assistant_in_db.space_id is not None, "Assistants must belong to a space"
         return Assistant(
-            id=cast(UUID, assistant_in_db.id),
+            id=assistant_in_db.id,
             user=user_sparse,
-            space_id=cast(UUID, assistant_in_db.space_id),
+            space_id=assistant_in_db.space_id,
             name=assistant_in_db.name,
             prompt=prompt,
             completion_model=completion_model,
@@ -262,14 +265,15 @@ class AssistantFactory:
             collections=collections,
             integration_knowledge_list=integration_knowledge_list,
             mcp_servers=mcp_servers,
-            created_at=cast(datetime, assistant_in_db.created_at),
-            updated_at=cast(datetime, assistant_in_db.updated_at),
+            created_at=assistant_in_db.created_at,
+            updated_at=assistant_in_db.updated_at,
             published=assistant_in_db.published,
             source_template=source_template,
             is_default=assistant_in_db.is_default,
             description=assistant_in_db.description,
             insight_enabled=assistant_in_db.insight_enabled,
             data_retention_days=assistant_in_db.data_retention_days,
-            metadata_json=cast(dict[str, object] | None, assistant_in_db.metadata_json),
+            # JSONB column is unparameterised dict in ORM (out-of-scope fix needed)
+            metadata_json=cast(dict[str, object] | None, assistant_in_db.metadata_json),  # pyright: ignore[reportUnknownMemberType]
             icon_id=assistant_in_db.icon_id,
         )

@@ -151,7 +151,7 @@ def _check_management_permission(
 def _check_method_resource_permission(
     request: Request,
     key: ApiKeyV2InDB,
-    config: dict,
+    config: dict[str, object],
 ) -> None:
     """Check method→permission and fine-grained resource permission.
 
@@ -164,9 +164,9 @@ def _check_method_resource_permission(
     *config* is written by the router-level
     ``require_resource_permission_for_method`` dependency.
     """
-    resource_type: str = config["resource_type"]
-    read_override_endpoints: frozenset[str] | None = config.get(
-        "read_override_endpoints"
+    resource_type = cast(str, config["resource_type"])
+    read_override_endpoints = cast(
+        "frozenset[str] | None", config.get("read_override_endpoints")
     )
 
     required = METHOD_PERMISSION_MAP.get(request.method, "admin")
@@ -218,6 +218,7 @@ class UserService:
         feature_flag_service: Optional["FeatureFlagService"] = None,
         session: Optional["AsyncSession"] = None,
     ):
+        super().__init__()
         self.repo = user_repo
         self.auth_service = auth_service
         self.api_key_auth_resolver = api_key_auth_resolver
@@ -520,7 +521,7 @@ class UserService:
 
             # Verify tenant exists
             tenant = await self.tenant_repo.get(tenant_id)
-            if tenant is None:
+            if tenant is None:  # pyright: ignore[reportUnnecessaryComparison]  # repo return type not Optional
                 logger.error(
                     f"Tenant not found: {tenant_id}",
                     extra={
@@ -619,9 +620,6 @@ class UserService:
 
         # Create access token
         issued_token = self.auth_service.create_access_token_for_user(user=user_in_db)
-        if issued_token is None:
-            raise AuthenticationException("Could not create access token.")
-        issued_token = cast(str, issued_token)
 
         logger.info(
             "OIDC login completed successfully",
@@ -647,7 +645,7 @@ class UserService:
         await self._validate_username(new_user.username)
 
         tenant = await self.tenant_repo.get(new_user.tenant_id)
-        if tenant is None:
+        if tenant is None:  # pyright: ignore[reportUnnecessaryComparison]  # repo return type not Optional
             raise BadRequestException(f"Tenant {new_user.tenant_id} does not exist")
 
         if new_user.password is not None:
@@ -1334,7 +1332,7 @@ class UserService:
         self,
         request: Request,
         key: ApiKeyV2InDB,
-        scope_config: dict,
+        scope_config: dict[str, object],
         *,
         strict_mode: bool = False,
     ) -> None:
@@ -1343,9 +1341,9 @@ class UserService:
         Called after authentication when scope config is set on the route
         and the key is non-tenant scoped.
         """
-        resource_type: str = scope_config["resource_type"]
-        path_param: str | None = scope_config["path_param"]
-        self_filtering: bool = scope_config.get("self_filtering", False)
+        resource_type = cast(str, scope_config["resource_type"])
+        path_param = cast("str | None", scope_config["path_param"])
+        self_filtering = cast(bool, scope_config.get("self_filtering", False))
         scope_type = ApiKeyScopeType(key.scope_type)
 
         # 1. Tenant-scoped keys always pass (fast path)
@@ -1705,8 +1703,8 @@ class UserService:
         return user_in_db
 
     async def _check_user_and_tenant_state(
-        self, user_in_db, correlation_id: str | None = None
-    ):
+        self, user_in_db: "UserInDB", correlation_id: str | None = None
+    ) -> None:
         """
         Check if the user or their tenant has restrictions.
         Raises appropriate exceptions if user is inactive or tenant is suspended.
@@ -1766,11 +1764,11 @@ class UserService:
 
     async def authenticate_with_assistant_api_key(
         self,
-        api_key: str,
-        token: str,
+        api_key: str | None,
+        token: str | None,
         assistant_id: UUID | None = None,
         request: Request | None = None,
-    ):
+    ) -> "UserInDB":
         user_in_db = None
         assistant_space_id: UUID | None = None
         assistant_tenant_id: UUID | None = None
@@ -1861,7 +1859,7 @@ class UserService:
             await self._validate_username(username)
 
         tenant = await self.tenant_repo.get(tenant_id)
-        if tenant is None:
+        if tenant is None:  # pyright: ignore[reportUnnecessaryComparison]  # repo return type not Optional
             raise BadRequestException(f"Tenant {tenant_id} does not exist")
 
         state = user_invite.state or UserState.INVITED
