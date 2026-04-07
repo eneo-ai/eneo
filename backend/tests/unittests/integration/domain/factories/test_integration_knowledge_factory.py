@@ -103,7 +103,8 @@ class TestIntegrationKnowledgeFactory(unittest.TestCase):
 
         # Act
         knowledge_list = IntegrationKnowledgeFactory.create_entities(
-            db_records, embedding_models=[self.embedding_model_mock for _ in range(num_records)]
+            db_records,
+            embedding_models=[self.embedding_model_mock for _ in range(num_records)],
         )
 
         # Assert

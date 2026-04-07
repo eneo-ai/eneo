@@ -30,7 +30,9 @@ router = APIRouter()
 
 @router.get("/", response_model=PaginatedResponse[WebsitePublic], deprecated=True)
 async def get_websites(
-    for_tenant: bool = Query(default=False, description="Filter websites by tenant scope"),
+    for_tenant: bool = Query(
+        default=False, description="Filter websites by tenant scope"
+    ),
     container: Container = Depends(get_container(with_user=True)),
 ):
     raise HTTPException(status_code=410, detail="This endpoint is deprecated")
@@ -127,6 +129,7 @@ async def bulk_run_crawl(
 ):
     """Trigger crawls for multiple websites in a single request."""
     import logging
+
     logger = logging.getLogger(__name__)
 
     logger.info(f"Bulk crawl request received: {len(request.website_ids)} websites")
@@ -137,7 +140,9 @@ async def bulk_run_crawl(
     try:
         successful_runs, errors = await service.bulk_crawl_websites(request.website_ids)
 
-        logger.info(f"Bulk crawl completed: {len(successful_runs)} queued, {len(errors)} failed")
+        logger.info(
+            f"Bulk crawl completed: {len(successful_runs)} queued, {len(errors)} failed"
+        )
         if errors:
             logger.warning(f"Bulk crawl errors: {errors}")
 
@@ -153,7 +158,9 @@ async def bulk_run_crawl(
         raise
 
 
-@router.get("/{id}/", response_model=WebsitePublic, responses=responses.get_responses([404]))
+@router.get(
+    "/{id}/", response_model=WebsitePublic, responses=responses.get_responses([404])
+)
 async def get_website(
     id: UUID = Path(description="Unique identifier of the website"),
     container: Container = Depends(get_container(with_user=True)),
@@ -164,7 +171,9 @@ async def get_website(
     return WebsitePublic.from_domain(website)
 
 
-@router.post("/{id}/", response_model=WebsitePublic, responses=responses.get_responses([404]))
+@router.post(
+    "/{id}/", response_model=WebsitePublic, responses=responses.get_responses([404])
+)
 async def update_website(
     id: UUID = Path(description="Unique identifier of the website to update"),
     website_update: WebsiteUpdate = ...,
@@ -236,6 +245,7 @@ async def delete_website(
 
     return {"id": id, "deletion_info": {"success": True}}
 
+
 @router.post(
     "/{id}/run/",
     response_model=CrawlRunPublic,
@@ -291,7 +301,9 @@ async def transfer_website_to_space(
 ):
     # Transfer website (do this FIRST to avoid DI issues)
     service = container.resource_mover_service()
-    await service.link_website_to_space(website_id=id, space_id=transfer_req.target_space_id)
+    await service.link_website_to_space(
+        website_id=id, space_id=transfer_req.target_space_id
+    )
 
     # Get user and website info AFTER transfer for audit logging
     user = container.user()
@@ -332,7 +344,8 @@ async def get_info_blobs(
     info_blobs_in_db = await service.get_by_website(id)
 
     info_blobs_public = [
-        info_blob_protocol.to_info_blob_public_no_text(blob) for blob in info_blobs_in_db
+        info_blob_protocol.to_info_blob_public_no_text(blob)
+        for blob in info_blobs_in_db
     ]
 
     return protocol.to_paginated_response(info_blobs_public)

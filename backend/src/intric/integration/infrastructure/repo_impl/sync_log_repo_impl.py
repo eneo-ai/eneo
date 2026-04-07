@@ -43,8 +43,10 @@ class SyncLogRepoImpl(
         self, integration_knowledge_id: UUID
     ) -> int:
         """Get the total count of sync logs for an integration."""
-        query = select(sa.func.count()).select_from(self._db_model).where(
-            self._db_model.integration_knowledge_id == integration_knowledge_id
+        query = (
+            select(sa.func.count())
+            .select_from(self._db_model)
+            .where(self._db_model.integration_knowledge_id == integration_knowledge_id)
         )
         result = await self.session.scalar(query)
         return result or 0

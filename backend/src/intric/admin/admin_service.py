@@ -258,9 +258,7 @@ class AdminService:
                 reason_text=f"User {username} deleted",
             )
             if revoked:
-                logger.info(
-                    f"Revoked {revoked} API keys for deleted user {username}"
-                )
+                logger.info(f"Revoked {revoked} API keys for deleted user {username}")
 
         result = await self.user_service.delete_user(user_in_db.id)
         logger.info(

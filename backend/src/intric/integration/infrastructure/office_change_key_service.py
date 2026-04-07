@@ -65,7 +65,11 @@ class OfficeChangeKeyService:
             return True
 
         # Decode bytes to string for comparison
-        cached_change_key = cached_change_key_bytes.decode('utf-8') if isinstance(cached_change_key_bytes, bytes) else cached_change_key_bytes
+        cached_change_key = (
+            cached_change_key_bytes.decode("utf-8")
+            if isinstance(cached_change_key_bytes, bytes)
+            else cached_change_key_bytes
+        )
 
         # Compare ChangeKeys
         if cached_change_key == change_key:

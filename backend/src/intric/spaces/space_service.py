@@ -158,7 +158,9 @@ class SpaceService:
         space.transcription_models = transcription_models
 
         # Set all tenant-enabled MCP servers for new spaces
-        from intric.database.tables.mcp_server_table import MCPServers as MCPServersTable
+        from intric.database.tables.mcp_server_table import (
+            MCPServers as MCPServersTable,
+        )
         from intric.mcp_servers.domain.entities.mcp_server import MCPServer
         import sqlalchemy as sa
 
@@ -282,7 +284,9 @@ class SpaceService:
         mcp_servers = None
         if mcp_server_ids is not None:
             # Query tenant MCP servers directly from database
-            from intric.database.tables.mcp_server_table import MCPServers as MCPServersTable
+            from intric.database.tables.mcp_server_table import (
+                MCPServers as MCPServersTable,
+            )
             from intric.database.tables.security_classifications_table import (
                 SecurityClassification as SecurityClassificationDBModel,
             )
@@ -358,10 +362,7 @@ class SpaceService:
         # Convert MCPToolSetting objects to tuples for repository
         mcp_tool_settings = None
         if mcp_tools is not None:
-            mcp_tool_settings = [
-                (tool.tool_id, tool.is_enabled)
-                for tool in mcp_tools
-            ]
+            mcp_tool_settings = [(tool.tool_id, tool.is_enabled) for tool in mcp_tools]
 
         return await self.repo.update(space, mcp_tool_settings=mcp_tool_settings)
 

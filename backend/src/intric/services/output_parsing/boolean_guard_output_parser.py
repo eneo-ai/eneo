@@ -7,8 +7,8 @@ FORMAT_INSTRUCTIONS = (
     "If the question relates to normal conversation or"
     " if the answer to the user question can be found anywhere in the"
     " articles delimited by triple quotes, or is relevant"
-    " to any of the information in the articles delimited by triple quotes, answer \"YES\","
-    " otherwise answer \"NO\". Answer only \"YES\" or \"NO\"."
+    ' to any of the information in the articles delimited by triple quotes, answer "YES",'
+    ' otherwise answer "NO". Answer only "YES" or "NO".'
 )
 
 

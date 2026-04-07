@@ -32,7 +32,9 @@ class AppTemplateRepository:
         # db relations
         self._options = [selectinload(self._db_model.completion_model)]
 
-    async def get_by_id(self, app_template_id: "UUID", tenant_id: Optional["UUID"] = None) -> Optional["AppTemplate"]:
+    async def get_by_id(
+        self, app_template_id: "UUID", tenant_id: Optional["UUID"] = None
+    ) -> Optional["AppTemplate"]:
         """Get template by ID.
 
         If tenant_id provided:
@@ -50,7 +52,7 @@ class AppTemplateRepository:
             .options(*self._options)
             .where(
                 self._db_model.id == app_template_id,
-                self._db_model.deleted_at.is_(None)
+                self._db_model.deleted_at.is_(None),
             )
         )
 
@@ -64,7 +66,9 @@ class AppTemplateRepository:
 
         return self.factory.create_app_template(item=record)
 
-    async def get_app_template_list(self, tenant_id: Optional["UUID"] = None) -> list["AppTemplate"]:
+    async def get_app_template_list(
+        self, tenant_id: Optional["UUID"] = None
+    ) -> list["AppTemplate"]:
         """Get all active templates.
 
         If tenant_id provided:
@@ -78,15 +82,17 @@ class AppTemplateRepository:
         Time complexity: O(k log n) where k is number of matching templates
         Uses composite index ix_app_templates_tenant_deleted
         """
-        query = select(self._db_model).options(*self._options).where(
-            self._db_model.deleted_at.is_(None)
+        query = (
+            select(self._db_model)
+            .options(*self._options)
+            .where(self._db_model.deleted_at.is_(None))
         )
 
         if tenant_id is not None:
             query = query.where(
                 or_(
                     self._db_model.tenant_id == tenant_id,
-                    self._db_model.tenant_id.is_(None)
+                    self._db_model.tenant_id.is_(None),
                 )
             )
         else:
@@ -158,13 +164,15 @@ class AppTemplateRepository:
             .options(*self._options)
             .where(
                 self._db_model.tenant_id == tenant_id,
-                self._db_model.deleted_at.is_(None)
+                self._db_model.deleted_at.is_(None),
             )
         )
         results = await self.session.scalars(query)
         return self.factory.create_app_template_list(items=results.all())
 
-    async def check_duplicate_name(self, name: str, tenant_id: Optional["UUID"] = None) -> bool:
+    async def check_duplicate_name(
+        self, name: str, tenant_id: Optional["UUID"] = None
+    ) -> bool:
         """Check if template name already exists.
 
         If tenant_id provided:
@@ -177,8 +185,7 @@ class AppTemplateRepository:
         Time complexity: O(log n) using indexes
         """
         query = select(func.count(self._db_model.id)).where(
-            self._db_model.name == name,
-            self._db_model.deleted_at.is_(None)
+            self._db_model.name == name, self._db_model.deleted_at.is_(None)
         )
         if tenant_id is not None:
             query = query.where(self._db_model.tenant_id == tenant_id)
@@ -188,7 +195,9 @@ class AppTemplateRepository:
         count = await self.session.scalar(query)
         return count > 0
 
-    async def soft_delete(self, id: "UUID", tenant_id: "UUID", user_id: "UUID") -> Optional["AppTemplate"]:
+    async def soft_delete(
+        self, id: "UUID", tenant_id: "UUID", user_id: "UUID"
+    ) -> Optional["AppTemplate"]:
         """Soft-delete template (mark with deleted_at).
 
         Validates: template belongs to tenant
@@ -196,14 +205,8 @@ class AppTemplateRepository:
         """
         stmt = (
             update(self._db_model)
-            .where(
-                self._db_model.id == id,
-                self._db_model.tenant_id == tenant_id
-            )
-            .values(
-                deleted_at=datetime.now(timezone.utc),
-                deleted_by_user_id=user_id
-            )
+            .where(self._db_model.id == id, self._db_model.tenant_id == tenant_id)
+            .values(deleted_at=datetime.now(timezone.utc), deleted_by_user_id=user_id)
             .returning(self._db_model)
         )
         result = await self.session.execute(stmt)
@@ -215,7 +218,9 @@ class AppTemplateRepository:
 
         return self.factory.create_app_template(item=record)
 
-    async def restore(self, id: "UUID", tenant_id: "UUID", user_id: "UUID") -> Optional["AppTemplate"]:
+    async def restore(
+        self, id: "UUID", tenant_id: "UUID", user_id: "UUID"
+    ) -> Optional["AppTemplate"]:
         """Restore soft-deleted template (clear deleted_at).
 
         Validates: template belongs to tenant and is deleted
@@ -226,12 +231,12 @@ class AppTemplateRepository:
             .where(
                 self._db_model.id == id,
                 self._db_model.tenant_id == tenant_id,
-                self._db_model.deleted_at.is_not(None)
+                self._db_model.deleted_at.is_not(None),
             )
             .values(
                 deleted_at=None,
                 restored_by_user_id=user_id,
-                restored_at=datetime.now(timezone.utc)
+                restored_at=datetime.now(timezone.utc),
             )
             .returning(self._db_model)
         )
@@ -253,13 +258,12 @@ class AppTemplateRepository:
         """
         from sqlalchemy import delete
 
-        stmt = (
-            delete(self._db_model)
-            .where(
-                self._db_model.id == id,
-                self._db_model.tenant_id == tenant_id,
-                self._db_model.deleted_at.is_not(None)  # Only hard-delete soft-deleted items
-            )
+        stmt = delete(self._db_model).where(
+            self._db_model.id == id,
+            self._db_model.tenant_id == tenant_id,
+            self._db_model.deleted_at.is_not(
+                None
+            ),  # Only hard-delete soft-deleted items
         )
         result = await self.session.execute(stmt)
         await self.session.flush()
@@ -279,7 +283,7 @@ class AppTemplateRepository:
             .options(*self._options)
             .where(
                 self._db_model.tenant_id == tenant_id,
-                self._db_model.deleted_at.is_not(None)
+                self._db_model.deleted_at.is_not(None),
             )
             .order_by(self._db_model.deleted_at.desc())
         )

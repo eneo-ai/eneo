@@ -12,7 +12,11 @@ from intric.server.dependencies.container import get_container
 from intric.server.protocol import to_paginated_response
 from intric.settings import settings_factory
 from intric.settings.setting_service import SettingService
-from intric.settings.settings import GetModelsResponse, SettingsPublic, ToggleSettingUpdate
+from intric.settings.settings import (
+    GetModelsResponse,
+    SettingsPublic,
+    ToggleSettingUpdate,
+)
 
 logger = get_logger(__name__)
 

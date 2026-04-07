@@ -151,7 +151,9 @@ class TextExtractor:
             raise CorruptFileError(display_name, str(e))
         except Exception as e:
             logger.error(f"Unexpected PDF extraction error for {display_name}: {e}")
-            raise ExtractionError(f"PDF extraction failed for '{display_name}': {str(e)}")
+            raise ExtractionError(
+                f"PDF extraction failed for '{display_name}': {str(e)}"
+            )
 
     @staticmethod
     def extract_from_docx(filepath: Path, filename: str | None = None) -> str:
@@ -170,7 +172,9 @@ class TextExtractor:
             )
         except Exception as e:
             logger.error(f"Unexpected DOCX extraction error for {display_name}: {e}")
-            raise ExtractionError(f"DOCX extraction failed for '{display_name}': {str(e)}")
+            raise ExtractionError(
+                f"DOCX extraction failed for '{display_name}': {str(e)}"
+            )
 
     @staticmethod
     def extract_from_xlsx(filepath: Path, filename: str | None = None) -> str:
@@ -213,7 +217,9 @@ class TextExtractor:
             raise CorruptFileError(display_name, f"Cannot parse Excel format: {e}")
         except Exception as e:
             logger.error(f"Unexpected Excel extraction error for {display_name}: {e}")
-            raise ExtractionError(f"Excel extraction failed for '{display_name}': {str(e)}")
+            raise ExtractionError(
+                f"Excel extraction failed for '{display_name}': {str(e)}"
+            )
 
     @staticmethod
     def extract_from_pptx(filepath: Path, filename: str | None = None) -> str:
@@ -250,7 +256,9 @@ class TextExtractor:
             )
         except Exception as e:
             logger.error(f"Unexpected PPTX extraction error for {display_name}: {e}")
-            raise ExtractionError(f"PPTX extraction failed for '{display_name}': {str(e)}")
+            raise ExtractionError(
+                f"PPTX extraction failed for '{display_name}': {str(e)}"
+            )
 
     def extract(
         self, filepath: Path, mimetype: str | None = None, filename: str | None = None

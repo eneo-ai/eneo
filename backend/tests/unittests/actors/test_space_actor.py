@@ -8,7 +8,9 @@ from intric.modules.module import Modules
 
 # Mocking external dependencies
 class MockUser:
-    def __init__(self, id, permissions=None, modules=None, role=None, user_groups_ids=None):
+    def __init__(
+        self, id, permissions=None, modules=None, role=None, user_groups_ids=None
+    ):
         self.id = id
         self.permissions = permissions or []
         self.modules = modules or []
@@ -23,7 +25,15 @@ class MockGroupMember:
 
 
 class MockSpace:
-    def __init__(self, user_id, personal=False, members=None, tenant_space_id=None, id=None, group_members=None):
+    def __init__(
+        self,
+        user_id,
+        personal=False,
+        members=None,
+        tenant_space_id=None,
+        id=None,
+        group_members=None,
+    ):
         self.user_id = user_id
         self.personal = personal
         self.members = members or {}
@@ -41,7 +51,7 @@ class MockSpace:
     # Org = saknar både user_id och tenant_space_id
     def is_organization(self):
         return (self.user_id is None) and (self.tenant_space_id is None)
-    
+
 
 class MockSpaceRole:
     ADMIN = "admin"
@@ -76,19 +86,16 @@ def editor_user():
 def admin_user():
     return MockUser(id=4, role=MockSpaceRole.ADMIN)
 
+
 @pytest.fixture
 def organization_space():
-    return MockSpace(
-        user_id=None, 
-        personal=False, 
-        tenant_space_id=None,
-        id="org-1"
-    )
+    return MockSpace(user_id=None, personal=False, tenant_space_id=None, id="org-1")
+
 
 @pytest.fixture
 def personal_space(organization_space, owner_user):
     return MockSpace(
-        user_id=owner_user.id, 
+        user_id=owner_user.id,
         personal=True,
         tenant_space_id=organization_space.id,
         id="personal-1",
@@ -480,7 +487,6 @@ def test_group_editor_cannot_manage_group_members(
         )
         is False
     )
-
 
 
 # ---------------------------------------------------------------------------

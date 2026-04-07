@@ -41,7 +41,9 @@ class CrawlRunSparse(CrawlRunBase, InDB):
         default=Status.QUEUED,
     )
     result_location: Optional[str] = Field(
-        validation_alias=AliasChoices(AliasPath("job", "result_location"), "result_location"),
+        validation_alias=AliasChoices(
+            AliasPath("job", "result_location"), "result_location"
+        ),
         default=None,
     )
     finished_at: Optional[datetime] = Field(

@@ -68,9 +68,7 @@ Answer style requirements:
 - Keep the answer language aligned with the user's language.
 """
 
-NO_QUESTIONS_ANSWER = (
-    "No questions were found in the selected timeframe, so there is not enough data to generate insights."
-)
+NO_QUESTIONS_ANSWER = "No questions were found in the selected timeframe, so there is not enough data to generate insights."
 
 
 class AnalysisService:
@@ -251,12 +249,15 @@ class AnalysisService:
 
         started = perf_counter()
         cleaned_questions = [
-            self._normalize_question_text(item) for item in question_texts if item and item.strip()
+            self._normalize_question_text(item)
+            for item in question_texts
+            if item and item.strip()
         ]
 
         if not cleaned_questions:
             no_data_completion = Completion(text=NO_QUESTIONS_ANSWER, stop=True)
             if stream:
+
                 async def _no_data_stream():
                     yield no_data_completion
 
@@ -332,7 +333,9 @@ class AnalysisService:
         summaries_text = "\n\n".join(
             f"Summary {idx + 1}:\n{summary}" for idx, summary in enumerate(summaries)
         )
-        reduce_prompt = REDUCE_SUMMARY_PROMPT.format(days=days, summaries=summaries_text)
+        reduce_prompt = REDUCE_SUMMARY_PROMPT.format(
+            days=days, summaries=summaries_text
+        )
 
         result = await model.get_response(
             question=question,
@@ -376,7 +379,9 @@ class AnalysisService:
             return assistant, [row.question for row in rows]
 
         await self._check_insight_access(group_chat_id=group_chat_id)
-        space = await self.space_service.get_space_by_group_chat(group_chat_id=group_chat_id)
+        space = await self.space_service.get_space_by_group_chat(
+            group_chat_id=group_chat_id
+        )
         group_chat = space.get_group_chat(group_chat_id=group_chat_id)
 
         if not group_chat.assistants:
@@ -719,7 +724,10 @@ class AnalysisService:
             )
 
         started = perf_counter()
-        model_to_use, question_texts = await self._get_question_texts_for_unified_analysis(
+        (
+            model_to_use,
+            question_texts,
+        ) = await self._get_question_texts_for_unified_analysis(
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
             from_date=from_date,
@@ -764,7 +772,11 @@ class AnalysisService:
 
         cursor_created_at, cursor_id = self._decode_question_cursor(cursor)
         started = perf_counter()
-        rows, total_count, has_more = await self.repo.get_assistant_question_history_page(
+        (
+            rows,
+            total_count,
+            has_more,
+        ) = await self.repo.get_assistant_question_history_page(
             assistant_id=assistant_id,
             from_date=from_date,
             to_date=to_date,

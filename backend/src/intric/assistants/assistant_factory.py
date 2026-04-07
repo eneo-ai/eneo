@@ -106,7 +106,8 @@ class AssistantFactory:
             )
 
         attachments = [
-            File(**attachment.file.to_dict()) for attachment in assistant_in_db.attachments
+            File(**attachment.file.to_dict())
+            for attachment in assistant_in_db.attachments
         ]
 
         user = UserSparse.model_validate(assistant_in_db.user)
@@ -115,7 +116,9 @@ class AssistantFactory:
         )
 
         source_template = (
-            self.assistant_template_factory.create_assistant_template(assistant_in_db.template)
+            self.assistant_template_factory.create_assistant_template(
+                assistant_in_db.template
+            )
             if assistant_in_db.template
             else None
         )
@@ -159,7 +162,8 @@ class AssistantFactory:
             for assistant_collection in assistant_in_db.assistant_groups
         ]
         websites_ids = [
-            assistant_website.website_id for assistant_website in assistant_in_db.assistant_websites
+            assistant_website.website_id
+            for assistant_website in assistant_in_db.assistant_websites
         ]
         integration_knowledge_ids = [
             assistant_integration_knowledge.integration_knowledge_id
@@ -173,11 +177,16 @@ class AssistantFactory:
             )
 
         attachments = [
-            File(**attachment.file.to_dict()) for attachment in assistant_in_db.attachments
+            File(**attachment.file.to_dict())
+            for attachment in assistant_in_db.attachments
         ]
 
-        collections = [collection for collection in collections if collection.id in collection_ids]
-        assistant_websites = [website for website in websites if website.id in websites_ids]
+        collections = [
+            collection for collection in collections if collection.id in collection_ids
+        ]
+        assistant_websites = [
+            website for website in websites if website.id in websites_ids
+        ]
 
         integration_knowledge_list = [
             integration_knowledge
@@ -186,7 +195,7 @@ class AssistantFactory:
         ]
 
         # Use filtered MCP servers if available (set by space repo), otherwise map from DB
-        _mcp_server_entities = getattr(assistant_in_db, '_mcp_server_entities', None)
+        _mcp_server_entities = getattr(assistant_in_db, "_mcp_server_entities", None)
         if _mcp_server_entities is not None:
             mcp_servers = _mcp_server_entities
         else:
@@ -197,12 +206,18 @@ class AssistantFactory:
             assistant_in_db.completion_model_kwargs or {}
         )
         completion_model = next(
-            (cm for cm in completion_models if cm.id == assistant_in_db.completion_model_id),
+            (
+                cm
+                for cm in completion_models
+                if cm.id == assistant_in_db.completion_model_id
+            ),
             None,
         )
 
         source_template = (
-            self.assistant_template_factory.create_assistant_template(assistant_in_db.template)
+            self.assistant_template_factory.create_assistant_template(
+                assistant_in_db.template
+            )
             if assistant_in_db.template
             else None
         )

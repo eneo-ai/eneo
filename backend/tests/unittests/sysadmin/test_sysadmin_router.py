@@ -189,7 +189,9 @@ class TestUpdateUser:
 class TestAllowedOriginCacheInvalidation:
     """Allowed-origin mutations should invalidate API-key origin cache immediately."""
 
-    async def test_add_origin_builds_policy_service_without_user_dependency(self, monkeypatch):
+    async def test_add_origin_builds_policy_service_without_user_dependency(
+        self, monkeypatch
+    ):
         tenant_id = uuid.uuid4()
         origin = AllowedOriginCreate(
             url="https://app.example.com",
@@ -222,7 +224,10 @@ class TestAllowedOriginCacheInvalidation:
 
         await add_origin(origin=origin, container=container)
 
-        assert captured_kwargs["allowed_origin_repo"] is container.allowed_origin_repo.return_value
+        assert (
+            captured_kwargs["allowed_origin_repo"]
+            is container.allowed_origin_repo.return_value
+        )
         assert captured_kwargs["space_service"] is None
         assert captured_kwargs["user"] is None
         policy_service.invalidate_tenant_origin_cache.assert_called_once_with(tenant_id)
@@ -277,7 +282,9 @@ class TestAllowedOriginCacheInvalidation:
 
         policy_service.invalidate_tenant_origin_cache.assert_called_once_with(tenant_id)
 
-    async def test_delete_origin_missing_record_does_not_invalidate_cache(self, monkeypatch):
+    async def test_delete_origin_missing_record_does_not_invalidate_cache(
+        self, monkeypatch
+    ):
         origin_id = uuid.uuid4()
 
         container = MagicMock()

@@ -58,6 +58,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
 async def forbid_org_space(
     id: UUID,
     container: Container = Depends(get_container(with_user=True)),
@@ -172,7 +173,9 @@ async def update_space(
         description=update_space_req.description,
         embedding_model_ids=_get_model_ids_or_none(update_space_req.embedding_models),
         completion_model_ids=_get_model_ids_or_none(update_space_req.completion_models),
-        transcription_model_ids=_get_model_ids_or_none(update_space_req.transcription_models),
+        transcription_model_ids=_get_model_ids_or_none(
+            update_space_req.transcription_models
+        ),
         mcp_server_ids=_get_model_ids_or_none(update_space_req.mcp_servers),
         mcp_tools=update_space_req.mcp_tools,
         security_classification=security_classification,
@@ -184,40 +187,75 @@ async def update_space(
     changes = {}
     if update_space_req.name and update_space_req.name != old_space.name:
         changes["name"] = {"old": old_space.name, "new": update_space_req.name}
-    if update_space_req.description is not None and update_space_req.description != old_space.description:
-        changes["description"] = {"old": old_space.description, "new": update_space_req.description}
-    if data_retention_days is not NOT_PROVIDED and data_retention_days != old_space.data_retention_days:
+    if (
+        update_space_req.description is not None
+        and update_space_req.description != old_space.description
+    ):
+        changes["description"] = {
+            "old": old_space.description,
+            "new": update_space_req.description,
+        }
+    if (
+        data_retention_days is not NOT_PROVIDED
+        and data_retention_days != old_space.data_retention_days
+    ):
         changes["data_retention_days"] = {
             "old": old_space.data_retention_days,
-            "new": data_retention_days
+            "new": data_retention_days,
         }
 
     # Track model changes using SET comparison (avoids false positives from ordering)
     if update_space_req.completion_models is not None:
-        old_model_set = {(str(m.id), m.name) for m in (old_space.completion_models or [])}
+        old_model_set = {
+            (str(m.id), m.name) for m in (old_space.completion_models or [])
+        }
         new_model_set = {(str(m.id), m.name) for m in (space.completion_models or [])}
         if old_model_set != new_model_set:
             changes["completion_models"] = {
-                "old": [{"id": str(m.id), "name": m.name} for m in (old_space.completion_models or [])],
-                "new": [{"id": str(m.id), "name": m.name} for m in (space.completion_models or [])]
+                "old": [
+                    {"id": str(m.id), "name": m.name}
+                    for m in (old_space.completion_models or [])
+                ],
+                "new": [
+                    {"id": str(m.id), "name": m.name}
+                    for m in (space.completion_models or [])
+                ],
             }
 
     if update_space_req.embedding_models is not None:
-        old_model_set = {(str(m.id), m.name) for m in (old_space.embedding_models or [])}
+        old_model_set = {
+            (str(m.id), m.name) for m in (old_space.embedding_models or [])
+        }
         new_model_set = {(str(m.id), m.name) for m in (space.embedding_models or [])}
         if old_model_set != new_model_set:
             changes["embedding_models"] = {
-                "old": [{"id": str(m.id), "name": m.name} for m in (old_space.embedding_models or [])],
-                "new": [{"id": str(m.id), "name": m.name} for m in (space.embedding_models or [])]
+                "old": [
+                    {"id": str(m.id), "name": m.name}
+                    for m in (old_space.embedding_models or [])
+                ],
+                "new": [
+                    {"id": str(m.id), "name": m.name}
+                    for m in (space.embedding_models or [])
+                ],
             }
 
     if update_space_req.transcription_models is not None:
-        old_model_set = {(str(m.id), m.name) for m in (old_space.transcription_models or [])}
-        new_model_set = {(str(m.id), m.name) for m in (space.transcription_models or [])}
+        old_model_set = {
+            (str(m.id), m.name) for m in (old_space.transcription_models or [])
+        }
+        new_model_set = {
+            (str(m.id), m.name) for m in (space.transcription_models or [])
+        }
         if old_model_set != new_model_set:
             changes["transcription_models"] = {
-                "old": [{"id": str(m.id), "name": m.name} for m in (old_space.transcription_models or [])],
-                "new": [{"id": str(m.id), "name": m.name} for m in (space.transcription_models or [])]
+                "old": [
+                    {"id": str(m.id), "name": m.name}
+                    for m in (old_space.transcription_models or [])
+                ],
+                "new": [
+                    {"id": str(m.id), "name": m.name}
+                    for m in (space.transcription_models or [])
+                ],
             }
 
     # Track security classification changes
@@ -236,7 +274,9 @@ async def update_space(
         entity_type=EntityType.SPACE,
         entity_id=id,
         description=f"Updated space '{space.name}'",
-        metadata=AuditMetadata.standard(actor=current_user, target=space, changes=changes),
+        metadata=AuditMetadata.standard(
+            actor=current_user, target=space, changes=changes
+        ),
     )
 
     return assembler.from_space_to_model(space)
@@ -303,8 +343,12 @@ async def delete_space(
 )
 async def get_spaces(
     request: Request,
-    include_applications: bool = Query(default=False, description="Includes published applications on each space"),
-    include_personal: bool = Query(default=False,  description="Includes your personal space"),
+    include_applications: bool = Query(
+        default=False, description="Includes published applications on each space"
+    ),
+    include_personal: bool = Query(
+        default=False, description="Includes your personal space"
+    ),
     container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.space_service()
@@ -320,9 +364,15 @@ async def get_spaces(
     if scope_filter.space_id is not None:
         spaces = [s for s in spaces if s.id == scope_filter.space_id]
 
-    spaces = [assembler.from_space_to_sparse_model(space, include_applications=include_applications) for space in spaces]
+    spaces = [
+        assembler.from_space_to_sparse_model(
+            space, include_applications=include_applications
+        )
+        for space in spaces
+    ]
 
     return protocol.to_paginated_response(spaces)
+
 
 @router.get(
     "/{id}/applications/",
@@ -378,7 +428,9 @@ async def create_space_assistant(
         entity_type=EntityType.ASSISTANT,
         entity_id=assistant.id,
         description=f"Created assistant '{assistant.name}' in space '{space.name if space else 'unknown'}'",
-        metadata=AuditMetadata.standard(actor=current_user, target=assistant, space=space),
+        metadata=AuditMetadata.standard(
+            actor=current_user, target=assistant, space=space
+        ),
     )
 
     return assembler.from_assistant_to_model(assistant, permissions=permissions)
@@ -482,7 +534,9 @@ async def create_space_services(
     service = container.service_service()
     assembler = container.space_assembler()
 
-    service, permissions = await service.create_space_service(name=service_in.name, space_id=id)
+    service, permissions = await service.create_space_service(
+        name=service_in.name, space_id=id
+    )
 
     return assembler.from_service_to_model(service=service, permissions=permissions)
 
@@ -506,6 +560,7 @@ async def get_space_knowledge(
     space.integration_knowledge_list = integrations
 
     return assembler.from_space_to_model(space).knowledge
+
 
 @router.post(
     "/{id}/knowledge/groups/",
@@ -556,7 +611,9 @@ async def create_space_groups(
         entity_type=EntityType.COLLECTION,
         entity_id=created_collection.id,
         description=f"Created collection '{created_collection.name}' in space '{space.name if space else 'unknown'}'",
-        metadata=AuditMetadata.standard(actor=user, target=created_collection, space=space, extra=extra),
+        metadata=AuditMetadata.standard(
+            actor=user, target=created_collection, space=space, extra=extra
+        ),
     )
 
     return CollectionPublic.from_domain(created_collection)
@@ -607,7 +664,9 @@ async def create_space_websites(
         download_files=website.download_files,
         crawl_type=website.crawl_type,
         update_interval=website.update_interval,
-        embedding_model_id=(website.embedding_model.id if website.embedding_model else None),
+        embedding_model_id=(
+            website.embedding_model.id if website.embedding_model else None
+        ),
         http_auth_username=website.http_auth_username,
         http_auth_password=website.http_auth_password,
     )
@@ -624,7 +683,9 @@ async def create_space_websites(
     extra = {
         "url": created_website.url,
         "crawl_type": str(website.crawl_type) if website.crawl_type else None,
-        "update_interval": str(website.update_interval) if website.update_interval else None,
+        "update_interval": str(website.update_interval)
+        if website.update_interval
+        else None,
     }
     if website.embedding_model:
         extra["embedding_model"] = {
@@ -641,7 +702,9 @@ async def create_space_websites(
         entity_type=EntityType.WEBSITE,
         entity_id=created_website.id,
         description=f"Created website crawler '{created_website.name}' ({created_website.url}) in space '{space.name if space else 'unknown'}'",
-        metadata=AuditMetadata.standard(actor=user, target=created_website, space=space, extra=extra),
+        metadata=AuditMetadata.standard(
+            actor=user, target=created_website, space=space, extra=extra
+        ),
     )
 
     return WebsitePublic.from_domain(created_website)
@@ -701,7 +764,9 @@ async def create_space_integration_knowledge(
         entity_type=EntityType.INTEGRATION_KNOWLEDGE,
         entity_id=knowledge.id,
         description=f"Added {knowledge.integration_type} knowledge '{knowledge.name}' to space '{space.name if space else 'unknown'}'",
-        metadata=AuditMetadata.standard(actor=user, target=knowledge, space=space, extra=extra),
+        metadata=AuditMetadata.standard(
+            actor=user, target=knowledge, space=space, extra=extra
+        ),
     )
 
     # Return job for frontend to track progress (like file upload does)
@@ -835,10 +900,14 @@ async def delete_space_integration_knowledge(
     # Get integration knowledge info BEFORE deletion (for audit log context)
     space_repo = container.space_repo()
     space = await space_repo.one(id=id)
-    knowledge = space.get_integration_knowledge(integration_knowledge_id=integration_knowledge_id)
+    knowledge = space.get_integration_knowledge(
+        integration_knowledge_id=integration_knowledge_id
+    )
 
     # Delete integration knowledge
-    await service.remove_knowledge(space_id=id, integration_knowledge_id=integration_knowledge_id)
+    await service.remove_knowledge(
+        space_id=id, integration_knowledge_id=integration_knowledge_id
+    )
 
     # Build extra context with integration-specific information
     extra = {
@@ -854,7 +923,9 @@ async def delete_space_integration_knowledge(
         entity_type=EntityType.INTEGRATION_KNOWLEDGE,
         entity_id=integration_knowledge_id,
         description=f"Removed {knowledge.integration_type} knowledge '{knowledge.name}' from space '{space.name}'",
-        metadata=AuditMetadata.standard(actor=user, target=knowledge, space=space, extra=extra),
+        metadata=AuditMetadata.standard(
+            actor=user, target=knowledge, space=space, extra=extra
+        ),
     )
 
 
@@ -936,7 +1007,9 @@ async def trigger_integration_full_sync(
     # Audit logging
     space_repo = container.space_repo()
     space = await space_repo.one(id=id)
-    knowledge = space.get_integration_knowledge(integration_knowledge_id=integration_knowledge_id)
+    knowledge = space.get_integration_knowledge(
+        integration_knowledge_id=integration_knowledge_id
+    )
 
     audit_service = container.audit_service()
     await audit_service.log_async(
@@ -997,7 +1070,9 @@ async def add_space_member(
     }
 
     # Audit logging
-    member_display = member_user.username or member_user.email if member_user else "member"
+    member_display = (
+        member_user.username or member_user.email if member_user else "member"
+    )
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
@@ -1006,7 +1081,12 @@ async def add_space_member(
         entity_type=EntityType.SPACE,
         entity_id=id,
         description=f"Added {member_display} to space '{space.name if space else 'unknown'}' with role '{add_space_member_req.role}'",
-        metadata=AuditMetadata.standard(actor=current_user, target=space if space else member, space=space, extra=extra),
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=space if space else member,
+            space=space,
+            extra=extra,
+        ),
     )
 
     return member
@@ -1047,7 +1127,9 @@ async def change_role_of_member(
     old_role = current_member.role
 
     # Change role
-    updated_member = await service.change_role_of_member(id, user_id, update_space_member_req.role)
+    updated_member = await service.change_role_of_member(
+        id, user_id, update_space_member_req.role
+    )
 
     # Build extra context with member-specific information
     extra = {
@@ -1147,7 +1229,9 @@ async def remove_space_member(
         description=f"Removed {member_name} from {space_name}",
         metadata=AuditMetadata.standard(
             actor=current_user,
-            target=space if space else type("FallbackTarget", (), {"id": id, "name": None})(),
+            target=space
+            if space
+            else type("FallbackTarget", (), {"id": id, "name": None})(),
             space=space,
             extra=extra,
         ),
@@ -1356,7 +1440,9 @@ async def remove_space_group_member(
         description=f"Removed group '{group_snapshot['name'] or 'group'}' from space '{space.name if space else 'unknown'}'",
         metadata=AuditMetadata.standard(
             actor=current_user,
-            target=space if space else type("FallbackTarget", (), {"id": id, "name": None})(),
+            target=space
+            if space
+            else type("FallbackTarget", (), {"id": id, "name": None})(),
             space=space,
             extra=extra,
         ),
@@ -1374,7 +1460,12 @@ async def get_personal_space(
 
     return assembler.from_space_to_model(space)
 
-@router.get("/type/organization/", response_model=SpacePublic, dependencies=[Depends(require_permission(Permission.ADMIN))])
+
+@router.get(
+    "/type/organization/",
+    response_model=SpacePublic,
+    dependencies=[Depends(require_permission(Permission.ADMIN))],
+)
 async def get_organization_space(
     container: Container = Depends(get_container(with_user=True)),
 ):

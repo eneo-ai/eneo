@@ -52,6 +52,7 @@ def mock_user():
     """Mock user with admin permissions."""
     from unittest.mock import Mock
     from uuid import uuid4
+
     user = Mock()
     user.id = uuid4()
     user.tenant_id = uuid4()
@@ -60,7 +61,9 @@ def mock_user():
 
 
 @pytest.fixture
-def service(mock_repo, mock_factory, mock_feature_flag_service, mock_session, mock_user):
+def service(
+    mock_repo, mock_factory, mock_feature_flag_service, mock_session, mock_user
+):
     """Service instance with mocked dependencies."""
     return AssistantTemplateService(
         repo=mock_repo,
@@ -72,7 +75,9 @@ def service(mock_repo, mock_factory, mock_feature_flag_service, mock_session, mo
 
 
 @pytest.mark.asyncio
-async def test_get_templates_returns_empty_when_feature_disabled(service, mock_feature_flag_service, mock_repo):
+async def test_get_templates_returns_empty_when_feature_disabled(
+    service, mock_feature_flag_service, mock_repo
+):
     """When feature flag is disabled, returns empty list."""
     tenant_id = uuid4()
 
@@ -83,15 +88,16 @@ async def test_get_templates_returns_empty_when_feature_disabled(service, mock_f
 
     assert result == []
     mock_feature_flag_service.check_is_feature_enabled.assert_called_once_with(
-        feature_name="using_templates",
-        tenant_id=tenant_id
+        feature_name="using_templates", tenant_id=tenant_id
     )
     # Should not call repo when feature disabled
     mock_repo.get_assistant_template_list.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_get_templates_returns_list_when_feature_enabled(service, mock_feature_flag_service, mock_repo):
+async def test_get_templates_returns_list_when_feature_enabled(
+    service, mock_feature_flag_service, mock_repo
+):
     """When feature flag is enabled, returns templates from repo."""
     tenant_id = uuid4()
     mock_templates = [Mock(), Mock()]
@@ -106,7 +112,9 @@ async def test_get_templates_returns_list_when_feature_enabled(service, mock_fea
 
 
 @pytest.mark.asyncio
-async def test_create_template_requires_feature_flag_enabled(service, mock_feature_flag_service):
+async def test_create_template_requires_feature_flag_enabled(
+    service, mock_feature_flag_service
+):
     """Cannot create template when feature flag is disabled."""
     tenant_id = uuid4()
     mock_feature_flag_service.check_is_feature_enabled.return_value = False
@@ -116,10 +124,7 @@ async def test_create_template_requires_feature_flag_enabled(service, mock_featu
         description="Test",
         category="Test",
         prompt="Test",
-        wizard=AssistantTemplateWizard(
-            attachments=None,
-            collections=None
-        )
+        wizard=AssistantTemplateWizard(attachments=None, collections=None),
     )
 
     with pytest.raises(BadRequestException) as exc_info:
@@ -129,7 +134,9 @@ async def test_create_template_requires_feature_flag_enabled(service, mock_featu
 
 
 @pytest.mark.asyncio
-async def test_create_template_checks_duplicate_name(service, mock_feature_flag_service, mock_repo):
+async def test_create_template_checks_duplicate_name(
+    service, mock_feature_flag_service, mock_repo
+):
     """Raises error when template name already exists in tenant."""
     tenant_id = uuid4()
 
@@ -141,10 +148,7 @@ async def test_create_template_checks_duplicate_name(service, mock_feature_flag_
         description="Test",
         category="Test",
         prompt="Test",
-        wizard=AssistantTemplateWizard(
-            attachments=None,
-            collections=None
-        )
+        wizard=AssistantTemplateWizard(attachments=None, collections=None),
     )
 
     with pytest.raises(NameCollisionException) as exc_info:
@@ -152,8 +156,7 @@ async def test_create_template_checks_duplicate_name(service, mock_feature_flag_
 
     assert "already exists" in str(exc_info.value).lower()
     mock_repo.check_duplicate_name.assert_called_once_with(
-        name="Duplicate Name",
-        tenant_id=tenant_id
+        name="Duplicate Name", tenant_id=tenant_id
     )
 
 
@@ -170,9 +173,7 @@ async def test_update_template_validates_ownership(service, mock_repo):
 
     with pytest.raises(NotFoundException) as exc_info:
         await service.update_template(
-            template_id=template_id,
-            data=data,
-            tenant_id=tenant_id
+            template_id=template_id, data=data, tenant_id=tenant_id
         )
 
     assert "does not belong" in str(exc_info.value).lower()
@@ -196,9 +197,7 @@ async def test_update_template_checks_duplicate_on_rename(service, mock_repo):
 
     with pytest.raises(NameCollisionException):
         await service.update_template(
-            template_id=template_id,
-            data=data,
-            tenant_id=tenant_id
+            template_id=template_id, data=data, tenant_id=tenant_id
         )
 
 
@@ -226,9 +225,7 @@ async def test_delete_template_allowed_even_when_in_use(service, mock_repo):
 
     # Verify soft_delete was called
     mock_repo.soft_delete.assert_called_once_with(
-        id=template_id,
-        tenant_id=tenant_id,
-        user_id=user_id
+        id=template_id, tenant_id=tenant_id, user_id=user_id
     )
 
 
@@ -244,10 +241,7 @@ async def test_rollback_template_validates_snapshot_exists(service, mock_repo):
     mock_repo.get_by_id.return_value = mock_template
 
     with pytest.raises(BadRequestException) as exc_info:
-        await service.rollback_template(
-            template_id=template_id,
-            tenant_id=tenant_id
-        )
+        await service.rollback_template(template_id=template_id, tenant_id=tenant_id)
 
     assert "snapshot not found" in str(exc_info.value).lower()
 
@@ -289,7 +283,9 @@ async def test_create_template_persists_completion_model_id_and_snapshot(
     params = stmt.compile().params
 
     assert params["completion_model_id"] == completion_model_id
-    assert params["original_snapshot"]["completion_model_id"] == str(completion_model_id)
+    assert params["original_snapshot"]["completion_model_id"] == str(
+        completion_model_id
+    )
 
 
 @pytest.mark.asyncio
@@ -331,7 +327,9 @@ async def test_rollback_template_restores_completion_model_id(
 
 
 @pytest.mark.asyncio
-async def test_get_templates_for_tenant_excludes_global(service, mock_session, mock_factory):
+async def test_get_templates_for_tenant_excludes_global(
+    service, mock_session, mock_factory
+):
     """Admin list should only show tenant-specific templates."""
     tenant_id = uuid4()
 

@@ -1,6 +1,14 @@
 """Database table for audit category configuration."""
 
-from sqlalchemy import Boolean, Column, String, TIMESTAMP, CheckConstraint, Index, ForeignKey
+from sqlalchemy import (
+    Boolean,
+    Column,
+    String,
+    TIMESTAMP,
+    CheckConstraint,
+    Index,
+    ForeignKey,
+)
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from intric.database.tables.base_class import BasePublic

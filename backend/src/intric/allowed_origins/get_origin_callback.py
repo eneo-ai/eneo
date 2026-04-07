@@ -16,7 +16,9 @@ async def get_origin(origin: str):
     async with sessionmanager.session() as session, session.begin():
         repo = AllowedOriginRepository(session)
         allowed_origins = await repo.get_all()
-        matches = any(origin_matches_pattern(origin, entry.url) for entry in allowed_origins)
+        matches = any(
+            origin_matches_pattern(origin, entry.url) for entry in allowed_origins
+        )
 
         logger.debug(
             f"Origin attempted to be resolved from database, success = {matches}"

@@ -1,6 +1,7 @@
 """
 Integration test fixtures using testcontainers for PostgreSQL and Redis.
 """
+
 import json
 import os
 from collections.abc import Callable
@@ -22,7 +23,10 @@ def pytest_collection_modifyitems(config, items):
     """
     # Check if migration_isolation marker was explicitly requested
     marker_expr = config.getoption("-m", default="")
-    if "migration_isolation" in marker_expr and "not migration_isolation" not in marker_expr:
+    if (
+        "migration_isolation" in marker_expr
+        and "not migration_isolation" not in marker_expr
+    ):
         # User explicitly requested migration_isolation tests, don't skip
         return
 
@@ -103,7 +107,9 @@ if not os.getenv("ENCRYPTION_KEY"):
 if not os.getenv("CRAWL_MAX_LENGTH"):
     os.environ["CRAWL_MAX_LENGTH"] = "1800"  # 30 minutes
 if not os.getenv("TENANT_WORKER_SEMAPHORE_TTL_SECONDS"):
-    os.environ["TENANT_WORKER_SEMAPHORE_TTL_SECONDS"] = "3600"  # 1 hour (must be > CRAWL_MAX_LENGTH)
+    os.environ["TENANT_WORKER_SEMAPHORE_TTL_SECONDS"] = (
+        "3600"  # 1 hour (must be > CRAWL_MAX_LENGTH)
+    )
 
 import contextlib
 from typing import AsyncGenerator, Generator
@@ -201,23 +207,19 @@ def test_settings(
         postgres_password="integration_test_password",
         postgres_port=pg_port,
         postgres_db="integration_test_db",
-
         # Redis settings
         redis_host=redis_host,
         redis_port=redis_port,
         redis_db=1,  # Use database 1 for tests to avoid collisions with dev data
-
         # File upload limits
         upload_file_to_session_max_size=10_000_000,
         upload_image_to_session_max_size=5_000_000,
         upload_max_file_size=100_000_000,
         transcription_max_file_size=25_000_000,
-
         # API settings
         api_prefix="/api/v1",
         api_key_length=32,
         api_key_header_name="X-API-Key",
-
         # JWT settings
         jwt_audience="test_audience",
         jwt_issuer="test_issuer",
@@ -225,11 +227,9 @@ def test_settings(
         jwt_algorithm="HS256",
         jwt_secret="test_secret_key_for_integration_tests",
         jwt_token_prefix="Bearer",
-
         # Security
         url_signing_key="test_url_signing_key",
         eneo_super_api_key="test-super-admin-key-for-integration-tests",
-
         # LLM API Keys - CRITICAL: Set to None to prevent reading from environment
         # Integration tests should NEVER use real API keys
         openai_api_key=None,
@@ -238,7 +238,6 @@ def test_settings(
         mistral_api_key=None,
         ovhcloud_api_key=None,
         vllm_api_key=None,
-
         # Feature flags
         using_access_management=False,
         using_iam=False,
@@ -246,14 +245,11 @@ def test_settings(
         using_crawl=False,
         tenant_credentials_enabled=False,  # Disable for integration tests (tests can override if needed)
         federation_enabled=True,
-
         # Note: Set to False for integration tests that need full app functionality
         openapi_only_mode=False,
-
         # Development
         testing=False,  # Integration tests have full isolation via testcontainers
         dev=True,
-
         # Encryption
         encryption_key=encryption_key,
     )
@@ -332,6 +328,7 @@ def override_settings_for_session(test_settings: Settings):
     # - By MUTATING the existing object's model.name attribute, all references
     #   (including the one captured in the function signature) see the new header name
     import intric.server.dependencies.auth_definitions as auth_defs
+
     auth_defs.API_KEY_HEADER.model.name = test_settings.api_key_header_name
 
     # Verify settings are correct
@@ -424,6 +421,7 @@ async def setup_database(test_settings: Settings):
 
             # Verify tenant and users exist
             from intric.main.container.container import Container
+
             container = Container(session=providers.Object(session))
 
             tenant_repo = container.tenant_repo()
@@ -458,16 +456,20 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
     async with sessionmanager.session() as session:
         async with session.begin():
             # Get all tables except alembic_version
-            result = await session.execute(text("""
+            result = await session.execute(
+                text("""
                 SELECT string_agg('"' || tablename || '"', ', ')
                 FROM pg_tables
                 WHERE schemaname = 'public' AND tablename != 'alembic_version'
-            """))
+            """)
+            )
             tables_csv = result.scalar()
 
             if tables_csv:
                 # Single TRUNCATE for all tables - much faster than one-by-one!
-                await session.execute(text(f'TRUNCATE TABLE {tables_csv} RESTART IDENTITY CASCADE'))
+                await session.execute(
+                    text(f"TRUNCATE TABLE {tables_csv} RESTART IDENTITY CASCADE")
+                )
 
     # Reseed tenant/user using existing helper function
     conn = psycopg2.connect(
@@ -545,6 +547,7 @@ async def app(setup_database):
     # Manually trigger startup only (not shutdown)
     # Import here because it needs to be after settings are configured
     from intric.server.dependencies.lifespan import startup
+
     await startup()
 
     # Verify app initialization
@@ -577,6 +580,7 @@ async def client(app) -> AsyncGenerator[AsyncClient, None]:
 
 # Database session fixtures
 
+
 @pytest.fixture
 def db_session(setup_database):
     """
@@ -586,6 +590,7 @@ def db_session(setup_database):
         async with db_session() as session:
             # use session here
     """
+
     @contextlib.asynccontextmanager
     async def _session():
         async with sessionmanager.session() as session, session.begin():
@@ -618,6 +623,7 @@ def db_container(setup_database):
         async with db_container(user=custom_user, tenant=custom_tenant) as container:
             service = container.some_service()
     """
+
     @contextlib.asynccontextmanager
     async def _container(user=None, tenant=None):
         async with sessionmanager.session() as session, session.begin():
@@ -648,6 +654,7 @@ def db_container(setup_database):
 
 # User and authentication fixtures
 
+
 @pytest.fixture
 async def admin_user(db_container):
     """
@@ -669,14 +676,13 @@ async def admin_user_api_key(admin_user, db_container):
     async with db_container() as container:
         auth_service = container.auth_service()
         api_key = await auth_service.create_user_api_key(
-            prefix="test",
-            user_id=admin_user.id,
-            delete_old=True
+            prefix="test", user_id=admin_user.id, delete_old=True
         )
     return api_key
 
 
 # Additional fixtures for tenant credentials E2E tests
+
 
 @pytest.fixture
 async def async_session(setup_database):
@@ -860,7 +866,9 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
             algs=algs or [test_settings.jwt_algorithm],
         )
 
-    monkeypatch.setattr(AuthService, "create_access_token_for_user", patched_create_token)
+    monkeypatch.setattr(
+        AuthService, "create_access_token_for_user", patched_create_token
+    )
     monkeypatch.setattr(AuthService, "get_jwt_payload", patched_get_jwt_payload)
 
 
@@ -873,7 +881,10 @@ def jwks_mock(monkeypatch):
     """
     import jwt as jwt_lib
 
-    def _configure(signing_keys: dict[str, str] | None = None, default_key: str = "test-signing-key"):
+    def _configure(
+        signing_keys: dict[str, str] | None = None,
+        default_key: str = "test-signing-key",
+    ):
         keys = signing_keys or {}
 
         class _Key:
@@ -1020,9 +1031,7 @@ async def tenant_user_token(test_tenant, test_settings):
 
     # Encode using test JWT secret (HS256)
     token = jwt.encode(
-        payload,
-        test_settings.jwt_secret,
-        algorithm=test_settings.jwt_algorithm
+        payload, test_settings.jwt_secret, algorithm=test_settings.jwt_algorithm
     )
 
     return token
@@ -1197,7 +1206,9 @@ def mock_transcription_models(monkeypatch):
     """Stub transcription model enablement to avoid external dependencies."""
     from uuid import uuid4
 
-    from intric.transcription_models.infrastructure import enable_transcription_models_service
+    from intric.transcription_models.infrastructure import (
+        enable_transcription_models_service,
+    )
 
     async def mock_get_model_id_by_name(self, model_name: str):
         return uuid4()
@@ -1243,7 +1254,9 @@ async def debug_auth_config(test_settings):
     print(f"Test settings eneo_super_api_key: {test_settings.eneo_super_api_key}")
     print(f"Runtime settings eneo_super_api_key: {runtime_settings.eneo_super_api_key}")
     print(f"Test settings api_key_header_name: {test_settings.api_key_header_name}")
-    print(f"Runtime settings api_key_header_name: {runtime_settings.api_key_header_name}")
+    print(
+        f"Runtime settings api_key_header_name: {runtime_settings.api_key_header_name}"
+    )
     print(f"API_KEY_HEADER name: {API_KEY_HEADER.model.name}")
     print(f"Settings object IDs match: {id(test_settings) == id(runtime_settings)}")
     print("=================\n")

@@ -72,6 +72,7 @@ class SpaceMember(UserSparse):
 
 class SpaceGroupMember(InDB):
     """A user group that is a member of a space with a specific role."""
+
     name: str
     role: SpaceRoleValue
     user_count: int = 0
@@ -174,6 +175,7 @@ class SpaceSparse(InDB, ResourcePermissionsMixin):
     applications: Optional[Applications] = None
     default_assistant: Optional[DefaultAssistant] = None
     data_retention_days: Optional[int] = None
+
 
 class SpaceDashboard(SpaceSparse):
     applications: Applications
@@ -327,7 +329,9 @@ class CreateSpaceIntegrationKnowledge(BaseModel):
     folder_id: Optional[str] = None
     folder_path: Optional[str] = None
     selected_item_type: Optional[str] = None  # "file", "folder", or "site_root"
-    resource_type: Optional[str] = "site"  # "site" for SharePoint, "onedrive" for OneDrive
+    resource_type: Optional[str] = (
+        "site"  # "site" for SharePoint, "onedrive" for OneDrive
+    )
 
 
 class CreateSpaceIntegrationKnowledgeBatchItem(BaseModel):
@@ -337,13 +341,17 @@ class CreateSpaceIntegrationKnowledgeBatchItem(BaseModel):
     folder_id: Optional[str] = None
     folder_path: Optional[str] = None
     selected_item_type: Optional[str] = None  # "file", "folder", or "site_root"
-    resource_type: Optional[str] = "site"  # "site" for SharePoint, "onedrive" for OneDrive
+    resource_type: Optional[str] = (
+        "site"  # "site" for SharePoint, "onedrive" for OneDrive
+    )
 
 
 class CreateSpaceIntegrationKnowledgeBatchRequest(BaseModel):
     embedding_model: ModelId
     wrapper_name: Optional[str] = None
-    items: list[CreateSpaceIntegrationKnowledgeBatchItem] = Field(min_length=1, max_length=50)
+    items: list[CreateSpaceIntegrationKnowledgeBatchItem] = Field(
+        min_length=1, max_length=50
+    )
 
 
 class CreateSpaceIntegrationKnowledgeBatchResult(BaseModel):

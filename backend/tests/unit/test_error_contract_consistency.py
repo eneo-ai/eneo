@@ -101,7 +101,9 @@ def test_no_return_http_exception_antipattern_in_critical_modules():
         tree = ast.parse(file_path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Return) and _is_http_exception_call(node.value):
-                violations.append(f"{file_path}:{node.lineno} return HTTPException(...)")
+                violations.append(
+                    f"{file_path}:{node.lineno} return HTTPException(...)"
+                )
 
     assert not violations, (
         "Found `return HTTPException(...)` anti-pattern in API v2 critical modules:\n"
@@ -134,6 +136,5 @@ def test_bare_unauthorized_debt_budget_not_increased_in_noncritical_modules():
 
     assert len(violations) <= MAX_BARE_UNAUTHORIZED_DEBT, (
         "Bare UnauthorizedException debt increased in non-critical modules "
-        f"({len(violations)} > {MAX_BARE_UNAUTHORIZED_DEBT}).\n"
-        + "\n".join(violations)
+        f"({len(violations)} > {MAX_BARE_UNAUTHORIZED_DEBT}).\n" + "\n".join(violations)
     )

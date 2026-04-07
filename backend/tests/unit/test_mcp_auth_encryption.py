@@ -477,7 +477,10 @@ class TestUpdateConnectionValidation:
         service, mock_repo, existing, _ = _setup
 
         service._test_connection_and_discover_tools = AsyncMock(
-            return_value=([], ConnectionResult(success=False, error_message="Connection refused"))
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="Connection refused"),
+            )
         )
 
         result = await service.update_mcp_server(
@@ -518,7 +521,10 @@ class TestUpdateConnectionValidation:
         service, mock_repo, existing, _ = _setup
 
         service._test_connection_and_discover_tools = AsyncMock(
-            return_value=([], ConnectionResult(success=False, error_message="Unauthorized"))
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="Unauthorized"),
+            )
         )
 
         result = await service.update_mcp_server(
@@ -538,7 +544,10 @@ class TestUpdateConnectionValidation:
         service, mock_repo, existing, _ = _setup
 
         service._test_connection_and_discover_tools = AsyncMock(
-            return_value=([], ConnectionResult(success=False, error_message="should not be called"))
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="should not be called"),
+            )
         )
 
         result = await service.update_mcp_server(
@@ -560,7 +569,10 @@ class TestUpdateConnectionValidation:
         service, mock_repo, existing, _ = _setup
 
         service._test_connection_and_discover_tools = AsyncMock(
-            return_value=([], ConnectionResult(success=False, error_message="Invalid token"))
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="Invalid token"),
+            )
         )
 
         result = await service.update_mcp_server(
@@ -623,7 +635,10 @@ class TestUpdateConnectionValidation:
         service, mock_repo, existing, _ = _setup
 
         service._test_connection_and_discover_tools = AsyncMock(
-            return_value=([], ConnectionResult(success=False, error_message="should not be called"))
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="should not be called"),
+            )
         )
 
         await service.update_mcp_server(

@@ -16,8 +16,14 @@ from intric.database.tables.integration_table import IntegrationKnowledge
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.websites_table import Websites
 from intric.embedding_models.domain.embedding_model_repo import EmbeddingModelRepository
-from intric.embedding_models.presentation.embedding_model_models import EmbeddingModelPublic
-from intric.main.exceptions import BadRequestException, NotFoundException, UnauthorizedException
+from intric.embedding_models.presentation.embedding_model_models import (
+    EmbeddingModelPublic,
+)
+from intric.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from intric.server.protocol import responses
 from intric.users.user import UserInDB
 
@@ -50,7 +56,9 @@ class TenantEmbeddingModelUpdate(BaseModel):
     max_input: int | None = Field(None, description="Maximum input tokens")
     hosting: str | None = Field(None, description="Hosting location (swe, eu, usa)")
     open_source: bool | None = Field(None, description="Is the model open source")
-    stability: str | None = Field(None, description="Model stability (stable, experimental)")
+    stability: str | None = Field(
+        None, description="Model stability (stable, experimental)"
+    )
 
 
 @router.post(
@@ -75,7 +83,9 @@ async def create_tenant_embedding_model(
     provider = result.scalar_one_or_none()
 
     if not provider:
-        raise NotFoundException("Model provider not found or does not belong to your organization")
+        raise NotFoundException(
+            "Model provider not found or does not belong to your organization"
+        )
 
     if not provider.is_active:
         raise BadRequestException("Model provider is not active")
@@ -150,7 +160,9 @@ async def update_tenant_embedding_model(
     model = result.scalar_one_or_none()
 
     if not model:
-        raise NotFoundException("Model not found or does not belong to your organization")
+        raise NotFoundException(
+            "Model not found or does not belong to your organization"
+        )
 
     # Cannot update global models
     if model.tenant_id is None:
@@ -206,7 +218,9 @@ async def delete_tenant_embedding_model(
     model = result.scalar_one_or_none()
 
     if not model:
-        raise NotFoundException("Model not found or does not belong to your organization")
+        raise NotFoundException(
+            "Model not found or does not belong to your organization"
+        )
 
     # Cannot delete global models
     if model.tenant_id is None:
@@ -215,9 +229,21 @@ async def delete_tenant_embedding_model(
     # Check if the model is in use by any collections, websites, or integrations
     usage_counts = await session.execute(
         sa.select(
-            sa.select(sa.func.count()).where(CollectionsTable.embedding_model_id == model_id).correlate(None).scalar_subquery().label("collections"),
-            sa.select(sa.func.count()).where(Websites.embedding_model_id == model_id).correlate(None).scalar_subquery().label("websites"),
-            sa.select(sa.func.count()).where(IntegrationKnowledge.embedding_model_id == model_id).correlate(None).scalar_subquery().label("integrations"),
+            sa.select(sa.func.count())
+            .where(CollectionsTable.embedding_model_id == model_id)
+            .correlate(None)
+            .scalar_subquery()
+            .label("collections"),
+            sa.select(sa.func.count())
+            .where(Websites.embedding_model_id == model_id)
+            .correlate(None)
+            .scalar_subquery()
+            .label("websites"),
+            sa.select(sa.func.count())
+            .where(IntegrationKnowledge.embedding_model_id == model_id)
+            .correlate(None)
+            .scalar_subquery()
+            .label("integrations"),
         )
     )
     row = usage_counts.one()

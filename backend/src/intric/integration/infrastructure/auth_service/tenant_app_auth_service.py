@@ -39,9 +39,7 @@ class TenantAppAuthService:
         self._token_cache: dict[str, TenantAppToken] = {}
 
     async def get_access_token(
-        self,
-        app: TenantSharePointApp,
-        force_refresh: bool = False
+        self, app: TenantSharePointApp, force_refresh: bool = False
     ) -> str:
         """Get an access token for the tenant app.
 
@@ -72,10 +70,7 @@ class TenantAppAuthService:
 
         return token.access_token
 
-    async def _acquire_token(
-        self,
-        app: TenantSharePointApp
-    ) -> TenantAppToken:
+    async def _acquire_token(self, app: TenantSharePointApp) -> TenantAppToken:
         """Acquire a new access token using client credentials flow.
 
         This uses the OAuth 2.0 client credentials grant type, which is designed
@@ -83,13 +78,15 @@ class TenantAppAuthService:
 
         Scopes are application-level (e.g., "Sites.Read.All" not "Sites.Read").
         """
-        token_endpoint = f"https://login.microsoftonline.com/{app.tenant_domain}/oauth2/v2.0/token"
+        token_endpoint = (
+            f"https://login.microsoftonline.com/{app.tenant_domain}/oauth2/v2.0/token"
+        )
 
         data = {
             "client_id": app.client_id,
             "client_secret": app.client_secret,
             "scope": "https://graph.microsoft.com/.default",
-            "grant_type": "client_credentials"
+            "grant_type": "client_credentials",
         }
 
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
@@ -108,13 +105,16 @@ class TenantAppAuthService:
                     access_token = token_data["access_token"]
                     expires_in = token_data["expires_in"]
 
-                    expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                    expires_at = datetime.now(timezone.utc) + timedelta(
+                        seconds=expires_in
+                    )
 
-                    logger.info(f"Successfully acquired token for app {app.id}, expires at {expires_at}")
+                    logger.info(
+                        f"Successfully acquired token for app {app.id}, expires at {expires_at}"
+                    )
 
                     return TenantAppToken(
-                        access_token=access_token,
-                        expires_at=expires_at
+                        access_token=access_token, expires_at=expires_at
                     )
                 else:
                     logger.error(
@@ -128,8 +128,7 @@ class TenantAppAuthService:
                 raise
 
     async def test_credentials(
-        self,
-        app: TenantSharePointApp
+        self, app: TenantSharePointApp
     ) -> tuple[bool, Optional[str]]:
         """Test if the app credentials are valid by attempting to acquire a token.
 
@@ -151,9 +150,13 @@ class TenantAppAuthService:
                 # Strip trace/correlation IDs from the description
                 if error_desc:
                     # Microsoft error_description format: "AADSTS...: Human message. Trace ID: ... Timestamp: ..."
-                    error_msg = error_desc.split("\r\n")[0].split(" Trace ID:")[0].strip()
+                    error_msg = (
+                        error_desc.split("\r\n")[0].split(" Trace ID:")[0].strip()
+                    )
                 else:
-                    error_msg = error_body.get("error", f"HTTP {e.response.status_code}")
+                    error_msg = error_body.get(
+                        "error", f"HTTP {e.response.status_code}"
+                    )
             except Exception:
                 error_msg = f"HTTP {e.response.status_code}"
             logger.error(f"Credentials test failed for app {app.id}: {error_msg}")

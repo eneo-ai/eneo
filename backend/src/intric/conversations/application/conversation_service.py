@@ -88,7 +88,9 @@ class ConversationService:
 
             if session.group_chat_id:
                 if require_tool_approval:
-                    raise BadRequestException("Tool approval is not supported for group chats.")
+                    raise BadRequestException(
+                        "Tool approval is not supported for group chats."
+                    )
                 # this is a group chat conversation
                 return await self.group_chat_service.ask_group_chat(
                     question=question,
@@ -147,7 +149,9 @@ class ConversationService:
 
     async def set_title_of_conversation(self, session_id: "UUID") -> "SessionInDB":
         session = await self.session_service.get_session_by_uuid(session_id)
-        space = await self.space_service.get_space_by_assistant(assistant_id=session.assistant.id)
+        space = await self.space_service.get_space_by_assistant(
+            assistant_id=session.assistant.id
+        )
         assistant = space.get_assistant(assistant_id=session.assistant.id)
 
         response = await self.completion_service.get_response(

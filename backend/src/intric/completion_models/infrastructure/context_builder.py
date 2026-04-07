@@ -359,7 +359,9 @@ class ContextBuilder:
                 message.generated_files, FileType.IMAGE
             )
 
-            message_tokens = count_tokens(question, model_name) + count_tokens(answer, model_name)
+            message_tokens = count_tokens(question, model_name) + count_tokens(
+                answer, model_name
+            )
 
             if len(messages) > min_len and total_tokens + message_tokens > max_tokens:
                 break
@@ -430,7 +432,10 @@ class ContextBuilder:
         else:
             max_tokens_messages = max_tokens - tokens_used
         messages, tokens_used_messages = self._build_messages(
-            session=session, max_tokens=max_tokens_messages, min_len=3, model_name=model_name
+            session=session,
+            max_tokens=max_tokens_messages,
+            min_len=3,
+            model_name=model_name,
         )
         tokens_used += tokens_used_messages
 

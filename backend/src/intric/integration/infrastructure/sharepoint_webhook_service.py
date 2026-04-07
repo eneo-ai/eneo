@@ -69,7 +69,10 @@ class SharepointWebhookService:
                 continue
             resource_type, resource_id = resource_info
 
-            if self.expected_client_state and notification.get("clientState") != self.expected_client_state:
+            if (
+                self.expected_client_state
+                and notification.get("clientState") != self.expected_client_state
+            ):
                 logger.warning(
                     "Ignoring webhook notification with unexpected clientState. "
                     "This may indicate a security issue or SHAREPOINT_WEBHOOK_CLIENT_STATE mismatch."
@@ -82,7 +85,10 @@ class SharepointWebhookService:
             notifications_by_resource[key].append(notification)
 
         # Process each resource's notifications
-        for (resource_type, resource_id), resource_notifications in notifications_by_resource.items():
+        for (
+            resource_type,
+            resource_id,
+        ), resource_notifications in notifications_by_resource.items():
             await self._queue_refresh_for_resource(
                 resource_type=resource_type,
                 resource_id=resource_id,
@@ -105,7 +111,9 @@ class SharepointWebhookService:
         notification doesn't trigger multiple syncs.
         """
         if resource_type == "drive":
-            knowledge_records = await self._fetch_knowledge_by_drive(drive_id=resource_id)
+            knowledge_records = await self._fetch_knowledge_by_drive(
+                drive_id=resource_id
+            )
         else:
             knowledge_records = await self._fetch_knowledge_by_site(site_id=resource_id)
 
@@ -160,7 +168,9 @@ class SharepointWebhookService:
                 )
 
         if not unique_notifications:
-            logger.info(f"{resource_type} {resource_id}: All notifications were duplicates, nothing to sync")
+            logger.info(
+                f"{resource_type} {resource_id}: All notifications were duplicates, nothing to sync"
+            )
             return
 
         for knowledge_db, user_integration_db in knowledge_records:
@@ -249,7 +259,9 @@ class SharepointWebhookService:
                 cache_key = f"tenant_admin_{user_integration_db.tenant_id}"
                 if cache_key not in user_cache:
                     try:
-                        admin_user = await self._get_tenant_admin(user_integration_db.tenant_id)
+                        admin_user = await self._get_tenant_admin(
+                            user_integration_db.tenant_id
+                        )
                         user_cache[cache_key] = admin_user
                         logger.info(
                             f"Using tenant admin {admin_user.id} for tenant_app integration {user_integration_db.id}"
@@ -283,8 +295,14 @@ class SharepointWebhookService:
                 user_id_for_job = user_integration_db.user_id
                 job_service_key = user_id_str
 
-            site_id_value = knowledge_db.site_id if isinstance(knowledge_db.site_id, str) else None
-            drive_id_value = knowledge_db.drive_id if isinstance(knowledge_db.drive_id, str) else None
+            site_id_value = (
+                knowledge_db.site_id if isinstance(knowledge_db.site_id, str) else None
+            )
+            drive_id_value = (
+                knowledge_db.drive_id
+                if isinstance(knowledge_db.drive_id, str)
+                else None
+            )
             resource_type_value = (
                 knowledge_db.resource_type
                 if isinstance(knowledge_db.resource_type, str)
@@ -298,11 +316,14 @@ class SharepointWebhookService:
                 token_id=token_id,  # None for tenant_app, UUID for user_oauth
                 tenant_app_id=tenant_app_id,  # UUID for tenant_app, None for user_oauth
                 integration_knowledge_id=knowledge_db.id,
-                site_id=site_id_value or (resource_id if resource_type == "site" else None),
-                drive_id=drive_id_value or (resource_id if resource_type == "drive" else None),
+                site_id=site_id_value
+                or (resource_id if resource_type == "site" else None),
+                drive_id=drive_id_value
+                or (resource_id if resource_type == "drive" else None),
                 folder_id=knowledge_db.folder_id,
                 folder_path=knowledge_db.folder_path,
-                resource_type=resource_type_value or ("onedrive" if resource_type == "drive" else "site"),
+                resource_type=resource_type_value
+                or ("onedrive" if resource_type == "drive" else "site"),
             )
 
             if job_service_key not in job_services:
@@ -359,7 +380,8 @@ class SharepointWebhookService:
             sa.select(IntegrationKnowledgeDBModel, UserIntegrationDBModel)
             .join(
                 UserIntegrationDBModel,
-                IntegrationKnowledgeDBModel.user_integration_id == UserIntegrationDBModel.id,
+                IntegrationKnowledgeDBModel.user_integration_id
+                == UserIntegrationDBModel.id,
             )
             .where(IntegrationKnowledgeDBModel.site_id == site_id)
         )
@@ -374,7 +396,8 @@ class SharepointWebhookService:
             sa.select(IntegrationKnowledgeDBModel, UserIntegrationDBModel)
             .join(
                 UserIntegrationDBModel,
-                IntegrationKnowledgeDBModel.user_integration_id == UserIntegrationDBModel.id,
+                IntegrationKnowledgeDBModel.user_integration_id
+                == UserIntegrationDBModel.id,
             )
             .where(
                 sa.and_(
@@ -409,7 +432,10 @@ class SharepointWebhookService:
             True if notification is in scope, False otherwise
         """
         # If no scope restriction (site_root), all notifications are in scope
-        if not knowledge_db.folder_id and (knowledge_db.selected_item_type == "site_root" or not knowledge_db.selected_item_type):
+        if not knowledge_db.folder_id and (
+            knowledge_db.selected_item_type == "site_root"
+            or not knowledge_db.selected_item_type
+        ):
             logger.info(
                 f"Knowledge {knowledge_db.id} is site-level (no folder_id, no scope); notification is in scope"
             )
@@ -495,7 +521,9 @@ class SharepointWebhookService:
             return True
 
         if not change_key:
-            logger.debug(f"No ChangeKey in notification for item {item_id}; processing anyway")
+            logger.debug(
+                f"No ChangeKey in notification for item {item_id}; processing anyway"
+            )
             return True
 
         # Check if we should process this notification

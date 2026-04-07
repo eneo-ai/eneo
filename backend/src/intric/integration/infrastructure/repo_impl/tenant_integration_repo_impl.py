@@ -23,9 +23,7 @@ if TYPE_CHECKING:
 
 
 class TenantIntegrationRepoImpl(
-    BaseRepoImpl[
-        TenantIntegration, TenantIntegrationDBModel, TenantIntegrationMapper
-    ],
+    BaseRepoImpl[TenantIntegration, TenantIntegrationDBModel, TenantIntegrationMapper],
     TenantIntegrationRepository,
 ):
     def __init__(self, session: "AsyncSession", mapper: TenantIntegrationMapper):

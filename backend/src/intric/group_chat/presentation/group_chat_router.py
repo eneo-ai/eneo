@@ -82,7 +82,9 @@ async def get_group_chat(
 
     group_chat = await service.get_group_chat(group_chat_id=id)
 
-    return assembler.from_domain_to_model(group_chat=group_chat, permissions=group_chat.permissions)
+    return assembler.from_domain_to_model(
+        group_chat=group_chat, permissions=group_chat.permissions
+    )
 
 
 @router.delete(
@@ -115,4 +117,6 @@ async def publish_group_chat(
 
     group_chat = await service.publish_group_chat(group_chat_id=id, publish=published)
 
-    return assembler.from_domain_to_model(group_chat=group_chat, permissions=group_chat.permissions)
+    return assembler.from_domain_to_model(
+        group_chat=group_chat, permissions=group_chat.permissions
+    )

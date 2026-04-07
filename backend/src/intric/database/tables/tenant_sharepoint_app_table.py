@@ -26,7 +26,10 @@ class TenantSharePointApp(BasePublic):
     __tablename__ = "tenant_sharepoint_apps"
 
     tenant_id: Mapped[UUID] = mapped_column(
-        ForeignKey("tenants.id", ondelete="CASCADE"), index=True, nullable=False, unique=True
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+        unique=True,
     )
     client_id: Mapped[str] = mapped_column(String(255), nullable=False)
     client_secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
@@ -45,7 +48,9 @@ class TenantSharePointApp(BasePublic):
     service_account_refresh_token_encrypted: Mapped[str | None] = mapped_column(
         Text, nullable=True
     )
-    service_account_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    service_account_email: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
 
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -54,7 +59,10 @@ class TenantSharePointApp(BasePublic):
         DateTime(timezone=True), nullable=False, default=datetime.utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
     )
 
     tenant: Mapped["Tenants"] = relationship("Tenants", back_populates="sharepoint_app")

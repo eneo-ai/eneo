@@ -55,7 +55,9 @@ class AnalysisJobManager:
             return None
         return AnalysisJob.model_validate(orjson.loads(raw))
 
-    async def mark_processing(self, *, tenant_id: UUID, job_id: UUID) -> AnalysisJob | None:
+    async def mark_processing(
+        self, *, tenant_id: UUID, job_id: UUID
+    ) -> AnalysisJob | None:
         job = await self.get_job(tenant_id=tenant_id, job_id=job_id)
         if job is None:
             return None
@@ -92,4 +94,8 @@ class AnalysisJobManager:
     async def _persist(self, job: AnalysisJob) -> None:
         key = self._job_key(tenant_id=job.tenant_id, job_id=job.job_id)
         # Keep the key alive at least for one day after the latest update.
-        await self.redis.setex(key, timedelta(seconds=self.TTL_SECONDS), orjson.dumps(job.model_dump(mode="json")))
+        await self.redis.setex(
+            key,
+            timedelta(seconds=self.TTL_SECONDS),
+            orjson.dumps(job.model_dump(mode="json")),
+        )

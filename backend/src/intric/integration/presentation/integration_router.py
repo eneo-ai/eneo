@@ -75,7 +75,9 @@ async def add_tenant_integration(
     user = container.user()
 
     # Add tenant integration
-    tenant_integration = await service.create_tenant_integration(integration_id=integration_id)
+    tenant_integration = await service.create_tenant_integration(
+        integration_id=integration_id
+    )
 
     # Audit logging
     audit_service = container.audit_service()
@@ -151,11 +153,14 @@ async def get_user_integrations(
     service = container.user_integration_service()
     user = container.user()
 
-    user_integrations = await service.get_my_integrations(user_id=user.id, tenant_id=user.tenant_id)
+    user_integrations = await service.get_my_integrations(
+        user_id=user.id, tenant_id=user.tenant_id
+    )
 
     # Filter out tenant_app integrations - they should only appear in admin panel
     personal_integrations = [
-        integration for integration in user_integrations
+        integration
+        for integration in user_integrations
         if integration.auth_type != "tenant_app"
     ]
 
@@ -166,8 +171,7 @@ async def get_user_integrations(
 
     assembler = container.user_integration_assembler()
     return assembler.to_paginated_response(
-        integrations=personal_integrations,
-        tenant_app_configured=tenant_app_configured
+        integrations=personal_integrations, tenant_app_configured=tenant_app_configured
     )
 
 
@@ -199,8 +203,7 @@ async def get_available_integrations_for_space(
 
     assembler = container.user_integration_assembler()
     return assembler.to_paginated_response(
-        integrations=user_integrations,
-        tenant_app_configured=tenant_app_configured
+        integrations=user_integrations, tenant_app_configured=tenant_app_configured
     )
 
 
@@ -263,9 +266,7 @@ async def get_sync_logs(
 
     # Get paginated logs
     sync_logs = await sync_log_repo.get_by_integration_knowledge(
-        integration_knowledge_id=integration_knowledge_id,
-        limit=limit,
-        offset=skip
+        integration_knowledge_id=integration_knowledge_id, limit=limit, offset=skip
     )
 
     # Convert domain entities to presentation models
@@ -285,10 +286,7 @@ async def get_sync_logs(
     ]
 
     return PaginatedSyncLogList(
-        items=sync_log_models,
-        total_count=total_count,
-        page_size=limit,
-        offset=skip
+        items=sync_log_models, total_count=total_count, page_size=limit, offset=skip
     )
 
 
@@ -304,7 +302,9 @@ async def get_integration_preview(
     service = container.integration_preview_service()
     assembler = container.confluence_content_assembler()
 
-    preview_data = await service.get_preview_data(user_integration_id=user_integration_id)
+    preview_data = await service.get_preview_data(
+        user_integration_id=user_integration_id
+    )
 
     return assembler.to_paginated_response(items=preview_data)
 
@@ -317,8 +317,12 @@ async def get_integration_preview(
 async def get_sharepoint_folder_tree(
     user_integration_id: UUID,
     space_id: UUID = Query(..., description="Space ID (for auth routing)"),
-    site_id: Optional[str] = Query(None, description="SharePoint site ID (required for SharePoint)"),
-    drive_id: Optional[str] = Query(None, description="Drive ID (required for OneDrive)"),
+    site_id: Optional[str] = Query(
+        None, description="SharePoint site ID (required for SharePoint)"
+    ),
+    drive_id: Optional[str] = Query(
+        None, description="Drive ID (required for OneDrive)"
+    ),
     folder_id: Optional[str] = Query(None, description="Folder ID (null for root)"),
     folder_path: str = Query("", description="Current folder path"),
     container: Container = Depends(get_container(with_user=True)),
@@ -366,7 +370,9 @@ async def get_sharepoint_folder_tree(
             raise NotFoundException(error_msg)
         elif "not authenticated" in error_msg.lower():
             # Integration not authenticated
-            raise BadRequestException(f"Integration authentication required: {error_msg}")
+            raise BadRequestException(
+                f"Integration authentication required: {error_msg}"
+            )
         elif "no oauth token" in error_msg.lower():
             # Missing OAuth token for user integration
             raise BadRequestException(
@@ -388,7 +394,7 @@ async def get_sharepoint_folder_tree(
                 "space_id": str(space_id),
                 "site_id": site_id,
             },
-            exc_info=True
+            exc_info=True,
         )
         raise BadRequestException(f"Failed to fetch SharePoint folder tree: {str(e)}")
 

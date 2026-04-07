@@ -22,6 +22,7 @@ from intric.server.dependencies.auth_definitions import (
 )
 from intric.users.setup import setup_user
 
+
 def _raise_api_key_http_error(
     exc: ApiKeyValidationError,
     *,
@@ -90,15 +91,15 @@ def get_container(
         try:
             session = cast(AsyncSession, container.session())
             if session.in_transaction():
-                user = await container.user_service().authenticate_with_assistant_api_key(
-                    token=token, api_key=api_key, assistant_id=id, request=request
+                user = (
+                    await container.user_service().authenticate_with_assistant_api_key(
+                        token=token, api_key=api_key, assistant_id=id, request=request
+                    )
                 )
             else:
                 async with session.begin():
-                    user = (
-                        await container.user_service().authenticate_with_assistant_api_key(
-                            token=token, api_key=api_key, assistant_id=id, request=request
-                        )
+                    user = await container.user_service().authenticate_with_assistant_api_key(
+                        token=token, api_key=api_key, assistant_id=id, request=request
                     )
         except ApiKeyValidationError as exc:
             _raise_api_key_http_error(exc, request=request)

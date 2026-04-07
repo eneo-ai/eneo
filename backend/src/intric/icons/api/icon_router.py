@@ -26,7 +26,10 @@ async def get_icon(id: UUID, container: Container = Depends(get_container())):
     return Response(
         content=icon.blob,
         media_type=icon.mimetype,
-        headers={"Cache-Control": "public, max-age=31536000", "Content-Length": str(icon.size)},
+        headers={
+            "Cache-Control": "public, max-age=31536000",
+            "Content-Length": str(icon.size),
+        },
     )
 
 
@@ -37,7 +40,9 @@ async def get_icon(id: UUID, container: Container = Depends(get_container())):
     summary="Upload icon",
     description="Upload icon image (PNG, JPEG, WebP). Max 256 KB. Returns icon ID.",
 )
-async def create_icon(file: UploadFile, container: Container = Depends(get_container(with_user=True))):
+async def create_icon(
+    file: UploadFile, container: Container = Depends(get_container(with_user=True))
+):
     icon_service = container.icon_service()
     user = container.user()
     icon = await icon_service.create_icon(file, user.tenant_id)
@@ -51,7 +56,9 @@ async def create_icon(file: UploadFile, container: Container = Depends(get_conta
     description="Delete an icon by ID. Requires authentication and ownership.",
     responses={204: {"description": "Deleted"}, 404: {"description": "Not found"}},
 )
-async def delete_icon(id: UUID, container: Container = Depends(get_container(with_user=True))):
+async def delete_icon(
+    id: UUID, container: Container = Depends(get_container(with_user=True))
+):
     icon_service = container.icon_service()
     user = container.user()
     await icon_service.delete_icon(id, user.tenant_id)

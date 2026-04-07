@@ -7,7 +7,9 @@ from pydantic import BaseModel, Field
 
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.roles.permissions import Permission, validate_permission
-from intric.transcription_models.presentation.transcription_model_models import TranscriptionModelPublic
+from intric.transcription_models.presentation.transcription_model_models import (
+    TranscriptionModelPublic,
+)
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.server.protocol import responses
 from intric.users.user import UserInDB
@@ -23,7 +25,10 @@ class TenantTranscriptionModelCreate(BaseModel):
     )
     display_name: str = Field(..., description="User-friendly display name")
     hosting: str = Field(default="swe", description="Hosting location (swe, eu, usa)")
-    family: str = Field(default="openai", description="Model family (e.g., 'openai', 'anthropic', 'deepseek')")
+    family: str = Field(
+        default="openai",
+        description="Model family (e.g., 'openai', 'anthropic', 'deepseek')",
+    )
     is_active: bool = Field(default=True, description="Enable in organization")
     is_default: bool = Field(default=False, description="Set as default model")
 
@@ -33,7 +38,9 @@ class TenantTranscriptionModelUpdate(BaseModel):
     description: str | None = Field(None, description="Model description")
     hosting: str | None = Field(None, description="Hosting location (swe, eu, usa)")
     open_source: bool | None = Field(None, description="Is the model open source")
-    stability: str | None = Field(None, description="Model stability (stable, experimental)")
+    stability: str | None = Field(
+        None, description="Model stability (stable, experimental)"
+    )
 
 
 @router.post(
@@ -62,7 +69,9 @@ async def create_tenant_transcription_model(
     provider = result.scalar_one_or_none()
 
     if not provider:
-        raise NotFoundException("Model provider not found or does not belong to your organization")
+        raise NotFoundException(
+            "Model provider not found or does not belong to your organization"
+        )
 
     if not provider.is_active:
         raise BadRequestException("Model provider is not active")
@@ -102,7 +111,10 @@ async def create_tenant_transcription_model(
     await session.flush()
 
     # Load the model BEFORE committing
-    from intric.transcription_models.domain.transcription_model_repo import TranscriptionModelRepository
+    from intric.transcription_models.domain.transcription_model_repo import (
+        TranscriptionModelRepository,
+    )
+
     repo = TranscriptionModelRepository(session, user)
     transcription_model = await repo.one(new_model.id)
 
@@ -138,7 +150,9 @@ async def update_tenant_transcription_model(
     model = result.scalar_one_or_none()
 
     if not model:
-        raise NotFoundException("Model not found or does not belong to your organization")
+        raise NotFoundException(
+            "Model not found or does not belong to your organization"
+        )
 
     # Cannot update global models
     if model.tenant_id is None:
@@ -159,7 +173,10 @@ async def update_tenant_transcription_model(
     await session.flush()
 
     # Load the updated model
-    from intric.transcription_models.domain.transcription_model_repo import TranscriptionModelRepository
+    from intric.transcription_models.domain.transcription_model_repo import (
+        TranscriptionModelRepository,
+    )
+
     repo = TranscriptionModelRepository(session, user)
     transcription_model = await repo.one(model.id)
 
@@ -181,7 +198,11 @@ async def delete_tenant_transcription_model(
     validate_permission(user, Permission.ADMIN)
     from intric.database.tables.ai_models_table import TranscriptionModels
     import sqlalchemy as sa
-    from intric.main.exceptions import UnauthorizedException, NotFoundException, BadRequestException
+    from intric.main.exceptions import (
+        UnauthorizedException,
+        NotFoundException,
+        BadRequestException,
+    )
 
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(TranscriptionModels).where(
@@ -192,7 +213,9 @@ async def delete_tenant_transcription_model(
     model = result.scalar_one_or_none()
 
     if not model:
-        raise NotFoundException("Model not found or does not belong to your organization")
+        raise NotFoundException(
+            "Model not found or does not belong to your organization"
+        )
 
     # Cannot delete global models
     if model.tenant_id is None:

@@ -73,9 +73,7 @@ class TenantSharePointApp(Entity):
         self.client_secret = client_secret
         self.tenant_domain = tenant_domain
 
-    def update_service_account(
-        self, refresh_token: str, email: str
-    ) -> None:
+    def update_service_account(self, refresh_token: str, email: str) -> None:
         """Update service account credentials."""
         self.auth_method = AUTH_METHOD_SERVICE_ACCOUNT
         self.service_account_refresh_token = refresh_token

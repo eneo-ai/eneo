@@ -137,7 +137,9 @@ router.include_router(
     tags=["crawl-runs"],
     dependencies=[
         Depends(require_resource_permission_for_method("knowledge")),
-        Depends(require_api_key_scope_check(resource_type="crawl_run", path_param="id")),
+        Depends(
+            require_api_key_scope_check(resource_type="crawl_run", path_param="id")
+        ),
     ],
 )
 router.include_router(
@@ -188,7 +190,9 @@ router.include_router(
     tags=["info-blobs"],
     dependencies=[
         Depends(require_resource_permission_for_method("knowledge")),
-        Depends(require_api_key_scope_check(resource_type="info_blob", path_param=None)),
+        Depends(
+            require_api_key_scope_check(resource_type="info_blob", path_param=None)
+        ),
     ],
 )
 router.include_router(
@@ -201,7 +205,9 @@ router.include_router(
                 "knowledge", read_override_endpoints=KNOWLEDGE_READ_OVERRIDES
             )
         ),
-        Depends(require_api_key_scope_check(resource_type="collection", path_param="id")),
+        Depends(
+            require_api_key_scope_check(resource_type="collection", path_param="id")
+        ),
     ],
 )
 router.include_router(settings_router, prefix="/settings", tags=["settings"])
@@ -224,7 +230,9 @@ router.include_router(
                 "assistants", read_override_endpoints=ASSISTANTS_READ_OVERRIDES
             )
         ),
-        Depends(require_api_key_scope_check(resource_type="assistant", path_param="id")),
+        Depends(
+            require_api_key_scope_check(resource_type="assistant", path_param="id")
+        ),
     ],
 )
 router.include_router(
@@ -233,7 +241,9 @@ router.include_router(
     tags=["group-chats"],
     dependencies=[
         Depends(require_resource_permission_for_method("assistants")),
-        Depends(require_api_key_scope_check(resource_type="group_chat", path_param="id")),
+        Depends(
+            require_api_key_scope_check(resource_type="group_chat", path_param="id")
+        ),
     ],
 )
 router.include_router(
@@ -246,7 +256,13 @@ router.include_router(
                 "assistants", read_override_endpoints=CONVERSATIONS_READ_OVERRIDES
             )
         ),
-        Depends(require_api_key_scope_check(resource_type="conversation", path_param="session_id", self_filtering=True)),
+        Depends(
+            require_api_key_scope_check(
+                resource_type="conversation",
+                path_param="session_id",
+                self_filtering=True,
+            )
+        ),
     ],
 )
 router.include_router(
@@ -363,7 +379,11 @@ router.include_router(
     prefix="/files",
     tags=["files"],
     dependencies=[
-        Depends(require_resource_permission_for_method("knowledge", read_override_endpoints=FILES_READ_OVERRIDES)),
+        Depends(
+            require_resource_permission_for_method(
+                "knowledge", read_override_endpoints=FILES_READ_OVERRIDES
+            )
+        ),
         Depends(require_api_key_scope_check(resource_type="file", path_param=None)),
         Depends(require_tenant_scope_for_delete()),
     ],

@@ -319,10 +319,14 @@ class AnalysisRepository:
         if assistant_id is not None and group_chat_id is not None:
             raise ValueError("Only one of assistant_id or group_chat_id can be set")
 
-        question_rank = sa.func.row_number().over(
-            partition_by=Questions.session_id,
-            order_by=(Questions.created_at.asc(), Questions.id.asc()),
-        ).label("question_rank")
+        question_rank = (
+            sa.func.row_number()
+            .over(
+                partition_by=Questions.session_id,
+                order_by=(Questions.created_at.asc(), Questions.id.asc()),
+            )
+            .label("question_rank")
+        )
 
         base_stmt = (
             sa.select(
@@ -386,10 +390,14 @@ class AnalysisRepository:
         if tenant_id is None:
             raise ValueError("tenant_id is required for insights question queries")
 
-        question_rank = sa.func.row_number().over(
-            partition_by=Questions.session_id,
-            order_by=(Questions.created_at.asc(), Questions.id.asc()),
-        ).label("question_rank")
+        question_rank = (
+            sa.func.row_number()
+            .over(
+                partition_by=Questions.session_id,
+                order_by=(Questions.created_at.asc(), Questions.id.asc()),
+            )
+            .label("question_rank")
+        )
 
         base_stmt = (
             sa.select(

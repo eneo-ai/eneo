@@ -15,7 +15,9 @@ if TYPE_CHECKING:
     from intric.embedding_models.domain.embedding_model import EmbeddingModel
 
 
-class IntegrationKnowledgeMapper(EntityMapper[IntegrationKnowledge, IntegrationKnowledgeDBModel]):
+class IntegrationKnowledgeMapper(
+    EntityMapper[IntegrationKnowledge, IntegrationKnowledgeDBModel]
+):
     def to_db_dict(self, entity: IntegrationKnowledge) -> Dict[str, Any]:
         return {
             "name": entity.name,
@@ -48,7 +50,9 @@ class IntegrationKnowledgeMapper(EntityMapper[IntegrationKnowledge, IntegrationK
         )
 
     def to_entities(
-        self, db_models: List[IntegrationKnowledgeDBModel], embedding_models: List["EmbeddingModel"]
+        self,
+        db_models: List[IntegrationKnowledgeDBModel],
+        embedding_models: List["EmbeddingModel"],
     ) -> List[IntegrationKnowledge]:
         return IntegrationKnowledgeFactory.create_entities(
             records=db_models, embedding_models=embedding_models

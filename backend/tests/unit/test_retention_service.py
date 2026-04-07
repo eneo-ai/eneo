@@ -124,7 +124,9 @@ class TestRetentionPolicyModel:
 class TestGetPolicy:
     """Tests for get_policy() method."""
 
-    async def test_get_policy_returns_existing_policy(self, retention_service, mock_session, sample_policy_row):
+    async def test_get_policy_returns_existing_policy(
+        self, retention_service, mock_session, sample_policy_row
+    ):
         """Verify existing policy is returned."""
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = sample_policy_row
@@ -135,7 +137,9 @@ class TestGetPolicy:
         assert result.tenant_id == sample_policy_row.tenant_id
         assert result.retention_days == sample_policy_row.retention_days
 
-    async def test_get_policy_creates_default_when_missing(self, retention_service, mock_session):
+    async def test_get_policy_creates_default_when_missing(
+        self, retention_service, mock_session
+    ):
         """Verify default policy is created when none exists."""
         tenant_id = uuid4()
 
@@ -164,7 +168,9 @@ class TestGetPolicy:
         # Verify default policy was created with 365 days
         assert result.retention_days == 365
 
-    async def test_get_policy_default_uses_365_days(self, retention_service, mock_session):
+    async def test_get_policy_default_uses_365_days(
+        self, retention_service, mock_session
+    ):
         """Verify default policy uses 365 days retention."""
         tenant_id = uuid4()
 
@@ -224,7 +230,9 @@ class TestUpdatePolicy:
 
         assert "maximum" in exc_info.value.args[0].lower()
 
-    async def test_update_policy_accepts_minimum_boundary(self, retention_service, mock_session):
+    async def test_update_policy_accepts_minimum_boundary(
+        self, retention_service, mock_session
+    ):
         """Verify 1 day retention is accepted."""
         tenant_id = uuid4()
         updated_policy = MagicMock(
@@ -248,7 +256,9 @@ class TestUpdatePolicy:
 
         assert result.retention_days == 1
 
-    async def test_update_policy_accepts_maximum_boundary(self, retention_service, mock_session):
+    async def test_update_policy_accepts_maximum_boundary(
+        self, retention_service, mock_session
+    ):
         """Verify 2555 day retention is accepted."""
         tenant_id = uuid4()
         updated_policy = MagicMock(
@@ -272,7 +282,9 @@ class TestUpdatePolicy:
 
         assert result.retention_days == 2555
 
-    async def test_update_policy_creates_if_missing(self, retention_service, mock_session):
+    async def test_update_policy_creates_if_missing(
+        self, retention_service, mock_session
+    ):
         """Verify policy is created if it doesn't exist."""
         tenant_id = uuid4()
 
@@ -332,7 +344,9 @@ class TestUpdatePolicy:
 class TestConversationRetention:
     """Tests for conversation retention feature."""
 
-    async def test_update_with_conversation_retention_enabled(self, retention_service, mock_session):
+    async def test_update_with_conversation_retention_enabled(
+        self, retention_service, mock_session
+    ):
         """Verify conversation retention can be enabled."""
         tenant_id = uuid4()
         updated_policy = MagicMock(
@@ -385,7 +399,9 @@ class TestConversationRetention:
 class TestPurgeOldLogs:
     """Tests for purge_old_logs() method."""
 
-    async def test_purge_updates_tracking_when_logs_purged(self, retention_service, mock_session):
+    async def test_purge_updates_tracking_when_logs_purged(
+        self, retention_service, mock_session
+    ):
         """Verify purge tracking is updated when logs are purged."""
         tenant_id = uuid4()
 
@@ -404,7 +420,9 @@ class TestPurgeOldLogs:
         mock_result_policy.scalar_one_or_none.return_value = policy
 
         # Mock the repository's hard_delete_old_logs (imported inside the function)
-        with patch("intric.audit.infrastructure.audit_log_repo_impl.AuditLogRepositoryImpl") as MockRepo:
+        with patch(
+            "intric.audit.infrastructure.audit_log_repo_impl.AuditLogRepositoryImpl"
+        ) as MockRepo:
             mock_repo_instance = AsyncMock()
             mock_repo_instance.hard_delete_old_logs.return_value = 10  # 10 logs purged
             MockRepo.return_value = mock_repo_instance
@@ -417,7 +435,9 @@ class TestPurgeOldLogs:
             # Verify tracking update was called
             assert mock_session.execute.call_count >= 2  # Policy query + update
 
-    async def test_purge_skips_tracking_when_no_logs_purged(self, retention_service, mock_session):
+    async def test_purge_skips_tracking_when_no_logs_purged(
+        self, retention_service, mock_session
+    ):
         """Verify purge tracking is not updated when no logs purged."""
         tenant_id = uuid4()
 
@@ -434,7 +454,9 @@ class TestPurgeOldLogs:
         mock_result_policy = MagicMock()
         mock_result_policy.scalar_one_or_none.return_value = policy
 
-        with patch("intric.audit.infrastructure.audit_log_repo_impl.AuditLogRepositoryImpl") as MockRepo:
+        with patch(
+            "intric.audit.infrastructure.audit_log_repo_impl.AuditLogRepositoryImpl"
+        ) as MockRepo:
             mock_repo_instance = AsyncMock()
             mock_repo_instance.hard_delete_old_logs.return_value = 0  # No logs purged
             MockRepo.return_value = mock_repo_instance
@@ -450,7 +472,9 @@ class TestValidationBoundaries:
     """Tests for validation boundary conditions."""
 
     @pytest.mark.parametrize("days", [1, 30, 90, 365, 730, 1825, 2555])
-    async def test_valid_retention_days_accepted(self, retention_service, mock_session, days):
+    async def test_valid_retention_days_accepted(
+        self, retention_service, mock_session, days
+    ):
         """Verify common valid retention periods are accepted."""
         tenant_id = uuid4()
         updated_policy = MagicMock(

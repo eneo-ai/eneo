@@ -147,6 +147,7 @@ class SpacesUserGroups(BaseCrossReference):
     Groups can be added to shared/organization spaces with a role,
     granting all members of the group access to the space at that role level.
     """
+
     space_id: Mapped[UUID] = mapped_column(
         ForeignKey(Spaces.id, ondelete="CASCADE"), primary_key=True
     )
@@ -157,4 +158,5 @@ class SpacesUserGroups(BaseCrossReference):
 
     # Relationships
     from intric.database.tables.user_groups_table import UserGroups
+
     user_group: Mapped["UserGroups"] = relationship()

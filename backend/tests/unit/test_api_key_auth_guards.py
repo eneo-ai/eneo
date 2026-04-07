@@ -48,6 +48,7 @@ from tests.unit.api_key_test_utils import make_api_key
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_key(**overrides: object) -> ApiKeyV2InDB:
     return make_api_key(
         default_permission=ApiKeyPermission.WRITE,
@@ -156,7 +157,9 @@ class TestMethodAwarePermissionCheck:
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
-            resource_permissions=ResourcePermissions(apps=ResourcePermissionLevel.WRITE),
+            resource_permissions=ResourcePermissions(
+                apps=ResourcePermissionLevel.WRITE
+            ),
         )
         request = _fake_request("POST")
         _check_method_resource_permission(request, key, _config("apps"))
@@ -168,7 +171,9 @@ class TestMethodAwarePermissionCheck:
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
-            resource_permissions=ResourcePermissions(apps=ResourcePermissionLevel.WRITE),
+            resource_permissions=ResourcePermissions(
+                apps=ResourcePermissionLevel.WRITE
+            ),
         )
         request = _fake_request("DELETE")
         with pytest.raises(ApiKeyValidationError) as exc_info:
@@ -183,7 +188,9 @@ class TestMethodAwarePermissionCheck:
         )
         key = _make_key(
             permission=ApiKeyPermission.ADMIN,
-            resource_permissions=ResourcePermissions(apps=ResourcePermissionLevel.ADMIN),
+            resource_permissions=ResourcePermissions(
+                apps=ResourcePermissionLevel.ADMIN
+            ),
         )
         request = _fake_request("DELETE")
         _check_method_resource_permission(request, key, _config("apps"))
@@ -195,7 +202,9 @@ class TestMethodAwarePermissionCheck:
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
-            resource_permissions=ResourcePermissions(apps=ResourcePermissionLevel.WRITE),
+            resource_permissions=ResourcePermissions(
+                apps=ResourcePermissionLevel.WRITE
+            ),
         )
         request = _fake_request("PURGE")
         with pytest.raises(ApiKeyValidationError) as exc_info:
@@ -228,7 +237,8 @@ class TestMethodAwarePermissionCheck:
         )
         request = _fake_request("POST", endpoint_name="ask_assistant")
         _check_method_resource_permission(
-            request, key,
+            request,
+            key,
             _config("assistants", read_override_endpoints=ASSISTANTS_READ_OVERRIDES),
         )
 
@@ -255,7 +265,8 @@ class TestEndpointPermissionTransitions:
         request = _fake_request("POST", endpoint_name="ask_assistant")
         # Should NOT raise — ask_assistant is in ASSISTANTS_READ_OVERRIDES
         _check_method_resource_permission(
-            request, key,
+            request,
+            key,
             _config("assistants", read_override_endpoints=ASSISTANTS_READ_OVERRIDES),
         )
 
@@ -284,33 +295,49 @@ class TestEndpointPermissionTransitions:
         # WRITE key: GET passes, POST passes, DELETE blocked (requires admin)
         key = _make_key(resource_permissions=None, permission=ApiKeyPermission.WRITE)
         _check_method_resource_permission(
-            _fake_request("GET"), key, _config("apps"),
+            _fake_request("GET"),
+            key,
+            _config("apps"),
         )
         _check_method_resource_permission(
-            _fake_request("POST"), key, _config("apps"),
+            _fake_request("POST"),
+            key,
+            _config("apps"),
         )
         with pytest.raises(ApiKeyValidationError) as exc_info:
             _check_method_resource_permission(
-                _fake_request("DELETE"), key, _config("apps"),
+                _fake_request("DELETE"),
+                key,
+                _config("apps"),
             )
         assert exc_info.value.status_code == 403
 
         # READ key: GET passes, POST blocked
-        read_key = _make_key(resource_permissions=None, permission=ApiKeyPermission.READ)
+        read_key = _make_key(
+            resource_permissions=None, permission=ApiKeyPermission.READ
+        )
         _check_method_resource_permission(
-            _fake_request("GET"), read_key, _config("apps"),
+            _fake_request("GET"),
+            read_key,
+            _config("apps"),
         )
         with pytest.raises(ApiKeyValidationError) as exc_info:
             _check_method_resource_permission(
-                _fake_request("POST"), read_key, _config("apps"),
+                _fake_request("POST"),
+                read_key,
+                _config("apps"),
             )
         assert exc_info.value.status_code == 403
 
         # ADMIN key: all pass
-        admin_key = _make_key(resource_permissions=None, permission=ApiKeyPermission.ADMIN)
+        admin_key = _make_key(
+            resource_permissions=None, permission=ApiKeyPermission.ADMIN
+        )
         for method in ("GET", "POST", "DELETE"):
             _check_method_resource_permission(
-                _fake_request(method), admin_key, _config("apps"),
+                _fake_request(method),
+                admin_key,
+                _config("apps"),
             )
 
 
@@ -359,7 +386,10 @@ class TestErrorContracts:
             _raise_api_key_http_error(exc)
         http_exc = exc_info.value
         assert http_exc.status_code == 429
-        assert http_exc.detail == {"code": "rate_limited", "message": "Too many requests."}
+        assert http_exc.detail == {
+            "code": "rate_limited",
+            "message": "Too many requests.",
+        }
         assert http_exc.headers["Retry-After"] == "60"
 
     def test_auth_dependencies_raise_includes_request_id_when_available(self):
@@ -385,7 +415,9 @@ class TestErrorContracts:
 
     def test_router_helpers_raise_preserves_contract(self):
         """15. raise_api_key_http_error in api_key_router_helpers.py."""
-        from intric.authentication.api_key_router_helpers import raise_api_key_http_error
+        from intric.authentication.api_key_router_helpers import (
+            raise_api_key_http_error,
+        )
 
         exc = ApiKeyValidationError(
             status_code=403,
@@ -404,7 +436,9 @@ class TestErrorContracts:
 
     def test_container_raise_preserves_contract(self):
         """16. _raise_api_key_http_error in container.py."""
-        from intric.server.dependencies.container import _raise_api_key_http_error as container_raise
+        from intric.server.dependencies.container import (
+            _raise_api_key_http_error as container_raise,
+        )
 
         exc = ApiKeyValidationError(
             status_code=401,
@@ -422,7 +456,9 @@ class TestErrorContracts:
         assert http_exc.headers["WWW-Authenticate"] == "Bearer"
 
     def test_converter_strips_granted_level_from_response_context(self):
-        from intric.authentication.api_key_router_helpers import raise_api_key_http_error
+        from intric.authentication.api_key_router_helpers import (
+            raise_api_key_http_error,
+        )
 
         exc = ApiKeyValidationError(
             status_code=403,
@@ -445,7 +481,9 @@ class TestErrorContracts:
         assert "granted_level" not in detail["context"]
 
     def test_converter_does_not_add_auth_layer_for_400(self):
-        from intric.authentication.api_key_router_helpers import raise_api_key_http_error
+        from intric.authentication.api_key_router_helpers import (
+            raise_api_key_http_error,
+        )
 
         exc = ApiKeyValidationError(
             status_code=400,
@@ -459,7 +497,9 @@ class TestErrorContracts:
         assert "context" not in exc_info.value.detail
 
     def test_converter_maps_guardrail_layer(self):
-        from intric.authentication.api_key_router_helpers import raise_api_key_http_error
+        from intric.authentication.api_key_router_helpers import (
+            raise_api_key_http_error,
+        )
 
         exc = ApiKeyValidationError(
             status_code=403,
@@ -494,7 +534,9 @@ class TestOverrideNameValidation:
         """Import the routers, iterate all registered routes, assert overrides match."""
         from intric.assistants.api.assistant_router import router as assistants_router
         from intric.groups_legacy.api.group_router import router as groups_router
-        from intric.conversations.conversations_router import router as conversations_router
+        from intric.conversations.conversations_router import (
+            router as conversations_router,
+        )
         from intric.apps.apps.api.app_router import router as apps_router
         from intric.services.service_router import router as services_router
 
@@ -502,10 +544,9 @@ class TestOverrideNameValidation:
         group_names = self._collect_endpoint_names(groups_router)
         conversation_names = self._collect_endpoint_names(conversations_router)
         # APPS_READ_OVERRIDES is shared across app_router and services_router
-        apps_names = (
-            self._collect_endpoint_names(apps_router)
-            | self._collect_endpoint_names(services_router)
-        )
+        apps_names = self._collect_endpoint_names(
+            apps_router
+        ) | self._collect_endpoint_names(services_router)
 
         for name in ASSISTANTS_READ_OVERRIDES:
             assert name in assistant_names, (
@@ -666,11 +707,14 @@ class TestHTTPIntegration:
                     request.state.api_key_permission = _key.permission
                     request.state.api_key_scope_type = _key.scope_type
                     request.state.api_key_scope_id = _key.scope_id
-                    request.state.api_key_resource_permissions = _key.resource_permissions
+                    request.state.api_key_resource_permissions = (
+                        _key.resource_permissions
+                    )
                     perm_config = getattr(request.state, "_resource_perm_config", None)
                     if perm_config is not None:
                         _check_method_resource_permission(request, _key, perm_config)
                 return {"id": "fake-user"}
+
             # Explicit annotation: avoids PEP 563 turning it into a string
             _dep.__annotations__["request"] = Request
             return _dep
@@ -684,6 +728,7 @@ class TestHTTPIntegration:
                 content={"code": exc.code, "message": exc.message},
                 headers=exc.headers,
             )
+
         _handle.__annotations__["request"] = Request
         _handle.__annotations__["exc"] = ApiKeyValidationError
 
@@ -730,7 +775,9 @@ class TestHTTPIntegration:
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             resp = await client.post("/test-resource")
-        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        assert resp.status_code == 200, (
+            f"Expected 200, got {resp.status_code}: {resp.text}"
+        )
         assert resp.json() == {"ok": True}
 
     @pytest.mark.asyncio
@@ -741,7 +788,9 @@ class TestHTTPIntegration:
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
-            resource_permissions=ResourcePermissions(apps=ResourcePermissionLevel.WRITE),
+            resource_permissions=ResourcePermissions(
+                apps=ResourcePermissionLevel.WRITE
+            ),
         )
         rate_exc = ApiKeyValidationError(
             status_code=429,
@@ -845,11 +894,14 @@ class TestReadOverrideConstants:
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
-            resource_permissions=ResourcePermissions(assistants=ResourcePermissionLevel.READ),
+            resource_permissions=ResourcePermissions(
+                assistants=ResourcePermissionLevel.READ
+            ),
         )
         request = _fake_request("POST", endpoint_name="chat")
         _check_method_resource_permission(
-            request, key,
+            request,
+            key,
             _config("assistants", read_override_endpoints=CONVERSATIONS_READ_OVERRIDES),
         )
 
@@ -860,11 +912,14 @@ class TestReadOverrideConstants:
             lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
         )
         key = _make_key(
-            resource_permissions=ResourcePermissions(assistants=ResourcePermissionLevel.READ),
+            resource_permissions=ResourcePermissions(
+                assistants=ResourcePermissionLevel.READ
+            ),
         )
         request = _fake_request("POST", endpoint_name="leave_feedback")
         _check_method_resource_permission(
-            request, key,
+            request,
+            key,
             _config("assistants", read_override_endpoints=CONVERSATIONS_READ_OVERRIDES),
         )
 
@@ -879,7 +934,8 @@ class TestReadOverrideConstants:
         )
         request = _fake_request("POST", endpoint_name="run_service")
         _check_method_resource_permission(
-            request, key,
+            request,
+            key,
             _config("apps", read_override_endpoints=APPS_READ_OVERRIDES),
         )
 
@@ -894,7 +950,8 @@ class TestReadOverrideConstants:
         )
         request = _fake_request("POST", endpoint_name="run_app")
         _check_method_resource_permission(
-            request, key,
+            request,
+            key,
             _config("apps", read_override_endpoints=APPS_READ_OVERRIDES),
         )
 
@@ -910,7 +967,8 @@ class TestReadOverrideConstants:
         request = _fake_request("POST", endpoint_name="create_app")
         with pytest.raises(ApiKeyValidationError) as exc_info:
             _check_method_resource_permission(
-                request, key,
+                request,
+                key,
                 _config("apps", read_override_endpoints=APPS_READ_OVERRIDES),
             )
         assert exc_info.value.status_code == 403
@@ -927,6 +985,7 @@ class TestLegacySplitMapping:
     def test_user_key_migration_creates_admin(self):
         """User key migration → permission=ADMIN."""
         from intric.authentication.auth_models import ApiKeyPermission
+
         # The code at api_key_resolver.py sets permission=ApiKeyPermission.ADMIN.value
         # for user keys (scope_type=tenant). Verify constant value.
         assert ApiKeyPermission.ADMIN.value == "admin"
@@ -934,6 +993,7 @@ class TestLegacySplitMapping:
     def test_assistant_key_migration_creates_read(self):
         """Assistant key migration → permission=READ."""
         from intric.authentication.auth_models import ApiKeyPermission
+
         # The code at api_key_resolver.py sets permission=ApiKeyPermission.READ.value
         # for assistant keys (scope_type=assistant). Verify constant value.
         assert ApiKeyPermission.READ.value == "read"
@@ -1119,8 +1179,12 @@ class TestPrimaryBugScenario:
 _MATRIX_CASES = []
 for _perm, _perm_level in [("read", 1), ("write", 2), ("admin", 3)]:
     for _method, _required in [
-        ("GET", "read"), ("HEAD", "read"), ("OPTIONS", "read"),
-        ("POST", "write"), ("PUT", "write"), ("PATCH", "write"),
+        ("GET", "read"),
+        ("HEAD", "read"),
+        ("OPTIONS", "read"),
+        ("POST", "write"),
+        ("PUT", "write"),
+        ("PATCH", "write"),
         ("DELETE", "admin"),
     ]:
         _required_level = PERMISSION_LEVEL_ORDER[_required]
@@ -1196,7 +1260,8 @@ class TestPermissionMatrix:
         )
         request = _fake_request("POST", endpoint_name=override_endpoint)
         _check_method_resource_permission(
-            request, key,
+            request,
+            key,
             _config(resource_type, read_override_endpoints=override_set),
         )
 
@@ -1228,7 +1293,9 @@ class TestGuardrailInteraction:
         # DELETE requires admin — should fail regardless of origin
         with pytest.raises(ApiKeyValidationError) as exc_info:
             _check_method_resource_permission(
-                _fake_request("DELETE"), key, _config("apps"),
+                _fake_request("DELETE"),
+                key,
+                _config("apps"),
             )
         assert exc_info.value.status_code == 403
         assert exc_info.value.code == "insufficient_permission"
@@ -1241,11 +1308,15 @@ class TestGuardrailInteraction:
         )
         key = _make_key(
             permission=ApiKeyPermission.ADMIN,
-            resource_permissions=ResourcePermissions(apps=ResourcePermissionLevel.ADMIN),
+            resource_permissions=ResourcePermissions(
+                apps=ResourcePermissionLevel.ADMIN
+            ),
         )
         # Admin key can DELETE — permission layer passes
         _check_method_resource_permission(
-            _fake_request("DELETE"), key, _config("apps"),
+            _fake_request("DELETE"),
+            key,
+            _config("apps"),
         )
 
     def test_basic_permission_check_independent(self, monkeypatch):
@@ -1279,7 +1350,9 @@ class TestGuardrailInteraction:
         )
         with pytest.raises(ApiKeyValidationError) as exc_info:
             _check_method_resource_permission(
-                _fake_request("DELETE"), key_l1, _config("apps"),
+                _fake_request("DELETE"),
+                key_l1,
+                _config("apps"),
             )
         assert exc_info.value.code == "insufficient_resource_permission"
 
@@ -1376,7 +1449,8 @@ class TestErrorContractSnapshots:
             key = _make_key(permission=contract["perm"])
             with pytest.raises(ApiKeyValidationError) as exc_info:
                 _check_basic_method_permission(
-                    _fake_request(contract["method"]), key,
+                    _fake_request(contract["method"]),
+                    key,
                 )
         elif contract["layer"] == "resource":
             key = _make_key(
@@ -1408,9 +1482,7 @@ class TestErrorContractSnapshots:
         assert exc.code == contract["code"]
 
         for text in contract["must_contain"]:
-            assert text in exc.message, (
-                f"Expected '{text}' in message: {exc.message}"
-            )
+            assert text in exc.message, f"Expected '{text}' in message: {exc.message}"
 
         for text in contract["must_not_contain"]:
             assert text not in exc.message, (
@@ -1458,7 +1530,9 @@ class TestManagementEndpointGuard:
                     request.state.api_key_permission = _key.permission
                     request.state.api_key_scope_type = _key.scope_type
                     request.state.api_key_scope_id = _key.scope_id
-                    request.state.api_key_resource_permissions = _key.resource_permissions
+                    request.state.api_key_resource_permissions = (
+                        _key.resource_permissions
+                    )
                     # Simulate _resolve_api_key's management check
                     required_perm = getattr(
                         request.state, "_required_api_key_permission", None
@@ -1466,6 +1540,7 @@ class TestManagementEndpointGuard:
                     if required_perm is not None:
                         _check_management_permission(_key, required_perm)
                 return {"id": "fake-user"}
+
             _dep.__annotations__["request"] = Request
             return _dep
 
@@ -1478,6 +1553,7 @@ class TestManagementEndpointGuard:
                 content={"code": exc.code, "message": exc.message},
                 headers=exc.headers,
             )
+
         _handle.__annotations__["request"] = Request
         _handle.__annotations__["exc"] = ApiKeyValidationError
 
@@ -1958,7 +2034,10 @@ class TestManagementGuardPermissionMatrix:
     @pytest.mark.parametrize("method,path", _MUTATIONS)
     @pytest.mark.asyncio
     async def test_read_key_blocked_on_all_mutations(
-        self, monkeypatch, method, path,
+        self,
+        monkeypatch,
+        method,
+        path,
     ):
         monkeypatch.setattr(
             "intric.authentication.auth_dependencies.get_settings",
@@ -1973,14 +2052,15 @@ class TestManagementGuardPermissionMatrix:
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             resp = await client.request(method, path)
-        assert resp.status_code == 403, (
-            f"Read key should be blocked on {method} {path}"
-        )
+        assert resp.status_code == 403, f"Read key should be blocked on {method} {path}"
 
     @pytest.mark.parametrize("method,path", _MUTATIONS)
     @pytest.mark.asyncio
     async def test_write_key_blocked_on_all_mutations(
-        self, monkeypatch, method, path,
+        self,
+        monkeypatch,
+        method,
+        path,
     ):
         monkeypatch.setattr(
             "intric.authentication.auth_dependencies.get_settings",
@@ -2002,7 +2082,10 @@ class TestManagementGuardPermissionMatrix:
     @pytest.mark.parametrize("method,path", _MUTATIONS)
     @pytest.mark.asyncio
     async def test_admin_key_passes_all_mutations(
-        self, monkeypatch, method, path,
+        self,
+        monkeypatch,
+        method,
+        path,
     ):
         monkeypatch.setattr(
             "intric.authentication.auth_dependencies.get_settings",
@@ -2017,9 +2100,7 @@ class TestManagementGuardPermissionMatrix:
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             resp = await client.request(method, path)
-        assert resp.status_code == 200, (
-            f"Admin key should pass on {method} {path}"
-        )
+        assert resp.status_code == 200, f"Admin key should pass on {method} {path}"
 
 
 # ---------------------------------------------------------------------------
@@ -2039,6 +2120,7 @@ class TestRouteGuardCoverage:
     def _endpoint_has_api_key_guard(endpoint_fn) -> bool:
         """Check if an endpoint function has require_api_key_permission in its dependencies."""
         import inspect
+
         sig = inspect.signature(endpoint_fn)
         for param in sig.parameters.values():
             if param.default is not inspect.Parameter.empty:
@@ -2047,7 +2129,10 @@ class TestRouteGuardCoverage:
                     # FastAPI Depends wraps the actual dependency
                     inner = dep.dependency
                     # The guard is a closure — check its qualname
-                    if hasattr(inner, "__qualname__") and "require_api_key_permission" in inner.__qualname__:
+                    if (
+                        hasattr(inner, "__qualname__")
+                        and "require_api_key_permission" in inner.__qualname__
+                    ):
                         return True
         return False
 
@@ -2113,7 +2198,9 @@ class TestRouteGuardCoverage:
                 continue
             endpoint = route.endpoint
             if self._endpoint_has_api_key_guard(endpoint):
-                guarded_reads.append(f"{route.methods} {route.path} ({endpoint.__name__})")
+                guarded_reads.append(
+                    f"{route.methods} {route.path} ({endpoint.__name__})"
+                )
 
         assert not guarded_reads, (
             "GET endpoints should NOT have management guard:\n"

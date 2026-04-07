@@ -419,7 +419,11 @@ EXCEPTION_MAP = {
     ProviderNotFoundException: (404, None, ErrorCodes.PROVIDER_NOT_FOUND),
     # Resource configuration errors - use None to pass through the exception's own message
     ModelNotAvailableException: (400, None, ErrorCodes.MODEL_NOT_AVAILABLE),
-    KnowledgeModelUnavailableException: (400, None, ErrorCodes.KNOWLEDGE_MODEL_UNAVAILABLE),
+    KnowledgeModelUnavailableException: (
+        400,
+        None,
+        ErrorCodes.KNOWLEDGE_MODEL_UNAVAILABLE,
+    ),
     SecurityClassificationMismatchException: (
         400,
         None,

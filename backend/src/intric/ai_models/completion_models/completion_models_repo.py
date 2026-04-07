@@ -28,14 +28,15 @@ class CompletionModelsRepository:
             CompletionModels.id == id,
             sa.or_(
                 CompletionModels.tenant_id.is_(None),
-                CompletionModels.tenant_id == tenant_id
-            )
+                CompletionModels.tenant_id == tenant_id,
+            ),
         )
         result = await self.session.execute(stmt)
         db_model = result.scalar_one_or_none()
 
         if db_model is None:
             from intric.main.exceptions import NotFoundException
+
             raise NotFoundException()
 
         model = CompletionModel.model_validate(db_model)
@@ -101,7 +102,7 @@ class CompletionModelsRepository:
             query = query.where(
                 sa.or_(
                     CompletionModels.tenant_id.is_(None),
-                    CompletionModels.tenant_id == tenant_id
+                    CompletionModels.tenant_id == tenant_id,
                 )
             )
 

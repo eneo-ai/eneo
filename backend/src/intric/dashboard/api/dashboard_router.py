@@ -28,11 +28,7 @@ async def get_dashboard(
     # Scope filtering: space-scoped key should only see its scoped space.
     scope_filter = get_scope_filter(request)
     if scope_filter.space_id is not None:
-        spaces = [
-            space
-            for space in spaces
-            if space.id == scope_filter.space_id
-        ]
+        spaces = [space for space in spaces if space.id == scope_filter.space_id]
 
     space_models = [
         assembler.from_space_to_dashboard_model(space, only_published=only_published)

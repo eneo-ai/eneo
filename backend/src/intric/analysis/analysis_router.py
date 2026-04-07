@@ -77,7 +77,9 @@ def _default_analytics_range(
 ) -> tuple[datetime, datetime]:
     now = datetime.now(timezone.utc)
     resolved_start = start_date if start_date is not None else now - timedelta(days=30)
-    resolved_end = end_date if end_date is not None else now + timedelta(hours=1, minutes=1)
+    resolved_end = (
+        end_date if end_date is not None else now + timedelta(hours=1, minutes=1)
+    )
     if resolved_start.tzinfo is None:
         resolved_start = resolved_start.replace(tzinfo=timezone.utc)
     if resolved_end.tzinfo is None:
@@ -236,16 +238,14 @@ async def get_most_recent_questions_paginated(
         q = q.strip() or None
 
     service = container.analysis_service()
-    items, total_count, next_cursor = (
-        await service.get_assistant_question_history_page(
-            assistant_id=assistant_id,
-            from_date=from_date,
-            to_date=to_date,
-            include_followups=include_followups,
-            limit=limit,
-            query=q,
-            cursor=cursor,
-        )
+    items, total_count, next_cursor = await service.get_assistant_question_history_page(
+        assistant_id=assistant_id,
+        from_date=from_date,
+        to_date=to_date,
+        include_followups=include_followups,
+        limit=limit,
+        query=q,
+        cursor=cursor,
     )
 
     return CursorPaginatedResponse(

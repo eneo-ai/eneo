@@ -29,14 +29,14 @@ router = APIRouter(prefix="/admin/templates/apps", tags=["admin-templates"])
     description="Returns all active app templates for your tenant (admin only)",
     responses=responses.get_responses([401, 403]),
 )
-async def list_templates(
-    container: Container = Depends(get_container(with_user=True))
-):
+async def list_templates(container: Container = Depends(get_container(with_user=True))):
     """List all active app templates for the tenant with usage counts."""
     service = container.app_template_service()
     user = container.user()
 
-    templates_with_usage = await service.get_templates_for_tenant(tenant_id=user.tenant_id)
+    templates_with_usage = await service.get_templates_for_tenant(
+        tenant_id=user.tenant_id
+    )
 
     items = [
         AppTemplateAdminPublic(
@@ -47,7 +47,9 @@ async def list_templates(
             prompt_text=t.prompt_text,
             completion_model_kwargs=t.completion_model_kwargs or {},
             completion_model_id=t.completion_model.id if t.completion_model else None,
-            completion_model_name=t.completion_model.name if t.completion_model else None,
+            completion_model_name=t.completion_model.name
+            if t.completion_model
+            else None,
             wizard=t.wizard,
             input_type=t.input_type,
             input_description=t.input_description,
@@ -162,8 +164,12 @@ async def create_template(
         category=template.category,
         prompt_text=template.prompt_text,
         completion_model_kwargs=template.completion_model_kwargs or {},
-        completion_model_id=template.completion_model.id if template.completion_model else None,
-        completion_model_name=template.completion_model.name if template.completion_model else None,
+        completion_model_id=template.completion_model.id
+        if template.completion_model
+        else None,
+        completion_model_name=template.completion_model.name
+        if template.completion_model
+        else None,
         wizard=template.wizard,
         input_type=template.input_type,
         input_description=template.input_description,
@@ -241,8 +247,12 @@ async def update_template(
         category=template.category,
         prompt_text=template.prompt_text,
         completion_model_kwargs=template.completion_model_kwargs or {},
-        completion_model_id=template.completion_model.id if template.completion_model else None,
-        completion_model_name=template.completion_model.name if template.completion_model else None,
+        completion_model_id=template.completion_model.id
+        if template.completion_model
+        else None,
+        completion_model_name=template.completion_model.name
+        if template.completion_model
+        else None,
         wizard=template.wizard,
         input_type=template.input_type,
         input_description=template.input_description,
@@ -310,8 +320,12 @@ async def toggle_default(
         category=template.category,
         prompt_text=template.prompt_text,
         completion_model_kwargs=template.completion_model_kwargs or {},
-        completion_model_id=template.completion_model.id if template.completion_model else None,
-        completion_model_name=template.completion_model.name if template.completion_model else None,
+        completion_model_id=template.completion_model.id
+        if template.completion_model
+        else None,
+        completion_model_name=template.completion_model.name
+        if template.completion_model
+        else None,
         wizard=template.wizard,
         input_type=template.input_type,
         input_description=template.input_description,
@@ -396,8 +410,12 @@ async def rollback_template(
         category=template.category,
         prompt_text=template.prompt_text,
         completion_model_kwargs=template.completion_model_kwargs or {},
-        completion_model_id=template.completion_model.id if template.completion_model else None,
-        completion_model_name=template.completion_model.name if template.completion_model else None,
+        completion_model_id=template.completion_model.id
+        if template.completion_model
+        else None,
+        completion_model_name=template.completion_model.name
+        if template.completion_model
+        else None,
         wizard=template.wizard,
         input_type=template.input_type,
         input_description=template.input_description,
@@ -443,8 +461,12 @@ async def restore_template(
         category=template.category,
         prompt_text=template.prompt_text,
         completion_model_kwargs=template.completion_model_kwargs or {},
-        completion_model_id=template.completion_model.id if template.completion_model else None,
-        completion_model_name=template.completion_model.name if template.completion_model else None,
+        completion_model_id=template.completion_model.id
+        if template.completion_model
+        else None,
+        completion_model_name=template.completion_model.name
+        if template.completion_model
+        else None,
         wizard=template.wizard,
         input_type=template.input_type,
         input_description=template.input_description,
@@ -491,13 +513,15 @@ async def permanent_delete_template(
     responses=responses.get_responses([401, 403]),
 )
 async def list_deleted_templates(
-    container: Container = Depends(get_container(with_user=True))
+    container: Container = Depends(get_container(with_user=True)),
 ):
     """List all deleted app templates for audit purposes with usage counts."""
     service = container.app_template_service()
     user = container.user()
 
-    templates_with_usage = await service.get_deleted_templates_for_tenant(tenant_id=user.tenant_id)
+    templates_with_usage = await service.get_deleted_templates_for_tenant(
+        tenant_id=user.tenant_id
+    )
 
     items = [
         AppTemplateAdminPublic(
@@ -508,7 +532,9 @@ async def list_deleted_templates(
             prompt_text=t.prompt_text,
             completion_model_kwargs=t.completion_model_kwargs or {},
             completion_model_id=t.completion_model.id if t.completion_model else None,
-            completion_model_name=t.completion_model.name if t.completion_model else None,
+            completion_model_name=t.completion_model.name
+            if t.completion_model
+            else None,
             wizard=t.wizard,
             input_type=t.input_type,
             input_description=t.input_description,

@@ -265,7 +265,9 @@ async def test_redis_keys_have_proper_ttl(
     expected_min_ttl = max_age + 3600 - 10
 
     assert start_ttl >= expected_min_ttl, f"Start time TTL should be ~{max_age + 3600}s"
-    assert count_ttl >= expected_min_ttl, f"Retry count TTL should be ~{max_age + 3600}s"
+    assert count_ttl >= expected_min_ttl, (
+        f"Retry count TTL should be ~{max_age + 3600}s"
+    )
 
     # Cleanup
     await redis_client.delete(
@@ -296,10 +298,18 @@ async def test_exponential_backoff_with_real_calculation(
     )
 
     # Test several attempts
-    attempt_1_delays = [calculate_exponential_backoff(1, base_delay, max_delay) for _ in range(100)]
-    attempt_2_delays = [calculate_exponential_backoff(2, base_delay, max_delay) for _ in range(100)]
-    attempt_3_delays = [calculate_exponential_backoff(3, base_delay, max_delay) for _ in range(100)]
-    attempt_4_delays = [calculate_exponential_backoff(4, base_delay, max_delay) for _ in range(100)]
+    attempt_1_delays = [
+        calculate_exponential_backoff(1, base_delay, max_delay) for _ in range(100)
+    ]
+    attempt_2_delays = [
+        calculate_exponential_backoff(2, base_delay, max_delay) for _ in range(100)
+    ]
+    attempt_3_delays = [
+        calculate_exponential_backoff(3, base_delay, max_delay) for _ in range(100)
+    ]
+    attempt_4_delays = [
+        calculate_exponential_backoff(4, base_delay, max_delay) for _ in range(100)
+    ]
 
     # Verify ranges (with jitter)
     # Attempt 1: 60 * 2^0 = 60 -> [0, 60]

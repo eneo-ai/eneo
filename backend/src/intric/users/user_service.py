@@ -85,6 +85,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+
 def _permission_allows(key: ApiKeyV2InDB, required: ApiKeyPermission) -> bool:
     granted = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
     needed = PERMISSION_LEVEL_ORDER.get(required.value, 3)
@@ -165,7 +166,9 @@ def _check_method_resource_permission(
     ``require_resource_permission_for_method`` dependency.
     """
     resource_type: str = config["resource_type"]
-    read_override_endpoints: frozenset[str] | None = config.get("read_override_endpoints")
+    read_override_endpoints: frozenset[str] | None = config.get(
+        "read_override_endpoints"
+    )
 
     required = METHOD_PERMISSION_MAP.get(request.method, "admin")
 
@@ -697,6 +700,7 @@ class UserService:
     async def _is_space_member(self, space_id: UUID, user_id: UUID) -> bool:
         """Check if user is a member of space (index-only, no user context)."""
         from intric.database.tables.spaces_table import SpacesUsers
+
         query = (
             sa.select(sa.literal(1))
             .select_from(SpacesUsers)
@@ -773,10 +777,14 @@ class UserService:
 
             # Verify the owner still has the permissions required for this key's scope.
             # Tenant-scoped keys require the owner to be a tenant admin.
-            if resolved.key.scope_type in (
-                ApiKeyScopeType.TENANT,
-                ApiKeyScopeType.TENANT.value,
-            ) and Permission.ADMIN not in user.permissions:
+            if (
+                resolved.key.scope_type
+                in (
+                    ApiKeyScopeType.TENANT,
+                    ApiKeyScopeType.TENANT.value,
+                )
+                and Permission.ADMIN not in user.permissions
+            ):
                 raise ApiKeyValidationError(
                     status_code=403,
                     code="owner_permission_revoked",
@@ -784,10 +792,15 @@ class UserService:
                 )
 
             # Scoped keys require the owner to still be a member of the target space.
-            if self._session is not None and resolved.key.scope_type not in (
-                ApiKeyScopeType.TENANT,
-                ApiKeyScopeType.TENANT.value,
-            ) and resolved.key.scope_id is not None:
+            if (
+                self._session is not None
+                and resolved.key.scope_type
+                not in (
+                    ApiKeyScopeType.TENANT,
+                    ApiKeyScopeType.TENANT.value,
+                )
+                and resolved.key.scope_id is not None
+            ):
                 space_id = await self._resolve_space_id_for_scope(
                     scope_type=resolved.key.scope_type,
                     scope_id=resolved.key.scope_id,
@@ -828,7 +841,9 @@ class UserService:
                 await self.api_key_rate_limiter.enforce(resolved.key)
         except ApiKeyValidationError as exc:
             await self._log_api_key_auth_failed(
-                user, resolved.key, exc,
+                user,
+                resolved.key,
+                exc,
                 ip_address=ip_address,
                 request_id=request_id,
                 user_agent=user_agent,
@@ -886,7 +901,9 @@ class UserService:
                     ),
                 )
                 await self._log_api_key_auth_failed(
-                    user, resolved.key, exc,
+                    user,
+                    resolved.key,
+                    exc,
                     ip_address=ip_address,
                     request_id=request_id,
                     user_agent=user_agent,
@@ -905,7 +922,9 @@ class UserService:
                 _check_method_resource_permission(request, resolved.key, perm_config)
             except ApiKeyValidationError as exc:
                 await self._log_api_key_auth_failed(
-                    user, resolved.key, exc,
+                    user,
+                    resolved.key,
+                    exc,
                     ip_address=ip_address,
                     request_id=request_id,
                     user_agent=user_agent,
@@ -918,7 +937,9 @@ class UserService:
                 _check_basic_method_permission(request, resolved.key)
             except ApiKeyValidationError as exc:
                 await self._log_api_key_auth_failed(
-                    user, resolved.key, exc,
+                    user,
+                    resolved.key,
+                    exc,
                     ip_address=ip_address,
                     request_id=request_id,
                     user_agent=user_agent,
@@ -927,15 +948,15 @@ class UserService:
                 raise
 
         # Management endpoint guard (NOT gated by feature flag)
-        required_perm = getattr(
-            request.state, "_required_api_key_permission", None
-        )
+        required_perm = getattr(request.state, "_required_api_key_permission", None)
         if required_perm is not None:
             try:
                 _check_management_permission(resolved.key, required_perm)
             except ApiKeyValidationError as exc:
                 await self._log_api_key_auth_failed(
-                    user, resolved.key, exc,
+                    user,
+                    resolved.key,
+                    exc,
                     ip_address=ip_address,
                     request_id=request_id,
                     user_agent=user_agent,
@@ -953,11 +974,16 @@ class UserService:
             ):
                 try:
                     await self._enforce_api_key_scope(
-                        request, resolved.key, scope_config, strict_mode=strict_mode_enabled
+                        request,
+                        resolved.key,
+                        scope_config,
+                        strict_mode=strict_mode_enabled,
                     )
                 except ApiKeyValidationError as exc:
                     await self._log_api_key_auth_failed(
-                        user, resolved.key, exc,
+                        user,
+                        resolved.key,
+                        exc,
                         ip_address=ip_address,
                         request_id=request_id,
                         user_agent=user_agent,
@@ -966,7 +992,8 @@ class UserService:
                     raise
 
         await self._maybe_log_api_key_used(
-            user, resolved.key,
+            user,
+            resolved.key,
             ip_address=ip_address,
             request_id=request_id,
             user_agent=user_agent,
@@ -1077,7 +1104,9 @@ class UserService:
         Security controls fail-closed: missing flag row defaults to enforced.
         """
         if self.feature_flag_service is None:
-            logger.warning("feature_flag_service not available, defaulting to scope enforced")
+            logger.warning(
+                "feature_flag_service not available, defaulting to scope enforced"
+            )
             return True
 
         return await self.feature_flag_service.check_is_feature_enabled_fail_closed(
@@ -1091,7 +1120,9 @@ class UserService:
         Strict mode defaults OFF when the flag row is missing to support staged rollout.
         """
         if self.feature_flag_service is None:
-            logger.warning("feature_flag_service not available, defaulting strict mode to disabled")
+            logger.warning(
+                "feature_flag_service not available, defaulting strict mode to disabled"
+            )
             return False
 
         return await self.feature_flag_service.check_is_feature_enabled(
@@ -1123,19 +1154,24 @@ class UserService:
             stmt = sa.select(Services.space_id).where(Services.id == resource_id)
             return await session.scalar(stmt)
         elif resource_type == "group_chat":
-            stmt = sa.select(GroupChatsTable.space_id).where(GroupChatsTable.id == resource_id)
+            stmt = sa.select(GroupChatsTable.space_id).where(
+                GroupChatsTable.id == resource_id
+            )
             return await session.scalar(stmt)
         elif resource_type == "conversation":
             # Session → assistant_id or group_chat_id → space_id
             row = await session.execute(
-                sa.select(Sessions.assistant_id, Sessions.group_chat_id)
-                .where(Sessions.id == resource_id)
+                sa.select(Sessions.assistant_id, Sessions.group_chat_id).where(
+                    Sessions.id == resource_id
+                )
             )
             result = row.one_or_none()
             if result is None:
                 return None
             if result.assistant_id is not None:
-                stmt = sa.select(Assistants.space_id).where(Assistants.id == result.assistant_id)
+                stmt = sa.select(Assistants.space_id).where(
+                    Assistants.id == result.assistant_id
+                )
                 return await session.scalar(stmt)
             if result.group_chat_id is not None:
                 stmt = sa.select(GroupChatsTable.space_id).where(
@@ -1499,7 +1535,11 @@ class UserService:
             return
 
         ownership_raw = getattr(key, "ownership", "user")
-        ownership = ownership_raw.value if isinstance(ownership_raw, Enum) else str(ownership_raw)
+        ownership = (
+            ownership_raw.value
+            if isinstance(ownership_raw, Enum)
+            else str(ownership_raw)
+        )
 
         extra: dict[str, object] = {
             "scope_type": key.scope_type,
@@ -1576,7 +1616,11 @@ class UserService:
                 extra["origin"] = origin
 
         ownership_raw = getattr(key, "ownership", "user")
-        ownership = ownership_raw.value if isinstance(ownership_raw, Enum) else str(ownership_raw)
+        ownership = (
+            ownership_raw.value
+            if isinstance(ownership_raw, Enum)
+            else str(ownership_raw)
+        )
         is_service = ownership == "service"
 
         if is_service:
@@ -1595,7 +1639,9 @@ class UserService:
             action=ActionType.API_KEY_AUTH_FAILED,
             entity_type=EntityType.API_KEY,
             entity_id=key.id,
-            description="Service API key auth failed" if is_service else "API key authentication failed",
+            description="Service API key auth failed"
+            if is_service
+            else "API key authentication failed",
             metadata=metadata,
             outcome=Outcome.FAILURE,
             error_message=exc.message,
@@ -1740,7 +1786,9 @@ class UserService:
                 check_resource_permission(key, "assistants", "read")
             except ApiKeyValidationError as exc:
                 await self._log_api_key_auth_failed(
-                    user_in_db, key, exc,
+                    user_in_db,
+                    key,
+                    exc,
                     ip_address=ip_addr,
                     request_id=req_id,
                     user_agent=ua,

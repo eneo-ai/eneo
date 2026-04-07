@@ -143,8 +143,7 @@ class SpaceFactory:
                 for mcp_server in mcp_servers
                 if mcp_server.id
                 in [
-                    mapping.mcp_server_id
-                    for mapping in space_in_db.mcp_servers_mapping
+                    mapping.mcp_server_id for mapping in space_in_db.mcp_servers_mapping
                 ]
             ]
 
@@ -194,13 +193,16 @@ class SpaceFactory:
                     ),
                     None,
                 ),
-                http_auth=getattr(website, '_decrypted_http_auth', None),
+                http_auth=getattr(website, "_decrypted_http_auth", None),
             )
             for website in websites_in_db
         ]
 
-        ik_source = list(integration_knowledge_in_db) if integration_knowledge_in_db is not None \
+        ik_source = (
+            list(integration_knowledge_in_db)
+            if integration_knowledge_in_db is not None
             else list(getattr(space_in_db, "integration_knowledge_list", []) or [])
+        )
 
         integration_knowledge_list = []
         for i in ik_source:
@@ -208,6 +210,7 @@ class SpaceFactory:
             # We need to use sqlalchemy.inspect to check if the attribute was loaded
             # without triggering a lazy load (which causes greenlet errors in async context)
             from sqlalchemy import inspect
+
             sharepoint_subscription = None
             try:
                 insp = inspect(i)
@@ -223,7 +226,11 @@ class SpaceFactory:
                     original_name=getattr(i, "original_name", None),
                     user_integration=getattr(i, "user_integration", None),
                     embedding_model=next(
-                        (em for em in embedding_models if em.id == i.embedding_model_id),
+                        (
+                            em
+                            for em in embedding_models
+                            if em.id == i.embedding_model_id
+                        ),
                         None,
                     ),
                     tenant_id=i.tenant_id,
@@ -234,7 +241,9 @@ class SpaceFactory:
                     site_id=getattr(i, "site_id", None),
                     last_synced_at=i.last_synced_at,
                     last_sync_summary=i.last_sync_summary,
-                    sharepoint_subscription_id=getattr(i, "sharepoint_subscription_id", None),
+                    sharepoint_subscription_id=getattr(
+                        i, "sharepoint_subscription_id", None
+                    ),
                     sharepoint_subscription=sharepoint_subscription,
                     delta_token=getattr(i, "delta_token", None),
                     folder_id=getattr(i, "folder_id", None),

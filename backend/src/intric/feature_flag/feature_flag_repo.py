@@ -23,7 +23,7 @@ class FeatureFlagRepository:
         """Delete a tenant's feature flag preference."""
         stmt = delete(TenantFeatureFlag).where(
             TenantFeatureFlag.feature_id == feature_id,
-            TenantFeatureFlag.tenant_id == tenant_id
+            TenantFeatureFlag.tenant_id == tenant_id,
         )
         await self.db_session.execute(stmt)
 
@@ -47,27 +47,35 @@ class FeatureFlagRepository:
 
         # Upsert all enabled tenant preferences
         for tenant_id in obj.tenant_ids:
-            stmt = pg_insert(TenantFeatureFlag).values(
-                feature_id=obj.feature_id,
-                tenant_id=tenant_id,
-                enabled=True,
-                name=obj.name,
-            ).on_conflict_do_update(
-                index_elements=['feature_id', 'tenant_id'],
-                set_={'enabled': True, 'updated_at': datetime.now(timezone.utc)}
+            stmt = (
+                pg_insert(TenantFeatureFlag)
+                .values(
+                    feature_id=obj.feature_id,
+                    tenant_id=tenant_id,
+                    enabled=True,
+                    name=obj.name,
+                )
+                .on_conflict_do_update(
+                    index_elements=["feature_id", "tenant_id"],
+                    set_={"enabled": True, "updated_at": datetime.now(timezone.utc)},
+                )
             )
             await self.db_session.execute(stmt)
 
         # Upsert all disabled tenant preferences
         for tenant_id in obj.disabled_tenant_ids:
-            stmt = pg_insert(TenantFeatureFlag).values(
-                feature_id=obj.feature_id,
-                tenant_id=tenant_id,
-                enabled=False,
-                name=obj.name,
-            ).on_conflict_do_update(
-                index_elements=['feature_id', 'tenant_id'],
-                set_={'enabled': False, 'updated_at': datetime.now(timezone.utc)}
+            stmt = (
+                pg_insert(TenantFeatureFlag)
+                .values(
+                    feature_id=obj.feature_id,
+                    tenant_id=tenant_id,
+                    enabled=False,
+                    name=obj.name,
+                )
+                .on_conflict_do_update(
+                    index_elements=["feature_id", "tenant_id"],
+                    set_={"enabled": False, "updated_at": datetime.now(timezone.utc)},
+                )
             )
             await self.db_session.execute(stmt)
 

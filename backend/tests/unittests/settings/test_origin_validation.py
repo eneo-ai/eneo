@@ -141,13 +141,17 @@ def test_validate_redirect_uri_branches(uri, expected, error_match):
     assert validate_redirect_uri(uri) == expected
 
 
-@pytest.mark.parametrize("uri", ["https://example.com/callback?x=1", "https://example.com/callback#frag"])
+@pytest.mark.parametrize(
+    "uri", ["https://example.com/callback?x=1", "https://example.com/callback#frag"]
+)
 def test_redirect_uri_rejects_query_and_fragment(uri):
     with pytest.raises(ValueError, match="must not include query or fragment"):
         validate_redirect_uri(uri)
 
 
-@pytest.mark.parametrize("path", ["/auth/callback/", "/auth/callback?x=1", "/auth/callback#frag"])
+@pytest.mark.parametrize(
+    "path", ["/auth/callback/", "/auth/callback?x=1", "/auth/callback#frag"]
+)
 def test_redirect_path_rejects_non_canonical_variants(path):
     with pytest.raises(ValueError):
         validate_redirect_path(path)

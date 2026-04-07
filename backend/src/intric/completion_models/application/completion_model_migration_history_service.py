@@ -6,9 +6,15 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.completion_models.domain.completion_model_migration_history_repo import CompletionModelMigrationHistoryRepo
-from intric.completion_models.presentation.completion_model_models import ModelMigrationHistory
-from intric.database.tables.completion_model_migration_history_table import CompletionModelMigrationHistory
+from intric.completion_models.domain.completion_model_migration_history_repo import (
+    CompletionModelMigrationHistoryRepo,
+)
+from intric.completion_models.presentation.completion_model_models import (
+    ModelMigrationHistory,
+)
+from intric.database.tables.completion_model_migration_history_table import (
+    CompletionModelMigrationHistory,
+)
 from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.users_table import Users
 
@@ -31,7 +37,7 @@ class CompletionModelMigrationHistoryService:
         migration_records = await self.repo.get_migration_history_for_model(
             model_id, tenant_id, limit, offset
         )
-        
+
         return await self._convert_to_public_models(migration_records)
 
     async def get_migration_history_for_tenant(
@@ -44,7 +50,7 @@ class CompletionModelMigrationHistoryService:
         migration_records = await self.repo.get_migration_history_for_tenant(
             tenant_id, limit, offset
         )
-        
+
         return await self._convert_to_public_models(migration_records)
 
     async def get_migration_history_by_id(
@@ -53,12 +59,14 @@ class CompletionModelMigrationHistoryService:
         tenant_id: UUID,
     ) -> Optional[ModelMigrationHistory]:
         """Get a specific migration history record by ID."""
-        migration_record = await self.repo.get_migration_history_by_id(migration_id, tenant_id)
-        
+        migration_record = await self.repo.get_migration_history_by_id(
+            migration_id, tenant_id
+        )
+
         if migration_record:
             converted = await self._convert_to_public_models([migration_record])
             return converted[0] if converted else None
-        
+
         return None
 
     async def _convert_to_public_models(
@@ -71,7 +79,7 @@ class CompletionModelMigrationHistoryService:
         # Extract unique IDs for batch queries
         model_ids = set()
         user_ids = set()
-        
+
         for record in migration_records:
             model_ids.add(record.from_model_id)
             model_ids.add(record.to_model_id)
@@ -79,7 +87,7 @@ class CompletionModelMigrationHistoryService:
 
         # Batch fetch model names
         model_names = await self._get_model_names(list(model_ids))
-        
+
         # Batch fetch user names
         user_names = await self._get_user_names(list(user_ids))
 
@@ -89,7 +97,7 @@ class CompletionModelMigrationHistoryService:
             from_model_name = model_names.get(record.from_model_id, "Unknown Model")
             to_model_name = model_names.get(record.to_model_id, "Unknown Model")
             initiated_by_name = user_names.get(record.initiated_by, "Unknown User")
-            
+
             public_model = ModelMigrationHistory(
                 id=record.id,
                 from_model_id=record.from_model_id,
@@ -117,7 +125,7 @@ class CompletionModelMigrationHistoryService:
         stmt = select(CompletionModels.id, CompletionModels.name).where(
             CompletionModels.id.in_(model_ids)
         )
-        
+
         result = await self.session.execute(stmt)
         return {row.id: row.name for row in result.fetchall()}
 
@@ -127,10 +135,9 @@ class CompletionModelMigrationHistoryService:
             return {}
 
         stmt = select(Users.id, Users.email).where(
-            Users.id.in_(user_ids),
-            Users.deleted_at.is_(None)
+            Users.id.in_(user_ids), Users.deleted_at.is_(None)
         )
-        
+
         result = await self.session.execute(stmt)
         return {row.id: row.email for row in result.fetchall()}
 

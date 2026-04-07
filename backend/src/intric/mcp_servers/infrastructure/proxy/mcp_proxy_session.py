@@ -19,7 +19,10 @@ from uuid import UUID
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer
-from intric.mcp_servers.infrastructure.client.mcp_client import MCPClient, MCPClientError
+from intric.mcp_servers.infrastructure.client.mcp_client import (
+    MCPClient,
+    MCPClientError,
+)
 
 logger = get_logger(__name__)
 
@@ -94,7 +97,11 @@ class MCPProxySession:
                 if not tool.is_enabled_by_default:
                     continue
                 # Skip new tools that have no active values yet
-                if tool.requires_approval and tool.description is None and tool.input_schema is None:
+                if (
+                    tool.requires_approval
+                    and tool.description is None
+                    and tool.input_schema is None
+                ):
                     continue
 
                 # Create prefixed tool name: server_name__tool_name
@@ -114,14 +121,18 @@ class MCPProxySession:
                 self._tool_registry[prefixed_name] = (server, tool.name)
 
                 # Build OpenAI-format tool definition
-                self._tools_for_llm.append({
-                    "type": "function",
-                    "function": {
-                        "name": prefixed_name,
-                        "description": tool.description or f"Tool from {server.name}",
-                        "parameters": tool.input_schema or {"type": "object", "properties": {}},
-                    },
-                })
+                self._tools_for_llm.append(
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": prefixed_name,
+                            "description": tool.description
+                            or f"Tool from {server.name}",
+                            "parameters": tool.input_schema
+                            or {"type": "object", "properties": {}},
+                        },
+                    }
+                )
 
         logger.debug(
             f"[MCPProxy] Built registry with {len(self._tool_registry)} tools "
@@ -147,7 +158,9 @@ class MCPProxySession:
             failures = int(state.get("failures", 0)) + 1
             state["failures"] = failures
             if failures >= _settings.mcp_circuit_breaker_failure_threshold:
-                state["open_until"] = time.time() + _settings.mcp_circuit_breaker_cooldown_seconds
+                state["open_until"] = (
+                    time.time() + _settings.mcp_circuit_breaker_cooldown_seconds
+                )
 
     async def _record_success(self, server_id: UUID) -> None:
         async with _CIRCUIT_BREAKER_LOCK:
@@ -290,9 +303,7 @@ class MCPProxySession:
 
         server, original_tool_name = self._tool_registry[tool_name]
 
-        logger.debug(
-            f"[MCPProxy] Calling {original_tool_name} on '{server.name}'"
-        )
+        logger.debug(f"[MCPProxy] Calling {original_tool_name} on '{server.name}'")
 
         if await self._is_circuit_open(server.id):
             return {
@@ -353,9 +364,7 @@ class MCPProxySession:
 
         # Log all tools being called
         tool_names = [name for name, _ in tool_calls]
-        logger.debug(
-            f"[MCPProxy] Executing {len(tool_calls)} tool(s): {tool_names}"
-        )
+        logger.debug(f"[MCPProxy] Executing {len(tool_calls)} tool(s): {tool_names}")
         total_start = time.perf_counter()
 
         # First, identify all servers we need to connect to (by ID to avoid hashability issues)
@@ -368,13 +377,14 @@ class MCPProxySession:
         # Connect to all needed servers in parallel (lazy - only if not already connected)
         if servers_needed:
             connect_tasks = [
-                self._get_or_create_client(server)
-                for server in servers_needed.values()
+                self._get_or_create_client(server) for server in servers_needed.values()
             ]
             await asyncio.gather(*connect_tasks, return_exceptions=True)
 
         # Execute all tool calls in parallel
-        async def execute_single(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        async def execute_single(
+            tool_name: str, arguments: dict[str, Any]
+        ) -> dict[str, Any]:
             try:
                 return await self.call_tool(tool_name, arguments)
             except Exception:
@@ -384,9 +394,9 @@ class MCPProxySession:
                     "is_error": True,
                 }
 
-        results = await asyncio.gather(*[
-            execute_single(name, args) for name, args in tool_calls
-        ])
+        results = await asyncio.gather(
+            *[execute_single(name, args) for name, args in tool_calls]
+        )
 
         total_elapsed_ms = (time.perf_counter() - total_start) * 1000
         error_count = sum(1 for r in results if r.get("is_error"))
@@ -410,7 +420,9 @@ class MCPProxySession:
 
         connection_count = len(self._clients)
         self._clients.clear()
-        logger.debug(f"[MCPProxy] Session closed, {connection_count} connection(s) cleaned up")
+        logger.debug(
+            f"[MCPProxy] Session closed, {connection_count} connection(s) cleaned up"
+        )
 
     async def __aenter__(self):
         """Async context manager entry - no connections yet (lazy)."""

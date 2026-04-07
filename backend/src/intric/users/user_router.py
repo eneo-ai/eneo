@@ -160,7 +160,9 @@ async def _resolve_single_tenant_redirect_uri(
         else ""
     )
     canonical_origin = (
-        f"{parsed_redirect.scheme}://{parsed_redirect.hostname}{parsed_port}".rstrip("/")
+        f"{parsed_redirect.scheme}://{parsed_redirect.hostname}{parsed_port}".rstrip(
+            "/"
+        )
     )
     if normalized_request_origin == canonical_origin:
         return redirect_uri
@@ -715,9 +717,7 @@ async def get_currently_authenticated_user(
     if truncated_key is None and current_user.api_key is not None:
         truncated_key = current_user.api_key.truncated_key
     legacy_suffix = (
-        current_user.api_key.truncated_key
-        if current_user.api_key is not None
-        else None
+        current_user.api_key.truncated_key if current_user.api_key is not None else None
     )
     return UserPublic(
         **current_user.model_dump(),
@@ -860,7 +860,9 @@ async def get_current_user_tenant(
     return TenantPublic(**tenant.model_dump())
 
 
-@users_admin_router.post("/admin/invite/", response_model=UserAdminView, status_code=201)
+@users_admin_router.post(
+    "/admin/invite/", response_model=UserAdminView, status_code=201
+)
 async def invite_user(
     user_invite: PropUserInvite,
     container: Container = Depends(get_container(with_user=True)),

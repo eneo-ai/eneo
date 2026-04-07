@@ -5,6 +5,7 @@ This provides a session-scoped event loop that works for both
 integration tests (with session-scoped async fixtures) and
 unit tests (with function-scoped tests).
 """
+
 import os
 
 # CRITICAL: Set crawler settings BEFORE importing pytest_plugins
@@ -24,12 +25,12 @@ import pytest
 # Organized to mirror the backend source structure (src/intric/*)
 pytest_plugins = [
     "tests.integration.fixtures.completion_models",  # Completion model fixtures
-    "tests.integration.fixtures.assistants",         # Assistant fixtures
-    "tests.integration.fixtures.apps",               # App fixtures
-    "tests.integration.fixtures.services",           # Service fixtures
-    "tests.integration.fixtures.spaces",             # Space fixtures
+    "tests.integration.fixtures.assistants",  # Assistant fixtures
+    "tests.integration.fixtures.apps",  # App fixtures
+    "tests.integration.fixtures.services",  # Service fixtures
+    "tests.integration.fixtures.spaces",  # Space fixtures
     "tests.integration.fixtures.organization_knowledge",  # Organization knowledge fixtures
-    "tests.integration.fixtures.integrations",       # Integration fixtures (SharePoint, etc.)
+    "tests.integration.fixtures.integrations",  # Integration fixtures (SharePoint, etc.)
 ]
 
 
@@ -45,9 +46,11 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         for marker_name in skip_markers:
             if marker_name in item.keywords:
-                item.add_marker(pytest.mark.skip(
-                    reason=f"'{marker_name}' tests require explicit -m {marker_name}"
-                ))
+                item.add_marker(
+                    pytest.mark.skip(
+                        reason=f"'{marker_name}' tests require explicit -m {marker_name}"
+                    )
+                )
 
 
 @pytest.fixture(scope="session")

@@ -47,7 +47,9 @@ def mock_tenant_app_not_service_account():
 def mock_settings():
     """Mock settings with oauth_callback_url configured."""
     settings = MagicMock()
-    settings.oauth_callback_url = "https://test.example.com/integrations/callback/token/"
+    settings.oauth_callback_url = (
+        "https://test.example.com/integrations/callback/token/"
+    )
     settings.public_origin = "https://test.example.com"
     return settings
 
@@ -57,7 +59,7 @@ def service(mock_settings):
     """Create ServiceAccountAuthService instance with mocked settings."""
     with patch(
         "intric.integration.infrastructure.auth_service.service_account_auth_service.get_settings",
-        return_value=mock_settings
+        return_value=mock_settings,
     ):
         yield ServiceAccountAuthService()
 
@@ -121,7 +123,10 @@ class TestGenAuthUrl:
         """Uses correct redirect URI from settings."""
         mock_settings.oauth_callback_url = "https://myapp.com/callback"
 
-        with patch("intric.integration.infrastructure.auth_service.service_account_auth_service.get_settings", return_value=mock_settings):
+        with patch(
+            "intric.integration.infrastructure.auth_service.service_account_auth_service.get_settings",
+            return_value=mock_settings,
+        ):
             service = ServiceAccountAuthService()
             result = service.gen_auth_url(
                 state="state",
@@ -160,7 +165,7 @@ class TestExchangeToken:
             mock_client.post.return_value = mock_response
             mock_client.get.return_value = MagicMock(
                 status_code=200,
-                json=MagicMock(return_value={"mail": "service@contoso.com"})
+                json=MagicMock(return_value={"mail": "service@contoso.com"}),
             )
             mock_client_class.return_value = mock_client
 
@@ -175,7 +180,9 @@ class TestExchangeToken:
         assert result.access_token == "new-access-token-xyz"
         assert result.refresh_token == "new-refresh-token-abc"
 
-    async def test_exchange_token_extracts_user_email(self, service, mock_token_response):
+    async def test_exchange_token_extracts_user_email(
+        self, service, mock_token_response
+    ):
         """Extracts user email from Microsoft Graph."""
         mock_token_resp = MagicMock(spec=httpx.Response)
         mock_token_resp.status_code = 200
@@ -202,7 +209,9 @@ class TestExchangeToken:
 
         assert result.email == "serviceaccount@contoso.com"
 
-    async def test_exchange_token_uses_upn_if_mail_missing(self, service, mock_token_response):
+    async def test_exchange_token_uses_upn_if_mail_missing(
+        self, service, mock_token_response
+    ):
         """Falls back to userPrincipalName if mail is not set."""
         mock_token_resp = MagicMock(spec=httpx.Response)
         mock_token_resp.status_code = 200
@@ -212,7 +221,7 @@ class TestExchangeToken:
         mock_user_resp.status_code = 200
         mock_user_resp.json.return_value = {
             "mail": None,
-            "userPrincipalName": "user@contoso.onmicrosoft.com"
+            "userPrincipalName": "user@contoso.onmicrosoft.com",
         }
 
         with patch("httpx.AsyncClient") as mock_client_class:
@@ -236,7 +245,9 @@ class TestExchangeToken:
 class TestRefreshAccessToken:
     """Tests for refresh_access_token method."""
 
-    async def test_refresh_access_token_success(self, service, mock_tenant_app, mock_token_response):
+    async def test_refresh_access_token_success(
+        self, service, mock_tenant_app, mock_token_response
+    ):
         """Successfully refreshes access token."""
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
@@ -271,7 +282,9 @@ class TestRefreshAccessToken:
         with pytest.raises(ValueError, match="no service account refresh token"):
             await service.refresh_access_token(app)
 
-    async def test_refresh_sends_stored_refresh_token(self, service, mock_tenant_app, mock_token_response):
+    async def test_refresh_sends_stored_refresh_token(
+        self, service, mock_tenant_app, mock_token_response
+    ):
         """Uses the stored refresh token from tenant app."""
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
@@ -287,14 +300,19 @@ class TestRefreshAccessToken:
             await service.refresh_access_token(mock_tenant_app)
 
         posted_data = mock_client.post.call_args.kwargs["data"]
-        assert posted_data["refresh_token"] == mock_tenant_app.service_account_refresh_token
+        assert (
+            posted_data["refresh_token"]
+            == mock_tenant_app.service_account_refresh_token
+        )
         assert posted_data["grant_type"] == "refresh_token"
 
 
 class TestTestRefreshToken:
     """Tests for test_refresh_token method."""
 
-    async def test_returns_success_tuple_on_valid_token(self, service, mock_tenant_app, mock_token_response):
+    async def test_returns_success_tuple_on_valid_token(
+        self, service, mock_tenant_app, mock_token_response
+    ):
         """Returns (True, None) when refresh succeeds."""
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
@@ -334,9 +352,13 @@ class TestTestRefreshToken:
         assert error is not None
         assert "400" in error or "invalid_grant" in error
 
-    async def test_returns_error_on_value_error(self, service, mock_tenant_app_not_service_account):
+    async def test_returns_error_on_value_error(
+        self, service, mock_tenant_app_not_service_account
+    ):
         """Returns (False, error_message) for configuration errors."""
-        success, error = await service.test_refresh_token(mock_tenant_app_not_service_account)
+        success, error = await service.test_refresh_token(
+            mock_tenant_app_not_service_account
+        )
 
         assert success is False
         assert "not configured for service account" in error
@@ -359,7 +381,10 @@ class TestServiceAccountCredentials:
         assert creds.client_secret == "secret-456"
         assert creds.tenant_domain == "contoso.onmicrosoft.com"
         assert creds.redirect_uri == "https://example.com/callback"
-        assert creds.authority == "https://login.microsoftonline.com/contoso.onmicrosoft.com"
+        assert (
+            creds.authority
+            == "https://login.microsoftonline.com/contoso.onmicrosoft.com"
+        )
 
 
 class TestServiceAccountTokenResult:

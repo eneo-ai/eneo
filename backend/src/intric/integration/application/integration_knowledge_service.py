@@ -610,19 +610,21 @@ class IntegrationKnowledgeService:
 
         resource_type = knowledge.resource_type or "site"
         is_onedrive = resource_type == "onedrive"
-        subscription_resource_id = knowledge.drive_id if is_onedrive else knowledge.site_id
+        subscription_resource_id = (
+            knowledge.drive_id if is_onedrive else knowledge.site_id
+        )
 
         if subscription_resource_id:
             try:
-                subscription = (
-                    await self.sharepoint_subscription_service.ensure_subscription_for_site(
-                        user_integration_id=user_integration.id,
-                        site_id=subscription_resource_id,
-                        token=subscription_token,
-                        is_onedrive=is_onedrive,
-                    )
+                subscription = await self.sharepoint_subscription_service.ensure_subscription_for_site(
+                    user_integration_id=user_integration.id,
+                    site_id=subscription_resource_id,
+                    token=subscription_token,
+                    is_onedrive=is_onedrive,
                 )
-                subscription_db_id = getattr(subscription, "id", None) if subscription else None
+                subscription_db_id = (
+                    getattr(subscription, "id", None) if subscription else None
+                )
                 existing_subscription_db_id = getattr(
                     knowledge, "sharepoint_subscription_id", None
                 )
@@ -764,7 +766,9 @@ class IntegrationKnowledgeService:
         for item in owned_items:
             knowledge = await self.integration_knowledge_repo.one(id=item.id)
             knowledge.wrapper_name = normalized_name
-            updated_items.append(await self.integration_knowledge_repo.update(knowledge))
+            updated_items.append(
+                await self.integration_knowledge_repo.update(knowledge)
+            )
 
         return updated_items
 

@@ -1184,7 +1184,9 @@ class TestCreateSpaceIntegrationKnowledge:
         editor_user = MagicMock(spec=UserInDB)
         editor_user.id = uuid4()
         editor_user.tenant_id = TEST_USER.tenant_id
-        editor_user.permissions = [Permission.INTEGRATIONS]  # Has integrations but NOT ADMIN
+        editor_user.permissions = [
+            Permission.INTEGRATIONS
+        ]  # Has integrations but NOT ADMIN
 
         actor = MagicMock()
         actor.can_create_integrations.return_value = True  # Editor has space permission
@@ -1571,7 +1573,9 @@ class TestCreateSpaceIntegrationKnowledgeBatch:
         job = MagicMock()
         job.id = uuid4()
 
-        service.create_space_integration_knowledge = AsyncMock(return_value=(knowledge, job))
+        service.create_space_integration_knowledge = AsyncMock(
+            return_value=(knowledge, job)
+        )
 
         await service.create_space_integration_knowledge_batch(
             user_integration_id=uuid4(),

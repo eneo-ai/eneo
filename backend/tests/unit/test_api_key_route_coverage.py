@@ -26,8 +26,10 @@ from intric.authentication.auth_dependencies import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_router():
     from intric.server.routers import router
+
     return router
 
 
@@ -66,9 +68,7 @@ def _find_route_by_method_and_paths(method: str, *paths: str):
         route_methods = getattr(route, "methods", set()) or set()
         if route_path in paths and method in route_methods:
             return route
-    pytest.fail(
-        f"No route found for method={method} paths={paths}"
-    )
+    pytest.fail(f"No route found for method={method} paths={paths}")
 
 
 def _get_all_endpoint_names():
@@ -105,36 +105,36 @@ def _get_intric_src_path() -> pathlib.Path:
 # Route prefixes that intentionally lack require_resource_permission_for_method()
 # Each entry has a rationale — no silent omissions.
 INTENTIONALLY_UNGUARDED = {
-    "/settings":                "Admin settings endpoints are mounted on a dedicated router with admin scope + admin key guards",
-    "/users":                   "Admin user endpoints are mounted on users_admin_router with admin scope + admin key guards; /me/ and /tenant/ safe for any scoped key",
-    "/admin":                   "Admin endpoints are mounted with admin scope + admin key guards",
-    "/dashboard":               "Read-only aggregation endpoint with scope guard",
-    "/icons":                   "Public static assets",
-    "/limits":                  "Authenticated limit info (with_user=True)",
-    "/prompts":                 "Scope-guarded per prompt ID; no resource permission needed (regular user feature)",
-    "/integrations":            "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
-    "/jobs":                    "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); service-layer authorization",
-    "/analysis":                "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); service-layer role checks",
-    "/logging":                 "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); router-level auth",
-    "/completion-models":       "Model catalog endpoints are mounted with admin scope + admin key guards",
-    "/embedding-models":        "Model catalog endpoints are mounted with admin scope + admin key guards",
-    "/transcription-models":    "Model catalog endpoints are mounted with admin scope + admin key guards",
-    "/ai-models":               "Model listing aggregation",
-    "/user-groups":             "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
-    "/allowed-origins":         "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
+    "/settings": "Admin settings endpoints are mounted on a dedicated router with admin scope + admin key guards",
+    "/users": "Admin user endpoints are mounted on users_admin_router with admin scope + admin key guards; /me/ and /tenant/ safe for any scoped key",
+    "/admin": "Admin endpoints are mounted with admin scope + admin key guards",
+    "/dashboard": "Read-only aggregation endpoint with scope guard",
+    "/icons": "Public static assets",
+    "/limits": "Authenticated limit info (with_user=True)",
+    "/prompts": "Scope-guarded per prompt ID; no resource permission needed (regular user feature)",
+    "/integrations": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
+    "/jobs": "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); service-layer authorization",
+    "/analysis": "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); service-layer role checks",
+    "/logging": "Tenant-scope guard (TENANT_ADMIN_SCOPE_GUARDS); router-level auth",
+    "/completion-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
+    "/embedding-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
+    "/transcription-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
+    "/ai-models": "Model listing aggregation",
+    "/user-groups": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
+    "/allowed-origins": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/security-classifications": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
-    "/storage":                 "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
-    "/token-usage":             "Admin scope + admin key permission guards (not resource guard)",
-    "/templates":               "Read-only discovery endpoints",
-    "/sysadmin":                "Separate intric_super_api_key auth, out of scope",
-    "/modules":                 "Separate auth, out of scope",
-    "/roles":                   "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
-    "/api-keys":                "Self-management with ensure_manage_authorized() + scope guard",
-    "/ws":                      "WebSocket endpoint — separate auth",
-    "/audit":                   "Admin audit endpoints with admin scope + admin key guards",
-    "/mcp-servers":             "MCP server management is tenant-admin infrastructure with admin scope + admin key guards",
-    "/auth":                    "Public federation/auth endpoints — no user auth required",
-    "/api-docs":                "Public API documentation endpoint",
+    "/storage": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
+    "/token-usage": "Admin scope + admin key permission guards (not resource guard)",
+    "/templates": "Read-only discovery endpoints",
+    "/sysadmin": "Separate intric_super_api_key auth, out of scope",
+    "/modules": "Separate auth, out of scope",
+    "/roles": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
+    "/api-keys": "Self-management with ensure_manage_authorized() + scope guard",
+    "/ws": "WebSocket endpoint — separate auth",
+    "/audit": "Admin audit endpoints with admin scope + admin key guards",
+    "/mcp-servers": "MCP server management is tenant-admin infrastructure with admin scope + admin key guards",
+    "/auth": "Public federation/auth endpoints — no user auth required",
+    "/api-docs": "Public API documentation endpoint",
 }
 
 # Route prefixes that intentionally do NOT have scope guards.
@@ -234,6 +234,7 @@ class TestRouteCoverage:
 # Phase 8A: No duplicate permission maps or ordering dicts
 # ---------------------------------------------------------------------------
 
+
 class TestNoDuplicatePermissionMaps:
     """Ensure METHOD_PERMISSION_MAP and PERMISSION_LEVEL_ORDER are defined once."""
 
@@ -251,12 +252,18 @@ class TestNoDuplicatePermissionMaps:
             for node in ast.walk(tree):
                 if isinstance(node, ast.Assign):
                     for target in node.targets:
-                        if isinstance(target, ast.Name) and target.id == "METHOD_PERMISSION_MAP":
+                        if (
+                            isinstance(target, ast.Name)
+                            and target.id == "METHOD_PERMISSION_MAP"
+                        ):
                             rel = py_file.relative_to(intric_src)
                             matches.append(f"{rel}:{node.lineno}")
                 elif isinstance(node, ast.AnnAssign):
                     target = node.target
-                    if isinstance(target, ast.Name) and target.id == "METHOD_PERMISSION_MAP":
+                    if (
+                        isinstance(target, ast.Name)
+                        and target.id == "METHOD_PERMISSION_MAP"
+                    ):
                         rel = py_file.relative_to(intric_src)
                         matches.append(f"{rel}:{node.lineno}")
 
@@ -285,6 +292,7 @@ class TestNoDuplicatePermissionMaps:
 # Phase 8B: Read-override names match real endpoint functions
 # ---------------------------------------------------------------------------
 
+
 class TestReadOverrideValidity:
     """Every name in a read-override frozenset must match a registered endpoint."""
 
@@ -309,6 +317,7 @@ class TestReadOverrideValidity:
 # ---------------------------------------------------------------------------
 # Phase 8C: Guarded routers have correct read-overrides
 # ---------------------------------------------------------------------------
+
 
 class TestReadOverrideWiring:
     """Verify routers with resource guards have the expected read-override constants.
@@ -430,7 +439,11 @@ class TestTenantAdminApiKeyGuards:
         ]
         for prefix in prefixes:
             routes = self._routes_for_prefix(prefix)
-            if prefix == "/roles" and not routes and not get_settings().using_access_management:
+            if (
+                prefix == "/roles"
+                and not routes
+                and not get_settings().using_access_management
+            ):
                 continue
             assert routes, f"No routes found for prefix {prefix}"
             for route in routes:
@@ -476,30 +489,52 @@ class TestHighRiskExactRouteGuards:
     """
 
     def test_integrations_admin_route_has_scope_and_admin_key_guards(self):
-        route = _find_route_by_method_and_paths("GET", "/integrations/", "/integrations")
-        assert _route_has_dep_name(route, "_scope_check_dep"), "GET /integrations/ missing _scope_check_dep"
-        assert _route_has_dep_name(route, "_api_key_permission_dep"), "GET /integrations/ missing _api_key_permission_dep"
+        route = _find_route_by_method_and_paths(
+            "GET", "/integrations/", "/integrations"
+        )
+        assert _route_has_dep_name(route, "_scope_check_dep"), (
+            "GET /integrations/ missing _scope_check_dep"
+        )
+        assert _route_has_dep_name(route, "_api_key_permission_dep"), (
+            "GET /integrations/ missing _api_key_permission_dep"
+        )
 
     def test_storage_admin_route_has_scope_and_admin_key_guards(self):
         route = _find_route_by_method_and_paths("GET", "/storage/", "/storage")
-        assert _route_has_dep_name(route, "_scope_check_dep"), "GET /storage/ missing _scope_check_dep"
-        assert _route_has_dep_name(route, "_api_key_permission_dep"), "GET /storage/ missing _api_key_permission_dep"
+        assert _route_has_dep_name(route, "_scope_check_dep"), (
+            "GET /storage/ missing _scope_check_dep"
+        )
+        assert _route_has_dep_name(route, "_api_key_permission_dep"), (
+            "GET /storage/ missing _api_key_permission_dep"
+        )
 
     def test_user_groups_admin_route_has_scope_and_admin_key_guards(self):
         route = _find_route_by_method_and_paths("GET", "/user-groups/", "/user-groups")
-        assert _route_has_dep_name(route, "_scope_check_dep"), "GET /user-groups/ missing _scope_check_dep"
-        assert _route_has_dep_name(route, "_api_key_permission_dep"), "GET /user-groups/ missing _api_key_permission_dep"
+        assert _route_has_dep_name(route, "_scope_check_dep"), (
+            "GET /user-groups/ missing _scope_check_dep"
+        )
+        assert _route_has_dep_name(route, "_api_key_permission_dep"), (
+            "GET /user-groups/ missing _api_key_permission_dep"
+        )
 
     def test_allowed_origins_admin_route_has_scope_and_admin_key_guards(self):
-        route = _find_route_by_method_and_paths("GET", "/allowed-origins/", "/allowed-origins")
-        assert _route_has_dep_name(route, "_scope_check_dep"), "GET /allowed-origins/ missing _scope_check_dep"
-        assert _route_has_dep_name(route, "_api_key_permission_dep"), "GET /allowed-origins/ missing _api_key_permission_dep"
+        route = _find_route_by_method_and_paths(
+            "GET", "/allowed-origins/", "/allowed-origins"
+        )
+        assert _route_has_dep_name(route, "_scope_check_dep"), (
+            "GET /allowed-origins/ missing _scope_check_dep"
+        )
+        assert _route_has_dep_name(route, "_api_key_permission_dep"), (
+            "GET /allowed-origins/ missing _api_key_permission_dep"
+        )
 
     def test_security_classifications_admin_route_has_scope_and_admin_key_guards(self):
         route = _find_route_by_method_and_paths(
             "GET", "/security-classifications/", "/security-classifications"
         )
-        assert _route_has_dep_name(route, "_scope_check_dep"), "GET /security-classifications/ missing _scope_check_dep"
+        assert _route_has_dep_name(route, "_scope_check_dep"), (
+            "GET /security-classifications/ missing _scope_check_dep"
+        )
         assert _route_has_dep_name(route, "_api_key_permission_dep"), (
             "GET /security-classifications/ missing _api_key_permission_dep"
         )
@@ -508,22 +543,32 @@ class TestHighRiskExactRouteGuards:
         if not get_settings().using_access_management:
             pytest.skip("roles router is disabled when using_access_management=false")
         route = _find_route_by_method_and_paths("GET", "/roles/", "/roles")
-        assert _route_has_dep_name(route, "_scope_check_dep"), "GET /roles/ missing _scope_check_dep"
-        assert _route_has_dep_name(route, "_api_key_permission_dep"), "GET /roles/ missing _api_key_permission_dep"
+        assert _route_has_dep_name(route, "_scope_check_dep"), (
+            "GET /roles/ missing _scope_check_dep"
+        )
+        assert _route_has_dep_name(route, "_api_key_permission_dep"), (
+            "GET /roles/ missing _api_key_permission_dep"
+        )
 
     @pytest.mark.parametrize(
         "method,paths,label",
         [
             ("GET", ("/analysis/counts/", "/analysis/counts"), "GET /analysis/counts/"),
             ("GET", ("/jobs/", "/jobs"), "GET /jobs/"),
-            ("GET", ("/logging/{message_id}/", "/logging/{message_id}"), "GET /logging/{message_id}/"),
+            (
+                "GET",
+                ("/logging/{message_id}/", "/logging/{message_id}"),
+                "GET /logging/{message_id}/",
+            ),
         ],
     )
     def test_diagnostics_routes_have_scope_guard_without_admin_key_guard(
         self, method: str, paths: tuple[str, ...], label: str
     ):
         route = _find_route_by_method_and_paths(method, *paths)
-        assert _route_has_dep_name(route, "_scope_check_dep"), f"{label} missing _scope_check_dep"
+        assert _route_has_dep_name(route, "_scope_check_dep"), (
+            f"{label} missing _scope_check_dep"
+        )
         assert not _route_has_dep_name(route, "_api_key_permission_dep"), (
             f"{label} should not require _api_key_permission_dep"
         )
@@ -531,8 +576,12 @@ class TestHighRiskExactRouteGuards:
     def test_files_routes_have_scope_resource_and_delete_stash_guards(self):
         list_route = _find_route_by_method_and_paths("GET", "/files/", "/files")
         post_route = _find_route_by_method_and_paths("POST", "/files/", "/files")
-        detail_get_route = _find_route_by_method_and_paths("GET", "/files/{id}/", "/files/{id}")
-        detail_delete_route = _find_route_by_method_and_paths("DELETE", "/files/{id}/", "/files/{id}")
+        detail_get_route = _find_route_by_method_and_paths(
+            "GET", "/files/{id}/", "/files/{id}"
+        )
+        detail_delete_route = _find_route_by_method_and_paths(
+            "DELETE", "/files/{id}/", "/files/{id}"
+        )
 
         for route, label in (
             (list_route, "GET /files/"),
@@ -540,16 +589,24 @@ class TestHighRiskExactRouteGuards:
             (detail_get_route, "GET /files/{id}/"),
             (detail_delete_route, "DELETE /files/{id}/"),
         ):
-            assert _route_has_dep_name(route, "_scope_check_dep"), f"{label} missing _scope_check_dep"
-            assert _route_has_dep_name(route, "_resource_permission_dep"), f"{label} missing _resource_permission_dep"
+            assert _route_has_dep_name(route, "_scope_check_dep"), (
+                f"{label} missing _scope_check_dep"
+            )
+            assert _route_has_dep_name(route, "_resource_permission_dep"), (
+                f"{label} missing _resource_permission_dep"
+            )
 
         assert _route_has_dep_name(detail_delete_route, "_stash"), (
             "DELETE /files/{id}/ missing deferred tenant-scope delete guard (_stash)"
         )
 
     def test_prompts_route_has_scope_guard_without_resource_permission_guard(self):
-        route = _find_route_by_method_and_paths("GET", "/prompts/{id}/", "/prompts/{id}")
-        assert _route_has_dep_name(route, "_scope_check_dep"), "GET /prompts/{id}/ missing _scope_check_dep"
+        route = _find_route_by_method_and_paths(
+            "GET", "/prompts/{id}/", "/prompts/{id}"
+        )
+        assert _route_has_dep_name(route, "_scope_check_dep"), (
+            "GET /prompts/{id}/ missing _scope_check_dep"
+        )
         assert not _route_has_dep_name(route, "_resource_permission_dep"), (
             "GET /prompts/{id}/ should not require resource-permission guard"
         )
@@ -558,6 +615,7 @@ class TestHighRiskExactRouteGuards:
 # ---------------------------------------------------------------------------
 # Phase 8D: Feature flag contract
 # ---------------------------------------------------------------------------
+
 
 class TestFeatureFlagContract:
     """The feature flag truth table as executable code.
@@ -568,6 +626,7 @@ class TestFeatureFlagContract:
 
     def _make_key(self, permission="read"):
         from unittest.mock import MagicMock
+
         key = MagicMock()
         key.permission = permission
         key.resource_permissions = None
@@ -579,6 +638,7 @@ class TestFeatureFlagContract:
 
     def _make_request(self, method="DELETE", path="/test"):
         from unittest.mock import MagicMock
+
         request = MagicMock()
         request.method = method
         request.url.path = path
@@ -609,7 +669,9 @@ class TestFeatureFlagContract:
 
         key = self._make_key("read")
 
-        with patch("intric.authentication.api_key_resolver.get_settings") as mock_settings:
+        with patch(
+            "intric.authentication.api_key_resolver.get_settings"
+        ) as mock_settings:
             mock_settings.return_value.api_key_enforce_resource_permissions = True
             with pytest.raises(ApiKeyValidationError):
                 check_resource_permission(key, "assistants", "admin")
@@ -621,7 +683,9 @@ class TestFeatureFlagContract:
 
         key = self._make_key("read")
 
-        with patch("intric.authentication.api_key_resolver.get_settings") as mock_settings:
+        with patch(
+            "intric.authentication.api_key_resolver.get_settings"
+        ) as mock_settings:
             mock_settings.return_value.api_key_enforce_resource_permissions = False
             # Should NOT raise
             check_resource_permission(key, "assistants", "admin")
@@ -682,7 +746,10 @@ class TestNoEndpointLevelStashDependencies:
                 if not isinstance(dep, ast.Call):
                     continue
                 dep_name = getattr(dep.func, "id", getattr(dep.func, "attr", ""))
-                if dep_name in {"require_api_key_scope_check", "require_api_key_permission"}:
+                if dep_name in {
+                    "require_api_key_scope_check",
+                    "require_api_key_permission",
+                }:
                     hits.append(f"{node.name}:{arg.arg}")
         return hits
 

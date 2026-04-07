@@ -425,7 +425,9 @@ async def test_request_approval_uses_namespaced_redis_key_and_ttl():
 
     redis_key = args[0]
     payload = json.loads(args[1])
-    assert redis_key.startswith(f"intric:{tool_approval_module.get_settings().environment}:mcp:approval:")
+    assert redis_key.startswith(
+        f"intric:{tool_approval_module.get_settings().environment}:mcp:approval:"
+    )
     assert redis_key.endswith(f":{approval_id}")
     assert kwargs["ex"] == tool_approval_module.APPROVAL_TTL_SECONDS
 
@@ -467,7 +469,7 @@ async def test_malformed_context_payload_returns_not_found():
     approval_id = str(uuid4())
     tenant_id = uuid4()
     user_id = uuid4()
-    
+
     # Manually inject malformed state to simulate corruption or schema mismatch
     # Has valid auth fields (passes _context_matches) but missing required session_id
     malformed_payload = {
@@ -486,7 +488,7 @@ async def test_malformed_context_payload_returns_not_found():
         actor_tenant_id=tenant_id,
         actor_user_id=user_id,
     )
-    
+
     assert result.status == "not_found"
     assert result.context is None
 

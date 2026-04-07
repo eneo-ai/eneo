@@ -158,6 +158,7 @@ def mock_tenant_app():
     app.is_service_account.return_value = False  # Not a service account
     return app
 
+
 async def test_personal_space_always_uses_user_oauth(
     setup: Setup,
     mock_user_integration,
@@ -166,7 +167,9 @@ async def test_personal_space_always_uses_user_oauth(
 ):
     """Personal spaces always route to user OAuth, regardless of tenant app config."""
     # Configure mocks
-    setup.oauth_token_service.get_oauth_token_by_user_integration.return_value = mock_oauth_token
+    setup.oauth_token_service.get_oauth_token_by_user_integration.return_value = (
+        mock_oauth_token
+    )
 
     # Execute
     token = await setup.router.get_token_for_integration(
@@ -196,7 +199,9 @@ async def test_shared_space_with_tenant_app_uses_tenant_app(
     """Shared spaces with configured tenant app use tenant app auth."""
     # Configure mocks
     setup.tenant_app_service.get_active_app_for_tenant.return_value = mock_tenant_app
-    setup.tenant_app_auth_service.get_access_token.return_value = "tenant-app-access-token"
+    setup.tenant_app_auth_service.get_access_token.return_value = (
+        "tenant-app-access-token"
+    )
 
     # Execute
     token = await setup.router.get_token_for_integration(
@@ -229,7 +234,9 @@ async def test_shared_space_without_tenant_app_falls_back_to_user_oauth(
     """Shared spaces without tenant app fall back to user OAuth with warning."""
     # Configure mocks - no tenant app configured
     setup.tenant_app_service.get_active_app_for_tenant.return_value = None
-    setup.oauth_token_service.get_oauth_token_by_user_integration.return_value = mock_oauth_token
+    setup.oauth_token_service.get_oauth_token_by_user_integration.return_value = (
+        mock_oauth_token
+    )
 
     # Execute
     token = await setup.router.get_token_for_integration(
@@ -256,7 +263,9 @@ async def test_organization_space_with_tenant_app_uses_tenant_app(
     """Organization spaces with configured tenant app use tenant app auth."""
     # Configure mocks
     setup.tenant_app_service.get_active_app_for_tenant.return_value = mock_tenant_app
-    setup.tenant_app_auth_service.get_access_token.return_value = "tenant-app-access-token"
+    setup.tenant_app_auth_service.get_access_token.return_value = (
+        "tenant-app-access-token"
+    )
 
     # Execute
     token = await setup.router.get_token_for_integration(
@@ -283,7 +292,9 @@ async def test_organization_space_without_tenant_app_falls_back_to_user_oauth(
     """Organization spaces without tenant app fall back to user OAuth."""
     # Configure mocks - no tenant app configured
     setup.tenant_app_service.get_active_app_for_tenant.return_value = None
-    setup.oauth_token_service.get_oauth_token_by_user_integration.return_value = mock_oauth_token
+    setup.oauth_token_service.get_oauth_token_by_user_integration.return_value = (
+        mock_oauth_token
+    )
 
     # Execute
     token = await setup.router.get_token_for_integration(
@@ -402,7 +413,9 @@ async def test_get_token_by_auth_type_user_oauth(
     mock_oauth_token,
 ):
     """get_token_by_auth_type with user_oauth uses user OAuth flow."""
-    setup.oauth_token_service.get_oauth_token_by_user_integration.return_value = mock_oauth_token
+    setup.oauth_token_service.get_oauth_token_by_user_integration.return_value = (
+        mock_oauth_token
+    )
 
     token = await setup.router.get_token_by_auth_type(
         mock_user_integration, "user_oauth"
@@ -435,9 +448,7 @@ async def test_get_token_by_auth_type_tenant_app_missing_tenant_app_id_raises_er
     mock_user_integration.tenant_app_id = None
 
     with pytest.raises(ValueError, match="has no tenant_app_id"):
-        await setup.router.get_token_by_auth_type(
-            mock_user_integration, "tenant_app"
-        )
+        await setup.router.get_token_by_auth_type(mock_user_integration, "tenant_app")
 
 
 async def test_get_token_by_auth_type_invalid_auth_type_raises_error(
@@ -446,9 +457,7 @@ async def test_get_token_by_auth_type_invalid_auth_type_raises_error(
 ):
     """get_token_by_auth_type with invalid auth_type raises error."""
     with pytest.raises(ValueError, match="Invalid auth_type"):
-        await setup.router.get_token_by_auth_type(
-            mock_user_integration, "invalid_type"
-        )
+        await setup.router.get_token_by_auth_type(mock_user_integration, "invalid_type")
 
 
 @pytest.mark.parametrize(
@@ -488,18 +497,20 @@ async def test_authentication_routing_matrix(
 
     # Configure tenant app availability
     if tenant_app_configured:
-        setup.tenant_app_service.get_active_app_for_tenant.return_value = mock_tenant_app
+        setup.tenant_app_service.get_active_app_for_tenant.return_value = (
+            mock_tenant_app
+        )
         setup.tenant_app_auth_service.get_access_token.return_value = "tenant-app-token"
     else:
         setup.tenant_app_service.get_active_app_for_tenant.return_value = None
 
     # Configure user OAuth
-    setup.oauth_token_service.get_oauth_token_by_user_integration.return_value = mock_oauth_token
+    setup.oauth_token_service.get_oauth_token_by_user_integration.return_value = (
+        mock_oauth_token
+    )
 
     # Execute
-    token = await setup.router.get_token_for_integration(
-        mock_user_integration, space
-    )
+    token = await setup.router.get_token_for_integration(mock_user_integration, space)
 
     # Assert correct authentication method was used
     if expected_auth == "user_oauth":
@@ -517,7 +528,9 @@ async def test_sharepoint_token_from_user_oauth_has_correct_structure(
     mock_oauth_token,
 ):
     """SharePointToken from user OAuth has all expected fields."""
-    setup.oauth_token_service.get_oauth_token_by_user_integration.return_value = mock_oauth_token
+    setup.oauth_token_service.get_oauth_token_by_user_integration.return_value = (
+        mock_oauth_token
+    )
 
     token = await setup.router.get_token_for_integration(
         mock_user_integration, mock_personal_space

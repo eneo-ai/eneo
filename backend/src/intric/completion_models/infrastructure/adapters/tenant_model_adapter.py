@@ -1,4 +1,5 @@
 """Minimal adapter for tenant models using LiteLLM."""
+
 import base64
 import json
 import re
@@ -100,13 +101,22 @@ class TenantModelAdapter(CompletionModelAdapter):
     def _get_dropped_params(self, litellm_kwargs: dict) -> set:
         """Get which params will be dropped by LiteLLM for this model."""
         # Params that are not model params (credentials, config)
-        non_model_params = {"api_key", "api_base", "api_version", "api_type", "organization", "deployment_name"}
+        non_model_params = {
+            "api_key",
+            "api_base",
+            "api_version",
+            "api_type",
+            "organization",
+            "deployment_name",
+        }
 
         try:
             # Get supported params for this model
             supported = get_supported_openai_params(model=self.litellm_model)
             if supported is None:
-                logger.debug(f"Could not determine supported params for {self.litellm_model}")
+                logger.debug(
+                    f"Could not determine supported params for {self.litellm_model}"
+                )
                 return set()
 
             supported_set = set(supported)
@@ -121,7 +131,9 @@ class TenantModelAdapter(CompletionModelAdapter):
             return dropped
         except Exception as e:
             # Don't fail the request if we can't check params
-            logger.debug(f"Could not check supported params for {self.litellm_model}: {e}")
+            logger.debug(
+                f"Could not check supported params for {self.litellm_model}: {e}"
+            )
             return set()
 
     def _get_effective_params(self, litellm_kwargs: dict, dropped: set) -> dict:
@@ -164,9 +176,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             reasoning_tokens=reasoning_tokens,
         )
 
-    def _accumulate_usage(
-        self, existing: TokenUsage | None, response
-    ) -> TokenUsage:
+    def _accumulate_usage(self, existing: TokenUsage | None, response) -> TokenUsage:
         """Accumulate token usage from a follow-up LiteLLM response."""
         new = self._extract_usage(response)
         if not existing:
@@ -293,27 +303,33 @@ class TenantModelAdapter(CompletionModelAdapter):
         # Convert previous Q&A pairs to user/assistant messages (with images)
         for msg in context.messages:
             # User message with question + images
-            messages.append({
-                "role": "user",
-                "content": self._build_content(
-                    input=msg.question,
-                    images=msg.images + msg.generated_images,
-                ),
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": self._build_content(
+                        input=msg.question,
+                        images=msg.images + msg.generated_images,
+                    ),
+                }
+            )
             # Assistant response
-            messages.append({
-                "role": "assistant",
-                "content": msg.answer or "[image generated]",
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": msg.answer or "[image generated]",
+                }
+            )
 
         # Add current question with images
-        messages.append({
-            "role": "user",
-            "content": self._build_content(
-                input=context.input,
-                images=context.images,
-            ),
-        })
+        messages.append(
+            {
+                "role": "user",
+                "content": self._build_content(
+                    input=context.input,
+                    images=context.images,
+                ),
+            }
+        )
 
         return messages
 
@@ -352,12 +368,14 @@ class TenantModelAdapter(CompletionModelAdapter):
         # Process model kwargs with provider-specific adjustments
         if model_kwargs:
             # Convert Pydantic ModelKwargs to dict if needed
-            if hasattr(model_kwargs, 'model_dump'):
+            if hasattr(model_kwargs, "model_dump"):
                 model_kwargs_dict = model_kwargs.model_dump(exclude_none=True)
-            elif hasattr(model_kwargs, 'dict'):
+            elif hasattr(model_kwargs, "dict"):
                 model_kwargs_dict = model_kwargs.dict(exclude_none=True)
             else:
-                model_kwargs_dict = model_kwargs if isinstance(model_kwargs, dict) else {}
+                model_kwargs_dict = (
+                    model_kwargs if isinstance(model_kwargs, dict) else {}
+                )
 
             # Claude-specific: Scale temperature from (0, 2) to (0, 1)
             if self.provider_type == "anthropic" and "temperature" in model_kwargs_dict:
@@ -371,13 +389,20 @@ class TenantModelAdapter(CompletionModelAdapter):
             # Only pass reasoning_effort if the model actually supports it
             # (per LiteLLM's supported_openai_params) and the value is meaningful
             if "reasoning_effort" in model_kwargs_dict:
-                supported_params = litellm.get_supported_openai_params(model=self.litellm_model) or []
-                if "reasoning_effort" not in supported_params or model_kwargs_dict["reasoning_effort"] in (None, "none", ""):
+                supported_params = (
+                    litellm.get_supported_openai_params(model=self.litellm_model) or []
+                )
+                if "reasoning_effort" not in supported_params or model_kwargs_dict[
+                    "reasoning_effort"
+                ] in (None, "none", ""):
                     del model_kwargs_dict["reasoning_effort"]
 
             # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)
             # require it explicitly or return empty responses
-            if "max_tokens" not in model_kwargs_dict and "max_completion_tokens" not in model_kwargs_dict:
+            if (
+                "max_tokens" not in model_kwargs_dict
+                and "max_completion_tokens" not in model_kwargs_dict
+            ):
                 model_kwargs_dict["max_tokens"] = self.model.max_output_tokens
                 logger.debug(f"Added default max_tokens={self.model.max_output_tokens}")
 
@@ -460,7 +485,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     logger.debug(f"[DEBUG] reasoning_content: {msg.reasoning_content}")
 
                 # Check if model wants to call MCP tools
-                if hasattr(msg, 'tool_calls') and msg.tool_calls and mcp_proxy:
+                if hasattr(msg, "tool_calls") and msg.tool_calls and mcp_proxy:
                     allowed_tools = mcp_proxy.get_allowed_tool_names()
                     for tc in msg.tool_calls:
                         if tc.function.name not in allowed_tools:
@@ -469,21 +494,23 @@ class TenantModelAdapter(CompletionModelAdapter):
                             )
 
                     # Add assistant message with tool calls to conversation
-                    messages.append({
-                        "role": "assistant",
-                        "content": msg.content,
-                        "tool_calls": [
-                            {
-                                "id": tc.id,
-                                "type": "function",
-                                "function": {
-                                    "name": tc.function.name,
-                                    "arguments": tc.function.arguments,
-                                },
-                            }
-                            for tc in msg.tool_calls
-                        ],
-                    })
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": msg.content,
+                            "tool_calls": [
+                                {
+                                    "id": tc.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc.function.name,
+                                        "arguments": tc.function.arguments,
+                                    },
+                                }
+                                for tc in msg.tool_calls
+                            ],
+                        }
+                    )
 
                     # Execute tools via proxy
                     proxy_calls = [
@@ -508,11 +535,13 @@ class TenantModelAdapter(CompletionModelAdapter):
                             result_text = json.dumps(
                                 {"error": result_text or "Tool execution failed"}
                             )
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "content": result_text,
-                        })
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": result_text,
+                            }
+                        )
 
                     # Follow-up completion without tools
                     follow_up_kwargs = {
@@ -533,7 +562,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                 completion.stop = choice.finish_reason == "stop"
 
             completion.usage = usage
-            logger.info(f"[TenantModelAdapter] {self.litellm_model}: Completion successful")
+            logger.info(
+                f"[TenantModelAdapter] {self.litellm_model}: Completion successful"
+            )
             return completion
 
         except AuthenticationError as exc:
@@ -585,7 +616,10 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
 
             # Check for specific error types
-            if "Virtual Network/Firewall" in error_message or "Firewall rules" in error_message:
+            if (
+                "Virtual Network/Firewall" in error_message
+                or "Firewall rules" in error_message
+            ):
                 raise OpenAIException(
                     "Access denied: Virtual Network/Firewall rules. "
                     "Please check your network configuration."
@@ -661,12 +695,16 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
 
             # Store context for MCP tool execution in iterate_stream
-            setattr(stream, '_eneo_context', {
-                'messages': messages,
-                'kwargs': litellm_kwargs,
-                'has_tools': bool(all_tools),
-                'mcp_proxy': mcp_proxy,
-            })
+            setattr(
+                stream,
+                "_eneo_context",
+                {
+                    "messages": messages,
+                    "kwargs": litellm_kwargs,
+                    "has_tools": bool(all_tools),
+                    "mcp_proxy": mcp_proxy,
+                },
+            )
 
             logger.info(
                 f"[TenantModelAdapter] {self.litellm_model}: Stream connection created successfully"
@@ -722,7 +760,10 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
 
             # Check for specific error types
-            if "Virtual Network/Firewall" in error_message or "Firewall rules" in error_message:
+            if (
+                "Virtual Network/Firewall" in error_message
+                or "Firewall rules" in error_message
+            ):
                 raise OpenAIException(
                     "Access denied: Virtual Network/Firewall rules. "
                     "Please check your network configuration."
@@ -770,11 +811,13 @@ class TenantModelAdapter(CompletionModelAdapter):
             Completion: Chunks of completion (yields error events for mid-stream failures)
         """
         try:
-            logger.info(f"[TenantModelAdapter] {self.litellm_model}: Starting stream iteration")
+            logger.info(
+                f"[TenantModelAdapter] {self.litellm_model}: Starting stream iteration"
+            )
 
             # Get MCP context stored by prepare_streaming
-            eneo_ctx = getattr(stream, '_eneo_context', None)
-            mcp_proxy = eneo_ctx.get('mcp_proxy') if eneo_ctx else None
+            eneo_ctx = getattr(stream, "_eneo_context", None)
+            mcp_proxy = eneo_ctx.get("mcp_proxy") if eneo_ctx else None
 
             # Shared state for tool call accumulation and usage across stream draining
             class _StreamResult:
@@ -799,7 +842,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                     if hasattr(chunk, "usage") and chunk.usage:
                         chunk_usage = self._extract_usage(chunk)
                         if chunk_usage:
-                            res.usage = self._accumulate_usage(res.usage, chunk) if res.usage else chunk_usage
+                            res.usage = (
+                                self._accumulate_usage(res.usage, chunk)
+                                if res.usage
+                                else chunk_usage
+                            )
 
                     if not (chunk.choices and len(chunk.choices) > 0):
                         continue
@@ -809,24 +856,28 @@ class TenantModelAdapter(CompletionModelAdapter):
                     logger.debug(f"[DEBUG] Delta: {delta}")
 
                     # Accumulate tool call deltas
-                    if delta and hasattr(delta, 'tool_calls') and delta.tool_calls:
+                    if delta and hasattr(delta, "tool_calls") and delta.tool_calls:
                         res.has_tool_calls = True
                         for tc_delta in delta.tool_calls:
                             idx = tc_delta.index
                             if idx not in res.tool_calls_acc:
                                 res.tool_calls_acc[idx] = {
-                                    'id': getattr(tc_delta, 'id', None),
-                                    'type': 'function',
-                                    'function': {'name': '', 'arguments': ''},
+                                    "id": getattr(tc_delta, "id", None),
+                                    "type": "function",
+                                    "function": {"name": "", "arguments": ""},
                                 }
-                            if getattr(tc_delta, 'id', None):
-                                res.tool_calls_acc[idx]['id'] = tc_delta.id
-                            if hasattr(tc_delta, 'function'):
+                            if getattr(tc_delta, "id", None):
+                                res.tool_calls_acc[idx]["id"] = tc_delta.id
+                            if hasattr(tc_delta, "function"):
                                 fn = tc_delta.function
-                                if getattr(fn, 'name', None):
-                                    res.tool_calls_acc[idx]['function']['name'] = fn.name
-                                if getattr(fn, 'arguments', None):
-                                    res.tool_calls_acc[idx]['function']['arguments'] += fn.arguments
+                                if getattr(fn, "name", None):
+                                    res.tool_calls_acc[idx]["function"]["name"] = (
+                                        fn.name
+                                    )
+                                if getattr(fn, "arguments", None):
+                                    res.tool_calls_acc[idx]["function"][
+                                        "arguments"
+                                    ] += fn.arguments
 
                     # Handle text content with thinking-block stripping
                     content = ""
@@ -841,7 +892,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             pre_think = buffer.split("<think>")[0]
                             if pre_think.strip():
                                 yield Completion(text=pre_think)
-                            buffer = buffer[buffer.index("<think>"):]
+                            buffer = buffer[buffer.index("<think>") :]
 
                         if inside_thinking and "</think>" in buffer:
                             inside_thinking = False
@@ -872,9 +923,14 @@ class TenantModelAdapter(CompletionModelAdapter):
                 yield comp
 
             # --- MCP tool call loop ---
-            if result.has_tool_calls and mcp_proxy and eneo_ctx and eneo_ctx.get('has_tools'):
-                messages = eneo_ctx['messages']
-                litellm_kwargs = eneo_ctx['kwargs']
+            if (
+                result.has_tool_calls
+                and mcp_proxy
+                and eneo_ctx
+                and eneo_ctx.get("has_tools")
+            ):
+                messages = eneo_ctx["messages"]
+                litellm_kwargs = eneo_ctx["kwargs"]
                 allowed_tools = mcp_proxy.get_allowed_tool_names()
 
                 max_rounds = 10
@@ -892,16 +948,20 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                     # Security validation
                     for tc in tool_calls:
-                        name = tc['function']['name']
+                        name = tc["function"]["name"]
                         if name not in allowed_tools:
                             raise OpenAIException(f"Unauthorized MCP tool: {name}")
 
                     # Build tool metadata for frontend
                     tool_metadata = []
                     for tc in tool_calls:
-                        name = tc['function']['name']
+                        name = tc["function"]["name"]
                         try:
-                            args = json.loads(tc['function']['arguments']) if tc['function']['arguments'] else None
+                            args = (
+                                json.loads(tc["function"]["arguments"])
+                                if tc["function"]["arguments"]
+                                else None
+                            )
                         except json.JSONDecodeError:
                             args = None
                         info = mcp_proxy.get_tool_info(name)
@@ -911,10 +971,14 @@ class TenantModelAdapter(CompletionModelAdapter):
                             sname, tname = name.split("__", 1)
                         else:
                             sname, tname = "", name
-                        tool_metadata.append(ToolCallMetadata(
-                            server_name=sname, tool_name=tname,
-                            arguments=args, tool_call_id=tc['id'],
-                        ))
+                        tool_metadata.append(
+                            ToolCallMetadata(
+                                server_name=sname,
+                                tool_name=tname,
+                                arguments=args,
+                                tool_call_id=tc["id"],
+                            )
+                        )
                     tool_args_by_call_id = {
                         tm.tool_call_id: tm.arguments
                         for tm in tool_metadata
@@ -926,7 +990,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     timed_out = False
                     if require_tool_approval and approval_manager:
                         if approval_context is None:
-                            raise OpenAIException("Missing approval context for tool approval flow")
+                            raise OpenAIException(
+                                "Missing approval context for tool approval flow"
+                            )
 
                         approval_id = str(uuid.uuid4())
                         tool_call_ids = [tc["id"] for tc in tool_calls if tc.get("id")]
@@ -948,12 +1014,15 @@ class TenantModelAdapter(CompletionModelAdapter):
                             approval_id=approval_id,
                         )
 
-                        wait_result = await approval_manager.wait_for_approval(approval_id)
+                        wait_result = await approval_manager.wait_for_approval(
+                            approval_id
+                        )
                         if pending_approval_ids is not None:
                             pending_approval_ids.discard(approval_id)
                         timed_out = wait_result.timed_out
                         decision_map = {
-                            d.tool_call_id: (d.approved, d.reason) for d in wait_result.decisions
+                            d.tool_call_id: (d.approved, d.reason)
+                            for d in wait_result.decisions
                         }
 
                         if timed_out:
@@ -981,11 +1050,17 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     tool_name=tm.tool_name,
                                     arguments=tm.arguments,
                                     tool_call_id=tm.tool_call_id,
-                                    approved=decision_map.get(tm.tool_call_id, (False, None))[0],
+                                    approved=decision_map.get(
+                                        tm.tool_call_id, (False, None)
+                                    )[0],
                                     result_status=(
                                         "approved"
-                                        if decision_map.get(tm.tool_call_id, (False, None))[0]
-                                        else ("timeout_denied" if timed_out else "denied")
+                                        if decision_map.get(
+                                            tm.tool_call_id, (False, None)
+                                        )[0]
+                                        else (
+                                            "timeout_denied" if timed_out else "denied"
+                                        )
                                     ),
                                 )
                                 for tm in tool_metadata
@@ -993,10 +1068,14 @@ class TenantModelAdapter(CompletionModelAdapter):
                         )
 
                         approved_tcs = [
-                            tc for tc in tool_calls if decision_map.get(tc["id"], (False, None))[0]
+                            tc
+                            for tc in tool_calls
+                            if decision_map.get(tc["id"], (False, None))[0]
                         ]
                         denied_tcs = [
-                            tc for tc in tool_calls if not decision_map.get(tc["id"], (False, None))[0]
+                            tc
+                            for tc in tool_calls
+                            if not decision_map.get(tc["id"], (False, None))[0]
                         ]
                     else:
                         yield Completion(
@@ -1017,29 +1096,31 @@ class TenantModelAdapter(CompletionModelAdapter):
                         denied_tcs = []
 
                     # Add assistant message with tool calls to conversation
-                    messages.append({
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [
-                            {
-                                "id": tc['id'],
-                                "type": "function",
-                                "function": {
-                                    "name": tc['function']['name'],
-                                    "arguments": tc['function']['arguments'],
-                                },
-                            }
-                            for tc in tool_calls
-                        ],
-                    })
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": tc["id"],
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc["function"]["name"],
+                                        "arguments": tc["function"]["arguments"],
+                                    },
+                                }
+                                for tc in tool_calls
+                            ],
+                        }
+                    )
 
                     # Execute approved tools
                     if approved_tcs:
                         proxy_calls = [
                             (
-                                tc['function']['name'],
-                                json.loads(tc['function']['arguments'])
-                                if tc['function']['arguments']
+                                tc["function"]["name"],
+                                json.loads(tc["function"]["arguments"])
+                                if tc["function"]["arguments"]
                                 else {},
                             )
                             for tc in approved_tcs
@@ -1054,18 +1135,24 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         text += ci.get("text", "")
                             result_status = "succeeded"
                             if res.get("is_error"):
-                                text = json.dumps({"error": text or "Tool execution failed"})
+                                text = json.dumps(
+                                    {"error": text or "Tool execution failed"}
+                                )
                                 result_status = "failed"
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tc['id'],
-                                "content": text,
-                            })
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tc["id"],
+                                    "content": text,
+                                }
+                            )
                             tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
                             if tool_info:
                                 server_name, tool_name = tool_info
                             elif "__" in tc["function"]["name"]:
-                                server_name, tool_name = tc["function"]["name"].split("__", 1)
+                                server_name, tool_name = tc["function"]["name"].split(
+                                    "__", 1
+                                )
                             else:
                                 server_name, tool_name = "", tc["function"]["name"]
                             execution_metadata.append(
@@ -1092,16 +1179,20 @@ class TenantModelAdapter(CompletionModelAdapter):
                         denial_payload: dict[str, Any] = {"denied": True}
                         if denial_reason:
                             denial_payload["user_reason"] = denial_reason
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc['id'],
-                            "content": json.dumps(denial_payload),
-                        })
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc["id"],
+                                "content": json.dumps(denial_payload),
+                            }
+                        )
                         tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
                         if tool_info:
                             server_name, tool_name = tool_info
                         elif "__" in tc["function"]["name"]:
-                            server_name, tool_name = tc["function"]["name"].split("__", 1)
+                            server_name, tool_name = tc["function"]["name"].split(
+                                "__", 1
+                            )
                         else:
                             server_name, tool_name = "", tc["function"]["name"]
                         denied_metadata.append(
@@ -1111,7 +1202,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 arguments=tool_args_by_call_id.get(tc["id"]),
                                 tool_call_id=tc["id"],
                                 approved=False,
-                                result_status="timeout_denied" if timed_out else "denied",
+                                result_status="timeout_denied"
+                                if timed_out
+                                else "denied",
                             )
                         )
 
@@ -1141,7 +1234,9 @@ class TenantModelAdapter(CompletionModelAdapter):
             # Final stop — attach accumulated usage
             yield Completion(text="", stop=True, usage=result.usage)
 
-            logger.info(f"[TenantModelAdapter] {self.litellm_model}: Stream iteration completed")
+            logger.info(
+                f"[TenantModelAdapter] {self.litellm_model}: Stream iteration completed"
+            )
 
         except Exception as exc:
             # Mid-stream errors: yield error event instead of raising
@@ -1154,7 +1249,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 error=f"Stream error: {str(exc)}",
                 error_code=500,
                 response_type=ResponseType.ERROR,
-                stop=True
+                stop=True,
             )
 
     def get_token_limit_of_model(self) -> int:

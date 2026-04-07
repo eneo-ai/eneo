@@ -109,7 +109,9 @@ class SessionService:
         self._check_exists_and_belongs_to_user(session)
         return session
 
-    async def delete(self, id: UUID, assistant_id: UUID = None, group_chat_id: UUID = None):
+    async def delete(
+        self, id: UUID, assistant_id: UUID = None, group_chat_id: UUID = None
+    ):
         session = await self.session_repo.get(id)
         self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id

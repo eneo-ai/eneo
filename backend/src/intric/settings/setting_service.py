@@ -123,13 +123,16 @@ class SettingService:
         provisioning = (
             overrides["provisioning"]
             if "provisioning" in overrides
-            else tenant.provisioning if tenant else False
+            else tenant.provisioning
+            if tenant
+            else False
         )
 
         app_settings = get_app_settings()
 
         return SettingsPublic(
-            chatbot_widget=(settings_in_db.chatbot_widget if settings_in_db else {}) or {},
+            chatbot_widget=(settings_in_db.chatbot_widget if settings_in_db else {})
+            or {},
             using_templates=using_templates,
             audit_logging_enabled=audit_logging_enabled,
             tenant_credentials_enabled=app_settings.tenant_credentials_enabled,
@@ -306,16 +309,20 @@ class SettingService:
             self.user.tenant_id,
         )
 
-        old_enabled = await self.feature_flag_service.check_is_feature_enabled_fail_closed(
-            feature_name="api_key_scope_enforcement",
-            tenant_id=self.user.tenant_id,
+        old_enabled = (
+            await self.feature_flag_service.check_is_feature_enabled_fail_closed(
+                feature_name="api_key_scope_enforcement",
+                tenant_id=self.user.tenant_id,
+            )
         )
 
         strict_was_enabled = False
         if not enabled:
-            strict_was_enabled = await self.feature_flag_service.check_is_feature_enabled(
-                feature_name="api_key_strict_mode",
-                tenant_id=self.user.tenant_id,
+            strict_was_enabled = (
+                await self.feature_flag_service.check_is_feature_enabled(
+                    feature_name="api_key_strict_mode",
+                    tenant_id=self.user.tenant_id,
+                )
             )
 
         await self._set_feature_flag_for_tenant(
@@ -386,7 +393,9 @@ class SettingService:
             feature_name="api_key_strict_mode",
             tenant_id=self.user.tenant_id,
         )
-        await self._set_feature_flag_for_tenant(name="api_key_strict_mode", enabled=enabled)
+        await self._set_feature_flag_for_tenant(
+            name="api_key_strict_mode", enabled=enabled
+        )
 
         settings = await self.repo.get(self.user.id)
 
@@ -399,7 +408,9 @@ class SettingService:
             description=f"Toggled api_key_strict_mode to {enabled}",
             metadata={
                 "setting": "api_key_strict_mode",
-                "changes": {"api_key_strict_mode": {"old": old_enabled, "new": enabled}},
+                "changes": {
+                    "api_key_strict_mode": {"old": old_enabled, "new": enabled}
+                },
             },
         )
 

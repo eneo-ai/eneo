@@ -58,12 +58,18 @@ from intric.database.tables.spaces_table import (
 from intric.database.tables.user_groups_table import UserGroups
 from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from intric.database.tables.websites_table import Websites as WebsitesTable
-from intric.main.exceptions import BadRequestException, NotFoundException, UniqueException
+from intric.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UniqueException,
+)
 from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember
 from intric.spaces.space import Space
 from intric.spaces.space_factory import SpaceFactory
 from intric.database.tables.websites_spaces_table import WebsitesSpaces
-from intric.database.tables.integration_knowledge_spaces_table import IntegrationKnowledgesSpaces
+from intric.database.tables.integration_knowledge_spaces_table import (
+    IntegrationKnowledgesSpaces,
+)
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -86,7 +92,9 @@ if TYPE_CHECKING:
     )
     from intric.users.user import UserInDB
     from intric.websites.domain.website import Website
-    from intric.websites.infrastructure.http_auth_encryption import HttpAuthEncryptionService
+    from intric.websites.infrastructure.http_auth_encryption import (
+        HttpAuthEncryptionService,
+    )
 
 
 class SpaceRepository:
@@ -217,8 +225,6 @@ class SpaceRepository:
         res = await self.session.execute(stmt)
         return res.all()
 
-
-
     async def _get_completion_models(self, space_in_db: Spaces):
         space_id = space_in_db.id
 
@@ -298,7 +304,9 @@ class SpaceRepository:
         if completion_models:
             stmt = sa.insert(SpacesCompletionModels).values(
                 [
-                    dict(completion_model_id=completion_model.id, space_id=space_in_db.id)
+                    dict(
+                        completion_model_id=completion_model.id, space_id=space_in_db.id
+                    )
                     for completion_model in completion_models
                 ]
             )
@@ -383,7 +391,7 @@ class SpaceRepository:
                     dict(
                         space_id=space_in_db.id,
                         mcp_server_tool_id=tool_id,
-                        is_enabled=is_enabled
+                        is_enabled=is_enabled,
                     )
                     for tool_id, is_enabled in tool_settings
                 ]
@@ -417,7 +425,9 @@ class SpaceRepository:
     ):
         """Persist group members for a space."""
         # Delete all existing group members
-        stmt = sa.delete(SpacesUserGroups).where(SpacesUserGroups.space_id == space_in_db.id)
+        stmt = sa.delete(SpacesUserGroups).where(
+            SpacesUserGroups.space_id == space_in_db.id
+        )
         await self.session.execute(stmt)
 
         # Add group members
@@ -439,7 +449,9 @@ class SpaceRepository:
 
     async def _set_assistants(self, space_in_db: Spaces, assistants: list["Assistant"]):
         new_assistants = [assistant for assistant in assistants if assistant.is_new]
-        existing_assistants = [assistant for assistant in assistants if not assistant.is_new]
+        existing_assistants = [
+            assistant for assistant in assistants if not assistant.is_new
+        ]
 
         for assistant in new_assistants:
             assistant.space_id = space_in_db.id
@@ -459,7 +471,9 @@ class SpaceRepository:
         )
         await self.session.execute(stmt)
 
-    async def _set_default_assistant(self, space_in_db: Spaces, assistant: Optional["Assistant"]):
+    async def _set_default_assistant(
+        self, space_in_db: Spaces, assistant: Optional["Assistant"]
+    ):
         if assistant is None:
             return
 
@@ -473,12 +487,22 @@ class SpaceRepository:
         await self.session.execute(stmt)
 
         # Set the default to default
-        stmt = sa.update(Assistants).values(is_default=True).where(Assistants.id == assistant.id)
+        stmt = (
+            sa.update(Assistants)
+            .values(is_default=True)
+            .where(Assistants.id == assistant.id)
+        )
         await self.session.execute(stmt)
 
-    async def _set_group_chats(self, space_in_db: Spaces, group_chats: list["GroupChat"]):
-        new_group_chats = [group_chat for group_chat in group_chats if group_chat.is_new]
-        existing_group_chats = [group_chat for group_chat in group_chats if not group_chat.is_new]
+    async def _set_group_chats(
+        self, space_in_db: Spaces, group_chats: list["GroupChat"]
+    ):
+        new_group_chats = [
+            group_chat for group_chat in group_chats if group_chat.is_new
+        ]
+        existing_group_chats = [
+            group_chat for group_chat in group_chats if not group_chat.is_new
+        ]
 
         if new_group_chats:
             stmt = sa.insert(GroupChatsTable).values(
@@ -542,11 +566,15 @@ class SpaceRepository:
         stmt = (
             sa.delete(GroupChatsTable)
             .where(GroupChatsTable.space_id == space_in_db.id)
-            .where(GroupChatsTable.id.notin_([group_chat.id for group_chat in group_chats]))
+            .where(
+                GroupChatsTable.id.notin_([group_chat.id for group_chat in group_chats])
+            )
         )
         await self.session.execute(stmt)
 
-    async def _set_collections(self, space_in_db: Spaces, collections: list["Collection"]):
+    async def _set_collections(
+        self, space_in_db: Spaces, collections: list["Collection"]
+    ):
         def _set_size_subquery(collection: "Collection"):
             return (
                 sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
@@ -588,7 +616,9 @@ class SpaceRepository:
             await self.session.execute(stmt)
 
         res = await self.session.execute(
-            sa.select(GroupsSpaces.collection_id).where(GroupsSpaces.space_id == space_in_db.id)
+            sa.select(GroupsSpaces.collection_id).where(
+                GroupsSpaces.space_id == space_in_db.id
+            )
         )
         current_ids = {row[0] for row in res.all()}
 
@@ -615,13 +645,14 @@ class SpaceRepository:
                     )
                 )
             )
-            
+
     async def _set_websites(self, space_in_db: Spaces, websites: list["Website"]):
         """Persist websites with encrypted auth credentials.
 
         Why: Repository is the encryption boundary. Domain entities have plaintext
         credentials, but database gets encrypted values.
         """
+
         def _set_size_subquery(website: "Website"):
             return (
                 sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
@@ -632,18 +663,19 @@ class SpaceRepository:
         def _prepare_auth_fields(website: "Website") -> dict:
             """Encrypt HTTP auth credentials if present."""
             if website.http_auth:
-                username, encrypted_password, auth_domain = \
+                username, encrypted_password, auth_domain = (
                     self.http_auth_encryption.encrypt_credentials(website.http_auth)
+                )
                 return {
-                    'http_auth_username': username,
-                    'encrypted_auth_password': encrypted_password,
-                    'http_auth_domain': auth_domain,
+                    "http_auth_username": username,
+                    "encrypted_auth_password": encrypted_password,
+                    "http_auth_domain": auth_domain,
                 }
             else:
                 return {
-                    'http_auth_username': None,
-                    'encrypted_auth_password': None,
-                    'http_auth_domain': None,
+                    "http_auth_username": None,
+                    "encrypted_auth_password": None,
+                    "http_auth_domain": None,
                 }
 
         new_websites = [website for website in websites if website.is_new]
@@ -653,20 +685,22 @@ class SpaceRepository:
             values = []
             for website in new_websites:
                 auth_fields = _prepare_auth_fields(website)
-                values.append(dict(
-                    id=website.id,
-                    name=website.name,
-                    url=website.url,
-                    download_files=website.download_files,
-                    crawl_type=website.crawl_type,
-                    update_interval=website.update_interval,
-                    size=_set_size_subquery(website),
-                    tenant_id=website.tenant_id,
-                    user_id=website.user_id,
-                    embedding_model_id=website.embedding_model.id,
-                    space_id=space_in_db.id,
-                    **auth_fields,
-                ))
+                values.append(
+                    dict(
+                        id=website.id,
+                        name=website.name,
+                        url=website.url,
+                        download_files=website.download_files,
+                        crawl_type=website.crawl_type,
+                        update_interval=website.update_interval,
+                        size=_set_size_subquery(website),
+                        tenant_id=website.tenant_id,
+                        user_id=website.user_id,
+                        embedding_model_id=website.embedding_model.id,
+                        space_id=space_in_db.id,
+                        **auth_fields,
+                    )
+                )
             stmt = sa.insert(WebsitesTable).values(values)
             await self.session.execute(stmt)
 
@@ -689,19 +723,25 @@ class SpaceRepository:
             await self.session.execute(stmt)
 
         res = await self.session.execute(
-            sa.select(WebsitesSpaces.website_id).where(WebsitesSpaces.space_id == space_in_db.id)
+            sa.select(WebsitesSpaces.website_id).where(
+                WebsitesSpaces.space_id == space_in_db.id
+            )
         )
         current_ids = {row[0] for row in res.all()}
         desired_ids = {w.id for w in websites}
 
-        to_add    = desired_ids - current_ids
+        to_add = desired_ids - current_ids
         to_remove = current_ids - desired_ids
 
         if to_add:
-            ins = pg_insert(WebsitesSpaces).values(
-                [dict(website_id=wid, space_id=space_in_db.id) for wid in to_add]
-            ).on_conflict_do_nothing(
-                index_elements=[WebsitesSpaces.website_id, WebsitesSpaces.space_id]
+            ins = (
+                pg_insert(WebsitesSpaces)
+                .values(
+                    [dict(website_id=wid, space_id=space_in_db.id) for wid in to_add]
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[WebsitesSpaces.website_id, WebsitesSpaces.space_id]
+                )
             )
             await self.session.execute(ins)
 
@@ -748,37 +788,40 @@ class SpaceRepository:
         tools_db: list[MCPServerToolsTable] = list(tools_result.scalars().all())
 
         # Load tenant-level tool settings
-        tenant_tool_settings_query = (
-            sa.select(MCPServerToolSettingsTable)
-            .where(MCPServerToolSettingsTable.tenant_id == self.user.tenant_id)
+        tenant_tool_settings_query = sa.select(MCPServerToolSettingsTable).where(
+            MCPServerToolSettingsTable.tenant_id == self.user.tenant_id
         )
         tenant_settings_result = await self.session.execute(tenant_tool_settings_query)
-        tenant_settings_db: list[MCPServerToolSettingsTable] = list(tenant_settings_result.scalars().all())
+        tenant_settings_db: list[MCPServerToolSettingsTable] = list(
+            tenant_settings_result.scalars().all()
+        )
 
         # Create map: tool_id -> is_enabled (tenant level)
         tenant_tool_settings: dict[UUID, bool] = {
-            setting.mcp_server_tool_id: setting.is_enabled for setting in tenant_settings_db
+            setting.mcp_server_tool_id: setting.is_enabled
+            for setting in tenant_settings_db
         }
 
         # Load space-level tool overrides
-        space_overrides_query = (
-            sa.select(SpacesMCPServerTools).where(SpacesMCPServerTools.space_id == space_id)
+        space_overrides_query = sa.select(SpacesMCPServerTools).where(
+            SpacesMCPServerTools.space_id == space_id
         )
         space_overrides_result = await self.session.execute(space_overrides_query)
         space_overrides_db = space_overrides_result.scalars().all()
 
         # Create map: tool_id -> is_enabled (space level)
         space_tool_overrides = {
-            override.mcp_server_tool_id: override.is_enabled for override in space_overrides_db
+            override.mcp_server_tool_id: override.is_enabled
+            for override in space_overrides_db
         }
 
         # Load assistant-level tool overrides
-        assistant_overrides_query = (
-            sa.select(AssistantMCPServerTools).where(
-                AssistantMCPServerTools.assistant_id == assistant_id
-            )
+        assistant_overrides_query = sa.select(AssistantMCPServerTools).where(
+            AssistantMCPServerTools.assistant_id == assistant_id
         )
-        assistant_overrides_result = await self.session.execute(assistant_overrides_query)
+        assistant_overrides_result = await self.session.execute(
+            assistant_overrides_query
+        )
         assistant_overrides_db = assistant_overrides_result.scalars().all()
 
         # Create map: tool_id -> is_enabled (assistant level)
@@ -801,7 +844,10 @@ class SpaceRepository:
             )
 
             # If tenant disabled this tool, skip it entirely (don't show in space/assistant)
-            if tool_db.id in tenant_tool_settings and not tenant_tool_settings[tool_db.id]:
+            if (
+                tool_db.id in tenant_tool_settings
+                and not tenant_tool_settings[tool_db.id]
+            ):
                 continue
 
             # Apply space override if exists, otherwise use tenant/default
@@ -848,7 +894,9 @@ class SpaceRepository:
                 selectinload(Assistants.assistant_groups),
                 selectinload(Assistants.assistant_integration_knowledge),
                 selectinload(Assistants.attachments).selectinload(AssistantsFiles.file),
-                selectinload(Assistants.template).selectinload(AssistantTemplates.completion_model),
+                selectinload(Assistants.template).selectinload(
+                    AssistantTemplates.completion_model
+                ),
                 selectinload(Assistants.mcp_servers),
             )
             .order_by(Assistants.created_at)
@@ -870,7 +918,11 @@ class SpaceRepository:
 
         for assistant in assistants:
             assistant.prompt = next(
-                (prompt for prompt, assistant_id in prompts if assistant_id == assistant.id),
+                (
+                    prompt
+                    for prompt, assistant_id in prompts
+                    if assistant_id == assistant.id
+                ),
                 None,
             )
 
@@ -885,12 +937,16 @@ class SpaceRepository:
                 mcp_servers = MCPServerMapper.to_entities(assistant.mcp_servers)
 
                 # Apply space + assistant level overrides using same logic as space MCP loading
-                mcp_servers = await self._load_assistant_mcp_server_tools_with_overrides(
-                    space_id=space_id, assistant_id=assistant.id, mcp_servers=mcp_servers
+                mcp_servers = (
+                    await self._load_assistant_mcp_server_tools_with_overrides(
+                        space_id=space_id,
+                        assistant_id=assistant.id,
+                        mcp_servers=mcp_servers,
+                    )
                 )
 
                 # Store the filtered entities back on the assistant for the factory
-                setattr(assistant, '_mcp_server_entities', mcp_servers)
+                setattr(assistant, "_mcp_server_entities", mcp_servers)
 
         return assistants
 
@@ -933,16 +989,18 @@ class SpaceRepository:
             HttpAuthCredentials if auth present and decryption succeeds, None otherwise.
         """
 
-        if not (website_record.http_auth_username and
-                website_record.encrypted_auth_password and
-                website_record.http_auth_domain):
+        if not (
+            website_record.http_auth_username
+            and website_record.encrypted_auth_password
+            and website_record.http_auth_domain
+        ):
             return None
 
         try:
             return self.http_auth_encryption.decrypt_credentials(
                 username=website_record.http_auth_username,
                 encrypted_password=website_record.encrypted_auth_password,
-                auth_domain=website_record.http_auth_domain
+                auth_domain=website_record.http_auth_domain,
             )
         except ValueError as e:
             # Log decryption failure but don't fail entire website load
@@ -952,7 +1010,7 @@ class SpaceRepository:
                 extra={
                     "website_id": str(website_record.id),
                     "tenant_id": str(website_record.tenant_id),
-                }
+                },
             )
             # Set transient flag for crawl task to detect
             # Why: Enables fail-fast behavior in crawler with clear error message
@@ -997,7 +1055,9 @@ class SpaceRepository:
 
         # Decrypt auth credentials and attach as transient attribute
         for website_record in websites_db:
-            website_record._decrypted_http_auth = self._decrypt_website_auth(website_record)
+            website_record._decrypted_http_auth = self._decrypt_website_auth(
+                website_record
+            )
 
         return websites_db
 
@@ -1030,12 +1090,13 @@ class SpaceRepository:
         tools_db: list[MCPServerToolsTable] = list(tools_result.scalars().all())
 
         # Load tenant-level tool settings
-        tenant_tool_settings_query = (
-            sa.select(MCPServerToolSettingsTable)
-            .where(MCPServerToolSettingsTable.tenant_id == self.user.tenant_id)
+        tenant_tool_settings_query = sa.select(MCPServerToolSettingsTable).where(
+            MCPServerToolSettingsTable.tenant_id == self.user.tenant_id
         )
         tenant_settings_result = await self.session.execute(tenant_tool_settings_query)
-        tenant_settings_db: list[MCPServerToolSettingsTable] = list(tenant_settings_result.scalars().all())
+        tenant_settings_db: list[MCPServerToolSettingsTable] = list(
+            tenant_settings_result.scalars().all()
+        )
 
         # Create map: tool_id -> is_enabled (tenant level)
         tenant_tool_settings: dict[UUID, bool] = {
@@ -1044,9 +1105,8 @@ class SpaceRepository:
         }
 
         # Load space-level tool overrides
-        space_overrides_query = (
-            sa.select(SpacesMCPServerTools)
-            .where(SpacesMCPServerTools.space_id == space_id)
+        space_overrides_query = sa.select(SpacesMCPServerTools).where(
+            SpacesMCPServerTools.space_id == space_id
         )
         space_overrides_result = await self.session.execute(space_overrides_query)
         space_overrides_db = space_overrides_result.scalars().all()
@@ -1070,7 +1130,10 @@ class SpaceRepository:
             )
 
             # If tenant disabled this tool, skip it entirely (don't show in space)
-            if tool_db.id in tenant_tool_settings and not tenant_tool_settings[tool_db.id]:
+            if (
+                tool_db.id in tenant_tool_settings
+                and not tenant_tool_settings[tool_db.id]
+            ):
                 continue
 
             # Apply space override if exists, otherwise use tenant/default
@@ -1128,7 +1191,9 @@ class SpaceRepository:
         prompts = prompt_records.all()
 
         for app in apps_db:
-            app.prompt = next((prompt for prompt, app_id in prompts if app_id == app.id), None)
+            app.prompt = next(
+                (prompt for prompt, app_id in prompts if app_id == app.id), None
+            )
 
         return apps_db
 
@@ -1137,21 +1202,26 @@ class SpaceRepository:
         if not entry_in_db:
             return
 
-        space_ids = effective_space_ids(entry_in_db) 
+        space_ids = effective_space_ids(entry_in_db)
 
         collections = await self._get_collections(space_ids)
         websites = await self._get_websites(space_ids)
-        integration_knowledge_union = await self._get_integration_knowledge_union(space_ids)
+        integration_knowledge_union = await self._get_integration_knowledge_union(
+            space_ids
+        )
 
         completion_models = await self.completion_model_repo.all(with_deprecated=True)
         embedding_models = await self.embedding_model_repo.all(with_deprecated=True)
-        transcription_models = await self.transcription_model_repo.all(with_deprecated=True)
+        transcription_models = await self.transcription_model_repo.all(
+            with_deprecated=True
+        )
 
         # Get tenant-enabled MCP servers directly
         from sqlalchemy.orm import selectinload as _selectinload
         from intric.database.tables.security_classifications_table import (
             SecurityClassification as SecurityClassificationDBModel,
         )
+
         mcp_servers_query = (
             sa.select(MCPServersTable)
             .where(MCPServersTable.tenant_id == self.user.tenant_id)
@@ -1170,6 +1240,7 @@ class SpaceRepository:
         from intric.security_classifications.domain.entities.security_classification import (
             SecurityClassification,
         )
+
         mcp_servers = [
             MCPServer(
                 id=server.id,
@@ -1277,9 +1348,7 @@ class SpaceRepository:
         return space
 
     async def update(
-        self,
-        space: Space,
-        mcp_tool_settings: list[tuple[UUID, bool]] = None
+        self, space: Space, mcp_tool_settings: list[tuple[UUID, bool]] = None
     ) -> Space:
         query = (
             sa.update(Spaces)
@@ -1316,7 +1385,8 @@ class SpaceRepository:
         await self._set_websites(entry_in_db, space.websites)
         await self._set_assistants(
             entry_in_db,
-            space.assistants + ([space.default_assistant] if space.default_assistant else []),
+            space.assistants
+            + ([space.default_assistant] if space.default_assistant else []),
         )
         await self._set_group_chats(entry_in_db, space.group_chats)
 
@@ -1333,7 +1403,9 @@ class SpaceRepository:
         self, include_applications: bool = False
     ) -> list[Space]:
         user_id = self.user.id
-        user_group_ids = list(self.user.user_groups_ids) if self.user.user_groups_ids else []
+        user_group_ids = (
+            list(self.user.user_groups_ids) if self.user.user_groups_ids else []
+        )
 
         direct_member_query = (
             sa.select(Spaces.id)
@@ -1349,7 +1421,9 @@ class SpaceRepository:
                 .where(SpacesUserGroups.user_group_id.in_(user_group_ids))
             )
             # Union of both membership types
-            combined_query = sa.union(direct_member_query, group_member_query).subquery()
+            combined_query = sa.union(
+                direct_member_query, group_member_query
+            ).subquery()
         else:
             combined_query = direct_member_query.subquery()
 
@@ -1375,7 +1449,11 @@ class SpaceRepository:
 
             spaces.append(
                 self.factory.create_space_from_db(
-                    record, user=self.user, assistants_in_db=assistants, apps_in_db=apps, group_chats_in_db=group_chats
+                    record,
+                    user=self.user,
+                    assistants_in_db=assistants,
+                    apps_in_db=apps,
+                    group_chats_in_db=group_chats,
                 )
             )
 
@@ -1417,7 +1495,11 @@ class SpaceRepository:
         return space
 
     async def get_space_by_group_chat(self, group_chat_id: UUID) -> Space:
-        query = sa.select(Spaces).join(GroupChatsTable).where(GroupChatsTable.id == group_chat_id)
+        query = (
+            sa.select(Spaces)
+            .join(GroupChatsTable)
+            .where(GroupChatsTable.id == group_chat_id)
+        )
         space = await self._get_from_query(query=query)
 
         if space is None:
@@ -1426,7 +1508,11 @@ class SpaceRepository:
         return space
 
     async def get_space_by_collection(self, collection_id: UUID) -> Space:
-        query = sa.select(Spaces).join(CollectionsTable).where(CollectionsTable.id == collection_id)
+        query = (
+            sa.select(Spaces)
+            .join(CollectionsTable)
+            .where(CollectionsTable.id == collection_id)
+        )
 
         space = await self._get_from_query(query)
 
@@ -1436,7 +1522,9 @@ class SpaceRepository:
         return space
 
     async def get_space_by_website(self, website_id: UUID) -> Space:
-        query = sa.select(Spaces).join(WebsitesTable).where(WebsitesTable.id == website_id)
+        query = (
+            sa.select(Spaces).join(WebsitesTable).where(WebsitesTable.id == website_id)
+        )
 
         space = await self._get_from_query(query)
 
@@ -1445,7 +1533,9 @@ class SpaceRepository:
 
         return space
 
-    async def get_space_by_integration_knowledge(self, integration_knowledge_id: UUID) -> Space:
+    async def get_space_by_integration_knowledge(
+        self, integration_knowledge_id: UUID
+    ) -> Space:
         query = (
             sa.select(Spaces)
             .join(IntegrationKnowledge)
@@ -1472,7 +1562,9 @@ class SpaceRepository:
 
         # find space through group chat
         if session.group_chat_id is not None:
-            return await self.get_space_by_group_chat(group_chat_id=session.group_chat_id)
+            return await self.get_space_by_group_chat(
+                group_chat_id=session.group_chat_id
+            )
 
     async def _get_integration_knowledge_union(self, space_ids: list[UUID]):
         """Fetch integration knowledge both directly owned and distributed via org space.
@@ -1500,16 +1592,18 @@ class SpaceRepository:
             .options(
                 selectinload(ik.embedding_model),
                 selectinload(ik.user_integration)
-                    .selectinload(UserIntegrationDBModel.tenant_integration)
-                    .selectinload(TenantIntegrationDBModel.integration),
+                .selectinload(UserIntegrationDBModel.tenant_integration)
+                .selectinload(TenantIntegrationDBModel.integration),
                 selectinload(ik.sharepoint_subscription),
             )
             .order_by(ik.created_at)
         )
         rows = await self.session.execute(stmt)
         return list(rows.scalars().all())
-    
-    async def get_space_by_name_and_tenant(self, name: str, tenant_id: UUID) -> Space | None:
+
+    async def get_space_by_name_and_tenant(
+        self, name: str, tenant_id: UUID
+    ) -> Space | None:
         q = sa.select(Spaces).where(
             Spaces.name == name,
             Spaces.tenant_id == tenant_id,
@@ -1517,8 +1611,10 @@ class SpaceRepository:
             Spaces.tenant_space_id.is_(None),
         )
         return await self._get_from_query(q)
-    
-    async def create_org_space_for_tenant(self, name: str, description: str, tenant_id: UUID) -> Space:
+
+    async def create_org_space_for_tenant(
+        self, name: str, description: str, tenant_id: UUID
+    ) -> Space:
         """Create organization space for a tenant. Called when tenant is created."""
         space = self.factory.create_space(
             name=name,

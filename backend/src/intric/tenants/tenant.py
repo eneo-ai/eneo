@@ -145,7 +145,9 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         if has_full_federation_config:
             missing = required - set(v.keys())
             if missing:
-                raise ValueError(f"Federation config missing required fields: {missing}")
+                raise ValueError(
+                    f"Federation config missing required fields: {missing}"
+                )
         else:
             unexpected_fields = set(v.keys()) - redirect_only_fields
             if unexpected_fields:
@@ -180,12 +182,9 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
                     canonicalize_legacy_redirect_path(redirect_path)
                 )
             except ValueError as e:
-                raise ValueError(
-                    f"Invalid redirect_path in federation_config: {e}"
-                )
+                raise ValueError(f"Invalid redirect_path in federation_config: {e}")
 
         if "additional_redirect_uris" in v:
-
             additional_redirect_uris = v["additional_redirect_uris"]
             if not isinstance(additional_redirect_uris, list):
                 raise ValueError("additional_redirect_uris must be a list")
@@ -197,9 +196,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
                         "additional_redirect_uris must contain only strings"
                     )
                 try:
-                    normalized_redirect_uris.append(
-                        validate_redirect_uri(redirect_uri)
-                    )
+                    normalized_redirect_uris.append(validate_redirect_uri(redirect_uri))
                 except ValueError as e:
                     raise ValueError(
                         f"Invalid redirect URI in additional_redirect_uris: {e}"

@@ -71,9 +71,7 @@ class TestDeleteFile:
         await svc.delete_file(file_id)
 
         # Verify delete_by_owner is called with both id and user_id
-        repo.delete_by_owner.assert_awaited_once_with(
-            id=file_id, user_id=svc.user.id
-        )
+        repo.delete_by_owner.assert_awaited_once_with(id=file_id, user_id=svc.user.id)
         # Verify plain delete is NOT called
         repo.delete.assert_not_awaited()
 
@@ -195,9 +193,11 @@ class TestDeleteByOwnerRepo:
 
         repo = FileRepository(session=mock_session)
 
-        with patch.object(File, "model_validate", return_value=_make_file(
-            user_id=user_id, file_id=file_id
-        )) as mock_validate:
+        with patch.object(
+            File,
+            "model_validate",
+            return_value=_make_file(user_id=user_id, file_id=file_id),
+        ) as mock_validate:
             result = await repo.delete_by_owner(id=file_id, user_id=user_id)
 
         assert result is not None
@@ -268,7 +268,9 @@ class TestGetByIdRepo:
         repo = FileRepository(session=mock_session)
         repo._delegate.get = AsyncMock(return_value=MagicMock())
 
-        with patch.object(File, "model_validate", return_value=expected) as mock_validate:
+        with patch.object(
+            File, "model_validate", return_value=expected
+        ) as mock_validate:
             result = await repo.get_by_id(file_id=file_id)
 
         assert result is expected

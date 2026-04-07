@@ -25,7 +25,9 @@ async def test_session_service_create_session_starts_short_transaction_when_need
     session.in_transaction.return_value = False
     session.begin.return_value = _begin()
 
-    session_repo = SimpleNamespace(session=session, add=AsyncMock(return_value=SimpleNamespace()))
+    session_repo = SimpleNamespace(
+        session=session, add=AsyncMock(return_value=SimpleNamespace())
+    )
     service = SessionService(
         session_repo=session_repo,
         question_repo=AsyncMock(),
@@ -44,7 +46,9 @@ async def test_session_service_create_session_reuses_existing_transaction():
     session.in_transaction.return_value = True
     session.begin = MagicMock()
 
-    session_repo = SimpleNamespace(session=session, add=AsyncMock(return_value=SimpleNamespace()))
+    session_repo = SimpleNamespace(
+        session=session, add=AsyncMock(return_value=SimpleNamespace())
+    )
     service = SessionService(
         session_repo=session_repo,
         question_repo=AsyncMock(),
@@ -71,7 +75,9 @@ async def test_file_service_save_image_starts_short_transaction_when_needed():
     session.in_transaction.return_value = False
     session.begin.return_value = _begin()
 
-    repo = SimpleNamespace(session=session, add=AsyncMock(return_value=SimpleNamespace()))
+    repo = SimpleNamespace(
+        session=session, add=AsyncMock(return_value=SimpleNamespace())
+    )
     service = FileService(
         user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
         repo=repo,
@@ -90,7 +96,9 @@ async def test_file_service_save_image_reuses_existing_transaction():
     session.in_transaction.return_value = True
     session.begin = MagicMock()
 
-    repo = SimpleNamespace(session=session, add=AsyncMock(return_value=SimpleNamespace()))
+    repo = SimpleNamespace(
+        session=session, add=AsyncMock(return_value=SimpleNamespace())
+    )
     service = FileService(
         user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
         repo=repo,

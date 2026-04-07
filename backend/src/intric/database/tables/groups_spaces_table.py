@@ -10,14 +10,13 @@ from intric.database.tables.spaces_table import Spaces
 
 
 class GroupsSpaces(BaseCrossReference):
-    __tablename__ = "groups_spaces" 
+    __tablename__ = "groups_spaces"
 
     collection_id: Mapped[UUID] = mapped_column(
         "group_id",
-        ForeignKey(CollectionsTable.id
-        , ondelete="CASCADE")
-        , primary_key=True
-        , index=True
+        ForeignKey(CollectionsTable.id, ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
     )
     space_id: Mapped[UUID] = mapped_column(
         ForeignKey(Spaces.id, ondelete="CASCADE"), primary_key=True, index=True

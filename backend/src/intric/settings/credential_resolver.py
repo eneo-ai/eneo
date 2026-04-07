@@ -370,7 +370,10 @@ class CredentialResolver:
         # SINGLE-TENANT MODE (federation_enabled=false):
         # ONLY use environment variables, never check database
         if not self.settings.federation_enabled:
-            if self.settings.oidc_discovery_endpoint and self.settings.oidc_client_secret:
+            if (
+                self.settings.oidc_discovery_endpoint
+                and self.settings.oidc_client_secret
+            ):
                 config = {
                     "provider": "mobilityguard",  # Legacy global provider
                     "discovery_endpoint": self.settings.oidc_discovery_endpoint,
@@ -575,7 +578,9 @@ class CredentialResolver:
                 )
             else:
                 # Single-tenant mode: need global config
-                tenant_context = f" for tenant '{self.tenant.name}'" if self.tenant else ""
+                tenant_context = (
+                    f" for tenant '{self.tenant.name}'" if self.tenant else ""
+                )
                 logger.error(
                     f"No public origin configured{tenant_context}",
                     extra={
@@ -590,7 +595,9 @@ class CredentialResolver:
 
         # Origin should already be validated and normalized by Settings/Tenant validators
         # But double-check HTTPS as defense in depth (allow http://localhost for development)
-        is_localhost = origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1")
+        is_localhost = origin.startswith("http://localhost") or origin.startswith(
+            "http://127.0.0.1"
+        )
         if not origin.startswith("https://") and not is_localhost:
             logger.error(
                 f"Public origin must be HTTPS: {origin}",
@@ -623,7 +630,9 @@ class CredentialResolver:
                 "tenant_id": str(self.tenant.id) if self.tenant else None,
                 "tenant_name": self.tenant.name if self.tenant else "single-tenant",
                 "redirect_uri": redirect_uri,
-                "source": "tenant" if federation_config.get("canonical_public_origin") else "global",
+                "source": "tenant"
+                if federation_config.get("canonical_public_origin")
+                else "global",
                 "metric_name": "oidc.redirect_uri.resolved",
                 "metric_value": 1,
             },
@@ -648,7 +657,10 @@ class CredentialResolver:
 
         valid_redirect_uris = [canonical_redirect_uri]
         for redirect_uri in additional_redirect_uris:
-            if isinstance(redirect_uri, str) and redirect_uri not in valid_redirect_uris:
+            if (
+                isinstance(redirect_uri, str)
+                and redirect_uri not in valid_redirect_uris
+            ):
                 valid_redirect_uris.append(redirect_uri)
 
         return valid_redirect_uris

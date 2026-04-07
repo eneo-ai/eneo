@@ -14,6 +14,7 @@ from intric.ai_models.completion_models.completion_model import (
 
 class ModelUsageStatistics(BaseModel):
     """Pre-aggregated usage statistics for a completion model."""
+
     model_id: UUID
     total_usage: int
     assistants_count: int
@@ -28,9 +29,12 @@ class ModelUsageStatistics(BaseModel):
 
 class ModelUsageDetail(BaseModel):
     """Detailed information about a specific entity using a completion model."""
+
     entity_id: UUID
     entity_name: str
-    entity_type: str  # 'assistant', 'app', 'service', 'assistant_template', 'app_template'
+    entity_type: (
+        str  # 'assistant', 'app', 'service', 'assistant_template', 'app_template'
+    )
     space_id: Optional[UUID] = None
     space_name: Optional[str] = None
     owner_id: Optional[UUID] = None
@@ -42,6 +46,7 @@ class ModelUsageDetail(BaseModel):
 
 class ModelMigrationRequest(BaseModel):
     """Request to migrate usage from one model to another."""
+
     to_model_id: UUID
     entity_types: Optional[List[str]] = None  # If None, migrate all types
     confirm_migration: bool = False
@@ -49,6 +54,7 @@ class ModelMigrationRequest(BaseModel):
 
 class MigrationResult(BaseModel):
     """Result of a model migration operation."""
+
     success: bool
     migrated_count: int
     failed_count: int
@@ -56,12 +62,17 @@ class MigrationResult(BaseModel):
     duration: float  # Duration in seconds
     migration_id: UUID
     warnings: List[str] = []
-    auto_recalculated: bool = False  # Whether usage stats were automatically recalculated
-    requires_manual_recalculation: bool = False  # Whether manual recalculation is needed
+    auto_recalculated: bool = (
+        False  # Whether usage stats were automatically recalculated
+    )
+    requires_manual_recalculation: bool = (
+        False  # Whether manual recalculation is needed
+    )
 
 
 class ValidationResult(BaseModel):
     """Result of migration compatibility validation."""
+
     compatible: bool
     warnings: List[str]
     requires_confirmation: bool
@@ -70,6 +81,7 @@ class ValidationResult(BaseModel):
 
 class ModelUsageSummary(BaseModel):
     """Summary of usage for a single model."""
+
     model_id: UUID
     model_name: str
     model_nickname: str
@@ -80,6 +92,7 @@ class ModelUsageSummary(BaseModel):
 
 class MigrationPreview(BaseModel):
     """Preview of what would be migrated."""
+
     total_count: int
     assistants_count: int
     apps_count: int
@@ -92,6 +105,7 @@ class MigrationPreview(BaseModel):
 
 class PaginatedResponse(BaseModel):
     """Generic paginated response with cursor-based pagination."""
+
     items: List[ModelUsageDetail]
     total: int
     has_more: bool
@@ -101,6 +115,7 @@ class PaginatedResponse(BaseModel):
 
 class ModelMigrationHistory(BaseModel):
     """Historical record of a model migration."""
+
     id: UUID
     from_model_id: UUID
     from_model_name: str

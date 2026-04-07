@@ -23,7 +23,9 @@ async def main() -> int:
     finally:
         await sessionmanager.close()
 
-    print("Federation migration applied." if migrated else "Federation migration skipped.")
+    print(
+        "Federation migration applied." if migrated else "Federation migration skipped."
+    )
     return 0
 
 

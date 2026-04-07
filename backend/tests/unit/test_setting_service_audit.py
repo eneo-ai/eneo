@@ -25,6 +25,7 @@ from intric.settings.setting_service import SettingService
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 def _make_user(**overrides: Any) -> SimpleNamespace:
     base = {
         "id": uuid4(),
@@ -41,7 +42,9 @@ def _make_feature_flag(name: str = "test_flag") -> SimpleNamespace:
     return SimpleNamespace(feature_id=uuid4(), name=name)
 
 
-def _make_service(user: SimpleNamespace | None = None) -> tuple[SettingService, AsyncMock]:
+def _make_service(
+    user: SimpleNamespace | None = None,
+) -> tuple[SettingService, AsyncMock]:
     """Build a SettingService with mocked dependencies. Returns (service, audit_mock)."""
     if user is None:
         user = _make_user()
@@ -54,12 +57,14 @@ def _make_service(user: SimpleNamespace | None = None) -> tuple[SettingService, 
     feature_flag_service = AsyncMock()
     feature_flag_service.feature_flag_repo = AsyncMock()
     feature_flag_service.check_is_feature_enabled = AsyncMock(return_value=False)
-    feature_flag_service.check_is_feature_enabled_fail_closed = AsyncMock(return_value=False)
+    feature_flag_service.check_is_feature_enabled_fail_closed = AsyncMock(
+        return_value=False
+    )
 
     tenant_repo = AsyncMock()
-    tenant_repo.get = AsyncMock(return_value=SimpleNamespace(
-        id=user.tenant_id, provisioning=False
-    ))
+    tenant_repo.get = AsyncMock(
+        return_value=SimpleNamespace(id=user.tenant_id, provisioning=False)
+    )
 
     audit_service = AsyncMock()
     audit_service.log_async = AsyncMock(return_value=uuid4())
@@ -79,6 +84,7 @@ def _make_service(user: SimpleNamespace | None = None) -> tuple[SettingService, 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestSettingToggleAuditLogging:
     """Each toggle method must produce a structured audit log entry."""
@@ -115,9 +121,13 @@ class TestSettingToggleAuditLogging:
         call_kwargs = audit_mock.log_async.call_args[1]
         assert call_kwargs["action"] == ActionType.TENANT_SETTINGS_UPDATED
         assert call_kwargs["metadata"]["setting"] == "audit_logging_enabled"
-        assert call_kwargs["metadata"]["changes"]["audit_logging_enabled"]["new"] is False
+        assert (
+            call_kwargs["metadata"]["changes"]["audit_logging_enabled"]["new"] is False
+        )
         # old value comes from check_is_feature_enabled mock (returns False)
-        assert call_kwargs["metadata"]["changes"]["audit_logging_enabled"]["old"] is False
+        assert (
+            call_kwargs["metadata"]["changes"]["audit_logging_enabled"]["old"] is False
+        )
 
     @pytest.mark.asyncio
     async def test_update_provisioning_setting_logs_audit(self):
@@ -146,9 +156,15 @@ class TestSettingToggleAuditLogging:
         call_kwargs = audit_mock.log_async.call_args[1]
         assert call_kwargs["action"] == ActionType.TENANT_SETTINGS_UPDATED
         assert call_kwargs["metadata"]["setting"] == "api_key_scope_enforcement"
-        assert call_kwargs["metadata"]["changes"]["api_key_scope_enforcement"]["new"] is True
+        assert (
+            call_kwargs["metadata"]["changes"]["api_key_scope_enforcement"]["new"]
+            is True
+        )
         # old value comes from check_is_feature_enabled mock (returns False)
-        assert call_kwargs["metadata"]["changes"]["api_key_scope_enforcement"]["old"] is False
+        assert (
+            call_kwargs["metadata"]["changes"]["api_key_scope_enforcement"]["old"]
+            is False
+        )
 
     @pytest.mark.asyncio
     async def test_disabling_scope_enforcement_forces_strict_mode_off(self):
@@ -156,7 +172,9 @@ class TestSettingToggleAuditLogging:
         service.feature_flag_service.feature_flag_repo.one_or_none = AsyncMock(
             return_value=_make_feature_flag("api_key_scope_enforcement")
         )
-        service.feature_flag_service.check_is_feature_enabled = AsyncMock(return_value=True)
+        service.feature_flag_service.check_is_feature_enabled = AsyncMock(
+            return_value=True
+        )
         service.feature_flag_service.check_is_feature_enabled_fail_closed = AsyncMock(
             return_value=True
         )
@@ -228,7 +246,9 @@ class TestSettingToggleAuditLogging:
         """When toggling to the same value, audit logs old==new (real query, no synthetic)."""
         service, audit_mock = _make_service()
         # Mock check_is_feature_enabled returns True (already enabled)
-        service.feature_flag_service.check_is_feature_enabled = AsyncMock(return_value=True)
+        service.feature_flag_service.check_is_feature_enabled = AsyncMock(
+            return_value=True
+        )
         service.feature_flag_service.feature_flag_repo.one_or_none = AsyncMock(
             return_value=_make_feature_flag("using_templates")
         )

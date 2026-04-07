@@ -334,15 +334,15 @@ def extract_text_from_pdf(binary_data: bytes) -> str:
 
     try:
         with pdfplumber.open(io.BytesIO(binary_data)) as pdf:
-            extracted_text = " ".join(
-                page.extract_text() or "" for page in pdf.pages
-            )
+            extracted_text = " ".join(page.extract_text() or "" for page in pdf.pages)
 
         # Remove null bytes (cause PostgreSQL UTF-8 encoding errors)
         sanitized = extracted_text.replace("\x00", "")
 
         if not sanitized.strip():
-            logger.warning("No text extracted from PDF - file may be image-only or scanned")
+            logger.warning(
+                "No text extracted from PDF - file may be image-only or scanned"
+            )
 
         return sanitized
 

@@ -48,7 +48,9 @@ router = APIRouter(
 )
 
 # Provider enum - supported LLM providers
-Provider = Literal["openai", "anthropic", "azure", "mistral", "ovhcloud", "gemini", "cohere"]
+Provider = Literal[
+    "openai", "anthropic", "azure", "mistral", "ovhcloud", "gemini", "cohere"
+]
 
 
 class SetCredentialRequest(BaseModel):

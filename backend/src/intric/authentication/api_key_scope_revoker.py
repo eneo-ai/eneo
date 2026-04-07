@@ -202,7 +202,7 @@ class ApiKeyScopeRevoker:
         all_keys.extend(space_keys)
 
         # Assistant-scoped keys
-        for asst_id in (assistant_ids or []):
+        for asst_id in assistant_ids or []:
             asst_keys = await self.api_key_repo.list_filtered(
                 tenant_id=tenant_id,
                 scope_type=ApiKeyScopeType.ASSISTANT,
@@ -214,7 +214,7 @@ class ApiKeyScopeRevoker:
             all_keys.extend(asst_keys)
 
         # App-scoped keys
-        for app_id in (app_ids or []):
+        for app_id in app_ids or []:
             app_keys = await self.api_key_repo.list_filtered(
                 tenant_id=tenant_id,
                 scope_type=ApiKeyScopeType.APP,

@@ -149,7 +149,9 @@ class TestIsInvalidTransactionErrorMsg:
         """Should detect 'another operation is in progress' in message."""
         from intric.worker.crawl.recovery import is_invalid_transaction_error_msg
 
-        assert is_invalid_transaction_error_msg("another operation is in progress") is True
+        assert (
+            is_invalid_transaction_error_msg("another operation is in progress") is True
+        )
 
     def test_case_insensitive(self):
         """Should be case insensitive."""
@@ -192,9 +194,7 @@ class TestRecoverSession:
         created_sessions = []
         logger = MagicMock()
 
-        with patch(
-            "intric.database.database.sessionmanager", mock_sessionmanager
-        ):
+        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
             result_session, result_uploader = await recover_session(
                 container=mock_container,
                 old_session=old_session,
@@ -242,9 +242,7 @@ class TestRecoverSession:
         created_sessions = []
         logger = MagicMock()
 
-        with patch(
-            "intric.database.database.sessionmanager", mock_sessionmanager
-        ):
+        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
             await recover_session(
                 container=mock_container,
                 old_session=old_session,
@@ -277,9 +275,7 @@ class TestRecoverSession:
         created_sessions = []
         logger = MagicMock()
 
-        with patch(
-            "intric.database.database.sessionmanager", mock_sessionmanager
-        ):
+        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
             result_session, _ = await recover_session(
                 container=mock_container,
                 old_session=None,
@@ -324,9 +320,7 @@ class TestExecuteWithRecovery:
         mock_sessionmanager = MagicMock()
         mock_sessionmanager.create_session = MagicMock(return_value=mock_session)
 
-        with patch(
-            "intric.database.database.sessionmanager", mock_sessionmanager
-        ):
+        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
             result = await execute_with_recovery(
                 container=container,
                 session_holder=session_holder,
@@ -362,9 +356,7 @@ class TestExecuteWithRecovery:
         mock_sessionmanager = MagicMock()
         mock_sessionmanager.create_session = MagicMock(return_value=mock_session)
 
-        with patch(
-            "intric.database.database.sessionmanager", mock_sessionmanager
-        ):
+        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
             with pytest.raises(ValueError, match="Not a transaction error"):
                 await execute_with_recovery(
                     container=container,
@@ -413,9 +405,7 @@ class TestExecuteWithRecovery:
             side_effect=[primary_session, retry_session]
         )
 
-        with patch(
-            "intric.database.database.sessionmanager", mock_sessionmanager
-        ):
+        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
             result = await execute_with_recovery(
                 container=mock_container,
                 session_holder=session_holder,
@@ -442,9 +432,7 @@ class TestResetTenantRetryDelay:
         from intric.worker.crawl.recovery import reset_tenant_retry_delay
 
         # Should not raise
-        result = await reset_tenant_retry_delay(
-            tenant_id=uuid4(), redis_client=None
-        )
+        result = await reset_tenant_retry_delay(tenant_id=uuid4(), redis_client=None)
         assert result is None
 
     @pytest.mark.asyncio
@@ -457,9 +445,7 @@ class TestResetTenantRetryDelay:
 
         tenant_id = uuid4()
 
-        await reset_tenant_retry_delay(
-            tenant_id=tenant_id, redis_client=mock_redis
-        )
+        await reset_tenant_retry_delay(tenant_id=tenant_id, redis_client=mock_redis)
 
         expected_key = f"tenant:{tenant_id}:limiter_backoff"
         mock_redis.delete.assert_called_once_with(expected_key)
@@ -473,9 +459,7 @@ class TestResetTenantRetryDelay:
         mock_redis.delete = AsyncMock(side_effect=Exception("Redis error"))
 
         # Should not raise
-        await reset_tenant_retry_delay(
-            tenant_id=uuid4(), redis_client=mock_redis
-        )
+        await reset_tenant_retry_delay(tenant_id=uuid4(), redis_client=mock_redis)
 
 
 class TestSessionHolderTypedDict:

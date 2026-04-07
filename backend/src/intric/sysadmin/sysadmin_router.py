@@ -1337,9 +1337,21 @@ async def delete_embedding_model(
         if not force:
             usage_counts = await session.execute(
                 sa.select(
-                    sa.select(sa.func.count()).where(CollectionsTable.embedding_model_id == id).correlate(None).scalar_subquery().label("collections"),
-                    sa.select(sa.func.count()).where(Websites.embedding_model_id == id).correlate(None).scalar_subquery().label("websites"),
-                    sa.select(sa.func.count()).where(IntegrationKnowledge.embedding_model_id == id).correlate(None).scalar_subquery().label("integrations"),
+                    sa.select(sa.func.count())
+                    .where(CollectionsTable.embedding_model_id == id)
+                    .correlate(None)
+                    .scalar_subquery()
+                    .label("collections"),
+                    sa.select(sa.func.count())
+                    .where(Websites.embedding_model_id == id)
+                    .correlate(None)
+                    .scalar_subquery()
+                    .label("websites"),
+                    sa.select(sa.func.count())
+                    .where(IntegrationKnowledge.embedding_model_id == id)
+                    .correlate(None)
+                    .scalar_subquery()
+                    .label("integrations"),
                 )
             )
             row = usage_counts.one()

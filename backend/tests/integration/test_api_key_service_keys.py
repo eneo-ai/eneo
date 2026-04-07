@@ -151,9 +151,7 @@ async def _remove_space_member(db_container, space_id: str, user_id: UUID):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_service_key_creation_rejected_for_non_admin(
-    client, regular_user_token
-):
+async def test_service_key_creation_rejected_for_non_admin(client, regular_user_token):
     """Non-admin user cannot create ownership=service keys."""
     resp = await _create_service_key(
         client,
@@ -167,9 +165,7 @@ async def test_service_key_creation_rejected_for_non_admin(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_service_key_tenant_write_requires_guardrails(
-    client, default_user_token
-):
+async def test_service_key_tenant_write_requires_guardrails(client, default_user_token):
     """Service tenant write/admin key without IP or expiry is rejected."""
     resp = await _create_service_key(
         client,
@@ -203,9 +199,7 @@ async def test_service_key_tenant_write_accepted_with_expiry(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_service_key_tenant_read_no_guardrails_needed(
-    client, default_user_token
-):
+async def test_service_key_tenant_read_no_guardrails_needed(client, default_user_token):
     """Service tenant read key doesn't need IP/expiry guardrail."""
     resp = await _create_service_key(
         client,
@@ -249,7 +243,9 @@ async def test_service_key_survives_owner_deactivation(
         _AUTH_ENDPOINT,
         headers={"X-API-Key": secret},
     )
-    assert probe2.status_code == 200, f"Service key should survive owner deactivation: {probe2.text}"
+    assert probe2.status_code == 200, (
+        f"Service key should survive owner deactivation: {probe2.text}"
+    )
 
     # Re-activate for cleanup
     async with db_container() as container:
@@ -320,14 +316,14 @@ async def test_service_key_survives_owner_deletion(
         _AUTH_ENDPOINT,
         headers={"X-API-Key": secret},
     )
-    assert probe2.status_code == 200, f"Service key should survive owner deletion: {probe2.text}"
+    assert probe2.status_code == 200, (
+        f"Service key should survive owner deletion: {probe2.text}"
+    )
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_service_key_still_enforces_scope(
-    client, default_user_token
-):
+async def test_service_key_still_enforces_scope(client, default_user_token):
     """Service key with space scope cannot access resources in another space."""
     space_id = await _create_space(client, token=default_user_token)
 
@@ -360,14 +356,14 @@ async def test_service_key_still_enforces_scope(
         headers={"X-API-Key": secret},
     )
     # Should be denied (403 scope mismatch or similar)
-    assert probe.status_code in (401, 403), f"Scope enforcement failed: {probe.status_code} {probe.text}"
+    assert probe.status_code in (401, 403), (
+        f"Scope enforcement failed: {probe.status_code} {probe.text}"
+    )
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_service_key_space_scoped_can_read_space(
-    client, default_user_token
-):
+async def test_service_key_space_scoped_can_read_space(client, default_user_token):
     """Space-scoped read service key can GET the space it's scoped to."""
     space_id = await _create_space(client, token=default_user_token)
 
@@ -385,7 +381,9 @@ async def test_service_key_space_scoped_can_read_space(
         f"/api/v1/spaces/{space_id}/",
         headers={"X-API-Key": secret},
     )
-    assert probe.status_code == 200, f"Space-scoped read key should access its own space: {probe.text}"
+    assert probe.status_code == 200, (
+        f"Space-scoped read key should access its own space: {probe.text}"
+    )
 
 
 @pytest.mark.integration
@@ -411,7 +409,9 @@ async def test_service_key_space_scoped_read_cannot_patch_space(
         json={"name": "should-fail"},
         headers={"X-API-Key": secret},
     )
-    assert probe.status_code == 403, f"Read key should not be able to PATCH space: {probe.status_code}"
+    assert probe.status_code == 403, (
+        f"Read key should not be able to PATCH space: {probe.status_code}"
+    )
 
 
 @pytest.mark.integration
@@ -439,7 +439,9 @@ async def test_service_key_space_scoped_write_cannot_patch_space(
         json={"name": "should-fail"},
         headers={"X-API-Key": secret},
     )
-    assert probe.status_code == 403, f"Write key (EDITOR) should not be able to PATCH space: {probe.status_code}"
+    assert probe.status_code == 403, (
+        f"Write key (EDITOR) should not be able to PATCH space: {probe.status_code}"
+    )
 
 
 @pytest.mark.integration
@@ -468,7 +470,9 @@ async def test_service_key_space_scoped_admin_can_patch_space(
         json={"name": new_name},
         headers={"X-API-Key": secret},
     )
-    assert probe.status_code == 200, f"Admin key should be able to PATCH space: {probe.text}"
+    assert probe.status_code == 200, (
+        f"Admin key should be able to PATCH space: {probe.text}"
+    )
     assert probe.json()["name"] == new_name
 
 
@@ -505,7 +509,9 @@ async def test_service_key_survives_member_removal(
         f"/api/v1/spaces/{space_id}/",
         headers={"X-API-Key": secret},
     )
-    assert probe2.status_code == 200, f"Service key should survive member removal: {probe2.text}"
+    assert probe2.status_code == 200, (
+        f"Service key should survive member removal: {probe2.text}"
+    )
 
     # Re-add the user for cleanup
     async with db_container() as container:

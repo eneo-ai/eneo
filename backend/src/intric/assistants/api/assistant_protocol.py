@@ -210,7 +210,11 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
     else:
         logger.warning(
             "Unsupported SSE response type",
-            extra={"response_type": chunk.response_type.value if chunk.response_type else None},
+            extra={
+                "response_type": chunk.response_type.value
+                if chunk.response_type
+                else None
+            },
         )
         data = SSEError(
             session_id=session_id,
@@ -219,7 +223,9 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
         )
 
     event_name = (
-        chunk.response_type.value if chunk.response_type is not None else ResponseType.ERROR.value
+        chunk.response_type.value
+        if chunk.response_type is not None
+        else ResponseType.ERROR.value
     )
     return ServerSentEvent(data.model_dump_json(), event=event_name)
 
@@ -229,9 +235,9 @@ async def to_response(
     stream: bool,
 ):
     if stream:
+
         async def event_stream():
             async for chunk in response.answer:
-
                 if chunk.response_type == ResponseType.TEXT:
                     yield to_ask_response(
                         question=response.question,
@@ -261,6 +267,7 @@ async def to_conversation_response(
     stream: bool,
 ):
     if stream:
+
         async def event_stream():
             data = SSEFirstChunk(
                 **to_ask_conversation_response(

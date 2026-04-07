@@ -2,7 +2,15 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional, Dict
 from uuid import UUID
 
-from sqlalchemy import DateTime, JSON, BigInteger, Enum, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    JSON,
+    BigInteger,
+    Enum,
+    ForeignKey,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -59,15 +67,15 @@ class UserIntegration(BasePublic):
     authenticated: Mapped[bool] = mapped_column(server_default="False", nullable=False)
 
     auth_type: Mapped[str] = mapped_column(
-        Enum('user_oauth', 'tenant_app', name='auth_type'),
+        Enum("user_oauth", "tenant_app", name="auth_type"),
         nullable=False,
-        server_default='user_oauth'
+        server_default="user_oauth",
     )
 
     tenant_app_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("tenant_sharepoint_apps.id", ondelete="SET NULL"),
         nullable=True,
-        index=True
+        index=True,
     )
 
     tenant_integration: Mapped[TenantIntegration] = relationship()
@@ -116,17 +124,22 @@ class IntegrationKnowledge(BasePublic):
     last_synced_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    last_sync_summary: Mapped[Optional[Dict[str, int]]] = mapped_column(JSONB, nullable=True)
+    last_sync_summary: Mapped[Optional[Dict[str, int]]] = mapped_column(
+        JSONB, nullable=True
+    )
     site_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     sharepoint_subscription_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey("sharepoint_subscriptions.id", ondelete="SET NULL"),
-        nullable=True
+        ForeignKey("sharepoint_subscriptions.id", ondelete="SET NULL"), nullable=True
     )
     delta_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     folder_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True, index=True)
     folder_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    selected_item_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True, server_default="site_root")
-    resource_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True, server_default="site")
+    selected_item_type: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, server_default="site_root"
+    )
+    resource_type: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, server_default="site"
+    )
     drive_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     wrapper_id: Mapped[Optional[UUID]] = mapped_column(nullable=True, index=True)
     wrapper_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

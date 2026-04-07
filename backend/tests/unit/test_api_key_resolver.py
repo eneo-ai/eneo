@@ -399,9 +399,7 @@ async def test_assistant_key_migration_creates_read_permission(
                 tenant_id=tenant_id,
             )
 
-    resolver.legacy_repo.session.execute = AsyncMock(
-        return_value=_AssistantResult()
-    )
+    resolver.legacy_repo.session.execute = AsyncMock(return_value=_AssistantResult())
 
     await resolver._migrate_legacy_key(
         plain_key="ina_assistant_key",

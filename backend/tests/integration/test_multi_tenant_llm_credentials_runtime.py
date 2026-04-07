@@ -194,8 +194,12 @@ async def test_resolver_isolates_credentials_between_tenants(
 ):
     repo = TenantRepository(async_session)
 
-    tenant_a_data = await _create_tenant(client, super_admin_token, f"tenant-a-{uuid4().hex[:6]}")
-    tenant_b_data = await _create_tenant(client, super_admin_token, f"tenant-b-{uuid4().hex[:6]}")
+    tenant_a_data = await _create_tenant(
+        client, super_admin_token, f"tenant-a-{uuid4().hex[:6]}"
+    )
+    tenant_b_data = await _create_tenant(
+        client, super_admin_token, f"tenant-b-{uuid4().hex[:6]}"
+    )
 
     tenant_a_id = UUID(tenant_a_data["id"])
     tenant_b_id = UUID(tenant_b_data["id"])

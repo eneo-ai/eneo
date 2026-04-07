@@ -81,7 +81,11 @@ class FakeSession:
 class FakeTenantRepo:
     def __init__(self, primary_tenant, tenants=None):
         self._primary = primary_tenant
-        self._tenants = tenants if tenants is not None else ([primary_tenant] if primary_tenant else [])
+        self._tenants = (
+            tenants
+            if tenants is not None
+            else ([primary_tenant] if primary_tenant else [])
+        )
 
     async def get(self, tenant_id):
         for tenant in self._tenants:
@@ -199,7 +203,9 @@ async def test_recalculate_tenant_usage_stats_success():
     user = build_user(tenant.id, tenant)
     user_row = SimpleNamespace(id=user.id)
     job_service = FakeJobService()
-    container = FakeContainer(tenant=tenant, user_row=user_row, user_obj=user, job_service=job_service)
+    container = FakeContainer(
+        tenant=tenant, user_row=user_row, user_obj=user, job_service=job_service
+    )
 
     result = await recalculate_tenant_usage_stats(container, tenant.id)
 
@@ -220,7 +226,9 @@ async def test_recalculate_tenant_usage_stats_rejects_user_mismatch():
     user = build_user(wrong_tenant.id, wrong_tenant)  # user from different tenant
     user_row = SimpleNamespace(id=user.id)
     job_service = FakeJobService()
-    container = FakeContainer(tenant=tenant, user_row=user_row, user_obj=user, job_service=job_service)
+    container = FakeContainer(
+        tenant=tenant, user_row=user_row, user_obj=user, job_service=job_service
+    )
 
     result = await recalculate_tenant_usage_stats(container, tenant.id)
 
@@ -234,7 +242,9 @@ async def test_recalculate_tenant_usage_stats_handles_missing_user():
     tenant = build_tenant()
     user_row = None  # session will return no user rows
     job_service = FakeJobService()
-    container = FakeContainer(tenant=tenant, user_row=user_row, user_obj=None, job_service=job_service)
+    container = FakeContainer(
+        tenant=tenant, user_row=user_row, user_obj=None, job_service=job_service
+    )
 
     result = await recalculate_tenant_usage_stats(container, tenant.id)
 
@@ -255,8 +265,12 @@ async def test_recalculate_tenant_usage_stats_isolated_between_tenants():
 
     job_service = FakeJobService()
 
-    container_a = FakeContainer(tenant=tenant_a, user_row=row_a, user_obj=user_a, job_service=job_service)
-    container_b = FakeContainer(tenant=tenant_b, user_row=row_b, user_obj=user_b, job_service=job_service)
+    container_a = FakeContainer(
+        tenant=tenant_a, user_row=row_a, user_obj=user_a, job_service=job_service
+    )
+    container_b = FakeContainer(
+        tenant=tenant_b, user_row=row_b, user_obj=user_b, job_service=job_service
+    )
 
     result_a = await recalculate_tenant_usage_stats(container_a, tenant_a.id)
     result_b = await recalculate_tenant_usage_stats(container_b, tenant_b.id)

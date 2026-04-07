@@ -22,22 +22,20 @@ class AuditActionConfig(BasePublic):
     __tablename__ = "audit_action_config"
 
     tenant_id: Mapped[UUID] = mapped_column(
-        ForeignKey("tenants.id", ondelete="CASCADE"),
-        nullable=False,
-        primary_key=True
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, primary_key=True
     )
     action: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
         primary_key=True,
-        comment="Action type (e.g., 'user_created', 'file_uploaded')"
+        comment="Action type (e.g., 'user_created', 'file_uploaded')",
     )
     enabled: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=True,
         server_default="TRUE",
-        comment="Whether this action is logged for this tenant"
+        comment="Whether this action is logged for this tenant",
     )
 
     # Relationships

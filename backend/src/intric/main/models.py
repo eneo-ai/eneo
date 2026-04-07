@@ -46,6 +46,7 @@ NOT_PROVIDED = NotProvided()
 
 class MCPToolSetting(BaseModel):
     """MCP server tool enablement setting."""
+
     tool_id: UUID
     is_enabled: bool
 
@@ -69,7 +70,9 @@ def partial_model(model: Type[_M]) -> Type[_M]:
     ) -> Tuple[Any, FieldInfo]:
         new = deepcopy(field)
         new.default = default
-        new.default_factory = None  # Clear default_factory to avoid conflict with default
+        new.default_factory = (
+            None  # Clear default_factory to avoid conflict with default
+        )
         new.annotation = Optional[field.annotation]  # type: ignore
         return new.annotation, new
 

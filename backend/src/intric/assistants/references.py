@@ -72,7 +72,9 @@ class ReferencesService:
         info_blobs = []
         for chunk in info_blob_chunks:
             info_blob = await self.info_blobs_repo.get(chunk.info_blob_id)
-            info_blob = InfoBlobInDBWithScore(**info_blob.model_dump(), score=chunk.score)
+            info_blob = InfoBlobInDBWithScore(
+                **info_blob.model_dump(), score=chunk.score
+            )
             info_blobs.append(info_blob)
 
         return info_blobs
@@ -83,7 +85,10 @@ class ReferencesService:
         c = {}
 
         for chunk in info_blob_chunks:
-            if c.get(chunk.info_blob_id) is None or c[chunk.info_blob_id].score < chunk.score:
+            if (
+                c.get(chunk.info_blob_id) is None
+                or c[chunk.info_blob_id].score < chunk.score
+            ):
                 c[chunk.info_blob_id] = chunk
 
         return list(c.values())
@@ -94,7 +99,9 @@ class ReferencesService:
         info_blobs: list["InfoBlobInDB"],
     ):
         info_blob_ids = {blob.id for blob in info_blobs}
-        return [chunk for chunk in info_blob_chunks if chunk.info_blob_id in info_blob_ids]
+        return [
+            chunk for chunk in info_blob_chunks if chunk.info_blob_id in info_blob_ids
+        ]
 
     def _concatenate_conversation(
         self,
@@ -104,7 +111,10 @@ class ReferencesService:
     ):
         if files:
             files_text = (
-                "\n".join(file.text for file in files if file.file_type == FileType.TEXT) + "\n"
+                "\n".join(
+                    file.text for file in files if file.file_type == FileType.TEXT
+                )
+                + "\n"
             )
         else:
             files_text = ""

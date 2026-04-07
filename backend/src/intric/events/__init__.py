@@ -11,7 +11,7 @@ from .event_publisher import EventPublisher, EventHandler, get_event_publisher
 
 __all__ = [
     "ModelMigrationStarted",
-    "ModelMigrationCompleted", 
+    "ModelMigrationCompleted",
     "ModelMigrationFailed",
     "ModelUsageStatsUpdated",
     "EventPublisher",

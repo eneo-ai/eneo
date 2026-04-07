@@ -46,14 +46,14 @@ class CollectionCRUDService:
 
         space_after = await self.space_service.get_space_by_collection(group_id=grp.id)
         return space_after.get_collection(collection_id=grp.id)
-    
+
     async def get_collection(self, collection_id: "UUID") -> Collection:
         space = await self.space_service.get_space_by_collection(collection_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
         if not actor.can_read_collections():
             raise UnauthorizedException()
         return space.get_collection(collection_id=collection_id)
-    
+
     async def update_collection(
         self,
         collection_id: "UUID",

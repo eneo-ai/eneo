@@ -34,6 +34,7 @@ logger = get_logger(__name__)
 
 ORG_SPACE_ROLES = {"owner", "ai configurator"}  # Temp, kan bytas senare.
 
+
 class UsersRepository:
     def __init__(self, session: AsyncSession):
         self.delegate = BaseRepositoryDelegate(
@@ -168,8 +169,7 @@ class UsersRepository:
 
         roles_ids = [role.id for role in roles]
         stmt = sa.select(Roles).filter(
-            Roles.id.in_(roles_ids),
-            Roles.tenant_id == tenant_id
+            Roles.id.in_(roles_ids), Roles.tenant_id == tenant_id
         )
         roles = await self.session.scalars(stmt)
 
@@ -284,6 +284,7 @@ class UsersRepository:
             PaginatedResult with items and metadata (total_count, total_pages, etc.)
         """
         import time
+
         start_time = time.time()
 
         # Build base query with tenant isolation (FIRST WHERE condition - security critical!)
@@ -322,12 +323,12 @@ class UsersRepository:
         # Single query, single table scan - O(n) where n = users matching filters
         state_counts_query = (
             sa.select(
-                sa.func.count(1).filter(
-                    Users.state.in_([UserState.ACTIVE, UserState.INVITED])
-                ).label("active_count"),
-                sa.func.count(1).filter(
-                    Users.state == UserState.INACTIVE
-                ).label("inactive_count"),
+                sa.func.count(1)
+                .filter(Users.state.in_([UserState.ACTIVE, UserState.INVITED]))
+                .label("active_count"),
+                sa.func.count(1)
+                .filter(Users.state == UserState.INACTIVE)
+                .label("inactive_count"),
             )
             .select_from(Users)
             .where(Users.tenant_id == tenant_id)
@@ -348,8 +349,8 @@ class UsersRepository:
         counts_result = await self.session.execute(state_counts_query)
         counts_row = counts_result.one()
         state_counts = {
-            'active': int(counts_row.active_count or 0),
-            'inactive': int(counts_row.inactive_count or 0)
+            "active": int(counts_row.active_count or 0),
+            "inactive": int(counts_row.inactive_count or 0),
         }
 
         # Map SortField enum to SQLAlchemy columns

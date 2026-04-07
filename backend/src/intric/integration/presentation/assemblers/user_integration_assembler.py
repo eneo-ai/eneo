@@ -12,9 +12,7 @@ if TYPE_CHECKING:
 class UserIntegrationAssembler:
     @classmethod
     def from_domain_to_model(
-        cls,
-        item: "UserIntegration",
-        tenant_app_configured: bool = True
+        cls, item: "UserIntegration", tenant_app_configured: bool = True
     ) -> "UserIntegrationModel":
         return UserIntegrationModel(
             id=item.id,
@@ -30,12 +28,12 @@ class UserIntegrationAssembler:
 
     @classmethod
     def to_paginated_response(
-        cls,
-        integrations: list["UserIntegration"],
-        tenant_app_configured: bool = True
+        cls, integrations: list["UserIntegration"], tenant_app_configured: bool = True
     ) -> UserIntegrationList:
         items = [
-            cls.from_domain_to_model(integration, tenant_app_configured=tenant_app_configured)
+            cls.from_domain_to_model(
+                integration, tenant_app_configured=tenant_app_configured
+            )
             for integration in integrations
         ]
         return UserIntegrationList(items=items)

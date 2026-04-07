@@ -18,7 +18,9 @@ from intric.main.models import IdAndName
 class AdminEmbeddingModelsService:
     def __init__(self, session: AsyncSession):
         self.session = session
-        self.delegate = BaseRepositoryDelegate(session, EmbeddingModels, EmbeddingModelLegacy)
+        self.delegate = BaseRepositoryDelegate(
+            session, EmbeddingModels, EmbeddingModelLegacy
+        )
 
     async def get_model(self, id: UUID, tenant_id: UUID) -> EmbeddingModelLegacy:
         # Query the model with tenant filtering
@@ -26,14 +28,15 @@ class AdminEmbeddingModelsService:
             EmbeddingModels.id == id,
             sa.or_(
                 EmbeddingModels.tenant_id.is_(None),
-                EmbeddingModels.tenant_id == tenant_id
-            )
+                EmbeddingModels.tenant_id == tenant_id,
+            ),
         )
         result = await self.session.execute(stmt)
         db_model = result.scalar_one_or_none()
 
         if db_model is None:
             from intric.main.exceptions import NotFoundException
+
             raise NotFoundException()
 
         model = EmbeddingModelLegacy.model_validate(db_model)
@@ -71,7 +74,7 @@ class AdminEmbeddingModelsService:
             stmt = stmt.where(
                 sa.or_(
                     EmbeddingModels.tenant_id.is_(None),
-                    EmbeddingModels.tenant_id == tenant_id
+                    EmbeddingModels.tenant_id == tenant_id,
                 )
             )
 

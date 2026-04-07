@@ -17,7 +17,8 @@ class MockSettings:
         self,
         *,
         federation_enabled: bool = True,
-        oidc_discovery_endpoint: str | None = "https://idp.example.com/.well-known/openid-configuration",
+        oidc_discovery_endpoint: str
+        | None = "https://idp.example.com/.well-known/openid-configuration",
         oidc_client_id: str | None = "client-id",
         oidc_client_secret: str | None = "super-secret-value",
         oidc_tenant_id: str | None = "tenant-123",
@@ -89,9 +90,7 @@ async def test_startup_migration_preserves_existing_redirect_fields():
         federation_config={
             "canonical_public_origin": "https://tenant.example.com",
             "redirect_path": "/auth/callback",
-            "additional_redirect_uris": [
-                "https://external.example.com/auth/callback"
-            ],
+            "additional_redirect_uris": ["https://external.example.com/auth/callback"],
         }
     )
     service, tenant_repo, _ = _make_service(tenant=tenant)
@@ -269,7 +268,9 @@ async def test_manual_runner_opens_explicit_transaction(monkeypatch):
 
     monkeypatch.setattr(startup_migration, "get_settings", lambda: MockSettings())
     monkeypatch.setattr(startup_migration, "sessionmanager", fake_session_manager)
-    monkeypatch.setattr(startup_migration, "FederationStartupMigrationService", fake_service_cls)
+    monkeypatch.setattr(
+        startup_migration, "FederationStartupMigrationService", fake_service_cls
+    )
 
     result = await startup_migration.run_env_oidc_to_tenant_federation_migration()
 

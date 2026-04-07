@@ -15,7 +15,9 @@ if TYPE_CHECKING:
 class ModelProviderService:
     """Service for managing model providers with credential encryption."""
 
-    def __init__(self, repository: ModelProviderRepository, encryption: EncryptionService):
+    def __init__(
+        self, repository: ModelProviderRepository, encryption: EncryptionService
+    ):
         self.repository = repository
         self.encryption = encryption
 
@@ -25,7 +27,9 @@ class ModelProviderService:
 
         # Encrypt API key if present
         if "api_key" in encrypted_creds and encrypted_creds["api_key"]:
-            encrypted_creds["api_key"] = self.encryption.encrypt(encrypted_creds["api_key"])
+            encrypted_creds["api_key"] = self.encryption.encrypt(
+                encrypted_creds["api_key"]
+            )
 
         # Add more credential fields here if needed in the future
         # e.g., client_secret, access_token, etc.
@@ -38,7 +42,9 @@ class ModelProviderService:
 
         # Decrypt API key if present
         if "api_key" in decrypted_creds and decrypted_creds["api_key"]:
-            decrypted_creds["api_key"] = self.encryption.decrypt(decrypted_creds["api_key"])
+            decrypted_creds["api_key"] = self.encryption.decrypt(
+                decrypted_creds["api_key"]
+            )
 
         return decrypted_creds
 
@@ -124,7 +130,9 @@ class ModelProviderService:
         if name is not None and name != provider.name:
             existing = await self.repository.get_by_name(name)
             if existing is not None:
-                raise NameCollisionException(f"Provider with name '{name}' already exists")
+                raise NameCollisionException(
+                    f"Provider with name '{name}' already exists"
+                )
             provider.name = name
 
         if credentials is not None:
@@ -171,7 +179,10 @@ class ModelProviderService:
         For transcription models: skips validation (requires audio file).
         """
         if model_type == "transcription":
-            return {"success": True, "message": "Validation skipped for transcription models"}
+            return {
+                "success": True,
+                "message": "Validation skipped for transcription models",
+            }
 
         import litellm
 
@@ -277,9 +288,7 @@ class ModelProviderService:
                         data = resp.json()
                         return [
                             {"name": m["id"]}
-                            for m in sorted(
-                                data.get("data", []), key=lambda m: m["id"]
-                            )
+                            for m in sorted(data.get("data", []), key=lambda m: m["id"])
                         ]
                     return []
 

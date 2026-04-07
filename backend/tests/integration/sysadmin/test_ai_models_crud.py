@@ -9,6 +9,7 @@ Tests the system-wide AI model management endpoints that require super admin API
 - POST /sysadmin/embedding-models/{id}/metadata
 - DELETE /sysadmin/embedding-models/{id}
 """
+
 import pytest
 import sqlalchemy as sa
 
@@ -130,7 +131,9 @@ async def test_create_completion_model_with_invalid_auth(client):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_update_completion_model_metadata(client, super_admin_token, db_container):
+async def test_update_completion_model_metadata(
+    client, super_admin_token, db_container
+):
     """Test updating an existing completion model's metadata."""
     # First create a model
     create_data = {
@@ -529,7 +532,9 @@ async def test_delete_nonexistent_embedding_model(client, super_admin_token):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_create_completion_model_missing_required_fields(client, super_admin_token):
+async def test_create_completion_model_missing_required_fields(
+    client, super_admin_token
+):
     """Test that creating a model with missing required fields fails."""
     incomplete_data = {
         "name": "incomplete-model",

@@ -52,7 +52,9 @@ def mock_user():
 
 
 @pytest.fixture
-def service(mock_repo, mock_factory, mock_feature_flag_service, mock_session, mock_user):
+def service(
+    mock_repo, mock_factory, mock_feature_flag_service, mock_session, mock_user
+):
     return AppTemplateService(
         repo=mock_repo,
         factory=mock_factory,
@@ -161,7 +163,9 @@ async def test_create_template_persists_completion_model_id_and_snapshot(
     params = stmt.compile().params
 
     assert params["completion_model_id"] == completion_model_id
-    assert params["original_snapshot"]["completion_model_id"] == str(completion_model_id)
+    assert params["original_snapshot"]["completion_model_id"] == str(
+        completion_model_id
+    )
 
 
 @pytest.mark.asyncio

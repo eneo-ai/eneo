@@ -69,18 +69,24 @@ class FakeRedis:
                 if "EXPIRE" in script:
                     # Parse the script to check if EXPIRE is called BEFORE return 0
                     # In the FIXED script, EXPIRE is only after the success check
-                    lines = script.split('\n')
+                    lines = script.split("\n")
                     in_failure_block = False
                     for line in lines:
-                        if 'current > limit' in line:
+                        if "current > limit" in line:
                             in_failure_block = True
-                        if in_failure_block and 'return 0' in line:
+                        if in_failure_block and "return 0" in line:
                             break
-                        if in_failure_block and 'EXPIRE' in line and 'Success' not in line:
+                        if (
+                            in_failure_block
+                            and "EXPIRE" in line
+                            and "Success" not in line
+                        ):
                             # BUG: EXPIRE called on failure path
                             self._expire_calls_on_failure += 1
                             self._ttl[key] = ttl
-                            self._expire_call_count[key] = self._expire_call_count.get(key, 0) + 1
+                            self._expire_call_count[key] = (
+                                self._expire_call_count.get(key, 0) + 1
+                            )
 
                 return 0  # Failure - at capacity
 
@@ -163,14 +169,20 @@ class TestLuaAcquireScript:
         ttl = 3600
 
         # Acquire slots up to limit
-        result1 = await redis.redis_eval(self.FIXED_ACQUIRE_LUA, 1, key, str(limit), str(ttl))
+        result1 = await redis.redis_eval(
+            self.FIXED_ACQUIRE_LUA, 1, key, str(limit), str(ttl)
+        )
         assert result1 == 1, "First acquire should succeed"
 
-        result2 = await redis.redis_eval(self.FIXED_ACQUIRE_LUA, 1, key, str(limit), str(ttl))
+        result2 = await redis.redis_eval(
+            self.FIXED_ACQUIRE_LUA, 1, key, str(limit), str(ttl)
+        )
         assert result2 == 2, "Second acquire should succeed"
 
         # Try to acquire when at capacity (should fail)
-        result3 = await redis.redis_eval(self.FIXED_ACQUIRE_LUA, 1, key, str(limit), str(ttl))
+        result3 = await redis.redis_eval(
+            self.FIXED_ACQUIRE_LUA, 1, key, str(limit), str(ttl)
+        )
         assert result3 == 0, "Third acquire should fail (at capacity)"
 
         # Verify slot count is unchanged
@@ -178,8 +190,12 @@ class TestLuaAcquireScript:
 
         # CRITICAL: Verify no EXPIRE call on failure path in FIXED script
         # The script structure prevents EXPIRE on failure in the fixed version
-        assert "Success:" in self.FIXED_ACQUIRE_LUA, "Fixed script should have Success comment before EXPIRE"
-        assert redis._expire_calls_on_failure == 0, "Fixed script should NOT call EXPIRE on failure"
+        assert "Success:" in self.FIXED_ACQUIRE_LUA, (
+            "Fixed script should have Success comment before EXPIRE"
+        )
+        assert redis._expire_calls_on_failure == 0, (
+            "Fixed script should NOT call EXPIRE on failure"
+        )
 
     @pytest.mark.asyncio
     async def test_fixed_script_refreshes_ttl_on_success(self):
@@ -191,7 +207,9 @@ class TestLuaAcquireScript:
         ttl = 3600
 
         # Acquire first slot
-        result = await redis.redis_eval(self.FIXED_ACQUIRE_LUA, 1, key, str(limit), str(ttl))
+        result = await redis.redis_eval(
+            self.FIXED_ACQUIRE_LUA, 1, key, str(limit), str(ttl)
+        )
         assert result == 1, "Acquire should succeed"
 
         # Verify TTL was set
@@ -202,33 +220,36 @@ class TestLuaAcquireScript:
     async def test_script_structure_has_ttl_refresh_only_on_success_path(self):
         """Verify the script structure places EXPIRE only after success confirmation."""
         script = self.FIXED_ACQUIRE_LUA
-        lines = script.split('\n')
+        lines = script.split("\n")
 
         # Find the failure block (current > limit) and success block
         failure_block_start = None
         success_expire_line = None
 
         for i, line in enumerate(lines):
-            if 'current > limit' in line:
+            if "current > limit" in line:
                 failure_block_start = i
-            if 'Success:' in line:
+            if "Success:" in line:
                 # EXPIRE should be after this comment
                 for j in range(i, len(lines)):
-                    if 'EXPIRE' in lines[j]:
+                    if "EXPIRE" in lines[j]:
                         success_expire_line = j
                         break
                 break
 
         assert failure_block_start is not None, "Script should have failure block"
-        assert success_expire_line is not None, "Script should have EXPIRE after Success comment"
+        assert success_expire_line is not None, (
+            "Script should have EXPIRE after Success comment"
+        )
 
         # Verify no EXPIRE between failure_block_start and 'return 0'
         for i in range(failure_block_start, len(lines)):
             line = lines[i]
-            if 'return 0' in line:
+            if "return 0" in line:
                 break
-            assert 'EXPIRE' not in line or 'Success' in lines[i-1] if i > 0 else False, \
-                f"EXPIRE should not appear in failure block before 'return 0' (line {i})"
+            assert (
+                "EXPIRE" not in line or "Success" in lines[i - 1] if i > 0 else False
+            ), f"EXPIRE should not appear in failure block before 'return 0' (line {i})"
 
 
 class TestLuaScriptConsistency:
@@ -240,14 +261,24 @@ class TestLuaScriptConsistency:
         from intric.worker.redis.lua_scripts import LuaScripts
 
         # All scripts should be defined as class attributes
-        assert hasattr(LuaScripts, 'ACQUIRE_SLOT'), "Missing ACQUIRE_SLOT script"
-        assert hasattr(LuaScripts, 'RELEASE_SLOT'), "Missing RELEASE_SLOT script"
-        assert hasattr(LuaScripts, 'REFRESH_LEADER_LOCK'), "Missing REFRESH_LEADER_LOCK script"
-        assert hasattr(LuaScripts, 'RECONCILE_COUNTER_CAS'), "Missing RECONCILE_COUNTER_CAS script"
+        assert hasattr(LuaScripts, "ACQUIRE_SLOT"), "Missing ACQUIRE_SLOT script"
+        assert hasattr(LuaScripts, "RELEASE_SLOT"), "Missing RELEASE_SLOT script"
+        assert hasattr(LuaScripts, "REFRESH_LEADER_LOCK"), (
+            "Missing REFRESH_LEADER_LOCK script"
+        )
+        assert hasattr(LuaScripts, "RECONCILE_COUNTER_CAS"), (
+            "Missing RECONCILE_COUNTER_CAS script"
+        )
 
         # Scripts should be non-empty strings
-        assert isinstance(LuaScripts.ACQUIRE_SLOT, str) and len(LuaScripts.ACQUIRE_SLOT) > 0
-        assert isinstance(LuaScripts.RELEASE_SLOT, str) and len(LuaScripts.RELEASE_SLOT) > 0
+        assert (
+            isinstance(LuaScripts.ACQUIRE_SLOT, str)
+            and len(LuaScripts.ACQUIRE_SLOT) > 0
+        )
+        assert (
+            isinstance(LuaScripts.RELEASE_SLOT, str)
+            and len(LuaScripts.RELEASE_SLOT) > 0
+        )
 
     @pytest.mark.asyncio
     async def test_acquire_script_has_ttl_fix(self):
@@ -261,14 +292,14 @@ class TestLuaScriptConsistency:
         assert "return 0" in script, "Script should return 0 on failure"
 
         # The EXPIRE call should only appear after the failure block
-        lines = script.split('\n')
+        lines = script.split("\n")
         failure_block_start = None
         failure_return_line = None
 
         for i, line in enumerate(lines):
-            if 'current > limit' in line:
+            if "current > limit" in line:
                 failure_block_start = i
-            if failure_block_start and 'return 0' in line:
+            if failure_block_start and "return 0" in line:
                 failure_return_line = i
                 break
 
@@ -277,8 +308,9 @@ class TestLuaScriptConsistency:
 
         # Verify no EXPIRE between failure_block_start and failure_return_line
         for i in range(failure_block_start, failure_return_line):
-            assert 'EXPIRE' not in lines[i], \
+            assert "EXPIRE" not in lines[i], (
                 f"EXPIRE should not be in failure block (line {i}: {lines[i]})"
+            )
 
 
 class TestLuaReleaseScript:

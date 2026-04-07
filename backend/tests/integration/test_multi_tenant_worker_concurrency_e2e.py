@@ -155,8 +155,12 @@ async def test_tenant_worker_limit_enforced_under_load(
         acquire_results.append(result)
 
     # Verify exactly 4 succeeded, 6 failed
-    assert acquire_results.count(True) == 4, f"Expected 4 acquired, got {acquire_results.count(True)}"
-    assert acquire_results.count(False) == 6, f"Expected 6 rejected, got {acquire_results.count(False)}"
+    assert acquire_results.count(True) == 4, (
+        f"Expected 4 acquired, got {acquire_results.count(True)}"
+    )
+    assert acquire_results.count(False) == 6, (
+        f"Expected 6 rejected, got {acquire_results.count(False)}"
+    )
 
     # Check Redis semaphore state
     current_count = await redis_client.get(semaphore_key)
@@ -303,7 +307,9 @@ async def test_semaphore_ttl_prevents_slot_leakage(
     count_after_ttl = await redis_client.get(semaphore_key)
 
     # Key should be deleted when count reaches 0 after TTL
-    assert count_after_ttl is None, f"Semaphore should auto-expire, got {count_after_ttl}"
+    assert count_after_ttl is None, (
+        f"Semaphore should auto-expire, got {count_after_ttl}"
+    )
 
     # Verify new job can acquire slot
     result_after_expire = await limiter.acquire(tenant_id)
@@ -437,7 +443,9 @@ async def test_concurrent_acquire_and_release_race_condition(
 
     if final_count:
         final_count_int = int(final_count)
-        assert 0 <= final_count_int <= 4, f"Semaphore count {final_count_int} out of range [0, 4]"
+        assert 0 <= final_count_int <= 4, (
+            f"Semaphore count {final_count_int} out of range [0, 4]"
+        )
 
     # Cleanup
     for _ in range(acquired_count):
@@ -484,7 +492,9 @@ async def test_zero_limit_disables_concurrency_control(
         results.append(result)
 
     # All should succeed
-    assert all(results), f"All 100 acquires should succeed with limit=0, got {results.count(True)}/100"
+    assert all(results), (
+        f"All 100 acquires should succeed with limit=0, got {results.count(True)}/100"
+    )
 
     # Verify Redis key was never created
     semaphore_key = f"tenant:{tenant_id}:active_jobs"

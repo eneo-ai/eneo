@@ -25,7 +25,9 @@ if TYPE_CHECKING:
 
 
 class StorageInfoRepository:
-    def __init__(self, user: UserInDB, session: AsyncSession, factory: StorageInfoFactory):
+    def __init__(
+        self, user: UserInDB, session: AsyncSession, factory: StorageInfoFactory
+    ):
         self.user = user
         self.session = session
         self.factory = factory
@@ -54,7 +56,9 @@ class StorageInfoRepository:
         integration_knowledge_size_subquery = (
             sa.select(
                 IntegrationKnowledge.space_id,
-                sa.func.sum(IntegrationKnowledge.size).label("total_integration_knowledge_size"),
+                sa.func.sum(IntegrationKnowledge.size).label(
+                    "total_integration_knowledge_size"
+                ),
             )
             .group_by(IntegrationKnowledge.space_id)
             .alias("integration_knowledge_size_subquery")
@@ -77,7 +81,9 @@ class StorageInfoRepository:
                 Tenants.quota_limit,
             )
             .outerjoin(group_size_subquery, Spaces.id == group_size_subquery.c.space_id)
-            .outerjoin(website_size_subquery, Spaces.id == website_size_subquery.c.space_id)
+            .outerjoin(
+                website_size_subquery, Spaces.id == website_size_subquery.c.space_id
+            )
             .outerjoin(
                 integration_knowledge_size_subquery,
                 Spaces.id == integration_knowledge_size_subquery.c.space_id,
@@ -107,5 +113,7 @@ class StorageInfoRepository:
             for row in result
         ]
 
-        storage_info = self.factory.create_storage_info_from_db(query_result=storage_info_list)
+        storage_info = self.factory.create_storage_info_from_db(
+            query_result=storage_info_list
+        )
         return storage_info

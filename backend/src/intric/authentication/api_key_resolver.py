@@ -113,15 +113,23 @@ def check_resource_permission(
         granted_level = 0
     else:
         granted_level = PERMISSION_LEVEL_ORDER.get(
-            granted_value.value if hasattr(granted_value, "value") else str(granted_value),
+            granted_value.value
+            if hasattr(granted_value, "value")
+            else str(granted_value),
             0,
         )
 
     required_level = PERMISSION_LEVEL_ORDER.get(required, 0)
     if granted_level < required_level:
         granted_str = (
-            granted_value.value if hasattr(granted_value, "value") else str(granted_value)
-        ) if granted_value is not None else "none"
+            (
+                granted_value.value
+                if hasattr(granted_value, "value")
+                else str(granted_value)
+            )
+            if granted_value is not None
+            else "none"
+        )
         raise ApiKeyValidationError(
             status_code=403,
             code="insufficient_resource_permission",
@@ -301,7 +309,9 @@ class ApiKeyAuthResolver:
                     state=ApiKeyState.ACTIVE.value,
                 )
             except IntegrityError:
-                migrated = await self._fetch_concurrent_migration(plain_key, prefix, tenant_id)
+                migrated = await self._fetch_concurrent_migration(
+                    plain_key, prefix, tenant_id
+                )
             await self._log_legacy_migration(
                 migrated=migrated,
                 legacy_record=legacy_record,
@@ -331,7 +341,9 @@ class ApiKeyAuthResolver:
                     state=ApiKeyState.ACTIVE.value,
                 )
             except IntegrityError:
-                migrated = await self._fetch_concurrent_migration(plain_key, prefix, tenant_id)
+                migrated = await self._fetch_concurrent_migration(
+                    plain_key, prefix, tenant_id
+                )
             await self._log_legacy_migration(
                 migrated=migrated,
                 legacy_record=legacy_record,

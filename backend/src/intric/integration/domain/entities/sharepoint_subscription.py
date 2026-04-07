@@ -36,10 +36,12 @@ class SharePointSubscription(Entity):
     def is_expiring_soon(self, hours: int = 4) -> bool:
         """Check if subscription will expire within the specified hours."""
         from datetime import timedelta, timezone
+
         threshold = datetime.now(timezone.utc) + timedelta(hours=hours)
         return self.expires_at <= threshold
 
     def is_expired(self) -> bool:
         """Check if subscription has already expired."""
         from datetime import timezone
+
         return self.expires_at <= datetime.now(timezone.utc)

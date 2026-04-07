@@ -61,11 +61,15 @@ async def test_municipality_admin_sets_api_key(
         json={"api_key": test_key},
         headers={"X-API-Key": super_admin_token},  # Use API key auth, not Bearer token
     )
-    assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+    assert response.status_code == 200, (
+        f"Expected 200, got {response.status_code}: {response.text}"
+    )
 
     data = response.json()
     assert data["provider"] == "openai"
-    assert data["masked_key"].endswith("123"), f"Key should be masked showing last 4 chars, got {data['masked_key']}"
+    assert data["masked_key"].endswith("123"), (
+        f"Key should be masked showing last 4 chars, got {data['masked_key']}"
+    )
     assert "api_key" not in data, "Full key should never be returned in API response"
     # Note: The actual endpoint returns tenant_id and message, not set_at
     assert data["tenant_id"] == str(tenant_id)
@@ -79,12 +83,16 @@ async def test_municipality_admin_sets_api_key(
     tenant = await repo.get(tenant_id)
 
     assert tenant is not None, "Tenant should exist"
-    assert hasattr(tenant, "api_credentials"), "Tenant should have api_credentials field"
+    assert hasattr(tenant, "api_credentials"), (
+        "Tenant should have api_credentials field"
+    )
     assert "openai" in tenant.api_credentials, "OpenAI credentials should be stored"
 
     openai_cred = tenant.api_credentials["openai"]
     assert "api_key" in openai_cred, "API key field should exist"
-    assert openai_cred["api_key"] != test_key, "Key should be encrypted (not stored as plaintext)"
+    assert openai_cred["api_key"] != test_key, (
+        "Key should be encrypted (not stored as plaintext)"
+    )
     # Encrypted value will be different from plaintext
 
     # Step 3: List credentials shows masked key
@@ -101,10 +109,14 @@ async def test_municipality_admin_sets_api_key(
 
     openai_cred = next((c for c in creds if c["provider"] == "openai"), None)
     assert openai_cred is not None, "OpenAI credential should be in list"
-    assert openai_cred["masked_key"].endswith("123"), f"Key should be masked, got {openai_cred['masked_key']}"
+    assert openai_cred["masked_key"].endswith("123"), (
+        f"Key should be masked, got {openai_cred['masked_key']}"
+    )
     assert "api_key" not in openai_cred, "Full key should never be exposed"
     assert "configured_at" in openai_cred, "Should have configured_at timestamp"
-    assert openai_cred["encryption_status"] in ["encrypted", "plaintext"], "Should have encryption status"
+    assert openai_cred["encryption_status"] in ["encrypted", "plaintext"], (
+        "Should have encryption status"
+    )
 
 
 @pytest.mark.integration
@@ -142,11 +154,15 @@ async def test_azure_with_data_residency(
         headers={"X-API-Key": super_admin_token},
     )
 
-    assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+    assert response.status_code == 200, (
+        f"Expected 200, got {response.status_code}: {response.text}"
+    )
 
     data = response.json()
     assert data["provider"] == "azure"
-    assert data["masked_key"].endswith("6def"), f"Azure key should be masked, got {data['masked_key']}"
+    assert data["masked_key"].endswith("6def"), (
+        f"Azure key should be masked, got {data['masked_key']}"
+    )
     assert "api_key" not in data, "API key should not be in response"
 
     # Verify in database with LIST endpoint to get config
@@ -157,7 +173,9 @@ async def test_azure_with_data_residency(
     assert list_response.status_code == 200
 
     list_data = list_response.json()
-    azure_cred = next((c for c in list_data["credentials"] if c["provider"] == "azure"), None)
+    azure_cred = next(
+        (c for c in list_data["credentials"] if c["provider"] == "azure"), None
+    )
     assert azure_cred is not None, "Azure credential should exist"
     assert azure_cred["config"]["endpoint"] == "https://sweden.openai.azure.com/"
     assert azure_cred["config"]["api_version"] == "2024-02-15-preview"
@@ -172,7 +190,9 @@ async def test_azure_with_data_residency(
     assert "azure" in tenant.api_credentials
     azure_db_cred = tenant.api_credentials["azure"]
     # Key should be encrypted in DB
-    assert azure_db_cred["api_key"] != "azure-key-sweden-456def", "Key should be encrypted"
+    assert azure_db_cred["api_key"] != "azure-key-sweden-456def", (
+        "Key should be encrypted"
+    )
     assert azure_db_cred["endpoint"] == "https://sweden.openai.azure.com/"
     assert azure_db_cred["api_version"] == "2024-02-15-preview"
     assert azure_db_cred["deployment_name"] == "gpt-4-sweden"
@@ -337,9 +357,7 @@ async def test_backward_compatibility(
     assert tenant.api_credentials is None or "openai" not in tenant.api_credentials
 
     resolver = CredentialResolver(
-        tenant=tenant,
-        settings=settings,
-        encryption_service=encryption_service
+        tenant=tenant, settings=settings, encryption_service=encryption_service
     )
     api_key = resolver.get_api_key("openai")
 
@@ -362,16 +380,16 @@ async def test_backward_compatibility(
 
     # Test resolution with tenant-specific key
     resolver = CredentialResolver(
-        tenant=updated_tenant,
-        settings=settings,
-        encryption_service=encryption_service
+        tenant=updated_tenant, settings=settings, encryption_service=encryption_service
     )
     api_key = resolver.get_api_key("openai")
 
     assert api_key == tenant_key, "Should use tenant-specific key"
 
     uses_global = resolver.uses_global_credentials("openai")
-    assert uses_global is False, "Should NOT use global credentials when tenant key exists"
+    assert uses_global is False, (
+        "Should NOT use global credentials when tenant key exists"
+    )
 
     # Cleanup: restore original setting
     settings.openai_api_key = original_openai_key
@@ -450,7 +468,10 @@ async def test_strict_error_handling_no_fallback(
 
         error_data = response.json()
         assert "detail" in error_data
-        assert "invalid" in error_data["detail"].lower() or "authentication" in error_data["detail"].lower()
+        assert (
+            "invalid" in error_data["detail"].lower()
+            or "authentication" in error_data["detail"].lower()
+        )
 
     # Verify CredentialResolver does NOT fall back (outside the mock context)
     from intric.settings.credential_resolver import CredentialResolver
@@ -466,7 +487,9 @@ async def test_strict_error_handling_no_fallback(
     assert resolved_key == invalid_key, "Should NOT fall back to global key"
 
     uses_global = resolver.uses_global_credentials("openai")
-    assert uses_global is False, "Should indicate using tenant credentials (even if invalid)"
+    assert uses_global is False, (
+        "Should indicate using tenant credentials (even if invalid)"
+    )
 
     # Delete invalid credential to restore global fallback
     response = await client.delete(
@@ -516,6 +539,7 @@ async def test_credential_update_overwrites_existing(
 
     # Wait briefly to ensure timestamp changes
     import asyncio
+
     await asyncio.sleep(0.1)
 
     # Update with new key
@@ -548,7 +572,9 @@ async def test_credential_update_overwrites_existing(
     # Also verify the credential is encrypted in the database
     openai_cred = tenant.api_credentials["openai"]
     assert openai_cred["api_key"] != new_key, "Key should be encrypted in DB"
-    assert openai_cred["api_key"].startswith("enc:fernet:v1:"), "Should use encryption envelope"
+    assert openai_cred["api_key"].startswith("enc:fernet:v1:"), (
+        "Should use encryption envelope"
+    )
 
 
 @pytest.mark.integration
@@ -592,10 +618,14 @@ async def test_credential_validation_rejects_invalid_format(
         json={"api_key": "azure-key"},  # Missing endpoint, api_version
         headers={"X-API-Key": super_admin_token},
     )
-    assert response.status_code == 422, "Should reject Azure credential without endpoint"
+    assert response.status_code == 422, (
+        "Should reject Azure credential without endpoint"
+    )
 
     error_data = response.json()
-    assert "endpoint" in str(error_data).lower() or "required" in str(error_data).lower()
+    assert (
+        "endpoint" in str(error_data).lower() or "required" in str(error_data).lower()
+    )
 
 
 @pytest.mark.integration
@@ -666,21 +696,25 @@ async def test_cross_tenant_credential_isolation(
 
     Expected to FAIL: Tenant isolation not implemented.
     """
-    from intric.transcription_models.infrastructure import enable_transcription_models_service
+    from intric.transcription_models.infrastructure import (
+        enable_transcription_models_service,
+    )
     from uuid import uuid4
 
     # Mock transcription model lookup to avoid database dependency
 
-
     async def mock_get_model_id_by_name(self, model_name: str):
-
-
         # Return a new UUID each time to avoid conflicts
-
 
         return uuid4()
 
-    async def mock_enable_transcription_model(self, transcription_model_id, tenant_id, is_org_enabled=True, is_org_default=False):
+    async def mock_enable_transcription_model(
+        self,
+        transcription_model_id,
+        tenant_id,
+        is_org_enabled=True,
+        is_org_default=False,
+    ):
         # No-op for tests - bypass database insertion
         return None
 

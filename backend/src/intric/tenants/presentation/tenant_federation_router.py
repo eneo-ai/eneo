@@ -68,7 +68,9 @@ class FederationRequestBase(BaseModel):
         ],
     )
     client_id: str | None = Field(None, description="OAuth client ID")
-    client_secret: str | None = Field(None, min_length=8, description="OAuth client secret")
+    client_secret: str | None = Field(
+        None, min_length=8, description="OAuth client secret"
+    )
     allowed_domains: list[str] | None = Field(
         None,
         description="Email domains allowed for this tenant (e.g., ['stockholm.se'])",
@@ -381,7 +383,11 @@ def _merge_federation_config(
     if "allowed_domains" in updates:
         merged["allowed_domains"] = updates["allowed_domains"] or []
 
-    for field in ("canonical_public_origin", "redirect_path", "additional_redirect_uris"):
+    for field in (
+        "canonical_public_origin",
+        "redirect_path",
+        "additional_redirect_uris",
+    ):
         if field not in updates:
             continue
         value = updates[field]

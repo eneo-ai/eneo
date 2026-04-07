@@ -14,6 +14,7 @@ from intric.groups_legacy.api.group_models import Group, GroupCreate, GroupUpdat
 from intric.database.tables.groups_spaces_table import GroupsSpaces
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+
 class GroupRepository:
     def __init__(self, session: AsyncSession):
         self.delegate = BaseRepositoryDelegate(
@@ -22,7 +23,9 @@ class GroupRepository:
             Group,
             with_options=[
                 selectinload(CollectionsTable.user).selectinload(Users.roles),
-                selectinload(CollectionsTable.user).selectinload(Users.predefined_roles),
+                selectinload(CollectionsTable.user).selectinload(
+                    Users.predefined_roles
+                ),
                 selectinload(CollectionsTable.embedding_model),
             ],
         )
@@ -83,7 +86,9 @@ class GroupRepository:
         )
         return await self.delegate.get_model_from_query(query)
 
-    async def remove_group_from_all_assistants(self, group_id: UUID, assistant_ids: list[UUID]):
+    async def remove_group_from_all_assistants(
+        self, group_id: UUID, assistant_ids: list[UUID]
+    ):
         stmt = (
             sa.delete(AssistantsGroups)
             .where(AssistantsGroups.group_id == group_id)
@@ -94,7 +99,9 @@ class GroupRepository:
 
         await self.session.execute(stmt)
 
-    async def remove_group_from_all_services(self, group_id: UUID, service_ids: list[UUID]):
+    async def remove_group_from_all_services(
+        self, group_id: UUID, service_ids: list[UUID]
+    ):
         stmt = (
             sa.delete(ServicesGroups)
             .where(ServicesGroups.group_id == group_id)
@@ -114,7 +121,7 @@ class GroupRepository:
             .order_by(CollectionsTable.created_at)
         )
         return await self.delegate.get_models_from_query(query)
-    
+
     async def link_group_to_space(self, group_id: UUID, space_id: UUID) -> None:
         stmt = (
             pg_insert(GroupsSpaces)
@@ -133,10 +140,12 @@ class GroupRepository:
         await self.session.execute(stmt)
 
     async def get_spaces_for_group(self, group_id: UUID):
-        query = sa.select(GroupsSpaces.space_id).where(GroupsSpaces.collection_id == group_id)
+        query = sa.select(GroupsSpaces.space_id).where(
+            GroupsSpaces.collection_id == group_id
+        )
         result = await self.session.execute(query)
         return [row[0] for row in result.all()]
-    
+
     async def unlink_group_from_all_spaces(self, group_id: UUID) -> None:
         stmt = sa.delete(GroupsSpaces).where(GroupsSpaces.collection_id == group_id)
         await self.session.execute(stmt)

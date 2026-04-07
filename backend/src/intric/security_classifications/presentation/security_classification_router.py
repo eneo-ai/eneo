@@ -158,7 +158,9 @@ async def update_security_classification_levels(
     user = container.user()
 
     sc_ids = [model.id for model in request.security_classifications]
-    security_classifications = await service.update_security_levels(security_classifications=sc_ids)
+    security_classifications = await service.update_security_levels(
+        security_classifications=sc_ids
+    )
 
     # Audit logging
     audit_service = container.audit_service()
@@ -189,7 +191,9 @@ async def update_security_classification_levels(
 
     return SecurityClassificationsListPublic(
         security_classifications=[
-            SecurityClassificationPublic.from_domain(sc, return_none_if_not_enabled=False)
+            SecurityClassificationPublic.from_domain(
+                sc, return_none_if_not_enabled=False
+            )
             for sc in security_classifications
         ]
     )
@@ -281,7 +285,10 @@ async def update_security_classification(
     changes = {}
     if request.name is not NOT_PROVIDED and request.name != old_sc.name:
         changes["name"] = {"old": old_sc.name, "new": request.name}
-    if request.description is not NOT_PROVIDED and request.description != old_sc.description:
+    if (
+        request.description is not NOT_PROVIDED
+        and request.description != old_sc.description
+    ):
         changes["description"] = {"old": old_sc.description, "new": request.description}
 
     # Audit logging

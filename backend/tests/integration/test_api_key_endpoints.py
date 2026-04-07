@@ -695,7 +695,9 @@ async def test_admin_api_key_management_flow(client, default_user_token, default
         json={"permission": "admin"},
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
-    assert disallowed_update_response.status_code == 400, disallowed_update_response.text
+    assert disallowed_update_response.status_code == 400, (
+        disallowed_update_response.text
+    )
     disallowed_payload = disallowed_update_response.json()
     assert disallowed_payload["code"] == "invalid_request"
 
@@ -1001,7 +1003,9 @@ async def test_admin_list_supports_owner_relation_filters(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_admin_lookup_finds_exact_secret(client, default_user_token, default_user):
+async def test_admin_lookup_finds_exact_secret(
+    client, default_user_token, default_user
+):
     create_response = await client.post(
         "/api/v1/api-keys",
         json={

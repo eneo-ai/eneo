@@ -52,6 +52,7 @@ def _exception_context(
 
     return result or None
 
+
 logger = logging.getLogger(__name__)
 
 

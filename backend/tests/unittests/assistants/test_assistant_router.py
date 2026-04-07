@@ -156,14 +156,14 @@ class TestAskAssistant:
         # This is the key assertion - if code uses response.session_id, it would fail
         # because MagicMock(spec=AssistantResponse) won't have that attribute
         metadata = call_kwargs["metadata"]
-        expected_session_id = mock_container.assistant_service.return_value.ask.return_value.session.id
+        expected_session_id = (
+            mock_container.assistant_service.return_value.ask.return_value.session.id
+        )
 
         # The metadata.extra dict should contain the correct session_id
         assert str(expected_session_id) in str(metadata)
 
-    async def test_audit_logs_session_started_action(
-        self, mock_container, monkeypatch
-    ):
+    async def test_audit_logs_session_started_action(self, mock_container, monkeypatch):
         """Verify SESSION_STARTED is logged with correct action type and entity type."""
         mock_to_response = AsyncMock(return_value=MagicMock())
         monkeypatch.setattr(
@@ -214,9 +214,7 @@ class TestAskAssistant:
         assert call_kwargs["tenant_id"] == mock_user.tenant_id
         assert call_kwargs["actor_id"] == mock_user.id
 
-    async def test_audit_logs_file_metadata(
-        self, mock_container, monkeypatch
-    ):
+    async def test_audit_logs_file_metadata(self, mock_container, monkeypatch):
         """Verify file count is captured in audit metadata when files are provided."""
         mock_to_response = AsyncMock(return_value=MagicMock())
         monkeypatch.setattr(

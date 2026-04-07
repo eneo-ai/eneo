@@ -30,7 +30,10 @@ class SharepointAuthService(BaseOauthService):
         "Group.Read.All",
     ]
 
-    def __init__(self, tenant_sharepoint_app_service: Optional["TenantSharePointAppService"] = None):
+    def __init__(
+        self,
+        tenant_sharepoint_app_service: Optional["TenantSharePointAppService"] = None,
+    ):
         self.tenant_sharepoint_app_service = tenant_sharepoint_app_service
         self.default_scopes = self.DEFAULT_SCOPES
 
@@ -40,7 +43,11 @@ class SharepointAuthService(BaseOauthService):
 
         tenant_app = None
         if tenant_id and self.tenant_sharepoint_app_service:
-            tenant_app = await self.tenant_sharepoint_app_service.get_active_app_for_tenant(tenant_id)
+            tenant_app = (
+                await self.tenant_sharepoint_app_service.get_active_app_for_tenant(
+                    tenant_id
+                )
+            )
 
         if not tenant_app:
             raise ValueError(
@@ -88,7 +95,9 @@ class SharepointAuthService(BaseOauthService):
         url = f"{auth_endpoint}?{urlencode(params)}"
         return {"auth_url": url}
 
-    async def exchange_token(self, auth_code: str, tenant_id: Optional[UUID] = None) -> TokenResponse:
+    async def exchange_token(
+        self, auth_code: str, tenant_id: Optional[UUID] = None
+    ) -> TokenResponse:
         """Exchange authorization code for access token.
 
         Args:
@@ -119,7 +128,9 @@ class SharepointAuthService(BaseOauthService):
             else:
                 response.raise_for_status()
 
-    async def refresh_access_token(self, refresh_token: str, tenant_id: Optional[UUID] = None) -> TokenResponse:
+    async def refresh_access_token(
+        self, refresh_token: str, tenant_id: Optional[UUID] = None
+    ) -> TokenResponse:
         """Refresh access token using refresh token.
 
         Args:

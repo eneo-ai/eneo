@@ -43,7 +43,9 @@ class ConversationRequest(BaseModel):
             if value is not None
         ]
         if len(ids) == 0:
-            raise ValueError("Provide exactly one of session_id, assistant_id, or group_chat_id.")
+            raise ValueError(
+                "Provide exactly one of session_id, assistant_id, or group_chat_id."
+            )
         if len(ids) > 1:
             raise ValueError(
                 "Provide exactly one of session_id, assistant_id, or group_chat_id, not multiple."

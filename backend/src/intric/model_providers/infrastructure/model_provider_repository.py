@@ -20,7 +20,9 @@ class ModelProviderRepository:
 
     async def all(self, active_only: bool = False) -> list[ModelProvider]:
         """Get all providers for the tenant."""
-        stmt = sa.select(ModelProviders).where(ModelProviders.tenant_id == self.tenant_id)
+        stmt = sa.select(ModelProviders).where(
+            ModelProviders.tenant_id == self.tenant_id
+        )
 
         if active_only:
             stmt = stmt.where(ModelProviders.is_active == True)  # noqa
@@ -30,7 +32,9 @@ class ModelProviderRepository:
         result = await self.session.execute(stmt)
         providers_db = result.scalars().all()
 
-        return [ModelProvider.create_from_db(provider_db) for provider_db in providers_db]
+        return [
+            ModelProvider.create_from_db(provider_db) for provider_db in providers_db
+        ]
 
     async def get_by_id(self, provider_id: UUID) -> ModelProvider:
         """Get a provider by ID."""
@@ -121,12 +125,16 @@ class ModelProviderRepository:
 
         # Count completion models
         completion_count = await self.session.scalar(
-            sa.select(sa.func.count()).select_from(CompletionModels).where(CompletionModels.provider_id == provider_id)
+            sa.select(sa.func.count())
+            .select_from(CompletionModels)
+            .where(CompletionModels.provider_id == provider_id)
         )
 
         # Count embedding models
         embedding_count = await self.session.scalar(
-            sa.select(sa.func.count()).select_from(EmbeddingModels).where(EmbeddingModels.provider_id == provider_id)
+            sa.select(sa.func.count())
+            .select_from(EmbeddingModels)
+            .where(EmbeddingModels.provider_id == provider_id)
         )
 
         # Count transcription models
@@ -136,4 +144,8 @@ class ModelProviderRepository:
             .where(TranscriptionModels.provider_id == provider_id)
         )
 
-        return (completion_count or 0) + (embedding_count or 0) + (transcription_count or 0)
+        return (
+            (completion_count or 0)
+            + (embedding_count or 0)
+            + (transcription_count or 0)
+        )

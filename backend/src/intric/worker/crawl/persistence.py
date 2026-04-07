@@ -24,7 +24,12 @@ from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.info_blobs.info_blob import InfoBlobChunk
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
-from intric.worker.crawl_context import CrawlContext, EmbeddingModelSpec, FailureReason, PreparedPage
+from intric.worker.crawl_context import (
+    CrawlContext,
+    EmbeddingModelSpec,
+    FailureReason,
+    PreparedPage,
+)
 
 if TYPE_CHECKING:
     from intric.main.container.container import Container
@@ -141,13 +146,13 @@ async def persist_batch(
         return 0, len(page_buffer), [], failures_by_reason
 
     # Validate embedding model has required provider_id for credential lookup
-    if not getattr(embedding_model, 'provider_id', None):
+    if not getattr(embedding_model, "provider_id", None):
         logger.error(
             "Embedding model missing provider_id - cannot load API credentials",
             extra={
                 "website_id": str(ctx.website_id),
-                "embedding_model_name": getattr(embedding_model, 'name', None),
-                "embedding_model_id": str(getattr(embedding_model, 'id', None)),
+                "embedding_model_name": getattr(embedding_model, "name", None),
+                "embedding_model_id": str(getattr(embedding_model, "id", None)),
             },
         )
         for page in page_buffer:
@@ -258,9 +263,11 @@ async def persist_batch(
                 async with _get_embedding_semaphore():
                     try:
                         async with asyncio.timeout(ctx.embedding_timeout_seconds):
-                            chunk_embedding_list = await create_embeddings_service.get_embeddings(
-                                model=embedding_model,
-                                chunks=chunk_objects,
+                            chunk_embedding_list = (
+                                await create_embeddings_service.get_embeddings(
+                                    model=embedding_model,
+                                    chunks=chunk_objects,
+                                )
                             )
                     except asyncio.TimeoutError:
                         logger.warning(
@@ -280,10 +287,16 @@ async def persist_batch(
                 embeddings: list[list[float]] = []
                 for _, embedding in chunk_embedding_list:
                     # ChunkEmbeddingList returns numpy arrays, convert to list
-                    embeddings.append(embedding.tolist() if hasattr(embedding, "tolist") else list(embedding))
+                    embeddings.append(
+                        embedding.tolist()
+                        if hasattr(embedding, "tolist")
+                        else list(embedding)
+                    )
 
                 # 6. Track embedding memory for early flush
-                embedding_bytes = sum(len(e) * 4 for e in embeddings)  # float32 = 4 bytes
+                embedding_bytes = sum(
+                    len(e) * 4 for e in embeddings
+                )  # float32 = 4 bytes
                 buffer_embedding_bytes += embedding_bytes
 
                 # 7. Create PreparedPage with all data needed for Phase 2
@@ -305,7 +318,10 @@ async def persist_batch(
                 if buffer_embedding_bytes >= ctx.max_batch_embedding_bytes:
                     logger.info(
                         f"Embedding memory cap reached ({buffer_embedding_bytes} bytes), stopping Phase 1 early",
-                        extra={"website_id": str(ctx.website_id), "pages_prepared": len(prepared_pages)},
+                        extra={
+                            "website_id": str(ctx.website_id),
+                            "pages_prepared": len(prepared_pages),
+                        },
                     )
                     break
 
@@ -402,12 +418,16 @@ async def persist_batch(
                         ]
 
                         if chunk_values:
-                            insert_chunks_stmt = sa.insert(InfoBlobChunks).values(chunk_values)
+                            insert_chunks_stmt = sa.insert(InfoBlobChunks).values(
+                                chunk_values
+                            )
                             await session.execute(insert_chunks_stmt)
 
                         await savepoint.commit()
                         success_count += 1
-                        successful_urls.append(prepared.url)  # Track this URL as actually persisted
+                        successful_urls.append(
+                            prepared.url
+                        )  # Track this URL as actually persisted
 
                     except Exception as e:
                         await savepoint.rollback()

@@ -17,7 +17,9 @@ class AssistantTemplateFactory:
     def create_assistant_template(
         item: "AssistantTemplateDBModel",
     ) -> AssistantTemplate:
-        wizard = AssistantTemplateWizard.model_validate(item.wizard) if item.wizard else None
+        wizard = (
+            AssistantTemplateWizard.model_validate(item.wizard) if item.wizard else None
+        )
         return AssistantTemplate(
             id=item.id,
             name=item.name,

@@ -21,7 +21,7 @@ def to_session_public(session: SessionInDB):
     return SessionPublic(
         **session.model_dump(),
         messages=[to_question_public(question) for question in session.questions],
-        feedback=feedback
+        feedback=feedback,
     )
 
 

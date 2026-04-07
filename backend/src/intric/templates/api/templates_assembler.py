@@ -36,9 +36,9 @@ class TemplateAssembler:
             apps + assistants,
             key=lambda item: (
                 not item.is_default,  # False (defaults) sort before True (non-defaults)
-                item.name.lower(),     # Alphabetical (case-insensitive, stable)
-                -item.created_at.timestamp()  # Tiebreaker for same name (newer first)
-            )
+                item.name.lower(),  # Alphabetical (case-insensitive, stable)
+                -item.created_at.timestamp(),  # Tiebreaker for same name (newer first)
+            ),
         )
 
         return TemplateListPublic(items=all_items)

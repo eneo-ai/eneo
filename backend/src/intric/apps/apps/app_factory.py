@@ -104,9 +104,12 @@ class AppFactory:
             else None
         )
         input_fields = [
-            InputField.model_validate(input_field) for input_field in app_in_db.input_fields
+            InputField.model_validate(input_field)
+            for input_field in app_in_db.input_fields
         ]
-        attachments = [File(**attachment.file.to_dict()) for attachment in app_in_db.attachments]
+        attachments = [
+            File(**attachment.file.to_dict()) for attachment in app_in_db.attachments
+        ]
         model_kwargs = (
             ModelKwargs(**app_in_db.completion_model_kwargs)
             if app_in_db.completion_model_kwargs is not None
@@ -154,9 +157,12 @@ class AppFactory:
             prompt = None
 
         input_fields = [
-            InputField.model_validate(input_field) for input_field in app_in_db.input_fields
+            InputField.model_validate(input_field)
+            for input_field in app_in_db.input_fields
         ]
-        attachments = [File(**attachment.file.to_dict()) for attachment in app_in_db.attachments]
+        attachments = [
+            File(**attachment.file.to_dict()) for attachment in app_in_db.attachments
+        ]
         model_kwargs = (
             ModelKwargs(**app_in_db.completion_model_kwargs)
             if app_in_db.completion_model_kwargs is not None
@@ -170,7 +176,11 @@ class AppFactory:
         )
 
         completion_model = next(
-            (model for model in completion_models if model.id == app_in_db.completion_model_id),
+            (
+                model
+                for model in completion_models
+                if model.id == app_in_db.completion_model_id
+            ),
             None,
         )
 

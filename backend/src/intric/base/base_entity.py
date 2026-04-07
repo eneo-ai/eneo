@@ -29,8 +29,14 @@ class Entity:
             return False
 
         # Only compare fields that are not datetime
-        self_vars = {k: v for k, v in vars(self).items() if k not in ["created_at", "updated_at"]}
-        other_vars = {k: v for k, v in vars(other).items() if k not in ["created_at", "updated_at"]}
+        self_vars = {
+            k: v for k, v in vars(self).items() if k not in ["created_at", "updated_at"]
+        }
+        other_vars = {
+            k: v
+            for k, v in vars(other).items()
+            if k not in ["created_at", "updated_at"]
+        }
 
         return self_vars == other_vars
 

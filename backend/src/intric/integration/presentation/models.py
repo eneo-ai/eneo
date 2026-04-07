@@ -150,7 +150,7 @@ class IntegrationKnowledgeMetaData(BaseModel):
     last_synced_at: Optional[datetime] = None
     sharepoint_subscription_expires_at: Optional[datetime] = Field(
         None,
-        description="When the SharePoint webhook subscription expires (only for SharePoint integrations)"
+        description="When the SharePoint webhook subscription expires (only for SharePoint integrations)",
     )
 
     @property
@@ -164,6 +164,7 @@ class IntegrationKnowledgeMetaData(BaseModel):
             return None
 
         from datetime import datetime, timezone, timedelta
+
         now = datetime.now(timezone.utc)
         expires_at = self.sharepoint_subscription_expires_at
 
@@ -185,6 +186,7 @@ class IntegrationKnowledgeMetaData(BaseModel):
             return None
 
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc)
         delta = self.sharepoint_subscription_expires_at - now
         return max(0, int(delta.total_seconds() / 3600))
@@ -201,7 +203,9 @@ class IntegrationKnowledgePublic(BaseModel):
     embedding_model: EmbeddingModelPublicLegacy
     site_id: Optional[str] = None
     drive_id: Optional[str] = None  # For OneDrive direct access
-    resource_type: Optional[str] = None  # "site" for SharePoint, "onedrive" for OneDrive
+    resource_type: Optional[str] = (
+        None  # "site" for SharePoint, "onedrive" for OneDrive
+    )
     sharepoint_subscription_id: Optional[UUID] = None
     folder_id: Optional[str] = None
     folder_path: Optional[str] = None

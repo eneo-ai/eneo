@@ -53,9 +53,9 @@ router = APIRouter()
 
 
 def _raise_conversation_scope_denied(http_request: Request, message: str) -> NoReturn:
-    request_id = http_request.headers.get("x-correlation-id") or http_request.headers.get(
-        "x-request-id"
-    )
+    request_id = http_request.headers.get(
+        "x-correlation-id"
+    ) or http_request.headers.get("x-request-id")
     detail: dict[str, object] = {
         "code": "insufficient_scope",
         "message": message,
@@ -266,7 +266,9 @@ async def chat(
     request: ConversationRequest,
     http_request: Request,
     version: int = Query(default=1, ge=1, le=2),
-    container: Container = Depends(get_container(with_user=True, with_transaction=False)),
+    container: Container = Depends(
+        get_container(with_user=True, with_transaction=False)
+    ),
 ):
     """Unified endpoint for communicating with an assistant or a group chat.
 
@@ -354,7 +356,9 @@ async def chat(
 async def list_conversations(
     http_request: Request,
     assistant_id: Optional[UUID] = Query(None, description="The UUID of the assistant"),
-    group_chat_id: Optional[UUID] = Query(None, description="The UUID of the group chat"),
+    group_chat_id: Optional[UUID] = Query(
+        None, description="The UUID of the group chat"
+    ),
     limit: int = Query(default=None, gt=0),
     cursor: datetime = None,
     previous: bool = False,
@@ -516,7 +520,9 @@ async def set_title_of_conversation(
 )
 async def approve_tools(
     http_request: Request,
-    approval_id: UUID = Query(..., description="The approval ID from the tool_approval_required event"),
+    approval_id: UUID = Query(
+        ..., description="The approval ID from the tool_approval_required event"
+    ),
     decisions: list[ToolApprovalDecision] = Body(default_factory=list),
     container: Container = Depends(get_container(with_user=True)),
 ):
@@ -632,7 +638,9 @@ async def approve_tools(
     if submit_result.response_status != "already_processed":
         approved_count = sum(1 for decision in decisions if decision.approved)
         denied_count = sum(1 for decision in decisions if not decision.approved)
-        entity_id = context_result.context.assistant_id or context_result.context.session_id
+        entity_id = (
+            context_result.context.assistant_id or context_result.context.session_id
+        )
         entity_type = (
             EntityType.ASSISTANT
             if context_result.context.assistant_id

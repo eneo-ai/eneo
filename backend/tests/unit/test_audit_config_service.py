@@ -325,9 +325,9 @@ class TestUpdateConfig:
         # Category cache should be invalidated
         expected_category_key = f"audit_config:{tenant_id}:admin_actions"
         delete_calls = [str(call) for call in mock_redis.delete.call_args_list]
-        assert any(
-            expected_category_key in call for call in delete_calls
-        ), f"Category cache {expected_category_key} should be invalidated"
+        assert any(expected_category_key in call for call in delete_calls), (
+            f"Category cache {expected_category_key} should be invalidated"
+        )
 
         # All action caches for this category should also be invalidated
         actions_in_category = [
@@ -337,9 +337,9 @@ class TestUpdateConfig:
         ]
         # 1 category + N actions in admin_actions category
         expected_calls = 1 + len(actions_in_category)
-        assert (
-            mock_redis.delete.call_count == expected_calls
-        ), f"Expected {expected_calls} cache invalidations (1 category + {len(actions_in_category)} actions)"
+        assert mock_redis.delete.call_count == expected_calls, (
+            f"Expected {expected_calls} cache invalidations (1 category + {len(actions_in_category)} actions)"
+        )
 
     async def test_update_config_returns_updated_config(
         self, config_service, mock_repository, mock_redis

@@ -74,12 +74,16 @@ class Assistants(BasePublic):
     template: Mapped[Optional[AssistantTemplates]] = relationship(viewonly=True)
 
     assistant_groups: Mapped[list["AssistantsGroups"]] = relationship(viewonly=True)
-    assistant_integration_knowledge: Mapped[list["AssistantIntegrationKnowledge"]] = relationship(
-        viewonly=True
+    assistant_integration_knowledge: Mapped[list["AssistantIntegrationKnowledge"]] = (
+        relationship(viewonly=True)
     )
     assistant_websites: Mapped[list["AssistantsWebsites"]] = relationship(viewonly=True)
-    assistant_mcp_servers: Mapped[list["AssistantMCPServers"]] = relationship(viewonly=True)
-    assistant_mcp_server_tools: Mapped[list["AssistantMCPServerTools"]] = relationship(viewonly=True)
+    assistant_mcp_servers: Mapped[list["AssistantMCPServers"]] = relationship(
+        viewonly=True
+    )
+    assistant_mcp_server_tools: Mapped[list["AssistantMCPServerTools"]] = relationship(
+        viewonly=True
+    )
 
     __table_args__ = {"extend_existing": True}  # Temporary
 
@@ -117,7 +121,9 @@ class AssistantsFiles(BaseCrossReference):
 class AssistantIntegrationKnowledge(BasePublic):
     __tablename__ = "assistant_integration_knowledge"
 
-    assistant_id: Mapped[UUID] = mapped_column(ForeignKey(Assistants.id, ondelete="CASCADE"))
+    assistant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Assistants.id, ondelete="CASCADE")
+    )
     integration_knowledge_id: Mapped[UUID] = mapped_column(
         ForeignKey(IntegrationKnowledge.id, ondelete="CASCADE")
     )
@@ -129,6 +135,7 @@ class AssistantMCPServers(BaseCrossReference):
     Note: MCP servers are accessed via `Assistants.mcp_servers` (direct many-to-many).
     This association table follows the same pattern as AssistantsGroups/AssistantsWebsites.
     """
+
     __tablename__ = "assistant_mcp_servers"  # type: ignore[assignment]
 
     assistant_id: Mapped[UUID] = mapped_column(
@@ -141,6 +148,7 @@ class AssistantMCPServers(BaseCrossReference):
 
 class AssistantMCPServerTools(BaseCrossReference):
     """Assistant-level tool permissions."""
+
     __tablename__ = "assistant_mcp_server_tools"  # type: ignore[assignment]
 
     assistant_id: Mapped[UUID] = mapped_column(

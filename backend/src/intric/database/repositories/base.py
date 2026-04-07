@@ -69,7 +69,7 @@ class BaseRepositoryDelegate:
         *,
         exclude: set = set(),
         relationships: list[RelationshipOption] = [],
-        **extra_kwargs
+        **extra_kwargs,
     ):
         query = (
             sa.insert(self.table)
@@ -78,7 +78,7 @@ class BaseRepositoryDelegate:
                     exclude_none=True,
                     exclude=exclude | self._get_relationships_names(),
                 ),
-                **extra_kwargs
+                **extra_kwargs,
             )
             .returning(self.table)
         )
@@ -159,7 +159,7 @@ class BaseRepositoryDelegate:
         *,
         exclude: set = set(),
         relationships: list[RelationshipOption] = [],
-        **extra_kwargs
+        **extra_kwargs,
     ):
         query = (
             sa.update(self.table)
@@ -168,7 +168,7 @@ class BaseRepositoryDelegate:
                     exclude_unset=True,
                     exclude={"id", "uuid"} | exclude | self._get_relationships_names(),
                 ),
-                **extra_kwargs
+                **extra_kwargs,
             )
             .where(self.table.id == new_entry.id)
             .returning(self.table)

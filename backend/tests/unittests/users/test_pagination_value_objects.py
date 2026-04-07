@@ -12,6 +12,7 @@ These tests validate:
 - SortOptions default values
 - PaginatedResult metadata calculations
 """
+
 import pytest
 
 from intric.users.user import (
@@ -205,7 +206,9 @@ class TestPaginatedResult:
     def test_generic_type_handling(self):
         """PaginatedResult should work with any item type"""
         # String items
-        result = PaginatedResult(items=["a", "b", "c"], total_count=3, page=1, page_size=100)
+        result = PaginatedResult(
+            items=["a", "b", "c"], total_count=3, page=1, page_size=100
+        )
         assert len(result.items) == 3
         assert result.items[0] == "a"
 

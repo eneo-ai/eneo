@@ -7,7 +7,10 @@ from fastapi import Depends, HTTPException, Request, Security, status
 
 from intric.authentication.auth_factory import get_auth_service
 from intric.authentication.auth_service import AuthService
-from intric.authentication.api_key_resolver import ApiKeyValidationError, check_resource_permission
+from intric.authentication.api_key_resolver import (
+    ApiKeyValidationError,
+    check_resource_permission,
+)
 from intric.authentication.api_key_router_helpers import raise_api_key_http_error
 from intric.authentication.auth_models import ApiKeyPermission
 from intric.main.config import get_settings
@@ -145,26 +148,34 @@ def require_api_key_permission(required: ApiKeyPermission):
     return _api_key_permission_dep
 
 
-ASSISTANTS_READ_OVERRIDES: frozenset[str] = frozenset({
-    "ask_assistant",
-    "ask_followup",
-    "leave_feedback",
-})
+ASSISTANTS_READ_OVERRIDES: frozenset[str] = frozenset(
+    {
+        "ask_assistant",
+        "ask_followup",
+        "leave_feedback",
+    }
+)
 KNOWLEDGE_READ_OVERRIDES: frozenset[str] = frozenset({"run_semantic_search"})
 
-CONVERSATIONS_READ_OVERRIDES: frozenset[str] = frozenset({
-    "chat",
-    "leave_feedback",
-})
+CONVERSATIONS_READ_OVERRIDES: frozenset[str] = frozenset(
+    {
+        "chat",
+        "leave_feedback",
+    }
+)
 
-APPS_READ_OVERRIDES: frozenset[str] = frozenset({
-    "run_service",
-    "run_app",
-})
+APPS_READ_OVERRIDES: frozenset[str] = frozenset(
+    {
+        "run_service",
+        "run_app",
+    }
+)
 
-FILES_READ_OVERRIDES: frozenset[str] = frozenset({
-    "generate_signed_url",
-})
+FILES_READ_OVERRIDES: frozenset[str] = frozenset(
+    {
+        "generate_signed_url",
+    }
+)
 
 
 def require_resource_permission_for_method(
@@ -302,15 +313,15 @@ def get_scope_filter(request: Request) -> ScopeFilter:
     if scope_type is None or scope_id is None:
         return ScopeFilter()
 
-    scope_type_str = scope_type.value if hasattr(scope_type, "value") else str(scope_type)
+    scope_type_str = (
+        scope_type.value if hasattr(scope_type, "value") else str(scope_type)
+    )
 
     if scope_type_str == "tenant":
         return ScopeFilter(scope_type=scope_type_str)
     elif scope_type_str == "space":
         return ScopeFilter(scope_type=scope_type_str, space_id=scope_id)
     elif scope_type_str == "assistant":
-        return ScopeFilter(
-            scope_type=scope_type_str, assistant_id=scope_id
-        )
+        return ScopeFilter(scope_type=scope_type_str, assistant_id=scope_id)
     else:
         return ScopeFilter(scope_type=scope_type_str)

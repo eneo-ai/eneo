@@ -109,7 +109,11 @@ class MCPServerService:
         self, config: dict[str, Any] | None
     ) -> dict[str, Any] | None:
         """Encrypt sensitive values in auth config before storing."""
-        if not config or not self.encryption_service or not self.encryption_service.is_active():
+        if (
+            not config
+            or not self.encryption_service
+            or not self.encryption_service.is_active()
+        ):
             return config
 
         encrypted = dict(config)
@@ -248,8 +252,7 @@ class MCPServerService:
         # Track whether connection-affecting fields are actually changing
         url_changed = http_url is not None and str(http_url) != mcp_server.http_url
         auth_type_changed = (
-            http_auth_type is not None
-            and http_auth_type != mcp_server.http_auth_type
+            http_auth_type is not None and http_auth_type != mcp_server.http_auth_type
         )
         credentials_changed = http_auth_config_schema is not None
 
@@ -572,7 +575,11 @@ class MCPServerService:
             if tool.mcp_server_id != mcp_server_id:
                 continue
 
-            if tool.requires_approval and tool.description is None and tool.input_schema is None:
+            if (
+                tool.requires_approval
+                and tool.description is None
+                and tool.input_schema is None
+            ):
                 # New tool that was never active — delete it
                 await self.tool_repo.delete(id=tool_id)
                 continue

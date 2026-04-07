@@ -284,43 +284,81 @@ ORG_SPACE_PERMISSIONS = {
     },
     SpaceRole.ADMIN: {
         SpaceResourceType.ASSISTANT: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
-            SpaceAction.PUBLISH, SpaceAction.INSIGHT_TOGGLE, SpaceAction.INSIGHT_VIEW,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+            SpaceAction.PUBLISH,
+            SpaceAction.INSIGHT_TOGGLE,
+            SpaceAction.INSIGHT_VIEW,
         },
         SpaceResourceType.GROUP_CHAT: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
-            SpaceAction.PUBLISH, SpaceAction.INSIGHT_TOGGLE, SpaceAction.INSIGHT_VIEW,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+            SpaceAction.PUBLISH,
+            SpaceAction.INSIGHT_TOGGLE,
+            SpaceAction.INSIGHT_VIEW,
         },
         SpaceResourceType.APP: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE, SpaceAction.PUBLISH,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+            SpaceAction.PUBLISH,
         },
         SpaceResourceType.SERVICE: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE, SpaceAction.PUBLISH,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+            SpaceAction.PUBLISH,
         },
         SpaceResourceType.COLLECTION: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
         },
         SpaceResourceType.WEBSITE: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
         },
         SpaceResourceType.INTEGRATION_KNOWLEDGE: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
         },
         SpaceResourceType.INFO_BLOB: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.DELETE,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.DELETE,
         },
         SpaceResourceType.SPACE: {
-            SpaceAction.READ, SpaceAction.EDIT, SpaceAction.DELETE,
+            SpaceAction.READ,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
         },
         SpaceResourceType.MEMBER: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
         },
         SpaceResourceType.GROUP_MEMBER: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
         },
         # Chat / default-assistenten synlig & redigerbar endast för admin:
         SpaceResourceType.DEFAULT_ASSISTANT: {
-            SpaceAction.READ, SpaceAction.EDIT,
+            SpaceAction.READ,
+            SpaceAction.EDIT,
         },
     },
 }
@@ -420,7 +458,11 @@ class SpaceActor:
         # Only service keys need synthetic role derivation —
         # user keys authenticate as a real user who has actual membership.
         ownership_raw = getattr(key, "ownership", "user")
-        ownership = ownership_raw.value if isinstance(ownership_raw, Enum) else str(ownership_raw)
+        ownership = (
+            ownership_raw.value
+            if isinstance(ownership_raw, Enum)
+            else str(ownership_raw)
+        )
         if ownership != "service":
             return None
 
@@ -496,15 +538,19 @@ class SpaceActor:
             SpaceRole.VIEWER: 1,
         }
 
-        return role1 if role_priority.get(role1, 0) >= role_priority.get(role2, 0) else role2
+        return (
+            role1
+            if role_priority.get(role1, 0) >= role_priority.get(role2, 0)
+            else role2
+        )
 
     def _get_permissions(self, role: SpaceRole):
         if self.space.is_personal():
             return self._personal_space_permissions.get(role, {})
-        if self.space.is_organization(): 
+        if self.space.is_organization():
             return self._org_space_permissions.get(role, {})
         return self._shared_space_permissions.get(role, {})
-    
+
     def can_perform_action(
         self,
         action: SpaceAction,
@@ -514,14 +560,14 @@ class SpaceActor:
         role = self._get_role()
         permissions = self._get_permissions(role=role)
 
-        if (
-            self.space.is_personal()
-            and resource_type in PERMISSION_RESOURCES
-        ):
+        if self.space.is_personal() and resource_type in PERMISSION_RESOURCES:
             permission = self._to_permisson(resource_type=resource_type)
-            has_permission = permission in self.user.permissions if permission else False
+            has_permission = (
+                permission in self.user.permissions if permission else False
+            )
             if not has_permission and not (
-                resource_type in {SpaceResourceType.WEBSITE, SpaceResourceType.INTEGRATION_KNOWLEDGE}
+                resource_type
+                in {SpaceResourceType.WEBSITE, SpaceResourceType.INTEGRATION_KNOWLEDGE}
                 and action == SpaceAction.READ
             ):
                 return False
@@ -926,7 +972,9 @@ class SpaceActor:
             can_edit=self.can_edit_group_chats(),
             can_delete=self.can_delete_group_chats(),
             can_publish=self.can_publish_group_chats(),
-            can_access_insight=self.can_access_insight_group_chat(group_chat=group_chat),
+            can_access_insight=self.can_access_insight_group_chat(
+                group_chat=group_chat
+            ),
             can_toggle_insight=self.can_toggle_insight(),
         )
 

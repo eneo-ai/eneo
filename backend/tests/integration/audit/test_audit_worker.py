@@ -58,8 +58,7 @@ async def test_log_audit_event_task(db_session, test_tenant, test_user):
 
         # Find our log
         created_log = next(
-            (log for log in logs if log.description == "Worker created assistant"),
-            None
+            (log for log in logs if log.description == "Worker created assistant"), None
         )
         assert created_log is not None
         assert created_log.action == ActionType.ASSISTANT_CREATED
@@ -103,10 +102,7 @@ async def test_worker_task_handles_failure_outcome(db_session, test_tenant, test
         repository = AuditLogRepositoryImpl(session)
         logs, count = await repository.get_logs(tenant_id=test_tenant.id)
 
-        failed_log = next(
-            (log for log in logs if log.outcome == Outcome.FAILURE),
-            None
-        )
+        failed_log = next((log for log in logs if log.outcome == Outcome.FAILURE), None)
         assert failed_log is not None
         assert failed_log.error_message == "Email already exists"
 

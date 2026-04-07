@@ -59,7 +59,9 @@ class ServiceCreate(ServiceBase):
     user_id: UUID
     groups: list[ModelId] = []
     completion_model_id: UUID = Field(
-        validation_alias=AliasChoices(AliasPath("completion_model", "id"), "completion_model_id")
+        validation_alias=AliasChoices(
+            AliasPath("completion_model", "id"), "completion_model_id"
+        )
     )
 
 

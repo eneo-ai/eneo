@@ -66,7 +66,9 @@ class ToolCallInfo(BaseModel):
     tool_name: str
     arguments: Optional[dict] = None
     tool_call_id: Optional[str] = None  # For tool approval flow
-    approved: Optional[bool] = None  # True=approved, False=denied, None=auto-approved or pending
+    approved: Optional[bool] = (
+        None  # True=approved, False=denied, None=auto-approved or pending
+    )
     # Additive execution status for newer clients. Keep `approved` for compatibility.
     result_status: Optional[str] = None
 

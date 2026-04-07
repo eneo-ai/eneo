@@ -273,7 +273,9 @@ class ApiKeysV2Repository:
                 sa.or_(
                     sa.func.lower(self.table.name).like(term),
                     sa.func.lower(self.table.key_suffix).like(term),
-                    sa.func.lower(sa.func.coalesce(self.table.description, "")).like(term),
+                    sa.func.lower(sa.func.coalesce(self.table.description, "")).like(
+                        term
+                    ),
                     owner_match,
                     creator_match,
                 )
@@ -428,9 +430,7 @@ class ApiKeysV2Repository:
 
         # Total count (uncapped)
         count_query = (
-            sa.select(sa.func.count())
-            .select_from(self.table)
-            .where(*base_where)
+            sa.select(sa.func.count()).select_from(self.table).where(*base_where)
         )
         total = int(await self.session.scalar(count_query) or 0)
 

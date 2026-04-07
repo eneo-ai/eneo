@@ -23,12 +23,10 @@ class StorageInfoQueryResult(TypedDict):
 
 
 class StorageInfoFactory:
-
     @staticmethod
     def _create_storage_space_info_from_db(
         query_result: list[StorageInfoQueryResult],
     ) -> dict["UUID", StorageSpaceInfo]:
-
         storage_space_info_dict = {}
         for row in query_result:
             space = row["spaces"]

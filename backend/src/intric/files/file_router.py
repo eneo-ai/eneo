@@ -255,7 +255,7 @@ async def download_file_signed(
 
     total_size = len(content_bytes)
     headers = {
-        "Content-Disposition": f"{content_disposition.value}; filename=\"{response_filename}\"",
+        "Content-Disposition": f'{content_disposition.value}; filename="{response_filename}"',
         "Accept-Ranges": "bytes",
     }
 

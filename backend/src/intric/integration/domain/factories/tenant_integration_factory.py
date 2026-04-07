@@ -19,6 +19,4 @@ class TenantIntegrationFactory:
 
     @staticmethod
     def create_entities(records: list[dict]) -> list[TenantIntegration]:
-        return [
-            TenantIntegrationFactory.create_entity(record) for record in records
-        ]
+        return [TenantIntegrationFactory.create_entity(record) for record in records]

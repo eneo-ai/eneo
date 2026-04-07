@@ -93,7 +93,9 @@ class Assistant(Entity):
         self.description = description
         self.insight_enabled = insight_enabled
         self.data_retention_days = data_retention_days
-        self.type = AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
+        self.type = (
+            AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
+        )
         self._metadata_json = metadata_json
         self.icon_id = icon_id
 
@@ -199,7 +201,9 @@ class Assistant(Entity):
         return self._integration_knowledge_list
 
     @integration_knowledge_list.setter
-    def integration_knowledge_list(self, integration_knowledge_list: list["IntegrationKnowledge"]):
+    def integration_knowledge_list(
+        self, integration_knowledge_list: list["IntegrationKnowledge"]
+    ):
         if integration_knowledge_list:
             self._validate_embedding_model(integration_knowledge_list)
 
@@ -338,7 +342,9 @@ class Assistant(Entity):
                 )
 
         # Fill half the context
-        num_chunks = self.completion_model.max_input_tokens // 200 // 2 if version == 2 else 30
+        num_chunks = (
+            self.completion_model.max_input_tokens // 200 // 2 if version == 2 else 30
+        )
 
         if self.has_knowledge():
             datastore_result = await references_service.get_references(

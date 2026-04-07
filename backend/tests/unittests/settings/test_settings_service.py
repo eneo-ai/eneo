@@ -30,6 +30,7 @@ class MockRepo:
 
 class MockFeatureFlagService:
     """Mock feature flag service for testing."""
+
     async def check_is_feature_enabled(self, feature_name: str, tenant_id=None):
         # Return False for using_templates by default (feature disabled)
         return False
@@ -45,9 +46,11 @@ class MockFeatureFlagService:
 
 class MockTenantRepo:
     """Mock tenant repo for testing."""
+
     async def get(self, tenant_id):
         # Return a mock tenant with provisioning=False
         from intric.tenants.tenant import TenantInDB, TenantState
+
         return TenantInDB(
             id=tenant_id,
             name="Test Tenant",
@@ -62,6 +65,7 @@ class MockTenantRepo:
 
 class MockAuditService:
     """Mock audit service for testing."""
+
     async def log_async(self, *args, **kwargs):
         pass
 

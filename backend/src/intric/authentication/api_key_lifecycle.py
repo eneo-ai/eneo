@@ -72,7 +72,9 @@ class ApiKeyLifecycleService:
             else None
         )
 
-        owner_user_id = None if request.ownership == ApiKeyOwnership.SERVICE else user.id
+        owner_user_id = (
+            None if request.ownership == ApiKeyOwnership.SERVICE else user.id
+        )
 
         record = await self.api_key_repo.create(
             tenant_id=user.tenant_id,

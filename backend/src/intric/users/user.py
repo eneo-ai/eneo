@@ -6,7 +6,12 @@ from uuid import UUID
 
 from pydantic import EmailStr, Field, computed_field, field_serializer, field_validator
 
-from intric.authentication.auth_models import AccessToken, ApiKey, ApiKeyInDB, ApiKeyV2InDB
+from intric.authentication.auth_models import (
+    AccessToken,
+    ApiKey,
+    ApiKeyInDB,
+    ApiKeyV2InDB,
+)
 from intric.main.models import BaseModel, InDB, ModelId, partial_model
 from intric.predefined_roles.predefined_role import (
     PredefinedRoleInDB,

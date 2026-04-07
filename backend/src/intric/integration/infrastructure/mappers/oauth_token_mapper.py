@@ -23,7 +23,5 @@ class OauthTokenMapper(EntityMapper[OauthToken, OauthTokenDBModel]):
     def to_entity(self, db_model: OauthTokenDBModel) -> OauthToken:
         return OauthTokenFactory.create_entity(record=db_model)
 
-    def to_entities(
-        self, db_models: List[OauthTokenDBModel]
-    ) -> List[OauthToken]:
+    def to_entities(self, db_models: List[OauthTokenDBModel]) -> List[OauthToken]:
         pass

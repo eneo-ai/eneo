@@ -19,7 +19,9 @@ from intric.integration.infrastructure.auth_service.base_auth_service import (
 from intric.main.config import get_settings
 
 if TYPE_CHECKING:
-    from intric.integration.domain.entities.tenant_sharepoint_app import TenantSharePointApp
+    from intric.integration.domain.entities.tenant_sharepoint_app import (
+        TenantSharePointApp,
+    )
 
 logger = getLogger(__name__)
 
@@ -27,6 +29,7 @@ logger = getLogger(__name__)
 @dataclass
 class ServiceAccountCredentials:
     """Credentials for service account OAuth flow."""
+
     client_id: str
     client_secret: str
     tenant_domain: str
@@ -37,6 +40,7 @@ class ServiceAccountCredentials:
 @dataclass
 class ServiceAccountTokenResult:
     """Result of service account token exchange."""
+
     access_token: str
     refresh_token: str
     email: Optional[str] = None

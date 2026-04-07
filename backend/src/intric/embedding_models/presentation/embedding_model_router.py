@@ -32,7 +32,9 @@ async def get_embedding_models(
     service = container.embedding_model_crud_service()
     models = await service.get_embedding_models()
 
-    return PaginatedResponse(items=[EmbeddingModelPublic.from_domain(model) for model in models])
+    return PaginatedResponse(
+        items=[EmbeddingModelPublic.from_domain(model) for model in models]
+    )
 
 
 @router.get(
@@ -93,8 +95,16 @@ async def update_embedding_model(
 
     # Track security classification changes
     if update.security_classification is not NOT_PROVIDED:
-        old_sc_name = old_model.security_classification.name if old_model.security_classification else None
-        new_sc_name = model.security_classification.name if model.security_classification else None
+        old_sc_name = (
+            old_model.security_classification.name
+            if old_model.security_classification
+            else None
+        )
+        new_sc_name = (
+            model.security_classification.name
+            if model.security_classification
+            else None
+        )
         if old_sc_name != new_sc_name:
             changes["security_classification"] = {
                 "old": old_sc_name,

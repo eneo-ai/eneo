@@ -9,7 +9,6 @@ logger = get_logger(__name__)
 
 
 def gen_transaction(session: AsyncSession):
-
     @wrapt.decorator
     async def _inner(func, instance, args, kwargs):
         transaction_id = uuid.uuid4()

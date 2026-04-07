@@ -54,7 +54,7 @@ class AssistantTemplateRepository:
         """
         base_query = select(self._db_model).where(
             self._db_model.id == assistant_template_id,
-            self._db_model.deleted_at.is_(None)
+            self._db_model.deleted_at.is_(None),
         )
 
         if tenant_id is not None:
@@ -69,7 +69,9 @@ class AssistantTemplateRepository:
 
         return self.factory.create_assistant_template(item=record)
 
-    async def get_assistant_template_list(self, tenant_id: Optional["UUID"] = None) -> list["AssistantTemplate"]:
+    async def get_assistant_template_list(
+        self, tenant_id: Optional["UUID"] = None
+    ) -> list["AssistantTemplate"]:
         """Get all active templates.
 
         If tenant_id provided:
@@ -80,15 +82,13 @@ class AssistantTemplateRepository:
           - Return templates WHERE tenant_id IS NULL AND deleted_at IS NULL
           - Global templates only
         """
-        base_query = select(self._db_model).where(
-            self._db_model.deleted_at.is_(None)
-        )
+        base_query = select(self._db_model).where(self._db_model.deleted_at.is_(None))
 
         if tenant_id is not None:
             base_query = base_query.where(
                 or_(
                     self._db_model.tenant_id == tenant_id,
-                    self._db_model.tenant_id.is_(None)
+                    self._db_model.tenant_id.is_(None),
                 )
             )
         else:
@@ -153,14 +153,15 @@ class AssistantTemplateRepository:
         Used for admin management page.
         """
         base_query = select(self._db_model).where(
-            self._db_model.tenant_id == tenant_id,
-            self._db_model.deleted_at.is_(None)
+            self._db_model.tenant_id == tenant_id, self._db_model.deleted_at.is_(None)
         )
         query = self._apply_options(query=base_query)
         results = await self.session.scalars(query)
         return self.factory.create_assistant_template_list(items=results.all())
 
-    async def check_duplicate_name(self, name: str, tenant_id: Optional["UUID"] = None) -> bool:
+    async def check_duplicate_name(
+        self, name: str, tenant_id: Optional["UUID"] = None
+    ) -> bool:
         """Check if template name already exists.
 
         If tenant_id provided:
@@ -172,8 +173,7 @@ class AssistantTemplateRepository:
         Returns True if duplicate exists, False otherwise.
         """
         query = select(func.count(self._db_model.id)).where(
-            self._db_model.name == name,
-            self._db_model.deleted_at.is_(None)
+            self._db_model.name == name, self._db_model.deleted_at.is_(None)
         )
         if tenant_id is not None:
             query = query.where(self._db_model.tenant_id == tenant_id)
@@ -183,21 +183,17 @@ class AssistantTemplateRepository:
         count = await self.session.scalar(query)
         return count > 0
 
-    async def soft_delete(self, id: "UUID", tenant_id: "UUID", user_id: "UUID") -> "AssistantTemplate":
+    async def soft_delete(
+        self, id: "UUID", tenant_id: "UUID", user_id: "UUID"
+    ) -> "AssistantTemplate":
         """Soft-delete template (mark with deleted_at).
 
         Validates: template belongs to tenant
         """
         stmt = (
             update(self._db_model)
-            .where(
-                self._db_model.id == id,
-                self._db_model.tenant_id == tenant_id
-            )
-            .values(
-                deleted_at=datetime.now(timezone.utc),
-                deleted_by_user_id=user_id
-            )
+            .where(self._db_model.id == id, self._db_model.tenant_id == tenant_id)
+            .values(deleted_at=datetime.now(timezone.utc), deleted_by_user_id=user_id)
             .returning(self._db_model)
         )
         result = await self.session.execute(stmt)
@@ -209,7 +205,9 @@ class AssistantTemplateRepository:
 
         return self.factory.create_assistant_template(item=record)
 
-    async def restore(self, id: "UUID", tenant_id: "UUID", user_id: "UUID") -> "AssistantTemplate":
+    async def restore(
+        self, id: "UUID", tenant_id: "UUID", user_id: "UUID"
+    ) -> "AssistantTemplate":
         """Restore soft-deleted template (clear deleted_at).
 
         Validates: template belongs to tenant and is deleted
@@ -219,12 +217,12 @@ class AssistantTemplateRepository:
             .where(
                 self._db_model.id == id,
                 self._db_model.tenant_id == tenant_id,
-                self._db_model.deleted_at.is_not(None)
+                self._db_model.deleted_at.is_not(None),
             )
             .values(
                 deleted_at=None,
                 restored_by_user_id=user_id,
-                restored_at=datetime.now(timezone.utc)
+                restored_at=datetime.now(timezone.utc),
             )
             .returning(self._db_model)
         )
@@ -245,29 +243,34 @@ class AssistantTemplateRepository:
         """
         from sqlalchemy import delete
 
-        stmt = (
-            delete(self._db_model)
-            .where(
-                self._db_model.id == id,
-                self._db_model.tenant_id == tenant_id,
-                self._db_model.deleted_at.is_not(None)  # Only hard-delete soft-deleted items
-            )
+        stmt = delete(self._db_model).where(
+            self._db_model.id == id,
+            self._db_model.tenant_id == tenant_id,
+            self._db_model.deleted_at.is_not(
+                None
+            ),  # Only hard-delete soft-deleted items
         )
         result = await self.session.execute(stmt)
         await self.session.flush()
 
         return result.rowcount > 0
 
-    async def get_deleted_for_tenant(self, tenant_id: "UUID") -> list["AssistantTemplate"]:
+    async def get_deleted_for_tenant(
+        self, tenant_id: "UUID"
+    ) -> list["AssistantTemplate"]:
         """Get soft-deleted templates for audit trail view.
 
         Returns templates WHERE tenant_id = ? AND deleted_at IS NOT NULL
         Ordered by deleted_at DESC (most recently deleted first)
         """
-        base_query = select(self._db_model).where(
-            self._db_model.tenant_id == tenant_id,
-            self._db_model.deleted_at.is_not(None)
-        ).order_by(self._db_model.deleted_at.desc())
+        base_query = (
+            select(self._db_model)
+            .where(
+                self._db_model.tenant_id == tenant_id,
+                self._db_model.deleted_at.is_not(None),
+            )
+            .order_by(self._db_model.deleted_at.desc())
+        )
 
         query = self._apply_options(query=base_query)
         results = await self.session.scalars(query)

@@ -163,9 +163,9 @@ class ToolApprovalManager:
         user_id: UUID,
     ) -> bool:
         context = payload.get("context", {})
-        return context.get("tenant_id") == str(tenant_id) and context.get("user_id") == str(
-            user_id
-        )
+        return context.get("tenant_id") == str(tenant_id) and context.get(
+            "user_id"
+        ) == str(user_id)
 
     @staticmethod
     def _build_decisions(
@@ -323,7 +323,9 @@ class ToolApprovalManager:
                 continue
             normalized_incoming[decision.tool_call_id] = decision
 
-        existing_decisions: dict[str, dict[str, Any]] = payload.setdefault("decisions", {})
+        existing_decisions: dict[str, dict[str, Any]] = payload.setdefault(
+            "decisions", {}
+        )
 
         if payload.get("finalized"):
             conflict = False
@@ -346,7 +348,9 @@ class ToolApprovalManager:
                 status="accepted",
                 response_status="already_processed",
                 decisions_received=len(existing_decisions),
-                decisions_remaining=max(0, len(required_tool_ids) - len(existing_decisions)),
+                decisions_remaining=max(
+                    0, len(required_tool_ids) - len(existing_decisions)
+                ),
                 unrecognized_tool_call_ids=unrecognized,
             )
 
@@ -369,7 +373,9 @@ class ToolApprovalManager:
             status="accepted",
             response_status="accepted",
             decisions_received=len(existing_decisions),
-            decisions_remaining=max(0, len(required_tool_ids) - len(existing_decisions)),
+            decisions_remaining=max(
+                0, len(required_tool_ids) - len(existing_decisions)
+            ),
             unrecognized_tool_call_ids=unrecognized,
         )
 

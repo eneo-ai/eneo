@@ -90,8 +90,16 @@ async def update_transcription_model(
 
     # Track security classification changes
     if update_flags.security_classification is not NOT_PROVIDED:
-        old_sc_name = old_model.security_classification.name if old_model.security_classification else None
-        new_sc_name = transcription_model.security_classification.name if transcription_model.security_classification else None
+        old_sc_name = (
+            old_model.security_classification.name
+            if old_model.security_classification
+            else None
+        )
+        new_sc_name = (
+            transcription_model.security_classification.name
+            if transcription_model.security_classification
+            else None
+        )
         if old_sc_name != new_sc_name:
             changes["security_classification"] = {
                 "old": old_sc_name,

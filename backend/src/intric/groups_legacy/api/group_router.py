@@ -7,7 +7,10 @@ from intric.ai_models.embedding_models.datastore.datastore_models import (
     SemanticSearchRequest,
     SemanticSearchResponse,
 )
-from intric.authentication.auth_dependencies import get_current_active_user, get_scope_filter
+from intric.authentication.auth_dependencies import (
+    get_current_active_user,
+    get_scope_filter,
+)
 from intric.collections.presentation.collection_models import (
     CollectionPublic,
     CollectionUpdate,

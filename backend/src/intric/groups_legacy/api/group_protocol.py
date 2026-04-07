@@ -15,11 +15,16 @@ def to_group_public_with_metadata(group: Group, num_info_blobs: int):
 
 
 def to_groups_public_with_metadata(groups: list[Group], counts: list[int]):
-    return [to_group_public_with_metadata(group, count) for group, count in zip(groups, counts)]
+    return [
+        to_group_public_with_metadata(group, count)
+        for group, count in zip(groups, counts)
+    ]
 
 
 def to_deletion_response(group: Group, num_info_blobs: int):
     return DeleteGroupResponse(
-        **to_group_public_with_metadata(group, num_info_blobs=num_info_blobs).model_dump(),
+        **to_group_public_with_metadata(
+            group, num_info_blobs=num_info_blobs
+        ).model_dump(),
         deletion_info=DeletionInfo(success=True),
     )

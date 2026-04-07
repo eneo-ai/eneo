@@ -3,7 +3,9 @@
 import pytest
 
 from intric.audit.application.audit_config_service import AuditConfigService
-from intric.audit.infrastructure.audit_config_repository import AuditConfigRepositoryImpl
+from intric.audit.infrastructure.audit_config_repository import (
+    AuditConfigRepositoryImpl,
+)
 from intric.audit.schemas.audit_config_schemas import CategoryUpdate
 from intric.worker.redis import get_redis
 
@@ -17,19 +19,17 @@ async def seeded_tenant(db_session, test_tenant):
         repo = AuditConfigRepositoryImpl(session)
         # Seed all 7 categories
         for category in [
-            'admin_actions',
-            'user_actions',
-            'security_events',
-            'file_operations',
-            'integration_events',
-            'system_actions',
-            'audit_access',
+            "admin_actions",
+            "user_actions",
+            "security_events",
+            "file_operations",
+            "integration_events",
+            "system_actions",
+            "audit_access",
         ]:
             await repo.update(test_tenant.id, category, True)
         await session.commit()
     return test_tenant
-
-
 
 
 class TestAuditConfigRepository:
@@ -47,13 +47,13 @@ class TestAuditConfigRepository:
 
             categories = {config[0] for config in configs}
             expected_categories = {
-                'admin_actions',
-                'user_actions',
-                'security_events',
-                'file_operations',
-                'integration_events',
-                'system_actions',
-                'audit_access',
+                "admin_actions",
+                "user_actions",
+                "security_events",
+                "file_operations",
+                "integration_events",
+                "system_actions",
+                "audit_access",
             }
             assert categories == expected_categories
 
@@ -67,7 +67,9 @@ class TestAuditConfigRepository:
 
             # All categories should be enabled by default
             for category, enabled in configs:
-                assert enabled is True, f"Category {category} should be enabled by default"
+                assert enabled is True, (
+                    f"Category {category} should be enabled by default"
+                )
 
     async def test_find_by_tenant_and_category_existing(
         self, db_session, seeded_tenant
@@ -76,11 +78,11 @@ class TestAuditConfigRepository:
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
             config = await repo.find_by_tenant_and_category(
-                seeded_tenant.id, 'admin_actions'
+                seeded_tenant.id, "admin_actions"
             )
 
             assert config is not None
-            assert config[0] == 'admin_actions'
+            assert config[0] == "admin_actions"
             assert config[1] is True
 
     async def test_find_by_tenant_and_category_nonexistent(
@@ -90,7 +92,7 @@ class TestAuditConfigRepository:
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
             config = await repo.find_by_tenant_and_category(
-                seeded_tenant.id, 'nonexistent_category'
+                seeded_tenant.id, "nonexistent_category"
             )
 
             assert config is None
@@ -102,14 +104,14 @@ class TestAuditConfigRepository:
         # Update in one session
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
-            await repo.update(seeded_tenant.id, 'admin_actions', False)
+            await repo.update(seeded_tenant.id, "admin_actions", False)
             await session.commit()
 
         # Verify in fresh session
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
             config = await repo.find_by_tenant_and_category(
-                seeded_tenant.id, 'admin_actions'
+                seeded_tenant.id, "admin_actions"
             )
 
             assert config is not None
@@ -122,39 +124,37 @@ class TestAuditConfigRepository:
         # Disable then re-enable in one session
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
-            await repo.update(seeded_tenant.id, 'user_actions', False)
+            await repo.update(seeded_tenant.id, "user_actions", False)
             await session.commit()
 
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
-            await repo.update(seeded_tenant.id, 'user_actions', True)
+            await repo.update(seeded_tenant.id, "user_actions", True)
             await session.commit()
 
         # Verify in fresh session
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
             config = await repo.find_by_tenant_and_category(
-                seeded_tenant.id, 'user_actions'
+                seeded_tenant.id, "user_actions"
             )
 
             assert config is not None
             assert config[1] is True
 
-    async def test_update_creates_if_not_exists_upsert(
-        self, db_session, seeded_tenant
-    ):
+    async def test_update_creates_if_not_exists_upsert(self, db_session, seeded_tenant):
         """Test that update creates a new row if it doesn't exist (upsert behavior)."""
         # Update in one session
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
-            await repo.update(seeded_tenant.id, 'admin_actions', False)
+            await repo.update(seeded_tenant.id, "admin_actions", False)
             await session.commit()
 
         # Verify in fresh session
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
             config = await repo.find_by_tenant_and_category(
-                seeded_tenant.id, 'admin_actions'
+                seeded_tenant.id, "admin_actions"
             )
 
             assert config is not None
@@ -178,13 +178,13 @@ class TestAuditConfigService:
             # Verify all categories have required fields
             for category_config in response.categories:
                 assert category_config.category in {
-                    'admin_actions',
-                    'user_actions',
-                    'security_events',
-                    'file_operations',
-                    'integration_events',
-                    'system_actions',
-                    'audit_access',
+                    "admin_actions",
+                    "user_actions",
+                    "security_events",
+                    "file_operations",
+                    "integration_events",
+                    "system_actions",
+                    "audit_access",
                 }
                 assert isinstance(category_config.enabled, bool)
                 assert len(category_config.description) > 0
@@ -202,44 +202,40 @@ class TestAuditConfigService:
             response = await service.get_config(seeded_tenant.id)
 
             admin_config = next(
-                c for c in response.categories if c.category == 'admin_actions'
+                c for c in response.categories if c.category == "admin_actions"
             )
             assert admin_config.action_count == 23
 
-    async def test_update_config_single_category(
-        self, db_session, seeded_tenant
-    ):
+    async def test_update_config_single_category(self, db_session, seeded_tenant):
         """Test updating a single category."""
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
             service = AuditConfigService(repository=repo)
 
-            updates = [CategoryUpdate(category='file_operations', enabled=False)]
+            updates = [CategoryUpdate(category="file_operations", enabled=False)]
             response = await service.update_config(seeded_tenant.id, updates)
 
             file_ops_config = next(
-                c for c in response.categories if c.category == 'file_operations'
+                c for c in response.categories if c.category == "file_operations"
             )
             assert file_ops_config.enabled is False
 
             # Other categories should remain enabled
             admin_config = next(
-                c for c in response.categories if c.category == 'admin_actions'
+                c for c in response.categories if c.category == "admin_actions"
             )
             assert admin_config.enabled is True
 
-    async def test_update_config_multiple_categories(
-        self, db_session, seeded_tenant
-    ):
+    async def test_update_config_multiple_categories(self, db_session, seeded_tenant):
         """Test updating multiple categories at once."""
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
             service = AuditConfigService(repository=repo)
 
             updates = [
-                CategoryUpdate(category='admin_actions', enabled=False),
-                CategoryUpdate(category='security_events', enabled=False),
-                CategoryUpdate(category='file_operations', enabled=False),
+                CategoryUpdate(category="admin_actions", enabled=False),
+                CategoryUpdate(category="security_events", enabled=False),
+                CategoryUpdate(category="file_operations", enabled=False),
             ]
 
             response = await service.update_config(seeded_tenant.id, updates)
@@ -248,39 +244,35 @@ class TestAuditConfigService:
                 c.category for c in response.categories if not c.enabled
             }
             assert disabled_categories == {
-                'admin_actions',
-                'security_events',
-                'file_operations',
+                "admin_actions",
+                "security_events",
+                "file_operations",
             }
 
-    async def test_is_category_enabled_default_true(
-        self, db_session, seeded_tenant
-    ):
+    async def test_is_category_enabled_default_true(self, db_session, seeded_tenant):
         """Test that is_category_enabled returns True by default."""
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
             service = AuditConfigService(repository=repo)
 
             enabled = await service.is_category_enabled(
-                seeded_tenant.id, 'admin_actions'
+                seeded_tenant.id, "admin_actions"
             )
             assert enabled is True
 
-    async def test_is_category_enabled_after_disable(
-        self, db_session, seeded_tenant
-    ):
+    async def test_is_category_enabled_after_disable(self, db_session, seeded_tenant):
         """Test that is_category_enabled returns False after disabling."""
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
             service = AuditConfigService(repository=repo)
 
             # Disable admin_actions
-            updates = [CategoryUpdate(category='admin_actions', enabled=False)]
+            updates = [CategoryUpdate(category="admin_actions", enabled=False)]
             await service.update_config(seeded_tenant.id, updates)
 
             # Check if it's disabled
             enabled = await service.is_category_enabled(
-                seeded_tenant.id, 'admin_actions'
+                seeded_tenant.id, "admin_actions"
             )
             assert enabled is False
 
@@ -295,7 +287,7 @@ class TestAuditConfigService:
 
             # First call - cache miss (database query)
             enabled1 = await service.is_category_enabled(
-                seeded_tenant.id, 'user_actions'
+                seeded_tenant.id, "user_actions"
             )
             assert enabled1 is True
 
@@ -303,17 +295,15 @@ class TestAuditConfigService:
             cache_key = f"audit_config:{seeded_tenant.id}:user_actions"
             cached_value = await redis.get(cache_key)
             assert cached_value is not None
-            assert cached_value.decode('utf-8') == "true"
+            assert cached_value.decode("utf-8") == "true"
 
             # Second call - cache hit (no database query)
             enabled2 = await service.is_category_enabled(
-                seeded_tenant.id, 'user_actions'
+                seeded_tenant.id, "user_actions"
             )
             assert enabled2 is True
 
-    async def test_cache_invalidation_on_update(
-        self, db_session, seeded_tenant
-    ):
+    async def test_cache_invalidation_on_update(self, db_session, seeded_tenant):
         """Test that Redis cache is invalidated when config is updated."""
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
@@ -321,9 +311,7 @@ class TestAuditConfigService:
             redis = get_redis()
 
             # Populate cache
-            await service.is_category_enabled(
-                seeded_tenant.id, 'security_events'
-            )
+            await service.is_category_enabled(seeded_tenant.id, "security_events")
 
             cache_key = f"audit_config:{seeded_tenant.id}:security_events"
 
@@ -332,7 +320,7 @@ class TestAuditConfigService:
             assert cached_before is not None
 
             # Update the category
-            updates = [CategoryUpdate(category='security_events', enabled=False)]
+            updates = [CategoryUpdate(category="security_events", enabled=False)]
             await service.update_config(seeded_tenant.id, updates)
 
             # Verify cache was invalidated
@@ -341,14 +329,14 @@ class TestAuditConfigService:
 
             # Next call should query database and set new cache value
             enabled = await service.is_category_enabled(
-                seeded_tenant.id, 'security_events'
+                seeded_tenant.id, "security_events"
             )
             assert enabled is False
 
             # Verify new cache value
             cached_new = await redis.get(cache_key)
             assert cached_new is not None
-            assert cached_new.decode('utf-8') == "false"
+            assert cached_new.decode("utf-8") == "false"
 
     async def test_is_category_enabled_unknown_category_defaults_true(
         self, db_session, seeded_tenant
@@ -359,13 +347,11 @@ class TestAuditConfigService:
             service = AuditConfigService(repository=repo)
 
             enabled = await service.is_category_enabled(
-                seeded_tenant.id, 'unknown_category'
+                seeded_tenant.id, "unknown_category"
             )
             assert enabled is True
 
-    async def test_cache_ttl_is_60_seconds(
-        self, db_session, seeded_tenant
-    ):
+    async def test_cache_ttl_is_60_seconds(self, db_session, seeded_tenant):
         """Test that cache TTL is set to 60 seconds."""
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
@@ -373,9 +359,7 @@ class TestAuditConfigService:
             redis = get_redis()
 
             # Trigger cache population
-            await service.is_category_enabled(
-                seeded_tenant.id, 'audit_access'
-            )
+            await service.is_category_enabled(seeded_tenant.id, "audit_access")
 
             cache_key = f"audit_config:{seeded_tenant.id}:audit_access"
             ttl = await redis.ttl(cache_key)
@@ -398,29 +382,27 @@ class TestTenantIsolation:
             # Disable admin_actions
             await service.update_config(
                 seeded_tenant.id,
-                [CategoryUpdate(category='admin_actions', enabled=False)]
+                [CategoryUpdate(category="admin_actions", enabled=False)],
             )
 
             # Verify admin_actions is disabled
             enabled_admin = await service.is_category_enabled(
-                seeded_tenant.id, 'admin_actions'
+                seeded_tenant.id, "admin_actions"
             )
             assert enabled_admin is False
 
             # Verify other categories remain enabled
             enabled_user = await service.is_category_enabled(
-                seeded_tenant.id, 'user_actions'
+                seeded_tenant.id, "user_actions"
             )
             assert enabled_user is True
 
             enabled_security = await service.is_category_enabled(
-                seeded_tenant.id, 'security_events'
+                seeded_tenant.id, "security_events"
             )
             assert enabled_security is True
 
-    async def test_cache_keys_are_category_specific(
-        self, db_session, seeded_tenant
-    ):
+    async def test_cache_keys_are_category_specific(self, db_session, seeded_tenant):
         """Verify that cache invalidation is category-specific."""
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
@@ -428,12 +410,8 @@ class TestTenantIsolation:
             redis = get_redis()
 
             # Populate cache for two different categories
-            await service.is_category_enabled(
-                seeded_tenant.id, 'user_actions'
-            )
-            await service.is_category_enabled(
-                seeded_tenant.id, 'file_operations'
-            )
+            await service.is_category_enabled(seeded_tenant.id, "user_actions")
+            await service.is_category_enabled(seeded_tenant.id, "file_operations")
 
             # Verify both are cached
             cache_key1 = f"audit_config:{seeded_tenant.id}:user_actions"
@@ -448,7 +426,7 @@ class TestTenantIsolation:
             # Update only user_actions
             await service.update_config(
                 seeded_tenant.id,
-                [CategoryUpdate(category='user_actions', enabled=False)]
+                [CategoryUpdate(category="user_actions", enabled=False)],
             )
 
             # Verify user_actions cache was invalidated

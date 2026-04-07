@@ -30,7 +30,9 @@ class DummySpaceService:
 
 def _service_with_user(patterns: list[str], *, permissions: list[object] | None = None):
     tenant = SimpleNamespace(api_key_policy={})
-    user = SimpleNamespace(tenant=tenant, permissions=permissions or [], tenant_id=uuid4())
+    user = SimpleNamespace(
+        tenant=tenant, permissions=permissions or [], tenant_id=uuid4()
+    )
     return ApiKeyPolicyService(
         allowed_origin_repo=DummyOriginRepo(patterns),
         space_service=DummySpaceService(),

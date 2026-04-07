@@ -85,8 +85,10 @@ class AssistantTemplateUpdate(BaseModel):
 
 # Admin-specific models for tenant-scoped templates
 
+
 class AssistantTemplateAdminPublic(BaseModel):
     """Admin view of template with tenant fields."""
+
     id: UUID
     name: str
     description: str
@@ -112,6 +114,7 @@ class AssistantTemplateAdminPublic(BaseModel):
 
 class AssistantTemplateAdminListPublic(BaseModel):
     """Admin list response."""
+
     items: list[AssistantTemplateAdminPublic]
 
     @computed_field
@@ -122,6 +125,7 @@ class AssistantTemplateAdminListPublic(BaseModel):
 
 class AssistantTemplateAdminCreate(BaseModel):
     """Admin template creation request."""
+
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=2000)
     category: str = Field(..., min_length=1, max_length=100)
@@ -134,6 +138,7 @@ class AssistantTemplateAdminCreate(BaseModel):
 
 class AssistantTemplateAdminUpdate(BaseModel):
     """Admin template update request (PATCH semantics)."""
+
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = Field(None, min_length=1, max_length=2000)
     category: Optional[str] = Field(None, min_length=1, max_length=100)
@@ -154,4 +159,5 @@ class AssistantTemplateAdminUpdate(BaseModel):
 
 class AssistantTemplateToggleDefaultRequest(BaseModel):
     """Request to toggle template as default/featured."""
+
     is_default: bool

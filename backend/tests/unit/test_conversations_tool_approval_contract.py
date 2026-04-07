@@ -306,7 +306,7 @@ async def test_approve_tools_success_creates_audit_log_entry():
             decisions=[decision],
             container=container,
         )
-    
+
     mock_validate_scope.assert_awaited_once()
 
     audit_service.log_async.assert_awaited_once()

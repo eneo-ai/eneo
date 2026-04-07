@@ -107,7 +107,9 @@ class TaskService:
                 )
 
             # Set name of the job to the filename being processed
-            job = await self.job_service.queue_job(task_type, name=filename, task_params=params)
+            job = await self.job_service.queue_job(
+                task_type, name=filename, task_params=params
+            )
         except BaseException:
             with contextlib.suppress(FileNotFoundError):
                 os.remove(filepath)

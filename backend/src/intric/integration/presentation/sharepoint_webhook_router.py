@@ -33,7 +33,9 @@ async def sharepoint_webhook(
     # Avoid logging full payload/headers since they may contain sensitive metadata.
     payload: Dict[str, Any] = await request.json()
     notifications = payload.get("value", [])
-    logger.info("Received SharePoint webhook with %s notification(s)", len(notifications))
+    logger.info(
+        "Received SharePoint webhook with %s notification(s)", len(notifications)
+    )
     if notifications:
         first = notifications[0]
         logger.debug(

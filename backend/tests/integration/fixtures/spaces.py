@@ -3,6 +3,7 @@ Fixtures for spaces (mirrors src/intric/spaces/).
 
 These fixtures create spaces with access to completion models.
 """
+
 from typing import List
 from uuid import UUID
 
@@ -33,11 +34,9 @@ def space_factory(admin_user):
     Returns:
         Spaces: The created space
     """
+
     async def _create_space(
-        session,
-        name: str,
-        model_ids: List[UUID] = None,
-        **extra
+        session, name: str, model_ids: List[UUID] = None, **extra
     ) -> Spaces:
         """Create a space with access to the specified models.
 
@@ -55,9 +54,9 @@ def space_factory(admin_user):
         org_space = (
             await session.execute(
                 select(SpacesTable).where(
-                    (SpacesTable.tenant_id == admin_user.tenant_id) &
-                    (SpacesTable.user_id.is_(None)) &
-                    (SpacesTable.tenant_space_id.is_(None))
+                    (SpacesTable.tenant_id == admin_user.tenant_id)
+                    & (SpacesTable.user_id.is_(None))
+                    & (SpacesTable.tenant_space_id.is_(None))
                 )
             )
         ).scalar_one_or_none()
@@ -78,7 +77,7 @@ def space_factory(admin_user):
             name=name,
             tenant_id=admin_user.tenant_id,
             tenant_space_id=org_space.id,  # Make it a child space
-            **extra
+            **extra,
         )
 
         session.add(space)

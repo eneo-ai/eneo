@@ -8,6 +8,7 @@ from intric.token_usage.domain.token_usage_models import ModelTokenUsage
 @dataclass
 class UserTokenUsage:
     """Token usage data for a specific user."""
+
     user_id: UUID
     username: str
     email: str
@@ -25,6 +26,7 @@ class UserTokenUsage:
 @dataclass
 class UserTokenUsageSummary:
     """Summary of token usage across multiple users."""
+
     users: list[UserTokenUsage]
     start_date: datetime
     end_date: datetime

@@ -63,7 +63,6 @@ class ModelInfo(BaseModel):
         return self.max_input_tokens
 
 
-
 # Relationship models
 class GroupWithEmbeddingModel(GroupInDBBase):
     embedding_model: Optional[EmbeddingModelLegacy] = None

@@ -1,6 +1,7 @@
 from uuid import UUID
 from intric.spaces.space import Space
 
+
 def effective_space_ids(space: Space) -> list[UUID]:
     """Return space IDs to query for knowledge (collections, websites, integrations).
 

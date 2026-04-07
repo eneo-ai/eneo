@@ -57,6 +57,7 @@ class FunctionCall:
 @dataclass
 class ToolCallMetadata:
     """Metadata for MCP tool calls to be rendered by frontend."""
+
     server_name: str
     tool_name: str
     arguments: Optional[dict] = None  # The input values provided to the tool

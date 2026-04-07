@@ -301,8 +301,12 @@ async def test_scoped_non_admin_keys_on_governance_fail_with_management_permissi
                 expected_auth_layer="api_key_method",
                 request_id=request_id,
             )
-            assert detail.get("context", {}).get("action") == "management", response.text
-            assert detail.get("context", {}).get("required_level") == "admin", response.text
+            assert detail.get("context", {}).get("action") == "management", (
+                response.text
+            )
+            assert detail.get("context", {}).get("required_level") == "admin", (
+                response.text
+            )
 
 
 @pytest.mark.integration
@@ -380,7 +384,9 @@ async def test_scoped_non_admin_keys_on_governance_write_fail_with_management_pe
                     path=path,
                 )
             )
-            assert detail.get("context", {}).get("action") == expected_action, response.text
+            assert detail.get("context", {}).get("action") == expected_action, (
+                response.text
+            )
             assert (
                 detail.get("context", {}).get("required_level") == expected_required
             ), response.text
@@ -583,7 +589,8 @@ async def test_kill_switch_scoped_admin_key_not_scope_blocked_on_locked_governan
             )
             detail = _error_detail(response)
             assert not (
-                response.status_code == 403 and detail.get("code") == "insufficient_scope"
+                response.status_code == 403
+                and detail.get("code") == "insufficient_scope"
             ), response.text
 
 
@@ -653,7 +660,8 @@ async def test_kill_switch_scoped_keys_not_scope_blocked_on_diagnostics(
             )
             detail = _error_detail(response)
             assert not (
-                response.status_code == 403 and detail.get("code") == "insufficient_scope"
+                response.status_code == 403
+                and detail.get("code") == "insufficient_scope"
             ), response.text
 
 
@@ -734,7 +742,9 @@ async def test_api_key_scope_smoke_matrix_no_500_on_representative_locked_and_co
             )
             if response.status_code == 403:
                 detail = _error_detail(response)
-                assert isinstance(detail.get("code"), str) and detail.get("code"), response.text
+                assert isinstance(detail.get("code"), str) and detail.get("code"), (
+                    response.text
+                )
 
 
 @pytest.mark.integration
@@ -772,7 +782,8 @@ async def test_scoped_read_keys_keep_access_to_low_risk_self_service_routes(
             assert response.status_code != 500, response.text
             detail = _error_detail(response)
             assert not (
-                response.status_code == 403 and detail.get("code") == "insufficient_scope"
+                response.status_code == 403
+                and detail.get("code") == "insufficient_scope"
             ), response.text
 
 

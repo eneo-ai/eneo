@@ -106,8 +106,10 @@ class AppTemplateUpdate(BaseModel):
 
 # Admin-specific models for tenant-scoped templates
 
+
 class AppTemplateAdminPublic(BaseModel):
     """Admin view of template with tenant fields."""
+
     id: UUID
     name: str
     description: str
@@ -135,6 +137,7 @@ class AppTemplateAdminPublic(BaseModel):
 
 class AppTemplateAdminListPublic(BaseModel):
     """Admin list response."""
+
     items: list[AppTemplateAdminPublic]
 
     @computed_field
@@ -145,6 +148,7 @@ class AppTemplateAdminListPublic(BaseModel):
 
 class AppTemplateAdminCreate(BaseModel):
     """Admin template creation request."""
+
     name: str
     description: Optional[str] = None
     category: str
@@ -159,6 +163,7 @@ class AppTemplateAdminCreate(BaseModel):
 
 class AppTemplateAdminUpdate(BaseModel):
     """Admin template update request (PATCH semantics)."""
+
     name: Optional[str] = None
     description: Optional[str] = None
     category: Optional[str] = None
@@ -181,4 +186,5 @@ class AppTemplateAdminUpdate(BaseModel):
 
 class AppTemplateToggleDefaultRequest(BaseModel):
     """Request to toggle template as default/featured."""
+
     is_default: bool

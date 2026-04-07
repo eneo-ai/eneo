@@ -26,6 +26,4 @@ class UserIntegrationFactory:
     def create_entities(
         records: list["UserIntegrationDBModel"],
     ) -> list[UserIntegration]:
-        return [
-            UserIntegrationFactory.create_entity(record) for record in records
-        ]
+        return [UserIntegrationFactory.create_entity(record) for record in records]

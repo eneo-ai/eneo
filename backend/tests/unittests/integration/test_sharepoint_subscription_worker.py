@@ -11,7 +11,9 @@ from uuid import uuid4
 
 import pytest
 
-from intric.integration.domain.entities.sharepoint_subscription import SharePointSubscription
+from intric.integration.domain.entities.sharepoint_subscription import (
+    SharePointSubscription,
+)
 from intric.integration.infrastructure.sharepoint_subscription_worker import (
     get_token_for_subscription,
     cleanup_orphaned_subscriptions,
@@ -23,7 +25,9 @@ from intric.integration.infrastructure.sharepoint_subscription_worker import (
 async def mock_session_context():
     """Mock async context manager for sessionmanager.session()."""
     mock_session = AsyncMock()
-    mock_session.begin = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()))
+    mock_session.begin = MagicMock(
+        return_value=AsyncMock(__aenter__=AsyncMock(), __aexit__=AsyncMock())
+    )
     yield mock_session
 
 
@@ -68,14 +72,18 @@ class TestGetTokenForSubscription:
     """Tests for get_token_for_subscription helper function."""
 
     @pytest.mark.asyncio
-    async def test_returns_oauth_token_for_user_oauth_auth(self, mock_subscription, mock_container):
+    async def test_returns_oauth_token_for_user_oauth_auth(
+        self, mock_subscription, mock_container
+    ):
         """Test that OAuth token is returned for user_oauth auth type."""
         # Setup user integration with user_oauth auth
         user_integration = MagicMock()
         user_integration.auth_type = "user_oauth"
         user_integration.tenant_app_id = None
 
-        mock_container.user_integration_repo().one = AsyncMock(return_value=user_integration)
+        mock_container.user_integration_repo().one = AsyncMock(
+            return_value=user_integration
+        )
 
         # Setup OAuth token
         oauth_token = MagicMock()
@@ -83,8 +91,8 @@ class TestGetTokenForSubscription:
         oauth_token.id = uuid4()
         oauth_token.access_token = "oauth-access-token"
 
-        mock_container.oauth_token_service().get_oauth_token_by_user_integration = AsyncMock(
-            return_value=oauth_token
+        mock_container.oauth_token_service().get_oauth_token_by_user_integration = (
+            AsyncMock(return_value=oauth_token)
         )
         mock_container.oauth_token_service().refresh_and_update_token = AsyncMock(
             return_value=oauth_token
@@ -100,7 +108,9 @@ class TestGetTokenForSubscription:
         mock_container.oauth_token_service().refresh_and_update_token.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_returns_tenant_app_token_for_tenant_app_auth(self, mock_subscription, mock_container):
+    async def test_returns_tenant_app_token_for_tenant_app_auth(
+        self, mock_subscription, mock_container
+    ):
         """Test that tenant app token is returned for tenant_app auth type."""
         tenant_app_id = uuid4()
 
@@ -109,13 +119,17 @@ class TestGetTokenForSubscription:
         user_integration.auth_type = "tenant_app"
         user_integration.tenant_app_id = tenant_app_id
 
-        mock_container.user_integration_repo().one = AsyncMock(return_value=user_integration)
+        mock_container.user_integration_repo().one = AsyncMock(
+            return_value=user_integration
+        )
 
         # Setup tenant app (not service account)
         tenant_app = MagicMock()
         tenant_app.is_service_account = MagicMock(return_value=False)
 
-        mock_container.tenant_sharepoint_app_repo().one = AsyncMock(return_value=tenant_app)
+        mock_container.tenant_sharepoint_app_repo().one = AsyncMock(
+            return_value=tenant_app
+        )
         mock_container.tenant_app_auth_service().get_access_token = AsyncMock(
             return_value="tenant-app-access-token"
         )
@@ -126,7 +140,9 @@ class TestGetTokenForSubscription:
         # Verify
         assert token is not None
         assert token.access_token == "tenant-app-access-token"
-        mock_container.tenant_app_auth_service().get_access_token.assert_called_once_with(tenant_app)
+        mock_container.tenant_app_auth_service().get_access_token.assert_called_once_with(
+            tenant_app
+        )
 
     @pytest.mark.asyncio
     async def test_returns_service_account_token_for_service_account_auth(
@@ -140,14 +156,18 @@ class TestGetTokenForSubscription:
         user_integration.auth_type = "tenant_app"
         user_integration.tenant_app_id = tenant_app_id
 
-        mock_container.user_integration_repo().one = AsyncMock(return_value=user_integration)
+        mock_container.user_integration_repo().one = AsyncMock(
+            return_value=user_integration
+        )
 
         # Setup tenant app (is service account)
         tenant_app = MagicMock()
         tenant_app.is_service_account = MagicMock(return_value=True)
         tenant_app.service_account_refresh_token = "old-refresh-token"
 
-        mock_container.tenant_sharepoint_app_repo().one = AsyncMock(return_value=tenant_app)
+        mock_container.tenant_sharepoint_app_repo().one = AsyncMock(
+            return_value=tenant_app
+        )
         mock_container.service_account_auth_service().refresh_access_token = AsyncMock(
             return_value={
                 "access_token": "service-account-access-token",
@@ -165,17 +185,23 @@ class TestGetTokenForSubscription:
             tenant_app
         )
         tenant_app.update_refresh_token.assert_called_once_with("new-refresh-token")
-        mock_container.tenant_sharepoint_app_repo().update.assert_called_once_with(tenant_app)
+        mock_container.tenant_sharepoint_app_repo().update.assert_called_once_with(
+            tenant_app
+        )
 
     @pytest.mark.asyncio
-    async def test_returns_none_when_no_oauth_token_found(self, mock_subscription, mock_container):
+    async def test_returns_none_when_no_oauth_token_found(
+        self, mock_subscription, mock_container
+    ):
         """Test that None is returned when no OAuth token exists."""
         user_integration = MagicMock()
         user_integration.auth_type = "user_oauth"
 
-        mock_container.user_integration_repo().one = AsyncMock(return_value=user_integration)
-        mock_container.oauth_token_service().get_oauth_token_by_user_integration = AsyncMock(
-            return_value=None
+        mock_container.user_integration_repo().one = AsyncMock(
+            return_value=user_integration
+        )
+        mock_container.oauth_token_service().get_oauth_token_by_user_integration = (
+            AsyncMock(return_value=None)
         )
 
         token = await get_token_for_subscription(mock_subscription, mock_container)
@@ -183,13 +209,17 @@ class TestGetTokenForSubscription:
         assert token is None
 
     @pytest.mark.asyncio
-    async def test_returns_none_when_tenant_app_id_missing(self, mock_subscription, mock_container):
+    async def test_returns_none_when_tenant_app_id_missing(
+        self, mock_subscription, mock_container
+    ):
         """Test that None is returned when tenant_app auth but no tenant_app_id."""
         user_integration = MagicMock()
         user_integration.auth_type = "tenant_app"
         user_integration.tenant_app_id = None
 
-        mock_container.user_integration_repo().one = AsyncMock(return_value=user_integration)
+        mock_container.user_integration_repo().one = AsyncMock(
+            return_value=user_integration
+        )
 
         token = await get_token_for_subscription(mock_subscription, mock_container)
 
@@ -227,7 +257,9 @@ class TestCleanupOrphanedSubscriptions:
         mock_container.sharepoint_subscription_repo().list_all = AsyncMock(
             return_value=[subscription]
         )
-        mock_container.sharepoint_subscription_repo().count_references = AsyncMock(return_value=1)
+        mock_container.sharepoint_subscription_repo().count_references = AsyncMock(
+            return_value=1
+        )
 
         # Patch sessionmanager and worker._create_container
         with patch(
@@ -260,18 +292,24 @@ class TestCleanupOrphanedSubscriptions:
         mock_container.sharepoint_subscription_repo().list_all = AsyncMock(
             return_value=[subscription]
         )
-        mock_container.sharepoint_subscription_repo().count_references = AsyncMock(return_value=0)
+        mock_container.sharepoint_subscription_repo().count_references = AsyncMock(
+            return_value=0
+        )
 
         # Setup user integration with tenant app
         user_integration = MagicMock()
         user_integration.auth_type = "tenant_app"
         user_integration.tenant_app_id = uuid4()
-        mock_container.user_integration_repo().one = AsyncMock(return_value=user_integration)
+        mock_container.user_integration_repo().one = AsyncMock(
+            return_value=user_integration
+        )
 
         # Setup tenant app
         tenant_app = MagicMock()
         tenant_app.is_service_account = MagicMock(return_value=False)
-        mock_container.tenant_sharepoint_app_repo().one = AsyncMock(return_value=tenant_app)
+        mock_container.tenant_sharepoint_app_repo().one = AsyncMock(
+            return_value=tenant_app
+        )
         mock_container.tenant_app_auth_service().get_access_token = AsyncMock(
             return_value="access-token"
         )
@@ -310,24 +348,29 @@ class TestRenewExpiringSubscriptions:
             site_id="site-123,web-123,list-123",
             subscription_id="sub-123",
             drive_id="drive-123",
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),  # Expiring soon
+            expires_at=datetime.now(timezone.utc)
+            + timedelta(hours=24),  # Expiring soon
         )
 
         # Setup subscription service
-        mock_container.sharepoint_subscription_service().list_expiring_subscriptions = AsyncMock(
-            return_value=[subscription]
+        mock_container.sharepoint_subscription_service().list_expiring_subscriptions = (
+            AsyncMock(return_value=[subscription])
         )
 
         # Setup user integration with tenant app
         user_integration = MagicMock()
         user_integration.auth_type = "tenant_app"
         user_integration.tenant_app_id = uuid4()
-        mock_container.user_integration_repo().one = AsyncMock(return_value=user_integration)
+        mock_container.user_integration_repo().one = AsyncMock(
+            return_value=user_integration
+        )
 
         # Setup tenant app
         tenant_app = MagicMock()
         tenant_app.is_service_account = MagicMock(return_value=False)
-        mock_container.tenant_sharepoint_app_repo().one = AsyncMock(return_value=tenant_app)
+        mock_container.tenant_sharepoint_app_repo().one = AsyncMock(
+            return_value=tenant_app
+        )
         mock_container.tenant_app_auth_service().get_access_token = AsyncMock(
             return_value="access-token"
         )
@@ -356,8 +399,8 @@ class TestRenewExpiringSubscriptions:
     @pytest.mark.asyncio
     async def test_returns_early_when_no_expiring_subscriptions(self, mock_container):
         """Test that job returns early when no subscriptions need renewal."""
-        mock_container.sharepoint_subscription_service().list_expiring_subscriptions = AsyncMock(
-            return_value=[]
+        mock_container.sharepoint_subscription_service().list_expiring_subscriptions = (
+            AsyncMock(return_value=[])
         )
 
         # Patch sessionmanager and worker._create_container

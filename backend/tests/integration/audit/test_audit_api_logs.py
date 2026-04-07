@@ -21,7 +21,9 @@ class TestLogsEndpointAuthentication:
         assert response.status_code == 401
         assert "AUDIT_SESSION_REQUIRED" in response.headers.get("X-Error-Code", "")
 
-    async def test_logs_with_valid_session_succeeds(self, client, auth_headers_with_session):
+    async def test_logs_with_valid_session_succeeds(
+        self, client, auth_headers_with_session
+    ):
         """Verify /logs returns 200 with valid auth and session."""
         headers, cookies = auth_headers_with_session
         response = await client.get(
@@ -67,7 +69,9 @@ class TestLogsEndpointResponse:
         assert data["page"] == 1
         assert data["page_size"] == 100  # Default page size
 
-    async def test_logs_items_have_required_fields(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_logs_items_have_required_fields(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify log items contain required fields."""
         headers, cookies = auth_headers_with_session
         response = await client.get(
@@ -91,7 +95,9 @@ class TestLogsEndpointResponse:
 class TestLogsEndpointFiltering:
     """Tests for /logs endpoint filtering capabilities."""
 
-    async def test_filter_by_action(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_filter_by_action(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify filtering by action type works."""
         headers, cookies = auth_headers_with_session
         response = await client.get(
@@ -105,7 +111,9 @@ class TestLogsEndpointFiltering:
         for log in data["logs"]:
             assert log["action"] == "user_created"
 
-    async def test_filter_by_date_range(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_filter_by_date_range(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify filtering by date range works."""
         headers, cookies = auth_headers_with_session
 
@@ -121,7 +129,9 @@ class TestLogsEndpointFiltering:
         )
         assert response.status_code == 200
 
-    async def test_filter_by_actor_id(self, client, auth_headers_with_session, sample_audit_logs, test_user):
+    async def test_filter_by_actor_id(
+        self, client, auth_headers_with_session, sample_audit_logs, test_user
+    ):
         """Verify filtering by actor_id works."""
         headers, cookies = auth_headers_with_session
         response = await client.get(
@@ -135,7 +145,9 @@ class TestLogsEndpointFiltering:
         for log in data["logs"]:
             assert log["actor_id"] == str(test_user)
 
-    async def test_combined_filters(self, client, auth_headers_with_session, sample_audit_logs, test_user):
+    async def test_combined_filters(
+        self, client, auth_headers_with_session, sample_audit_logs, test_user
+    ):
         """Verify multiple filters can be combined."""
         headers, cookies = auth_headers_with_session
 
@@ -146,7 +158,7 @@ class TestLogsEndpointFiltering:
             params={
                 "actor_id": str(test_user),
                 "action": "user_created",
-                "from_date": from_date
+                "from_date": from_date,
             },
             headers=headers,
             cookies=cookies,
@@ -157,7 +169,9 @@ class TestLogsEndpointFiltering:
 class TestLogsEndpointValidation:
     """Tests for /logs endpoint input validation."""
 
-    async def test_invalid_page_number_rejected(self, client, auth_headers_with_session):
+    async def test_invalid_page_number_rejected(
+        self, client, auth_headers_with_session
+    ):
         """Verify page < 1 is rejected."""
         headers, cookies = auth_headers_with_session
         response = await client.get(
@@ -187,7 +201,9 @@ class TestLogsEndpointValidation:
         )
         assert response.status_code == 422
 
-    async def test_invalid_date_format_rejected(self, client, auth_headers_with_session):
+    async def test_invalid_date_format_rejected(
+        self, client, auth_headers_with_session
+    ):
         """Verify invalid date format is rejected."""
         headers, cookies = auth_headers_with_session
         response = await client.get(
@@ -201,7 +217,9 @@ class TestLogsEndpointValidation:
 class TestLogsEndpointAuditTrail:
     """Tests for /logs endpoint self-auditing."""
 
-    async def test_viewing_logs_creates_audit_entry(self, client, auth_headers_with_session):
+    async def test_viewing_logs_creates_audit_entry(
+        self, client, auth_headers_with_session
+    ):
         """Verify viewing logs creates AUDIT_LOG_VIEWED entry."""
         headers, cookies = auth_headers_with_session
 
@@ -236,7 +254,7 @@ class TestAccessSessionEndpoint:
             json={
                 "category": "test",
                 "description": "Test description for audit access",
-            }
+            },
         )
         assert response.status_code == 401
 
@@ -252,7 +270,9 @@ class TestAccessSessionEndpoint:
         )
         assert response.status_code == 422
 
-    async def test_create_session_validates_description_length(self, client, auth_headers):
+    async def test_create_session_validates_description_length(
+        self, client, auth_headers
+    ):
         """Verify description minimum length (10 chars) is enforced."""
         response = await client.post(
             "/api/v1/audit/access-session",
@@ -315,11 +335,11 @@ class TestRateLimiting:
                 "/api/v1/audit/access-session",
                 json={
                     "category": "rate_limit_test",
-                    "description": f"Rate limit test session {i+1}",
+                    "description": f"Rate limit test session {i + 1}",
                 },
                 headers=auth_headers,
             )
-            assert response.status_code == 200, f"Session {i+1} should succeed"
+            assert response.status_code == 200, f"Session {i + 1} should succeed"
 
         # 6th request should be rate limited
         response = await client.post(
@@ -348,7 +368,9 @@ class TestUserLogsEndpoint:
         response = await client.get(f"/api/v1/audit/logs/user/{test_user}")
         assert response.status_code == 401
 
-    async def test_user_logs_returns_user_specific_data(self, client, auth_headers, test_user, sample_audit_logs):
+    async def test_user_logs_returns_user_specific_data(
+        self, client, auth_headers, test_user, sample_audit_logs
+    ):
         """Verify GDPR endpoint returns user-specific logs."""
         response = await client.get(
             f"/api/v1/audit/logs/user/{test_user}",

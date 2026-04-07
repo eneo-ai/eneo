@@ -204,7 +204,9 @@ async def test_initiate_auth_blocks_inactive_tenant(monkeypatch):
     )
 
     with pytest.raises(HTTPException) as exc:
-        await federation_router.initiate_auth(tenant="suspended", state=None, container=container)
+        await federation_router.initiate_auth(
+            tenant="suspended", state=None, container=container
+        )
 
     assert exc.value.status_code == 403
 
@@ -230,9 +232,7 @@ async def test_initiate_auth_uses_additional_redirect_uri_from_query_param(monke
             "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
             "canonical_public_origin": "https://canonical.example.com",
             "redirect_path": "/auth/callback",
-            "additional_redirect_uris": [
-                "https://external.example.com/auth/callback"
-            ],
+            "additional_redirect_uris": ["https://external.example.com/auth/callback"],
             "allowed_domains": ["example.com"],
         },
         created_at=datetime.now(timezone.utc),
@@ -273,9 +273,7 @@ async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
         modules=[],
         api_credentials={},
         federation_config={
-            "additional_redirect_uris": [
-                "https://external.example.com/auth/callback"
-            ]
+            "additional_redirect_uris": ["https://external.example.com/auth/callback"]
         },
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -293,7 +291,9 @@ async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
         federation_router,
         "aiohttp_client",
         lambda: FakeAioHttpClient(
-            FakeResponse({"authorization_endpoint": "https://idp.example.com/authorize"})
+            FakeResponse(
+                {"authorization_endpoint": "https://idp.example.com/authorize"}
+            )
         ),
     )
 
@@ -337,9 +337,7 @@ async def test_initiate_auth_rejects_unregistered_redirect_uri(monkeypatch):
             "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
             "canonical_public_origin": "https://canonical.example.com",
             "redirect_path": "/auth/callback",
-            "additional_redirect_uris": [
-                "https://external.example.com/auth/callback"
-            ],
+            "additional_redirect_uris": ["https://external.example.com/auth/callback"],
             "allowed_domains": ["example.com"],
         },
         created_at=datetime.now(timezone.utc),
@@ -440,7 +438,9 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
         "config_version": old_version,
     }
 
-    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+    signed_state = jwt.encode(
+        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    )
 
     cache_payload = {
         "tenant_id": str(tenant_id),
@@ -456,7 +456,9 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
     )
 
     # Simulate canonical origin update during login
-    tenant.federation_config["canonical_public_origin"] = "https://new.tenant.example.com"
+    tenant.federation_config["canonical_public_origin"] = (
+        "https://new.tenant.example.com"
+    )
     tenant.updated_at = datetime.now(timezone.utc)
 
     fake_response = FakeResponse({"id_token": "id", "access_token": "token"})
@@ -554,7 +556,9 @@ async def test_auth_callback_accepts_additional_redirect_uri(monkeypatch):
         "config_version": config_version,
     }
 
-    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+    signed_state = jwt.encode(
+        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    )
 
     cache_payload = {
         "tenant_id": str(tenant_id),
@@ -656,7 +660,9 @@ async def test_auth_callback_rejects_invalid_email_format(monkeypatch, bad_email
         "config_version": datetime.now(timezone.utc).isoformat(),
     }
 
-    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+    signed_state = jwt.encode(
+        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    )
 
     # Store state in Redis cache with correct key format (uses nonce, not full JWT)
     cache_payload = {
@@ -688,7 +694,10 @@ async def test_auth_callback_rejects_invalid_email_format(monkeypatch, bad_email
 
     assert exc.value.status_code == 401
     # Accept either "invalid" or "failed to validate" in error message
-    assert ("invalid" in exc.value.detail.lower() or "failed to validate" in exc.value.detail.lower())
+    assert (
+        "invalid" in exc.value.detail.lower()
+        or "failed to validate" in exc.value.detail.lower()
+    )
 
 
 # --- JIT Provisioning Tests ---
@@ -709,7 +718,9 @@ class PredefinedRolesRepoStub:
 class UserRepoStubForJIT:
     """User repo stub that can simulate a user not existing initially, then being created."""
 
-    def __init__(self, existing_user: UserInDB | None = None, tenant: TenantInDB | None = None):
+    def __init__(
+        self, existing_user: UserInDB | None = None, tenant: TenantInDB | None = None
+    ):
         self._user = existing_user
         self._tenant = tenant
         self._created_user = None
@@ -871,7 +882,9 @@ async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
         "config_version": config_version,
     }
 
-    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+    signed_state = jwt.encode(
+        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    )
 
     cache_payload = {
         "tenant_id": str(tenant_id),
@@ -981,7 +994,9 @@ async def test_jit_provisioning_returns_403_when_disabled(monkeypatch):
         "config_version": config_version,
     }
 
-    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+    signed_state = jwt.encode(
+        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    )
 
     cache_payload = {
         "tenant_id": str(tenant_id),
@@ -1095,7 +1110,9 @@ async def test_auth_callback_rejects_malformed_state_redirect_uri(monkeypatch):
         "config_version": config_version,
     }
 
-    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+    signed_state = jwt.encode(
+        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    )
 
     cache_payload = {
         "tenant_id": str(tenant_id),

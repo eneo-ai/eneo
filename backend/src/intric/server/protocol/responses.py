@@ -31,7 +31,9 @@ def streaming_response(
         # If only model is provided (backwards compatibility)
         schema = model.model_json_schema(ref_template="#/components/schemas/{model}")
 
-    streaming: dict[int | str, Any] = {200: {"content": {"text/event-stream": {"schema": schema}}}}
+    streaming: dict[int | str, Any] = {
+        200: {"content": {"text/event-stream": {"schema": schema}}}
+    }
 
     if response_codes is not None:
         codes = get_responses(response_codes)

@@ -75,8 +75,10 @@ class InfoBlobRepository:
 
         else:
             # Skydd mot none
-            raise ValueError("InfoBlob must reference a group, website, or integration_knowledge")
-        
+            raise ValueError(
+                "InfoBlob must reference a group, website, or integration_knowledge"
+            )
+
         info_blob_to_db = InfoBlobAddToDB(
             **info_blob.model_dump(),
             embedding_model_id=embedding_model_id,
@@ -97,7 +99,9 @@ class InfoBlobRepository:
         we never create duplicates - just update existing ones.
         """
         if not info_blob.integration_knowledge_id or not info_blob.title:
-            raise ValueError("title and integration_knowledge_id are required for upsert")
+            raise ValueError(
+                "title and integration_knowledge_id are required for upsert"
+            )
 
         # Check if blob already exists
         existing = await self.get_by_title_and_integration_knowledge(
@@ -139,7 +143,8 @@ class InfoBlobRepository:
         stmt = sa.select(InfoBlobs).where(
             sa.and_(
                 InfoBlobs.sharepoint_item_id == info_blob.sharepoint_item_id,
-                InfoBlobs.integration_knowledge_id == info_blob.integration_knowledge_id,
+                InfoBlobs.integration_knowledge_id
+                == info_blob.integration_knowledge_id,
             )
         )
         result = await self.session.execute(stmt)
@@ -480,12 +485,16 @@ class InfoBlobRepository:
     async def get_count_by_integration_knowledge(self, integration_knowledge_id: UUID):
         """Get the count of info_blobs associated with a specific integration_knowledge."""
         stmt = (
-            sa.select(sa.func.count()).select_from(InfoBlobs).where(InfoBlobs.integration_knowledge_id == integration_knowledge_id)
+            sa.select(sa.func.count())
+            .select_from(InfoBlobs)
+            .where(InfoBlobs.integration_knowledge_id == integration_knowledge_id)
         )
 
         return await self.session.scalar(stmt)
 
-    async def get_by_filter_integration_knowledge(self, integration_knowledge_id: UUID) -> list[InfoBlobInDB]:
+    async def get_by_filter_integration_knowledge(
+        self, integration_knowledge_id: UUID
+    ) -> list[InfoBlobInDB]:
         """Get all info_blobs for a specific integration_knowledge."""
         query = (
             sa.select(InfoBlobs)

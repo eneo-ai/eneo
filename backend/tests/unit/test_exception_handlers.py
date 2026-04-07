@@ -25,7 +25,10 @@ def test_unauthorized_exception_without_message_has_readable_default():
     payload = response.json()
     assert payload["intric_error_code"] == 9001
     assert payload["code"] == "forbidden"
-    assert payload["message"] == "Forbidden: you do not have permission to perform this action."
+    assert (
+        payload["message"]
+        == "Forbidden: you do not have permission to perform this action."
+    )
     assert payload["context"]["auth_layer"] == "domain_policy"
     assert "request_id" not in payload
 

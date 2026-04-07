@@ -121,7 +121,9 @@ class FederationStartupMigrationService:
     def _build_env_config(self) -> dict[str, Any]:
         client_secret = self.settings.oidc_client_secret
         if client_secret is None:
-            raise ValueError("OIDC client secret is required for federation startup migration")
+            raise ValueError(
+                "OIDC client secret is required for federation startup migration"
+            )
 
         encrypted_secret = self.encryption_service.encrypt(client_secret)
         now = datetime.now(timezone.utc).isoformat()

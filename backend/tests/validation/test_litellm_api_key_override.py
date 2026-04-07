@@ -36,18 +36,11 @@ async def test_per_request_api_key_override():
         "choices": [
             {
                 "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "test_response"
-                },
-                "finish_reason": "stop"
+                "message": {"role": "assistant", "content": "test_response"},
+                "finish_reason": "stop",
             }
         ],
-        "usage": {
-            "prompt_tokens": 10,
-            "completion_tokens": 5,
-            "total_tokens": 15
-        }
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
     }
 
     # Create a mock ModelResponse object that LiteLLM returns
@@ -61,7 +54,7 @@ async def test_per_request_api_key_override():
             response = await litellm.acompletion(
                 model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": "test"}],
-                api_key="sk-test-override-key"  # This is the critical parameter to test
+                api_key="sk-test-override-key",  # This is the critical parameter to test
             )
 
             # Verify the mock was called with the api_key parameter
@@ -69,8 +62,12 @@ async def test_per_request_api_key_override():
             call_kwargs = mock_acompletion.call_args.kwargs
 
             # Check that api_key was passed in the call
-            assert "api_key" in call_kwargs, "api_key parameter was not passed to acompletion"
-            assert call_kwargs["api_key"] == "sk-test-override-key", "api_key value mismatch"
+            assert "api_key" in call_kwargs, (
+                "api_key parameter was not passed to acompletion"
+            )
+            assert call_kwargs["api_key"] == "sk-test-override-key", (
+                "api_key value mismatch"
+            )
 
             # Verify response is valid
             assert response is not None, "Response should not be None"
@@ -99,10 +96,7 @@ async def test_api_key_parameter_signature():
 
     # Check if api_key is in parameters or if **kwargs is present
     has_api_key = "api_key" in params
-    has_kwargs = any(
-        p.kind == inspect.Parameter.VAR_KEYWORD
-        for p in params.values()
-    )
+    has_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
 
     assert has_api_key or has_kwargs, (
         "acompletion does not accept api_key parameter "

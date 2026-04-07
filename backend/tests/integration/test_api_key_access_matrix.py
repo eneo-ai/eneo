@@ -192,8 +192,19 @@ class MatrixCollector:
         )
         print(header)
         print(
-            "─" * 35 + "┼" + "─" * 8 + "┼" + "─" * 29
-            + "┼" + "─" * 66 + "┼" + "─" * 6 + "┼" + "─" * 8 + "┼" + "─" * 8
+            "─" * 35
+            + "┼"
+            + "─" * 8
+            + "┼"
+            + "─" * 29
+            + "┼"
+            + "─" * 66
+            + "┼"
+            + "─" * 6
+            + "┼"
+            + "─" * 8
+            + "┼"
+            + "─" * 8
         )
 
         for r in self.results:
@@ -212,7 +223,9 @@ class MatrixCollector:
         passed = sum(1 for r in self.results if r.passed)
         errors = sum(1 for r in self.results if r.is_error)
         failed = sum(1 for r in self.results if not r.passed) - errors
-        print(f"SUMMARY: {passed}/{len(self.results)} passed, {failed} failed, {errors} errors")
+        print(
+            f"SUMMARY: {passed}/{len(self.results)} passed, {failed} failed, {errors} errors"
+        )
 
         if failed > 0:
             print()
@@ -248,11 +261,32 @@ class MatrixCollector:
 
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(["key", "method", "endpoint", "path", "status_code", "actual", "expected", "result"])
+        writer.writerow(
+            [
+                "key",
+                "method",
+                "endpoint",
+                "path",
+                "status_code",
+                "actual",
+                "expected",
+                "result",
+            ]
+        )
         for r in self.results:
             status = "PASS" if r.passed else "FAIL"
-            writer.writerow([r.key_name, r.method, r.endpoint_name, r.path,
-                             r.status_code, r.actual, r.expected, status])
+            writer.writerow(
+                [
+                    r.key_name,
+                    r.method,
+                    r.endpoint_name,
+                    r.path,
+                    r.status_code,
+                    r.actual,
+                    r.expected,
+                    status,
+                ]
+            )
         path.write_text(buf.getvalue())
         print(f"Matrix written to {path}")
 
@@ -397,7 +431,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
         # RESOURCE-GUARDED ENDPOINTS
         # (require_resource_permission_for_method + require_api_key_scope_check)
         # =================================================================
-
         # --- Assistants (resource_type="assistants", scope_resource="assistant") ---
         {
             "name": "list-assistants",
@@ -458,7 +491,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "scope_resource": "assistant",
             "target_resource_key": "assistant_a_id",
         },
-
         # --- Conversations (resource_type="assistants", scope_resource="conversation") ---
         {
             "name": "list-conversations",
@@ -468,7 +500,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "scope_resource": "conversation",
             "target_resource_key": None,
         },
-
         # --- Apps (resource_type="apps", scope_resource="app") ---
         {
             "name": "get-app-a",
@@ -507,11 +538,9 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "target_resource_key": "app_a_id",
             "skip": app_a is None,
         },
-
         # --- App Runs (resource_type="apps", scope_resource="app_run") ---
         # NOTE: Skipping fake UUID probe — scope enforcement fails-closed for
         # non-tenant keys when the resource doesn't exist (can't verify ownership).
-
         # --- Spaces (resource_type="spaces", scope_resource="space") ---
         {
             "name": "list-spaces",
@@ -586,7 +615,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "scope_resource": "space",
             "target_resource_key": None,
         },
-
         # --- Services (resource_type="apps", scope_resource="service") ---
         {
             "name": "list-services",
@@ -596,11 +624,9 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "scope_resource": "service",
             "target_resource_key": None,
         },
-
         # --- Group Chats (resource_type="assistants", scope_resource="group_chat") ---
         # NOTE: Skipping fake UUID probe — scope enforcement fails-closed for
         # non-tenant keys when the resource doesn't exist.
-
         # --- Groups/Knowledge (resource_type="knowledge", scope_resource="collection") ---
         {
             "name": "list-groups",
@@ -634,7 +660,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "scope_resource": "collection",
             "target_resource_key": "group_a_id",
         },
-
         # --- Files (resource_type="knowledge", scope_resource="file") ---
         {
             "name": "list-files",
@@ -644,7 +669,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "scope_resource": "file",
             "target_resource_key": None,
         },
-
         # --- Info Blobs (resource_type="knowledge", scope_resource="info_blob") ---
         {
             "name": "list-info-blobs",
@@ -654,18 +678,14 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "scope_resource": "info_blob",
             "target_resource_key": None,
         },
-
         # NOTE: list-websites (GET /api/v1/websites/) removed — endpoint is
         # explicitly deprecated and always returns 410.
-
         # --- Crawl Runs (resource_type="knowledge", scope_resource="crawl_run") ---
         # NOTE: Skipping fake UUID probe — scope enforcement fails-closed for
         # non-tenant keys when the resource doesn't exist.
-
         # =================================================================
         # TENANT_ADMIN_API_KEY_GUARDS (admin scope + admin permission)
         # =================================================================
-
         # --- Completion Models ---
         {
             "name": "list-completion-models",
@@ -697,7 +717,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- Embedding Models ---
         {
             "name": "list-embedding-models",
@@ -709,7 +728,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- Transcription Models ---
         {
             "name": "list-transcription-models",
@@ -721,7 +739,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- Tenant Models (admin) ---
         {
             "name": "create-tenant-completion-model",
@@ -756,7 +773,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- Model Providers ---
         {
             "name": "list-model-providers",
@@ -778,7 +794,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- MCP Servers ---
         {
             "name": "list-mcp-servers",
@@ -820,7 +835,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- Allowed Origins ---
         {
             "name": "list-allowed-origins",
@@ -832,7 +846,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- Security Classifications ---
         {
             "name": "list-security-class",
@@ -844,7 +857,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- User Groups ---
         {
             "name": "list-user-groups",
@@ -856,7 +868,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- Integrations ---
         {
             "name": "list-integrations",
@@ -878,7 +889,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- Storage ---
         {
             "name": "get-storage",
@@ -900,7 +910,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- Token Usage ---
         {
             "name": "get-token-usage",
@@ -922,7 +931,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- Admin Router (TENANT_ADMIN_API_KEY_GUARDS) ---
         {
             "name": "admin-list-users",
@@ -1014,13 +1022,11 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- Tenant Self Credentials (mounted at /admin with internal prefix /credentials) ---
         # NOTE: The credentials router uses internal prefix="/credentials" and is
         # mounted at prefix="/admin". The GET endpoint returns provider credential
         # status. This requires checking the actual resolved path.
         # Skipped: 404 for all keys suggests a routing/path resolution issue.
-
         # --- Admin SharePoint (mounted at /admin) ---
         {
             "name": "admin-sharepoint-app",
@@ -1042,7 +1048,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- Audit (prefix="/audit", TENANT_ADMIN_API_KEY_GUARDS) ---
         # NOTE: GET /audit/logs requires an access session (POST /audit/access-session
         # first). Use retention-policy which doesn't require a session.
@@ -1056,7 +1061,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- Roles (TENANT_ADMIN_API_KEY_GUARDS, conditional on using_access_management) ---
         {
             "name": "list-roles",
@@ -1068,7 +1072,7 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
             "description": "Only mounted if using_access_management is True. "
-                           "May 404 if not enabled.",
+            "May 404 if not enabled.",
         },
         {
             "name": "list-permissions",
@@ -1080,7 +1084,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- Admin Templates: Assistant (TENANT_ADMIN_API_KEY_GUARDS) ---
         {
             "name": "admin-assistant-templates",
@@ -1102,7 +1105,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # --- Admin Templates: App (TENANT_ADMIN_API_KEY_GUARDS) ---
         {
             "name": "admin-app-templates",
@@ -1124,12 +1126,10 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # =================================================================
         # TENANT_ADMIN_SCOPE_GUARDS (admin scope, NO admin perm)
         # These allow tenant keys with any permission (read/write/admin)
         # =================================================================
-
         # --- Analysis ---
         {
             "name": "analysis-counts",
@@ -1171,7 +1171,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": False,
             "target_resource_key": None,
         },
-
         # --- Jobs ---
         {
             "name": "list-jobs",
@@ -1183,7 +1182,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": False,
             "target_resource_key": None,
         },
-
         # --- Logging ---
         {
             "name": "get-logging-fake",
@@ -1195,7 +1193,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": False,
             "target_resource_key": None,
         },
-
         # =================================================================
         # SPECIAL: API KEY MANAGEMENT (admin scope, no admin perm guard)
         # api_key_router mounted with scope_check(resource_type="admin")
@@ -1240,11 +1237,9 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": False,
             "target_resource_key": None,
         },
-
         # =================================================================
         # SPECIAL: USERS ROUTER (split: admin vs user-facing)
         # =================================================================
-
         # users_admin_router: TENANT_ADMIN_API_KEY_GUARDS → /users
         {
             "name": "users-admin-list",
@@ -1261,7 +1256,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
                 "users_router GET /me/ and /tenant/ without guards."
             ),
         },
-
         # users_router (no API key guards): /users/me/
         {
             "name": "users-me",
@@ -1286,11 +1280,9 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "target_resource_key": None,
             "is_unguarded": True,
         },
-
         # =================================================================
         # SPECIAL: SETTINGS ROUTER (split: admin vs user-facing)
         # =================================================================
-
         # settings_router (no API key guards at router level, but uses legacy
         # auth dependency internally). GET /settings/ uses
         # get_user_from_token_or_assistant_api_key_without_assistant_id which
@@ -1318,7 +1310,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "target_resource_key": None,
             "is_unguarded": True,
         },
-
         # settings_admin_router: TENANT_ADMIN_API_KEY_GUARDS
         {
             "name": "settings-admin-upsert",
@@ -1331,7 +1322,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
-
         # =================================================================
         # SPECIAL: DASHBOARD (scope_check only, no resource_perm guard)
         # =================================================================
@@ -1350,14 +1340,12 @@ def _build_probes(resource_ids: dict) -> list[dict]:
                 "pass, assistant/app scoped keys should be denied."
             ),
         },
-
         # =================================================================
         # SPECIAL: PROMPTS (scope_check only, no resource_perm guard)
         # NOTE: Skipping fake UUID probe — scope enforcement resolves prompt's
         # space from path_param="id", failing closed for non-tenant keys on
         # non-existent resources.
         # =================================================================
-
         # =================================================================
         # UNGUARDED ENDPOINTS (no API key guards — any key should access)
         # =================================================================
@@ -1429,43 +1417,82 @@ def _build_key_configs(resource_ids: dict) -> list[dict]:
         {"name": "tenant-read", "permission": "read", "scope_type": "tenant"},
         {"name": "tenant-write", "permission": "write", "scope_type": "tenant"},
         {"name": "tenant-admin", "permission": "admin", "scope_type": "tenant"},
-        {"name": "space-read", "permission": "read", "scope_type": "space", "scope_id": space_a},
-        {"name": "space-write", "permission": "write", "scope_type": "space", "scope_id": space_a},
-        {"name": "space-admin", "permission": "admin", "scope_type": "space", "scope_id": space_a},
-        {"name": "assistant-read", "permission": "read", "scope_type": "assistant", "scope_id": asst_a},
-        {"name": "assistant-write", "permission": "write", "scope_type": "assistant", "scope_id": asst_a},
+        {
+            "name": "space-read",
+            "permission": "read",
+            "scope_type": "space",
+            "scope_id": space_a,
+        },
+        {
+            "name": "space-write",
+            "permission": "write",
+            "scope_type": "space",
+            "scope_id": space_a,
+        },
+        {
+            "name": "space-admin",
+            "permission": "admin",
+            "scope_type": "space",
+            "scope_id": space_a,
+        },
+        {
+            "name": "assistant-read",
+            "permission": "read",
+            "scope_type": "assistant",
+            "scope_id": asst_a,
+        },
+        {
+            "name": "assistant-write",
+            "permission": "write",
+            "scope_type": "assistant",
+            "scope_id": asst_a,
+        },
     ]
 
     if app_a is not None:
-        configs.extend([
-            {"name": "app-read", "permission": "read", "scope_type": "app", "scope_id": app_a},
-            {"name": "app-write", "permission": "write", "scope_type": "app", "scope_id": app_a},
-        ])
+        configs.extend(
+            [
+                {
+                    "name": "app-read",
+                    "permission": "read",
+                    "scope_type": "app",
+                    "scope_id": app_a,
+                },
+                {
+                    "name": "app-write",
+                    "permission": "write",
+                    "scope_type": "app",
+                    "scope_id": app_a,
+                },
+            ]
+        )
 
-    configs.extend([
-        {
-            "name": "tenant-with-assistants-rw",
-            "permission": "write",
-            "scope_type": "tenant",
-            "resource_permissions": {
-                "assistants": "write",
-                "apps": "none",
-                "spaces": "none",
-                "knowledge": "none",
+    configs.extend(
+        [
+            {
+                "name": "tenant-with-assistants-rw",
+                "permission": "write",
+                "scope_type": "tenant",
+                "resource_permissions": {
+                    "assistants": "write",
+                    "apps": "none",
+                    "spaces": "none",
+                    "knowledge": "none",
+                },
             },
-        },
-        {
-            "name": "tenant-with-knowledge-rw",
-            "permission": "write",
-            "scope_type": "tenant",
-            "resource_permissions": {
-                "assistants": "none",
-                "apps": "none",
-                "spaces": "none",
-                "knowledge": "write",
+            {
+                "name": "tenant-with-knowledge-rw",
+                "permission": "write",
+                "scope_type": "tenant",
+                "resource_permissions": {
+                    "assistants": "none",
+                    "apps": "none",
+                    "spaces": "none",
+                    "knowledge": "write",
+                },
             },
-        },
-    ])
+        ]
+    )
 
     return configs
 
@@ -1492,6 +1519,7 @@ async def test_collect_access_matrix(api_client, bearer_token):
         app_a = await _create_app(api_client, token=bearer_token, space_id=space_a)
     except AssertionError:
         import warnings
+
         warnings.warn(
             "App creation failed — all app-scoped probes and key configs will be skipped. "
             "Ensure prerequisites (e.g. transcription model) are available for full coverage.",
@@ -1610,7 +1638,9 @@ async def test_tenant_key_revoked_after_admin_role_removed(
     assert resp.status_code == 200, f"Key should work before revocation: {resp.text}"
 
     resp = await api_client.get("/api/v1/completion-models/", headers=key_headers)
-    assert resp.status_code == 200, f"Key should access admin endpoints before revocation: {resp.text}"
+    assert resp.status_code == 200, (
+        f"Key should access admin endpoints before revocation: {resp.text}"
+    )
 
     # ---- 3. Revoke admin role (downgrade to "User") ----
     # Look up the "User" predefined role and the current user's username
@@ -1698,16 +1728,46 @@ async def test_expired_key_is_rejected(api_client, bearer_token):
 # not file-typed). These are allowed for scoped keys in normal mode but denied
 # in strict mode.
 STRICT_MODE_PROBES = [
-    {"name": "list-assistants", "method": "GET", "path": "/api/v1/assistants/", "resource_type": "assistant"},
-    {"name": "list-spaces", "method": "GET", "path": "/api/v1/spaces/", "resource_type": "space"},
-    {"name": "list-groups", "method": "GET", "path": "/api/v1/groups/", "resource_type": "collection"},
-    {"name": "list-info-blobs", "method": "GET", "path": "/api/v1/info-blobs/", "resource_type": "info_blob"},
+    {
+        "name": "list-assistants",
+        "method": "GET",
+        "path": "/api/v1/assistants/",
+        "resource_type": "assistant",
+    },
+    {
+        "name": "list-spaces",
+        "method": "GET",
+        "path": "/api/v1/spaces/",
+        "resource_type": "space",
+    },
+    {
+        "name": "list-groups",
+        "method": "GET",
+        "path": "/api/v1/groups/",
+        "resource_type": "collection",
+    },
+    {
+        "name": "list-info-blobs",
+        "method": "GET",
+        "path": "/api/v1/info-blobs/",
+        "resource_type": "info_blob",
+    },
 ]
 
 # List endpoints exempt from strict mode (self_filtering=True or resource_type="file")
 STRICT_MODE_EXEMPT_PROBES = [
-    {"name": "list-files", "method": "GET", "path": "/api/v1/files/", "resource_type": "file"},
-    {"name": "list-conversations", "method": "GET", "path": "/api/v1/conversations/", "resource_type": "conversation"},
+    {
+        "name": "list-files",
+        "method": "GET",
+        "path": "/api/v1/files/",
+        "resource_type": "file",
+    },
+    {
+        "name": "list-conversations",
+        "method": "GET",
+        "path": "/api/v1/conversations/",
+        "resource_type": "conversation",
+    },
 ]
 
 
@@ -1741,7 +1801,9 @@ async def test_strict_scope_mode_matrix(api_client, bearer_token):
     """
 
     # ---- Setup ----
-    space_id = await _create_space(api_client, token=bearer_token, name="strict-test-space")
+    space_id = await _create_space(
+        api_client, token=bearer_token, name="strict-test-space"
+    )
 
     space_read_key = await _create_api_key(
         api_client,
@@ -1772,30 +1834,34 @@ async def test_strict_scope_mode_matrix(api_client, bearer_token):
         # Space-scoped key: should be ALLOWED (service layer filters)
         resp = await api_client.get(probe["path"], headers=space_headers)
         actual = "deny" if resp.status_code in (401, 403) else "allow"
-        collector.add(ProbeResult(
-            key_name="space-read",
-            method="GET",
-            endpoint_name=probe["name"],
-            path=probe["path"],
-            status_code=resp.status_code,
-            actual=actual,
-            expected="allow",
-            description="Strict mode OFF — scoped key allowed on list endpoints",
-        ))
+        collector.add(
+            ProbeResult(
+                key_name="space-read",
+                method="GET",
+                endpoint_name=probe["name"],
+                path=probe["path"],
+                status_code=resp.status_code,
+                actual=actual,
+                expected="allow",
+                description="Strict mode OFF — scoped key allowed on list endpoints",
+            )
+        )
 
         # Tenant-scoped key: should always be ALLOWED
         resp = await api_client.get(probe["path"], headers=tenant_headers)
         actual = "deny" if resp.status_code in (401, 403) else "allow"
-        collector.add(ProbeResult(
-            key_name="tenant-read",
-            method="GET",
-            endpoint_name=probe["name"],
-            path=probe["path"],
-            status_code=resp.status_code,
-            actual=actual,
-            expected="allow",
-            description="Tenant key — always allowed",
-        ))
+        collector.add(
+            ProbeResult(
+                key_name="tenant-read",
+                method="GET",
+                endpoint_name=probe["name"],
+                path=probe["path"],
+                status_code=resp.status_code,
+                actual=actual,
+                expected="allow",
+                description="Tenant key — always allowed",
+            )
+        )
 
     # ---- Phase 2: Strict mode ON ----
     await _toggle_strict_mode(api_client, bearer_token, enabled=True)
@@ -1804,45 +1870,51 @@ async def test_strict_scope_mode_matrix(api_client, bearer_token):
         # Space-scoped key: should be DENIED (strict mode fail-closed)
         resp = await api_client.get(probe["path"], headers=space_headers)
         actual = "deny" if resp.status_code in (401, 403) else "allow"
-        collector.add(ProbeResult(
-            key_name="space-read",
-            method="GET",
-            endpoint_name=probe["name"],
-            path=probe["path"],
-            status_code=resp.status_code,
-            actual=actual,
-            expected="deny",
-            description="Strict mode ON — scoped key denied on ambiguous list endpoint",
-        ))
+        collector.add(
+            ProbeResult(
+                key_name="space-read",
+                method="GET",
+                endpoint_name=probe["name"],
+                path=probe["path"],
+                status_code=resp.status_code,
+                actual=actual,
+                expected="deny",
+                description="Strict mode ON — scoped key denied on ambiguous list endpoint",
+            )
+        )
 
         # Tenant-scoped key: should still be ALLOWED
         resp = await api_client.get(probe["path"], headers=tenant_headers)
         actual = "deny" if resp.status_code in (401, 403) else "allow"
-        collector.add(ProbeResult(
-            key_name="tenant-read",
-            method="GET",
-            endpoint_name=probe["name"],
-            path=probe["path"],
-            status_code=resp.status_code,
-            actual=actual,
-            expected="allow",
-            description="Tenant key — always allowed even in strict mode",
-        ))
+        collector.add(
+            ProbeResult(
+                key_name="tenant-read",
+                method="GET",
+                endpoint_name=probe["name"],
+                path=probe["path"],
+                status_code=resp.status_code,
+                actual=actual,
+                expected="allow",
+                description="Tenant key — always allowed even in strict mode",
+            )
+        )
 
     for probe in STRICT_MODE_EXEMPT_PROBES:
         # Space-scoped key on exempt endpoints: should still be ALLOWED
         resp = await api_client.get(probe["path"], headers=space_headers)
         actual = "deny" if resp.status_code in (401, 403) else "allow"
-        collector.add(ProbeResult(
-            key_name="space-read",
-            method="GET",
-            endpoint_name=probe["name"],
-            path=probe["path"],
-            status_code=resp.status_code,
-            actual=actual,
-            expected="allow",
-            description="Strict mode ON — exempt endpoint still allowed for scoped key",
-        ))
+        collector.add(
+            ProbeResult(
+                key_name="space-read",
+                method="GET",
+                endpoint_name=probe["name"],
+                path=probe["path"],
+                status_code=resp.status_code,
+                actual=actual,
+                expected="allow",
+                description="Strict mode ON — exempt endpoint still allowed for scoped key",
+            )
+        )
 
     # ---- Print and assert ----
     print()
@@ -1895,9 +1967,7 @@ async def test_api_key_rejected_when_owner_deactivated(
     """API key should return 403 owner_inactive when the owner is deactivated."""
 
     # 1. Create a second user and get their bearer token
-    user_id, username, email = await _create_second_user(
-        api_client, token=bearer_token
-    )
+    user_id, username, email = await _create_second_user(api_client, token=bearer_token)
     user_token = await _get_bearer_token_for_user(db_container, email)
 
     # 2. Create a space (as admin) and add user2 as member
@@ -1944,9 +2014,7 @@ async def test_api_key_rejected_when_owner_deleted(
     """API key should be rejected when the owner is deleted."""
 
     # 1. Create a second user and get their bearer token
-    user_id, username, email = await _create_second_user(
-        api_client, token=bearer_token
-    )
+    user_id, username, email = await _create_second_user(api_client, token=bearer_token)
     user_token = await _get_bearer_token_for_user(db_container, email)
 
     # 2. Create a space (as admin) and add user2 as member, then user2 creates a key
@@ -1992,9 +2060,7 @@ async def test_space_key_rejected_when_owner_removed_from_space(
     """Space-scoped key should return 403 when owner is removed from the space."""
 
     # 1. Create a second user
-    user_id, username, email = await _create_second_user(
-        api_client, token=bearer_token
-    )
+    user_id, username, email = await _create_second_user(api_client, token=bearer_token)
     user_token = await _get_bearer_token_for_user(db_container, email)
 
     # 2. Create a space (owned by admin) and add user2 as member
@@ -2041,9 +2107,7 @@ async def test_keys_revoked_on_user_deactivation(
     """Deactivating a user should revoke all their API keys in the DB."""
 
     # 1. Create a second user and get their bearer token
-    user_id, username, email = await _create_second_user(
-        api_client, token=bearer_token
-    )
+    user_id, username, email = await _create_second_user(api_client, token=bearer_token)
     user_token = await _get_bearer_token_for_user(db_container, email)
 
     # 2. Create space (as admin), add user2, then user2 creates keys
@@ -2084,7 +2148,9 @@ async def test_keys_revoked_on_user_deactivation(
         api_key_repo = container.api_key_v2_repo()
         user = await container.user_repo().get_user_by_email(email)
         for key_info in [key1, key2]:
-            key = await api_key_repo.get(key_id=key_info["id"], tenant_id=user.tenant_id)
+            key = await api_key_repo.get(
+                key_id=key_info["id"], tenant_id=user.tenant_id
+            )
             assert key is not None, f"Key {key_info['id']} not found"
             assert key.state == ApiKeyState.REVOKED.value, (
                 f"Key {key_info['id']} should be revoked, got state={key.state}"
@@ -2098,9 +2164,7 @@ async def test_space_keys_revoked_on_member_removal(
     """Removing a member from a space should revoke only their keys for that space."""
 
     # 1. Create a second user
-    user_id, username, email = await _create_second_user(
-        api_client, token=bearer_token
-    )
+    user_id, username, email = await _create_second_user(api_client, token=bearer_token)
     user_token = await _get_bearer_token_for_user(db_container, email)
 
     # 2. Create two spaces, add user2 to both
@@ -2162,9 +2226,7 @@ async def test_reactivated_user_needs_new_keys(
     """After deactivation and reactivation, old keys should remain revoked."""
 
     # 1. Create a second user
-    user_id, username, email = await _create_second_user(
-        api_client, token=bearer_token
-    )
+    user_id, username, email = await _create_second_user(api_client, token=bearer_token)
     user_token = await _get_bearer_token_for_user(db_container, email)
 
     # 2. Create a space, add user2, create key
@@ -2222,13 +2284,13 @@ async def test_assistant_key_rejected_when_owner_removed_from_space(
     """
 
     # 1. Create a second user
-    user_id, username, email = await _create_second_user(
-        api_client, token=bearer_token
-    )
+    user_id, username, email = await _create_second_user(api_client, token=bearer_token)
     user_token = await _get_bearer_token_for_user(db_container, email)
 
     # 2. Create a space (as admin), add user2, create an assistant
-    space_id = await _create_space(api_client, token=bearer_token, name="asst-scope-space")
+    space_id = await _create_space(
+        api_client, token=bearer_token, name="asst-scope-space"
+    )
     resp = await api_client.post(
         f"/api/v1/spaces/{space_id}/members/",
         json={"id": user_id, "role": "admin"},
@@ -2278,13 +2340,13 @@ async def test_app_key_rejected_when_owner_removed_from_space(
     """
 
     # 1. Create a second user
-    user_id, username, email = await _create_second_user(
-        api_client, token=bearer_token
-    )
+    user_id, username, email = await _create_second_user(api_client, token=bearer_token)
     user_token = await _get_bearer_token_for_user(db_container, email)
 
     # 2. Create a space (as admin), add user2, create an app
-    space_id = await _create_space(api_client, token=bearer_token, name="app-scope-space")
+    space_id = await _create_space(
+        api_client, token=bearer_token, name="app-scope-space"
+    )
     resp = await api_client.post(
         f"/api/v1/spaces/{space_id}/members/",
         json={"id": user_id, "role": "admin"},
@@ -2295,7 +2357,9 @@ async def test_app_key_rejected_when_owner_removed_from_space(
     try:
         app_id = await _create_app(api_client, token=bearer_token, space_id=space_id)
     except AssertionError:
-        pytest.skip("App creation requires transcription model — not available in test env")
+        pytest.skip(
+            "App creation requires transcription model — not available in test env"
+        )
 
     # 3. User2 creates an app-scoped key
     result = await _create_api_key(
@@ -2340,9 +2404,7 @@ async def test_assistant_key_revoked_on_member_removal(
     but not their keys in other spaces."""
 
     # 1. Create a second user
-    user_id, username, email = await _create_second_user(
-        api_client, token=bearer_token
-    )
+    user_id, username, email = await _create_second_user(api_client, token=bearer_token)
     user_token = await _get_bearer_token_for_user(db_container, email)
 
     # 2. Create two spaces, add user2 to both, create assistants
@@ -2414,9 +2476,7 @@ async def test_invited_user_key_rejected(
     """
 
     # 1. Create a second user (starts as ACTIVE) and get their bearer token
-    user_id, username, email = await _create_second_user(
-        api_client, token=bearer_token
-    )
+    user_id, username, email = await _create_second_user(api_client, token=bearer_token)
     user_token = await _get_bearer_token_for_user(db_container, email)
 
     # 2. Create a space, add user2, create a key

@@ -103,7 +103,9 @@ class Datastore:
 
         return info_blob_chunks
 
-    async def _add(self, chunk_embedding_list: ChunkEmbeddingList, batch_size: int = 100):
+    async def _add(
+        self, chunk_embedding_list: ChunkEmbeddingList, batch_size: int = 100
+    ):
         chunks = []
         for chunk, embedding in chunk_embedding_list:
             chunks.append(
@@ -128,7 +130,9 @@ class Datastore:
         info_blob_chunks = self._chunk_text(info_blob)
 
         if not info_blob_chunks:
-            logger.warning(f"Info Blob {info_blob.id} did not yield any chunks after splitting.")
+            logger.warning(
+                f"Info Blob {info_blob.id} did not yield any chunks after splitting."
+            )
             return
 
         logger.debug(f"Embedding {len(info_blob_chunks)} info-blob chunks.")
@@ -154,8 +158,10 @@ class Datastore:
         integration_knowledge_ids = [i.id for i in integration_knowledge_list]
 
         start = time.time()
-        search_string_embedding = await self.create_embeddings_service.get_embedding_for_query(
-            model=embedding_model, query=search_string
+        search_string_embedding = (
+            await self.create_embeddings_service.get_embedding_for_query(
+                model=embedding_model, query=search_string
+            )
         )
         step_1 = time.time()
         semantic_results = await self.chunk_repo.semantic_search(
