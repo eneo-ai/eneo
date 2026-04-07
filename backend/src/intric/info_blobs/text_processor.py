@@ -20,6 +20,7 @@ class TextProcessor:
         datastore: Datastore,
         info_blob_service: InfoBlobService,
     ):
+        super().__init__()
         self.user = user
         self.extractor = extractor
         self.datastore = datastore

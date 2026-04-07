@@ -46,7 +46,8 @@ class InfoBlobService:
         update_website_size_service: "UpdateWebsiteSizeService",
         space_service: "SpaceService",
         actor_manager: "ActorManager",
-    ):
+    ) -> None:
+        super().__init__()
         self.repo = repo
         self.space_repo = space_repo
         self.group_service = group_service
@@ -113,6 +114,8 @@ class InfoBlobService:
             case SpaceAction.DELETE:
                 if not actor.can_delete_info_blobs():
                     raise UnauthorizedException()
+            case _:
+                pass  # Other SpaceAction values are not applicable to info blobs
 
     async def _delete_if_same_title(self, info_blob: InfoBlobAdd):
         if info_blob.title:
@@ -238,7 +241,7 @@ class InfoBlobService:
 
         return updated_info_blob
 
-    async def get_by_id(self, id: str):
+    async def get_by_id(self, id: UUID):
         blob = await self.repo.get(id)
 
         await self._validate(blob)
@@ -259,7 +262,7 @@ class InfoBlobService:
 
         if metadata_filter:
 
-            def filter_func(item: InfoBlobInDB):
+            def filter_func(item: InfoBlobInDBNoText) -> bool:
                 filter_dict = metadata_filter.model_dump(exclude_none=True)
                 item_dict = item.model_dump()
                 return filter_dict.items() <= item_dict.items()
@@ -290,7 +293,7 @@ class InfoBlobService:
 
         return await self.repo.get_by_website(website_id=id)
 
-    async def delete(self, id: str):
+    async def delete(self, id: UUID):
         # Fetch the blob first to validate authorization BEFORE deleting
         blob = await self.repo.get(id)
 

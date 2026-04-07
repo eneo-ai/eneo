@@ -5,6 +5,8 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Union
 
+from typing_extensions import override
+
 from intric.base.base_entity import Entity
 from intric.main.models import NOT_PROVIDED, NotProvided, is_provided
 
@@ -27,7 +29,8 @@ class GroupChatAssistant:
         self,
         assistant: "Assistant",
         user_description: Optional[str] = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.assistant = assistant
         self.user_description = user_description
 
@@ -53,7 +56,7 @@ class GroupChat(Entity):
         insight_enabled: bool = False,
         metadata_json: Optional[dict[str, object]] = None,
         icon_id: Optional["UUID"] = None,
-    ):
+    ) -> None:
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.user_id = user_id
         self.space_id = space_id
@@ -67,6 +70,7 @@ class GroupChat(Entity):
         self._metadata_json = metadata_json
         self.icon_id = icon_id
 
+    @override
     @classmethod
     def create(
         cls,
@@ -96,8 +100,8 @@ class GroupChat(Entity):
         self._metadata_json = metadata_json
 
     @property
-    def assistant_ids(self) -> list["UUID"]:
-        assistant_ids = []
+    def assistant_ids(self) -> "list[UUID]":
+        assistant_ids: list["UUID"] = []
         for group_chat_assistant in self.assistants:
             assistant_ids.append(group_chat_assistant.assistant.id)
         return assistant_ids

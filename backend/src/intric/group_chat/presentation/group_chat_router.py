@@ -2,6 +2,7 @@
 #
 # Licensed under the MIT License.
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -15,6 +16,8 @@ from intric.server.protocol import responses
 
 router = APIRouter()
 
+ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
+
 
 @router.patch(
     "/{id}/",
@@ -26,7 +29,7 @@ router = APIRouter()
 async def update_group_chat(
     id: UUID,
     group_chat_upd: GroupChatUpdateSchema,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ):
     service = container.group_chat_service()
     assembler = container.group_chat_assembler()
@@ -35,14 +38,13 @@ async def update_group_chat(
     if group_chat_upd.tools is not None:
         # If tools.assistants exists in the request (even as empty list),
         # we'll pass it through to update the assistants
-        if group_chat_upd.tools.assistants is not None:
-            assistants = [
-                GroupChatAssistantData(
-                    id=assistant.id,
-                    user_description=assistant.user_description,
-                )
-                for assistant in group_chat_upd.tools.assistants
-            ]
+        assistants = [
+            GroupChatAssistantData(
+                id=assistant.id,
+                user_description=assistant.user_description,
+            )
+            for assistant in group_chat_upd.tools.assistants
+        ]
 
     # Handle icon_id: check if it was provided in the request
     request_dict = group_chat_upd.model_dump(exclude_unset=True)
@@ -75,7 +77,7 @@ async def update_group_chat(
 )
 async def get_group_chat(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ):
     service = container.group_chat_service()
     assembler = container.group_chat_assembler()
@@ -95,7 +97,7 @@ async def get_group_chat(
 )
 async def delete_group_chat(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ):
     service = container.group_chat_service()
 
@@ -110,7 +112,7 @@ async def delete_group_chat(
 async def publish_group_chat(
     id: UUID,
     published: bool,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ):
     service = container.group_chat_service()
     assembler = container.group_chat_assembler()

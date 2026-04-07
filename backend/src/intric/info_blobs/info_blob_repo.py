@@ -1,4 +1,4 @@
-from typing import List
+from typing import Any, List
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -22,7 +22,8 @@ from intric.info_blobs.info_blob import (
 
 
 class InfoBlobRepository:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
         self.delegate: BaseRepositoryDelegate[InfoBlobInDB] = BaseRepositoryDelegate(
             session,
             InfoBlobs,
@@ -62,6 +63,7 @@ class InfoBlobRepository:
         if info_blob.group_id is not None:
             group = await self._get_group(info_blob.group_id)
             assert group is not None
+            assert group.embedding_model_id is not None
             embedding_model_id = group.embedding_model_id
 
         elif info_blob.website_id is not None:
@@ -253,7 +255,7 @@ class InfoBlobRepository:
             )
         )
 
-        space_conditions = []
+        space_conditions: list[Any] = []
         if group_ids:
             space_conditions.append(InfoBlobs.group_id.in_(group_ids))
         if website_ids:
@@ -303,7 +305,7 @@ class InfoBlobRepository:
         if not space_ids:
             return []
 
-        conditions = []
+        conditions: list[Any] = []
 
         if include_groups:
             group_ids = await self.session.scalars(
@@ -414,10 +416,11 @@ class InfoBlobRepository:
         result = await self.session.execute(stmt)
         blobs_to_delete = result.scalars().all()
 
-        deleted = []
+        deleted: list[InfoBlobInDB] = []
         for blob in blobs_to_delete:
             deleted_blob = await self.delegate.delete(blob.id)
-            deleted.append(deleted_blob)
+            if deleted_blob is not None:
+                deleted.append(deleted_blob)
 
         return deleted
 
@@ -472,7 +475,7 @@ class InfoBlobRepository:
         )
         return [InfoBlobInDB.model_validate(record) for record in records]
 
-    async def delete(self, id: int) -> InfoBlobInDB:
+    async def delete(self, id: UUID) -> InfoBlobInDB:
         record = await self.delegate.delete(id)
         return InfoBlobInDB.model_validate(record)
 
