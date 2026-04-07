@@ -2,11 +2,13 @@ import hashlib
 import re
 from email.message import Message
 from pathlib import PurePosixPath
+from typing import cast
 from urllib.parse import unquote, urlparse
 
 import scrapy
 import scrapy.http
 from scrapy.pipelines.files import FilesPipeline
+from typing_extensions import override
 
 # Maximum filename length in bytes (ext4 limit is 255, leave room for safety)
 MAX_FILENAME_BYTES = 200
@@ -67,27 +69,29 @@ def _truncate_filename(filename: str, max_bytes: int = MAX_FILENAME_BYTES) -> st
 
 
 class FileNamePipeline(FilesPipeline):
+    @override
     def file_path(
         self,
         request: scrapy.Request,
         response: scrapy.http.Response | None = None,
-        info=None,
+        info: object = None,
         *,
-        item=None,
-    ):
+        item: object = None,
+    ) -> str:
         filename = None
 
         if response is not None:
-            cd_header = response.headers.get(b"Content-Disposition")
-            if cd_header:
+            # Scrapy Headers.get() is untyped; cast to bytes | None at the boundary.
+            cd_raw = cast(bytes | None, response.headers.get(b"Content-Disposition"))  # pyright: ignore[reportUnknownMemberType]  # Scrapy has no py.typed stubs
+            if cd_raw:
                 msg = Message()
                 # Decode header bytes safely to handle non-ASCII headers
-                msg["content-disposition"] = cd_header.decode("utf-8", "ignore")
+                msg["content-disposition"] = cd_raw.decode("utf-8", "ignore")
                 filename = msg.get_filename()
 
         if not filename:
-            # Fallback to URL path
-            filename = PurePosixPath(urlparse(request.url).path).name
+            # Fallback to URL path; cast request.url to str (Scrapy URL type is untyped)
+            filename = PurePosixPath(urlparse(str(request.url)).path).name
 
         if not filename:
             url_hash = hashlib.md5(request.url.encode("utf-8")).hexdigest()[:8]

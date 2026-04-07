@@ -13,12 +13,13 @@ from intric.sessions.session import SessionUpdate
 if TYPE_CHECKING:
     from uuid import UUID
 
+    from intric.assistants.api.assistant_models import AssistantResponse
     from intric.assistants.assistant_service import AssistantService
     from intric.completion_models.infrastructure.completion_service import (
         CompletionService,
     )
     from intric.group_chat.application.group_chat_service import GroupChatService
-    from intric.sessions.session import AskChatResponse, SessionInDB
+    from intric.sessions.session import SessionInDB
     from intric.sessions.session_service import SessionService
     from intric.spaces.space_service import SpaceService
 
@@ -36,7 +37,8 @@ class ConversationService:
         session_service: "SessionService",
         completion_service: "CompletionService",
         space_service: "SpaceService",
-    ):
+    ) -> None:
+        super().__init__()
         self.assistant_service = assistant_service
         self.group_chat_service = group_chat_service
         self.session_service = session_service
@@ -49,13 +51,13 @@ class ConversationService:
         session_id: Optional["UUID"] = None,
         assistant_id: Optional["UUID"] = None,
         group_chat_id: Optional["UUID"] = None,
-        file_ids: list["UUID"] = None,
+        file_ids: "list[UUID] | None" = None,
         stream: bool = False,
         tool_assistant_id: Optional["UUID"] = None,
         version: int = 1,
         use_web_search: bool = False,
         require_tool_approval: bool = False,
-    ) -> "AskChatResponse":
+    ) -> "AssistantResponse":
         """
         Routes a conversation request to the appropriate service based on the parameters.
 
@@ -75,7 +77,7 @@ class ConversationService:
         Raises:
             ValueError: If neither session_id, assistant_id, nor group_chat_id is provided
         """
-        if file_ids is None:
+        if not file_ids:
             file_ids = []
 
         if require_tool_approval and group_chat_id is not None:
@@ -159,10 +161,11 @@ class ConversationService:
             assistant_id=session.assistant.id
         )
         assistant = space.get_assistant(assistant_id=session.assistant.id)
+        assert assistant.completion_model is not None
 
         response = await self.completion_service.get_response(
             text_input="Please set the title of the conversation",
-            model=assistant.completion_model,
+            model=assistant.completion_model,  # pyright: ignore[reportArgumentType]  # domain CompletionModel aliases ai_models one
             prompt=SET_TITLE_OF_CONVERSATION_PROMPT,
             session=session,
         )

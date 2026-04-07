@@ -106,8 +106,9 @@ class CrawlManager:
         # Start crawl and store the deferred.
         # runner.crawl() is from untyped Scrapy; cast to Any at the boundary.
         self._crawl_deferred = cast(
-            Any, self._runner.crawl(self._crawler, **spider_kwargs)
-        )  # pyright: ignore[reportUnknownMemberType]
+            Any,
+            self._runner.crawl(self._crawler, **spider_kwargs),  # pyright: ignore[reportUnknownMemberType]  # Scrapy has no py.typed stubs
+        )
 
         # Add callback to signal completion
         def on_complete(_: Any) -> None:
@@ -283,10 +284,10 @@ class Crawler:
         # runner.crawl() is from untyped Scrapy; cast pins the return to Any.
         return cast(
             Any,
-            runner.crawl(
+            runner.crawl(  # pyright: ignore[reportUnknownMemberType]  # Scrapy has no py.typed stubs
                 CrawlSpider, url=url, http_user=http_user, http_pass=http_pass
             ),
-        )  # pyright: ignore[reportUnknownMemberType]
+        )
 
     @crochet.run_in_reactor
     @staticmethod
