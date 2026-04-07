@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 from intric.main.models import ResourcePermission
 from intric.modules.module import Modules
@@ -395,6 +395,7 @@ class SpaceActor:
         personal_space_permissions: AccessControlList = PERSONAL_SPACE_PERMISSIONS,
         org_space_permissions: AccessControlList = ORG_SPACE_PERMISSIONS,
     ):
+        super().__init__()
         self.user = user
         self.space = space
         self._shared_space_permissions = shared_space_permissions
@@ -479,7 +480,7 @@ class SpaceActor:
         elif scope_type in ("assistant", "app"):
             # The key is scoped to a single resource — allow access to its
             # parent space so the resource can actually be reached.
-            resource_ids = set()
+            resource_ids: set[object] = set()
             if scope_type == "assistant":
                 resource_ids = {a.id for a in (self.space.assistants or [])}
             elif scope_type == "app":
@@ -544,7 +545,11 @@ class SpaceActor:
             else role2
         )
 
-    def _get_permissions(self, role: SpaceRole):
+    def _get_permissions(
+        self, role: SpaceRole | None
+    ) -> dict[SpaceResourceType, set[SpaceAction]]:
+        if role is None:
+            return {}
         if self.space.is_personal():
             return self._personal_space_permissions.get(role, {})
         if self.space.is_organization():
@@ -555,7 +560,7 @@ class SpaceActor:
         self,
         action: SpaceAction,
         resource_type: SpaceResourceType,
-        resource: Union["Assistant", "GroupChat", "App"] = None,
+        resource: Optional[Union["Assistant", "GroupChat", "App"]] = None,
     ):
         role = self._get_role()
         permissions = self._get_permissions(role=role)
@@ -922,8 +927,8 @@ class SpaceActor:
         can_publish: bool,
         can_access_insight: bool,
         can_toggle_insight: bool,
-    ):
-        permissions = []
+    ) -> list[ResourcePermission]:
+        permissions: list[ResourcePermission] = []
 
         if can_edit:
             permissions.append(ResourcePermission.EDIT)
@@ -942,8 +947,10 @@ class SpaceActor:
 
         return permissions
 
-    def get_assistant_permissions(self, assistant: "Assistant"):
-        permissions = []
+    def get_assistant_permissions(
+        self, assistant: "Assistant"
+    ) -> list[ResourcePermission]:
+        permissions: list[ResourcePermission] = []
 
         # TODO: Getting permissions should be revisited after
         # Space is the aggregate root
@@ -967,7 +974,9 @@ class SpaceActor:
             can_toggle_insight=self.can_toggle_insight(),
         )
 
-    def get_group_chat_permissions(self, group_chat: "GroupChat"):
+    def get_group_chat_permissions(
+        self, group_chat: "GroupChat"
+    ) -> list[ResourcePermission]:
         return self._get_resource_permissions(
             can_edit=self.can_edit_group_chats(),
             can_delete=self.can_delete_group_chats(),
@@ -978,7 +987,7 @@ class SpaceActor:
             can_toggle_insight=self.can_toggle_insight(),
         )
 
-    def get_app_permissions(self):
+    def get_app_permissions(self) -> list[ResourcePermission]:
         return self._get_resource_permissions(
             can_edit=self.can_edit_apps(),
             can_delete=self.can_delete_apps(),
@@ -987,7 +996,7 @@ class SpaceActor:
             can_toggle_insight=False,
         )
 
-    def get_collection_permissions(self):
+    def get_collection_permissions(self) -> list[ResourcePermission]:
         return self._get_resource_permissions(
             can_edit=self.can_edit_collections(),
             can_delete=self.can_delete_collections(),
@@ -996,7 +1005,7 @@ class SpaceActor:
             can_toggle_insight=False,
         )
 
-    def get_website_permissions(self):
+    def get_website_permissions(self) -> list[ResourcePermission]:
         return self._get_resource_permissions(
             can_edit=self.can_edit_websites(),
             can_delete=self.can_delete_websites(),
@@ -1005,7 +1014,7 @@ class SpaceActor:
             can_toggle_insight=False,
         )
 
-    def get_integrations_permissions(self):
+    def get_integrations_permissions(self) -> list[ResourcePermission]:
         return self._get_resource_permissions(
             can_edit=self.can_edit_integrations(),
             can_delete=self.can_delete_integrations(),
@@ -1014,7 +1023,7 @@ class SpaceActor:
             can_toggle_insight=False,
         )
 
-    def get_service_permissions(self):
+    def get_service_permissions(self) -> list[ResourcePermission]:
         return self._get_resource_permissions(
             can_edit=self.can_edit_services(),
             can_delete=self.can_delete_services(),
@@ -1023,10 +1032,8 @@ class SpaceActor:
             can_toggle_insight=False,
         )
 
-    def get_available_roles(self):
+    def get_available_roles(self) -> list[SpaceRole]:
         if self.space.is_personal():
             return []
 
-        roles = [SpaceRole.ADMIN, SpaceRole.EDITOR, SpaceRole.VIEWER]
-
-        return roles
+        return [SpaceRole.ADMIN, SpaceRole.EDITOR, SpaceRole.VIEWER]

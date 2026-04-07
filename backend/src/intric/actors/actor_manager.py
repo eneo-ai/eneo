@@ -8,6 +8,7 @@ if TYPE_CHECKING:
 
 class ActorManager:
     def __init__(self, user: "UserInDB", factory: "ActorFactory"):
+        super().__init__()
         self.user = user
         self.factory = factory
 

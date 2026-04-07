@@ -1,3 +1,4 @@
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, UploadFile
@@ -15,6 +16,7 @@ from intric.collections.presentation.collection_models import (
     CollectionPublic,
     CollectionUpdate,
 )
+from intric.embedding_models.domain.embedding_model import EmbeddingModel
 from intric.groups_legacy.api import group_protocol
 from intric.groups_legacy.api.group_models import (
     CreateGroupRequest,
@@ -23,6 +25,7 @@ from intric.groups_legacy.api.group_models import (
 from intric.info_blobs import info_blob_protocol
 from intric.info_blobs.info_blob import (
     InfoBlobAdd,
+    InfoBlobInDB,
     InfoBlobPublic,
     InfoBlobPublicNoText,
 )
@@ -50,7 +53,7 @@ router = APIRouter()
 )
 async def get_groups(
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     scope_filter = get_scope_filter(request)
     service = container.group_service()
@@ -67,7 +70,8 @@ async def get_groups(
     responses=responses.get_responses([404]),
 )
 async def get_group_by_id(
-    id: UUID, container: Container = Depends(get_container(with_user=True))
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.collection_crud_service()
     collection = await service.get_collection(id)
@@ -85,7 +89,7 @@ async def get_group_by_id(
 )
 async def create_group(
     group: CreateGroupRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Valid values for `embedding_model` are the provided by `GET /api/v1/settings/models/`.
@@ -105,7 +109,7 @@ async def create_group(
 async def update_group(
     id: UUID,
     group: CollectionUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
@@ -163,7 +167,8 @@ async def update_group(
     responses=responses.get_responses([404]),
 )
 async def delete_group_by_id(
-    id: UUID, container: Container = Depends(get_container(with_user=True))
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
@@ -224,8 +229,8 @@ async def delete_group_by_id(
 async def add_info_blobs(
     id: UUID,
     info_blobs: InfoBlobUpsertRequest,
-    container: Container = Depends(get_container(with_user=True)),
-    current_user: UserInDB = Depends(get_current_active_user),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    current_user: Annotated[UserInDB, Depends(get_current_active_user)],
 ):
     """Maximum allowed simultaneous upload is 128.
 
@@ -255,9 +260,14 @@ async def add_info_blobs(
     )
 
     # Add to datastore
-    info_blobs_updated = []
+    info_blobs_updated: list[InfoBlobInDB] = []
     for info_blob in info_blobs_added:
-        await datastore.add(info_blob=info_blob, embedding_model=group.embedding_model)
+        await datastore.add(
+            info_blob=info_blob,
+            # EmbeddingModelLegacy is structurally compatible — legacy groups predate
+            # the new EmbeddingModel domain type; cast avoids runtime cost.
+            embedding_model=cast(EmbeddingModel, group.embedding_model),
+        )
         info_blob_updated = await service.update_info_blob_size(info_blob.id)
         info_blobs_updated.append(info_blob_updated)
 
@@ -313,7 +323,7 @@ async def add_info_blobs(
 )
 async def get_info_blobs(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.info_blob_service()
     info_blobs_in_db = await service.get_by_group(id)
@@ -335,7 +345,7 @@ async def get_info_blobs(
 async def upload_file(
     id: UUID,
     file: UploadFile,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Starts a job, use the job operations to keep track of this job"""
     from intric.audit.domain.action_types import ActionType
@@ -347,9 +357,12 @@ async def upload_file(
     # Get group info for context
     group = await group_service.get_group(id)
 
-    # Upload file to group
+    # Upload file to group; content_type and filename can be None per FastAPI spec
     result = await group_service.add_file_to_group(
-        group_id=id, file=file.file, mimetype=file.content_type, filename=file.filename
+        group_id=id,
+        file=file.file,
+        mimetype=file.content_type or "",
+        filename=file.filename or "",
     )
 
     # Get space for context
@@ -398,7 +411,7 @@ async def upload_file(
 async def run_semantic_search(
     id: UUID,
     search_parameters: SemanticSearchRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.collection_crud_service()
     datastore = container.datastore()
@@ -420,7 +433,7 @@ async def run_semantic_search(
 async def transfer_group_to_space(
     id: UUID,
     transfer_req: TransferRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.resource_mover_service()
     await service.move_collection_to_space(

@@ -1,6 +1,6 @@
 # MIT License
 
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
@@ -26,6 +26,7 @@ class UserGroupsRepository:
     UNIQUE_EXCEPTION_MSG = "User group name already exists."
 
     def __init__(self, session: AsyncSession):
+        super().__init__()
         self.delegate: BaseRepositoryDelegate[UserGroupInDB] = BaseRepositoryDelegate(
             session,
             UserGroups,
@@ -82,7 +83,9 @@ class UserGroupsRepository:
     async def delete_user_group(self, id: UUID) -> UserGroupInDB | None:
         return await self.delegate.delete(id)
 
-    async def get_all_user_groups(self, tenant_id: UUID = None) -> List[UserGroupInDB]:
+    async def get_all_user_groups(
+        self, tenant_id: Optional[UUID] = None
+    ) -> List[UserGroupInDB]:
         return await self.delegate.filter_by(
             conditions={UserGroups.tenant_id: tenant_id}
         )

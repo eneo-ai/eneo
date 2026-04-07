@@ -22,6 +22,7 @@ class _Group:
         published: bool = False,
         num_info_blobs: int = 0,
     ):
+        super().__init__()
         self.id = id
         self.created_at = created_at
         self.updated_at = updated_at
