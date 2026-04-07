@@ -17,6 +17,7 @@ class FluxAdapter:
     BASE_URL = "https://api.us1.bfl.ai/v1"
 
     def __init__(self):
+        super().__init__()
         api_key = get_settings().flux_api_key
         if api_key is None:
             raise ValueError("FLUX_API_KEY is not configured")

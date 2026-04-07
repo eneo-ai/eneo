@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Sundsvalls Kommun
 #
 # Licensed under the MIT License.
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from intric.group_chat.domain.entities.group_chat import GroupChat, GroupChatAssistant
 
@@ -71,11 +71,7 @@ class GroupChatFactory:
                 )
             )
 
-        # metadata_json column is Mapped[dict | None] (untyped JSONB); cast at boundary
-        metadata_json: dict[str, object] | None = cast(
-            dict[str, object] | None,
-            group_chat_db.metadata_json,  # pyright: ignore[reportUnknownMemberType]  # db column lacks generic args
-        )
+        metadata_json: dict[str, object] | None = group_chat_db.metadata_json
 
         return GroupChat(
             created_at=group_chat_db.created_at,

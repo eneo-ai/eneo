@@ -3,7 +3,7 @@
 # Licensed under the MIT License.
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union, cast, overload
 
 from typing_extensions import override
 
@@ -70,21 +70,47 @@ class GroupChat(Entity):
         self._metadata_json = metadata_json
         self.icon_id = icon_id
 
-    @override
+    @overload
     @classmethod
     def create(
         cls,
         name: str,
         space_id: "UUID",
         user_id: "UUID",
+        /,
+    ) -> "GroupChat": ...
+
+    @overload
+    @classmethod
+    def create(
+        cls,
+        *,
+        name: str,
+        space_id: "UUID",
+        user_id: "UUID",
+    ) -> "GroupChat": ...
+
+    @override
+    @classmethod
+    def create(
+        cls,
+        *args: object,
+        **kwargs: object,
     ) -> "GroupChat":
+        if args:
+            name, space_id, user_id = args
+        else:
+            name = kwargs["name"]
+            space_id = kwargs["space_id"]
+            user_id = kwargs["user_id"]
+
         return cls(
             id=None,
             created_at=None,
             updated_at=None,
-            user_id=user_id,
-            space_id=space_id,
-            name=name,
+            user_id=cast("UUID", user_id),
+            space_id=cast("UUID", space_id),
+            name=cast(str, name),
             assistants=[],
             allow_mentions=False,
             show_response_label=False,

@@ -191,39 +191,42 @@ class SpaceFactory:
                     user_count=len(user_group.users) if user_group.users else 0,
                 )
 
-        space_collections = [
-            Collection.to_domain(
-                record=collection,
-                embedding_model=cast(
-                    "EmbeddingModel",
-                    next(
-                        (
-                            embedding_model
-                            for embedding_model in embedding_models
-                            if embedding_model.id == collection.embedding_model_id
-                        ),
-                        None,
-                    ),
+        space_collections: list[Collection] = []
+        for collection, info_blob_count in collections_in_db:
+            embedding_model = next(
+                (
+                    embedding_model
+                    for embedding_model in embedding_models
+                    if embedding_model.id == collection.embedding_model_id
                 ),
-                num_info_blobs=info_blob_count,
+                None,
             )
-            for collection, info_blob_count in collections_in_db
-        ]
-        space_websites = [
-            Website.to_domain(
-                record=website,
-                embedding_model=next(
-                    (
-                        embedding_model
-                        for embedding_model in embedding_models
-                        if embedding_model.id == website.embedding_model_id
-                    ),
-                    None,
+            assert embedding_model is not None
+            space_collections.append(
+                Collection.to_domain(
+                    record=collection,
+                    embedding_model=embedding_model,
+                    num_info_blobs=info_blob_count,
+                )
+            )
+        space_websites: list[Website] = []
+        for website in websites_in_db:
+            embedding_model = next(
+                (
+                    embedding_model
+                    for embedding_model in embedding_models
+                    if embedding_model.id == website.embedding_model_id
                 ),
-                http_auth=getattr(website, "_decrypted_http_auth", None),
+                None,
             )
-            for website in websites_in_db
-        ]
+            assert embedding_model is not None
+            space_websites.append(
+                Website.to_domain(
+                    record=website,
+                    embedding_model=embedding_model,
+                    http_auth=getattr(website, "_decrypted_http_auth", None),
+                )
+            )
 
         ik_source: list["IntegrationKnowledgeDBModel"] = (
             list(integration_knowledge_in_db)

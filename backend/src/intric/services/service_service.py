@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from intric.groups_legacy.group_service import GroupService
@@ -125,7 +125,7 @@ class ServiceService:
         service_in_db = await self.repo.add(service_create)
 
         # TODO: Review how we get the permissions to the presentation layer
-        permissions = cast(list[ResourcePermission], actor.get_app_permissions())
+        permissions = actor.get_app_permissions()
 
         return service_in_db, permissions
 
@@ -153,7 +153,7 @@ class ServiceService:
             await self.validate_space_service(service_in_db, space=space)
 
         # TODO: Review how we get the permissions to the presentation layer
-        permissions = cast(list[ResourcePermission], actor.get_app_permissions())
+        permissions = actor.get_app_permissions()
 
         return service_in_db, permissions
 
@@ -169,7 +169,7 @@ class ServiceService:
             raise UnauthorizedException()
 
         # TODO: Review how we get the permissions to the presentation layer
-        permissions = cast(list[ResourcePermission], actor.get_app_permissions())
+        permissions = actor.get_app_permissions()
 
         return service, permissions
 

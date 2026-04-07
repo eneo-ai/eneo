@@ -9,6 +9,7 @@ logger = getLogger(__name__)
 
 class BaseClient:
     def __init__(self, base_url: str):
+        super().__init__()
         self.client = WrappedAiohttpClient(base_url=base_url)
 
     async def __aenter__(self) -> Self:
@@ -29,6 +30,7 @@ class BaseClient:
 
 class AsyncClient:
     def __init__(self, base_url: str):
+        super().__init__()
         self.client = WrappedAiohttpClient(base_url=base_url)
 
     async def __aenter__(self) -> WrappedAiohttpClient:

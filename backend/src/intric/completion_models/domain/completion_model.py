@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, Optional
 
 from typing_extensions import override
 
@@ -109,9 +109,9 @@ class CompletionModel(AIModel):
         # Settings are now directly on the model table
         return cls(
             user=user,
-            id=cast("UUID", completion_model_db.id),
-            created_at=cast("datetime", completion_model_db.created_at),
-            updated_at=cast("datetime", completion_model_db.updated_at),
+            id=completion_model_db.id,
+            created_at=completion_model_db.created_at,
+            updated_at=completion_model_db.updated_at,
             nickname=completion_model_db.nickname,
             name=completion_model_db.name,
             max_input_tokens=completion_model_db.max_input_tokens,

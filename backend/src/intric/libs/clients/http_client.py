@@ -14,6 +14,7 @@ RequestHeaders = Mapping[str, str]
 
 class WrappedAiohttpClient:
     def __init__(self, base_url: str):
+        super().__init__()
         self.base_url = base_url
         self.client = aiohttp.ClientSession()
 

@@ -1,6 +1,6 @@
 # MIT License
 
-from typing import Annotated, cast
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -133,7 +133,7 @@ async def create_tenant_completion_model(
     )
 
     repo = CompletionModelRepository(session, user)
-    completion_model = await repo.one(model_id=cast(UUID, new_model.id))
+    completion_model = await repo.one(model_id=new_model.id)
 
     # Commit the transaction
     await session.commit()
@@ -211,7 +211,7 @@ async def update_tenant_completion_model(
     )
 
     repo = CompletionModelRepository(session, user)
-    completion_model = await repo.one(model_id=cast(UUID, model.id))
+    completion_model = await repo.one(model_id=model.id)
 
     await session.commit()
 

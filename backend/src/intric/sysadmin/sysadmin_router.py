@@ -553,10 +553,7 @@ async def get_embedding_models(
         Depends(get_repository(AdminEmbeddingModelsService)),
     ],
 ):
-    models = cast(
-        list[EmbeddingModelLegacy],
-        await embedding_model_repo.get_models(with_deprecated=False),
-    )
+    models = await embedding_model_repo.get_models(with_deprecated=False)
     return protocol.to_paginated_response(models)
 
 

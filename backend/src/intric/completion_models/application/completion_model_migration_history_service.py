@@ -113,7 +113,7 @@ class CompletionModelMigrationHistoryService:
             initiated_by_name = user_names.get(initiated_by, "Unknown User")
 
             public_model = ModelMigrationHistory(
-                id=cast(UUID, record.id),
+                id=record.id,
                 from_model_id=from_model_id,
                 from_model_name=from_model_name,
                 to_model_id=to_model_id,

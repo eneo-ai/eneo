@@ -57,7 +57,7 @@ class ListOutput(ParsedOutput):
 class PydanticOutput(ParsedOutput):
     @override
     def to_string(self) -> str:
-        return cast(BaseModel, self.parsed_output).json()
+        return cast(BaseModel, self.parsed_output).model_dump_json()
 
     @override
     def to_value(self) -> dict[str, object]:

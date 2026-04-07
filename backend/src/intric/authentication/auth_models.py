@@ -18,9 +18,9 @@ from intric.main.config import get_settings
 class JWTMeta(BaseModel):
     iss: str = get_settings().jwt_issuer  # who issued it
     aud: str = get_settings().jwt_audience  # who it's intended for
-    iat: float = datetime.timestamp(datetime.utcnow())  # issued at time
+    iat: float = datetime.timestamp(datetime.now(timezone.utc))  # issued at time
     exp: float = datetime.timestamp(
-        datetime.utcnow() + timedelta(minutes=get_settings().jwt_expiry_time)
+        datetime.now(timezone.utc) + timedelta(minutes=get_settings().jwt_expiry_time)
     )  # expiry time
 
 

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional, cast
-from uuid import UUID
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
 
 import redis.asyncio as aioredis
 
@@ -126,7 +125,7 @@ class CompletionService:
             )
 
         # Create credential resolver
-        provider_id = cast(UUID, provider_db.id)
+        provider_id = provider_db.id
 
         encryption_service = self.encryption_service
         if encryption_service is None:

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import TYPE_CHECKING, Optional, Union, cast
+from typing import TYPE_CHECKING, Optional, Union, cast, overload
 
 from typing_extensions import override
 
@@ -122,19 +122,83 @@ class Website(Entity):
         self.http_auth = None
         return self
 
+    @overload
+    @classmethod
+    def create(
+        cls,
+        space_id: "UUID",
+        user: "UserInDB",
+        url: str,
+        name: Optional[str],
+        download_files: bool,
+        crawl_type: CrawlType,
+        update_interval: UpdateInterval,
+        embedding_model: "EmbeddingModel",
+        http_auth_username: Optional[str] = None,
+        http_auth_password: Optional[str] = None,
+        /,
+    ) -> "Website": ...
+
+    @overload
+    @classmethod
+    def create(
+        cls,
+        *,
+        space_id: "UUID",
+        user: "UserInDB",
+        url: str,
+        name: Optional[str],
+        download_files: bool,
+        crawl_type: CrawlType,
+        update_interval: UpdateInterval,
+        embedding_model: "EmbeddingModel",
+        http_auth_username: Optional[str] = None,
+        http_auth_password: Optional[str] = None,
+    ) -> "Website": ...
+
     @override
     @classmethod
-    def create(cls, **kwargs: object) -> "Website":
-        space_id = cast("UUID", kwargs["space_id"])
-        user = cast("UserInDB", kwargs["user"])
-        url = cast(str, kwargs["url"])
-        name = cast(Optional[str], kwargs.get("name"))
-        download_files = cast(bool, kwargs["download_files"])
-        crawl_type = cast(CrawlType, kwargs["crawl_type"])
-        update_interval = cast(UpdateInterval, kwargs["update_interval"])
-        embedding_model = cast("EmbeddingModel", kwargs["embedding_model"])
-        http_auth_username = cast(Optional[str], kwargs.get("http_auth_username"))
-        http_auth_password = cast(Optional[str], kwargs.get("http_auth_password"))
+    def create(cls, *args: object, **kwargs: object) -> "Website":
+        if args:
+            (
+                space_id,
+                user,
+                url,
+                name,
+                download_files,
+                crawl_type,
+                update_interval,
+                embedding_model,
+                *optional_auth,
+            ) = args
+            http_auth_username = cast(
+                Optional[str], optional_auth[0] if optional_auth else None
+            )
+            http_auth_password = cast(
+                Optional[str], optional_auth[1] if len(optional_auth) > 1 else None
+            )
+        else:
+            space_id = kwargs["space_id"]
+            user = kwargs["user"]
+            url = kwargs["url"]
+            name = kwargs.get("name")
+            download_files = kwargs["download_files"]
+            crawl_type = kwargs["crawl_type"]
+            update_interval = kwargs["update_interval"]
+            embedding_model = kwargs["embedding_model"]
+            http_auth_username = kwargs.get("http_auth_username")
+            http_auth_password = kwargs.get("http_auth_password")
+
+        space_id = cast("UUID", space_id)
+        user = cast("UserInDB", user)
+        url = cast(str, url)
+        name = cast(Optional[str], name)
+        download_files = cast(bool, download_files)
+        crawl_type = cast(CrawlType, crawl_type)
+        update_interval = cast(UpdateInterval, update_interval)
+        embedding_model = cast("EmbeddingModel", embedding_model)
+        http_auth_username = cast(Optional[str], http_auth_username)
+        http_auth_password = cast(Optional[str], http_auth_password)
 
         website = cls(
             id=None,
@@ -161,17 +225,38 @@ class Website(Entity):
 
         return website
 
+    @classmethod
+    @overload
+    def to_domain(
+        cls,
+        db_model: "WebsitesTable",
+        *,
+        embedding_model: "EmbeddingModel",
+        http_auth: Optional[HttpAuthCredentials] = None,
+    ) -> "Website": ...
+
+    @overload
+    @classmethod
+    def to_domain(
+        cls,
+        *,
+        record: "WebsitesTable",
+        embedding_model: "EmbeddingModel",
+        http_auth: Optional[HttpAuthCredentials] = None,
+    ) -> "Website": ...
+
     @override
     @classmethod
     def to_domain(
         cls,
-        db_model: Optional["WebsitesTable"] = None,
+        db_model: object = None,
+        *args: object,
         **kwargs: object,
     ) -> "Website":
-        record = (
-            db_model
-            if db_model is not None
-            else cast("WebsitesTable", kwargs["record"])
+        del args
+        record = cast(
+            "WebsitesTable",
+            db_model if db_model is not None else kwargs["record"],
         )
         embedding_model = cast("EmbeddingModel", kwargs["embedding_model"])
         http_auth = cast(Optional[HttpAuthCredentials], kwargs.get("http_auth"))
@@ -294,17 +379,30 @@ class WebsiteSparse(Entity):
         self.consecutive_failures = consecutive_failures
         self.next_retry_at = next_retry_at
 
+    @classmethod
+    @overload
+    def to_domain(cls, db_model: "WebsitesTable") -> "WebsiteSparse": ...
+
+    @overload
+    @classmethod
+    def to_domain(
+        cls,
+        *,
+        record: "WebsitesTable",
+    ) -> "WebsiteSparse": ...
+
     @override
     @classmethod
     def to_domain(
         cls,
-        db_model: Optional["WebsitesTable"] = None,
+        db_model: object = None,
+        *args: object,
         **kwargs: object,
     ) -> "WebsiteSparse":
-        record = (
-            db_model
-            if db_model is not None
-            else cast("WebsitesTable", kwargs["record"])
+        del args
+        record = cast(
+            "WebsitesTable",
+            db_model if db_model is not None else kwargs["record"],
         )
 
         return cls(

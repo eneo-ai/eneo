@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Union, cast
+from typing import TYPE_CHECKING, Optional, Union
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import ModelKwargs
@@ -114,7 +114,7 @@ class AppService:
             )
 
         # TODO: Review how we get the permissions to the presentation layer
-        permissions = cast(list[ResourcePermission], actor.get_app_permissions())
+        permissions = actor.get_app_permissions()
 
         return app_in_db, permissions  # type: ignore[return-value]
 
@@ -191,10 +191,7 @@ class AppService:
         )
         if not transcription_model:
             # Get default from tenant (for both personal and non-personal spaces)
-            transcription_model = cast(
-                "TranscriptionModel | None",
-                await self.transcription_model_crud_service.get_default_transcription_model(),
-            )
+            transcription_model = await self.transcription_model_crud_service.get_default_transcription_model()
 
         if transcription_model is None:
             raise BadRequestException(
@@ -220,7 +217,7 @@ class AppService:
             )
 
         # TODO: Review how we get the permissions to the presentation layer
-        permissions = cast(list[ResourcePermission], actor.get_app_permissions())
+        permissions = actor.get_app_permissions()
 
         return app, permissions
 
@@ -313,7 +310,7 @@ class AppService:
         app_in_db = await self.repo.update(app)
 
         # TODO: Review how we get the permissions to the presentation layer
-        permissions = cast(list[ResourcePermission], actor.get_app_permissions())
+        permissions = actor.get_app_permissions()
 
         return app_in_db, permissions  # type: ignore[return-value]
 
@@ -434,6 +431,6 @@ class AppService:
         app_in_db = await self.repo.update(app)
 
         # TODO: Review how we get the permissions to the presentation layer
-        permissions = cast(list[ResourcePermission], actor.get_app_permissions())
+        permissions = actor.get_app_permissions()
 
         return app_in_db, permissions

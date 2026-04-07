@@ -1,7 +1,7 @@
 import base64
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional, cast
 from uuid import UUID
 
@@ -81,7 +81,7 @@ class CompletionModelUsageService:
                 assistant_templates_count=0,
                 app_templates_count=0,
                 spaces_count=0,
-                last_updated=datetime.utcnow(),
+                last_updated=datetime.now(timezone.utc),
             )
 
         return ModelUsageStatistics(
@@ -226,7 +226,9 @@ class CompletionModelUsageService:
                     model_nickname=cast(str, row.nickname),
                     is_enabled=cast(bool, row.is_enabled),
                     total_usage=cast(int, row.total_usage or 0),
-                    last_updated=cast(datetime, row.last_updated or datetime.utcnow()),
+                    last_updated=cast(
+                        datetime, row.last_updated or datetime.now(timezone.utc)
+                    ),
                 )
                 summaries.append(summary)
 
@@ -322,7 +324,7 @@ class CompletionModelUsageService:
                 stmt = stmt.join(join_table, join_condition, isouter=True)
 
         result = await self.session.execute(stmt)
-        rows = list(result.fetchall())
+        rows = list(result.mappings().all())
 
         # Check if there are more results
         has_more = len(rows) > limit
@@ -331,8 +333,7 @@ class CompletionModelUsageService:
         # Convert rows to ModelUsageDetail objects
         details: list[ModelUsageDetail] = []
         for row in rows:
-            # Build a dict from the row data
-            row_dict = cast(dict[str, Any], dict(row._mapping))
+            row_dict = cast(dict[str, Any], dict(row))
 
             # Map the data to ModelUsageDetail fields
             detail = ModelUsageDetail(
@@ -1001,7 +1002,7 @@ class CompletionModelUsageService:
         )
 
         # Update timestamp
-        stats.last_updated = datetime.utcnow()
+        stats.last_updated = datetime.now(timezone.utc)
 
         # Final verification of data integrity
         verification_total = (

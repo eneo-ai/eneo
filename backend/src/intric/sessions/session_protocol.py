@@ -33,7 +33,7 @@ def to_sessions_paginated_response(
     sessions: list[SessionInDB],
     total_count: int,
     limit: int | None = None,
-    cursor: datetime = None,
+    cursor: datetime | None = None,
     previous: bool = False,
 ):
     # If no limit is provided, return all session data.
@@ -97,7 +97,7 @@ def to_session_metadata_paginated_response(
     sessions: list[SessionMetadataPublic],
     total_count: int,
     limit: int | None = None,
-    cursor: datetime = None,
+    cursor: datetime | None = None,
     previous: bool = False,
 ):
     if limit is None:

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import TYPE_CHECKING, Optional, Union, cast
+from typing import TYPE_CHECKING, Optional, Union, cast, overload
 
 from typing_extensions import override
 
@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from datetime import datetime
     from uuid import UUID
 
+    from intric.database.tables.job_table import Jobs
     from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
     from intric.websites.domain.website import Website, WebsiteSparse
 
@@ -50,10 +51,22 @@ class CrawlRun(Entity):
         self.job_id = job_id
         self.failure_summary = failure_summary
 
+    @overload
+    @classmethod
+    def create(cls, website: Union["Website", "WebsiteSparse"], /) -> "CrawlRun": ...
+
+    @overload
+    @classmethod
+    def create(cls, *, website: Union["Website", "WebsiteSparse"]) -> "CrawlRun": ...
+
     @override
     @classmethod
-    def create(cls, **kwargs: object) -> "CrawlRun":
-        website = cast(Union["Website", "WebsiteSparse"], kwargs["website"])
+    def create(cls, *args: object, **kwargs: object) -> "CrawlRun":
+        website = (
+            cast(Union["Website", "WebsiteSparse"], args[0])
+            if args
+            else cast(Union["Website", "WebsiteSparse"], kwargs["website"])
+        )
         return cls(
             id=None,
             created_at=None,
@@ -71,19 +84,32 @@ class CrawlRun(Entity):
             failure_summary=None,
         )
 
+    @classmethod
+    @overload
+    def to_domain(cls, db_model: "CrawlRunsTable") -> "CrawlRun": ...
+
+    @overload
+    @classmethod
+    def to_domain(
+        cls,
+        *,
+        record: "CrawlRunsTable",
+    ) -> "CrawlRun": ...
+
     @override
     @classmethod
     def to_domain(
         cls,
-        db_model: Optional["CrawlRunsTable"] = None,
+        db_model: object = None,
+        *args: object,
         **kwargs: object,
     ) -> "CrawlRun":
-        record = (
-            db_model
-            if db_model is not None
-            else cast("CrawlRunsTable", kwargs["record"])
+        del args
+        record = cast(
+            "CrawlRunsTable",
+            db_model if db_model is not None else kwargs["record"],
         )
-        job = getattr(record, "job", None)
+        job = cast("Jobs | None", getattr(record, "job", None))
 
         return cls(
             id=record.id,
@@ -96,9 +122,9 @@ class CrawlRun(Entity):
             pages_failed=record.pages_failed,
             files_failed=record.files_failed,
             job_id=record.job_id,
-            status=Status(cast(str, job.status)) if job else Status.QUEUED,
-            result_location=cast(Optional[str], job.result_location) if job else None,
-            finished_at=cast(Optional["datetime"], job.finished_at) if job else None,
+            status=Status(job.status) if job else Status.QUEUED,
+            result_location=job.result_location if job else None,
+            finished_at=job.finished_at if job else None,
             failure_summary=record.failure_summary,
         )
 
