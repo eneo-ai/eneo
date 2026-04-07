@@ -5,6 +5,7 @@
   import { ChevronRight, Search, Check, X } from "lucide-svelte";
   import { onMount } from "svelte";
   import { slide, fly } from "svelte/transition";
+  import { SvelteSet } from "svelte/reactivity";
 
   const intric = getIntric();
 
@@ -28,7 +29,7 @@
   // State
   let categoryConfig = $state<CategoryConfigItem[]>([]);
   let actionConfig = $state<ActionConfigItem[]>([]);
-  let expandedCategories = $state(new Set<string>());
+  const expandedCategories = new SvelteSet<string>();
   let searchQuery = $state("");
   let isLoading = $state(true);
   let showLoading = $state(false); // Only show loading spinner after 200ms delay
@@ -91,7 +92,6 @@
     } else {
       expandedCategories.add(category);
     }
-    expandedCategories = new Set(expandedCategories);
   }
 
   // Toggle all actions in a category with proper Svelte 5 reactivity
@@ -248,13 +248,11 @@
     for (const category of categoryConfig) {
       expandedCategories.add(category.category);
     }
-    expandedCategories = new Set(expandedCategories);
   }
 
   // Collapse all categories
   function collapseAll() {
     expandedCategories.clear();
-    expandedCategories = new Set(expandedCategories);
   }
 
   onMount(() => {

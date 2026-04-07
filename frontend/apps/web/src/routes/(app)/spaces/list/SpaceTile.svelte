@@ -18,6 +18,7 @@
   $: iconUrl = space.icon_id ? `${environment.baseUrl}/api/v1/icons/${space.icon_id}/` : null;
 </script>
 
+<!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing for dynamic path -->
 <a
   aria-label={space.name}
   href={localizeHref(`/spaces/${space.id}`)}
@@ -43,3 +44,4 @@
 
   <div class="pointer-events-none absolute inset-0 flex items-center justify-center"></div>
 </a>
+<!-- eslint-enable svelte/no-navigation-without-resolve -->

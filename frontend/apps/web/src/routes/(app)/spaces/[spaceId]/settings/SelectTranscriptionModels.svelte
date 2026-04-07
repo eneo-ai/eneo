@@ -14,6 +14,7 @@
   import { sortModels } from "$lib/features/ai-models/sortModels";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
+  import { SvelteSet } from "svelte/reactivity";
 
   export let selectableModels: (TranscriptionModel & {
     meets_security_classification?: boolean | null | undefined;
@@ -30,7 +31,7 @@
     ($currentSpace) => $currentSpace.transcription_models.map((model) => model.id) ?? []
   );
 
-  let loading = new Set<string>();
+  let loading = new SvelteSet<string>();
   async function toggleModel(model: TranscriptionModel) {
     loading.add(model.id);
     loading = loading;

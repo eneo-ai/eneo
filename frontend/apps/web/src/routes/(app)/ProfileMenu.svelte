@@ -25,7 +25,8 @@
       localStorage.removeItem("eneo:last-tenant");
     }
 
-    // Navigate to endpoint
+    // Navigate to endpoint (not a SvelteKit route — server endpoint)
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- server endpoint, not a typed route
     goto("/login/switch-organisation");
   }
 

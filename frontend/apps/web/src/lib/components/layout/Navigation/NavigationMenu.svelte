@@ -14,6 +14,7 @@
   <slot />
   <div class="flex-grow"></div>
   {#if featureFlags.showHelpCenter}
+    <!-- eslint-disable svelte/no-navigation-without-resolve -- external help center URL from environment config -->
     <a
       href={environment.helpCenterUrl}
       target="_blank"
@@ -23,6 +24,7 @@
       <span>{m.have_a_question()}</span>
       <IconFeedback />
     </a>
+    <!-- eslint-enable svelte/no-navigation-without-resolve -->
   {/if}
   <NavigationVersionInfo />
 </nav>

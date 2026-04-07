@@ -27,6 +27,7 @@
     defaultSelected: { value: { id: currentApp.id } },
     onSelectedChange: ({ next }) => {
       if (next) {
+        // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with space and app ids
         goto(`/spaces/${$currentSpace.routeId}/apps/${next.value.id}`);
       }
       return next;

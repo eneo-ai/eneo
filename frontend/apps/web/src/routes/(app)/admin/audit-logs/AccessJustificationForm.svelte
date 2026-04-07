@@ -5,6 +5,7 @@
   import { slide, fade, fly } from "svelte/transition";
   import { writable } from "svelte/store";
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { onMount } from "svelte";
 
   // Animation state for staggered entrance
@@ -109,7 +110,7 @@
 
   // Handle cancel - go back to audit logs without filters
   function handleCancel() {
-    goto("/admin/audit-logs", { replaceState: true });
+    goto(resolve("/admin/audit-logs"), { replaceState: true });
   }
 
   // Handle keyboard shortcuts

@@ -88,6 +88,7 @@
               $showCreateDialog = false;
               resetForm();
               if (openAssistantAfterCreation) {
+                // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with space and assistant ids
                 goto(`/spaces/${$currentSpace.routeId}/assistants/${id}/edit?next=default`);
               }
             }

@@ -9,6 +9,7 @@
   import { integrationData } from "../../IntegrationData";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import { resolve } from "$app/paths";
 
   const contextIntegrations = getAvailableIntegrations();
   const {
@@ -109,14 +110,18 @@
         <p class="text-secondary max-w-[60ch] pr-48 pl-4">
           {#if isPersonalSpace}
             {m.import_knowledge_from_third_party()}
+            <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
             <a href={localizeHref("/account/integrations?tab=providers")} class="underline"
               >{m.personal_account()}</a
             >.
+            <!-- eslint-enable svelte/no-navigation-without-resolve -->
           {:else}
             {m.import_knowledge_from_org_integrations()}
+            <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
             <a href={localizeHref("/admin/integrations?tab=providers")} class="underline"
               >{m.admin_settings()}</a
             >.
+            <!-- eslint-enable svelte/no-navigation-without-resolve -->
           {/if}
         </p>
         <!-- <div class="h-8"></div> -->
@@ -132,13 +137,13 @@
               <p class="mb-2">{m.no_integrations_available()}</p>
               <p class="text-sm">
                 {#if isPersonalSpace}
-                  <a href="/account/integrations?tab=providers" class="underline"
+                  <a href={resolve("/account/integrations?tab=providers")} class="underline"
                     >{m.connect_personal_integration()}</a
                   >
                   {m.to_get_started()}
                 {:else}
                   {m.configure_a()}
-                  <a href="/admin/integrations?tab=providers" class="underline"
+                  <a href={resolve("/admin/integrations?tab=providers")} class="underline"
                     >{m.tenant_app_integration()}</a
                   >
                   {m.in_admin_settings()}

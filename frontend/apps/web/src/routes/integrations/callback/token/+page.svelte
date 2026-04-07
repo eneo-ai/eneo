@@ -238,12 +238,14 @@
     {#if errorMessage}
       <p class="text-secondary max-w-md text-center">{errorMessage}</p>
     {/if}
+    <!-- eslint-disable svelte/no-navigation-without-resolve -- static literal route, public callback layout -->
     <a
       href="/admin/integrations"
       class="mt-4 rounded-lg bg-blue-600 px-6 py-2 text-white hover:bg-blue-700"
     >
       {m.back_to_integrations()}
     </a>
+    <!-- eslint-enable svelte/no-navigation-without-resolve -->
   {/if}
 
   <!-- Hidden form for service account OAuth completion -->
@@ -259,6 +261,7 @@
             status = "service_success";
             serviceAccountEmail = (result.data.service_account_email as string) || null;
             setTimeout(() => {
+              // eslint-disable-next-line svelte/no-navigation-without-resolve -- static literal route with query string
               goto("/admin/integrations?sharepoint_configured=true");
             }, 2000);
           } else if (result.type === "failure") {

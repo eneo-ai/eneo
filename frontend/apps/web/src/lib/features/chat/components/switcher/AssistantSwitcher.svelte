@@ -42,9 +42,9 @@
     defaultSelected: { value: $state.snapshot(chat.partner) },
     onSelectedChange: ({ next }) => {
       if (next) {
-        goto(
-          `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: next.value })}`
-        );
+        const url = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: next.value })}`;
+        // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with space id and chat query params
+        goto(url);
       }
       return next;
     }

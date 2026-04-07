@@ -11,6 +11,7 @@
   import WrapperNameCell from "./WrapperNameCell.svelte";
   import { integrationData } from "$lib/features/integrations/IntegrationData";
   import { m } from "$lib/paraglide/messages";
+  import { SvelteMap } from "svelte/reactivity";
 
   interface Props {
     onSelectIntegrationForSyncHistory?: (integration: IntegrationKnowledge) => void;
@@ -111,7 +112,7 @@
 
   const displayItems = derived([knowledge, currentSpace], ([$knowledge, $currentSpace]) => {
     // Group items by wrapper_id
-    const wrapperMap = new Map<string, IntegrationKnowledge[]>();
+    const wrapperMap = new SvelteMap<string, IntegrationKnowledge[]>();
     const noWrapper: IntegrationKnowledge[] = [];
 
     for (const item of $knowledge) {

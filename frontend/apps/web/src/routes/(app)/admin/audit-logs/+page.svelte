@@ -1,7 +1,9 @@
 <script lang="ts">
   import { goto, replaceState } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { page } from "$app/stores";
   import { writable } from "svelte/store";
+  import { SvelteDate, SvelteSet, SvelteURLSearchParams } from "svelte/reactivity";
   import { Page } from "$lib/components/layout";
   import { Button, Input, Dropdown, ProgressBar } from "@intric/ui";
   import * as m from "$lib/paraglide/messages";
@@ -85,13 +87,14 @@
   // Update URL when tab changes
   function switchTab(tab: "logs" | "config") {
     activeTab = tab;
-    const params = new URLSearchParams($page.url.search);
+    const params = new SvelteURLSearchParams($page.url.search);
     if (tab === "config") {
       params.set("tab", "config");
     } else {
       params.delete("tab");
     }
     const url = params.toString() ? `/admin/audit-logs?${params.toString()}` : "/admin/audit-logs";
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic query string built from URLSearchParams
     goto(url, { noScroll: true, keepFocus: true });
   }
 
@@ -108,7 +111,7 @@
       });
 
       // Reload page - session cookie is now set, grants access to audit logs
-      await goto("/admin/audit-logs", { invalidateAll: true });
+      await goto(resolve("/admin/audit-logs"), { invalidateAll: true });
     } catch (error) {
       console.error("Failed to create audit access session:", error);
       // Error will be shown by the form component
@@ -117,7 +120,7 @@
   }
 
   // Expandable row state
-  let expandedRows = $state<Set<string>>(new Set());
+  const expandedRows = new SvelteSet<string>();
   let copiedRowId = $state<string | null>(null);
 
   // Filter states
@@ -752,7 +755,6 @@
     } else {
       expandedRows.add(logId);
     }
-    expandedRows = new Set(expandedRows); // Trigger reactivity
   }
 
   async function copyJsonToClipboard(json: Record<string, unknown>, logId: string) {
@@ -777,7 +779,7 @@
     }
     filterAbortController = new AbortController();
 
-    const params = new URLSearchParams();
+    const params = new SvelteURLSearchParams();
 
     // Build filter params for API call
     const filterParams: {
@@ -827,6 +829,7 @@
 
     // Update URL without triggering navigation (preserves session)
     const url = params.toString() ? `/admin/audit-logs?${params.toString()}` : "/admin/audit-logs";
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic query string built from URLSearchParams
     replaceState(url, {});
 
     // Fetch data directly without triggering load function
@@ -1200,7 +1203,7 @@
 
   // Calculate cutoff date for retention
   function getRetentionCutoffDate(days: number): string {
-    const cutoff = new Date();
+    const cutoff = new SvelteDate();
     cutoff.setDate(cutoff.getDate() - days);
     return cutoff.toLocaleDateString("sv-SE");
   }

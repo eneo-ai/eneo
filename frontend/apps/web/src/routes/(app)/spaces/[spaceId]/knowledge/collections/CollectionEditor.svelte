@@ -51,6 +51,7 @@
       collectionName = "";
       embeddingModel = undefined;
       $showDialog = false;
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path with routeId and collection id
       await goto(`/spaces/${routeId}/knowledge/collections/${newCollection.id}`);
     } catch (error) {
       toastError(error);

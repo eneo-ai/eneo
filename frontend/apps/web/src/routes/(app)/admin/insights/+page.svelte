@@ -30,6 +30,7 @@
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { onMount } from "svelte";
+  import { SvelteMap } from "svelte/reactivity";
 
   // Use $props() for Svelte 5 runes mode
   let { data } = $props();
@@ -57,7 +58,7 @@
   let showComparison = $state(false);
   let comparisonData: AnalyticsAggregatedData | null = $state(null);
   let isLoadingComparison = $state(false);
-  const comparisonCache = new Map<string, AnalyticsAggregatedData>();
+  const comparisonCache = new SvelteMap<string, AnalyticsAggregatedData>();
 
   // Data freshness tracking
   let lastUpdated = $state<Date | null>(null);
@@ -84,7 +85,7 @@
   let _activityError = $state(false);
 
   // Cache for previously fetched date ranges
-  const analyticsCache = new Map<
+  const analyticsCache = new SvelteMap<
     string,
     { data: AnalyticsAggregatedData; timeframe: { start: string; end: string } }
   >();
@@ -942,6 +943,7 @@
                         </div>
 
                         <!-- Tokens - Clickable card linking to full usage -->
+                        <!-- eslint-disable svelte/no-navigation-without-resolve -- static query string route -->
                         <a
                           href="/admin/usage?tab=tokens"
                           class="stat-card group relative flex cursor-pointer flex-col border-t border-l-2 border-[var(--border-dimmer)] border-l-transparent bg-[var(--background-primary)] px-5 py-4 no-underline transition-all duration-300 ease-out hover:border-l-[var(--accent-default)] hover:bg-[var(--background-hover-dimmer)]"
@@ -1027,6 +1029,7 @@
                             >
                           {/if}
                         </a>
+                        <!-- eslint-enable svelte/no-navigation-without-resolve -->
                       </div>
                     </div>
                   {/if}

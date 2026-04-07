@@ -12,6 +12,7 @@
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight } from "lucide-svelte";
   import type { components } from "@intric/intric-js";
+  import { SvelteSet } from "svelte/reactivity";
 
   type MCPTool = components["schemas"]["MCPServerToolPublic"];
 
@@ -48,16 +49,14 @@
   const { selectableServers }: Props = $props();
 
   // Track expanded servers
-  let expandedServers = $state(new Set<string>());
+  const expandedServers = new SvelteSet<string>();
 
   function toggleExpanded(serverId: string) {
-    const newExpanded = new Set(expandedServers);
-    if (newExpanded.has(serverId)) {
-      newExpanded.delete(serverId);
+    if (expandedServers.has(serverId)) {
+      expandedServers.delete(serverId);
     } else {
-      newExpanded.add(serverId);
+      expandedServers.add(serverId);
     }
-    expandedServers = newExpanded;
   }
 
   const {
@@ -87,12 +86,10 @@
     return server?.tools ?? [];
   }
 
-  let loading = $state(new Set<string>());
+  const loading = new SvelteSet<string>();
 
   async function toggleServer(server: SelectableMCPServer) {
-    const newLoading = new Set(loading);
-    newLoading.add(server.id);
-    loading = newLoading;
+    loading.add(server.id);
 
     try {
       if ($currentlySelectedServers.includes(server.id)) {
@@ -122,9 +119,7 @@
       console.error("Failed to toggle server:", e);
     }
 
-    const updatedLoading = new Set(loading);
-    updatedLoading.delete(server.id);
-    loading = updatedLoading;
+    loading.delete(server.id);
   }
 
   async function toggleTool(tool: SpaceMCPTool) {

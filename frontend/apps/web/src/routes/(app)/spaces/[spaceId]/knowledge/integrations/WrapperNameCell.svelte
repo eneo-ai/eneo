@@ -11,6 +11,7 @@
   let { name, link, subtitle }: Props = $props();
 </script>
 
+<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- link is a typed prop passed from caller -->
 <a href={link} class="group flex w-full items-center gap-2">
   <div class="text-muted flex-shrink-0">
     <IconCollections class="min-w-6" />

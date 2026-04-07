@@ -19,6 +19,7 @@
   import { IconChevronRight } from "@intric/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
+  import { SvelteSet } from "svelte/reactivity";
 
   type Props =
     | {
@@ -45,7 +46,7 @@
   }
 
   function listOrgs(models: { org?: string | null | undefined }[]) {
-    const uniqueOrgs = new Set<string>();
+    const uniqueOrgs = new SvelteSet<string>();
 
     for (const model of models) {
       if (model.org) uniqueOrgs.add(model.org);

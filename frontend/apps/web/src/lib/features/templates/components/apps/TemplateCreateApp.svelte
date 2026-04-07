@@ -114,6 +114,7 @@
               $showCreateDialog = false;
               resetForm();
               if (openAppAfterCreation) {
+                // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with space and app ids
                 goto(`/spaces/${$currentSpace.routeId}/apps/${id}/edit?next=default`);
               }
             }

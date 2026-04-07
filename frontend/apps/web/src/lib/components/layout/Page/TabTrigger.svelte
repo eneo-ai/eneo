@@ -25,6 +25,7 @@
 
     // replaceState updates the URL without triggering SvelteKit navigation,
     // so tab switching is instant (no load functions re-run)
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with mutated query params
     replaceState(url, { ...$page.state, tab });
   }
 </script>

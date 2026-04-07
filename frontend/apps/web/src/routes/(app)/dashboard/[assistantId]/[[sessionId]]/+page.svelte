@@ -26,6 +26,7 @@
     const loaded = await chat.loadConversation(conversation);
     if (loaded) {
       showHistory = false;
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with assistant and conversation IDs
       pushState(`/dashboard/${chat.partner.id}/${loaded.id}`, {
         conversation: loaded,
         tab: "chat"
@@ -43,10 +44,12 @@
     class="bg-primary sticky top-0 flex items-center justify-between px-3.5 py-3 backdrop-blur-md"
     in:fade={{ duration: 50 }}
   >
+    <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
     <a
       href={localizeHref("/dashboard")}
       class="flex max-w-[calc(100%_-_7rem)] flex-grow items-center rounded-lg"
     >
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
       <span
         class="border-default hover:bg-hover-dimmer flex h-8 w-8 items-center justify-center rounded-lg border"
         >←</span
@@ -67,6 +70,7 @@
       variant="primary"
       on:click={() => {
         chat.newConversation();
+        // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with assistant ID
         pushState(`/dashboard/${chat.partner.id}?tab=chat`, {
           conversation: undefined,
           tab: "chat"

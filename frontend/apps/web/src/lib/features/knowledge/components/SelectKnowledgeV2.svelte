@@ -19,6 +19,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getAvailableKnowledge } from "../getAvailableKnowledge";
   import { tick } from "svelte";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { m } from "$lib/paraglide/messages";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import IntegrationVendorIcon from "$lib/features/integrations/components/IntegrationVendorIcon.svelte";
@@ -145,12 +146,12 @@
 
   const intric = getIntric();
 
-  let expandedItems = new Set<string>();
-  let expandedWrapperSelections = new Set<string>();
-  let expandedWrapperOptions = new Set<string>();
-  let blobCache = new Map<string, InfoBlob[]>();
-  let loadingBlobs = new Set<string>();
-  let currentPages = new Map<string, number>();
+  let expandedItems = new SvelteSet<string>();
+  let expandedWrapperSelections = new SvelteSet<string>();
+  let expandedWrapperOptions = new SvelteSet<string>();
+  let blobCache = new SvelteMap<string, InfoBlob[]>();
+  let loadingBlobs = new SvelteSet<string>();
+  let currentPages = new SvelteMap<string, number>();
   const ITEMS_PER_PAGE = 10;
 
   type MessageFn = (args?: Record<string, unknown>) => string;
@@ -392,10 +393,10 @@
   }
 
   function groupIntegrationByWrapper(knowledgeItems: IntegrationKnowledge[]): {
-    wrappers: Map<string, IntegrationKnowledge[]>;
+    wrappers: SvelteMap<string, IntegrationKnowledge[]>;
     singles: IntegrationKnowledge[];
   } {
-    const wrappers = new Map<string, IntegrationKnowledge[]>();
+    const wrappers = new SvelteMap<string, IntegrationKnowledge[]>();
     const singles: IntegrationKnowledge[] = [];
 
     for (const knowledge of knowledgeItems) {
@@ -572,7 +573,7 @@
 
   $: sectionEntries = Object.entries(availableKnowledge.sections).map(([modelId, section]) => {
     const dedupe = <T extends { id: string }>(arr: T[] = []) => {
-      const seen = new Set<string>();
+      const seen = new SvelteSet<string>();
       return arr.filter((x) => (seen.has(x.id) ? false : (seen.add(x.id), true)));
     };
     return [

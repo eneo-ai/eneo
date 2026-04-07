@@ -77,6 +77,7 @@
   async function openQuestionHistory() {
     const next = new URL($page.url);
     next.searchParams.set("tab", "questions");
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL built from current page URL with mutated search params
     await goto(next.toString(), {
       replaceState: true,
       noScroll: true,

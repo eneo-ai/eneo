@@ -10,6 +10,7 @@
   import { Input, Tooltip } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight } from "lucide-svelte";
+  import { SvelteSet } from "svelte/reactivity";
 
   interface MCPTool {
     id: string;
@@ -55,16 +56,14 @@
   let loading = $state(true);
 
   // Track expanded servers
-  let expandedServers = $state(new Set<string>());
+  const expandedServers = new SvelteSet<string>();
 
   function toggleExpanded(serverId: string) {
-    const newExpanded = new Set(expandedServers);
-    if (newExpanded.has(serverId)) {
-      newExpanded.delete(serverId);
+    if (expandedServers.has(serverId)) {
+      expandedServers.delete(serverId);
     } else {
-      newExpanded.add(serverId);
+      expandedServers.add(serverId);
     }
-    expandedServers = newExpanded;
   }
 
   function getServerTools(server: MCPServer): MCPTool[] {

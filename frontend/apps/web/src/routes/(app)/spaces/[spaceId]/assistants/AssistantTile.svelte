@@ -18,6 +18,7 @@
   $: iconUrl = item.icon_id ? `${environment.baseUrl}/api/v1/icons/${item.icon_id}/` : null;
 </script>
 
+<!-- eslint-disable svelte/no-navigation-without-resolve -- dynamic path with query string -->
 <a
   aria-label={item.name}
   {...dynamicColour({ basedOn: item.id })}
@@ -88,3 +89,4 @@
 
   <div class="flex-grow"></div>
 </a>
+<!-- eslint-enable svelte/no-navigation-without-resolve -->

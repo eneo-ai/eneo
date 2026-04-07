@@ -11,6 +11,7 @@
   import TenantSelector from "$lib/components/TenantSelector.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import { SvelteURLSearchParams } from "svelte/reactivity";
 
   type TenantInfo = {
     slug: string;
@@ -237,12 +238,13 @@
 
   async function clearOidcErrorFromUrl() {
     if (!browser) return;
-    const params = new URLSearchParams(window.location.search);
+    const params = new SvelteURLSearchParams(window.location.search);
     params.delete("message");
     params.delete("detailCode");
     params.delete("correlation");
     params.delete("rawDetail");
     const query = params.toString();
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL built from window.location
     await goto(`${window.location.pathname}${query ? `?${query}` : ""}`, {
       replaceState: true,
       noScroll: true
@@ -328,13 +330,14 @@
       } catch {
         // ignore storage errors (private browsing, etc.)
       }
-      const params = new URLSearchParams(window.location.search);
+      const params = new SvelteURLSearchParams(window.location.search);
       params.delete("message");
       params.delete("detailCode");
       params.delete("correlation");
       params.delete("rawDetail");
       params.delete("tenant");
       const query = params.toString();
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL built from window.location
       await goto(`${window.location.pathname}${query ? `?${query}` : ""}`, {
         replaceState: true,
         noScroll: true
@@ -667,6 +670,7 @@
 
             return async ({ result }) => {
               if (result.type === "redirect") {
+                // eslint-disable-next-line svelte/no-navigation-without-resolve -- redirect location from server form action
                 await goto(result.location);
               } else {
                 isSubmittingUPLogin = false;

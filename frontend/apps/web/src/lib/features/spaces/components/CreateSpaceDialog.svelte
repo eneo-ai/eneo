@@ -29,6 +29,7 @@
         newSpaceName = "";
         if (forwardToNewSpace) {
           const routeId = space.personal ? "personal" : space.id;
+          // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with new space route id
           await goto(`/spaces/${routeId}/overview`);
         }
       }
