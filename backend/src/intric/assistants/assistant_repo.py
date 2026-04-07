@@ -50,6 +50,7 @@ class AssistantRepository:
         completion_model_repo: "CompletionModelRepository",
         user: "UserInDB",
     ):
+        super().__init__()
         self.session = session
         self.factory = factory
         self.completion_model_repo = completion_model_repo

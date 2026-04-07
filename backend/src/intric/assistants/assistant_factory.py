@@ -37,6 +37,7 @@ class AssistantFactory:
         prompt_factory: PromptFactory,
         assistant_template_factory: "AssistantTemplateFactory",
     ):
+        super().__init__()
         self.prompt_factory = prompt_factory
         self.assistant_template_factory = assistant_template_factory
 
@@ -117,9 +118,13 @@ class AssistantFactory:
         ]
 
         user = UserSparse.model_validate(assistant_in_db.user)
-        completion_model_kwargs_raw = cast(
-            dict[str, object], assistant_in_db.completion_model_kwargs or {}
-        )
+        completion_model_kwargs_source = assistant_in_db.completion_model_kwargs
+        if completion_model_kwargs_source is None:
+            completion_model_kwargs_raw: dict[str, object] = {}
+        else:
+            completion_model_kwargs_raw = cast(
+                dict[str, object], completion_model_kwargs_source
+            )
         completion_model_kwargs = ModelKwargs.model_validate(
             completion_model_kwargs_raw
         )
@@ -216,9 +221,13 @@ class AssistantFactory:
             # Fallback: Map MCP servers from database to domain entities (without filtering)
             mcp_servers = MCPServerMapper.to_entities(assistant_in_db.mcp_servers)
 
-        completion_model_kwargs_raw = cast(
-            dict[str, object], assistant_in_db.completion_model_kwargs or {}
-        )
+        completion_model_kwargs_source = assistant_in_db.completion_model_kwargs
+        if completion_model_kwargs_source is None:
+            completion_model_kwargs_raw: dict[str, object] = {}
+        else:
+            completion_model_kwargs_raw = cast(
+                dict[str, object], completion_model_kwargs_source
+            )
         completion_model_kwargs = ModelKwargs.model_validate(
             completion_model_kwargs_raw
         )
@@ -261,8 +270,6 @@ class AssistantFactory:
             description=assistant_in_db.description,
             insight_enabled=assistant_in_db.insight_enabled,
             data_retention_days=assistant_in_db.data_retention_days,
-            metadata_json=cast(
-                dict[str, object] | None, assistant_in_db.metadata_json
-            ),
+            metadata_json=cast(dict[str, object] | None, assistant_in_db.metadata_json),
             icon_id=assistant_in_db.icon_id,
         )

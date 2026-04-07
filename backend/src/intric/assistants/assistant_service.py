@@ -139,6 +139,7 @@ class AssistantService:
         icon_repo: IconRepository,
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
+        super().__init__()
         self.repo = repo
         self.space_repo = space_repo
         self.factory = factory

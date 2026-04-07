@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
@@ -29,6 +30,7 @@ class ReferencesService:
         info_blobs_repo: "InfoBlobRepository",
         datastore: "Datastore",
     ):
+        super().__init__()
         self.info_blobs_repo = info_blobs_repo
         self.datastore = datastore
 
@@ -37,10 +39,11 @@ class ReferencesService:
         input_string: str,
         collections: list["Collection"],
         websites: list["Website"],
-        integration_knowledge_list: list["IntegrationKnowledge"] = [],
+        integration_knowledge_list: Sequence["IntegrationKnowledge"] | None = None,
         num_chunks: Optional[int] = None,
         version: int = 1,
     ) -> list["InfoBlobChunkInDBWithScore"]:
+        integration_knowledge_list = list(integration_knowledge_list or [])
         if (collections or websites or integration_knowledge_list) and input_string:
             if version == 1:
                 search_params = dict(autocut_cutoff=3, num_chunks=30)
