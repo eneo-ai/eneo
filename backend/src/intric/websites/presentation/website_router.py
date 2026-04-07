@@ -1,4 +1,4 @@
-from typing import Annotated, Any, cast
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -75,13 +75,7 @@ async def check_existing_website_url(
 ) -> WebsiteExistsResponse | None:
     """Check if URL exists on the Organization space."""
     service = container.website_crud_service()
-    # find_on_organization_space returns dict | None; container.website_crud_service()
-    # is untyped so the method appears as Unknown member. Cast pins the return type
-    # at this boundary instead of propagating Unknown into model_validate.
-    result = cast(
-        "dict[str, Any] | None",
-        await service.find_on_organization_space(url),  # pyright: ignore[reportUnknownMemberType]
-    )
+    result = await service.find_on_organization_space(url)
 
     if result is None:
         return None

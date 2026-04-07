@@ -349,7 +349,7 @@ class WebsiteCRUDService:
 
         return successful_runs, errors
 
-    async def find_on_organization_space(self, url: str) -> dict | None:
+    async def find_on_organization_space(self, url: str) -> dict[str, object] | None:
         """Find website with matching URL on the user's organization space.
 
         Why: Help users discover that a website is already being crawled on the
