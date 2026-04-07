@@ -1,4 +1,3 @@
-from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -9,7 +8,7 @@ from intric.main.models import InDB
 
 
 class SettingsBase(BaseModel):
-    chatbot_widget: dict[str, Any] = Field(default_factory=dict)
+    chatbot_widget: dict[str, object] = Field(default_factory=dict)
 
 
 class SettingsUpsert(SettingsBase):

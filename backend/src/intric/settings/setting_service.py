@@ -33,6 +33,7 @@ class SettingService:
         tenant_repo: TenantRepository,
         audit_service: AuditService,
     ):
+        super().__init__()
         self.repo = repo
         self.user = user
         self.ai_models_service = ai_models_service
@@ -41,7 +42,7 @@ class SettingService:
         self.audit_service = audit_service
 
     async def _require_feature_flag(self, name: str) -> "FeatureFlag":
-        feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(
+        feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(  # type: ignore[reportUnknownMemberType]  # feature_flag_repo.one_or_none uses **filters which lacks type annotations
             name=name
         )
         if not feature_flag:

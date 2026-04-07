@@ -7,6 +7,7 @@ Uses versioned format (enc:fernet:v1:) for future-proofing.
 from typing import Optional, Protocol, Union
 
 from cryptography.fernet import Fernet, InvalidToken
+from typing_extensions import override
 
 from intric.main.logging import get_logger
 
@@ -37,6 +38,7 @@ class EncryptionService:
             encryption_key: Base64-encoded Fernet key (32 bytes) or object exposing
                 an ``encryption_key`` attribute (e.g. ``Settings`` instance).
         """
+        super().__init__()
         self._fernet: Optional[Fernet] = None
 
         key_value: Optional[str]
@@ -65,6 +67,7 @@ class EncryptionService:
         """Check if encryption is enabled."""
         return self._fernet is not None
 
+    @override
     def __repr__(self) -> str:
         """Safe representation for debugging (doesn't expose key material)."""
         return f"<EncryptionService active={self.is_active()}>"

@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends
 
 from intric.authentication import auth_dependencies
@@ -26,9 +28,10 @@ settings_admin_router = APIRouter()
 
 @router.get("/", response_model=SettingsPublic)
 async def get_settings(
-    service: SettingService = Depends(
-        settings_factory.get_settings_service_allowing_read_only_key
-    ),
+    service: Annotated[
+        SettingService,
+        Depends(settings_factory.get_settings_service_allowing_read_only_key),
+    ],
 ):
     return await service.get_settings()
 
@@ -36,7 +39,7 @@ async def get_settings(
 @settings_admin_router.post("/", response_model=SettingsPublic)
 async def upsert_settings(
     settings: SettingsPublic,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Omitted fields are not updated."""
     validate_permission(container.user(), Permission.ADMIN)
@@ -46,7 +49,7 @@ async def upsert_settings(
 
 @router.get("/models/", response_model=GetModelsResponse)
 async def get_models(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     From the response:
@@ -108,7 +111,7 @@ Enable or disable the template management feature for your tenant.
 )
 async def update_template_setting(
     data: ToggleSettingUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Toggle template feature for tenant.
@@ -155,7 +158,7 @@ Enable or disable global audit logging for your tenant.
 )
 async def update_audit_logging_setting(
     data: ToggleSettingUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Toggle global audit logging for tenant.
@@ -202,7 +205,7 @@ Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
 )
 async def update_provisioning_setting(
     data: ToggleSettingUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.settings_service()
     return await service.update_provisioning_setting(enabled=data.enabled)
@@ -227,7 +230,7 @@ Toggle API key scope enforcement for your tenant.
 )
 async def update_scope_enforcement_setting(
     data: ToggleSettingUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.settings_service()
     return await service.update_scope_enforcement_setting(enabled=data.enabled)
@@ -252,7 +255,7 @@ Toggle API key strict mode for your tenant.
 )
 async def update_strict_mode_setting(
     data: ToggleSettingUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.settings_service()
     return await service.update_strict_mode_setting(enabled=data.enabled)
@@ -276,7 +279,7 @@ Toggle API key expiry notifications for your tenant.
 )
 async def update_api_key_expiry_notifications_setting(
     data: ToggleSettingUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.settings_service()
     return await service.update_api_key_expiry_notifications_setting(
