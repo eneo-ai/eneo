@@ -89,8 +89,8 @@ class Websites(BasePublic):
     group: Mapped[CollectionsTable] = relationship()
     embedding_model: Mapped[EmbeddingModels] = relationship()
 
-    @declared_attr
-    def __mapper_args__(cls):
+    @declared_attr  # pyright: ignore[reportArgumentType]  # dict return is valid for __mapper_args__ declared_attr
+    def __mapper_args__(cls):  # type: ignore[override]
         most_recent_crawl = (
             select(CrawlRuns.id)
             .where(CrawlRuns.website_id == cls.id)

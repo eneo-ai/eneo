@@ -1,7 +1,10 @@
 """Database table for completion model migration history."""
 
+from typing import Optional
+
 from sqlalchemy import JSON, TIMESTAMP, Column, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column
 
 from intric.database.tables.base_class import BasePublic
 
@@ -38,7 +41,7 @@ class CompletionModelMigrationHistory(BasePublic):
     affected_count = Column(Integer, nullable=False, default=0)
     migrated_count = Column(Integer, nullable=False, default=0)
     failed_count = Column(Integer, nullable=False, default=0)
-    duration_seconds = Column(Float, nullable=True)
+    duration_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     error_message = Column(Text, nullable=True)
     warnings = Column(JSON, nullable=True)
     migration_details = Column(JSON, nullable=True)

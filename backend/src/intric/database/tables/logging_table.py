@@ -1,6 +1,6 @@
 # MIT License
 
-from sqlalchemy import UUID, Column, String, Table, func
+from sqlalchemy import UUID, Column, MetaData, String, Table, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import registry
 
@@ -9,11 +9,11 @@ from intric.database.tables.base_class import Base
 mapper_registry = registry()
 
 
-def create_logging_table(metadata_obj):
+def create_logging_table(metadata_obj: MetaData) -> type:
     table = Table(
         "logging",
         metadata_obj,
-        Column(
+        Column(  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
             "id",
             UUID,
             primary_key=True,

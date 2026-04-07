@@ -21,7 +21,8 @@ if TYPE_CHECKING:
 
 
 class TranscriptionModelRepository:
-    def __init__(self, session: "AsyncSession", user: "UserInDB"):
+    def __init__(self, session: "AsyncSession", user: "UserInDB") -> None:
+        super().__init__()
         self.session = session
         self.user = user
 

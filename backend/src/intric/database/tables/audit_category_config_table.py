@@ -1,5 +1,7 @@
 """Database table for audit category configuration."""
 
+from datetime import datetime
+
 from sqlalchemy import (
     TIMESTAMP,
     Boolean,
@@ -10,6 +12,7 @@ from sqlalchemy import (
     String,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
 
 from intric.database.tables.base_class import BasePublic
 
@@ -54,12 +57,12 @@ class AuditCategoryConfig(BasePublic):
     )
 
     # Timestamps
-    created_at = Column(
+    created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         nullable=False,
         server_default="NOW()",
     )
-    updated_at = Column(
+    updated_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         nullable=False,
         server_default="NOW()",

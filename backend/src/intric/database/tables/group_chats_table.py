@@ -24,7 +24,9 @@ class GroupChatsTable(BasePublic):
     show_response_label: Mapped[bool] = mapped_column(Boolean, default=False)
     published: Mapped[bool] = mapped_column(Boolean, default=False)
     insight_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    metadata_json: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB, nullable=True
+    )
     # TODO: refactor since this is a somewhat weird solution having a
     # type column. The reason is bc front-end wants a non-nullable
     # "type" field in a bunch of models. Thus a field with a default
