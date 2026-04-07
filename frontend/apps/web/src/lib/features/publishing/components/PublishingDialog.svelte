@@ -87,7 +87,7 @@
 
     <Dialog.Description>{strings.description}</Dialog.Description>
     {#if autoFollowHint}
-      <p class="mt-2 text-xs text-muted">{autoFollowHint}</p>
+      <p class="text-muted mt-2 text-xs">{autoFollowHint}</p>
     {/if}
 
     <Dialog.Controls let:close>

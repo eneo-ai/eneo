@@ -119,7 +119,7 @@
       toastError(error);
       testResult = {
         success: false,
-        error_message: getErrorMessage(error),
+        error_message: getErrorMessage(error)
       };
     }
   });

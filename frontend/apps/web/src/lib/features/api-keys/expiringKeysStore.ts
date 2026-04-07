@@ -28,8 +28,9 @@ interface ExpiringKeysSummaryResponse {
   generated_at: string;
 }
 
-const [getExpiringKeysStore, setExpiringKeysStore] =
-  createContext<ReturnType<typeof createExpiringKeysStore>>("Expiring API keys notifications");
+const [getExpiringKeysStore, setExpiringKeysStore] = createContext<
+  ReturnType<typeof createExpiringKeysStore>
+>("Expiring API keys notifications");
 
 function initExpiringKeysStore(data: {
   intric: Intric;

@@ -31,9 +31,9 @@
   <Dialog.Content width="medium">
     <Dialog.Title class="flex items-center gap-3">
       <div
-        class="flex h-10 w-10 items-center justify-center rounded-xl bg-positive/10 dark:bg-positive/15"
+        class="bg-positive/10 dark:bg-positive/15 flex h-10 w-10 items-center justify-center rounded-xl"
       >
-        <Key class="h-5 w-5 text-positive" />
+        <Key class="text-positive h-5 w-5" />
       </div>
       <span class="text-default">
         {source === "rotated" ? m.api_keys_rotated_title() : m.api_keys_created_title()}
@@ -42,18 +42,21 @@
 
     <Dialog.Description>
       <div
-        class="mt-3 flex items-start gap-3 rounded-lg border border-caution/35 bg-caution/8 px-4 py-3 dark:bg-caution/12"
+        class="border-caution/35 bg-caution/8 dark:bg-caution/12 mt-3 flex items-start gap-3 rounded-lg border px-4 py-3"
       >
-        <AlertCircle class="mt-0.5 h-5 w-5 flex-shrink-0 text-caution" />
-        <p class="text-sm text-secondary">
-          <strong class="text-caution">{m.api_keys_important()}</strong> {m.api_keys_copy_warning()}
+        <AlertCircle class="text-caution mt-0.5 h-5 w-5 flex-shrink-0" />
+        <p class="text-secondary text-sm">
+          <strong class="text-caution">{m.api_keys_important()}</strong>
+          {m.api_keys_copy_warning()}
         </p>
       </div>
     </Dialog.Description>
 
     {#if secret}
       <div class="mt-5">
-        <span class="mb-2 block text-sm font-medium text-secondary">{m.api_keys_your_new_key()}</span>
+        <span class="text-secondary mb-2 block text-sm font-medium"
+          >{m.api_keys_your_new_key()}</span
+        >
         <CodeBlock source={secret} />
 
         <div class="mt-4 flex items-center gap-3">
@@ -75,7 +78,7 @@
 
           {#if copied}
             <span
-              class="text-sm text-positive"
+              class="text-positive text-sm"
               role="status"
               aria-live="polite"
               in:fade={{ duration: 150 }}

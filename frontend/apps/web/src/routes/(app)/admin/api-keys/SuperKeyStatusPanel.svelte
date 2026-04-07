@@ -13,7 +13,9 @@
   let status = $state<SuperApiKeyStatus | null>(null);
 
   const statusLabel = (configured: boolean) => ({
-    label: configured ? m.api_keys_admin_status_configured() : m.api_keys_admin_status_not_configured(),
+    label: configured
+      ? m.api_keys_admin_status_configured()
+      : m.api_keys_admin_status_not_configured(),
     color: (configured ? "green" : "red") as "green" | "red"
   });
 

@@ -150,12 +150,16 @@
       <div class="space-y-5 py-4">
         <!-- Empty state (no keys and no legacy key) -->
         {#if keys.length === 0 && !legacySuffix && !loading}
-          <div class="rounded-xl border-2 border-dashed border-default bg-subtle/30 p-12 text-center">
-            <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent-default/10">
-              <Key class="h-8 w-8 text-accent-default" />
+          <div
+            class="border-default bg-subtle/30 rounded-xl border-2 border-dashed p-12 text-center"
+          >
+            <div
+              class="bg-accent-default/10 mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl"
+            >
+              <Key class="text-accent-default h-8 w-8" />
             </div>
-            <h3 class="text-lg font-semibold text-default">{m.api_keys_your_keys()}</h3>
-            <p class="mt-2 text-sm text-muted max-w-md mx-auto">{m.api_keys_description()}</p>
+            <h3 class="text-default text-lg font-semibold">{m.api_keys_your_keys()}</h3>
+            <p class="text-muted mx-auto mt-2 max-w-md text-sm">{m.api_keys_description()}</p>
             <div class="mt-4">
               <CreateApiKeyDialog onCreated={handleCreated} />
             </div>
@@ -166,28 +170,38 @@
         {#if errorMessage}
           <div
             role="alert"
-            class="flex items-center gap-3 rounded-xl border border-negative/30 bg-negative/5 px-5 py-4"
+            class="border-negative/30 bg-negative/5 flex items-center gap-3 rounded-xl border px-5 py-4"
           >
-            <AlertCircle class="h-5 w-5 text-negative shrink-0" />
-            <p class="text-sm text-negative">{errorMessage}</p>
+            <AlertCircle class="text-negative h-5 w-5 shrink-0" />
+            <p class="text-negative text-sm">{errorMessage}</p>
           </div>
         {/if}
 
         <!-- Legacy key notice -->
         {#if legacySuffix && !loading}
-          <div class="rounded-xl border border-caution/30 bg-caution/5 dark:bg-caution/10 p-5">
+          <div class="border-caution/30 bg-caution/5 dark:bg-caution/10 rounded-xl border p-5">
             <div class="flex items-start gap-4">
-              <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-caution/15 dark:bg-caution/20 shrink-0">
-                <ShieldAlert class="h-5 w-5 text-caution" />
+              <div
+                class="bg-caution/15 dark:bg-caution/20 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+              >
+                <ShieldAlert class="text-caution h-5 w-5" />
               </div>
               <div class="flex-1">
-                <h3 class="font-semibold text-caution">{m.api_keys_legacy_detected()}</h3>
-                <p class="mt-1 text-sm text-muted">
-                  {m.api_keys_legacy_ending_in()} <code class="font-mono bg-caution/15 dark:bg-caution/20 px-1.5 py-0.5 rounded text-caution">****{legacySuffix}</code>.
+                <h3 class="text-caution font-semibold">{m.api_keys_legacy_detected()}</h3>
+                <p class="text-muted mt-1 text-sm">
+                  {m.api_keys_legacy_ending_in()}
+                  <code
+                    class="bg-caution/15 dark:bg-caution/20 text-caution rounded px-1.5 py-0.5 font-mono"
+                    >****{legacySuffix}</code
+                  >.
                   {m.api_keys_legacy_recommend()}
                 </p>
                 <div class="mt-3 flex flex-wrap items-center gap-2">
-                  <Button variant="simple" class="text-negative hover:text-negative" on:click={() => showRevokeDialog.set(true)}>
+                  <Button
+                    variant="simple"
+                    class="text-negative hover:text-negative"
+                    on:click={() => showRevokeDialog.set(true)}
+                  >
                     {m.api_keys_legacy_revoke()}
                   </Button>
                   <CreateApiKeyDialog onCreated={handleCreated} />
@@ -200,51 +214,59 @@
         <!-- Notification preferences -->
         <NotificationPreferences
           bind:this={notificationPrefsRef}
-          onExpiringItemsChanged={(items) => { expiringItems = items; }}
-          onError={(msg) => { errorMessage = msg; }}
-          onFollowedKeysChanged={(ids, _hasSubs) => { followedKeyIds = ids; }}
-          onNotificationsEnabledChanged={(enabled) => { notificationsEnabled = enabled; }}
+          onExpiringItemsChanged={(items) => {
+            expiringItems = items;
+          }}
+          onError={(msg) => {
+            errorMessage = msg;
+          }}
+          onFollowedKeysChanged={(ids, _hasSubs) => {
+            followedKeyIds = ids;
+          }}
+          onNotificationsEnabledChanged={(enabled) => {
+            notificationsEnabled = enabled;
+          }}
         />
 
         <!-- Expiring keys banner -->
         {#if notificationsEnabled && expiringItems.length > 0}
-          <ExpiringKeysBanner
-            items={expiringItems}
-            tenantId={tenant.id}
-            userId={user.id}
-          />
+          <ExpiringKeysBanner items={expiringItems} tenantId={tenant.id} userId={user.id} />
         {/if}
 
         <!-- Keys Table -->
-        <div class="rounded-xl border border-default bg-primary shadow-sm overflow-hidden">
-          <div class="px-6 py-3.5 border-b border-default bg-subtle/30">
+        <div class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm">
+          <div class="border-default bg-subtle/30 border-b px-6 py-3.5">
             <div class="flex items-center justify-between gap-4">
-              <h3 class="font-semibold text-default shrink-0">
+              <h3 class="text-default shrink-0 font-semibold">
                 {filteredKeys.length === keys.length
-                  ? (keys.length !== 1 ? m.api_keys_count_plural({ count: keys.length }) : m.api_keys_count({ count: keys.length }))
+                  ? keys.length !== 1
+                    ? m.api_keys_count_plural({ count: keys.length })
+                    : m.api_keys_count({ count: keys.length })
                   : m.api_keys_filtered({ filtered: filteredKeys.length, total: keys.length })}
               </h3>
               {#if keys.length > 3}
-                <div class="relative flex-1 max-w-xs">
-                  <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted pointer-events-none" />
+                <div class="relative max-w-xs flex-1">
+                  <Search
+                    class="text-muted pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2"
+                  />
                   <Input.Text
                     bind:value={searchQuery}
                     placeholder={m.api_keys_search_placeholder()}
-                    class="!pl-9 !h-9 !bg-primary !border-default/60 focus:!border-accent-default !text-sm !rounded-lg"
+                    class="!bg-primary !border-default/60 focus:!border-accent-default !h-9 !rounded-lg !pl-9 !text-sm"
                   />
                   {#if searchQuery}
                     <button
                       type="button"
                       onclick={() => (searchQuery = "")}
                       aria-label={m.api_keys_search_clear_button_aria_label()}
-                      class="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-md hover:bg-hover text-muted hover:text-default transition-colors"
+                      class="hover:bg-hover text-muted hover:text-default absolute top-1/2 right-3 -translate-y-1/2 rounded-md p-1 transition-colors"
                     >
                       <X class="h-3.5 w-3.5" />
                     </button>
                   {/if}
                 </div>
               {/if}
-              <div class="lg:hidden shrink-0">
+              <div class="shrink-0 lg:hidden">
                 <CreateApiKeyDialog onCreated={handleCreated} />
               </div>
             </div>
@@ -262,13 +284,13 @@
           </div>
 
           {#if nextCursor}
-            <div class="flex justify-center border-t border-default px-6 py-3">
+            <div class="border-default flex justify-center border-t px-6 py-3">
               <button
                 type="button"
                 onclick={loadMoreKeys}
                 disabled={loadingMore}
-                class="text-sm font-medium text-accent-default hover:text-accent-default/80
-                       disabled:opacity-50 transition-colors"
+                class="text-accent-default hover:text-accent-default/80 text-sm font-medium
+                       transition-colors disabled:opacity-50"
               >
                 {loadingMore ? m.api_keys_loading_more() : m.api_keys_load_more()}
               </button>
@@ -295,8 +317,4 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<ApiKeySecretDialog
-  openController={secretDialogOpen}
-  secret={latestSecret}
-  source={secretSource}
-/>
+<ApiKeySecretDialog openController={secretDialogOpen} secret={latestSecret} source={secretSource} />

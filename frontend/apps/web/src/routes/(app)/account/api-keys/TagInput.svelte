@@ -148,7 +148,7 @@
 <div class="space-y-2">
   <!-- Label and description -->
   {#if label}
-    <span id="tag-input-label" class="block text-sm font-medium text-default">
+    <span id="tag-input-label" class="text-default block text-sm font-medium">
       {label}
       {#if required}
         <span class="text-negative">*</span>
@@ -156,39 +156,41 @@
     </span>
   {/if}
   {#if description}
-    <p class="text-xs text-muted">{description}</p>
+    <p class="text-muted text-xs">{description}</p>
   {/if}
 
   <!-- Tags container -->
   <div
-    class="min-h-[2.75rem] rounded-lg border border-default bg-primary p-2
-           transition-all duration-150 ease-out
-           focus-within:border-accent-default focus-within:ring-2 focus-within:ring-accent-default/20
-           {disabled ? 'opacity-50 cursor-not-allowed' : ''}
-           {validationError ? 'border-negative focus-within:border-negative focus-within:ring-negative/20' : ''}"
+    class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 min-h-[2.75rem] rounded-lg
+           border p-2 transition-all
+           duration-150 ease-out focus-within:ring-2
+           {disabled ? 'cursor-not-allowed opacity-50' : ''}
+           {validationError
+      ? 'border-negative focus-within:border-negative focus-within:ring-negative/20'
+      : ''}"
   >
     <div class="flex flex-wrap items-center gap-1.5">
       <!-- Existing tags -->
       {#each value as tag (tag)}
         <div
-          class="group inline-flex items-center gap-1.5 rounded-md bg-subtle px-2.5 py-1
-                 border border-transparent hover:border-dimmer hover:bg-hover-subtle
+          class="group bg-subtle hover:border-dimmer hover:bg-hover-subtle inline-flex items-center gap-1.5 rounded-md
+                 border border-transparent px-2.5 py-1
                  transition-all duration-150 ease-out"
           animate:flip={{ duration: 200 }}
           in:scale={{ duration: 150 }}
           out:scale={{ duration: 150 }}
         >
-          <Icon class="h-3 w-3 text-muted" />
-          <span class="text-sm font-mono text-default max-w-[200px] truncate" title={tag}>
+          <Icon class="text-muted h-3 w-3" />
+          <span class="text-default max-w-[200px] truncate font-mono text-sm" title={tag}>
             {tag}
           </span>
           {#if !disabled}
             <button
               type="button"
               onclick={() => removeTag(tag)}
-              class="rounded p-0.5 text-muted opacity-0 group-hover:opacity-100
-                     hover:bg-negative/10 hover:text-negative
-                     transition-all duration-150 ease-out"
+              class="text-muted hover:bg-negative/10 hover:text-negative rounded p-0.5
+                     opacity-0 transition-all
+                     duration-150 ease-out group-hover:opacity-100"
               aria-label="Remove {tag}"
             >
               <X class="h-3 w-3" />
@@ -198,7 +200,7 @@
       {/each}
 
       <!-- Input field -->
-      <div class="flex-1 min-w-[150px]">
+      <div class="min-w-[150px] flex-1">
         <input
           bind:this={inputElement}
           bind:value={inputValue}
@@ -208,7 +210,7 @@
           }}
           {placeholder}
           {disabled}
-          class="w-full bg-transparent text-sm text-default placeholder:text-muted
+          class="text-default placeholder:text-muted w-full bg-transparent text-sm
                  focus:outline-none disabled:cursor-not-allowed"
         />
       </div>
@@ -218,7 +220,7 @@
         <button
           type="button"
           onclick={addTag}
-          class="rounded-md p-1.5 text-muted hover:bg-accent-default/10 hover:text-accent-default transition-colors"
+          class="text-muted hover:bg-accent-default/10 hover:text-accent-default rounded-md p-1.5 transition-colors"
           aria-label="Add tag"
         >
           <Plus class="h-4 w-4" />
@@ -230,7 +232,7 @@
   <!-- Validation error -->
   {#if validationError}
     <p
-      class="flex items-center gap-1.5 text-xs text-negative"
+      class="text-negative flex items-center gap-1.5 text-xs"
       transition:fly={{ y: -4, duration: 150 }}
     >
       <AlertCircle class="h-3.5 w-3.5 flex-shrink-0" />
@@ -241,17 +243,17 @@
   <!-- Quick-add buttons -->
   {#if !disabled && quickAddOptions.length > 0}
     <div class="flex flex-wrap items-center gap-2">
-      <span class="text-xs text-muted">{m.api_keys_tag_quick_add()}</span>
+      <span class="text-muted text-xs">{m.api_keys_tag_quick_add()}</span>
       {#each quickAddOptions as opt (opt.pattern)}
         <button
           type="button"
           onclick={() => addQuickPattern(opt.pattern)}
           disabled={value.includes(opt.pattern)}
-          class="inline-flex items-center gap-1 rounded-md border border-dashed border-dimmer
-                 px-2 py-1 text-xs text-muted
-                 hover:border-accent-default/60 hover:bg-accent-default/5 hover:text-accent-default
+          class="border-dimmer text-muted hover:border-accent-default/60 hover:bg-accent-default/5 hover:text-accent-default inline-flex items-center
+                 gap-1 rounded-md border border-dashed
+                 px-2 py-1 text-xs
                  transition-all duration-150 ease-out
-                 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
         >
           <Plus class="h-3 w-3" />
           {opt.label}

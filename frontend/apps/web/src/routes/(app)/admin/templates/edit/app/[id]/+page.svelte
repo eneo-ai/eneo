@@ -177,12 +177,7 @@
 
     <Page.Flex>
       <Button variant="outlined" href={localizeHref("/admin/templates")}>{m.cancel()}</Button>
-      <Button
-        variant="positive"
-        class="w-fit"
-        onclick={handleUpdateTemplate}
-        disabled={isSaving}
-      >
+      <Button variant="positive" class="w-fit" onclick={handleUpdateTemplate} disabled={isSaving}>
         {isSaving ? m.loading() : m.save_changes()}
       </Button>
     </Page.Flex>

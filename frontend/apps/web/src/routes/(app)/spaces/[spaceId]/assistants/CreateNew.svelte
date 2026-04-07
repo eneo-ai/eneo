@@ -40,7 +40,9 @@
       });
       refreshCurrentSpace();
       if (openGroupChatAfterCreation) {
-        goto(resolve(`/spaces/${$currentSpace.routeId}/group-chats/${newGroup.id}/edit?next=default`));
+        goto(
+          resolve(`/spaces/${$currentSpace.routeId}/group-chats/${newGroup.id}/edit?next=default`)
+        );
       }
       newGroupChatName = "";
       $showCreateGroupChatDialog = false;

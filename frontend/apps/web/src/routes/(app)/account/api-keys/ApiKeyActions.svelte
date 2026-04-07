@@ -13,7 +13,14 @@
 
   const intric = getIntric();
 
-  let { apiKey, onChanged, onSecret, isFollowed = false, isFollowedViaScope = false, onFollowChanged } = $props<{
+  let {
+    apiKey,
+    onChanged,
+    onSecret,
+    isFollowed = false,
+    isFollowedViaScope = false,
+    onFollowChanged
+  } = $props<{
     apiKey: ApiKeyV2;
     onChanged: () => void;
     onSecret: (response: ApiKeyCreatedResponse) => void;
@@ -115,77 +122,77 @@
 </script>
 
 {#if apiKey.state !== "revoked"}
-<Dropdown.Root>
-  <Dropdown.Trigger asFragment let:trigger>
-    <Button is={trigger} padding="icon" aria-label={m.actions()}>
-      <MoreVertical size={16} />
-    </Button>
-  </Dropdown.Trigger>
-
-  <Dropdown.Menu let:item>
-    {#if canRotate}
-      <Button is={item} padding="icon-leading" on:click={rotateKey}>
-        <RotateCcw size={16} />
-        {m.api_keys_action_rotate()}
+  <Dropdown.Root>
+    <Dropdown.Trigger asFragment let:trigger>
+      <Button is={trigger} padding="icon" aria-label={m.actions()}>
+        <MoreVertical size={16} />
       </Button>
-    {/if}
+    </Dropdown.Trigger>
 
-    {#if isFollowedViaScope}
-      <Button is={item} padding="icon-leading" disabled>
-        <Bell size={16} />
-        {m.api_keys_notifications_followed_via_scope()}
-      </Button>
-    {:else if apiKey.state !== "revoked" && apiKey.state !== "expired"}
-      <Button is={item} padding="icon-leading" on:click={toggleFollow} disabled={followLoading}>
-        {#if isFollowed}
-          <BellOff size={16} />
-          {m.api_keys_notifications_unfollow_action()}
-        {:else}
+    <Dropdown.Menu let:item>
+      {#if canRotate}
+        <Button is={item} padding="icon-leading" on:click={rotateKey}>
+          <RotateCcw size={16} />
+          {m.api_keys_action_rotate()}
+        </Button>
+      {/if}
+
+      {#if isFollowedViaScope}
+        <Button is={item} padding="icon-leading" disabled>
           <Bell size={16} />
-          {m.api_keys_notifications_follow_action()}
-        {/if}
-      </Button>
-    {/if}
+          {m.api_keys_notifications_followed_via_scope()}
+        </Button>
+      {:else if apiKey.state !== "revoked" && apiKey.state !== "expired"}
+        <Button is={item} padding="icon-leading" on:click={toggleFollow} disabled={followLoading}>
+          {#if isFollowed}
+            <BellOff size={16} />
+            {m.api_keys_notifications_unfollow_action()}
+          {:else}
+            <Bell size={16} />
+            {m.api_keys_notifications_follow_action()}
+          {/if}
+        </Button>
+      {/if}
 
-    {#if isActive}
-      <Button
-        is={item}
-        padding="icon-leading"
-        on:click={() => {
-          $showSuspendDialog = true;
-        }}
-      >
-        <Ban size={16} />
-        {m.api_keys_action_suspend()}
-      </Button>
-    {/if}
+      {#if isActive}
+        <Button
+          is={item}
+          padding="icon-leading"
+          on:click={() => {
+            $showSuspendDialog = true;
+          }}
+        >
+          <Ban size={16} />
+          {m.api_keys_action_suspend()}
+        </Button>
+      {/if}
 
-    {#if isSuspended}
-      <Button is={item} padding="icon-leading" on:click={reactivateKey}>
-        <RefreshCw size={16} />
-        {m.api_keys_action_reactivate()}
-      </Button>
-    {/if}
+      {#if isSuspended}
+        <Button is={item} padding="icon-leading" on:click={reactivateKey}>
+          <RefreshCw size={16} />
+          {m.api_keys_action_reactivate()}
+        </Button>
+      {/if}
 
-    {#if apiKey.state !== "revoked"}
-      <Button
-        is={item}
-        variant="destructive"
-        padding="icon-leading"
-        on:click={() => {
-          $showRevokeDialog = true;
-        }}
-      >
-        <Ban size={16} />
-        {m.api_keys_action_revoke()}
-      </Button>
-    {/if}
-  </Dropdown.Menu>
-</Dropdown.Root>
+      {#if apiKey.state !== "revoked"}
+        <Button
+          is={item}
+          variant="destructive"
+          padding="icon-leading"
+          on:click={() => {
+            $showRevokeDialog = true;
+          }}
+        >
+          <Ban size={16} />
+          {m.api_keys_action_revoke()}
+        </Button>
+      {/if}
+    </Dropdown.Menu>
+  </Dropdown.Root>
 {/if}
 
 {#if errorMessage}
-  <div class="text-xs text-negative">{errorMessage}</div>
+  <div class="text-negative text-xs">{errorMessage}</div>
 {/if}
 
 <Dialog.Root alert openController={showSuspendDialog}>

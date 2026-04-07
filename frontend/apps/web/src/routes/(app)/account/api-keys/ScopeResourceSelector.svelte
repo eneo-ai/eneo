@@ -1,7 +1,15 @@
 <script lang="ts">
   import { createCombobox } from "@melt-ui/svelte";
   import type { SpaceSparse } from "@intric/intric-js";
-  import { Search, Check, ChevronDown, Building2, MessageSquare, AppWindow, X } from "lucide-svelte";
+  import {
+    Search,
+    Check,
+    ChevronDown,
+    Building2,
+    MessageSquare,
+    AppWindow,
+    X
+  } from "lucide-svelte";
   import { fly } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
 
@@ -131,40 +139,42 @@
 </script>
 
 <div class="relative w-full">
-  <span {...$label} class="mb-1.5 block text-sm font-medium text-default">
+  <span {...$label} class="text-default mb-1.5 block text-sm font-medium">
     {m.api_keys_select_resource({ scopeType })}
   </span>
 
   <div class="relative">
     <!-- Search Icon -->
-    <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted pointer-events-none" />
+    <Search
+      class="text-muted pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2"
+    />
 
     <!-- Input -->
     <input
       {...$input}
       use:input
-      class="h-11 w-full rounded-lg border border-default bg-primary pl-10 pr-16 text-sm
-             placeholder:text-muted transition-all duration-150
-             hover:border-dimmer focus:border-accent-default focus:ring-2 focus:ring-accent-default/20
+      class="border-default bg-primary placeholder:text-muted hover:border-dimmer focus:border-accent-default focus:ring-accent-default/20 h-11 w-full rounded-lg
+             border pr-16 pl-10
+             text-sm transition-all duration-150 focus:ring-2
              disabled:cursor-not-allowed disabled:opacity-50"
       placeholder={m.api_keys_search_resource({ scopeType })}
       {disabled}
     />
 
     <!-- Right side icons -->
-    <div class="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+    <div class="absolute top-1/2 right-3 flex -translate-y-1/2 items-center gap-1">
       {#if value}
         <button
           type="button"
           onclick={clearSelection}
-          class="rounded p-1 text-muted hover:bg-hover-default hover:text-default transition-colors"
+          class="text-muted hover:bg-hover-default hover:text-default rounded p-1 transition-colors"
           aria-label="Clear selection"
         >
           <X class="h-4 w-4" />
         </button>
       {/if}
       <ChevronDown
-        class="h-4 w-4 text-muted transition-transform duration-200 {$open ? 'rotate-180' : ''}"
+        class="text-muted h-4 w-4 transition-transform duration-200 {$open ? 'rotate-180' : ''}"
       />
     </div>
   </div>
@@ -173,12 +183,12 @@
   {#if selectedResource}
     <div class="mt-2 flex items-center gap-2">
       <div
-        class="inline-flex items-center gap-2 rounded-lg border border-accent-default/30 bg-accent-default/5 px-3 py-1.5"
+        class="border-accent-default/30 bg-accent-default/5 inline-flex items-center gap-2 rounded-lg border px-3 py-1.5"
       >
-        <Icon class="h-4 w-4 text-accent-default" />
-        <span class="text-sm font-medium text-default">{selectedResource.name}</span>
+        <Icon class="text-accent-default h-4 w-4" />
+        <span class="text-default text-sm font-medium">{selectedResource.name}</span>
         {#if selectedResource.spaceName}
-          <span class="text-xs text-muted">· {selectedResource.spaceName}</span>
+          <span class="text-muted text-xs">· {selectedResource.spaceName}</span>
         {/if}
       </div>
     </div>
@@ -189,17 +199,19 @@
     <div
       {...$menu}
       use:menu
-      class="absolute z-50 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-default bg-primary shadow-lg"
+      class="border-default bg-primary absolute z-50 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border shadow-lg"
       transition:fly={{ y: -4, duration: 150 }}
     >
       {#if filteredResources.length === 0}
         <div class="px-4 py-8 text-center">
-          <div class="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-secondary">
-            <Search class="h-5 w-5 text-muted" />
+          <div
+            class="bg-secondary mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full"
+          >
+            <Search class="text-muted h-5 w-5" />
           </div>
-          <p class="text-sm text-muted">{m.api_keys_no_resource_found({ scopeType })}</p>
+          <p class="text-muted text-sm">{m.api_keys_no_resource_found({ scopeType })}</p>
           {#if $inputValue}
-            <p class="mt-1 text-xs text-muted">{m.api_keys_try_different_search()}</p>
+            <p class="text-muted mt-1 text-xs">{m.api_keys_try_different_search()}</p>
           {/if}
         </div>
       {:else}
@@ -210,33 +222,37 @@
               {...$option({ value: resource, label: resource.name })}
               use:option
               type="button"
-              class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors
-                     hover:bg-hover-default
-                     data-[highlighted]:bg-hover-default
+              class="hover:bg-hover-default data-[highlighted]:bg-hover-default flex w-full items-center gap-3 rounded-lg px-3 py-2.5
+                     text-left
+                     transition-colors
                      {selected ? 'bg-accent-default/5' : ''}"
               onclick={() => handleSelect(resource)}
             >
               <!-- Resource type icon -->
               <div
                 class="flex h-8 w-8 items-center justify-center rounded-lg
-                       {selected ? 'bg-accent-default/15 text-accent-default' : 'bg-secondary text-muted'}"
+                       {selected
+                  ? 'bg-accent-default/15 text-accent-default'
+                  : 'bg-secondary text-muted'}"
               >
                 <Icon class="h-4 w-4" />
               </div>
 
               <!-- Resource info -->
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-medium text-default truncate">{resource.name}</p>
+              <div class="min-w-0 flex-1">
+                <p class="text-default truncate text-sm font-medium">{resource.name}</p>
                 {#if resource.spaceName}
-                  <p class="text-xs text-muted truncate">{m.api_keys_in_space({ spaceName: resource.spaceName })}</p>
+                  <p class="text-muted truncate text-xs">
+                    {m.api_keys_in_space({ spaceName: resource.spaceName })}
+                  </p>
                 {:else}
-                  <p class="text-xs text-muted font-mono truncate">{resource.id.slice(0, 8)}...</p>
+                  <p class="text-muted truncate font-mono text-xs">{resource.id.slice(0, 8)}...</p>
                 {/if}
               </div>
 
               <!-- Selected check -->
               {#if selected}
-                <Check class="h-4 w-4 text-accent-default flex-shrink-0" />
+                <Check class="text-accent-default h-4 w-4 flex-shrink-0" />
               {/if}
             </button>
           {/each}

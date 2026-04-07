@@ -15,18 +15,16 @@
   import type { ExpiringKeyDisplayItem } from "$lib/features/api-keys/expirationUtils";
   import { Bell, BellOff, ShieldAlert } from "lucide-svelte";
   import { slide } from "svelte/transition";
+  import { SvelteSet } from "svelte/reactivity";
+  import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
 
-  let {
-    onExpiringItemsChanged,
-    onError,
-    onFollowedKeysChanged,
-    onNotificationsEnabledChanged
-  } = $props<{
-    onExpiringItemsChanged: (items: ExpiringKeyDisplayItem[]) => void;
-    onError: (msg: string) => void;
-    onFollowedKeysChanged: (ids: Set<string>, hasSubscriptions: boolean) => void;
-    onNotificationsEnabledChanged: (enabled: boolean) => void;
-  }>();
+  let { onExpiringItemsChanged, onError, onFollowedKeysChanged, onNotificationsEnabledChanged } =
+    $props<{
+      onExpiringItemsChanged: (items: ExpiringKeyDisplayItem[]) => void;
+      onError: (msg: string) => void;
+      onFollowedKeysChanged: (ids: Set<string>, hasSubscriptions: boolean) => void;
+      onNotificationsEnabledChanged: (enabled: boolean) => void;
+    }>();
 
   const intric = getIntric();
   const { forceRefresh: forceRefreshExpiringStore } = getExpiringKeysStore();
@@ -130,13 +128,7 @@
     }
   }
 
-  async function handleNotificationsToggle({
-    current,
-    next
-  }: {
-    current: boolean;
-    next: boolean;
-  }) {
+  async function handleNotificationsToggle({ current, next }: { current: boolean; next: boolean }) {
     const previous = current;
     notificationsEnabled = next;
     onNotificationsEnabledChanged(next);
@@ -153,11 +145,11 @@
         onError(m.api_keys_notifications_policy_disabled_error());
       }
       await forceRefreshExpiringStore();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
       notificationsEnabled = previous;
       onNotificationsEnabledChanged(previous);
-      onError(error?.getReadableMessage?.() ?? m.something_went_wrong());
+      onError(getErrorMessage(error));
     } finally {
       notificationSettingsSaving = false;
     }
@@ -172,7 +164,7 @@
 
   function toggleReminderDay(day: number) {
     if (notificationSettingsSaving) return;
-    const next = new Set(selectedReminderDays);
+    const next = new SvelteSet(selectedReminderDays);
     if (next.has(day)) {
       next.delete(day);
     } else {
@@ -206,9 +198,9 @@
         notificationPolicyEnabled = false;
       }
       await forceRefreshExpiringStore();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
-      onError(error?.getReadableMessage?.() ?? m.something_went_wrong());
+      onError(getErrorMessage(error));
     } finally {
       notificationSettingsSaving = false;
     }
@@ -235,10 +227,10 @@
         allowAutoFollowAssistants = false;
         onError(m.api_keys_notifications_auto_follow_assistants_policy_error());
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
       autoFollowPublishedAssistants = current;
-      onError(error?.getReadableMessage?.() ?? m.something_went_wrong());
+      onError(getErrorMessage(error));
     } finally {
       notificationSettingsSaving = false;
     }
@@ -265,10 +257,10 @@
         allowAutoFollowApps = false;
         onError(m.api_keys_notifications_auto_follow_apps_policy_error());
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
       autoFollowPublishedApps = current;
-      onError(error?.getReadableMessage?.() ?? m.something_went_wrong());
+      onError(getErrorMessage(error));
     } finally {
       notificationSettingsSaving = false;
     }
@@ -296,18 +288,20 @@
   });
 </script>
 
-<div class="rounded-xl border border-default bg-primary shadow-sm overflow-hidden">
+<div class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm">
   <!-- Header -->
   <div class="flex items-center justify-between gap-4 px-5 py-3.5">
-    <div class="flex items-center gap-3 min-w-0">
-      <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-default/10">
+    <div class="flex min-w-0 items-center gap-3">
+      <div
+        class="bg-accent-default/10 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+      >
         {#if notificationsEnabled && !isPolicyBlocked}
-          <Bell class="h-4 w-4 text-accent-default" />
+          <Bell class="text-accent-default h-4 w-4" />
         {:else}
-          <BellOff class="h-4 w-4 text-muted" />
+          <BellOff class="text-muted h-4 w-4" />
         {/if}
       </div>
-      <h3 class="text-sm font-semibold text-primary">
+      <h3 class="text-primary text-sm font-semibold">
         {m.api_keys_notifications_settings_title()}
       </h3>
     </div>
@@ -322,9 +316,11 @@
 
   <!-- Policy-blocked banner -->
   {#if isPolicyBlocked}
-    <div class="mx-5 mb-4 flex items-center gap-3 rounded-lg border border-negative-default/20 bg-negative-dimmer/50 px-4 py-3">
-      <ShieldAlert class="h-4 w-4 text-negative-default shrink-0" />
-      <p class="text-xs text-negative-default">
+    <div
+      class="border-negative-default/20 bg-negative-dimmer/50 mx-5 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3"
+    >
+      <ShieldAlert class="text-negative-default h-4 w-4 shrink-0" />
+      <p class="text-negative-default text-xs">
         {m.api_keys_notifications_policy_header_hint()}
       </p>
     </div>
@@ -332,20 +328,24 @@
 
   <!-- Disabled hint -->
   {#if !notificationsEnabled && !isPolicyBlocked && !notificationSettingsLoading}
-    <p class="px-5 pb-4 text-xs text-muted">
+    <p class="text-muted px-5 pb-4 text-xs">
       {m.api_keys_notifications_enable_to_edit_hint()}
     </p>
   {/if}
 
   <!-- Expanded body (only when enabled) -->
   {#if notificationsEnabled && !isPolicyBlocked}
-    <div class="border-t border-default px-5 py-4 space-y-4" transition:slide={{ duration: 200 }}>
-      <p class="text-xs text-secondary">
+    <div class="border-default space-y-4 border-t px-5 py-4" transition:slide={{ duration: 200 }}>
+      <p class="text-secondary text-xs">
         {m.api_keys_notifications_settings_description()}
       </p>
 
       <!-- Reminder schedule -->
-      <div class="space-y-3" class:opacity-50={notificationSettingsSaving} class:pointer-events-none={notificationSettingsSaving}>
+      <div
+        class="space-y-3"
+        class:opacity-50={notificationSettingsSaving}
+        class:pointer-events-none={notificationSettingsSaving}
+      >
         <!-- Quick day chips -->
         <div class="flex flex-wrap gap-1.5">
           {#each reminderDayOptions as day (day)}
@@ -353,9 +353,9 @@
             <button
               type="button"
               style="font-variant-numeric: tabular-nums"
-              class="inline-flex h-8 min-w-[42px] items-center justify-center rounded-lg px-3 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default/50 {isSelected
+              class="focus-visible:ring-accent-default/50 inline-flex h-8 min-w-[42px] items-center justify-center rounded-lg px-3 text-xs font-medium transition-all focus-visible:ring-2 focus-visible:outline-none {isSelected
                 ? 'bg-accent-default text-on-fill shadow-sm'
-                : 'border border-default bg-primary text-secondary hover:text-primary hover:border-stronger'}"
+                : 'border-default bg-primary text-secondary hover:text-primary hover:border-stronger border'}"
               aria-pressed={isSelected}
               aria-label={m.api_keys_notifications_day_chip_aria_label({ day })}
               disabled={notificationSettingsSaving}
@@ -380,14 +380,14 @@
         {:else}
           <button
             type="button"
-            class="text-xs text-accent-default hover:underline"
+            class="text-accent-default text-xs hover:underline"
             onclick={() => (showCustomInput = true)}
           >
             {m.api_keys_notifications_customize_days()}
           </button>
         {/if}
 
-        <p class="text-xs text-muted leading-relaxed">
+        <p class="text-muted text-xs leading-relaxed">
           {m.api_keys_notifications_days_help()}
           {#if notificationPolicyMaxDays}
             {m.api_keys_notifications_max_days_hint({ days: notificationPolicyMaxDays })}
@@ -396,18 +396,22 @@
       </div>
 
       <!-- Auto-follow settings -->
-      <div class="space-y-3 border-t border-default pt-4" class:opacity-50={notificationSettingsSaving} class:pointer-events-none={notificationSettingsSaving}>
+      <div
+        class="border-default space-y-3 border-t pt-4"
+        class:opacity-50={notificationSettingsSaving}
+        class:pointer-events-none={notificationSettingsSaving}
+      >
         <!-- Assistants -->
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
-            <p class="text-sm font-medium text-primary">
+            <p class="text-primary text-sm font-medium">
               {m.api_keys_notifications_auto_follow_assistants_title()}
             </p>
-            <p class="mt-0.5 text-xs text-secondary">
+            <p class="text-secondary mt-0.5 text-xs">
               {m.api_keys_notifications_auto_follow_assistants_description()}
             </p>
             {#if allowAutoFollowAssistants === false}
-              <p class="mt-1 text-xs text-negative-default">
+              <p class="text-negative-default mt-1 text-xs">
                 {m.api_keys_notifications_auto_follow_assistants_locked_hint()}
               </p>
             {/if}
@@ -424,14 +428,14 @@
         <!-- Apps -->
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
-            <p class="text-sm font-medium text-primary">
+            <p class="text-primary text-sm font-medium">
               {m.api_keys_notifications_auto_follow_apps_title()}
             </p>
-            <p class="mt-0.5 text-xs text-secondary">
+            <p class="text-secondary mt-0.5 text-xs">
               {m.api_keys_notifications_auto_follow_apps_description()}
             </p>
             {#if allowAutoFollowApps === false}
-              <p class="mt-1 text-xs text-negative-default">
+              <p class="text-negative-default mt-1 text-xs">
                 {m.api_keys_notifications_auto_follow_apps_locked_hint()}
               </p>
             {/if}

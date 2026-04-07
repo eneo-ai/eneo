@@ -32,17 +32,23 @@
     <span class="pl-3 font-medium">{m.api_keys_expiring_bell_title()}</span>
 
     {#if expiredCount > 0 || urgentCount > 0 || warningCount > 0}
-      <span class="pl-3 text-xs text-secondary">
+      <span class="text-secondary pl-3 text-xs">
         {#if expiredCount > 0}
-          <span class="text-negative">{m.api_keys_expiring_bell_summary_expired({ count: expiredCount })}</span>
+          <span class="text-negative"
+            >{m.api_keys_expiring_bell_summary_expired({ count: expiredCount })}</span
+          >
         {/if}
         {#if urgentCount > 0}
           {#if expiredCount > 0}<span>, </span>{/if}
-          <span class="text-negative">{m.api_keys_expiring_bell_summary_urgent({ count: urgentCount })}</span>
+          <span class="text-negative"
+            >{m.api_keys_expiring_bell_summary_urgent({ count: urgentCount })}</span
+          >
         {/if}
         {#if warningCount > 0}
           {#if expiredCount > 0 || urgentCount > 0}<span>, </span>{/if}
-          <span class="text-caution">{m.api_keys_expiring_bell_summary_warning({ count: warningCount })}</span>
+          <span class="text-caution"
+            >{m.api_keys_expiring_bell_summary_warning({ count: warningCount })}</span
+          >
         {/if}
       </span>
     {/if}
@@ -55,10 +61,11 @@
         <div
           class="border-dimmer flex items-center justify-between gap-x-3 border-b px-2 py-1.5 whitespace-nowrap last-of-type:border-b-0"
         >
-          <div class="flex items-center gap-2 flex-shrink truncate pr-4">
+          <div class="flex flex-shrink items-center gap-2 truncate pr-4">
             <span
               aria-hidden="true"
-              class="inline-block flex-shrink-0 rounded-full {item.level === 'expired' || item.level === 'urgent'
+              class="inline-block flex-shrink-0 rounded-full {item.level === 'expired' ||
+              item.level === 'urgent'
                 ? 'bg-negative h-2.5 w-2.5'
                 : 'bg-caution h-2 w-2'}"
             ></span>
@@ -69,14 +76,14 @@
               {item.name}
             </span>
             {#if item.keySuffix && hasDuplicateName(item.name, $displayItems)}
-              <span class="text-tertiary text-xs font-mono flex-shrink-0"
+              <span class="text-tertiary flex-shrink-0 font-mono text-xs"
                 >&middot; ...{item.keySuffix}</span
               >
             {/if}
           </div>
           <div class="flex-shrink-0 text-right">
             {#if item.level === "expired"}
-              <span class="text-negative font-medium text-xs"
+              <span class="text-negative text-xs font-medium"
                 >{m.api_keys_expiring_item_expired()}</span
               >
             {:else if item.daysRemaining === 0}
@@ -84,9 +91,7 @@
             {:else if item.daysRemaining === 1}
               <span class="text-negative text-xs">{m.api_keys_expiring_item_tomorrow()}</span>
             {:else}
-              <span
-                class="{item.level === 'urgent' ? 'text-negative' : 'text-caution'} text-xs"
-              >
+              <span class="{item.level === 'urgent' ? 'text-negative' : 'text-caution'} text-xs">
                 {m.api_keys_expiring_item_days({ days: item.daysRemaining })}
               </span>
             {/if}
@@ -95,21 +100,23 @@
       {/each}
 
       {#if overflowCount > 0}
-        <div class="px-2 py-1.5 text-xs text-secondary">
+        <div class="text-secondary px-2 py-1.5 text-xs">
           {m.api_keys_expiring_bell_more({ count: overflowCount })}
         </div>
       {/if}
     </div>
 
+    <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
     <a
       href={localizeHref("/account/api-keys")}
-      class="flex items-center justify-between gap-2 rounded-md px-3 py-2 min-h-[44px]
-             text-sm font-medium text-accent-default hover:bg-hover
-             focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default/50
-             transition-colors"
+      class="text-accent-default hover:bg-hover focus-visible:ring-accent-default/50 flex min-h-[44px] items-center justify-between gap-2
+             rounded-md px-3 py-2 text-sm
+             font-medium transition-colors focus-visible:ring-2
+             focus-visible:outline-none"
     >
       {m.api_keys_expiring_bell_manage()}
       <IconChevronRight class="h-4 w-4" />
     </a>
+    <!-- eslint-enable svelte/no-navigation-without-resolve -->
   </div>
 {/if}

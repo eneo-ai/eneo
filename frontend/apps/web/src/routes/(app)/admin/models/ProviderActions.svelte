@@ -82,7 +82,12 @@
       providerModels = [
         ...tagModels(models.completionModels, "completion", m.completion_model(), Sparkles),
         ...tagModels(models.embeddingModels, "embedding", m.embedding_model(), Box),
-        ...tagModels(models.transcriptionModels, "transcription", m.transcription_model(), AudioLines)
+        ...tagModels(
+          models.transcriptionModels,
+          "transcription",
+          m.transcription_model(),
+          AudioLines
+        )
       ].sort((a, b) => a.name.localeCompare(b.name));
     } catch (e: unknown) {
       modelsLoadError = e instanceof Error ? e.message : m.failed_to_load_models();

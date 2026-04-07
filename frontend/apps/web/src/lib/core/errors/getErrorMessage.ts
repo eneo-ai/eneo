@@ -1,5 +1,5 @@
-import { IntricError } from '@intric/intric-js';
-import { m } from '$lib/paraglide/messages';
+import { IntricError } from "@intric/intric-js";
+import { m } from "$lib/paraglide/messages";
 
 /**
  * Maps backend error codes to localized i18n messages.
@@ -20,30 +20,30 @@ import { m } from '$lib/paraglide/messages';
  * The @unique decorator on ErrorCodes guarantees no duplicate codes exist.
  */
 const ERROR_CODE_MESSAGES: Record<number, () => string> = {
-	// --- Authorization & authentication ---
-	9001: () => m.eneo_error_9001(), // UNAUTHORIZED
-	9005: () => m.eneo_error_9005(), // AUTHENTICATION_ERROR
-	9019: () => m.eneo_error_9019(), // USER_INACTIVE
-	9025: () => m.eneo_error_9025(), // TENANT_SUSPENDED
+  // --- Authorization & authentication ---
+  9001: () => m.eneo_error_9001(), // UNAUTHORIZED
+  9005: () => m.eneo_error_9005(), // AUTHENTICATION_ERROR
+  9019: () => m.eneo_error_9019(), // USER_INACTIVE
+  9025: () => m.eneo_error_9025(), // TENANT_SUSPENDED
 
-	// --- Model & provider issues ---
-	9002: () => m.eneo_error_9002(), // UNSUPPORTED_MODEL
-	9020: () => m.eneo_error_9020(), // NO_MODEL_SELECTED
-	9026: () => m.eneo_error_9026(), // API_KEY_NOT_CONFIGURED
-	9031: () => m.eneo_error_9031(), // PROVIDER_INACTIVE
-	9033: () => m.eneo_error_9033(), // MODEL_NOT_AVAILABLE
-	9034: () => m.eneo_error_9034(), // KNOWLEDGE_MODEL_UNAVAILABLE
-	9035: () => m.eneo_error_9035(), // SECURITY_CLASSIFICATION_MISMATCH
-	9036: () => m.eneo_error_9036(), // MCP_UPSTREAM_ERROR
-	9037: () => m.eneo_error_9037(), // MCP_UPSTREAM_AUTH_ERROR
+  // --- Model & provider issues ---
+  9002: () => m.eneo_error_9002(), // UNSUPPORTED_MODEL
+  9020: () => m.eneo_error_9020(), // NO_MODEL_SELECTED
+  9026: () => m.eneo_error_9026(), // API_KEY_NOT_CONFIGURED
+  9031: () => m.eneo_error_9031(), // PROVIDER_INACTIVE
+  9033: () => m.eneo_error_9033(), // MODEL_NOT_AVAILABLE
+  9034: () => m.eneo_error_9034(), // KNOWLEDGE_MODEL_UNAVAILABLE
+  9035: () => m.eneo_error_9035(), // SECURITY_CLASSIFICATION_MISMATCH
+  9036: () => m.eneo_error_9036(), // MCP_UPSTREAM_ERROR
+  9037: () => m.eneo_error_9037(), // MCP_UPSTREAM_AUTH_ERROR
 
-	// --- AI service errors ---
-	9008: () => m.eneo_error_9008(), // QUOTA_EXCEEDED
-	9010: () => m.eneo_error_9010(), // OPENAI_ERROR
-	9011: () => m.eneo_error_9011(), // CLAUDE_ERROR
+  // --- AI service errors ---
+  9008: () => m.eneo_error_9008(), // QUOTA_EXCEEDED
+  9010: () => m.eneo_error_9010(), // OPENAI_ERROR
+  9011: () => m.eneo_error_9011(), // CLAUDE_ERROR
 
-	// --- Internal errors ---
-	9024: () => m.eneo_error_9024() // INTERNAL_SERVER_ERROR
+  // --- Internal errors ---
+  9024: () => m.eneo_error_9024() // INTERNAL_SERVER_ERROR
 };
 
 /**
@@ -57,15 +57,15 @@ const ERROR_CODE_MESSAGES: Record<number, () => string> = {
  * Use toastError() to show the message directly as a toast notification.
  */
 export function getErrorMessage(error: unknown): string {
-	if (error instanceof IntricError) {
-		const mapped = ERROR_CODE_MESSAGES[error.code];
-		if (mapped) {
-			return mapped();
-		}
-		const readable = error.getReadableMessage();
-		if (readable) {
-			return readable;
-		}
-	}
-	return m.request_failed();
+  if (error instanceof IntricError) {
+    const mapped = ERROR_CODE_MESSAGES[error.code];
+    if (mapped) {
+      return mapped();
+    }
+    const readable = error.getReadableMessage();
+    if (readable) {
+      return readable;
+    }
+  }
+  return m.request_failed();
 }

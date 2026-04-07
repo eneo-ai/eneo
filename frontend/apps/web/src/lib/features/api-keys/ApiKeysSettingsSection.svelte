@@ -133,10 +133,14 @@
 
   function getEmptyMessage(): string {
     switch (scopeType) {
-      case "assistant": return m.api_keys_empty_assistant();
-      case "space": return m.api_keys_empty_space();
-      case "app": return m.api_keys_empty_app();
-      default: return m.api_keys_empty_assistant();
+      case "assistant":
+        return m.api_keys_empty_assistant();
+      case "space":
+        return m.api_keys_empty_space();
+      case "app":
+        return m.api_keys_empty_app();
+      default:
+        return m.api_keys_empty_assistant();
     }
   }
 
@@ -149,9 +153,11 @@
 <div class="w-full">
   {#if errorMessage}
     <!-- Error state -->
-    <div class="flex items-center gap-3 rounded-lg border border-negative-default/20 bg-negative-dimmer px-5 py-4">
-      <AlertCircle class="h-4 w-4 text-negative-default flex-shrink-0" />
-      <p class="flex-1 text-sm text-negative-default">{errorMessage}</p>
+    <div
+      class="border-negative-default/20 bg-negative-dimmer flex items-center gap-3 rounded-lg border px-5 py-4"
+    >
+      <AlertCircle class="text-negative-default h-4 w-4 flex-shrink-0" />
+      <p class="text-negative-default flex-1 text-sm">{errorMessage}</p>
       <Button variant="simple" on:click={loadKeys} class="gap-1.5 text-xs">
         <RefreshCw class="h-3.5 w-3.5" />
         {m.retry()}
@@ -160,15 +166,17 @@
   {:else if loading && keys.length === 0}
     <!-- Loading state -->
     <div class="flex items-center gap-3 py-4">
-      <div class="h-4 w-4 animate-spin rounded-full border-2 border-accent-default border-t-transparent"></div>
-      <span class="text-sm text-muted">{m.loading()}...</span>
+      <div
+        class="border-accent-default h-4 w-4 animate-spin rounded-full border-2 border-t-transparent"
+      ></div>
+      <span class="text-muted text-sm">{m.loading()}...</span>
     </div>
   {:else if keys.length === 0}
     <!-- Empty state -->
-    <div class="flex items-start gap-4 rounded-lg border border-default px-5 py-5">
-      <Key class="mt-0.5 h-5 w-5 flex-shrink-0 text-muted" />
+    <div class="border-default flex items-start gap-4 rounded-lg border px-5 py-5">
+      <Key class="text-muted mt-0.5 h-5 w-5 flex-shrink-0" />
       <div class="flex flex-col gap-3">
-        <p class="text-sm leading-relaxed text-secondary">{getEmptyMessage()}</p>
+        <p class="text-secondary text-sm leading-relaxed">{getEmptyMessage()}</p>
         <div>
           <CreateApiKeyDialog
             onCreated={handleCreated}
@@ -182,33 +190,36 @@
     </div>
   {:else}
     <!-- Collapsible key list -->
-    <div class="overflow-hidden rounded-lg border border-default">
+    <div class="border-default overflow-hidden rounded-lg border">
       <!-- Summary header -->
       <div class="flex w-full items-center gap-2 px-5 py-4">
         <button
           type="button"
           onclick={() => (expanded = !expanded)}
-          class="flex min-w-0 flex-1 items-center justify-between text-left transition-colors hover:text-default"
+          class="hover:text-default flex min-w-0 flex-1 items-center justify-between text-left transition-colors"
           aria-expanded={expanded}
         >
           <div class="flex items-center gap-3">
-            <Key class="h-4 w-4 text-muted" />
-            <span class="text-sm font-medium text-default">
-              {keys.length} {m.api_keys()}
+            <Key class="text-muted h-4 w-4" />
+            <span class="text-default text-sm font-medium">
+              {keys.length}
+              {m.api_keys()}
             </span>
-            <span class="text-xs text-muted">
+            <span class="text-muted text-xs">
               {m.api_keys_summary({ active: activeCount, suspended: suspendedCount })}
             </span>
           </div>
           <ChevronDown
-            class="h-4 w-4 text-muted transition-transform duration-200 {expanded ? 'rotate-180' : ''}"
+            class="text-muted h-4 w-4 transition-transform duration-200 {expanded
+              ? 'rotate-180'
+              : ''}"
           />
         </button>
         {#if canFollowScope}
           <button
             type="button"
             onclick={() => void toggleScopeFollow()}
-            class="inline-flex items-center gap-1.5 rounded-md border border-default px-2.5 py-1 text-xs text-muted hover:text-default"
+            class="border-default text-muted hover:text-default inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs"
             disabled={scopeFollowLoading}
           >
             {#if isScopeFollowed}
@@ -226,7 +237,7 @@
       {#if expanded}
         <div transition:slide={{ duration: 200 }}>
           {#if expiringDisplayItems.length > 0}
-            <div class="border-t border-default px-5 pt-4">
+            <div class="border-default border-t px-5 pt-4">
               <ExpiringKeysBanner
                 items={expiringDisplayItems}
                 tenantId={tenant.id}
@@ -236,7 +247,7 @@
               />
             </div>
           {/if}
-          <div class="border-t border-default px-5 py-5">
+          <div class="border-default border-t px-5 py-5">
             <ApiKeyTable
               {keys}
               {loading}
@@ -244,14 +255,17 @@
               onSecret={handleSecret}
               followedKeyIds={effectiveFollowedKeyIds}
               scopeFollowed={isScopeFollowed}
-              onFollowChanged={async () => { await loadScopeFollowState(); await forceRefreshExpiringStore(); }}
+              onFollowChanged={async () => {
+                await loadScopeFollowState();
+                await forceRefreshExpiringStore();
+              }}
             />
           </div>
         </div>
       {/if}
 
       <!-- Footer actions -->
-      <div class="flex items-center justify-between border-t border-dimmer px-5 py-3">
+      <div class="border-dimmer flex items-center justify-between border-t px-5 py-3">
         <CreateApiKeyDialog
           onCreated={handleCreated}
           lockedScopeType={scopeType}
@@ -262,7 +276,7 @@
         <!-- eslint-disable svelte/no-navigation-without-resolve -- linked from settings module -->
         <a
           href="/account/api-keys"
-          class="flex items-center gap-1.5 text-xs text-secondary transition-colors hover:text-default"
+          class="text-secondary hover:text-default flex items-center gap-1.5 text-xs transition-colors"
         >
           {m.api_keys_manage_all()}
           <ExternalLink class="h-3 w-3" />
@@ -273,8 +287,4 @@
   {/if}
 </div>
 
-<ApiKeySecretDialog
-  openController={secretDialogOpen}
-  secret={latestSecret}
-  source={secretSource}
-/>
+<ApiKeySecretDialog openController={secretDialogOpen} secret={latestSecret} source={secretSource} />

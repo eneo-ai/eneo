@@ -79,7 +79,9 @@
             if (currentTab) params.set("tab", currentTab);
             if (trimmed) params.set("search", trimmed);
 
-            const nextUrl = params.toString() ? `/admin/users?${params.toString()}` : "/admin/users";
+            const nextUrl = params.toString()
+              ? `/admin/users?${params.toString()}`
+              : "/admin/users";
             const currentUrl = `${$page.url.pathname}${$page.url.search}`;
             if (nextUrl === currentUrl) {
               return;

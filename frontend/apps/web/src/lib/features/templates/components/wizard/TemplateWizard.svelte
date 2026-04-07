@@ -47,7 +47,7 @@
         {#if $selectedTemplate.wizard.collections}
           <div class="flex flex-col p-4">
             <h4 class="flex items-center gap-2 text-lg font-medium">
-              <BookOpen class="h-5 w-5 text-muted flex-shrink-0" />
+              <BookOpen class="text-muted h-5 w-5 flex-shrink-0" />
               {$selectedTemplate.wizard.collections.title}
               {#if $selectedTemplate.wizard.collections.required}
                 <span class="text-muted text-base font-normal">({m.recommended()})</span>
@@ -61,7 +61,7 @@
               <SelectKnowledgeV2 bind:selectedCollections={$selectedCollections} inDialog
               ></SelectKnowledgeV2>
             {:else}
-              <p class="text-secondary text-sm italic pl-7">{m.knowledge_add_later_hint()}</p>
+              <p class="text-secondary pl-7 text-sm italic">{m.knowledge_add_later_hint()}</p>
             {/if}
           </div>
         {/if}
@@ -73,7 +73,7 @@
         {#if $selectedTemplate.wizard.attachments}
           <div class="flex flex-col p-4">
             <h4 class="flex items-center gap-2 text-lg font-medium">
-              <FileUp class="h-5 w-5 text-muted flex-shrink-0" />
+              <FileUp class="text-muted h-5 w-5 flex-shrink-0" />
               {$selectedTemplate.wizard.attachments.title}
               {#if $selectedTemplate.wizard.attachments.required}
                 <span class="text-muted text-base font-normal">({m.required()})</span>

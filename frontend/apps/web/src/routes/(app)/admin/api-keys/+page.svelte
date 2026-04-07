@@ -247,11 +247,7 @@
     try {
       let forcedSearchFallback: string | null = null;
 
-      if (
-        reset &&
-        searchScope === "entity" &&
-        isLikelyFullApiKeySecret(searchQuery)
-      ) {
+      if (reset && searchScope === "entity" && isLikelyFullApiKeySecret(searchQuery)) {
         try {
           const lookupResponse = await intric.apiKeys.admin.lookup({
             secret: searchQuery.trim()
@@ -507,7 +503,10 @@
     return false;
   }
 
-  function handleSecret(response: ApiKeyCreatedResponse, source: "created" | "rotated" = "created") {
+  function handleSecret(
+    response: ApiKeyCreatedResponse,
+    source: "created" | "rotated" = "created"
+  ) {
     latestSecret = response.secret;
     secretSource = source;
     secretDialogOpen.set(true);
@@ -519,7 +518,8 @@
     try {
       const config = await intric.audit.getActionConfig();
       const actions = config?.actions ?? [];
-      apiKeyUsedTrackingEnabled = actions.find((item) => item.action === "api_key_used")?.enabled ?? false;
+      apiKeyUsedTrackingEnabled =
+        actions.find((item) => item.action === "api_key_used")?.enabled ?? false;
       apiKeyAuthFailedTrackingEnabled =
         actions.find((item) => item.action === "api_key_auth_failed")?.enabled ?? true;
       trackingConfigLoaded = true;
@@ -531,7 +531,10 @@
     }
   }
 
-  async function updateTrackingAction(action: "api_key_used" | "api_key_auth_failed", enabled: boolean) {
+  async function updateTrackingAction(
+    action: "api_key_used" | "api_key_auth_failed",
+    enabled: boolean
+  ) {
     const previousUsed = apiKeyUsedTrackingEnabled;
     const previousFailed = apiKeyAuthFailedTrackingEnabled;
     if (action === "api_key_used") apiKeyUsedTrackingEnabled = enabled;
@@ -591,13 +594,7 @@
     }
   }
 
-  async function toggleScopeEnforcement({
-    current,
-    next
-  }: {
-    current: boolean;
-    next: boolean;
-  }) {
+  async function toggleScopeEnforcement({ current, next }: { current: boolean; next: boolean }) {
     scopeEnforcementEnabled = next;
     try {
       const updated = await intric.settings.updateScopeEnforcement(next);
@@ -610,13 +607,7 @@
     }
   }
 
-  async function toggleStrictMode({
-    current,
-    next
-  }: {
-    current: boolean;
-    next: boolean;
-  }) {
+  async function toggleStrictMode({ current, next }: { current: boolean; next: boolean }) {
     strictModeEnabled = next;
     try {
       const updated = await intric.settings.updateStrictMode(next);
@@ -628,13 +619,7 @@
     }
   }
 
-  async function toggleExpiryNotifications({
-    current,
-    next
-  }: {
-    current: boolean;
-    next: boolean;
-  }) {
+  async function toggleExpiryNotifications({ current, next }: { current: boolean; next: boolean }) {
     expiryNotificationsEnabled = next;
     try {
       const updated = await intric.settings.updateApiKeyExpiryNotifications(next);
@@ -653,10 +638,7 @@
       return;
     }
     const parsedMax = Number(notificationPolicyMaxDaysInput);
-    const maxDays =
-      Number.isFinite(parsedMax) && parsedMax > 0
-        ? Math.floor(parsedMax)
-        : null;
+    const maxDays = Number.isFinite(parsedMax) && parsedMax > 0 ? Math.floor(parsedMax) : null;
 
     notificationPolicySaving = true;
     try {
@@ -712,593 +694,609 @@
 
   <Page.Main>
     <Settings.Page>
-    <div class="space-y-6">
-      <!-- Filter Section -->
-      <div class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm">
-        <!-- Filter Header -->
-        <button
-          type="button"
-          onclick={() => (showFilters = !showFilters)}
-          aria-expanded={showFilters}
-          aria-controls="admin-api-key-filters-panel"
-          class="bg-subtle/50 hover:bg-subtle flex w-full items-center justify-between px-6 py-4 transition-colors"
-        >
-          <div class="flex items-center gap-3">
-            <div
-              class="bg-primary border-default flex h-9 w-9 items-center justify-center rounded-lg border"
-            >
-              <Filter class="text-muted h-4 w-4" />
-            </div>
-            <div class="text-left">
-              <h3 class="text-default text-sm font-semibold">
-                {m.api_keys_admin_filters_search()}
-              </h3>
-              <p class="text-muted text-xs">
-                {activeFilterCount > 0
-                  ? activeFilterCount > 1
-                    ? m.api_keys_admin_filters_active_plural({ count: activeFilterCount })
-                    : m.api_keys_admin_filters_active({ count: activeFilterCount })
-                  : m.api_keys_admin_filters_description()}
-              </p>
-            </div>
-            {#if activeFilterCount > 0}
-              <span
-                class="bg-accent-default text-on-fill inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold"
-              >
-                {activeFilterCount}
-              </span>
-            {/if}
-          </div>
-          <ChevronDown
-            class="text-muted h-5 w-5 transition-transform duration-200 {showFilters
-              ? 'rotate-180'
-              : ''}"
-          />
-        </button>
-
-        <!-- Filter Content -->
-        {#if showFilters}
-          <div
-            id="admin-api-key-filters-panel"
-            transition:slide={{ duration: 200 }}
-            class="border-default space-y-5 border-t px-6 py-5"
+      <div class="space-y-6">
+        <!-- Filter Section -->
+        <div class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm">
+          <!-- Filter Header -->
+          <button
+            type="button"
+            onclick={() => (showFilters = !showFilters)}
+            aria-expanded={showFilters}
+            aria-controls="admin-api-key-filters-panel"
+            class="bg-subtle/50 hover:bg-subtle flex w-full items-center justify-between px-6 py-4 transition-colors"
           >
-            <!-- Search -->
-            <div class="api-keys-user-search-container scope-dropdown-container user-dropdown-container relative flex-1 min-w-[280px]">
-              <div class="absolute top-1/2 left-2 z-10 flex -translate-y-1/2 items-center">
-                <button
-                  type="button"
-                  onclick={() => (showSearchScopeDropdown = !showSearchScopeDropdown)}
-                  aria-haspopup="listbox"
-                  aria-expanded={showSearchScopeDropdown}
-                  class="text-muted bg-subtle/80 border-default/40 hover:bg-hover hover:text-default hover:border-default/60 flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition-all duration-150 focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:ring-offset-1 focus-visible:outline-none"
+            <div class="flex items-center gap-3">
+              <div
+                class="bg-primary border-default flex h-9 w-9 items-center justify-center rounded-lg border"
+              >
+                <Filter class="text-muted h-4 w-4" />
+              </div>
+              <div class="text-left">
+                <h3 class="text-default text-sm font-semibold">
+                  {m.api_keys_admin_filters_search()}
+                </h3>
+                <p class="text-muted text-xs">
+                  {activeFilterCount > 0
+                    ? activeFilterCount > 1
+                      ? m.api_keys_admin_filters_active_plural({ count: activeFilterCount })
+                      : m.api_keys_admin_filters_active({ count: activeFilterCount })
+                    : m.api_keys_admin_filters_description()}
+                </p>
+              </div>
+              {#if activeFilterCount > 0}
+                <span
+                  class="bg-accent-default text-on-fill inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold"
                 >
-                  {searchScope === "entity"
-                    ? m.audit_search_scope_entity()
-                    : m.audit_search_scope_user()}
-                  <ChevronDown
-                    class="h-3 w-3 transition-transform duration-150 {showSearchScopeDropdown
-                      ? 'rotate-180'
-                      : ''}"
-                  />
-                </button>
+                  {activeFilterCount}
+                </span>
+              {/if}
+            </div>
+            <ChevronDown
+              class="text-muted h-5 w-5 transition-transform duration-200 {showFilters
+                ? 'rotate-180'
+                : ''}"
+            />
+          </button>
 
-                {#if showSearchScopeDropdown}
-                  <div
-                    role="listbox"
-                    class="bg-primary border-default absolute top-full left-0 z-30 mt-1.5 min-w-[140px] overflow-hidden rounded-lg border py-1 shadow-lg"
-                    transition:slide={{ duration: 150 }}
+          <!-- Filter Content -->
+          {#if showFilters}
+            <div
+              id="admin-api-key-filters-panel"
+              transition:slide={{ duration: 200 }}
+              class="border-default space-y-5 border-t px-6 py-5"
+            >
+              <!-- Search -->
+              <div
+                class="api-keys-user-search-container scope-dropdown-container user-dropdown-container relative min-w-[280px] flex-1"
+              >
+                <div class="absolute top-1/2 left-2 z-10 flex -translate-y-1/2 items-center">
+                  <button
+                    type="button"
+                    onclick={() => (showSearchScopeDropdown = !showSearchScopeDropdown)}
+                    aria-haspopup="listbox"
+                    aria-expanded={showSearchScopeDropdown}
+                    class="text-muted bg-subtle/80 border-default/40 hover:bg-hover hover:text-default hover:border-default/60 focus-visible:ring-accent-default flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition-all duration-150 focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
                   >
-                    <button
-                      role="option"
-                      aria-selected={searchScope === "entity"}
-                      type="button"
-                      onclick={() => handleSearchScopeChange("entity")}
-                      class="w-full px-3 py-2 text-left text-sm transition-colors {searchScope === 'entity'
-                        ? 'bg-accent-default/5 text-accent-default font-medium'
-                        : 'text-default hover:bg-subtle'}"
+                    {searchScope === "entity"
+                      ? m.audit_search_scope_entity()
+                      : m.audit_search_scope_user()}
+                    <ChevronDown
+                      class="h-3 w-3 transition-transform duration-150 {showSearchScopeDropdown
+                        ? 'rotate-180'
+                        : ''}"
+                    />
+                  </button>
+
+                  {#if showSearchScopeDropdown}
+                    <div
+                      role="listbox"
+                      class="bg-primary border-default absolute top-full left-0 z-30 mt-1.5 min-w-[140px] overflow-hidden rounded-lg border py-1 shadow-lg"
+                      transition:slide={{ duration: 150 }}
                     >
-                      <span class="flex items-center justify-between gap-2">
-                        {m.audit_search_scope_entity()}
-                        {#if searchScope === "entity"}
-                          <Check class="h-4 w-4 text-accent-default" />
-                        {/if}
-                      </span>
-                    </button>
-                    <button
-                      role="option"
-                      aria-selected={searchScope === "user"}
-                      type="button"
-                      onclick={() => handleSearchScopeChange("user")}
-                      class="w-full px-3 py-2 text-left text-sm transition-colors {searchScope === 'user'
-                        ? 'bg-accent-default/5 text-accent-default font-medium'
-                        : 'text-default hover:bg-subtle'}"
-                    >
-                      <span class="flex items-center justify-between gap-2">
-                        {m.audit_search_scope_user()}
-                        {#if searchScope === "user"}
-                          <Check class="h-4 w-4 text-accent-default" />
-                        {/if}
-                      </span>
-                    </button>
+                      <button
+                        role="option"
+                        aria-selected={searchScope === "entity"}
+                        type="button"
+                        onclick={() => handleSearchScopeChange("entity")}
+                        class="w-full px-3 py-2 text-left text-sm transition-colors {searchScope ===
+                        'entity'
+                          ? 'bg-accent-default/5 text-accent-default font-medium'
+                          : 'text-default hover:bg-subtle'}"
+                      >
+                        <span class="flex items-center justify-between gap-2">
+                          {m.audit_search_scope_entity()}
+                          {#if searchScope === "entity"}
+                            <Check class="text-accent-default h-4 w-4" />
+                          {/if}
+                        </span>
+                      </button>
+                      <button
+                        role="option"
+                        aria-selected={searchScope === "user"}
+                        type="button"
+                        onclick={() => handleSearchScopeChange("user")}
+                        class="w-full px-3 py-2 text-left text-sm transition-colors {searchScope ===
+                        'user'
+                          ? 'bg-accent-default/5 text-accent-default font-medium'
+                          : 'text-default hover:bg-subtle'}"
+                      >
+                        <span class="flex items-center justify-between gap-2">
+                          {m.audit_search_scope_user()}
+                          {#if searchScope === "user"}
+                            <Check class="text-accent-default h-4 w-4" />
+                          {/if}
+                        </span>
+                      </button>
+                    </div>
+                  {/if}
+
+                  <div class="bg-default/40 ml-2 h-6 w-px"></div>
+                </div>
+
+                <input
+                  type="text"
+                  bind:value={searchQuery}
+                  oninput={(event) =>
+                    handleScopedSearch((event.currentTarget as HTMLInputElement).value)}
+                  onfocus={() =>
+                    searchScope === "user" &&
+                    searchQuery.length >= 3 &&
+                    userSearchResults.length > 0 &&
+                    (showUserDropdown = true)}
+                  placeholder={searchScope === "entity"
+                    ? m.api_keys_admin_search_placeholder()
+                    : m.audit_search_placeholder_user()}
+                  aria-label={searchScope === "entity"
+                    ? m.api_keys_admin_search_placeholder()
+                    : m.audit_search_placeholder_user()}
+                  autocomplete="off"
+                  class="text-default border-default bg-primary placeholder:text-muted focus:border-accent-default focus:ring-accent-default/30 h-11 w-full rounded-lg border py-2 pr-10 pl-32 text-sm transition-all duration-150 focus:ring-2 focus:outline-none"
+                />
+
+                {#if isSearchingUsers && searchScope === "user"}
+                  <div class="absolute top-1/2 right-8 -translate-y-1/2">
+                    <div
+                      class="border-accent-default h-4 w-4 animate-spin rounded-full border-2 border-t-transparent"
+                    ></div>
                   </div>
                 {/if}
 
-                <div class="bg-default/40 ml-2 h-6 w-px"></div>
-              </div>
-
-              <input
-                type="text"
-                bind:value={searchQuery}
-                oninput={(event) => handleScopedSearch((event.currentTarget as HTMLInputElement).value)}
-                onfocus={() =>
-                  searchScope === "user" &&
-                  searchQuery.length >= 3 &&
-                  userSearchResults.length > 0 &&
-                  (showUserDropdown = true)}
-                placeholder={searchScope === "entity"
-                  ? m.api_keys_admin_search_placeholder()
-                  : m.audit_search_placeholder_user()}
-                aria-label={searchScope === "entity"
-                  ? m.api_keys_admin_search_placeholder()
-                  : m.audit_search_placeholder_user()}
-                autocomplete="off"
-                class="text-default border-default bg-primary placeholder:text-muted focus:border-accent-default focus:ring-accent-default/30 h-11 w-full rounded-lg border py-2 pr-10 pl-32 text-sm transition-all duration-150 focus:ring-2 focus:outline-none"
-              />
-
-              {#if isSearchingUsers && searchScope === "user"}
-                <div class="absolute top-1/2 right-8 -translate-y-1/2">
-                  <div
-                    class="border-accent-default h-4 w-4 animate-spin rounded-full border-2 border-t-transparent"
-                  ></div>
-                </div>
-              {/if}
-
-              {#if searchQuery.length > 0}
-                <button
-                  type="button"
-                  onclick={clearSearch}
-                  class="text-muted hover:text-default hover:bg-hover absolute top-1/2 right-2 -translate-y-1/2 rounded-md p-1.5 transition-all duration-150 focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none"
-                  aria-label={m.audit_search_clear()}
-                >
-                  <X class="h-4 w-4" />
-                </button>
-              {/if}
-
-              {#if searchScope === "user" && showUserDropdown && userSearchResults.length > 0}
-                <div
-                  role="listbox"
-                  class="bg-primary border-default absolute top-full right-0 left-0 z-20 mt-2 max-h-64 overflow-y-auto rounded-lg border shadow-xl"
-                  transition:slide={{ duration: 150 }}
-                >
-                  {#each userSearchResults as user, index (user.id)}
-                    <button
-                      role="option"
-                      aria-selected={false}
-                      type="button"
-                      onclick={() => selectUser(user)}
-                      class="focus:bg-accent-default/5 hover:bg-accent-default/5 w-full px-4 py-3 text-left transition-colors focus:outline-none {index > 0
-                        ? 'border-default/50 border-t'
-                        : ''}"
-                    >
-                      <div class="flex items-center gap-3">
-                        <div
-                          class="text-accent-default bg-accent-default/10 flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold"
-                        >
-                          {(user.email ?? user.username ?? "U").charAt(0).toUpperCase()}
-                        </div>
-                        <div class="min-w-0">
-                          <div class="text-default truncate text-sm font-medium">
-                            {user.username ?? user.email}
-                          </div>
-                          <div class="text-muted truncate text-xs">{user.email}</div>
-                        </div>
-                      </div>
-                    </button>
-                  {/each}
-                </div>
-              {/if}
-
-              {#if searchScope === "user" && searchQuery.trim().length >= 3 && userSearchCompleted && userSearchResults.length === 0 && !isSearchingUsers}
-                <div
-                  class="bg-primary border-default absolute top-full right-0 left-0 z-20 mt-2 rounded-lg border p-4 shadow-lg"
-                  transition:slide={{ duration: 150 }}
-                >
-                  <div class="flex flex-col items-center gap-2 py-2 text-center">
-                    <div class="bg-muted/20 rounded-full p-2">
-                      <X class="text-muted h-5 w-5" />
-                    </div>
-                    <p class="text-muted text-sm">{m.no_users_found()}</p>
-                  </div>
-                </div>
-              {/if}
-            </div>
-
-            {#if searchScope === "user"}
-              <div class="space-y-1">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="text-muted text-xs font-medium">{m.api_keys_admin_user_relation_label()}</span>
-                  <div class="inline-flex items-center gap-1 rounded-lg border border-default bg-primary p-1">
-                    <button
-                      type="button"
-                      onclick={() => (userRelation = "owner")}
-                      class="rounded-md px-2 py-1 text-xs font-medium transition-colors {userRelation === 'owner'
-                        ? 'bg-accent-default/10 text-accent-default'
-                        : 'text-muted hover:text-default'}"
-                    >
-                      {m.api_keys_admin_user_relation_owner()}
-                    </button>
-                    <button
-                      type="button"
-                      onclick={() => (userRelation = "creator")}
-                      class="rounded-md px-2 py-1 text-xs font-medium transition-colors {userRelation === 'creator'
-                        ? 'bg-accent-default/10 text-accent-default'
-                        : 'text-muted hover:text-default'}"
-                    >
-                      {m.api_keys_admin_user_relation_creator()}
-                    </button>
-                  </div>
-                </div>
-                <p class="text-muted text-xs">
-                  {userRelation === "owner"
-                    ? m.api_keys_admin_user_relation_help_owner()
-                    : m.api_keys_admin_user_relation_help_creator()}
-                </p>
-              </div>
-            {/if}
-
-            {#if searchScope === "user" && selectedUser}
-              <div class="flex flex-wrap items-center gap-2">
-                <span
-                  class="text-accent-default bg-accent-default/10 inline-flex items-center gap-2 rounded-md px-2.5 py-1 text-xs font-medium"
-                >
-                  <span>{selectedUser.email ?? selectedUser.username ?? selectedUser.id}</span>
+                {#if searchQuery.length > 0}
                   <button
                     type="button"
-                    onclick={clearUserFilter}
-                    class="hover:bg-accent-default/20 rounded p-0.5"
+                    onclick={clearSearch}
+                    class="text-muted hover:text-default hover:bg-hover focus-visible:ring-accent-default absolute top-1/2 right-2 -translate-y-1/2 rounded-md p-1.5 transition-all duration-150 focus-visible:ring-2 focus-visible:outline-none"
+                    aria-label={m.audit_search_clear()}
                   >
-                    <X class="h-3 w-3" />
+                    <X class="h-4 w-4" />
                   </button>
-                </span>
-              </div>
-            {/if}
+                {/if}
 
-            <!-- Quick Filters -->
-            <div class="flex flex-wrap gap-2">
-              {#each quickFilters as qf (qf.label)}
-                {@const isActive = isQuickFilterActive(qf.filter)}
-                <button
-                  type="button"
-                  onclick={() => applyQuickFilter(qf.filter)}
-                  class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all
+                {#if searchScope === "user" && showUserDropdown && userSearchResults.length > 0}
+                  <div
+                    role="listbox"
+                    class="bg-primary border-default absolute top-full right-0 left-0 z-20 mt-2 max-h-64 overflow-y-auto rounded-lg border shadow-xl"
+                    transition:slide={{ duration: 150 }}
+                  >
+                    {#each userSearchResults as user, index (user.id)}
+                      <button
+                        role="option"
+                        aria-selected={false}
+                        type="button"
+                        onclick={() => selectUser(user)}
+                        class="focus:bg-accent-default/5 hover:bg-accent-default/5 w-full px-4 py-3 text-left transition-colors focus:outline-none {index >
+                        0
+                          ? 'border-default/50 border-t'
+                          : ''}"
+                      >
+                        <div class="flex items-center gap-3">
+                          <div
+                            class="text-accent-default bg-accent-default/10 flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold"
+                          >
+                            {(user.email ?? user.username ?? "U").charAt(0).toUpperCase()}
+                          </div>
+                          <div class="min-w-0">
+                            <div class="text-default truncate text-sm font-medium">
+                              {user.username ?? user.email}
+                            </div>
+                            <div class="text-muted truncate text-xs">{user.email}</div>
+                          </div>
+                        </div>
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+
+                {#if searchScope === "user" && searchQuery.trim().length >= 3 && userSearchCompleted && userSearchResults.length === 0 && !isSearchingUsers}
+                  <div
+                    class="bg-primary border-default absolute top-full right-0 left-0 z-20 mt-2 rounded-lg border p-4 shadow-lg"
+                    transition:slide={{ duration: 150 }}
+                  >
+                    <div class="flex flex-col items-center gap-2 py-2 text-center">
+                      <div class="bg-muted/20 rounded-full p-2">
+                        <X class="text-muted h-5 w-5" />
+                      </div>
+                      <p class="text-muted text-sm">{m.no_users_found()}</p>
+                    </div>
+                  </div>
+                {/if}
+              </div>
+
+              {#if searchScope === "user"}
+                <div class="space-y-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-muted text-xs font-medium"
+                      >{m.api_keys_admin_user_relation_label()}</span
+                    >
+                    <div
+                      class="border-default bg-primary inline-flex items-center gap-1 rounded-lg border p-1"
+                    >
+                      <button
+                        type="button"
+                        onclick={() => (userRelation = "owner")}
+                        class="rounded-md px-2 py-1 text-xs font-medium transition-colors {userRelation ===
+                        'owner'
+                          ? 'bg-accent-default/10 text-accent-default'
+                          : 'text-muted hover:text-default'}"
+                      >
+                        {m.api_keys_admin_user_relation_owner()}
+                      </button>
+                      <button
+                        type="button"
+                        onclick={() => (userRelation = "creator")}
+                        class="rounded-md px-2 py-1 text-xs font-medium transition-colors {userRelation ===
+                        'creator'
+                          ? 'bg-accent-default/10 text-accent-default'
+                          : 'text-muted hover:text-default'}"
+                      >
+                        {m.api_keys_admin_user_relation_creator()}
+                      </button>
+                    </div>
+                  </div>
+                  <p class="text-muted text-xs">
+                    {userRelation === "owner"
+                      ? m.api_keys_admin_user_relation_help_owner()
+                      : m.api_keys_admin_user_relation_help_creator()}
+                  </p>
+                </div>
+              {/if}
+
+              {#if searchScope === "user" && selectedUser}
+                <div class="flex flex-wrap items-center gap-2">
+                  <span
+                    class="text-accent-default bg-accent-default/10 inline-flex items-center gap-2 rounded-md px-2.5 py-1 text-xs font-medium"
+                  >
+                    <span>{selectedUser.email ?? selectedUser.username ?? selectedUser.id}</span>
+                    <button
+                      type="button"
+                      onclick={clearUserFilter}
+                      class="hover:bg-accent-default/20 rounded p-0.5"
+                    >
+                      <X class="h-3 w-3" />
+                    </button>
+                  </span>
+                </div>
+              {/if}
+
+              <!-- Quick Filters -->
+              <div class="flex flex-wrap gap-2">
+                {#each quickFilters as qf (qf.label)}
+                  {@const isActive = isQuickFilterActive(qf.filter)}
+                  <button
+                    type="button"
+                    onclick={() => applyQuickFilter(qf.filter)}
+                    class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all
                          {isActive
-                    ? 'border-accent-default bg-accent-default/10 text-accent-default ring-accent-default/20 ring-2'
-                    : 'border-default bg-primary text-muted hover:border-dimmer hover:text-default'}"
-                >
-                  {#if qf.filter.keyType === "sk_"}
-                    <Lock class="h-3 w-3" />
-                  {:else if qf.filter.keyType === "pk_"}
-                    <Globe class="h-3 w-3" />
-                  {:else}
-                    <span
-                      class="h-2 w-2 rounded-full
+                      ? 'border-accent-default bg-accent-default/10 text-accent-default ring-accent-default/20 ring-2'
+                      : 'border-default bg-primary text-muted hover:border-dimmer hover:text-default'}"
+                  >
+                    {#if qf.filter.keyType === "sk_"}
+                      <Lock class="h-3 w-3" />
+                    {:else if qf.filter.keyType === "pk_"}
+                      <Globe class="h-3 w-3" />
+                    {:else}
+                      <span
+                        class="h-2 w-2 rounded-full
                              {qf.color === 'green' ? 'bg-green-500' : ''}
                              {qf.color === 'yellow' ? 'bg-yellow-500' : ''}
                              {qf.color === 'gray' ? 'bg-gray-500' : ''}
                              {qf.color === 'red' ? 'bg-red-500' : ''}
                              {qf.color === 'blue' ? 'bg-blue-500' : ''}
                              {qf.color === 'orange' ? 'bg-orange-500' : ''}"
-                    ></span>
-                  {/if}
-                  {qf.label}
-                  {#if isActive}
-                    <X class="h-3 w-3" />
-                  {/if}
-                </button>
-              {/each}
-            </div>
+                      ></span>
+                    {/if}
+                    {qf.label}
+                    {#if isActive}
+                      <X class="h-3 w-3" />
+                    {/if}
+                  </button>
+                {/each}
+              </div>
 
-            <!-- Advanced Filters -->
-            <div class="grid gap-4 md:grid-cols-3">
-              <Select.Simple bind:value={scopeType} options={scopeOptions} resourceName="scope">
-                {m.api_keys_admin_label_scope_type()}
-              </Select.Simple>
-              <Select.Simple bind:value={stateFilter} options={stateOptions} resourceName="state">
-                {m.api_keys_admin_label_state()}
-              </Select.Simple>
-              <Select.Simple bind:value={keyType} options={keyTypeOptions} resourceName="key type">
-                {m.api_keys_admin_label_key_type()}
-              </Select.Simple>
-            </div>
+              <!-- Advanced Filters -->
+              <div class="grid gap-4 md:grid-cols-3">
+                <Select.Simple bind:value={scopeType} options={scopeOptions} resourceName="scope">
+                  {m.api_keys_admin_label_scope_type()}
+                </Select.Simple>
+                <Select.Simple bind:value={stateFilter} options={stateOptions} resourceName="state">
+                  {m.api_keys_admin_label_state()}
+                </Select.Simple>
+                <Select.Simple
+                  bind:value={keyType}
+                  options={keyTypeOptions}
+                  resourceName="key type"
+                >
+                  {m.api_keys_admin_label_key_type()}
+                </Select.Simple>
+              </div>
 
-            <div class="grid gap-4 md:grid-cols-4">
-              {#if scopeSelectorType}
-                <ScopeResourceSelector
-                  scopeType={scopeSelectorType}
-                  bind:value={scopeId}
-                  {spaces}
-                  assistants={assistantOptions}
-                  apps={appOptions}
+              <div class="grid gap-4 md:grid-cols-4">
+                {#if scopeSelectorType}
+                  <ScopeResourceSelector
+                    scopeType={scopeSelectorType}
+                    bind:value={scopeId}
+                    {spaces}
+                    assistants={assistantOptions}
+                    apps={appOptions}
+                  />
+                {:else}
+                  <div></div>
+                {/if}
+                <Input.Text
+                  bind:value={createdByUserId}
+                  label={userRelation === "owner"
+                    ? m.api_keys_admin_label_owner_user_id()
+                    : m.api_keys_admin_label_created_by()}
+                  placeholder={m.api_keys_enter_uuid()}
                 />
-              {:else}
-                <div></div>
-              {/if}
-              <Input.Text
-                bind:value={createdByUserId}
-                label={userRelation === "owner"
-                  ? m.api_keys_admin_label_owner_user_id()
-                  : m.api_keys_admin_label_created_by()}
-                placeholder={m.api_keys_enter_uuid()}
-              />
-              <Input.Text
-                bind:value={expiresWithinDays}
-                label={m.api_keys_admin_expires_within_label()}
-                placeholder="14"
-              />
-              <Select.Simple
-                bind:value={limit}
-                options={resultLimitOptions}
-                resourceName="results limit"
-              >
-                {m.api_keys_admin_label_results_limit()}
-              </Select.Simple>
-            </div>
-
-            <!-- Filter Actions -->
-            <div class="border-default flex items-center justify-between border-t pt-2">
-              <p class="text-muted text-xs">
-                {totalCount !== null
-                  ? m.api_keys_admin_keys_count({
-                      filtered: keys.length,
-                      total: totalCount
-                    })
-                  : ""}
-              </p>
-              <div class="flex items-center gap-2">
-                <Button variant="simple" on:click={resetFilters} class="text-sm">
-                  <X class="mr-1.5 h-4 w-4" />
-                  {m.api_keys_admin_clear_all()}
-                </Button>
-                <Button variant="primary" on:click={applyFilters} class="text-sm">
-                  <Filter class="mr-1.5 h-4 w-4" />
-                  {m.api_keys_admin_apply_filters()}
-                </Button>
+                <Input.Text
+                  bind:value={expiresWithinDays}
+                  label={m.api_keys_admin_expires_within_label()}
+                  placeholder="14"
+                />
+                <Select.Simple
+                  bind:value={limit}
+                  options={resultLimitOptions}
+                  resourceName="results limit"
+                >
+                  {m.api_keys_admin_label_results_limit()}
+                </Select.Simple>
               </div>
-            </div>
-          </div>
-        {/if}
-      </div>
 
-      <!-- Error Message -->
-      {#if errorMessage}
-        <div
-          class="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-5 py-4 dark:border-red-900 dark:bg-red-950/50"
-          transition:fly={{ y: -8, duration: 150 }}
-        >
-          <AlertCircle class="h-5 w-5 flex-shrink-0 text-red-600 dark:text-red-400" />
-          <p class="text-sm text-red-700 dark:text-red-300">{errorMessage}</p>
-        </div>
-      {/if}
-
-      <!-- Keys Table Section -->
-      <div class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm">
-        <div class="border-default bg-subtle/30 border-b px-6 py-4">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <div
-                class="bg-accent-default/10 flex h-10 w-10 items-center justify-center rounded-xl"
-              >
-                <Key class="text-accent-default h-5 w-5" />
-              </div>
-              <div>
-                <h3 class="text-default font-semibold">{m.api_keys()}</h3>
+              <!-- Filter Actions -->
+              <div class="border-default flex items-center justify-between border-t pt-2">
                 <p class="text-muted text-xs">
                   {totalCount !== null
-                    ? m.api_keys_admin_showing_keys({
+                    ? m.api_keys_admin_keys_count({
                         filtered: keys.length,
                         total: totalCount
                       })
-                    : loading
-                      ? m.api_keys_admin_loading_keys()
-                      : m.api_keys_admin_keys_count_simple({ count: keys.length })}
+                    : ""}
                 </p>
+                <div class="flex items-center gap-2">
+                  <Button variant="simple" on:click={resetFilters} class="text-sm">
+                    <X class="mr-1.5 h-4 w-4" />
+                    {m.api_keys_admin_clear_all()}
+                  </Button>
+                  <Button variant="primary" on:click={applyFilters} class="text-sm">
+                    <Filter class="mr-1.5 h-4 w-4" />
+                    {m.api_keys_admin_apply_filters()}
+                  </Button>
+                </div>
               </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="p-4">
-          <AdminApiKeyTable
-            {keys}
-            {loading}
-            scopeNames={scopeNamesById}
-            onChanged={() => loadKeys({ reset: true })}
-            onSecret={(r) => handleSecret(r, "rotated")}
-          />
-
-          {#if nextCursor}
-            <div class="mt-4 flex justify-center">
-              <Button variant="outlined" on:click={() => loadKeys({ reset: false })} class="gap-2">
-                {#if loadingMore}
-                  <div
-                    class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
-                  ></div>
-                  {m.api_keys_loading()}
-                {:else}
-                  {m.api_keys_admin_load_more()}
-                {/if}
-              </Button>
             </div>
           {/if}
         </div>
+
+        <!-- Error Message -->
+        {#if errorMessage}
+          <div
+            class="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-5 py-4 dark:border-red-900 dark:bg-red-950/50"
+            transition:fly={{ y: -8, duration: 150 }}
+          >
+            <AlertCircle class="h-5 w-5 flex-shrink-0 text-red-600 dark:text-red-400" />
+            <p class="text-sm text-red-700 dark:text-red-300">{errorMessage}</p>
+          </div>
+        {/if}
+
+        <!-- Keys Table Section -->
+        <div class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm">
+          <div class="border-default bg-subtle/30 border-b px-6 py-4">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div
+                  class="bg-accent-default/10 flex h-10 w-10 items-center justify-center rounded-xl"
+                >
+                  <Key class="text-accent-default h-5 w-5" />
+                </div>
+                <div>
+                  <h3 class="text-default font-semibold">{m.api_keys()}</h3>
+                  <p class="text-muted text-xs">
+                    {totalCount !== null
+                      ? m.api_keys_admin_showing_keys({
+                          filtered: keys.length,
+                          total: totalCount
+                        })
+                      : loading
+                        ? m.api_keys_admin_loading_keys()
+                        : m.api_keys_admin_keys_count_simple({ count: keys.length })}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="p-4">
+            <AdminApiKeyTable
+              {keys}
+              {loading}
+              scopeNames={scopeNamesById}
+              onChanged={() => loadKeys({ reset: true })}
+              onSecret={(r) => handleSecret(r, "rotated")}
+            />
+
+            {#if nextCursor}
+              <div class="mt-4 flex justify-center">
+                <Button
+                  variant="outlined"
+                  on:click={() => loadKeys({ reset: false })}
+                  class="gap-2"
+                >
+                  {#if loadingMore}
+                    <div
+                      class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+                    ></div>
+                    {m.api_keys_loading()}
+                  {:else}
+                    {m.api_keys_admin_load_more()}
+                  {/if}
+                </Button>
+              </div>
+            {/if}
+          </div>
+        </div>
+
+        <!-- API key settings and feature flags -->
+        <Settings.Group title={m.api_keys_admin_runtime_settings_title()}>
+          <Settings.Row
+            title={m.enable_scope_enforcement()}
+            description={m.enable_scope_enforcement_description()}
+          >
+            <Input.Switch
+              bind:value={scopeEnforcementEnabled}
+              sideEffect={toggleScopeEnforcement}
+              disabled={tenantSettingsLoading}
+            />
+          </Settings.Row>
+          <Settings.Row
+            title={m.enable_strict_mode()}
+            description={scopeEnforcementEnabled
+              ? m.enable_strict_mode_description()
+              : m.enable_strict_mode_requires_scope_enforcement()}
+          >
+            <Input.Switch
+              bind:value={strictModeEnabled}
+              sideEffect={toggleStrictMode}
+              disabled={!scopeEnforcementEnabled || tenantSettingsLoading}
+            />
+          </Settings.Row>
+          <Settings.Row
+            title={m.api_keys_notifications_feature_flag_title()}
+            description={m.api_keys_notifications_feature_flag_description()}
+          >
+            <Input.Switch
+              bind:value={expiryNotificationsEnabled}
+              sideEffect={toggleExpiryNotifications}
+              disabled={tenantSettingsLoading}
+            />
+          </Settings.Row>
+        </Settings.Group>
+
+        <!-- Notification policy -->
+        <Settings.Group title={m.api_keys_notifications_policy_title()}>
+          <Settings.Row
+            title={m.api_keys_notifications_policy_enabled_title()}
+            description={m.api_keys_notifications_policy_enabled_description()}
+          >
+            <Input.Switch
+              bind:value={notificationPolicy.enabled}
+              sideEffect={({ next }) => (notificationPolicy.enabled = next)}
+              disabled={notificationPolicyLoading || notificationPolicySaving}
+            />
+          </Settings.Row>
+          <Settings.Row
+            title={m.api_keys_notifications_policy_default_days_label()}
+            description={m.api_keys_notifications_policy_default_days_description()}
+          >
+            <Input.Text
+              bind:value={notificationPolicyDaysInput}
+              placeholder="30, 14, 7, 3, 1"
+              disabled={notificationPolicyLoading || notificationPolicySaving}
+              hiddenLabel
+            />
+          </Settings.Row>
+          <Settings.Row
+            title={m.api_keys_notifications_policy_max_days_label()}
+            description={m.api_keys_notifications_policy_max_days_description()}
+          >
+            <Input.Text
+              bind:value={notificationPolicyMaxDaysInput}
+              placeholder="365"
+              disabled={notificationPolicyLoading || notificationPolicySaving}
+              hiddenLabel
+            />
+          </Settings.Row>
+          <Settings.Row
+            title={m.api_keys_notifications_policy_autofollow_assistants_title()}
+            description={m.api_keys_notifications_policy_autofollow_assistants_description()}
+          >
+            <Input.Switch
+              bind:value={notificationPolicy.allow_auto_follow_published_assistants}
+              sideEffect={({ next }) =>
+                (notificationPolicy.allow_auto_follow_published_assistants = next)}
+              disabled={notificationPolicyLoading || notificationPolicySaving}
+            />
+          </Settings.Row>
+          <Settings.Row
+            title={m.api_keys_notifications_policy_autofollow_apps_title()}
+            description={m.api_keys_notifications_policy_autofollow_apps_description()}
+          >
+            <Input.Switch
+              bind:value={notificationPolicy.allow_auto_follow_published_apps}
+              sideEffect={({ next }) =>
+                (notificationPolicy.allow_auto_follow_published_apps = next)}
+              disabled={notificationPolicyLoading || notificationPolicySaving}
+            />
+          </Settings.Row>
+          <div class="flex justify-end px-4">
+            <Button
+              variant="primary"
+              on:click={saveNotificationPolicy}
+              disabled={notificationPolicyLoading || notificationPolicySaving}
+            >
+              {m.save()}
+            </Button>
+          </div>
+        </Settings.Group>
+
+        <!-- API Key Tracking Section -->
+        <Settings.Group title={m.api_keys_admin_tracking_title()}>
+          <Settings.Row
+            title={m.api_keys_admin_tracking_used_title()}
+            description={m.api_keys_admin_tracking_used_description()}
+          >
+            <Input.Switch
+              bind:value={apiKeyUsedTrackingEnabled}
+              sideEffect={({ next }) => updateTrackingAction("api_key_used", next)}
+              disabled={trackingConfigLoading || !trackingConfigLoaded}
+            />
+          </Settings.Row>
+          <Settings.Row
+            title={m.api_keys_admin_tracking_failed_title()}
+            description={m.api_keys_admin_tracking_failed_description()}
+          >
+            <Input.Switch
+              bind:value={apiKeyAuthFailedTrackingEnabled}
+              sideEffect={({ next }) => updateTrackingAction("api_key_auth_failed", next)}
+              disabled={trackingConfigLoading || !trackingConfigLoaded}
+            />
+          </Settings.Row>
+          <div class="px-4">
+            <a
+              href={resolve("/admin/audit-logs?tab=config")}
+              class="text-accent-default hover:text-accent-default/80 inline-flex items-center gap-1.5 text-sm font-medium"
+            >
+              {m.api_keys_admin_tracking_open_audit_config()}
+            </a>
+          </div>
+        </Settings.Group>
+
+        <!-- Policy Section -->
+        <Settings.Group title={m.api_keys_admin_tenant_policy()}>
+          <Settings.Row
+            title={m.api_keys_admin_tenant_policy()}
+            description={m.api_keys_admin_policy_description()}
+            fullWidth
+          >
+            <ApiKeyPolicyPanel />
+          </Settings.Row>
+        </Settings.Group>
+
+        <!-- Super Key Status Section -->
+        <Settings.Group title={m.api_keys_admin_super_key_status()}>
+          <Settings.Row
+            title={m.api_keys_admin_super_key_status()}
+            description={m.api_keys_admin_super_key_description()}
+            fullWidth
+          >
+            <SuperKeyStatusPanel />
+          </Settings.Row>
+        </Settings.Group>
       </div>
-
-      <!-- API key settings and feature flags -->
-      <Settings.Group title={m.api_keys_admin_runtime_settings_title()}>
-        <Settings.Row
-          title={m.enable_scope_enforcement()}
-          description={m.enable_scope_enforcement_description()}
-        >
-          <Input.Switch
-            bind:value={scopeEnforcementEnabled}
-            sideEffect={toggleScopeEnforcement}
-            disabled={tenantSettingsLoading}
-          />
-        </Settings.Row>
-        <Settings.Row
-          title={m.enable_strict_mode()}
-          description={scopeEnforcementEnabled
-            ? m.enable_strict_mode_description()
-            : m.enable_strict_mode_requires_scope_enforcement()}
-        >
-          <Input.Switch
-            bind:value={strictModeEnabled}
-            sideEffect={toggleStrictMode}
-            disabled={!scopeEnforcementEnabled || tenantSettingsLoading}
-          />
-        </Settings.Row>
-        <Settings.Row
-          title={m.api_keys_notifications_feature_flag_title()}
-          description={m.api_keys_notifications_feature_flag_description()}
-        >
-          <Input.Switch
-            bind:value={expiryNotificationsEnabled}
-            sideEffect={toggleExpiryNotifications}
-            disabled={tenantSettingsLoading}
-          />
-        </Settings.Row>
-      </Settings.Group>
-
-      <!-- Notification policy -->
-      <Settings.Group title={m.api_keys_notifications_policy_title()}>
-        <Settings.Row
-          title={m.api_keys_notifications_policy_enabled_title()}
-          description={m.api_keys_notifications_policy_enabled_description()}
-        >
-          <Input.Switch
-            bind:value={notificationPolicy.enabled}
-            sideEffect={({ next }) => (notificationPolicy.enabled = next)}
-            disabled={notificationPolicyLoading || notificationPolicySaving}
-          />
-        </Settings.Row>
-        <Settings.Row
-          title={m.api_keys_notifications_policy_default_days_label()}
-          description={m.api_keys_notifications_policy_default_days_description()}
-        >
-          <Input.Text
-            bind:value={notificationPolicyDaysInput}
-            placeholder="30, 14, 7, 3, 1"
-            disabled={notificationPolicyLoading || notificationPolicySaving}
-            hiddenLabel
-          />
-        </Settings.Row>
-        <Settings.Row
-          title={m.api_keys_notifications_policy_max_days_label()}
-          description={m.api_keys_notifications_policy_max_days_description()}
-        >
-          <Input.Text
-            bind:value={notificationPolicyMaxDaysInput}
-            placeholder="365"
-            disabled={notificationPolicyLoading || notificationPolicySaving}
-            hiddenLabel
-          />
-        </Settings.Row>
-        <Settings.Row
-          title={m.api_keys_notifications_policy_autofollow_assistants_title()}
-          description={m.api_keys_notifications_policy_autofollow_assistants_description()}
-        >
-          <Input.Switch
-            bind:value={notificationPolicy.allow_auto_follow_published_assistants}
-            sideEffect={({ next }) =>
-              (notificationPolicy.allow_auto_follow_published_assistants = next)}
-            disabled={notificationPolicyLoading || notificationPolicySaving}
-          />
-        </Settings.Row>
-        <Settings.Row
-          title={m.api_keys_notifications_policy_autofollow_apps_title()}
-          description={m.api_keys_notifications_policy_autofollow_apps_description()}
-        >
-          <Input.Switch
-            bind:value={notificationPolicy.allow_auto_follow_published_apps}
-            sideEffect={({ next }) =>
-              (notificationPolicy.allow_auto_follow_published_apps = next)}
-            disabled={notificationPolicyLoading || notificationPolicySaving}
-          />
-        </Settings.Row>
-        <div class="flex justify-end px-4">
-          <Button
-            variant="primary"
-            on:click={saveNotificationPolicy}
-            disabled={notificationPolicyLoading || notificationPolicySaving}
-          >
-            {m.save()}
-          </Button>
-        </div>
-      </Settings.Group>
-
-      <!-- API Key Tracking Section -->
-      <Settings.Group title={m.api_keys_admin_tracking_title()}>
-        <Settings.Row
-          title={m.api_keys_admin_tracking_used_title()}
-          description={m.api_keys_admin_tracking_used_description()}
-        >
-          <Input.Switch
-            bind:value={apiKeyUsedTrackingEnabled}
-            sideEffect={({ next }) => updateTrackingAction("api_key_used", next)}
-            disabled={trackingConfigLoading || !trackingConfigLoaded}
-          />
-        </Settings.Row>
-        <Settings.Row
-          title={m.api_keys_admin_tracking_failed_title()}
-          description={m.api_keys_admin_tracking_failed_description()}
-        >
-          <Input.Switch
-            bind:value={apiKeyAuthFailedTrackingEnabled}
-            sideEffect={({ next }) => updateTrackingAction("api_key_auth_failed", next)}
-            disabled={trackingConfigLoading || !trackingConfigLoaded}
-          />
-        </Settings.Row>
-        <div class="px-4">
-          <a
-            href={resolve("/admin/audit-logs?tab=config")}
-            class="text-accent-default hover:text-accent-default/80 inline-flex items-center gap-1.5 text-sm font-medium"
-          >
-            {m.api_keys_admin_tracking_open_audit_config()}
-          </a>
-        </div>
-      </Settings.Group>
-
-      <!-- Policy Section -->
-      <Settings.Group title={m.api_keys_admin_tenant_policy()}>
-        <Settings.Row
-          title={m.api_keys_admin_tenant_policy()}
-          description={m.api_keys_admin_policy_description()}
-          fullWidth
-        >
-          <ApiKeyPolicyPanel />
-        </Settings.Row>
-      </Settings.Group>
-
-      <!-- Super Key Status Section -->
-      <Settings.Group title={m.api_keys_admin_super_key_status()}>
-        <Settings.Row
-          title={m.api_keys_admin_super_key_status()}
-          description={m.api_keys_admin_super_key_description()}
-          fullWidth
-        >
-          <SuperKeyStatusPanel />
-        </Settings.Row>
-      </Settings.Group>
-    </div>
     </Settings.Page>
   </Page.Main>
 </Page.Root>
 
 <svelte:window onclick={handleClickOutside} />
 
-<ApiKeySecretDialog
-  openController={secretDialogOpen}
-  secret={latestSecret}
-  source={secretSource}
-/>
+<ApiKeySecretDialog openController={secretDialogOpen} secret={latestSecret} source={secretSource} />

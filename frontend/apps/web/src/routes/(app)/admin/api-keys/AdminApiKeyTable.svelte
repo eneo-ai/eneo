@@ -27,7 +27,11 @@
   } from "lucide-svelte";
   import { slide } from "svelte/transition";
   import { SvelteSet, SvelteURLSearchParams } from "svelte/reactivity";
-  import { getDaysUntilExpiration, getExpiryLevel, getEffectiveState } from "$lib/features/api-keys/expirationUtils";
+  import {
+    getDaysUntilExpiration,
+    getExpiryLevel,
+    getEffectiveState
+  } from "$lib/features/api-keys/expirationUtils";
 
   type ApiKeyUsageEvent = {
     id: string;
@@ -478,18 +482,22 @@
               <div class="border-default/50 border-l px-4 text-right first:border-l-0 first:pl-0">
                 <p class="text-muted text-xs">{m.api_keys_admin_rate_limit()}</p>
                 <p class="text-default font-medium">
-                  {key.rate_limit ? m.api_keys_rate_limit_value({ count: key.rate_limit }) : m.api_keys_default()}
+                  {key.rate_limit
+                    ? m.api_keys_rate_limit_value({ count: key.rate_limit })
+                    : m.api_keys_default()}
                 </p>
               </div>
 
               <!-- Expiration -->
               {#if daysUntil !== null}
                 {@const expiryLevel = getExpiryLevel(daysUntil)}
-                <div class="border-default/50 border-l px-4 text-right first:border-l-0 first:pl-0 flex items-center gap-1.5">
+                <div
+                  class="border-default/50 flex items-center gap-1.5 border-l px-4 text-right first:border-l-0 first:pl-0"
+                >
                   {#if expiryLevel === "urgent" || expiryLevel === "expired"}
-                    <span class="h-1.5 w-1.5 rounded-full bg-red-500 flex-shrink-0"></span>
+                    <span class="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-red-500"></span>
                   {:else if expiryLevel === "warning"}
-                    <span class="h-1.5 w-1.5 rounded-full bg-yellow-500 flex-shrink-0"></span>
+                    <span class="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-yellow-500"></span>
                   {/if}
                   <div>
                     <p class="text-muted text-xs">{m.api_keys_expires()}</p>
@@ -639,7 +647,9 @@
                               <th class="px-3 py-2 text-left font-medium"
                                 >{m.api_keys_admin_usage_request()}</th
                               >
-                              <th class="px-3 py-2 text-left font-medium">{m.api_keys_admin_usage_ip_origin()}</th>
+                              <th class="px-3 py-2 text-left font-medium"
+                                >{m.api_keys_admin_usage_ip_origin()}</th
+                              >
                             </tr>
                           </thead>
                           <tbody>
@@ -808,7 +818,9 @@
                   <div>
                     <p class="text-muted text-xs">{m.api_keys_rate_limit_label()}</p>
                     <p class="text-default text-sm font-medium">
-                      {key.rate_limit ? m.api_keys_rate_limit_value({ count: key.rate_limit }) : m.api_keys_default()}
+                      {key.rate_limit
+                        ? m.api_keys_rate_limit_value({ count: key.rate_limit })
+                        : m.api_keys_default()}
                     </p>
                   </div>
                 </div>

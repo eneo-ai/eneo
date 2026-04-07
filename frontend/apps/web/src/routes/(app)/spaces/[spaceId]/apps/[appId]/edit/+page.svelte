@@ -335,11 +335,7 @@
       </Settings.Group>
       {#if data.app.permissions?.includes("edit")}
         <Settings.Group title={m.api_access()}>
-          <Settings.Row
-            title={m.api_keys()}
-            description={m.api_keys_app_settings_desc()}
-            fullWidth
-          >
+          <Settings.Row title={m.api_keys()} description={m.api_keys_app_settings_desc()} fullWidth>
             <ApiKeysSettingsSection
               scopeType="app"
               scopeId={data.app.id}

@@ -18,13 +18,14 @@
   } = $props();
 </script>
 
+<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- href is a typed prop passed from caller -->
 <a {href} class="no-underline">
   <Card.Root class="hover:bg-hover-dimmer min-h-48 cursor-pointer transition-colors">
     <Card.Header>
       <h3 class="text-primary font-mono text-sm uppercase">{title}</h3>
     </Card.Header>
     <Card.Content class="flex flex-grow items-end justify-end">
-      <span class="text-primary text-[4rem] font-bold leading-none">
+      <span class="text-primary text-[4rem] leading-none font-bold">
         {count}
       </span>
     </Card.Content>

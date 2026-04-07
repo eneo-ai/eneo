@@ -11,7 +11,9 @@
   const {
     state: { uploads, jobs, currentlyRunningJobs }
   } = jobManager;
-  const { state: { displayItems: expiringDisplayItems } } = getExpiringKeysStore();
+  const {
+    state: { displayItems: expiringDisplayItems }
+  } = getExpiringKeysStore();
 
   const jobsUploadingBlob = derived(jobs, (jobs) => {
     return jobs.filter((job) => job.task === "upload_info_blob");

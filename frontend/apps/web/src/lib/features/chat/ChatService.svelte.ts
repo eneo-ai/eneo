@@ -42,7 +42,6 @@ export class ChatService {
   hasMoreConversations = $derived(this.loadedConversations.length < this.totalConversations);
   #nextCursor = $state<string | null>(null);
 
-
   // Tool approval state
   pendingToolApproval = $state<PendingToolApproval | null>(null);
 
@@ -252,7 +251,8 @@ export class ChatService {
               if (isStale()) return;
               // Add the message to the conversation only after backend confirms
               this.currentConversation.messages?.push(emptyMessage({ question }));
-              ref = this.currentConversation.messages[this.currentConversation.messages?.length - 1];
+              ref =
+                this.currentConversation.messages[this.currentConversation.messages?.length - 1];
               Object.assign(ref, chunk);
               this.currentConversation.id = chunk.session_id;
               this.currentConversation.name = question;

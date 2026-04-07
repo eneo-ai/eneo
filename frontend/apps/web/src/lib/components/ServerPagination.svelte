@@ -46,11 +46,7 @@
         <span>/</span>
         <span>{totalPages}</span>
       </div>
-      <Button
-        variant="outlined"
-        disabled={!hasNext}
-        on:click={() => dispatch("change", page + 1)}
-      >
+      <Button variant="outlined" disabled={!hasNext} on:click={() => dispatch("change", page + 1)}>
         →
       </Button>
     </div>

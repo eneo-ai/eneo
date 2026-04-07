@@ -103,9 +103,8 @@
     </div>
     <nav class="flex h-[3.25rem] w-full overflow-x-auto">
       <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
-      <a
-        href={localizeHref("/spaces/personal/chat")}
-        data-current={isPersonal ? "page" : undefined}>{m.personal()}</a
+      <a href={localizeHref("/spaces/personal/chat")} data-current={isPersonal ? "page" : undefined}
+        >{m.personal()}</a
       >
       <a href={localizeHref("/spaces/list")} data-current={isSpacesGeneric ? "page" : undefined}
         >{m.spaces()}</a

@@ -37,7 +37,7 @@
         {@render IconComponent({ class: "text-text h-4 w-4" })}
       </div>
     {/if}
-    <span class="font-medium text-default">{name}</span>
+    <span class="text-default font-medium">{name}</span>
     {#if isDefault}
       <span
         class="border-positive-stronger text-positive-stronger cursor-default rounded-full border px-2 py-0.5 text-xs font-medium"
@@ -49,12 +49,12 @@
   {#if description}
     {#if showTooltip}
       <Tooltip text={description} placement="bottom">
-        <span class="line-clamp-1 break-all text-sm text-dimmer max-w-[40ch]">
+        <span class="text-dimmer line-clamp-1 max-w-[40ch] text-sm break-all">
           {description}
         </span>
       </Tooltip>
     {:else}
-      <span class="line-clamp-1 break-all text-sm text-dimmer">
+      <span class="text-dimmer line-clamp-1 text-sm break-all">
         {description}
       </span>
     {/if}

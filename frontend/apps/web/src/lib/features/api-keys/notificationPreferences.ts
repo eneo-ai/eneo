@@ -56,7 +56,8 @@ export function normalizePolicy(raw: unknown): ApiKeyNotificationPolicy {
   return {
     enabled: data.enabled !== false,
     default_days_before_expiry: defaultDays.length > 0 ? defaultDays : [30, 14, 7, 3, 1],
-    max_days_before_expiry: Number.isFinite(parsedMax) && parsedMax > 0 ? Math.floor(parsedMax) : null,
+    max_days_before_expiry:
+      Number.isFinite(parsedMax) && parsedMax > 0 ? Math.floor(parsedMax) : null,
     allow_auto_follow_published_assistants: Boolean(data.allow_auto_follow_published_assistants),
     allow_auto_follow_published_apps: Boolean(data.allow_auto_follow_published_apps)
   };
@@ -82,7 +83,9 @@ function normalizeSubscription(raw: unknown): ApiKeyNotificationSubscription | n
   return null;
 }
 
-function mapScopeTypeToTargetType(scopeType: ApiKeyScopeType | string): ApiKeyNotificationTargetType {
+function mapScopeTypeToTargetType(
+  scopeType: ApiKeyScopeType | string
+): ApiKeyNotificationTargetType {
   const normalized = String(scopeType).toLowerCase();
   if (normalized === "assistant") return "assistant";
   if (normalized === "app") return "app";
@@ -90,7 +93,9 @@ function mapScopeTypeToTargetType(scopeType: ApiKeyScopeType | string): ApiKeyNo
   throw new Error(`scope_not_followable:${scopeType}`);
 }
 
-export function extractFollowedKeyIds(subscriptions: ApiKeyNotificationSubscription[]): Set<string> {
+export function extractFollowedKeyIds(
+  subscriptions: ApiKeyNotificationSubscription[]
+): Set<string> {
   return new Set(
     subscriptions
       .filter((subscription) => subscription.target_type === "key")
@@ -105,8 +110,7 @@ export function hasScopeSubscription(
 ): boolean {
   const targetType = mapScopeTypeToTargetType(scopeType);
   return subscriptions.some(
-    (subscription) =>
-      subscription.target_type === targetType && subscription.target_id === scopeId
+    (subscription) => subscription.target_type === targetType && subscription.target_id === scopeId
   );
 }
 
@@ -129,10 +133,7 @@ export async function listNotificationSubscriptions(
   intric: Intric
 ): Promise<ApiKeyNotificationSubscription[]> {
   const response = await intric.apiKeys.listNotificationSubscriptions();
-  const rawItems =
-    isObject(response) && Array.isArray(response.items)
-      ? response.items
-      : [];
+  const rawItems = isObject(response) && Array.isArray(response.items) ? response.items : [];
   return rawItems
     .map((item) => normalizeSubscription(item))
     .filter((item): item is ApiKeyNotificationSubscription => item !== null);
@@ -145,10 +146,7 @@ export async function followApiKeyNotifications(intric: Intric, apiKeyId: string
   });
 }
 
-export async function unfollowApiKeyNotifications(
-  intric: Intric,
-  apiKeyId: string
-): Promise<void> {
+export async function unfollowApiKeyNotifications(intric: Intric, apiKeyId: string): Promise<void> {
   await intric.apiKeys.unfollowNotificationTarget({
     target_type: "key",
     target_id: apiKeyId
