@@ -24,6 +24,7 @@ class CrawlSchedulerService:
     """
 
     def __init__(self, website_sparse_repo: "WebsiteSparseRepository"):
+        super().__init__()
         self.website_sparse_repo = website_sparse_repo
 
     async def get_websites_due_for_crawl(self) -> list["WebsiteSparse"]:

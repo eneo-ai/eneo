@@ -33,6 +33,7 @@ class HttpAuthEncryptionService:
         Raises:
             RuntimeError: If encryption key is invalid
         """
+        super().__init__()
         from intric.main.config import get_settings
 
         encryption_key = get_settings().encryption_key

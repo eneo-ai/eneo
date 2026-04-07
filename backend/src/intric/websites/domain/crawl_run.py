@@ -1,6 +1,8 @@
 from enum import Enum
 from typing import TYPE_CHECKING, Optional, Union, cast
 
+from typing_extensions import override
+
 from intric.base.base_entity import Entity
 from intric.main.models import Status
 
@@ -48,6 +50,7 @@ class CrawlRun(Entity):
         self.job_id = job_id
         self.failure_summary = failure_summary
 
+    @override
     @classmethod
     def create(cls, **kwargs: object) -> "CrawlRun":
         website = cast(Union["Website", "WebsiteSparse"], kwargs["website"])
@@ -68,6 +71,7 @@ class CrawlRun(Entity):
             failure_summary=None,
         )
 
+    @override
     @classmethod
     def to_domain(
         cls,
@@ -82,11 +86,11 @@ class CrawlRun(Entity):
         job = getattr(record, "job", None)
 
         return cls(
-            id=cast("UUID", record.id),
-            created_at=cast("datetime", record.created_at),
-            updated_at=cast("datetime", record.updated_at),
-            website_id=cast("UUID", record.website_id),
-            tenant_id=cast("UUID", record.tenant_id),
+            id=record.id,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+            website_id=record.website_id,
+            tenant_id=record.tenant_id,
             pages_crawled=record.pages_crawled,
             files_downloaded=record.files_downloaded,
             pages_failed=record.pages_failed,

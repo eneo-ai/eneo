@@ -40,6 +40,7 @@ class WebsiteCRUDService:
         crawl_service: "CrawlService",
         tenant_repo: "TenantRepository",
     ):
+        super().__init__()
         self.user = user
         self.space_service = space_service
         self.space_repo = space_repo
@@ -322,8 +323,8 @@ class WebsiteCRUDService:
         if len(website_ids) > 50:
             raise BadRequestException("Cannot crawl more than 50 websites at once")
 
-        successful_runs = []
-        errors = []
+        successful_runs: list["CrawlRun"] = []
+        errors: list[dict[str, str]] = []
 
         for website_id in website_ids:
             try:

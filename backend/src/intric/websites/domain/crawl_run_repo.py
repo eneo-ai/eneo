@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 class CrawlRunRepository:
     def __init__(self, session: "AsyncSession"):
+        super().__init__()
         self.session = session
 
     async def one(self, id: UUID) -> CrawlRun:

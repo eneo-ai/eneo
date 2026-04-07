@@ -1,6 +1,8 @@
 from enum import Enum
 from typing import TYPE_CHECKING, Optional, Union, cast
 
+from typing_extensions import override
+
 from intric.base.base_entity import Entity
 from intric.embedding_models.domain.embedding_model import EmbeddingModel
 from intric.main.models import NOT_PROVIDED, NotProvided, is_provided
@@ -120,6 +122,7 @@ class Website(Entity):
         self.http_auth = None
         return self
 
+    @override
     @classmethod
     def create(cls, **kwargs: object) -> "Website":
         space_id = cast("UUID", kwargs["space_id"])
@@ -158,6 +161,7 @@ class Website(Entity):
 
         return website
 
+    @override
     @classmethod
     def to_domain(
         cls,
@@ -176,26 +180,28 @@ class Website(Entity):
         )
 
         return cls(
-            id=cast("UUID", record.id),
-            created_at=cast("datetime", record.created_at),
-            updated_at=cast("datetime", record.updated_at),
-            space_id=cast("UUID", record.space_id),
-            user_id=cast("UUID", record.user_id),
-            tenant_id=cast("UUID", record.tenant_id),
-            url=cast(str, record.url),
-            name=cast(Optional[str], record.name),
-            download_files=cast(bool, record.download_files),
-            crawl_type=cast(CrawlType, record.crawl_type),
-            update_interval=UpdateInterval(cast(str, record.update_interval)),
+            id=record.id,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+            space_id=cast(
+                "UUID", record.space_id
+            ),  # DB invariant: space_id is non-null for persisted websites
+            user_id=record.user_id,
+            tenant_id=record.tenant_id,
+            url=record.url,
+            name=record.name,
+            download_files=record.download_files,
+            crawl_type=record.crawl_type,
+            update_interval=UpdateInterval(record.update_interval),
             embedding_model=embedding_model,
-            size=cast(int, record.size),
+            size=record.size,
             latest_crawl=CrawlRun.to_domain(db_model=latest_crawl)
             if latest_crawl
             else None,
-            last_crawled_at=cast(Optional["datetime"], record.last_crawled_at),
+            last_crawled_at=record.last_crawled_at,
             http_auth=http_auth,
-            consecutive_failures=cast(int, record.consecutive_failures),
-            next_retry_at=cast(Optional["datetime"], record.next_retry_at),
+            consecutive_failures=record.consecutive_failures,
+            next_retry_at=record.next_retry_at,
         )
 
     def update(
@@ -288,6 +294,7 @@ class WebsiteSparse(Entity):
         self.consecutive_failures = consecutive_failures
         self.next_retry_at = next_retry_at
 
+    @override
     @classmethod
     def to_domain(
         cls,
@@ -301,20 +308,24 @@ class WebsiteSparse(Entity):
         )
 
         return cls(
-            id=cast("UUID", record.id),
-            created_at=cast("datetime", record.created_at),
-            updated_at=cast("datetime", record.updated_at),
-            user_id=cast("UUID", record.user_id),
-            tenant_id=cast("UUID", record.tenant_id),
-            embedding_model_id=cast("UUID", record.embedding_model_id),
-            space_id=cast("UUID", record.space_id),
-            name=cast(str, record.name),
-            url=cast(str, record.url),
-            download_files=cast(bool, record.download_files),
-            crawl_type=cast(CrawlType, record.crawl_type),
-            update_interval=UpdateInterval(cast(str, record.update_interval)),
-            size=cast(int, record.size),
-            last_crawled_at=cast(Optional["datetime"], record.last_crawled_at),
-            consecutive_failures=cast(int, record.consecutive_failures),
-            next_retry_at=cast(Optional["datetime"], record.next_retry_at),
+            id=record.id,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+            user_id=record.user_id,
+            tenant_id=record.tenant_id,
+            embedding_model_id=record.embedding_model_id,
+            space_id=cast(
+                "UUID", record.space_id
+            ),  # DB invariant: space_id is non-null for persisted websites
+            name=cast(
+                str, record.name
+            ),  # DB invariant: name is non-null for sparse website records
+            url=record.url,
+            download_files=record.download_files,
+            crawl_type=record.crawl_type,
+            update_interval=UpdateInterval(record.update_interval),
+            size=record.size,
+            last_crawled_at=record.last_crawled_at,
+            consecutive_failures=record.consecutive_failures,
+            next_retry_at=record.next_retry_at,
         )

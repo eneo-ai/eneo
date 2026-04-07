@@ -88,6 +88,7 @@ class CrawlService:
         task_service: "TaskService",
         redis_client: aioredis.Redis,
     ):
+        super().__init__()
         self.repo = repo
         self.task_service = task_service
         self.redis_client = redis_client

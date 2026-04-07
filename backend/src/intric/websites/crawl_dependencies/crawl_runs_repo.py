@@ -15,6 +15,7 @@ from intric.websites.crawl_dependencies.crawl_models import (
 
 class CrawlRunRepository:
     def __init__(self, session: AsyncSession):
+        super().__init__()
         self.delegate: BaseRepositoryDelegate[CrawlRun] = BaseRepositoryDelegate(
             session=session,
             table=CrawlRuns,
