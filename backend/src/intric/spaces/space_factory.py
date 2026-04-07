@@ -30,6 +30,9 @@ if TYPE_CHECKING:
     from intric.database.tables.integration_table import (
         IntegrationKnowledge as IntegrationKnowledgeDBModel,
     )
+    from intric.database.tables.security_classifications_table import (
+        SecurityClassification as SecurityClassificationDBModel,
+    )
     from intric.database.tables.websites_table import Websites
     from intric.embedding_models.domain.embedding_model import EmbeddingModel
     from intric.mcp_servers.domain.entities.mcp_server import MCPServer
@@ -89,7 +92,7 @@ class SpaceFactory:
         group_chats_in_db: Sequence["GroupChatsTable"] | None = None,
         apps_in_db: Sequence["Apps"] | None = None,
         services_in_db: Sequence[Services] | None = None,
-        security_classification: Optional[SecurityClassification] = None,
+        security_classification: Optional["SecurityClassificationDBModel"] = None,
         integration_knowledge_in_db: Iterable["IntegrationKnowledgeDBModel"]
         | None = None,
     ) -> Space:
@@ -336,10 +339,11 @@ class SpaceFactory:
             for service in services_in_db
         ]
 
-        if security_classification is not None:
-            security_classification = SecurityClassification.to_domain(
-                security_classification
-            )
+        space_security_classification: SecurityClassification | None = (
+            SecurityClassification.to_domain(security_classification)
+            if security_classification is not None
+            else None
+        )
 
         return Space(
             created_at=space_in_db.created_at,
@@ -364,7 +368,7 @@ class SpaceFactory:
             websites=space_websites,
             members=members,
             group_members=group_members,
-            security_classification=security_classification,
+            security_classification=space_security_classification,
             data_retention_days=space_in_db.data_retention_days,
             icon_id=space_in_db.icon_id,
         )
