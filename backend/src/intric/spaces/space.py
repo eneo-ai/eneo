@@ -499,8 +499,9 @@ class Space:
 
     def remove_assistant(self, assistant: "Assistant"):
         for group_chat in self.group_chats or []:
-            if assistant.id in [a.assistant.id for a in group_chat.assistants]:
-                group_chat.assistants.remove(assistant)  # pyright: ignore[reportArgumentType]  # latent bug — see follow-up fix commit
+            group_chat.assistants = [
+                a for a in group_chat.assistants if a.assistant.id != assistant.id
+            ]
 
         self.assistants.remove(assistant)
 
