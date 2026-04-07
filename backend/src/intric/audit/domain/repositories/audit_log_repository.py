@@ -3,8 +3,10 @@
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import Any, Optional, TypedDict
+from typing import Any, Optional
 from uuid import UUID
+
+from typing_extensions import TypedDict
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.audit_log import AuditLog

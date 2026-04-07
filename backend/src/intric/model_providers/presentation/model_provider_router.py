@@ -1,10 +1,11 @@
 import re
 from collections import defaultdict
 from datetime import date
-from typing import Annotated, Any, TypedDict, cast
+from typing import Annotated, Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from typing_extensions import TypedDict
 
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.database.database import AsyncSession, get_session_with_transaction

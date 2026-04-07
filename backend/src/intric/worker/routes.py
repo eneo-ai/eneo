@@ -1,5 +1,7 @@
-from typing import TypedDict, cast
+from typing import cast
 from uuid import UUID
+
+from typing_extensions import TypedDict
 
 from intric.audit.application.audit_task_params import (
     AuditExportTaskParams,

@@ -6,13 +6,14 @@ import json
 import secrets
 import time
 from datetime import datetime, timezone
-from typing import Annotated, Any, NotRequired, Optional, Protocol, TypedDict, cast
+from typing import Annotated, Any, NotRequired, Optional, Protocol, cast
 from uuid import UUID
 
 import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from jwt import PyJWKClient as _PyJWKClient
 from pydantic import BaseModel
+from typing_extensions import TypedDict
 
 # JIT provisioning imports
 from intric.audit.application.audit_service import AuditService

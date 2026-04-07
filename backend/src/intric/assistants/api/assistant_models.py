@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import AsyncIterable, Optional, TypedDict, Union
+from typing import AsyncIterable, Optional, Union
 from uuid import UUID
 
 from pydantic import (
@@ -14,6 +14,7 @@ from pydantic import (
     computed_field,
     field_validator,
 )
+from typing_extensions import TypedDict
 
 from intric.ai_models.completion_models.completion_model import (
     Completion,

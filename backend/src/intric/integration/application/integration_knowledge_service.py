@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Protocol, TypedDict, cast
+from typing import TYPE_CHECKING, Protocol, cast
 from uuid import UUID, uuid4
+
+from typing_extensions import TypedDict
 
 from intric.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,

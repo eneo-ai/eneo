@@ -8,12 +8,13 @@ sensitive information from appearing in URLs, browser history, or server logs.
 import logging
 import secrets
 from datetime import datetime, timezone
-from typing import TypedDict, cast
+from typing import cast
 from uuid import UUID, uuid4
 
 import orjson
 import redis.exceptions
 from fastapi import HTTPException
+from typing_extensions import TypedDict
 
 from intric.worker.redis import get_redis
 

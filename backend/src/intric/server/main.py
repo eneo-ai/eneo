@@ -4,13 +4,14 @@ import time
 import traceback
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional, Protocol, TypedDict, cast
+from typing import Any, Optional, Protocol, cast
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from typing_extensions import TypedDict
 
 from intric.allowed_origins.get_origin_callback import get_origin
 from intric.main.config import get_settings

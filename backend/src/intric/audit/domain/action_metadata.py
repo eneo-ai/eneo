@@ -3,7 +3,7 @@
 Used by the audit configuration UI to display human-readable action names.
 """
 
-from typing import TypedDict
+from typing_extensions import TypedDict
 
 from intric.audit.domain.action_types import ActionType
 

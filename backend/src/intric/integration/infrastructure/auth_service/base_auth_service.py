@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Optional, TypedDict
+from typing import Optional
 from uuid import UUID
+
+from typing_extensions import TypedDict
 
 from intric.integration.infrastructure.content_service.types import OAuthResource
 

@@ -2,8 +2,10 @@
 #
 # Licensed under the MIT License.
 
-from typing import TYPE_CHECKING, TypedDict, cast
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
+
+from typing_extensions import TypedDict
 
 from intric.spaces.api.space_models import SpaceMember, SpaceRoleValue
 from intric.storage.domain.storage import StorageInfo, StorageSpaceInfo

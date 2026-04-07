@@ -11,7 +11,9 @@ Each field definition has:
   - in: "credentials" or "config" — where the value is stored in the API payload
 """
 
-from typing import Protocol, Set, TypedDict
+from typing import Protocol, Set
+
+from typing_extensions import TypedDict
 
 
 class CredentialRequest(Protocol):

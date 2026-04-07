@@ -23,8 +23,10 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
+
+from typing_extensions import TypedDict
 
 from intric.jobs.job_models import Task
 from intric.main.config import Settings

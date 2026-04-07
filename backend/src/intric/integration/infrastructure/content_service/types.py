@@ -1,4 +1,6 @@
-from typing import Any, Protocol, TypedDict
+from typing import Any, Protocol
+
+from typing_extensions import TypedDict
 
 
 class GraphParentReference(TypedDict, total=False):

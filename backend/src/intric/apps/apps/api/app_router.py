@@ -1,9 +1,10 @@
 import logging
-from typing import TypedDict, cast
+from typing import cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing_extensions import TypedDict
 
 from intric.apps.app_runs.api.app_run_models import (
     AppRunPublic,

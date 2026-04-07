@@ -1,10 +1,10 @@
 """Audit log export worker task."""
 
 import os
-from typing import TypedDict
 from uuid import UUID
 
 import redis.asyncio as aioredis
+from typing_extensions import TypedDict
 
 from intric.audit.application.audit_export_service import AuditExportService
 from intric.audit.application.audit_task_params import AuditExportTaskParams

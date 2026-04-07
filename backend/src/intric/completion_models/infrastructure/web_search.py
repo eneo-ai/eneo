@@ -1,9 +1,10 @@
 import uuid
-from typing import Protocol, TypedDict, cast
+from typing import Protocol, cast
 
 from tavily import (
     AsyncTavilyClient,  # pyright: ignore[reportMissingTypeStubs]  # tavily ships without type stubs
 )
+from typing_extensions import TypedDict
 
 from intric.main.config import get_settings
 from intric.main.models import InDB

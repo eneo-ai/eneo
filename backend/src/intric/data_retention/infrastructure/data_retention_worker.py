@@ -1,8 +1,8 @@
 import logging
 from datetime import datetime, timezone
-from typing import TypedDict
 
 from dependency_injector import providers
+from typing_extensions import TypedDict
 
 from intric.database.database import sessionmanager
 from intric.main.container.container import Container

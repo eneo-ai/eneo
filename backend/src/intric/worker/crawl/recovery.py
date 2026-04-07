@@ -26,11 +26,12 @@ import logging
 import random
 import time
 from collections.abc import Awaitable
-from typing import TYPE_CHECKING, Any, Callable, TypedDict, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Callable, TypeVar, cast
 from uuid import UUID
 
 from dependency_injector import providers
 from sqlalchemy.exc import InvalidRequestError, PendingRollbackError
+from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     import redis.asyncio as aioredis

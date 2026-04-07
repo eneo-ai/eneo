@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import sqlalchemy as sa
 from dependency_injector import providers
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from typing_extensions import TypedDict
 
 from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.database.tables.info_blob_chunk_table import InfoBlobChunks

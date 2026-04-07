@@ -1,9 +1,9 @@
 """Audit logging worker task."""
 
-from typing import TypedDict
 from uuid import UUID, uuid4
 
 from sqlalchemy.exc import IntegrityError
+from typing_extensions import TypedDict
 
 from intric.audit.application.audit_task_params import AuditLogTaskParams
 from intric.audit.domain.audit_log import AuditLog

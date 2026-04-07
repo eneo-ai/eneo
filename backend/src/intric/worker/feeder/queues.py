@@ -7,8 +7,10 @@ extracted from the monolithic CrawlFeeder class for better testability.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
+
+from typing_extensions import TypedDict
 
 from intric.jobs.job_manager import job_manager
 from intric.main.logging import get_logger
