@@ -1,6 +1,7 @@
-import pytest
-from uuid import uuid4
 from types import SimpleNamespace
+from uuid import uuid4
+
+import pytest
 
 from intric.authentication.api_key_policy import ApiKeyPolicyService
 from intric.authentication.api_key_request_context import resolve_client_ip
@@ -214,7 +215,7 @@ async def test_update_request_rejects_empty_allowed_origins_for_pk():
 
 
 @pytest.mark.asyncio
-async def test_update_request_rejects_admin_permission_for_pk():
+async def test_update_request_rejects_non_read_permission_for_pk():
     service = ApiKeyPolicyService(
         allowed_origin_repo=DummyOriginRepo([]),
         space_service=DummySpaceService(),
@@ -227,15 +228,16 @@ async def test_update_request_rejects_admin_permission_for_pk():
         resource_permissions=None,
     )
 
-    with pytest.raises(ApiKeyValidationError) as exc:
-        await service.validate_update_request(
-            key=key,
-            updates={"permission": ApiKeyPermission.ADMIN.value},
-        )
+    for perm in (ApiKeyPermission.WRITE, ApiKeyPermission.ADMIN):
+        with pytest.raises(ApiKeyValidationError) as exc:
+            await service.validate_update_request(
+                key=key,
+                updates={"permission": perm.value},
+            )
 
-    assert exc.value.status_code == 400
-    assert exc.value.code == "invalid_request"
-    assert "cannot have admin permission" in exc.value.message
+        assert exc.value.status_code == 400
+        assert exc.value.code == "invalid_request"
+        assert "can only have read permission" in exc.value.message
 
 
 @pytest.mark.asyncio
