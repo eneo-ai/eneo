@@ -733,7 +733,7 @@ def _build_expiring_summary(
 async def get_expiring_keys(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     days: Annotated[
-        int, Query(ge=1, le=90, description="Look-ahead window in days")
+        int, Query(ge=1, le=365, description="Look-ahead window in days")
     ] = 30,
     mode: Annotated[
         Literal["all", "subscribed"],

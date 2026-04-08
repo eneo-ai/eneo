@@ -329,6 +329,27 @@ async def test_expiring_soon_subscribed_mode_returns_empty_without_subscriptions
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_expiring_soon_accepts_days_up_to_365(client, default_user_token):
+    """The days look-ahead must accept up to 365d to match tenant policy max."""
+    far_future_id = await _create_tenant_key(
+        client,
+        default_user_token,
+        name=f"far-future-{uuid4().hex[:6]}",
+        expires_at_iso=_iso(200),
+    )
+
+    summary = await _fetch_expiring(client, default_user_token, days=365)
+    assert far_future_id in _ids(summary)
+
+    rejected = await client.get(
+        "/api/v1/api-keys/expiring-soon?days=366&mode=all",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert rejected.status_code == 422
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_expiring_soon_subscribed_mode_via_assistant_scope(
     client, default_user_token
 ):
