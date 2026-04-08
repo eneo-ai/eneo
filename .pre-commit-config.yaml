@@ -42,7 +42,7 @@ repos:
     hooks:
       - id: frontend-format
         name: frontend-format
-        entry: bash -c 'cd frontend && bunx prettier --write --ignore-unknown "${@/#frontend\//}"' --
+        entry: bash -c 'cd frontend && bunx --bun prettier --write --ignore-unknown "${@/#frontend\//}"' --
         language: system
         files: ^frontend/(apps|packages)/[^/]+/.*\.(svelte|ts|tsx|js|jsx|css|scss|json|md|yaml|yml|html)$
         exclude: ^frontend/[^/]+/[^/]+/(\.svelte-kit|node_modules|build|dist)/
@@ -53,7 +53,7 @@ repos:
     hooks:
       - id: frontend-lint
         name: frontend-lint
-        entry: bash -c 'cd frontend/apps/web && npx eslint --no-warn-ignored "${@/#frontend\/apps\/web\//}"' --
+        entry: bash -c 'cd frontend/apps/web && bunx eslint --no-warn-ignored "${@/#frontend\/apps\/web\//}"' --
         language: system
         files: ^frontend/apps/web/src/.*\.(svelte|ts|js)$
         stages: [pre-commit]

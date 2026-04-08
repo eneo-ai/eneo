@@ -256,11 +256,7 @@
                   <Plus class="h-3.5 w-3.5" />
                   {m.add_model()}
                 </button>
-                <ProviderActions
-                  {provider}
-                  onAddModel={handleAddModelToProvider}
-                  onEditProvider={handleEditProvider}
-                />
+                <ProviderActions {provider} onEditProvider={handleEditProvider} />
               {/if}
             </div>
           </svelte:fragment>
