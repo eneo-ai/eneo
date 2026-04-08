@@ -357,7 +357,25 @@
   // Export pending model for parent to check
   export function getPendingModel() {
     if (canAddModel) {
-      return { ...currentModel };
+      return {
+        name: currentModel.name,
+        displayName: currentModel.displayName,
+        maxInputTokens: currentModel.maxInputTokensStr
+          ? parseInt(currentModel.maxInputTokensStr, 10)
+          : undefined,
+        maxOutputTokens: currentModel.maxOutputTokensStr
+          ? parseInt(currentModel.maxOutputTokensStr, 10)
+          : undefined,
+        vision: currentModel.vision,
+        reasoning: currentModel.reasoning,
+        supportsToolCalling: currentModel.supportsToolCalling,
+        family: currentModel.family,
+        dimensions: currentModel.dimensionsStr
+          ? parseInt(currentModel.dimensionsStr, 10)
+          : undefined,
+        maxInput: currentModel.maxInputStr ? parseInt(currentModel.maxInputStr, 10) : undefined,
+        hosting: currentModel.hosting
+      };
     }
     return null;
   }
