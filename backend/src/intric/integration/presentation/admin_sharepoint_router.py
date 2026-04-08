@@ -1,19 +1,27 @@
 import json
 import secrets
-from typing import Dict, Optional
+from datetime import datetime
+from typing import Annotated, Optional, cast
 from uuid import UUID
 
-import redis.asyncio as redis
 from fastapi import APIRouter, Body, Depends, HTTPException, status
+from redis.asyncio import Redis
 
 from intric.integration.application.tenant_sharepoint_app_service import (
     TenantSharePointAppService,
 )
+from intric.integration.domain.entities.sharepoint_subscription import (
+    SharePointSubscription,
+)
+from intric.integration.domain.entities.user_integration import UserIntegration
 from intric.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountAuthService,
 )
 from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
     TenantAppAuthService,
+)
+from intric.integration.infrastructure.content_service.types import (
+    SharePointTokenProtocol,
 )
 from intric.integration.presentation.admin_models import (
     ServiceAccountAuthCallback,
@@ -31,6 +39,7 @@ from intric.main.logging import get_logger
 from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.settings.encryption_service import EncryptionService
+from intric.users.user import UserInDB
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -54,24 +63,31 @@ def _require_sharepoint_webhook_client_state() -> str:
     return client_state.strip()
 
 
+def _require_timestamp(value: datetime | None, field_name: str) -> datetime:
+    if value is None:
+        raise ValueError(f"{field_name} is missing")
+    return value
+
+
 class _SimpleGraphToken:
     """Lightweight token wrapper compatible with subscription service."""
 
-    def __init__(self, access_token: str):
+    def __init__(self, access_token: str) -> None:
+        super().__init__()
         self.access_token = access_token
         self.base_url = "https://graph.microsoft.com"
 
 
-async def _get_redis_client() -> redis.Redis:
+async def _get_redis_client() -> Redis:
     settings = get_settings()
-    return await redis.from_url(
+    return Redis.from_url(  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
         f"redis://{settings.redis_host}:{settings.redis_port}",
         encoding="utf8",
         decode_responses=True,
     )
 
 
-async def _store_oauth_state(state: str, data: dict) -> None:
+async def _store_oauth_state(state: str, data: dict[str, str]) -> None:
     client = await _get_redis_client()
     try:
         await client.set(
@@ -83,7 +99,7 @@ async def _store_oauth_state(state: str, data: dict) -> None:
         await client.close()
 
 
-async def _pop_oauth_state(state: str) -> Optional[dict]:
+async def _pop_oauth_state(state: str) -> Optional[dict[str, str]]:
     client = await _get_redis_client()
     try:
         key = f"{OAUTH_STATE_PREFIX}{state}"
@@ -96,7 +112,7 @@ async def _pop_oauth_state(state: str) -> Optional[dict]:
         await client.close()
 
 
-def _is_onedrive_subscription(subscription) -> bool:
+def _is_onedrive_subscription(subscription: SharePointSubscription) -> bool:
     """Infer OneDrive subscriptions from stored identifiers.
 
     OneDrive subscriptions store drive_id in both site_id and drive_id fields.
@@ -109,9 +125,9 @@ def _is_onedrive_subscription(subscription) -> bool:
 
 
 async def _get_sharepoint_token_for_user_integration(
-    user_integration,
+    user_integration: UserIntegration,
     container: Container,
-):
+) -> SharePointTokenProtocol:
     """Resolve token for both user_oauth and tenant_app integrations."""
     oauth_token_service = container.oauth_token_service()
 
@@ -136,11 +152,14 @@ async def _get_sharepoint_token_for_user_integration(
             ):
                 tenant_app.update_refresh_token(new_refresh_token)
                 await tenant_app_repo.update(tenant_app)
-            return _SimpleGraphToken(token_result["access_token"])
+            return cast(
+                SharePointTokenProtocol,
+                _SimpleGraphToken(token_result["access_token"]),
+            )
 
         tenant_app_auth = container.tenant_app_auth_service()
         access_token = await tenant_app_auth.get_access_token(tenant_app)
-        return _SimpleGraphToken(access_token)
+        return cast(SharePointTokenProtocol, _SimpleGraphToken(access_token))
 
     token = await oauth_token_service.get_oauth_token_by_user_integration(
         user_integration_id=user_integration.id
@@ -154,7 +173,10 @@ async def _get_sharepoint_token_for_user_integration(
             f"Token for user_integration {user_integration.id} is not a SharePoint token"
         )
 
-    return await oauth_token_service.refresh_and_update_token(token_id=token.id)
+    return cast(
+        SharePointTokenProtocol,
+        await oauth_token_service.refresh_and_update_token(token_id=token.id),
+    )
 
 
 @router.post(
@@ -177,7 +199,7 @@ async def _get_sharepoint_token_for_user_integration(
 )
 async def configure_sharepoint_app(
     app_config: TenantSharePointAppCreate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> TenantSharePointAppPublic:
     """Configure or update the tenant's SharePoint application credentials."""
     try:
@@ -326,8 +348,8 @@ async def configure_sharepoint_app(
             service_account_email=app.service_account_email,
             certificate_path=app.certificate_path,
             created_by=app.created_by,
-            created_at=app.created_at,
-            updated_at=app.updated_at,
+            created_at=_require_timestamp(app.created_at, "app.created_at"),
+            updated_at=_require_timestamp(app.updated_at, "app.updated_at"),
         )
 
     except HTTPException:
@@ -358,7 +380,7 @@ async def configure_sharepoint_app(
     },
 )
 async def get_sharepoint_app(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> Optional[TenantSharePointAppPublic]:
     """Get the tenant's SharePoint app configuration."""
     try:
@@ -388,8 +410,8 @@ async def get_sharepoint_app(
             service_account_email=app.service_account_email,
             certificate_path=app.certificate_path,
             created_by=app.created_by,
-            created_at=app.created_at,
-            updated_at=app.updated_at,
+            created_at=_require_timestamp(app.created_at, "app.created_at"),
+            updated_at=_require_timestamp(app.updated_at, "app.updated_at"),
         )
 
     except Exception as e:
@@ -416,8 +438,8 @@ async def get_sharepoint_app(
     },
 )
 async def test_sharepoint_app_credentials(
-    app_config: TenantSharePointAppCreate = Body(...),
-    container: Container = Depends(get_container(with_user=True)),
+    app_config: Annotated[TenantSharePointAppCreate, Body()],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> TenantAppTestResult:
     """Test SharePoint app credentials without saving them."""
     try:
@@ -490,8 +512,8 @@ async def test_sharepoint_app_credentials(
     },
 )
 async def delete_sharepoint_app(
-    container: Container = Depends(get_container(with_user=True)),
-) -> Dict[str, str]:
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> dict[str, str]:
     """Permanently delete the tenant's SharePoint app and all associated data."""
     try:
         user = container.user()
@@ -571,7 +593,7 @@ async def delete_sharepoint_app(
     },
 )
 async def list_sharepoint_subscriptions(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """List all SharePoint subscriptions for the tenant."""
     try:
@@ -590,9 +612,11 @@ async def list_sharepoint_subscriptions(
         from datetime import datetime, timezone
 
         # Build a cache of user_integrations and users for efficiency
-        user_integration_ids = [sub.user_integration_id for sub in all_subscriptions]
-        user_integrations_map = {}
-        users_map = {}
+        user_integration_ids: list[UUID] = [
+            sub.user_integration_id for sub in all_subscriptions
+        ]
+        user_integrations_map: dict[UUID, UserIntegration] = {}
+        users_map: dict[UUID, UserInDB] = {}
 
         # Fetch all user_integrations
         for ui_id in user_integration_ids:
@@ -609,7 +633,7 @@ async def list_sharepoint_subscriptions(
                 logger.warning(f"Could not fetch user_integration {ui_id}: {e}")
 
         # Convert to public models with computed fields
-        result = []
+        result: list[SharePointSubscriptionPublic] = []
         for sub in all_subscriptions:
             now = datetime.now(timezone.utc)
             expires_in_hours = max(
@@ -617,7 +641,7 @@ async def list_sharepoint_subscriptions(
             )
 
             # Determine owner info
-            owner_email = None
+            owner_email: str | None = None
             owner_type = "organization"
 
             ui = user_integrations_map.get(sub.user_integration_id)
@@ -638,7 +662,9 @@ async def list_sharepoint_subscriptions(
                     subscription_id=sub.subscription_id,
                     drive_id=sub.drive_id,
                     expires_at=sub.expires_at,
-                    created_at=sub.created_at,
+                    created_at=_require_timestamp(
+                        sub.created_at, "subscription.created_at"
+                    ),
                     is_expired=sub.is_expired(),
                     expires_in_hours=expires_in_hours,
                     owner_email=owner_email,
@@ -673,7 +699,7 @@ async def list_sharepoint_subscriptions(
     },
 )
 async def renew_expired_subscriptions(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Renew all expired SharePoint subscriptions for the tenant."""
     try:
@@ -699,7 +725,7 @@ async def renew_expired_subscriptions(
 
         recreated = 0
         failed = 0
-        errors = []
+        errors: list[str] = []
 
         for sub in expired_subscriptions:
             try:
@@ -795,7 +821,8 @@ async def renew_expired_subscriptions(
     },
 )
 async def recreate_subscription(
-    subscription_id: UUID, container: Container = Depends(get_container(with_user=True))
+    subscription_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Recreate a specific SharePoint subscription."""
     try:
@@ -894,7 +921,9 @@ async def recreate_subscription(
             subscription_id=subscription.subscription_id,
             drive_id=subscription.drive_id,
             expires_at=subscription.expires_at,
-            created_at=subscription.created_at,
+            created_at=_require_timestamp(
+                subscription.created_at, "subscription.created_at"
+            ),
             is_expired=subscription.is_expired(),
             expires_in_hours=expires_in_hours,
             owner_email=owner_email,
@@ -935,7 +964,7 @@ async def recreate_subscription(
 )
 async def start_service_account_auth(
     app_config: ServiceAccountAuthStart,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ServiceAccountAuthStartResponse:
     """Start OAuth flow for service account configuration."""
     try:
@@ -1006,7 +1035,7 @@ async def start_service_account_auth(
 )
 async def service_account_auth_callback(
     callback: ServiceAccountAuthCallback,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> TenantSharePointAppPublic:
     """Complete OAuth flow and configure service account."""
     try:
@@ -1147,8 +1176,8 @@ async def service_account_auth_callback(
             service_account_email=app.service_account_email,
             certificate_path=app.certificate_path,
             created_by=app.created_by,
-            created_at=app.created_at,
-            updated_at=app.updated_at,
+            created_at=_require_timestamp(app.created_at, "app.created_at"),
+            updated_at=_require_timestamp(app.updated_at, "app.updated_at"),
         )
 
     except HTTPException:

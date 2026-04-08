@@ -3,10 +3,18 @@
 Used by the audit configuration UI to display human-readable action names.
 """
 
+from typing_extensions import TypedDict
+
 from intric.audit.domain.action_types import ActionType
 
+
+class ActionMetadata(TypedDict):
+    name_sv: str
+    description_sv: str
+
+
 # Maps action type values to Swedish display metadata
-ACTION_METADATA = {
+ACTION_METADATA: dict[str, ActionMetadata] = {
     # Admin Actions (13)
     ActionType.USER_CREATED.value: {
         "name_sv": "Användare skapad",
@@ -352,7 +360,7 @@ ACTION_METADATA = {
 }
 
 
-def get_action_metadata(action: str) -> dict:
+def get_action_metadata(action: str) -> ActionMetadata:
     """Get Swedish metadata for an action.
 
     Args:

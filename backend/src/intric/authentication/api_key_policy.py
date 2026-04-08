@@ -50,6 +50,7 @@ class ApiKeyPolicyService:
         space_service: "SpaceService | None" = None,
         user: "UserInDB | None" = None,
     ):
+        super().__init__()
         self.allowed_origin_repo = allowed_origin_repo
         self.space_service = space_service
         self.user = user

@@ -26,7 +26,8 @@ class TokenUsageService:
         user: UserInDB,
         token_usage_analyzer: TokenUsageAnalyzer,
         user_token_usage_analyzer: UserTokenUsageAnalyzer,
-    ):
+    ) -> None:
+        super().__init__()
         self.user = user
         self.token_usage_analyzer = token_usage_analyzer
         self.user_token_usage_analyzer = user_token_usage_analyzer

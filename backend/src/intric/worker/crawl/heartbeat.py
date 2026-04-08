@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
 
-    from intric.tenants.tenant import Tenant  # type: ignore[attr-defined]
+    from intric.tenants.tenant import TenantInDB
 
 logger = logging.getLogger(__name__)
 
@@ -65,11 +65,12 @@ class HeartbeatMonitor:
         self,
         job_id: UUID,
         redis_client: "Redis | None",
-        tenant: "Tenant | None",
+        tenant: "TenantInDB | None",
         interval_seconds: int,
         max_failures: int,
         semaphore_ttl_seconds: int,
     ):
+        super().__init__()
         self._job_id = job_id
         self._redis_client = redis_client
         self._tenant = tenant
@@ -149,12 +150,20 @@ class HeartbeatMonitor:
             pipe = self._redis_client.pipeline(transaction=True)
             pipe.expire(concurrency_key, self._semaphore_ttl_seconds)
             pipe.expire(flag_key, self._semaphore_ttl_seconds)
-            results = await pipe.execute()
+            results: list[object] = cast(list[object], await pipe.execute())
 
             self._consecutive_failures = 0
 
-            counter_refreshed = results[0] if len(results) > 0 else 0
-            flag_refreshed = results[1] if len(results) > 1 else 0
+            counter_refreshed_raw = results[0] if len(results) > 0 else 0
+            flag_refreshed_raw = results[1] if len(results) > 1 else 0
+            counter_refreshed = (
+                int(counter_refreshed_raw)
+                if isinstance(counter_refreshed_raw, int)
+                else 0
+            )
+            flag_refreshed = (
+                int(flag_refreshed_raw) if isinstance(flag_refreshed_raw, int) else 0
+            )
 
             if counter_refreshed == 0:
                 logger.warning(

@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, AsyncIterator, Optional
 
 if TYPE_CHECKING:
     from intric.ai_models.completion_models.completion_model import (
+        Completion,
         CompletionModel,
         Context,
         ModelKwargs,
@@ -12,22 +13,29 @@ if TYPE_CHECKING:
 
 class CompletionModelAdapter(ABC):
     def __init__(self, model: "CompletionModel"):
+        super().__init__()
         self.model = model
 
-    def get_token_limit_of_model(self):
+    def get_token_limit_of_model(self) -> int:
         raise NotImplementedError()
 
     def get_logging_details(
-        self, context: "Context", model_kwargs: "ModelKwargs"
+        self, context: "Context", model_kwargs: "ModelKwargs | dict[str, Any] | None"
     ) -> "LoggingDetails":
         raise NotImplementedError()
 
     async def get_response(
-        self, context: "Context", model_kwargs: "ModelKwargs", mcp_proxy=None, **kwargs
-    ):
+        self,
+        context: "Context",
+        model_kwargs: "ModelKwargs | dict[str, Any] | None",
+        mcp_proxy: Any | None = None,
+        **kwargs: Any,
+    ) -> "Completion":
         raise NotImplementedError()
 
-    def get_response_streaming(self, context: "Context", model_kwargs: "ModelKwargs"):
+    def get_response_streaming(
+        self, context: "Context", model_kwargs: "ModelKwargs | dict[str, Any] | None"
+    ) -> Any:
         """
         Legacy streaming method for backward compatibility.
 
@@ -43,9 +51,9 @@ class CompletionModelAdapter(ABC):
     async def prepare_streaming(
         self,
         context: "Context",
-        model_kwargs: "ModelKwargs | None" = None,
-        mcp_proxy=None,
-        **kwargs,
+        model_kwargs: "ModelKwargs | dict[str, Any] | None" = None,
+        mcp_proxy: Any | None = None,
+        **kwargs: Any,
     ) -> Any:
         """
         Phase 1 (Pre-flight): Create streaming connection BEFORE EventSourceResponse.
@@ -72,13 +80,13 @@ class CompletionModelAdapter(ABC):
     async def iterate_stream(
         self,
         stream: Any,
-        context: "Context" = None,
-        model_kwargs: "ModelKwargs | None" = None,
+        context: Optional["Context"] = None,
+        model_kwargs: "ModelKwargs | dict[str, Any] | None" = None,
         require_tool_approval: bool = False,
-        approval_manager=None,
-        approval_context: dict | None = None,
+        approval_manager: Any | None = None,
+        approval_context: dict[str, Any] | None = None,
         pending_approval_ids: set[str] | None = None,
-    ):
+    ) -> "AsyncIterator[Completion]":
         """
         Phase 2 (Iteration): Iterate pre-created stream INSIDE EventSourceResponse.
 
@@ -105,4 +113,5 @@ class CompletionModelAdapter(ABC):
         Yields:
             Completion: Completion objects with text chunks or error events
         """
-        pass
+        if False:  # pragma: no cover
+            yield None  # type: ignore[misc]

@@ -16,7 +16,7 @@ class SharePointSubscriptionRepository(ABC):
     async def one_or_none(
         self,
         id: UUID | None = None,
-        **filters,
+        **filters: object,
     ) -> "Optional[SharePointSubscription]":
         """Get a single subscription by ID or filters, returning None if not found."""
         ...
@@ -32,7 +32,7 @@ class SharePointSubscriptionRepository(ABC):
         ...
 
     @abstractmethod
-    async def delete(self, id: UUID) -> None:
+    async def delete(self, id: UUID) -> bool:
         """Delete a subscription by database ID."""
         ...
 

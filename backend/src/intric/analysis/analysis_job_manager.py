@@ -19,7 +19,8 @@ class AnalysisJobManager:
     KEY_PREFIX = "analysis_insights"
     TTL_SECONDS = 60 * 60 * 24
 
-    def __init__(self, redis: aioredis.Redis):
+    def __init__(self, redis: aioredis.Redis) -> None:
+        super().__init__()
         self.redis = redis
 
     def _job_key(self, tenant_id: UUID, job_id: UUID) -> str:

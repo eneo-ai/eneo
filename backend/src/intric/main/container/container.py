@@ -351,7 +351,9 @@ def _create_redis_client() -> aioredis.Redis:
     url = f"redis://{settings.redis_host}:{settings.redis_port}"
     kwargs = build_redis_pool_kwargs(settings, decode_responses=False)
 
-    return aioredis.Redis.from_url(url, **kwargs)
+    # redis-py stubs declare Redis.from_url(**kwargs: Unknown), so pyright marks the
+    # call as partially unknown even though the return type is concrete.
+    return aioredis.Redis.from_url(url, **kwargs)  # pyright: ignore[reportUnknownMemberType]
 
 
 def _build_tenant_limiter(redis_client: aioredis.Redis) -> TenantConcurrencyLimiter:
@@ -361,6 +363,23 @@ def _build_tenant_limiter(redis_client: aioredis.Redis) -> TenantConcurrencyLimi
         max_concurrent=settings.tenant_worker_concurrency_limit,
         ttl_seconds=settings.tenant_worker_semaphore_ttl_seconds,
     )
+
+
+def _build_encryption_service() -> EncryptionService:
+    # NOTE: Must use get_settings() directly because the config provider chain is
+    # never initialized — the encryption service is constructed before any DI wiring.
+    settings = get_settings()
+    key = settings.encryption_key
+    if settings.testing:
+        key = None
+    _logger.info(
+        "Container: Initializing EncryptionService",
+        extra={
+            "encryption_key_present": bool(key),
+            "testing_mode": settings.testing,
+        },
+    )
+    return EncryptionService(key)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -408,7 +427,7 @@ class SessionProxy:
             )
         return getattr(session, name)
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: object, **kwargs: object) -> object:
         """Allow the proxy to be called if anyone tries to invoke it."""
         session = _active_session_ctx.get()
         if session is None:
@@ -416,11 +435,14 @@ class SessionProxy:
                 "Cannot call SessionProxy without active session scope. "
                 "Wrap your code in 'async with container.session_scope():'."
             )
-        return session(*args, **kwargs)  # pyright: ignore[reportCallIssue]
+        # AsyncSession is not callable; the runtime check above prevents reaching
+        # this branch in practice. Pyright still flags both the call and the
+        # unknown return, so we suppress both rules.
+        return session(*args, **kwargs)  # pyright: ignore[reportCallIssue, reportUnknownVariableType]
 
 
 class Container(containers.DeclarativeContainer):
-    __self__ = providers.Self()
+    __self__: providers.Self["Container"] = providers.Self()
 
     # Configuration
     config = providers.Configuration()
@@ -440,20 +462,6 @@ class Container(containers.DeclarativeContainer):
     # Encryption service (singleton - shared across all repositories)
     # NOTE: Must use get_settings() directly because config provider is never populated
     # The config.settings provider chain is never initialized, so we use get_settings() module singleton
-    def _build_encryption_service() -> EncryptionService:
-        settings = get_settings()
-        key = settings.encryption_key
-        if settings.testing:
-            key = None
-        _logger.info(
-            "Container: Initializing EncryptionService",
-            extra={
-                "encryption_key_present": bool(key),
-                "testing_mode": settings.testing,
-            },
-        )
-        return EncryptionService(key)
-
     encryption_service: providers.Singleton[EncryptionService] = providers.Singleton(
         _build_encryption_service
     )
@@ -1084,6 +1092,7 @@ class Container(containers.DeclarativeContainer):
         TemplateService,
         app_service=app_template_service,
         assistant_service=assistant_template_service,
+        tenant_id=user.provided.tenant_id,
     )
 
     space_init_service = providers.Factory(

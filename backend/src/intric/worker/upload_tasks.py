@@ -41,13 +41,15 @@ async def transcription_task(
         uploader = container.text_processor()
         group_service = container.group_service()
         group = await group_service.get_group(params.group_id)
+        embedding_model_repo = container.embedding_model_repo2()
+        embedding_model = await embedding_model_repo.one(group.embedding_model_id)
 
         text = await transcriber.transcribe_from_filepath(
             filepath=filepath, transcription_model=transcription_model
         )
         info_blob = await uploader.process_text(
             text=text,
-            embedding_model=group.embedding_model,
+            embedding_model=embedding_model,
             title=params.filename,
             group_id=params.group_id,
         )
@@ -74,13 +76,15 @@ async def upload_info_blob_task(
         uploader = container.text_processor()
         group_service = container.group_service()
         group = await group_service.get_group(params.group_id)
+        embedding_model_repo = container.embedding_model_repo2()
+        embedding_model = await embedding_model_repo.one(group.embedding_model_id)
 
         info_blob = await uploader.process_file(
             filepath=filepath,
             filename=params.filename,
             mimetype=params.mimetype,
             group_id=params.group_id,
-            embedding_model=group.embedding_model,
+            embedding_model=embedding_model,
         )
         assert info_blob is not None
 

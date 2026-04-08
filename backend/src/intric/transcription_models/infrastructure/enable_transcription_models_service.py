@@ -15,7 +15,8 @@ if TYPE_CHECKING:
 
 
 class TranscriptionModelEnableService:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
         self.session = session
 
     async def get_model_id_by_name(self, model_name: str) -> "TranscriptionModel":

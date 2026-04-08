@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 from intric.templates.assistant_template.api.assistant_template_models import (
     AssistantTemplateWizard,
@@ -43,9 +43,9 @@ class AssistantTemplateFactory:
 
     @staticmethod
     def create_assistant_template_list(
-        items: list["AssistantTemplateDBModel"],
-    ) -> AssistantTemplate:
-        return [  # type: ignore[return-value]
+        items: "Sequence[AssistantTemplateDBModel]",
+    ) -> list[AssistantTemplate]:
+        return [
             AssistantTemplateFactory.create_assistant_template(item=item)
             for item in items
         ]

@@ -1,5 +1,7 @@
 # MIT License
 
+from typing import Any, cast
+
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,14 +10,17 @@ from intric.logging.logging import LoggingDetails, LoggingDetailsInDB
 
 
 class LoggingRepository:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
         self.session = session
 
-    async def add(self, logging_details: LoggingDetails):
-        query = (
-            sa.insert(logging_table)
+    async def add(self, logging_details: LoggingDetails) -> LoggingDetailsInDB:
+        # logging_table is an imperatively-mapped class; pyright cannot infer types through it
+        query = cast(
+            sa.Insert,
+            sa.insert(logging_table)  # pyright: ignore[reportUnknownArgumentType]  # imperatively-mapped class has partially unknown type
             .values(**logging_details.model_dump())
-            .returning(logging_table)
+            .returning(logging_table),  # pyright: ignore[reportUnknownArgumentType]  # imperatively-mapped class has partially unknown type
         )
 
         result = await self.session.execute(query)
@@ -23,8 +28,11 @@ class LoggingRepository:
 
         return LoggingDetailsInDB.model_validate(entry_in_db)
 
-    async def get(self, id: int):
-        query = sa.select(logging_table).where(logging_table.id == id)  # type: ignore[attr-defined]
+    async def get(self, id: int) -> LoggingDetailsInDB:
+        query = cast(
+            sa.Select[Any],
+            sa.select(logging_table).where(logging_table.id == id),  # pyright: ignore[reportUnknownArgumentType]  # imperatively-mapped class has partially unknown type  # type: ignore[attr-defined]  # dynamically mapped class; id attr not known statically
+        )
 
         result = await self.session.execute(query)
         entry_in_db = result.scalar_one_or_none()

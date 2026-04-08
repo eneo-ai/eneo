@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Sundsvalls Kommun
 #
 # Licensed under the MIT License.
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from intric.group_chat.domain.entities.group_chat import GroupChat, GroupChatAssistant
 
@@ -32,7 +32,7 @@ class GroupChatFactory:
     def create_entity(
         cls,
         group_chat: "GroupChatsTable",
-        assistants: Optional[list[GroupChatAssistant]] = [],
+        assistants: list[GroupChatAssistant] | None = None,
     ) -> GroupChat:
         return GroupChat(
             created_at=group_chat.created_at,
@@ -41,7 +41,7 @@ class GroupChatFactory:
             user_id=group_chat.user_id,
             space_id=group_chat.space_id,
             name=group_chat.name,
-            assistants=assistants,
+            assistants=assistants or [],
             allow_mentions=group_chat.allow_mentions,
             show_response_label=group_chat.show_response_label,
             published=group_chat.published,
@@ -55,7 +55,7 @@ class GroupChatFactory:
         group_chat_db: "GroupChatsTable",
         assistants: list["Assistant"],
     ) -> GroupChat:
-        group_chat_assistants = []
+        group_chat_assistants: list[GroupChatAssistant] = []
         for group_chat_assistant in group_chat_db.group_chat_assistants:
             assistant = next(
                 (
@@ -71,6 +71,8 @@ class GroupChatFactory:
                 )
             )
 
+        metadata_json: dict[str, object] | None = group_chat_db.metadata_json
+
         return GroupChat(
             created_at=group_chat_db.created_at,
             updated_at=group_chat_db.updated_at,
@@ -83,6 +85,6 @@ class GroupChatFactory:
             show_response_label=group_chat_db.show_response_label,
             published=group_chat_db.published,
             insight_enabled=group_chat_db.insight_enabled,
-            metadata_json=group_chat_db.metadata_json,
+            metadata_json=metadata_json,
             icon_id=group_chat_db.icon_id,
         )

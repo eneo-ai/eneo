@@ -1,9 +1,10 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from intric.assistants.api.assistant_models import (
     AssistantPublic,
     AssistantType,
     DefaultAssistant,
+    MCPServerPublicDict,
     ModelInfo,
 )
 from intric.assistants.assistant import Assistant
@@ -31,15 +32,22 @@ from intric.users.user import UserInDB
 from intric.websites.presentation.website_models import WebsitePublic
 
 if TYPE_CHECKING:
+    from intric.ai_models.completion_models.completion_model import (
+        CompletionModelSparse,
+    )
+    from intric.completion_models.domain.completion_model import CompletionModel
     from intric.main.models import ResourcePermission
 
 
 class AssistantAssembler:
     def __init__(self, user: UserInDB, prompt_assembler: PromptAssembler):
+        super().__init__()
         self.user = user
         self.prompt_assembler = prompt_assembler
 
-    def _get_completion_model_sparse(self, model):
+    def _get_completion_model_sparse(
+        self, model: "CompletionModel | None"
+    ) -> "CompletionModelSparse | None":
         """
         Convert any completion model type to a CompletionModelSparse.
         Returns None if no model is provided.
@@ -76,8 +84,8 @@ class AssistantAssembler:
     def from_assistant_to_model(
         self,
         assistant: Assistant,
-        permissions: list["ResourcePermission"] = None,
-    ):
+        permissions: list["ResourcePermission"] | None = None,
+    ) -> AssistantPublic:
         permissions = permissions or []
 
         prompt = self._get_prompt(assistant)
@@ -128,6 +136,13 @@ class AssistantAssembler:
                 prompt_tokens=prompt_tokens,
             )
 
+        mcp_servers: list[MCPServerPublicDict] = [
+            cast(MCPServerPublicDict, MCPServerAssembler.to_dict_with_tools(server))
+            for server in assistant.mcp_servers
+        ]
+
+        assert assistant.user is not None
+
         return AssistantPublic(
             created_at=assistant.created_at,
             updated_at=assistant.updated_at,
@@ -143,10 +158,7 @@ class AssistantAssembler:
                 WebsitePublic.from_domain(website) for website in assistant.websites
             ],
             integration_knowledge_list=integration_knowledge_list,
-            mcp_servers=[
-                MCPServerAssembler.to_dict_with_tools(server)
-                for server in assistant.mcp_servers
-            ],
+            mcp_servers=mcp_servers,
             mcp_tools=[],  # Initialize as empty - frontend will track changes from current state
             completion_model=completion_model,
             completion_model_kwargs=assistant.completion_model_kwargs,

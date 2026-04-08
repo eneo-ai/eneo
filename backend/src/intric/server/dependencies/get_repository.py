@@ -1,15 +1,22 @@
-from typing import Callable, Type
+from typing import Annotated, Callable, Protocol, TypeVar
 
 from fastapi import Depends
 
 from intric.database.database import AsyncSession, get_session_with_transaction
-from intric.database.repositories.base import BaseRepositoryDelegate
+
+RepoT_co = TypeVar("RepoT_co", covariant=True)
 
 
-def get_repository(Repo_type: Type) -> Callable:
+class RepositoryFactory(Protocol[RepoT_co]):
+    def __call__(self, session: AsyncSession) -> RepoT_co: ...
+
+
+def get_repository(
+    repo_type: RepositoryFactory[RepoT_co],
+) -> Callable[..., RepoT_co]:
     def get_repo(
-        db: AsyncSession = Depends(get_session_with_transaction),
-    ) -> Type[BaseRepositoryDelegate]:
-        return Repo_type(db)
+        db: Annotated[AsyncSession, Depends(get_session_with_transaction)],
+    ) -> RepoT_co:
+        return repo_type(db)
 
     return get_repo

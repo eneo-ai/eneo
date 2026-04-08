@@ -1,6 +1,8 @@
 from typing import TYPE_CHECKING
 
 from intric.ai_models.ai_models_service import AIModelsService
+from intric.ai_models.completion_models.completion_model import CompletionModelPublic
+from intric.ai_models.embedding_models.embedding_model import EmbeddingModelPublicLegacy
 from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
@@ -31,6 +33,7 @@ class SettingService:
         tenant_repo: TenantRepository,
         audit_service: AuditService,
     ):
+        super().__init__()
         self.repo = repo
         self.user = user
         self.ai_models_service = ai_models_service
@@ -39,7 +42,7 @@ class SettingService:
         self.audit_service = audit_service
 
     async def _require_feature_flag(self, name: str) -> "FeatureFlag":
-        feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(
+        feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(  # type: ignore[reportUnknownMemberType]  # feature_flag_repo.one_or_none uses **filters which lacks type annotations
             name=name
         )
         if not feature_flag:
@@ -142,11 +145,11 @@ class SettingService:
             api_key_expiry_notifications=api_key_expiry_notifications,
         )
 
-    async def get_settings(self):
+    async def get_settings(self) -> SettingsPublic:
         settings = await self.repo.get(self.user.id)
         return await self._build_settings_public(settings_in_db=settings)
 
-    async def update_settings(self, settings: SettingsPublic):
+    async def update_settings(self, settings: SettingsPublic) -> SettingsInDB:
         settings_upsert = SettingsUpsert(**settings.model_dump(), user_id=self.user.id)
 
         settings_in_db = await self.repo.update(settings_upsert)
@@ -156,10 +159,12 @@ class SettingService:
 
         return settings_in_db
 
-    async def get_available_completion_models(self):
+    async def get_available_completion_models(self) -> list[CompletionModelPublic]:
         return await self.ai_models_service.get_completion_models()
 
-    async def get_available_embedding_models(self):
+    async def get_available_embedding_models(
+        self,
+    ) -> list[EmbeddingModelPublicLegacy]:
         return await self.ai_models_service.get_embedding_models()
 
     @validate_permissions(Permission.ADMIN)

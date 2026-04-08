@@ -14,7 +14,7 @@ from pydantic import (
 )
 from pydantic.fields import FieldInfo
 from pydantic_core import core_schema
-from typing_extensions import TypeIs
+from typing_extensions import TypeIs, override
 
 from intric.main.exceptions import ErrorCodes
 
@@ -26,7 +26,8 @@ _M = TypeVar("_M", bound=BaseModel)
 class NotProvided:
     """Sentinel value to indicate a parameter was not provided in a request."""
 
-    def __repr__(self):
+    @override
+    def __repr__(self) -> str:
         return "NOT_PROVIDED"
 
     @classmethod
@@ -140,12 +141,12 @@ class CursorPaginatedResponse(PaginatedResponse[T], Generic[T]):
     total_count: int
 
 
-class PaginatedResponseWithPublicItems(PaginatedResponse):
+class PaginatedResponseWithPublicItems(PaginatedResponse[T], Generic[T]):
     public_count: int = Field(description="Number of items returned in the response")
     public_items: list[T] = Field(description="List of items returned in the response")
 
 
-class PaginatedPermissions(PaginatedResponse, ResourcePermissionsMixin):
+class PaginatedPermissions(PaginatedResponse[T], ResourcePermissionsMixin, Generic[T]):
     pass
 
 
@@ -206,4 +207,4 @@ class Channel(BaseModel):
 class RedisMessage(BaseModel):
     id: UUID
     status: Status
-    additional_data: dict | None = None
+    additional_data: dict[str, object] | None = None

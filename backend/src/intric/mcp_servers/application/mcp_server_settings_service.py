@@ -43,6 +43,7 @@ class MCPServerSettingsService:
         user: "UserInDB",
         encryption_service: "EncryptionService | None" = None,
     ):
+        super().__init__()
         self.mcp_server_repo = mcp_server_repo
         self.user = user
         self.encryption_service = encryption_service or _NoopEncryptionService()

@@ -5,6 +5,7 @@ from intric.templates.assistant_template.api.assistant_template_models import (
     AssistantTemplateListPublic,
     AssistantTemplateOrganization,
     AssistantTemplatePublic,
+    AssistantTemplateWizard,
     CompletionModelPublicAssistantTemplate,
     PromptPublicAssistantTemplate,
 )
@@ -33,11 +34,14 @@ class AssistantTemplateAssembler:
         assistant = AssistantInTemplatePublic(
             name=assistant_template.name,
             completion_model=completion_model,
-            completion_model_kwargs=assistant_template.completion_model_kwargs,
+            completion_model_kwargs=assistant_template.completion_model_kwargs or {},
             prompt=prompt,
         )
         organization = AssistantTemplateOrganization(
             name=assistant_template.organization
+        )
+        wizard = assistant_template.wizard or AssistantTemplateWizard(
+            attachments=None, collections=None
         )
         return AssistantTemplatePublic(
             id=assistant_template.id,
@@ -47,7 +51,7 @@ class AssistantTemplateAssembler:
             description=assistant_template.description,
             category=assistant_template.category,
             assistant=assistant,
-            wizard=assistant_template.wizard,
+            wizard=wizard,
             type="assistant",
             organization=organization,
             is_default=assistant_template.is_default,
@@ -62,4 +66,4 @@ class AssistantTemplateAssembler:
             AssistantTemplateAssembler.from_domain_to_model(assistant_template=i)
             for i in items
         ]
-        return AssistantTemplateListPublic(items=public_item, count=len(public_item))  # type: ignore[call-overload]
+        return AssistantTemplateListPublic(items=public_item)

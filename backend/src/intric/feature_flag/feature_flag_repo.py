@@ -16,7 +16,8 @@ from intric.main.exceptions import NotFoundException
 
 
 class FeatureFlagRepository:
-    def __init__(self, db_session: AsyncSession):
+    def __init__(self, db_session: AsyncSession) -> None:
+        super().__init__()
         self.db_session = db_session
 
     async def _delete_tenant(self, feature_id: UUID, tenant_id: UUID) -> None:
@@ -84,6 +85,8 @@ class FeatureFlagRepository:
         all_new = obj.tenant_ids | obj.disabled_tenant_ids
         removed_tenants = all_current - all_new
 
+        if obj.feature_id is None:
+            raise ValueError("Cannot update a FeatureFlag without a feature_id")
         for tenant_id in removed_tenants:
             await self._delete_tenant(obj.feature_id, tenant_id)
 
@@ -93,7 +96,7 @@ class FeatureFlagRepository:
         pass
 
     async def one_or_none(
-        self, id: UUID | None = None, **filters
+        self, id: UUID | None = None, **filters: object
     ) -> FeatureFlag | None:
         if not filters:
             if id is None:
@@ -117,13 +120,13 @@ class FeatureFlagRepository:
 
         return feature_flag
 
-    async def one(self, id: UUID | None = None, **filters) -> FeatureFlag:
+    async def one(self, id: UUID | None = None, **filters: object) -> FeatureFlag:
         feature_flag = await self.one_or_none(id=id, **filters)
         if not feature_flag:
             raise NotFoundException("FeatureFlag not found")
         return feature_flag
 
-    async def _query_tenants(self, **filters) -> list[TenantFeatureFlag]:
+    async def _query_tenants(self, **filters: object) -> list[TenantFeatureFlag]:
         if not filters:
             return []
 

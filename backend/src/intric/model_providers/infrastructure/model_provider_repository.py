@@ -15,6 +15,7 @@ class ModelProviderRepository:
     """Repository for managing model providers."""
 
     def __init__(self, session: "AsyncSession", tenant_id: UUID):
+        super().__init__()
         self.session = session
         self.tenant_id = tenant_id
 

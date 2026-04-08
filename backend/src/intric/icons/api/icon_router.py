@@ -1,3 +1,4 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, UploadFile
@@ -8,6 +9,9 @@ from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 
 router = APIRouter()
+
+_Container = Annotated[Container, Depends(get_container())]
+_ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
 
 
 @router.get(
@@ -20,7 +24,7 @@ router = APIRouter()
         404: {"description": "Icon not found"},
     },
 )
-async def get_icon(id: UUID, container: Container = Depends(get_container())):
+async def get_icon(id: UUID, container: _Container) -> Response:
     icon_service = container.icon_service()
     icon = await icon_service.get_icon(id)
     return Response(
@@ -40,9 +44,7 @@ async def get_icon(id: UUID, container: Container = Depends(get_container())):
     summary="Upload icon",
     description="Upload icon image (PNG, JPEG, WebP). Max 256 KB. Returns icon ID.",
 )
-async def create_icon(
-    file: UploadFile, container: Container = Depends(get_container(with_user=True))
-):
+async def create_icon(file: UploadFile, container: _ContainerWithUser) -> IconPublic:
     icon_service = container.icon_service()
     user = container.user()
     icon = await icon_service.create_icon(file, user.tenant_id)
@@ -56,9 +58,7 @@ async def create_icon(
     description="Delete an icon by ID. Requires authentication and ownership.",
     responses={204: {"description": "Deleted"}, 404: {"description": "Not found"}},
 )
-async def delete_icon(
-    id: UUID, container: Container = Depends(get_container(with_user=True))
-):
+async def delete_icon(id: UUID, container: _ContainerWithUser) -> None:
     icon_service = container.icon_service()
     user = container.user()
     await icon_service.delete_icon(id, user.tenant_id)

@@ -47,6 +47,7 @@ class FederationStartupMigrationService:
         encryption_service: EncryptionService,
         settings: Settings,
     ) -> None:
+        super().__init__()
         self.tenant_repo = tenant_repo
         self.encryption_service = encryption_service
         self.settings = settings

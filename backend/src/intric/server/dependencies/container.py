@@ -1,8 +1,9 @@
-from typing import Annotated, NoReturn, cast
+from typing import Annotated, Awaitable, Callable, NoReturn, cast
 from uuid import UUID
 
 from dependency_injector import providers
 from fastapi import Depends, Request, Security, WebSocketException
+from starlette.status import WS_1008_POLICY_VIOLATION
 
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.api_key_router_helpers import raise_api_key_http_error
@@ -20,6 +21,7 @@ from intric.server.dependencies.auth_definitions import (
     get_token_from_websocket_header,
 )
 from intric.users.setup import setup_user
+from intric.users.user import UserInDB
 
 
 def _raise_api_key_http_error(
@@ -34,27 +36,28 @@ def get_container(
     with_user: bool = False,
     with_user_from_assistant_api_key: bool = False,
     with_transaction: bool = True,
-):
+) -> Callable[..., Awaitable[Container]]:
     if sum([with_user, with_user_from_assistant_api_key]) > 1:
         raise ValueError(
             "Only one of with_user, with_user_from_assistant_api_key can be set to True"
         )
 
     async def _get_container(
-        session: AsyncSession = Depends(
-            get_session_with_transaction if with_transaction else get_session
-        ),
-    ):
+        session: Annotated[
+            AsyncSession,
+            Depends(get_session_with_transaction if with_transaction else get_session),
+        ],
+    ) -> Container:
         return Container(
             session=providers.Object(session),
         )
 
     async def _get_container_with_user(
         request: Request,
-        token: str = Security(OAUTH2_SCHEME),
-        api_key: str = Security(API_KEY_HEADER),
-        container: Container = Depends(_get_container),
-    ):
+        token: Annotated[str, Security(OAUTH2_SCHEME)],
+        api_key: Annotated[str, Security(API_KEY_HEADER)],
+        container: Annotated[Container, Depends(_get_container)],
+    ) -> Container:
         if request.method == "OPTIONS":
             return container
         try:
@@ -81,10 +84,10 @@ def get_container(
     async def _get_container_with_user_from_assistant_api_key(
         id: UUID,
         request: Request,
-        token: str = Security(OAUTH2_SCHEME),
-        api_key: str = Security(API_KEY_HEADER),
-        container: Container = Depends(_get_container),
-    ):
+        token: Annotated[str, Security(OAUTH2_SCHEME)],
+        api_key: Annotated[str, Security(API_KEY_HEADER)],
+        container: Annotated[Container, Depends(_get_container)],
+    ) -> Container:
         if request.method == "OPTIONS":
             return container
         try:
@@ -115,7 +118,7 @@ def get_container(
     return _get_container
 
 
-def get_container_for_sysadmin():
+def get_container_for_sysadmin() -> Callable[..., Awaitable[Container]]:
     """Get a container for sysadmin endpoints that manage their own transactions.
 
     This function creates a container with a session that does NOT have a transaction
@@ -125,8 +128,8 @@ def get_container_for_sysadmin():
     """
 
     async def _get_container_for_sysadmin(
-        session: AsyncSession = Depends(get_session),
-    ):
+        session: Annotated[AsyncSession, Depends(get_session)],
+    ) -> Container:
         return Container(
             session=providers.Object(session),
         )
@@ -137,14 +140,17 @@ def get_container_for_sysadmin():
 # TODO: Find a better place for this
 async def get_user_from_websocket(
     token: Annotated[str, Security(get_token_from_websocket_header)],
-    session: AsyncSession = Depends(get_session),
-):
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> UserInDB:
     async with sessionmanager.session() as session, session.begin():
         container = Container(session=providers.Object(session))
 
         try:
             user = await container.user_service().authenticate(token=token)
         except Exception as e:
-            raise WebSocketException("Error connecting with websocket") from e
+            raise WebSocketException(
+                code=WS_1008_POLICY_VIOLATION,
+                reason="Error connecting with websocket",
+            ) from e
 
     return user

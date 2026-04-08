@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -37,7 +37,8 @@ ORG_SPACE_ROLES = {"owner", "ai configurator"}  # Temp, kan bytas senare.
 
 
 class UsersRepository:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
         self.delegate: BaseRepositoryDelegate[UserInDB] = BaseRepositoryDelegate(
             session,
             Users,
@@ -55,13 +56,17 @@ class UsersRepository:
             selectinload(Users.user_groups),
         ]
 
-    async def _get_model_from_query(self, query, with_deleted: bool = False):
+    async def _get_model_from_query(
+        self, query: sa.Select[tuple[Any]], with_deleted: bool = False
+    ) -> UserInDB | None:
         if not with_deleted:
             query = query.where(Users.deleted_at.is_(None))
 
         return await self.delegate.get_model_from_query(query)
 
-    async def _get_models_from_query(self, query, with_deleted: bool = False):
+    async def _get_models_from_query(
+        self, query: sa.Select[tuple[Any]], with_deleted: bool = False
+    ) -> list[UserInDB]:
         if not with_deleted:
             query = query.where(Users.deleted_at.is_(None))
 
@@ -128,7 +133,7 @@ class UsersRepository:
 
     async def get_all_users(
         self,
-        tenant_id: UUID = None,
+        tenant_id: UUID | None = None,
         limit: Optional[int] = None,
         cursor: Optional[str] = None,
         previous: bool = False,
@@ -169,7 +174,9 @@ class UsersRepository:
 
         return await self._get_models_from_query(query=query, with_deleted=False)
 
-    async def _get_roles(self, roles: list[ModelId] | None, tenant_id: UUID):
+    async def _get_roles(
+        self, roles: list[ModelId] | None, tenant_id: UUID
+    ) -> list[Roles]:
         if roles is None:
             return []
 
@@ -179,9 +186,11 @@ class UsersRepository:
         )
         result = await self.session.scalars(stmt)
 
-        return result.all()
+        return list(result.all())
 
-    async def _get_predefined_roles(self, roles: list[ModelId] | None):
+    async def _get_predefined_roles(
+        self, roles: list[ModelId] | None
+    ) -> list[PredefinedRoles]:
         if roles is None:
             return []
 
@@ -189,7 +198,7 @@ class UsersRepository:
         stmt = sa.select(PredefinedRoles).filter(PredefinedRoles.id.in_(roles_ids))
         result = await self.session.scalars(stmt)
 
-        return result.all()
+        return list(result.all())
 
     async def add(self, user: UserAdd):
         try:
@@ -241,10 +250,10 @@ class UsersRepository:
 
         return UserInDB.model_validate(entry_in_db)
 
-    async def hard_delete(self, id: int):
+    async def hard_delete(self, id: UUID):
         return await self.delegate.delete(id)
 
-    async def soft_delete(self, id: int):
+    async def soft_delete(self, id: UUID):
         # Cleanup personal space
         stmt = sa.delete(Spaces).where(Spaces.user_id == id)
         await self.session.execute(stmt)
@@ -257,7 +266,7 @@ class UsersRepository:
         )
         return await self.delegate.get_model_from_query(stmt)
 
-    async def delete(self, id: int, soft_delete: bool = True):
+    async def delete(self, id: UUID, soft_delete: bool = True):
         if soft_delete:
             return await self.soft_delete(id=id)
 

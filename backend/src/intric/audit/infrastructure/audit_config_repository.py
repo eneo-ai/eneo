@@ -6,8 +6,10 @@ from uuid import UUID, uuid4
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing_extensions import override
 
 from intric.audit.domain.repositories.audit_config_repository import (
+    ActionOverrides,
     AuditConfigRepository,
 )
 from intric.database.tables.audit_category_config_table import AuditCategoryConfig
@@ -19,8 +21,10 @@ class AuditConfigRepositoryImpl(AuditConfigRepository):
     """SQLAlchemy implementation of audit category configuration repository."""
 
     def __init__(self, session: AsyncSession):
+        super().__init__()
         self.session = session
 
+    @override
     async def find_by_tenant(self, tenant_id: UUID) -> list[tuple[str, bool]]:
         """
         Get all category configurations for a tenant.
@@ -40,9 +44,10 @@ class AuditConfigRepositoryImpl(AuditConfigRepository):
         result = await self.session.execute(query)
         return [(row[0], row[1]) for row in result.all()]
 
+    @override
     async def find_by_tenant_and_category(
         self, tenant_id: UUID, category: str
-    ) -> tuple[str, bool, dict] | None:
+    ) -> tuple[str, bool, ActionOverrides] | None:
         """
         Get configuration for a specific category.
 
@@ -72,7 +77,10 @@ class AuditConfigRepositoryImpl(AuditConfigRepository):
 
         return (row[0], row[1], row[2] or {})
 
-    async def find_all_by_tenant(self, tenant_id: UUID) -> list[tuple[str, bool, dict]]:
+    @override
+    async def find_all_by_tenant(
+        self, tenant_id: UUID
+    ) -> list[tuple[str, bool, ActionOverrides]]:
         """
         Get all category configurations for a tenant in a single batch query.
 
@@ -94,12 +102,13 @@ class AuditConfigRepositoryImpl(AuditConfigRepository):
         result = await self.session.execute(query)
         return [(row[0], row[1], row[2] or {}) for row in result.all()]
 
+    @override
     async def update(
         self,
         tenant_id: UUID,
         category: str,
         enabled: bool,
-        action_overrides: dict | None = None,
+        action_overrides: ActionOverrides | None = None,
     ) -> None:
         """
         Update or insert category configuration (upsert).
@@ -114,7 +123,7 @@ class AuditConfigRepositoryImpl(AuditConfigRepository):
             This method does NOT commit the transaction. The caller is responsible
             for committing the session.
         """
-        values = {
+        values: dict[str, object] = {
             "id": uuid4(),
             "tenant_id": tenant_id,
             "category": category,
@@ -126,7 +135,10 @@ class AuditConfigRepositoryImpl(AuditConfigRepository):
         stmt = insert(AuditCategoryConfig).values(**values)
 
         # PostgreSQL-specific upsert using ON CONFLICT
-        update_set = {"enabled": enabled, "updated_at": sa.func.now()}
+        update_set: dict[str, object] = {
+            "enabled": enabled,
+            "updated_at": sa.func.now(),
+        }
         if action_overrides is not None:
             update_set["action_overrides"] = action_overrides
 

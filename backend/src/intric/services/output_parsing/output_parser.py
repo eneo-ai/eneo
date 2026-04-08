@@ -1,29 +1,46 @@
 import abc
 import json
 from abc import abstractmethod
+from typing import Protocol, cast
 
 from langchain import output_parsers
+from pydantic import BaseModel
+from typing_extensions import override
 
 from intric.services.output_parsing.pydantic_model_factory import (
+    JSONSchemaDefinition,
     PydanticModelFactory,
 )
 
 
+class SupportsListParsing(Protocol):
+    def parse(self, text: str) -> list[str]: ...
+
+    def get_format_instructions(self) -> str: ...
+
+
+class SupportsPydanticParsing(Protocol):
+    def parse(self, text: str) -> BaseModel: ...
+
+    def get_format_instructions(self) -> str: ...
+
+
 class ParsedOutput(abc.ABC):
-    def __init__(self, parsed_output):
+    def __init__(self, parsed_output: object) -> None:
+        super().__init__()
         self.parsed_output = parsed_output
 
     @abstractmethod
     def to_string(self) -> str:
         raise NotImplementedError
 
-    def to_value(self):
+    def to_value(self) -> object:
         return self.parsed_output
 
 
 class OutputParserBase(abc.ABC):
     @abstractmethod
-    def parse(self, text) -> ParsedOutput:
+    def parse(self, text: str) -> ParsedOutput:
         raise NotImplementedError
 
     @abstractmethod
@@ -32,54 +49,71 @@ class OutputParserBase(abc.ABC):
 
 
 class ListOutput(ParsedOutput):
-    def to_string(self):
-        return json.dumps(self.parsed_output)
+    @override
+    def to_string(self) -> str:
+        return json.dumps(cast(list[str], self.parsed_output))
 
 
 class PydanticOutput(ParsedOutput):
-    def to_string(self):
-        return self.parsed_output.json()
+    @override
+    def to_string(self) -> str:
+        return cast(BaseModel, self.parsed_output).model_dump_json()
 
-    def to_value(self):
-        return self.parsed_output.model_dump()
+    @override
+    def to_value(self) -> dict[str, object]:
+        return cast(dict[str, object], cast(BaseModel, self.parsed_output).model_dump())
 
 
 class TextOutput(ParsedOutput):
-    def to_string(self):
-        return self.parsed_output
+    @override
+    def to_string(self) -> str:
+        return cast(str, self.parsed_output)
 
 
 class ListOutputParser(OutputParserBase):
-    def __init__(self):
-        self.output_parser = output_parsers.NumberedListOutputParser()
+    def __init__(self) -> None:
+        super().__init__()
+        self.output_parser = cast(
+            SupportsListParsing, output_parsers.NumberedListOutputParser()
+        )
 
-    def parse(self, text):
+    @override
+    def parse(self, text: str) -> ListOutput:
         parsed = self.output_parser.parse(text)
 
         return ListOutput(parsed)
 
-    def get_format_instructions(self):
+    @override
+    def get_format_instructions(self) -> str:
         return self.output_parser.get_format_instructions()
 
 
 class PydanticOutputParser(OutputParserBase):
-    def __init__(self, schema):
+    def __init__(self, schema: JSONSchemaDefinition) -> None:
+        super().__init__()
         self.factory = PydanticModelFactory(schema)
-        Model = self.factory.create_pydantic_model()
-        self.output_parser = output_parsers.PydanticOutputParser(pydantic_object=Model)
+        model = self.factory.create_pydantic_model()
+        self.output_parser = cast(
+            SupportsPydanticParsing,
+            output_parsers.PydanticOutputParser(pydantic_object=model),
+        )
 
-    def parse(self, text):
+    @override
+    def parse(self, text: str) -> PydanticOutput:
         parsed = self.output_parser.parse(text)
 
         return PydanticOutput(parsed)
 
-    def get_format_instructions(self):
+    @override
+    def get_format_instructions(self) -> str:
         return self.factory.get_format_instructions()
 
 
 class TextOutputParser(OutputParserBase):
-    def parse(self, text):
+    @override
+    def parse(self, text: str) -> TextOutput:
         return TextOutput(text)
 
-    def get_format_instructions(self):
+    @override
+    def get_format_instructions(self) -> str:
         return ""

@@ -313,7 +313,7 @@ async def build_api_key_usage_page(
         ip_addr = cast(str | None, record.ip_address)
         usage_events.append(
             ApiKeyUsageEvent(
-                id=cast(UUID, record.id),
+                id=record.id,
                 timestamp=cast(datetime, record.timestamp),
                 action=cast(str, record.action),
                 outcome=cast(str, record.outcome),

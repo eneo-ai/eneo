@@ -7,10 +7,13 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Coroutine, Iterable, Optional
 
 import crochet
+from scrapy.crawler import Crawler as ScrapyCrawler
 from scrapy.crawler import CrawlerRunner
+from scrapy.spiders import Spider
+from twisted.python.failure import Failure
 
 from intric.crawler.parse_html import CrawledPage
 from intric.crawler.pipelines import FileNamePipeline
@@ -63,23 +66,26 @@ class CrawlManager:
                 raise CrawlShutdownError(...)  # Don't read incomplete file!
     """
 
-    def __init__(self):
-        self._crawler = None
-        self._crawl_deferred = None
-        self._runner = None
+    def __init__(self) -> None:
+        super().__init__()
+        self._crawler: ScrapyCrawler | None = None
+        # Scrapy's runner.crawl() returns Deferred; Scrapy has no py.typed so
+        # the Deferred type parameter is Unknown at the boundary.
+        self._crawl_deferred: Any = None  # Deferred from Scrapy/Twisted
+        self._runner: CrawlerRunner | None = None
         # Note: _stop_event removed - was unused (set but never waited on)
         self._completion_event = threading.Event()
 
     @crochet.run_in_reactor
     def start_crawl(
         self,
-        spider_cls,
+        spider_cls: type[Spider] | str | ScrapyCrawler,
         *,
-        filepath: str,
-        files_dir: str | None = None,
+        filepath: str | Path,
+        files_dir: str | Path | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
-        **spider_kwargs,
-    ):
+        **spider_kwargs: Any,
+    ) -> Any:
         """Start a crawl and return the EventualResult.
 
         Unlike the previous approach that lost the crawler reference,
@@ -97,15 +103,17 @@ class CrawlManager:
         # Create crawler explicitly to keep reference for stop()
         self._crawler = self._runner.create_crawler(spider_cls)
 
-        # Start crawl and store the deferred
-        self._crawl_deferred = self._runner.crawl(self._crawler, **spider_kwargs)
+        # Start crawl and store the deferred.
+        self._crawl_deferred = self._runner.crawl(  # pyright: ignore[reportUnknownMemberType]  # Scrapy has no py.typed stubs
+            self._crawler, **spider_kwargs
+        )
 
         # Add callback to signal completion
-        def on_complete(_):
+        def on_complete(_: Any) -> None:
             logger.debug("Crawl deferred completed")
             self._completion_event.set()
 
-        def on_error(failure):
+        def on_error(failure: Failure) -> None:
             logger.warning(f"Crawl deferred errored: {failure}")
             self._completion_event.set()
 
@@ -115,7 +123,7 @@ class CrawlManager:
         return self._crawl_deferred
 
     @crochet.run_in_reactor
-    def stop_crawl(self, reason: str = "timeout"):
+    def stop_crawl(self, reason: str = "timeout") -> None:
         """Stop the crawler gracefully from within Twisted's reactor.
 
         CRITICAL: This must run inside the reactor thread because:
@@ -183,10 +191,10 @@ class Crawl:
 
 
 def create_runner(
-    filepath: str,
-    files_dir: Optional[str] = None,
+    filepath: str | Path,
+    files_dir: Optional[str | Path] = None,
     tenant_crawler_settings: dict[str, Any] | None = None,
-):
+) -> CrawlerRunner:
     """Create a Scrapy CrawlerRunner with tenant-aware settings.
 
     Settings are resolved in priority order:
@@ -199,8 +207,10 @@ def create_runner(
         files_dir: Optional directory for downloaded files
         tenant_crawler_settings: Optional tenant-specific settings from DB
     """
-    settings = {
-        "FEEDS": {filepath: {"format": "jsonl", "item_classes": [CrawledPage]}},
+    filepath_str = str(filepath)
+    # Scrapy settings values have heterogeneous types; dict[str, Any] is correct here.
+    settings: dict[str, Any] = {
+        "FEEDS": {filepath_str: {"format": "jsonl", "item_classes": [CrawledPage]}},
         # All settings use get_crawler_setting() for tenant-aware resolution
         "CLOSESPIDER_ITEMCOUNT": get_crawler_setting(
             "closespider_itemcount", tenant_crawler_settings
@@ -225,9 +235,13 @@ def create_runner(
 
     if files_dir is not None:
         settings["ITEM_PIPELINES"] = {FileNamePipeline: 300}
-        settings["FILES_STORE"] = files_dir
+        settings["FILES_STORE"] = str(files_dir)
 
     return CrawlerRunner(settings=settings)
+
+
+# Type alias for the async crawl functions used by _crawl()
+_CrawlFunc = Callable[..., Coroutine[Any, Any, None]]
 
 
 class Crawler:
@@ -244,17 +258,20 @@ class Crawler:
         url: str,
         download_files: bool = False,
         *,
-        filepath: Path,
-        files_dir: Optional[Path],
-        http_user: str = None,
-        http_pass: str = None,
+        filepath: str | Path,
+        files_dir: Optional[str | Path],
+        http_user: str | None = None,
+        http_pass: str | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
-    ):
+    ) -> Any:
         """Run crawl in Twisted reactor, returns EventualResult.
 
         The @crochet.run_in_reactor() decorator schedules this function
         to run in Twisted's reactor thread and returns an EventualResult
         that wraps the Deferred from runner.crawl().
+
+        Returns Any because Scrapy has no py.typed stubs; the actual runtime
+        value is Deferred[None] but pyright cannot verify the type parameter.
         """
         files_dir = files_dir if download_files else None
         runner = create_runner(
@@ -262,7 +279,7 @@ class Crawler:
             files_dir=files_dir,
             tenant_crawler_settings=tenant_crawler_settings,
         )
-        return runner.crawl(
+        return runner.crawl(  # pyright: ignore[reportUnknownMemberType]  # Scrapy has no py.typed stubs
             CrawlSpider, url=url, http_user=http_user, http_pass=http_pass
         )
 
@@ -271,23 +288,26 @@ class Crawler:
     def _run_sitemap_crawl_deferred(
         sitemap_url: str,
         *,
-        filepath: Path,
-        files_dir: Optional[Path],
-        http_user: str = None,
-        http_pass: str = None,
+        filepath: str | Path,
+        files_dir: Optional[str | Path],
+        http_user: str | None = None,
+        http_pass: str | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
-    ):
+    ) -> Any:
         """Run sitemap crawl in Twisted reactor, returns EventualResult.
 
         The @crochet.run_in_reactor() decorator schedules this function
         to run in Twisted's reactor thread and returns an EventualResult
         that wraps the Deferred from runner.crawl().
+
+        Returns Any because Scrapy has no py.typed stubs; the actual runtime
+        value is Deferred[None] but pyright cannot verify the type parameter.
         """
         runner = create_runner(
             filepath=filepath,
             tenant_crawler_settings=tenant_crawler_settings,
         )
-        return runner.crawl(
+        return runner.crawl(  # pyright: ignore[reportUnknownMemberType]
             SitemapSpider,
             sitemap_url=sitemap_url,
             http_user=http_user,
@@ -299,13 +319,13 @@ class Crawler:
         url: str,
         download_files: bool = False,
         *,
-        filepath: Path,
-        files_dir: Optional[Path],
-        http_user: str = None,
-        http_pass: str = None,
+        filepath: str | Path,
+        files_dir: Optional[str | Path],
+        http_user: str | None = None,
+        http_pass: str | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
         max_length: int,
-        heartbeat_callback: Optional[Any] = None,
+        heartbeat_callback: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
         heartbeat_interval: float = 60.0,
     ) -> None:
         """Async wrapper with tenant-aware timeout, graceful shutdown, and heartbeat.
@@ -330,7 +350,7 @@ class Crawler:
         shutdown_failed = False
         crawl_done = asyncio.Event()
 
-        def blocking_crawl():
+        def blocking_crawl() -> None:
             nonlocal timed_out, shutdown_failed
             files_dir_str = str(files_dir) if files_dir and download_files else None
 
@@ -364,7 +384,7 @@ class Crawler:
                         "output file may be incomplete"
                     )
 
-        async def heartbeat_loop():
+        async def heartbeat_loop() -> None:
             """Run heartbeat while crawl executes in thread."""
             while not crawl_done.is_set():
                 try:
@@ -410,13 +430,13 @@ class Crawler:
     async def _run_sitemap_crawl_with_timeout(
         sitemap_url: str,
         *,
-        filepath: Path,
-        files_dir: Optional[Path],
-        http_user: str = None,
-        http_pass: str = None,
+        filepath: str | Path,
+        files_dir: Optional[str | Path],
+        http_user: str | None = None,
+        http_pass: str | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
         max_length: int,
-        heartbeat_callback: Optional[Any] = None,
+        heartbeat_callback: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
         heartbeat_interval: float = 60.0,
     ) -> None:
         """Async wrapper with tenant-aware timeout, graceful shutdown, and heartbeat for sitemap.
@@ -429,7 +449,7 @@ class Crawler:
         5. Verify shutdown succeeded before allowing file read
 
         Args:
-            heartbeat_callback: Optional async callable to invoke periodically during crawl.
+            heartbeat_callback: Optional async callable for heartbeat during crawl.
             heartbeat_interval: Seconds between heartbeat calls (default 60s)
         """
         manager = CrawlManager()
@@ -437,7 +457,7 @@ class Crawler:
         shutdown_failed = False
         crawl_done = asyncio.Event()
 
-        def blocking_crawl():
+        def blocking_crawl() -> None:
             nonlocal timed_out, shutdown_failed
 
             eventual_result = manager.start_crawl(
@@ -470,7 +490,7 @@ class Crawler:
                         "output file may be incomplete"
                     )
 
-        async def heartbeat_loop():
+        async def heartbeat_loop() -> None:
             """Run heartbeat while crawl executes in thread."""
             while not crawl_done.is_set():
                 try:
@@ -514,12 +534,12 @@ class Crawler:
     @asynccontextmanager
     async def _crawl(
         self,
-        func,
+        func: _CrawlFunc,
         *,
         max_length: int,
-        heartbeat_callback: Optional[Any] = None,
+        heartbeat_callback: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
         heartbeat_interval: float = 60.0,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Execute crawl function with timeout and yield results.
 
@@ -543,7 +563,7 @@ class Crawler:
 
         is_partial = False
         termination_reason = "completed"
-        url = kwargs.get("url") or kwargs.get("sitemap_url", "unknown")
+        url: str = kwargs.get("url") or kwargs.get("sitemap_url") or "unknown"
 
         try:
             await func(
@@ -601,13 +621,13 @@ class Crawler:
             with open(tmp_file_path) as f:
                 pages_count = sum(1 for _ in f)
 
-            def _iter_pages():
+            def _iter_pages() -> Iterable[CrawledPage]:
                 with open(tmp_file_path) as f:
                     for line in f:
                         jsonl = json.loads(line)
                         yield CrawledPage(**jsonl)
 
-            def _iter_files():
+            def _iter_files() -> Iterable[Path]:
                 p = Path(tmp_dir)
                 return p.iterdir()
 
@@ -636,10 +656,10 @@ class Crawler:
         url: str,
         download_files: bool = False,
         crawl_type: CrawlType = CrawlType.CRAWL,
-        http_user: str = None,
-        http_pass: str = None,
+        http_user: str | None = None,
+        http_pass: str | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
-        heartbeat_callback: Optional[Any] = None,
+        heartbeat_callback: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
         heartbeat_interval: float = 60.0,
     ):
         """Execute a web crawl with tenant-aware settings.
@@ -661,7 +681,7 @@ class Crawler:
             crawl_max_length is now tenant-aware. The timeout is resolved at runtime
             from tenant settings (if provided) or falls back to environment default.
         """
-        # Get tenant-aware max crawl length (resolved at runtime, not import time)
+        # Get tenant-aware max crawl length (resolved at runtime, not import time).
         max_length = get_crawler_setting("crawl_max_length", tenant_crawler_settings)
 
         if crawl_type == CrawlType.CRAWL:

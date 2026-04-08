@@ -23,10 +23,13 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
+from typing_extensions import TypedDict
+
 from intric.jobs.job_models import Task
+from intric.main.config import Settings
 from intric.main.logging import get_logger
 from intric.worker.redis.lua_scripts import LuaScripts
 
@@ -54,20 +57,32 @@ class SlotReleaseJob:
     was_in_progress: bool = False
 
 
+def _uuid_list() -> list[UUID]:
+    return []
+
+
+def _slot_release_list() -> list["SlotReleaseJob"]:
+    return []
+
+
+def _job_requeue_list() -> list[dict[str, UUID]]:
+    return []
+
+
 @dataclass
 class Phase1Result:
     """Result of Phase 1: Kill expired jobs."""
 
-    expired_job_ids: list[UUID] = field(default_factory=list)
-    slots_to_release: list[SlotReleaseJob] = field(default_factory=list)
-    orphaned_job_ids: list[UUID] = field(default_factory=list)
+    expired_job_ids: list[UUID] = field(default_factory=_uuid_list)
+    slots_to_release: list[SlotReleaseJob] = field(default_factory=_slot_release_list)
+    orphaned_job_ids: list[UUID] = field(default_factory=_uuid_list)
 
 
 @dataclass
 class Phase2Result:
     """Result of Phase 2: Rescue stuck jobs."""
 
-    jobs_to_requeue: list[dict] = field(default_factory=list)
+    jobs_to_requeue: list[dict[str, UUID]] = field(default_factory=_job_requeue_list)
     rescued_count: int = 0
 
 
@@ -75,8 +90,8 @@ class Phase2Result:
 class Phase3Result:
     """Result of Phase 3: Fail long-running jobs."""
 
-    failed_job_ids: list[UUID] = field(default_factory=list)
-    slots_to_release: list[SlotReleaseJob] = field(default_factory=list)
+    failed_job_ids: list[UUID] = field(default_factory=_uuid_list)
+    slots_to_release: list[SlotReleaseJob] = field(default_factory=_slot_release_list)
 
 
 @dataclass
@@ -91,8 +106,8 @@ class Phase3_5Result:
     Uses shorter timeout than Phase 3 to avoid blocking users for 12 hours.
     """
 
-    failed_job_ids: list[UUID] = field(default_factory=list)
-    slots_to_release: list[SlotReleaseJob] = field(default_factory=list)
+    failed_job_ids: list[UUID] = field(default_factory=_uuid_list)
+    slots_to_release: list[SlotReleaseJob] = field(default_factory=_slot_release_list)
 
 
 @dataclass
@@ -107,6 +122,15 @@ class CleanupMetrics:
     slots_released: int = 0
 
 
+class Phase0ReconciliationResult(TypedDict):
+    reconciled_count: int
+
+
+class CounterReconciliationResult(TypedDict, total=False):
+    reconciled: bool
+    skipped_reason: str
+
+
 class OrphanWatchdog:
     """Cleans up orphaned crawl jobs with transaction-safe slot release.
 
@@ -118,7 +142,8 @@ class OrphanWatchdog:
         settings: Application settings with timeout thresholds.
     """
 
-    def __init__(self, redis_client: aioredis.Redis, settings) -> None:
+    def __init__(self, redis_client: aioredis.Redis, settings: Settings) -> None:
+        super().__init__()
         self._redis = redis_client
         self._settings = settings
 
@@ -139,7 +164,7 @@ class OrphanWatchdog:
             async with sessionmanager.session() as session, session.begin():
                 # Phase 0: Zombie counter reconciliation (can be Redis-only)
                 phase0_result = await self._run_phase0_reconciliation(session)
-                metrics.zombies_reconciled = phase0_result.get("reconciled_count", 0)
+                metrics.zombies_reconciled = phase0_result["reconciled_count"]
 
                 # Phase 1: Kill expired QUEUED jobs
                 phase1_result = await self._kill_expired_jobs(session, now=now)
@@ -203,7 +228,9 @@ class OrphanWatchdog:
 
         return metrics
 
-    async def _run_phase0_reconciliation(self, session: AsyncSession) -> dict:
+    async def _run_phase0_reconciliation(
+        self, session: AsyncSession
+    ) -> Phase0ReconciliationResult:
         """Phase 0: Detect and fix zombie counters.
 
         Scans Redis for tenant active_jobs counters that exceed actual
@@ -222,12 +249,14 @@ class OrphanWatchdog:
         from intric.main.models import Status
 
         reconciled_count = 0
+        redis_client: Any = self._redis
 
         try:
-            async for key in self._redis.scan_iter(match="tenant:*:active_jobs"):
+            async for key in redis_client.scan_iter(match="tenant:*:active_jobs"):
                 try:
+                    key_bytes = cast(bytes, key)
                     result = await self._reconcile_single_counter(
-                        session, key, Jobs, CrawlRuns, Status, func, select
+                        session, key_bytes, Jobs, CrawlRuns, Status, func, select
                     )
                     if result.get("reconciled"):
                         reconciled_count += 1
@@ -256,14 +285,14 @@ class OrphanWatchdog:
         self,
         session: AsyncSession,
         key: bytes,
-        Jobs,
-        CrawlRuns,
-        Status,
-        func,
-        select,
-    ) -> dict:
+        Jobs: Any,
+        CrawlRuns: Any,
+        Status: Any,
+        func: Any,
+        select: Any,
+    ) -> CounterReconciliationResult:
         """Reconcile a single tenant's zombie counter."""
-        key_str = key.decode("utf-8") if isinstance(key, bytes) else key
+        key_str = key.decode("utf-8")
         parts = key_str.split(":")
         if len(parts) != 3:
             return {"reconciled": False}
@@ -287,17 +316,19 @@ class OrphanWatchdog:
             return {"reconciled": False}
 
         # Query actual active jobs in DB
-        actual_active = await session.scalar(
-            select(func.count())
-            .select_from(Jobs)
-            .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
-            .where(
-                Jobs.task == Task.CRAWL.value,
-                Jobs.status.in_([Status.QUEUED, Status.IN_PROGRESS]),
-                CrawlRuns.tenant_id == tenant_uuid,
-            )
+        actual_active = cast(
+            int,
+            await session.scalar(
+                select(func.count())
+                .select_from(Jobs)
+                .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
+                .where(
+                    Jobs.task == Task.CRAWL.value,
+                    Jobs.status.in_([Status.QUEUED, Status.IN_PROGRESS]),
+                    CrawlRuns.tenant_id == tenant_uuid,
+                )
+            ),
         )
-        assert actual_active is not None
 
         if redis_count <= actual_active:
             return {"reconciled": False}
@@ -331,7 +362,7 @@ class OrphanWatchdog:
         db_active_count: int,
         tenant_id: UUID,
         redis_count: int | None = None,
-    ) -> dict:
+    ) -> CounterReconciliationResult:
         """Reconcile zombie counter for a specific tenant (for testing).
 
         Args:
@@ -422,7 +453,7 @@ class OrphanWatchdog:
         expired_rows = expired_result.fetchall()
 
         # Track jobs for slot release
-        jobs_with_crawlrun = set()
+        jobs_with_crawlrun: set[UUID] = set()
         for row in expired_rows:
             result.expired_job_ids.append(row.job_id)
             result.slots_to_release.append(
@@ -538,7 +569,7 @@ class OrphanWatchdog:
         potential_stuck_jobs = rescue_result.fetchall()
 
         # Re-queue stuck jobs that meet their tenant's threshold
-        rescued_job_ids = []
+        rescued_job_ids: list[UUID] = []
         skipped_count = 0
         for row in potential_stuck_jobs:
             # Get tenant-specific threshold with bounds
@@ -648,9 +679,7 @@ class OrphanWatchdog:
             run_id=run_id,
             url=url,
             download_files=download_files,
-            crawl_type=CrawlType(crawl_type)
-            if isinstance(crawl_type, str)
-            else crawl_type,
+            crawl_type=CrawlType(crawl_type),
         )
 
         try:

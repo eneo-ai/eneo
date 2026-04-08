@@ -1,8 +1,8 @@
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict
 
 from dependency_injector import providers
+from typing_extensions import TypedDict
 
 from intric.database.database import sessionmanager
 from intric.main.container.container import Container
@@ -12,8 +12,24 @@ logger = logging.getLogger(__name__)
 worker = Worker()
 
 
+class DeletedCounts(TypedDict):
+    questions: int
+    app_runs: int
+    sessions: int
+    total: int
+
+
+class CleanupResults(TypedDict):
+    start_time: str
+    end_time: str
+    duration_seconds: float
+    deleted: DeletedCounts
+    errors: list[str]
+    success: bool
+
+
 @worker.cron_job(hour=3, minute=0)  # Run daily at 3 AM
-async def cleanup_old_data(container: Container) -> Dict[str, Any]:
+async def cleanup_old_data(container: Container) -> CleanupResults:
     """
     Daily cleanup of old data based on retention policies.
 
@@ -28,18 +44,25 @@ async def cleanup_old_data(container: Container) -> Dict[str, Any]:
     """
     start_time = datetime.now(timezone.utc)
 
-    results = {
+    results: CleanupResults = {
         "start_time": start_time.isoformat(),
-        "deleted": {"questions": 0, "app_runs": 0, "sessions": 0},
+        "deleted": {
+            "questions": 0,
+            "app_runs": 0,
+            "sessions": 0,
+            "total": 0,
+        },
         "errors": [],
         "success": True,
+        "end_time": "",
+        "duration_seconds": 0.0,
     }
 
     logger.info("Starting data retention cleanup job")
 
     # Use fresh session to avoid nested transaction error from cron wrapper
     async with sessionmanager.session() as session:
-        container.session.override(providers.Object(session))
+        container.session.override(providers.Object(session))  # pyright: ignore[reportUnknownMemberType]  # dependency_injector provider stubs have partially unknown override()
         try:
             data_retention_service = container.data_retention_service()
 
@@ -97,7 +120,11 @@ async def cleanup_old_data(container: Container) -> Dict[str, Any]:
 
     results["end_time"] = end_time.isoformat()
     results["duration_seconds"] = duration
-    results["deleted"]["total"] = sum(results["deleted"].values())
+    results["deleted"]["total"] = (
+        results["deleted"]["questions"]
+        + results["deleted"]["app_runs"]
+        + results["deleted"]["sessions"]
+    )
 
     # Log summary
     if results["success"]:

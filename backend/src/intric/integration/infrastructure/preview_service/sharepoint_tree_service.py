@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Awaitable, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 from uuid import UUID
 
 from intric.integration.domain.entities.oauth_token import SharePointToken
@@ -16,7 +16,10 @@ TokenRefreshCallback = Callable[[UUID], Awaitable[Dict[str, str]]]
 
 
 class SharePointTreeService:
-    def __init__(self, token_refresh_callback: Optional[TokenRefreshCallback] = None):
+    def __init__(
+        self, token_refresh_callback: Optional[TokenRefreshCallback] = None
+    ) -> None:
+        super().__init__()
         self.token_refresh_callback = token_refresh_callback
 
     async def get_folder_tree(
@@ -26,7 +29,7 @@ class SharePointTreeService:
         drive_id: Optional[str] = None,
         folder_id: Optional[str] = None,
         folder_path: str = "",
-    ) -> dict:
+    ) -> Dict[str, Any]:
         """
         Get folder tree for SharePoint site or OneDrive.
 
@@ -90,6 +93,9 @@ class SharePointTreeService:
                     extra={"drive_id": actual_drive_id},
                 )
 
+            if actual_drive_id is None:
+                raise ValueError("Could not resolve drive ID")
+
             if folder_id is None:
                 folder_id = "root"
                 logger.debug("Using root folder")
@@ -140,7 +146,7 @@ class SharePointTreeService:
                     f"Failed to fetch folder items for folder {folder_id}: {str(e)}"
                 ) from e
 
-            tree_items = []
+            tree_items: List[Dict[str, Any]] = []
             for item in items:
                 item_name = item.get("name", "")
                 item_id = item.get("id", "")
@@ -191,7 +197,7 @@ class SharePointTreeService:
                         extra={"folder_id": folder_id},
                     )
 
-            result = {
+            result: Dict[str, Any] = {
                 "items": tree_items,
                 "current_path": folder_path or "/",
                 "parent_id": parent_id,

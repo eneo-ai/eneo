@@ -19,7 +19,8 @@ logger = get_logger(__name__)
 class OfficeChangeKeyService:
     """Service for validating Office item ChangeKeys using Redis cache."""
 
-    def __init__(self, redis_client: redis.Redis):
+    def __init__(self, redis_client: redis.Redis) -> None:
+        super().__init__()
         self.redis_client = redis_client
         # TTL for ChangeKey entries (7 days)
         self.changekey_ttl_seconds = 7 * 24 * 60 * 60
@@ -127,7 +128,7 @@ class OfficeChangeKeyService:
             integration_knowledge_id: The integration knowledge ID
         """
         pattern = f"office_change_key:{integration_knowledge_id}:*"
-        keys = await self.redis_client.keys(pattern)
+        keys: list[str] = await self.redis_client.keys(pattern)  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
         if keys:
             await self.redis_client.delete(*keys)
             logger.info(

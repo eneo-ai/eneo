@@ -107,6 +107,7 @@ class MCPClient:
             auth_credentials: Authentication credentials from tenant settings
             timeout: Connection timeout in seconds (defaults to 30s)
         """
+        super().__init__()
         self.mcp_server = mcp_server
         self.auth_credentials = auth_credentials or {}
         self.timeout = timeout or MCP_CONNECTION_TIMEOUT_DEFAULT

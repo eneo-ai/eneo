@@ -16,7 +16,8 @@ from intric.main.models import IdAndName
 
 
 class AdminEmbeddingModelsService:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
         self.session = session
         self.delegate: BaseRepositoryDelegate[EmbeddingModelLegacy] = (
             BaseRepositoryDelegate(session, EmbeddingModels, EmbeddingModelLegacy)
@@ -59,10 +60,10 @@ class AdminEmbeddingModelsService:
 
     async def get_models(
         self,
-        tenant_id: UUID = None,
+        tenant_id: UUID | None = None,
         with_deprecated: bool = False,
-        id_list: list[UUID] = None,
-    ):
+        id_list: list[UUID] | None = None,
+    ) -> list[EmbeddingModelLegacy]:
         stmt = sa.select(EmbeddingModels).order_by(EmbeddingModels.created_at)
 
         if not with_deprecated:
@@ -83,7 +84,7 @@ class AdminEmbeddingModelsService:
         result = await self.session.execute(stmt)
         db_models = result.scalars().all()
 
-        models = []
+        models: list[EmbeddingModelLegacy] = []
         for db_model in db_models:
             model = EmbeddingModelLegacy.model_validate(db_model)
             model.is_org_enabled = db_model.is_enabled

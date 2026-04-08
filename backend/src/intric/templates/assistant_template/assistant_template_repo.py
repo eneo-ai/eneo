@@ -25,7 +25,10 @@ if TYPE_CHECKING:
 
 
 class AssistantTemplateRepository:
+    _db_model: type[AssistantTemplates]
+
     def __init__(self, session: "AsyncSession", factory: "AssistantTemplateFactory"):
+        super().__init__()
         self.session = session
         self.factory = factory
 
@@ -33,7 +36,9 @@ class AssistantTemplateRepository:
         # db relations
         self._options = [selectinload(self._db_model.completion_model)]
 
-    def _apply_options(self, query: "Select") -> "Select":
+    def _apply_options(
+        self, query: "Select[tuple[AssistantTemplates]]"
+    ) -> "Select[tuple[AssistantTemplates]]":
         for option in self._options:
             query = query.options(option)
 
@@ -99,7 +104,7 @@ class AssistantTemplateRepository:
 
         results = await self.session.scalars(query)
 
-        return self.factory.create_assistant_template_list(items=results.all())  # type: ignore[return-value]
+        return self.factory.create_assistant_template_list(items=results.all())
 
     async def add(self, obj: "AssistantTemplateCreate") -> "AssistantTemplate":
         stmt = (
@@ -158,7 +163,7 @@ class AssistantTemplateRepository:
         )
         query = self._apply_options(query=base_query)
         results = await self.session.scalars(query)
-        return self.factory.create_assistant_template_list(items=results.all())  # type: ignore[return-value]
+        return self.factory.create_assistant_template_list(items=results.all())
 
     async def check_duplicate_name(
         self, name: str, tenant_id: Optional["UUID"] = None
@@ -276,4 +281,4 @@ class AssistantTemplateRepository:
 
         query = self._apply_options(query=base_query)
         results = await self.session.scalars(query)
-        return self.factory.create_assistant_template_list(items=results.all())  # type: ignore[return-value]
+        return self.factory.create_assistant_template_list(items=results.all())

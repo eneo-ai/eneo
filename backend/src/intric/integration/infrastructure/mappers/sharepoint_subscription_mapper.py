@@ -1,4 +1,6 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
+
+from typing_extensions import override
 
 from intric.base.base_entity import EntityMapper
 from intric.database.tables.sharepoint_subscription_table import (
@@ -12,8 +14,9 @@ from intric.integration.domain.entities.sharepoint_subscription import (
 class SharePointSubscriptionMapper(
     EntityMapper[SharePointSubscription, SharePointSubscriptionDBModel]
 ):
+    @override
     def to_db_dict(self, entity: SharePointSubscription) -> Dict[str, Any]:
-        result = {
+        result: Dict[str, Any] = {
             "id": entity.id,
             "user_integration_id": entity.user_integration_id,
             "site_id": entity.site_id,
@@ -29,6 +32,7 @@ class SharePointSubscriptionMapper(
             result["updated_at"] = entity.updated_at
         return result
 
+    @override
     def to_entity(
         self, db_model: SharePointSubscriptionDBModel
     ) -> SharePointSubscription:
@@ -43,7 +47,8 @@ class SharePointSubscriptionMapper(
             updated_at=db_model.updated_at,
         )
 
+    @override
     def to_entities(
-        self, db_models: List[SharePointSubscriptionDBModel]
+        self, db_models: Sequence[SharePointSubscriptionDBModel]
     ) -> List[SharePointSubscription]:
         return [self.to_entity(db_model) for db_model in db_models]

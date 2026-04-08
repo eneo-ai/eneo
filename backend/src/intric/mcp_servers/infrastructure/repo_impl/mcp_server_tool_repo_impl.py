@@ -4,6 +4,7 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.future import select
+from typing_extensions import override
 
 from intric.database.tables.mcp_server_table import (
     MCPServerTools as MCPServerToolsTable,
@@ -28,6 +29,7 @@ class MCPServerToolRepoImpl(
     def __init__(self, session: "AsyncSession", mapper: MCPServerToolMapper):
         super().__init__(session=session, model=MCPServerToolsTable, mapper=mapper)
 
+    @override
     async def all(self) -> list[MCPServerTool]:
         query = select(self._db_model)
         result = await self.session.scalars(query)
@@ -37,6 +39,7 @@ class MCPServerToolRepoImpl(
 
         return self.mapper.to_entities(records)
 
+    @override
     async def by_server(self, mcp_server_id: UUID) -> list[MCPServerTool]:
         """Get all tools for a specific MCP server, ordered by name."""
         query = (
@@ -51,6 +54,7 @@ class MCPServerToolRepoImpl(
 
         return self.mapper.to_entities(records)
 
+    @override
     async def find_by_name(
         self, mcp_server_id: UUID, name: str
     ) -> MCPServerTool | None:
@@ -67,6 +71,7 @@ class MCPServerToolRepoImpl(
 
         return self.mapper.to_entity(result)
 
+    @override
     async def add_many(self, objs: list[MCPServerTool]) -> list[MCPServerTool]:
         """Add multiple tools at once (bulk operation)."""
         if not objs:
@@ -81,6 +86,7 @@ class MCPServerToolRepoImpl(
         records = result.all()
         return self.mapper.to_entities(records)
 
+    @override
     async def upsert_by_server_and_name(self, obj: MCPServerTool) -> MCPServerTool:
         """Upsert a tool (update if exists by server+name, insert otherwise)."""
         db_dict = self.mapper.to_db_dict(obj)
@@ -107,6 +113,7 @@ class MCPServerToolRepoImpl(
             raise ValueError("Failed to upsert MCP server tool")
         return self.mapper.to_entity(record)
 
+    @override
     async def delete_by_server(self, mcp_server_id: UUID) -> None:
         """Delete all tools for a specific MCP server."""
         stmt = sa.delete(self._db_model).where(

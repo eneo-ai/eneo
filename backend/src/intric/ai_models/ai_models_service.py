@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import (
@@ -29,7 +30,8 @@ class AIModelsService:
         embedding_model_repo: AdminEmbeddingModelsService,
         completion_model_repo: CompletionModelsRepository,
         tenant_repo: TenantRepository,
-    ):
+    ) -> None:
+        super().__init__()
         self.user = user
         self.embedding_model_repo = embedding_model_repo
         self.completion_model_repo = completion_model_repo
@@ -55,22 +57,29 @@ class AIModelsService:
         return False
 
     def _get_latest_available_model(
-        self, models: list[CompletionModelPublic | EmbeddingModelPublicLegacy]
+        self, models: Sequence[CompletionModelPublic | EmbeddingModelPublicLegacy]
     ) -> CompletionModelPublic | EmbeddingModelPublicLegacy | None:
-        sorted_models = sorted(models, key=lambda model: model.created_at, reverse=True)  # type: ignore[call-overload]
+        sorted_models: list[CompletionModelPublic | EmbeddingModelPublicLegacy] = (
+            sorted(
+                models,
+                key=lambda model: model.created_at
+                or "",  # created_at is Optional[datetime]; treat None as earliest
+                reverse=True,
+            )
+        )
 
         for model in sorted_models:
             if model.can_access:
                 return model
 
     async def get_embedding_models(
-        self, id_list: list[UUID] = None
+        self, id_list: list[UUID] | None = None
     ) -> list[EmbeddingModelPublicLegacy]:
         embedding_models = await self.embedding_model_repo.get_models(
             tenant_id=self.user.tenant_id, with_deprecated=False, id_list=id_list
         )
 
-        models = []
+        models: list[EmbeddingModelPublicLegacy] = []
         for model in embedding_models:
             models.append(
                 EmbeddingModelPublicLegacy(
@@ -110,7 +119,7 @@ class AIModelsService:
         return self._get_latest_available_model(models)
 
     async def get_completion_models(
-        self, id_list: list[UUID] = None
+        self, id_list: list[UUID] | None = None
     ) -> list[CompletionModelPublic]:
         completion_models = await self.completion_model_repo.get_models(
             tenant_id=self.user.tenant_id,
@@ -118,7 +127,7 @@ class AIModelsService:
             id_list=id_list,
         )
 
-        models = []
+        models: list[CompletionModelPublic] = []
         for model in completion_models:
             if model.family == "azure" and not get_settings().using_azure_models:
                 continue
@@ -138,7 +147,7 @@ class AIModelsService:
         self, embedding_model_id: UUID, data: EmbeddingModelUpdateFlags
     ):
         await self.embedding_model_repo.enable_embedding_model(
-            is_org_enabled=data.is_org_enabled,
+            is_org_enabled=data.is_org_enabled or False,
             embedding_model_id=embedding_model_id,
             tenant_id=self.user.tenant_id,
         )

@@ -2,6 +2,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, Sequence, TypeVar
 from uuid import UUID, uuid4
 
+from typing_extensions import override
+
 from intric.main.models import ResourcePermission
 
 if TYPE_CHECKING:
@@ -9,6 +11,7 @@ if TYPE_CHECKING:
 
 T = TypeVar("T", bound="Entity")
 DB = TypeVar("DB", bound="BaseDBModel")
+_DB_contra = TypeVar("_DB_contra", bound="BaseDBModel", contravariant=True)  # type: ignore[misc]  # contravariant TypeVar for Protocol
 
 
 class Entity:
@@ -17,14 +20,16 @@ class Entity:
         id: Optional[UUID] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.id = id if id else uuid4()
         self.created_at = created_at
         self.updated_at = updated_at
 
         self._permissions: Optional[list[ResourcePermission]] = None
 
-    def __eq__(self, other: Any) -> bool:
+    @override
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, Entity):
             return False
 
@@ -41,13 +46,13 @@ class Entity:
         return self_vars == other_vars
 
     @classmethod
-    def create(cls, **kwargs) -> T: ...
+    def create(cls, *args: object, **kwargs: object) -> "T": ...  # type: ignore[misc]  # variadic *args/**kwargs on classmethod returning TypeVar
 
     @classmethod
-    def to_domain(cls, db_model: DB) -> T: ...
+    def to_domain(cls, db_model: "DB", *args: object, **kwargs: object) -> "T": ...  # type: ignore[misc]  # variadic *args/**kwargs on classmethod returning TypeVar
 
     @property
-    def is_new(self):
+    def is_new(self) -> bool:
         return self.created_at is None
 
     @property
@@ -58,18 +63,18 @@ class Entity:
         return self._permissions
 
     @permissions.setter
-    def permissions(self, permissions: list[ResourcePermission]):
+    def permissions(self, permissions: list[ResourcePermission]) -> None:
         self._permissions = permissions
 
 
-class EntityFactory(Protocol[T, DB]):
+class EntityFactory(Protocol[T, _DB_contra]):
     @classmethod
-    def create_entity(cls, record: DB) -> T: ...
+    def create_entity(cls, record: _DB_contra) -> T: ...
     @classmethod
-    def create_entities(cls, records: Sequence[DB]) -> List[T]: ...
+    def create_entities(cls, records: Sequence[_DB_contra]) -> List[T]: ...
 
 
-class EntityMapper(Protocol[T, DB]):
+class EntityMapper(Protocol[T, _DB_contra]):
     def to_db_dict(self, entity: T) -> Dict[str, Any]: ...
-    def to_entity(self, db_model: DB) -> T: ...
-    def to_entities(self, db_models: Sequence[DB]) -> List[T]: ...
+    def to_entity(self, db_model: _DB_contra) -> T: ...
+    def to_entities(self, db_models: Sequence[_DB_contra]) -> List[T]: ...

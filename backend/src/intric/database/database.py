@@ -35,7 +35,8 @@ class SafeAsyncSession(AsyncSession):
 
 
 class DatabaseSessionManager:
-    def __init__(self):
+    def __init__(self) -> None:
+        super().__init__()
         self._engine: AsyncEngine | None = None
         self._sessionmaker: async_sessionmaker[AsyncSession] | None = None
 

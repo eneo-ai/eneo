@@ -60,7 +60,8 @@ class ServiceAccountAuthService:
     # after token exchange (personal OAuth doesn't need this)
     DEFAULT_SCOPES = ["Files.Read.All", "Sites.Read.All", "User.Read"]
 
-    def __init__(self):
+    def __init__(self) -> None:
+        super().__init__()
         self.default_scopes = self.DEFAULT_SCOPES
 
     def _get_redirect_uri(self) -> str:
@@ -124,7 +125,7 @@ class ServiceAccountAuthService:
         client_id: str,
         client_secret: str,
         tenant_domain: str,
-    ) -> dict:
+    ) -> dict[str, str]:
         """Generate OAuth authorization URL for service account login.
 
         Args:

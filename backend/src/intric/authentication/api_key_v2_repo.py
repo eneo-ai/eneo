@@ -15,6 +15,7 @@ from intric.database.tables.users_table import Users
 
 class ApiKeysV2Repository:
     def __init__(self, session: AsyncSession):
+        super().__init__()
         self.session = session
         self.table = ApiKeysV2
 

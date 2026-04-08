@@ -35,6 +35,7 @@ class CORSMiddleware:
             typing.Callable[[str], typing.Awaitable[bool]]
         ] = None,
     ) -> None:
+        super().__init__()
         if "*" in allow_methods:
             allow_methods = ALL_METHODS
 

@@ -3,6 +3,8 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 
+ActionOverrides = dict[str, bool]
+
 
 class AuditConfigRepository(ABC):
     """Repository interface for audit category configuration."""
@@ -23,7 +25,7 @@ class AuditConfigRepository(ABC):
     @abstractmethod
     async def find_by_tenant_and_category(
         self, tenant_id: UUID, category: str
-    ) -> tuple[str, bool, dict] | None:
+    ) -> tuple[str, bool, ActionOverrides] | None:
         """
         Get configuration for a specific category.
 
@@ -37,7 +39,9 @@ class AuditConfigRepository(ABC):
         pass
 
     @abstractmethod
-    async def find_all_by_tenant(self, tenant_id: UUID) -> list[tuple[str, bool, dict]]:
+    async def find_all_by_tenant(
+        self, tenant_id: UUID
+    ) -> list[tuple[str, bool, ActionOverrides]]:
         """
         Get all category configurations for a tenant in a single batch query.
 
@@ -55,7 +59,7 @@ class AuditConfigRepository(ABC):
         tenant_id: UUID,
         category: str,
         enabled: bool,
-        action_overrides: dict | None = None,
+        action_overrides: ActionOverrides | None = None,
     ) -> None:
         """
         Update or insert category configuration (upsert).

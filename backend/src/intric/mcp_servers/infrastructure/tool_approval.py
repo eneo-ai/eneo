@@ -112,6 +112,7 @@ class ToolApprovalManager:
     """Manages pending tool approvals across streaming requests."""
 
     def __init__(self, redis_client: Optional[aioredis.Redis] = None):
+        super().__init__()
         self._redis = redis_client
         self._pending_events: dict[str, asyncio.Event] = {}
         self._memory_state: dict[str, dict[str, Any]] = {}

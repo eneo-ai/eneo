@@ -1,8 +1,12 @@
+from typing import cast
+
 import pydantic
 
 from intric.assistants.references import ReferencesService
+from intric.collections.domain.collection import Collection
 from intric.completion_models.infrastructure.completion_service import CompletionService
 from intric.completion_models.infrastructure.context_builder import count_tokens
+from intric.files.file_models import FilePublic
 from intric.files.file_service import FileService
 from intric.main.exceptions import PydanticParseError
 from intric.main.logging import get_logger
@@ -27,7 +31,8 @@ class ServiceRunner:
         references_service: ReferencesService,
         question_repo: QuestionRepository,
         prompt: str,
-    ):
+    ) -> None:
+        super().__init__()
         self.user = user
         self.service = service
         self.completion_service = completion_service
@@ -40,18 +45,24 @@ class ServiceRunner:
     async def run(
         self,
         input: str,
-        file_ids: list[ModelId] = [],
-    ):
+        file_ids: list[ModelId] | None = None,
+    ) -> RunnerResult:
         # Get the relevant texts
         datastore_result = await self.references_service.get_references(
-            input, collections=self.service.groups
+            input, collections=cast(list[Collection], self.service.groups)
         )
 
-        files = await self.file_service.get_files_by_ids([file.id for file in file_ids])
+        effective_file_ids = file_ids or []
+        files = await self.file_service.get_files_by_ids(
+            [file.id for file in effective_file_ids]
+        )
 
+        assert self.service.completion_model is not None, (
+            "Service must have a completion model"
+        )
         # Query the AI models
         ai_response = await self.completion_service.get_response(
-            model=self.service.completion_model,
+            model=self.service.completion_model,  # pyright: ignore[reportArgumentType]  # two CompletionModel classes coexist: ai_models.completion_model vs completion_models.domain; structural mismatch, works at runtime
             text_input=input,
             files=files,
             prompt=self.prompt,
@@ -95,7 +106,6 @@ class ServiceRunner:
         )
 
         # Save
-        assert self.service.completion_model is not None
         question = QuestionAdd(
             tenant_id=self.user.tenant_id,
             question=input,
@@ -112,7 +122,9 @@ class ServiceRunner:
         )
 
         return RunnerResult(
-            result=output.to_value(),
+            result=cast(
+                bool | list[object] | dict[str, object] | str, output.to_value()
+            ),
             datastore_result=datastore_result,
-            files=files,
+            files=cast(list[FilePublic], files),
         )

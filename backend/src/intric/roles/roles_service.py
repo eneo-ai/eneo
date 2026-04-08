@@ -22,18 +22,19 @@ class RolesService:
         self,
         user: UserInDB,
         repo: RolesRepository,
-    ):
+    ) -> None:
+        super().__init__()
         self.user = user
         self.repo = repo
 
-    def _validate(self, role: RoleInDB, role_id: UUID):
+    def _validate(self, role: RoleInDB | None, role_id: UUID) -> None:
         if role is None or self.user.tenant_id != role.tenant_id:
             raise NotFoundException(
                 f"Role {role_id} not found for tenant({self.user.tenant_id})"
             )
 
-    async def get_permissions(self) -> dict:
-        return [  # type: ignore[return-value]
+    async def get_permissions(self) -> list[PermissionPublic]:
+        return [
             PermissionPublic(name=key, description=value)
             for key, value in PERMISSIONS_WITH_DESCRIPTION.items()
         ]

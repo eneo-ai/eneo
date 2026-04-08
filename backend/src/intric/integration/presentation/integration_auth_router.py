@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Annotated, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
@@ -25,8 +25,8 @@ router = APIRouter()
 )
 async def gen_url(
     tenant_integration_id: UUID,
-    state: Optional[str] = None,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    state: Annotated[Optional[str], Query()] = None,
 ):
     oauth2_service = container.oauth2_service()
 
@@ -38,7 +38,7 @@ async def gen_url(
 @router.post("/callback/token/", status_code=200, response_model=UserIntegration)
 async def on_auth_callback(
     params: AuthCallbackParams,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     oauth2_service = container.oauth2_service()
     user = container.user()

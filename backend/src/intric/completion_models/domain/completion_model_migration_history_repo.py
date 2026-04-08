@@ -1,7 +1,7 @@
 """Repository for completion model migration history operations."""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import desc, select
@@ -16,6 +16,7 @@ class CompletionModelMigrationHistoryRepo:
     """Repository for managing completion model migration history."""
 
     def __init__(self, session: AsyncSession):
+        super().__init__()
         self.session = session
 
     async def create_migration_history(
@@ -26,7 +27,7 @@ class CompletionModelMigrationHistoryRepo:
         to_model_id: UUID,
         initiated_by: UUID,
         status: str,
-        entity_types: Optional[List[str]] = None,
+        entity_types: list[str] | None = None,
         affected_count: int = 0,
         started_at: Optional[datetime] = None,
     ) -> CompletionModelMigrationHistory:
@@ -63,8 +64,8 @@ class CompletionModelMigrationHistoryRepo:
         completed_at: Optional[datetime] = None,
         duration_seconds: Optional[float] = None,
         error_message: Optional[str] = None,
-        warnings: Optional[List[str]] = None,
-        migration_details: Optional[dict] = None,
+        warnings: list[str] | None = None,
+        migration_details: dict[str, int] | None = None,
     ) -> Optional[CompletionModelMigrationHistory]:
         """Update an existing migration history record with type-safe parameters."""
         stmt = select(CompletionModelMigrationHistory).where(
@@ -120,7 +121,7 @@ class CompletionModelMigrationHistoryRepo:
         tenant_id: UUID,
         limit: int = 50,
         offset: int = 0,
-    ) -> List[CompletionModelMigrationHistory]:
+    ) -> list[CompletionModelMigrationHistory]:
         """Get migration history for a specific model (from or to)."""
         stmt = (
             select(CompletionModelMigrationHistory)
@@ -144,7 +145,7 @@ class CompletionModelMigrationHistoryRepo:
         tenant_id: UUID,
         limit: int = 50,
         offset: int = 0,
-    ) -> List[CompletionModelMigrationHistory]:
+    ) -> list[CompletionModelMigrationHistory]:
         """Get all migration history for a tenant."""
         stmt = (
             select(CompletionModelMigrationHistory)

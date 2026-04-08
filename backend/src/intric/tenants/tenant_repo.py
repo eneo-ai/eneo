@@ -33,6 +33,7 @@ class TenantRepository:
         session: AsyncSession,
         encryption_service: Optional["EncryptionService"] = None,
     ):
+        super().__init__()
         self.delegate: BaseRepositoryDelegate[TenantInDB] = BaseRepositoryDelegate(
             session,
             Tenants,
@@ -79,17 +80,14 @@ class TenantRepository:
         except IntegrityError as e:
             raise exceptions.UniqueException("Tenant name already exists.") from e
 
-    async def get(self, id: UUID) -> TenantInDB:
-        return cast(TenantInDB, await self.delegate.get(id))
+    async def get(self, id: UUID) -> TenantInDB | None:
+        return await self.delegate.get(id)
 
     async def get_all_tenants(self, domain: str | None = None) -> list[TenantInDB]:
         if domain is not None:
-            return cast(
-                list[TenantInDB],
-                await self.delegate.filter_by(conditions={Tenants.domain: domain}),
-            )
+            return await self.delegate.filter_by(conditions={Tenants.domain: domain})
 
-        return cast(list[TenantInDB], await self.delegate.get_all())
+        return await self.delegate.get_all()
 
     async def add_modules(self, list_of_module_ids: list[ModelId], tenant_id: UUID):
         module_ids = [module.id for module in list_of_module_ids]
@@ -118,6 +116,8 @@ class TenantRepository:
         policy_updates: dict[str, Any],
     ) -> TenantInDB:
         tenant = await self.get(tenant_id)
+        if tenant is None:
+            raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
         policy = dict(tenant.api_key_policy or {})
         policy.update(policy_updates)
 
@@ -275,11 +275,16 @@ class TenantRepository:
         if not credentials:
             return {}
 
-        masked = {}
-        for provider, cred in credentials.items():
+        masked: dict[str, str] = {}
+        # JSONB from PostgreSQL arrives as Any; cast to a typed dict at the boundary.
+        credentials_typed: dict[str, object] = cast(dict[str, object], credentials)
+        for provider, cred in credentials_typed.items():
             # Handle both dict format and legacy string format
+            api_key: str
             if isinstance(cred, dict):
-                api_key = cred.get("api_key", "")
+                cred_dict = cast(dict[str, object], cred)
+                raw = cred_dict.get("api_key", "")
+                api_key = raw if isinstance(raw, str) else str(raw)
             else:
                 api_key = str(cred)
 
@@ -340,11 +345,16 @@ class TenantRepository:
         if not credentials:
             return {}
 
-        metadata = {}
-        for provider, cred in credentials.items():
+        metadata: dict[str, dict[str, str]] = {}
+        # JSONB from PostgreSQL arrives as Any; cast to a typed dict at the boundary.
+        credentials_typed: dict[str, object] = cast(dict[str, object], credentials)
+        for provider, cred in credentials_typed.items():
             # Extract api_key from credential structure
+            api_key: str
             if isinstance(cred, dict):
-                api_key = cred.get("api_key", "")
+                cred_dict = cast(dict[str, object], cred)
+                raw = cred_dict.get("api_key", "")
+                api_key = raw if isinstance(raw, str) else str(raw)
             else:
                 api_key = str(cred)
 
@@ -369,10 +379,15 @@ class TenantRepository:
             # Mask the key - show last 4 chars or "***" for short keys
             masked_key = mask_api_key(api_key)
 
+            cred_for_set_at = (
+                cast(dict[str, object], cred) if isinstance(cred, dict) else {}
+            )
+            set_at_raw = cred_for_set_at.get("set_at")
+            set_at_str = set_at_raw if isinstance(set_at_raw, str) else ""
             metadata[provider] = {
                 "masked_key": masked_key,
                 "encryption_status": encryption_status,
-                "set_at": cred.get("set_at") if isinstance(cred, dict) else None,
+                "set_at": set_at_str,
             }
 
         return metadata
@@ -520,8 +535,11 @@ class TenantRepository:
         if not config:
             return None
 
+        config_typed: dict[str, object] = dict(config)
+
         # Extract and process client_secret
-        client_secret = config.get("client_secret", "")
+        raw_secret = config_typed.get("client_secret", "")
+        client_secret = raw_secret if isinstance(raw_secret, str) else str(raw_secret)
 
         # Detect encryption status BEFORE decryption
         if client_secret.startswith("enc:fernet:v"):
@@ -541,14 +559,30 @@ class TenantRepository:
 
         masked_secret = mask_api_key(client_secret)
 
+        def _str_or_none(v: object) -> str | None:
+            return v if isinstance(v, str) else None
+
+        domains_raw = config_typed.get("allowed_domains", [])
+        domains: list[str] = (
+            [d for d in cast(list[object], domains_raw) if isinstance(d, str)]
+            if isinstance(domains_raw, list)
+            else []
+        )
+        redirect_uris_raw = config_typed.get("additional_redirect_uris", [])
+        redirect_uris: list[str] = (
+            [u for u in cast(list[object], redirect_uris_raw) if isinstance(u, str)]
+            if isinstance(redirect_uris_raw, list)
+            else []
+        )
+
         return {
-            "provider": config.get("provider"),
-            "client_id": config.get("client_id"),
+            "provider": _str_or_none(config_typed.get("provider")),
+            "client_id": _str_or_none(config_typed.get("client_id")),
             "masked_secret": masked_secret,
-            "issuer": config.get("issuer"),
-            "allowed_domains": config.get("allowed_domains", []),
-            "additional_redirect_uris": config.get("additional_redirect_uris", []),
-            "encrypted_at": config.get("encrypted_at"),
+            "issuer": _str_or_none(config_typed.get("issuer")),
+            "allowed_domains": domains,
+            "additional_redirect_uris": redirect_uris,
+            "encrypted_at": _str_or_none(config_typed.get("encrypted_at")),
             "encryption_status": encryption_status,
         }
 

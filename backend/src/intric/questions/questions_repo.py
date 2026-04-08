@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -28,7 +28,8 @@ if TYPE_CHECKING:
 
 
 class QuestionRepository:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
         self.delegate: BaseRepositoryDelegate[Question] = BaseRepositoryDelegate(
             session,
             Questions,
@@ -53,7 +54,9 @@ class QuestionRepository:
             selectinload(Questions.web_search_results),
         ]
 
-    def _add_options(self, stmt: sa.Select | sa.Insert | sa.Update):
+    def _add_options(
+        self, stmt: sa.Select[tuple[Any]] | sa.Insert | sa.Update
+    ) -> sa.Select[tuple[Any]] | sa.Insert | sa.Update:
         for option in self._get_options():
             stmt = stmt.options(option)
 
@@ -70,7 +73,7 @@ class QuestionRepository:
 
     async def _add_references(
         self, question_id: int, chunks: list[InfoBlobChunkInDBWithScore]
-    ):
+    ) -> list[InfoBlobReferences]:
         if not chunks:
             return []
 
@@ -90,7 +93,7 @@ class QuestionRepository:
             .returning(InfoBlobReferences)
         )
 
-        return (await self.session.scalars(stmt)).all()
+        return list((await self.session.scalars(stmt)).all())
 
     async def _add_files(
         self, question_id: int, files: list[File], file_type: str = "user"
@@ -129,10 +132,10 @@ class QuestionRepository:
     async def add(
         self,
         question: QuestionAdd,
-        info_blob_chunks: list[InfoBlobChunkInDBWithScore] = [],
-        files: list[File] = [],
-        generated_files: list[File] = [],
-        web_search_results: list["WebSearchResult"] = [],
+        info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
+        files: list[File] | None = None,
+        generated_files: list[File] | None = None,
+        web_search_results: list["WebSearchResult"] | None = None,
     ):
         stmt = (
             sa.insert(Questions)
@@ -145,7 +148,7 @@ class QuestionRepository:
         question_record = await self.session.scalar(stmt)
 
         question_record.info_blob_references = await self._add_references(
-            question_id=question_record.id, chunks=info_blob_chunks
+            question_id=question_record.id, chunks=info_blob_chunks or []
         )
 
         if files:
@@ -166,18 +169,18 @@ class QuestionRepository:
             )
 
         if question.logging_details is not None:
-            stmt = (
+            stmt = (  # pyright: ignore[reportUnknownVariableType]  # logging_table type is dynamically created and not fully typed
                 sa.insert(logging_table)
                 .values(**question.logging_details.model_dump())
                 .returning(logging_table)
             )
-            result = await self.session.execute(stmt)
-            logging_details = result.scalar_one()
+            result = await self.session.execute(stmt)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]  # logging_table dynamic type
+            logging_details = result.scalar_one()  # pyright: ignore[reportUnknownVariableType]  # dynamic table scalar
             question_record.logging_details = logging_details
 
         return await self.get(question_record.id)
 
-    async def get_by_service(self, service_id: int):
+    async def get_by_service(self, service_id: UUID):
         stmt = (
             sa.select(Questions)
             .where(Questions.service_id == service_id)
@@ -191,7 +194,7 @@ class QuestionRepository:
     ):
         stmt = (
             sa.select(Questions)
-            .where(Questions.session_id is not None)
+            .where(Questions.session_id.is_not(None))
             .join(Sessions)
             .join(Users)
             .where(Users.tenant_id == tenant_id)

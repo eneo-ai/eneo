@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, cast
 from uuid import UUID as UUIDType
 
 from sqlalchemy import func, select
@@ -44,6 +44,7 @@ class AssistantTemplateService:
         session: "AsyncSession",
         user: "UserInDB",
     ) -> None:
+        super().__init__()
         self.factory = factory
         self.repo = repo
         self.feature_flag_service = feature_flag_service
@@ -128,7 +129,7 @@ class AssistantTemplateService:
             AssistantTemplate,
         )
 
-        snapshot = AssistantTemplate.create_snapshot(
+        snapshot: dict[str, object] = AssistantTemplate.create_snapshot(
             {
                 "name": data.name,
                 "description": data.description,
@@ -394,8 +395,16 @@ class AssistantTemplateService:
 
         from intric.database.tables.assistant_template_table import AssistantTemplates
 
-        snapshot = template.original_snapshot
-        completion_model_id = snapshot.get("completion_model_id")
+        snapshot: dict[str, object] = template.original_snapshot
+        completion_model_id = cast(str | None, snapshot.get("completion_model_id"))
+        name = cast(str | None, snapshot.get("name"))
+        description = cast(str | None, snapshot.get("description"))
+        category = cast(str | None, snapshot.get("category"))
+        prompt_text = cast(str | None, snapshot.get("prompt_text"))
+        completion_model_kwargs = cast(
+            dict[str, object] | None, snapshot.get("completion_model_kwargs")
+        )
+        wizard = cast(dict[str, object] | None, snapshot.get("wizard"))
 
         stmt = (
             sa.update(AssistantTemplates)
@@ -404,15 +413,15 @@ class AssistantTemplateService:
                 AssistantTemplates.tenant_id == tenant_id,
             )
             .values(
-                name=snapshot.get("name"),
-                description=snapshot.get("description"),
-                category=snapshot.get("category"),
-                prompt_text=snapshot.get("prompt_text"),
-                completion_model_kwargs=snapshot.get("completion_model_kwargs"),
+                name=name,
+                description=description,
+                category=category,
+                prompt_text=prompt_text,
+                completion_model_kwargs=completion_model_kwargs,
                 completion_model_id=UUIDType(completion_model_id)
                 if completion_model_id
                 else None,
-                wizard=snapshot.get("wizard"),
+                wizard=wizard,
                 updated_at=datetime.now(timezone.utc),
             )
             .returning(AssistantTemplates)
@@ -515,10 +524,10 @@ class AssistantTemplateService:
         rows = result.all()
 
         # Convert to (AssistantTemplate, usage_count) tuples
-        templates_with_usage = []
+        templates_with_usage: list[tuple[AssistantTemplate, int]] = []
         for row in rows:
-            template_record = row[0]
-            usage_count = row[1]
+            template_record: AssistantTemplates = row[0]
+            usage_count: int = row[1]
             template = self.factory.create_assistant_template(item=template_record)
             templates_with_usage.append((template, usage_count))
 
@@ -559,10 +568,10 @@ class AssistantTemplateService:
         rows = result.all()
 
         # Convert to (AssistantTemplate, usage_count) tuples
-        templates_with_usage = []
+        templates_with_usage: list[tuple[AssistantTemplate, int]] = []
         for row in rows:
-            template_record = row[0]
-            usage_count = row[1]
+            template_record: AssistantTemplates = row[0]
+            usage_count: int = row[1]
             template = self.factory.create_assistant_template(item=template_record)
             templates_with_usage.append((template, usage_count))
 

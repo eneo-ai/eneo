@@ -21,6 +21,9 @@ from intric.users.user import UserInDB
 
 if TYPE_CHECKING:
     from intric.actors import ActorManager
+    from intric.ai_models.completion_models.completion_model import (
+        CompletionModelResponse,
+    )
     from intric.completion_models.application import CompletionModelCRUDService
     from intric.completion_models.domain.completion_model import CompletionModel
     from intric.completion_models.infrastructure.completion_service import (
@@ -56,6 +59,7 @@ class AppService:
         icon_repo: IconRepository,
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
+        super().__init__()
         self.user = user
         self.repo = repo
         self.space_repo = space_repo
@@ -118,9 +122,9 @@ class AppService:
         self,
         space: "Space",
         template_data: "TemplateCreate",
-        completion_model: Optional["CompletionModel"],
+        completion_model: "CompletionModel",
         name: str | None = None,
-        transcription_model: Optional["TranscriptionModel"] = None,
+        transcription_model: "TranscriptionModel | None" = None,
     ):
         template = await self.app_template_service.get_app_template(
             app_template_id=template_data.id
@@ -165,21 +169,26 @@ class AppService:
 
         return await self.repo.add(app)
 
-    async def get_completion_model(self, space: Space) -> Optional["CompletionModel"]:
-        """Get a completion model for the space. Returns None if no model is available."""
+    async def get_completion_model(self, space: Space) -> "CompletionModel":
+        """Get a completion model for the space."""
         completion_model = space.get_default_completion_model() or (
             space.get_latest_completion_model()
             if not space.is_personal()
             else await self.completion_model_crud_service.get_default_completion_model()
         )
 
-        return completion_model  # type: ignore[return-value]
+        if completion_model is None:
+            raise BadRequestException(
+                "No completion model available. Please enable a completion model in the space before creating an app."
+            )
 
-    async def get_transcription_model(
-        self, space: Space
-    ) -> Optional["TranscriptionModel"]:
-        """Get a transcription model for the space. Returns None if no model is available."""
-        transcription_model = space.get_latest_transcription_model()
+        return completion_model
+
+    async def get_transcription_model(self, space: Space) -> "TranscriptionModel":
+        """Get a transcription model for the space."""
+        transcription_model: "TranscriptionModel | None" = (
+            space.get_latest_transcription_model()
+        )
         if not transcription_model:
             # Get default from tenant (for both personal and non-personal spaces)
             transcription_model = await self.transcription_model_crud_service.get_default_transcription_model()
@@ -342,7 +351,9 @@ class AppService:
         if icon_id:
             await self.icon_repo.delete(icon_id)
 
-    async def run_app(self, app_id: UUID, file_ids: list[UUID], text: str | None):
+    async def run_app(
+        self, app_id: UUID, file_ids: list[UUID], text: str | None
+    ) -> "CompletionModelResponse":
         space = await self.space_repo.get_space_by_app(app_id=app_id)
         app = space.get_app(app_id=app_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
@@ -397,7 +408,9 @@ class AppService:
 
         return await self.prompt_service.get_prompts_by_app(app_id=app_id)
 
-    async def publish_app(self, app_id: "UUID", publish: bool):
+    async def publish_app(
+        self, app_id: "UUID", publish: bool
+    ) -> tuple[App, list[ResourcePermission]]:
         space = await self.space_repo.get_space_by_app(app_id=app_id)
         app = space.get_app(app_id=app_id)
         actor = self.actor_manager.get_space_actor_from_space(space)

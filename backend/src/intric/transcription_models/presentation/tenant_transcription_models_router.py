@@ -1,5 +1,6 @@
 # MIT License
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -13,6 +14,9 @@ from intric.transcription_models.presentation.transcription_model_models import 
     TranscriptionModelPublic,
 )
 from intric.users.user import UserInDB
+
+CurrentUser = Annotated[UserInDB, Depends(get_current_active_user)]
+DBSession = Annotated[AsyncSession, Depends(get_session_with_transaction)]
 
 router = APIRouter()
 
@@ -50,8 +54,8 @@ class TenantTranscriptionModelUpdate(BaseModel):
 )
 async def create_tenant_transcription_model(
     model_create: TenantTranscriptionModelCreate,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
+    user: CurrentUser,
+    session: DBSession,
 ):
     """Create a new tenant-specific transcription model."""
     validate_permission(user, Permission.ADMIN)
@@ -136,8 +140,8 @@ async def create_tenant_transcription_model(
 async def update_tenant_transcription_model(
     model_id: UUID,
     model_update: TenantTranscriptionModelUpdate,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
+    user: CurrentUser,
+    session: DBSession,
 ):
     """Update a tenant-specific transcription model."""
     validate_permission(user, Permission.ADMIN)
@@ -197,8 +201,8 @@ async def update_tenant_transcription_model(
 )
 async def delete_tenant_transcription_model(
     model_id: UUID,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
+    user: CurrentUser,
+    session: DBSession,
 ):
     """Delete a tenant-specific transcription model."""
     validate_permission(user, Permission.ADMIN)

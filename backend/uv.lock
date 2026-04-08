@@ -1125,6 +1125,7 @@ dependencies = [
     { name = "tavily-python" },
     { name = "tenacity" },
     { name = "tiktoken" },
+    { name = "typing-extensions" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "wrapt" },
 ]
@@ -1204,6 +1205,7 @@ requires-dist = [
     { name = "tavily-python", specifier = ">=0.5.1,<0.6" },
     { name = "tenacity", specifier = ">=8.2.1,<9" },
     { name = "tiktoken", specifier = ">=0,<1" },
+    { name = "typing-extensions", specifier = ">=4.12.0,<5" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0,<1" },
     { name = "wrapt", specifier = ">=1.16.0,<2" },
 ]

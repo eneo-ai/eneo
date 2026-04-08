@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable, Coroutine, TypeVar
 
 from intric.main.exceptions import UnauthorizedException
 
 if TYPE_CHECKING:
     from intric.users.user import UserInDB
+
+_F = TypeVar("_F", bound=Callable[..., Coroutine[Any, Any, Any]])
 
 
 class Permission(str, Enum):
@@ -25,13 +27,13 @@ class Permission(str, Enum):
     INTEGRATIONS = "integrations"
 
 
-def validate_permissions(permission: Permission):
+def validate_permissions(permission: Permission) -> Callable[[_F], _F]:
     """This decorator can only be used on class methods
     where a user exists in the `self`.
     """
 
-    def _validate(func):
-        async def _inner(self, *args, **kwargs):
+    def _validate(func: _F) -> _F:
+        async def _inner(self: Any, *args: Any, **kwargs: Any) -> Any:
             if permission not in self.user.permissions:
                 raise UnauthorizedException(
                     f"Need permission {permission.value} in order to access"
@@ -39,9 +41,9 @@ def validate_permissions(permission: Permission):
 
             return await func(self, *args, **kwargs)
 
-        return _inner
+        return _inner  # type: ignore[return-value]  # TypeVar bound wrapping
 
-    return _validate
+    return _validate  # type: ignore[return-value]  # TypeVar bound wrapping
 
 
 def validate_permission(user: UserInDB, permission: Permission):

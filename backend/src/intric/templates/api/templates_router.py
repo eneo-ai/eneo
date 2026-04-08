@@ -5,6 +5,8 @@ from intric.server.dependencies.container import get_container
 from intric.templates.api.template_models import TemplateListPublic
 
 router = APIRouter()
+WITH_USER_CONTAINER = get_container(with_user=True)
+USER_CONTAINER = Depends(WITH_USER_CONTAINER)
 
 
 @router.get(
@@ -12,7 +14,7 @@ router = APIRouter()
     response_model=TemplateListPublic,
     status_code=200,
 )
-async def get_templates(container: Container = Depends(get_container(with_user=True))):
+async def get_templates(container: Container = USER_CONTAINER):
     """Get all types of templates"""
     template_service = container.template_service()
 

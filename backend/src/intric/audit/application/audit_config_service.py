@@ -10,6 +10,7 @@ from intric.audit.domain.category_mappings import (
     get_category_for_action,
 )
 from intric.audit.domain.repositories.audit_config_repository import (
+    ActionOverrides,
     AuditConfigRepository,
 )
 from intric.audit.schemas.audit_config_schemas import (
@@ -41,6 +42,7 @@ class AuditConfigService:
     """Service for managing audit category configuration with Redis caching."""
 
     def __init__(self, repository: AuditConfigRepository):
+        super().__init__()
         self.repository = repository
         self.redis = get_redis()
         self.cache_ttl = AUDIT_CONFIG_CACHE_TTL
@@ -124,7 +126,9 @@ class AuditConfigService:
         """
         # Fetch current config from database
         configs = await self.repository.find_by_tenant(tenant_id)
-        config_dict = {category: enabled for category, enabled in configs}
+        config_dict: dict[str, bool] = {
+            category: enabled for category, enabled in configs
+        }
 
         # All 7 categories in order
         all_categories = [
@@ -138,7 +142,7 @@ class AuditConfigService:
         ]
 
         # Build enriched category configs
-        category_configs = []
+        category_configs: list[CategoryConfig] = []
         for category in all_categories:
             # Get enabled state (default to True if not found)
             enabled = config_dict.get(category, True)
@@ -261,9 +265,7 @@ class AuditConfigService:
                 enabled = True
             else:
                 category_enabled = config[1]  # enabled boolean
-                action_overrides = (
-                    config[2] if len(config) > 2 else {}
-                )  # action_overrides JSONB
+                action_overrides = config[2]  # action_overrides JSONB
 
                 if action in action_overrides:
                     # Action has explicit override - takes precedence over category state
@@ -308,13 +310,13 @@ class AuditConfigService:
         all_configs = await self.repository.find_all_by_tenant(tenant_id)
 
         # Build local lookup dict: {category: (enabled, action_overrides)}
-        config_dict = {
+        config_dict: dict[str, tuple[bool, ActionOverrides]] = {
             category: (enabled, overrides)
             for category, enabled, overrides in all_configs
         }
 
         # Build list of all actions with their enabled status
-        action_configs = []
+        action_configs: list[ActionConfig] = []
 
         for action_value, category in CATEGORY_MAPPINGS.items():
             # Determine if action is enabled using local dict (avoids 65 async calls)
@@ -366,7 +368,7 @@ class AuditConfigService:
             Updated ActionConfigResponse
         """
         # Group updates by category (since we update JSONB per category)
-        updates_by_category: dict[str, dict[str, bool]] = {}
+        updates_by_category: dict[str, ActionOverrides] = {}
 
         for update in updates:
             category = get_category_for_action(update.action)
@@ -384,11 +386,11 @@ class AuditConfigService:
             if config is None:
                 # If no category config exists, create it with default enabled=True
                 category_enabled = True
-                current_overrides = {}
+                current_overrides: ActionOverrides = {}
             else:
                 # Preserve existing category enabled state
                 category_enabled = config[1]
-                current_overrides = config[2] if len(config) > 2 else {}
+                current_overrides = config[2]
 
             # Merge new overrides with existing ones
             updated_overrides = {**current_overrides, **action_overrides}

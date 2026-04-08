@@ -28,7 +28,7 @@ class Step(BaseModel):
 
 class StepInDB(InDB, Step):
     service: Service
-    filter: Optional[FilterInDB] = None
+    filter: Optional[FilterInDB] = None  # type: ignore[assignment]  # intentional narrowing: FilterInDB extends Filter; Pydantic handles covariant override
 
 
 class WorkflowBase(BaseModel):
@@ -37,7 +37,7 @@ class WorkflowBase(BaseModel):
 
 
 class WorkflowInDB(InDB, WorkflowBase):
-    steps: list[StepInDB]
+    steps: list[StepInDB]  # type: ignore[assignment]  # intentional narrowing: list[StepInDB] is list[Step] at runtime via Pydantic covariant field
 
 
 # Rebuild models

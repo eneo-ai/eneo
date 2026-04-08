@@ -1,11 +1,12 @@
 import logging
-from datetime import datetime
-from typing import TYPE_CHECKING, Any, List, Optional
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy import and_, delete, func, select, true, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from intric.completion_models.application.completion_model_usage_service import (
     CompletionModelUsageService,
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
     from intric.completion_models.domain.completion_model_repo import (
         CompletionModelRepository,
     )
-    from intric.users.user import User  # type: ignore[attr-defined]
+    from intric.users.user import UserInDB
 
 
 class CompletionModelMigrationService:
@@ -43,6 +44,7 @@ class CompletionModelMigrationService:
         completion_model_repo: "CompletionModelRepository",
         usage_service: CompletionModelUsageService,
     ):
+        super().__init__()
         self.session = session
         self.completion_model_repo = completion_model_repo
         self.usage_service = usage_service
@@ -55,12 +57,13 @@ class CompletionModelMigrationService:
         self,
         from_model_id: UUID,
         to_model_id: UUID,
-        entity_types: Optional[List[str]] = None,
-        user: "User" = None,
+        entity_types: list[str] | str | None = None,
+        *,
+        user: "UserInDB",
         confirm_migration: bool = False,
     ) -> MigrationResult:
         """Execute model migration with full safety checks and observability."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         migration_id = uuid4()
 
         self.logger.info(
@@ -75,38 +78,28 @@ class CompletionModelMigrationService:
             },
         )
 
+        normalized_entity_types: list[str] | None
+        if isinstance(entity_types, str):
+            normalized_entity_types = [entity_types]
+        else:
+            normalized_entity_types = entity_types
+
         # Validate and normalize entity_types
-        if entity_types is not None:
-            # Add debugging to catch the "string" issue
-            self.logger.debug(
-                f"Raw entity_types received: {entity_types} (type: {type(entity_types)})"
-            )
-
-            # Handle case where a string is passed instead of a list
-            if isinstance(entity_types, str):
-                self.logger.warning(
-                    f"entity_types is a string instead of list: '{entity_types}'. Converting to list."
-                )
-                entity_types = [entity_types]
-
-            # Validate entity types
-            if not isinstance(entity_types, list):
-                raise ValidationException(
-                    f"entity_types must be a list of strings, got {type(entity_types)}"
-                )
-
+        if normalized_entity_types is not None:
             # Check for invalid entity types
             invalid_types = [
-                t for t in entity_types if t not in ENTITY_TYPES and t != "spaces"
+                t
+                for t in normalized_entity_types
+                if t not in ENTITY_TYPES and t != "spaces"
             ]
             if invalid_types:
                 raise ValidationException(
                     f"Invalid entity types: {invalid_types}. Valid types are: {ENTITY_TYPES + ['spaces']}"
                 )
 
-            self.logger.debug(f"Validated entity_types: {entity_types}")
+            self.logger.debug(f"Validated entity_types: {normalized_entity_types}")
 
-        final_entity_types = entity_types or ENTITY_TYPES
+        final_entity_types: list[str] = normalized_entity_types or list(ENTITY_TYPES)
         self.logger.debug(f"Final entity_types for migration: {final_entity_types}")
 
         # Validate models exist and belong to tenant
@@ -203,7 +196,7 @@ class CompletionModelMigrationService:
             to_model_id=to_model_id,
             initiated_by=user.id,
             status="in_progress",
-            entity_types=entity_types,
+            entity_types=normalized_entity_types,
             affected_count=affected_count,
             started_at=start_time,
         )
@@ -229,7 +222,7 @@ class CompletionModelMigrationService:
             # Only fail if there are compatibility issues AND user hasn't confirmed
             if not validation_result.compatible and not confirm_migration:
                 # Update migration history with validation failure
-                duration = (datetime.utcnow() - start_time).total_seconds()
+                duration = (datetime.now(timezone.utc) - start_time).total_seconds()
                 await self.migration_history_repo.update_migration_history(
                     migration_id=migration_id,
                     tenant_id=user.tenant_id,
@@ -237,7 +230,7 @@ class CompletionModelMigrationService:
                     migrated_count=0,
                     failed_count=0,
                     duration_seconds=duration,
-                    completed_at=datetime.utcnow(),
+                    completed_at=datetime.now(timezone.utc),
                     error_message=f"Migration has compatibility issues: {', '.join(validation_result.warnings)}. Set confirm_migration=true to proceed anyway.",
                     warnings=validation_result.warnings,
                 )
@@ -314,7 +307,7 @@ class CompletionModelMigrationService:
                     },
                 )
 
-            duration = (datetime.utcnow() - start_time).total_seconds()
+            duration = (datetime.now(timezone.utc) - start_time).total_seconds()
 
             self.logger.info(
                 "Model migration completed successfully",
@@ -336,7 +329,7 @@ class CompletionModelMigrationService:
                 migrated_count=result["total"],
                 failed_count=0,
                 duration_seconds=duration,
-                completed_at=datetime.utcnow(),
+                completed_at=datetime.now(timezone.utc),
                 warnings=validation_result.warnings
                 if validation_result.warnings
                 else None,
@@ -349,7 +342,7 @@ class CompletionModelMigrationService:
                     migration_id=migration_id,
                     migrated_count=result["total"],
                     duration_seconds=duration,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                 )
             )
 
@@ -381,7 +374,7 @@ class CompletionModelMigrationService:
             )
 
             # Update migration history with failure
-            duration = (datetime.utcnow() - start_time).total_seconds()
+            duration = (datetime.now(timezone.utc) - start_time).total_seconds()
             await self.migration_history_repo.update_migration_history(
                 migration_id=migration_id,
                 tenant_id=user.tenant_id,
@@ -389,7 +382,7 @@ class CompletionModelMigrationService:
                 migrated_count=0,
                 failed_count=affected_count,
                 duration_seconds=duration,
-                completed_at=datetime.utcnow(),
+                completed_at=datetime.now(timezone.utc),
                 error_message=str(e),
             )
 
@@ -398,7 +391,7 @@ class CompletionModelMigrationService:
                 ModelMigrationFailed(
                     migration_id=migration_id,
                     error_message=f"Database error: {str(e)}",
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                 )
             )
 
@@ -418,7 +411,7 @@ class CompletionModelMigrationService:
             )
 
             # Update migration history with failure
-            duration = (datetime.utcnow() - start_time).total_seconds()
+            duration = (datetime.now(timezone.utc) - start_time).total_seconds()
             await self.migration_history_repo.update_migration_history(
                 migration_id=migration_id,
                 tenant_id=user.tenant_id,
@@ -426,7 +419,7 @@ class CompletionModelMigrationService:
                 migrated_count=0,
                 failed_count=affected_count,
                 duration_seconds=duration,
-                completed_at=datetime.utcnow(),
+                completed_at=datetime.now(timezone.utc),
                 error_message=str(e),
             )
 
@@ -435,7 +428,7 @@ class CompletionModelMigrationService:
                 ModelMigrationFailed(
                     migration_id=migration_id,
                     error_message=f"Unexpected error: {str(e)}",
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                 )
             )
 
@@ -448,7 +441,7 @@ class CompletionModelMigrationService:
         from_model = await self.completion_model_repo.one(model_id=from_model_id)
         to_model = await self.completion_model_repo.one(model_id=to_model_id)
 
-        issues = []
+        issues: list[str] = []
 
         # Check if target model is deprecated
         if to_model.is_deprecated:
@@ -488,7 +481,7 @@ class CompletionModelMigrationService:
         )
 
     async def _count_affected_entities(
-        self, from_model_id: UUID, entity_types: List[str], tenant_id: UUID
+        self, from_model_id: UUID, entity_types: list[str], tenant_id: UUID
     ) -> int:
         """Count how many entities would be affected by the migration."""
         total_count = 0
@@ -561,11 +554,11 @@ class CompletionModelMigrationService:
         self,
         from_model_id: UUID,
         to_model_id: UUID,
-        entity_types: List[str],
+        entity_types: list[str],
         tenant_id: UUID,
-    ) -> dict:
+    ) -> dict[str, int]:
         """Execute migration with savepoint-based rollback capability."""
-        results = {}
+        results: dict[str, int] = {}
 
         async with self.session.begin_nested() as savepoint:  # Savepoint for rollback
             try:
@@ -591,7 +584,7 @@ class CompletionModelMigrationService:
 
     def _build_tenant_filter_condition(
         self, table: Any, entity_type: str, tenant_id: UUID
-    ):
+    ) -> ColumnElement[bool]:
         """Build appropriate tenant filtering condition based on entity type."""
         from intric.database.tables.users_table import Users
 
@@ -605,7 +598,7 @@ class CompletionModelMigrationService:
             )
         elif entity_type in {"assistant_template", "app_template"}:
             # Global entities - no tenant filtering needed
-            return True
+            return true()
         elif entity_type == "spaces":
             # Spaces have direct tenant_id field
             return table.tenant_id == tenant_id
@@ -613,7 +606,7 @@ class CompletionModelMigrationService:
             self.logger.warning(
                 f"Unknown entity type for tenant filtering: {entity_type}"
             )
-            return True
+            return true()
 
     async def _migrate_entity_type(
         self, entity_type: str, from_model_id: UUID, to_model_id: UUID, tenant_id: UUID
@@ -633,7 +626,7 @@ class CompletionModelMigrationService:
             )
             return 0
 
-        table = ENTITY_TABLE_MAP[entity_type]
+        table: Any = ENTITY_TABLE_MAP[entity_type]
 
         # Build tenant-aware filtering condition
         tenant_condition = self._build_tenant_filter_condition(
@@ -674,8 +667,8 @@ class CompletionModelMigrationService:
         from_model_id: UUID,
         to_model_id: UUID,
         tenant_id: UUID,
-        table,
-        tenant_condition,
+        table: Any,
+        tenant_condition: ColumnElement[bool],
     ) -> int:
         """Migrate assistants and handle their completion_model_kwargs properly."""
         self.logger.debug(

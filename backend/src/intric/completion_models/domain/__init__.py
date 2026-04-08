@@ -7,3 +7,5 @@ from intric.completion_models.domain.completion_model import (
 from intric.completion_models.domain.completion_model_repo import (
     CompletionModelRepository,
 )
+
+__all__ = ["CompletionModel", "CompletionModelRepository"]

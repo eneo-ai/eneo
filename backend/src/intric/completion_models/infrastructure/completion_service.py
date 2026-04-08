@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, AsyncGenerator, Optional
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
 
 import redis.asyncio as aioredis
 
@@ -24,6 +24,7 @@ from intric.mcp_servers.infrastructure.proxy import (
 )
 from intric.mcp_servers.infrastructure.tool_approval import get_approval_manager
 from intric.sessions.session import SessionInDB
+from intric.settings.encryption_service import EncryptionService
 from intric.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
@@ -59,12 +60,18 @@ class CompletionService:
         self.context_builder = context_builder
         self.tenant = tenant
         self.config = config or SETTINGS
+        if encryption_service is None:
+            encryption_settings: Settings | None = (
+                None if self.config.testing else self.config
+            )
+            encryption_service = EncryptionService(encryption_settings)
         self.encryption_service = encryption_service
         self.session = session
         self.redis_client = redis_client
         self._mcp_proxy_factory = MCPProxySessionFactory(
-            encryption_service=encryption_service
+            encryption_service=self.encryption_service
         )
+        super().__init__()
 
     async def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
         """
@@ -124,8 +131,10 @@ class CompletionService:
             )
 
         # Create credential resolver
+        provider_id = provider_db.id
+
         credential_resolver = TenantModelCredentialResolver(
-            provider_id=provider_db.id,
+            provider_id=provider_id,
             provider_type=provider_db.provider_type,
             credentials=provider_db.credentials,
             config=provider_db.config,
@@ -214,20 +223,32 @@ class CompletionService:
         model: CompletionModel,
         text_input: str,
         model_kwargs: ModelKwargs | None = None,
-        files: list[File] = [],
+        files: list[File] | None = None,
         prompt: str = "",
-        prompt_files: list[File] = [],
-        transcription_inputs: list[str] = [],
-        info_blob_chunks: list[InfoBlobChunkInDBWithScore] = [],
-        web_search_results: list["WebSearchResult"] = [],
+        prompt_files: list[File] | None = None,
+        transcription_inputs: list[str] | None = None,
+        info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
+        web_search_results: list["WebSearchResult"] | None = None,
         session: SessionInDB | None = None,
         stream: bool = False,
         extended_logging: bool = False,
         version: int = 1,
         use_image_generation: bool = False,
-        mcp_servers: list["MCPServer"] = [],
+        mcp_servers: list["MCPServer"] | None = None,
         require_tool_approval: bool = False,
-    ):
+    ) -> CompletionModelResponse:
+        if files is None:
+            files = []
+        if prompt_files is None:
+            prompt_files = []
+        if transcription_inputs is None:
+            transcription_inputs = []
+        if info_blob_chunks is None:
+            info_blob_chunks = []
+        if web_search_results is None:
+            web_search_results = []
+        if mcp_servers is None:
+            mcp_servers = []
         model_adapter = await self._get_adapter(model)
 
         # Make sure everything fits in the context of the model
@@ -292,22 +313,22 @@ class CompletionService:
 
             # Phase 2: Create generator that iterates the pre-created stream
             # This generator yields error events for mid-stream failures
-            async def streaming_wrapper():
+            async def streaming_wrapper() -> AsyncGenerator[Completion, None]:
                 """
                 Generator that iterates pre-created stream.
                 The stream was already created and validated, so we're past
                 the pre-flight checks. Any errors here are mid-stream failures.
                 Proxy cleanup happens after iteration completes.
                 """
+                approval_manager: Any | None = None
+                pending_approval_ids: set[str] = set()
+                approval_context = None
                 try:
                     # Get approval manager if tool approval is required
-                    approval_manager = (
-                        get_approval_manager(redis_client=self.redis_client)
-                        if require_tool_approval
-                        else None
-                    )
-                    pending_approval_ids: set[str] = set()
-                    approval_context = None
+                    if require_tool_approval:
+                        approval_manager = get_approval_manager(
+                            redis_client=self.redis_client
+                        )
                     if require_tool_approval:
                         if session is None:
                             raise ValueError(
@@ -366,3 +387,4 @@ class CompletionService:
 class CompletionServiceFactory:
     def __init__(self, container: Container):
         self.container = container
+        super().__init__()

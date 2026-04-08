@@ -8,6 +8,7 @@ if TYPE_CHECKING:
 
 class CompletionModelService:
     def __init__(self, completion_model_repo: "CompletionModelRepository"):
+        super().__init__()
         self.completion_model_repo = completion_model_repo
 
     async def get_available_completion_models(self):

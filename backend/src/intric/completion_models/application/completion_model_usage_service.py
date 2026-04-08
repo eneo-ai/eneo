@@ -1,14 +1,15 @@
 import base64
 import json
 import logging
-from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional, cast
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, true
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from intric.completion_models.presentation.completion_model_models import (
     ModelUsageDetail,
@@ -35,6 +36,12 @@ if TYPE_CHECKING:
     )
 
 
+EntityDetailsFetcher = Callable[
+    [UUID, UUID, int, dict[str, Any] | None],
+    Awaitable[tuple[list["ModelUsageDetail"], bool]],
+]
+
+
 class CompletionModelUsageService:
     """Service for tracking and retrieving completion model usage statistics."""
 
@@ -43,6 +50,7 @@ class CompletionModelUsageService:
         session: AsyncSession,
         completion_model_repo: "CompletionModelRepository",
     ):
+        super().__init__()
         self.session = session
         self.completion_model_repo = completion_model_repo
         self.logger = logging.getLogger(__name__)
@@ -73,7 +81,7 @@ class CompletionModelUsageService:
                 assistant_templates_count=0,
                 app_templates_count=0,
                 spaces_count=0,
-                last_updated=datetime.utcnow(),
+                last_updated=datetime.now(timezone.utc),
             )
 
         return ModelUsageStatistics(
@@ -109,7 +117,7 @@ class CompletionModelUsageService:
                 cursor_data = None
 
         # Define entity types to query
-        entity_queries = {
+        entity_queries: dict[str, EntityDetailsFetcher] = {
             "assistant": self._get_assistant_details,
             "app": self._get_app_details,
             "service": self._get_service_details,
@@ -147,7 +155,7 @@ class CompletionModelUsageService:
         else:
             # For multiple entity types, use simpler approach
             # This is less common and doesn't need full cursor support
-            details = []
+            details: list[ModelUsageDetail] = []
             for _entity_type_name, query_func in entity_queries.items():
                 entity_details, _ = await query_func(
                     model_id, tenant_id, limit // len(entity_queries), None
@@ -170,7 +178,7 @@ class CompletionModelUsageService:
 
     async def get_all_models_usage_summary(
         self, tenant_id: UUID
-    ) -> List[ModelUsageSummary]:
+    ) -> list[ModelUsageSummary]:
         """Get usage summary for all models in a tenant."""
         import logging
 
@@ -204,21 +212,23 @@ class CompletionModelUsageService:
             logger.info(f"Executing query: {stmt}")
 
             results = await self.session.execute(stmt)
-            rows = results.all()
+            rows: list[Any] = list(results.all())
 
             logger.info(f"Query returned {len(rows)} rows")
 
-            summaries = []
+            summaries: list[ModelUsageSummary] = []
             for row in rows:
                 logger.debug(f"Processing row: {row}")
 
                 summary = ModelUsageSummary(
-                    model_id=row.id,
-                    model_name=row.name,
-                    model_nickname=row.nickname,
-                    is_enabled=row.is_enabled,
-                    total_usage=row.total_usage or 0,
-                    last_updated=row.last_updated or datetime.utcnow(),
+                    model_id=cast(UUID, row.id),
+                    model_name=cast(str, row.name),
+                    model_nickname=cast(str, row.nickname),
+                    is_enabled=cast(bool, row.is_enabled),
+                    total_usage=cast(int, row.total_usage or 0),
+                    last_updated=cast(
+                        datetime, row.last_updated or datetime.now(timezone.utc)
+                    ),
                 )
                 summaries.append(summary)
 
@@ -233,7 +243,7 @@ class CompletionModelUsageService:
 
     def _build_tenant_filter_condition(
         self, table: Any, entity_type: str, tenant_id: UUID
-    ):
+    ) -> ColumnElement[bool]:
         """Build appropriate tenant filtering condition based on entity type."""
         if entity_type in {"app", "question"}:
             # Direct tenant_id field
@@ -245,12 +255,12 @@ class CompletionModelUsageService:
             )
         elif entity_type in {"assistant_template", "app_template"}:
             # Global entities - no tenant filtering needed
-            return True
+            return true()
         else:
             self.logger.warning(
                 f"Unknown entity type for tenant filtering: {entity_type}"
             )
-            return True
+            return true()
 
     async def _get_entity_details(
         self,
@@ -259,17 +269,17 @@ class CompletionModelUsageService:
         tenant_id: UUID,
         limit: int,
         entity_type: str,
-        joins: List[tuple] = None,
-        extra_columns: List[Any] = None,
-        cursor_data: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[List[ModelUsageDetail], bool]:
+        joins: list[tuple[Any, Any]] | None = None,
+        extra_columns: list[Any] | None = None,
+        cursor_data: dict[str, Any] | None = None,
+    ) -> tuple[list[ModelUsageDetail], bool]:
         """Generic method to get entity details for any entity type with cursor support."""
         self.logger.debug(
             f"Getting entity details for entity_type={entity_type}, model_id={model_id}, tenant_id={tenant_id}"
         )
 
         # Base columns that all entities have
-        columns = [
+        columns: list[Any] = [
             table.id,
             table.name,
             table.created_at,
@@ -314,28 +324,27 @@ class CompletionModelUsageService:
                 stmt = stmt.join(join_table, join_condition, isouter=True)
 
         result = await self.session.execute(stmt)
-        rows = result.fetchall()
+        rows = list(result.mappings().all())
 
         # Check if there are more results
         has_more = len(rows) > limit
         rows = rows[:limit]  # Only return requested limit
 
         # Convert rows to ModelUsageDetail objects
-        details = []
+        details: list[ModelUsageDetail] = []
         for row in rows:
-            # Build a dict from the row data
-            row_dict = dict(row._mapping)
+            row_dict = cast(dict[str, Any], dict(row))
 
             # Map the data to ModelUsageDetail fields
             detail = ModelUsageDetail(
-                entity_id=row_dict.get("id"),
-                entity_name=row_dict.get("name"),
+                entity_id=cast(UUID, row_dict["id"]),
+                entity_name=cast(str, row_dict["name"]),
                 entity_type=entity_type,
-                space_id=row_dict.get("space_id"),
-                space_name=row_dict.get("space_name"),
-                owner_id=row_dict.get("user_id"),
-                owner_name=row_dict.get("owner_name"),
-                created_at=row_dict.get("created_at"),
+                space_id=cast(UUID | None, row_dict.get("space_id")),
+                space_name=cast(str | None, row_dict.get("space_name")),
+                owner_id=cast(UUID | None, row_dict.get("user_id")),
+                owner_name=cast(str | None, row_dict.get("owner_name")),
+                created_at=cast(datetime, row_dict["created_at"]),
             )
             details.append(detail)
 
@@ -346,8 +355,8 @@ class CompletionModelUsageService:
         model_id: UUID,
         tenant_id: UUID,
         limit: int,
-        cursor_data: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[List[ModelUsageDetail], bool]:
+        cursor_data: dict[str, Any] | None = None,
+    ) -> tuple[list[ModelUsageDetail], bool]:
         """Get details for assistants using this model."""
         return await self._get_entity_details(
             table=Assistants,
@@ -373,8 +382,8 @@ class CompletionModelUsageService:
         model_id: UUID,
         tenant_id: UUID,
         limit: int,
-        cursor_data: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[List[ModelUsageDetail], bool]:
+        cursor_data: dict[str, Any] | None = None,
+    ) -> tuple[list[ModelUsageDetail], bool]:
         """Get details for apps using this model."""
         return await self._get_entity_details(
             table=Apps,
@@ -399,8 +408,8 @@ class CompletionModelUsageService:
         model_id: UUID,
         tenant_id: UUID,
         limit: int,
-        cursor_data: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[List[ModelUsageDetail], bool]:
+        cursor_data: dict[str, Any] | None = None,
+    ) -> tuple[list[ModelUsageDetail], bool]:
         """Get details for services using this model."""
         return await self._get_entity_details(
             table=Services,
@@ -422,8 +431,8 @@ class CompletionModelUsageService:
         model_id: UUID,
         tenant_id: UUID,
         limit: int,
-        cursor_data: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[List[ModelUsageDetail], bool]:
+        cursor_data: dict[str, Any] | None = None,
+    ) -> tuple[list[ModelUsageDetail], bool]:
         """Get details for assistant templates using this model."""
         return await self._get_entity_details(
             table=AssistantTemplates,
@@ -447,8 +456,8 @@ class CompletionModelUsageService:
         model_id: UUID,
         tenant_id: UUID,
         limit: int,
-        cursor_data: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[List[ModelUsageDetail], bool]:
+        cursor_data: dict[str, Any] | None = None,
+    ) -> tuple[list[ModelUsageDetail], bool]:
         """Get details for app templates using this model."""
         return await self._get_entity_details(
             table=AppTemplates,
@@ -468,7 +477,7 @@ class CompletionModelUsageService:
         )
 
     async def update_usage_stats_incremental(
-        self, tenant_id: UUID, model_id: Optional[UUID] = None
+        self, tenant_id: UUID, model_id: UUID | None = None
     ) -> None:
         """Update usage statistics incrementally for changes.
 
@@ -495,7 +504,7 @@ class CompletionModelUsageService:
                 self.logger.debug(f"Query for completion models: {stmt}")
 
                 result = await self.session.execute(stmt)
-                model_rows = result.fetchall()
+                model_rows: list[Any] = list(result.fetchall())
 
                 self.logger.info(
                     f"Found {len(model_rows)} completion models for tenant {tenant_id}"
@@ -993,7 +1002,7 @@ class CompletionModelUsageService:
         )
 
         # Update timestamp
-        stats.last_updated = datetime.utcnow()
+        stats.last_updated = datetime.now(timezone.utc)
 
         # Final verification of data integrity
         verification_total = (

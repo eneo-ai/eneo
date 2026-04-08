@@ -8,15 +8,16 @@ class FeatureFlag:
         self,
         name: str,
         feature_id: UUID | None = None,
-        tenant_ids: set | None = None,
-        disabled_tenant_ids: set | None = None,
+        tenant_ids: set[UUID] | None = None,
+        disabled_tenant_ids: set[UUID] | None = None,
         is_enabled_globally: bool = False,
         description: str | None = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.feature_id = feature_id
         self.name = name
-        self.tenant_ids = tenant_ids if tenant_ids is not None else set()
-        self.disabled_tenant_ids = (
+        self.tenant_ids: set[UUID] = tenant_ids if tenant_ids is not None else set()
+        self.disabled_tenant_ids: set[UUID] = (
             disabled_tenant_ids if disabled_tenant_ids is not None else set()
         )
         self.is_enabled_globally = is_enabled_globally

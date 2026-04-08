@@ -18,6 +18,8 @@ from intric.templates.assistant_template.api.assistant_template_models import (
 )
 
 router = APIRouter(prefix="/admin/templates/assistants", tags=["admin-templates"])
+WITH_USER_CONTAINER = get_container(with_user=True)
+USER_CONTAINER = Depends(WITH_USER_CONTAINER)
 
 
 @router.get(
@@ -39,7 +41,7 @@ Use this endpoint for the admin template management page.
     """,
     responses=responses.get_responses([401, 403]),
 )
-async def list_templates(container: Container = Depends(get_container(with_user=True))):
+async def list_templates(container: Container = USER_CONTAINER):
     """List all active assistant templates for the tenant with usage counts."""
     service = container.assistant_template_service()
     user = container.user()
@@ -49,34 +51,38 @@ async def list_templates(container: Container = Depends(get_container(with_user=
     )
 
     # Convert to admin response model
-    items = [
-        AssistantTemplateAdminPublic(
-            id=t.id,
-            name=t.name,
-            description=t.description,
-            category=t.category,
-            prompt_text=t.prompt_text,
-            completion_model_kwargs=t.completion_model_kwargs or {},
-            completion_model_id=t.completion_model.id if t.completion_model else None,
-            completion_model_name=t.completion_model.name
-            if t.completion_model
-            else None,
-            wizard=t.wizard,
-            organization=t.organization,
-            tenant_id=t.tenant_id,
-            deleted_at=t.deleted_at,
-            deleted_by_user_id=t.deleted_by_user_id,
-            restored_at=t.restored_at,
-            restored_by_user_id=t.restored_by_user_id,
-            original_snapshot=t.original_snapshot,
-            created_at=t.created_at,
-            updated_at=t.updated_at,
-            usage_count=usage_count,
-            is_default=t.is_default,
-            icon_name=t.icon_name,
+    items: list[AssistantTemplateAdminPublic] = []
+    for t, usage_count in templates_with_usage:
+        assert t.tenant_id is not None  # tenant templates always have a tenant_id
+        items.append(
+            AssistantTemplateAdminPublic(
+                id=t.id,
+                name=t.name,
+                description=t.description,
+                category=t.category,
+                prompt_text=t.prompt_text,
+                completion_model_kwargs=t.completion_model_kwargs or {},
+                completion_model_id=t.completion_model.id
+                if t.completion_model
+                else None,
+                completion_model_name=t.completion_model.name
+                if t.completion_model
+                else None,
+                wizard=t.wizard,
+                organization=t.organization,
+                tenant_id=t.tenant_id,
+                deleted_at=t.deleted_at,
+                deleted_by_user_id=t.deleted_by_user_id,
+                restored_at=t.restored_at,
+                restored_by_user_id=t.restored_by_user_id,
+                original_snapshot=t.original_snapshot,
+                created_at=t.created_at,
+                updated_at=t.updated_at,
+                usage_count=usage_count,
+                is_default=t.is_default,
+                icon_name=t.icon_name,
+            )
         )
-        for t, usage_count in templates_with_usage
-    ]
 
     return AssistantTemplateAdminListPublic(items=items)
 
@@ -119,7 +125,7 @@ Create a new assistant template for your tenant.
 )
 async def create_template(
     data: AssistantTemplateAdminCreate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """Create a new assistant template for the tenant."""
     service = container.assistant_template_service()
@@ -129,7 +135,11 @@ async def create_template(
     from intric.templates.assistant_template.api.assistant_template_models import (
         AssistantTemplateCreate,
     )
+    from intric.templates.assistant_template.api.assistant_template_models import (
+        AssistantTemplateWizard as _AssistantTemplateWizard,
+    )
 
+    wizard = data.wizard or _AssistantTemplateWizard(attachments=None, collections=None)
     create_data = AssistantTemplateCreate(
         name=data.name,
         description=data.description or "",
@@ -137,7 +147,7 @@ async def create_template(
         prompt=data.prompt or "",
         completion_model_kwargs=data.completion_model_kwargs or {},
         completion_model_id=data.completion_model_id,
-        wizard=data.wizard,
+        wizard=wizard,
         icon_name=data.icon_name,
     )
 
@@ -165,6 +175,7 @@ async def create_template(
         ),
     )
 
+    assert template.tenant_id is not None  # created under a tenant
     return AssistantTemplateAdminPublic(
         id=template.id,
         name=template.name,
@@ -203,7 +214,7 @@ async def create_template(
 async def update_template(
     template_id: "UUID",
     data: AssistantTemplateAdminUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """Update an assistant template."""
     service = container.assistant_template_service()
@@ -247,6 +258,7 @@ async def update_template(
         ),
     )
 
+    assert template.tenant_id is not None  # updated under a tenant
     return AssistantTemplateAdminPublic(
         id=template.id,
         name=template.name,
@@ -306,7 +318,7 @@ Toggle an assistant template as featured/default.
 async def toggle_default(
     template_id: UUID,
     data: AssistantTemplateToggleDefaultRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """Toggle template as featured/default."""
     service = container.assistant_template_service()
@@ -318,6 +330,7 @@ async def toggle_default(
         tenant_id=user.tenant_id,
     )
 
+    assert template.tenant_id is not None  # tenant template always has tenant_id
     return AssistantTemplateAdminPublic(
         id=template.id,
         name=template.name,
@@ -378,7 +391,7 @@ Soft-delete an assistant template (marks with deleted_at timestamp).
 )
 async def delete_template(
     template_id: "UUID",
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """Soft-delete an assistant template."""
     service = container.assistant_template_service()
@@ -418,7 +431,7 @@ async def delete_template(
 )
 async def rollback_template(
     template_id: "UUID",
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """Rollback an assistant template to its original state."""
     service = container.assistant_template_service()
@@ -429,6 +442,7 @@ async def rollback_template(
         tenant_id=user.tenant_id,
     )
 
+    assert template.tenant_id is not None  # tenant template always has tenant_id
     return AssistantTemplateAdminPublic(
         id=template.id,
         name=template.name,
@@ -466,7 +480,7 @@ async def rollback_template(
 )
 async def restore_template(
     template_id: "UUID",
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """Restore a soft-deleted assistant template."""
     service = container.assistant_template_service()
@@ -478,6 +492,7 @@ async def restore_template(
         user_id=user.id,
     )
 
+    assert template.tenant_id is not None  # tenant template always has tenant_id
     return AssistantTemplateAdminPublic(
         id=template.id,
         name=template.name,
@@ -514,7 +529,7 @@ async def restore_template(
 )
 async def permanent_delete_template(
     template_id: "UUID",
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """Permanently delete a soft-deleted assistant template (hard delete)."""
     service = container.assistant_template_service()
@@ -535,7 +550,7 @@ async def permanent_delete_template(
     responses=responses.get_responses([401, 403]),
 )
 async def list_deleted_templates(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """List all deleted assistant templates for audit purposes with usage counts."""
     service = container.assistant_template_service()
@@ -545,33 +560,37 @@ async def list_deleted_templates(
         tenant_id=user.tenant_id
     )
 
-    items = [
-        AssistantTemplateAdminPublic(
-            id=t.id,
-            name=t.name,
-            description=t.description,
-            category=t.category,
-            prompt_text=t.prompt_text,
-            completion_model_kwargs=t.completion_model_kwargs or {},
-            completion_model_id=t.completion_model.id if t.completion_model else None,
-            completion_model_name=t.completion_model.name
-            if t.completion_model
-            else None,
-            wizard=t.wizard,
-            organization=t.organization,
-            tenant_id=t.tenant_id,
-            deleted_at=t.deleted_at,
-            deleted_by_user_id=t.deleted_by_user_id,
-            restored_at=t.restored_at,
-            restored_by_user_id=t.restored_by_user_id,
-            original_snapshot=t.original_snapshot,
-            created_at=t.created_at,
-            updated_at=t.updated_at,
-            usage_count=usage_count,
-            is_default=t.is_default,
-            icon_name=t.icon_name,
+    items: list[AssistantTemplateAdminPublic] = []
+    for t, usage_count in templates_with_usage:
+        assert t.tenant_id is not None  # deleted tenant templates always have tenant_id
+        items.append(
+            AssistantTemplateAdminPublic(
+                id=t.id,
+                name=t.name,
+                description=t.description,
+                category=t.category,
+                prompt_text=t.prompt_text,
+                completion_model_kwargs=t.completion_model_kwargs or {},
+                completion_model_id=t.completion_model.id
+                if t.completion_model
+                else None,
+                completion_model_name=t.completion_model.name
+                if t.completion_model
+                else None,
+                wizard=t.wizard,
+                organization=t.organization,
+                tenant_id=t.tenant_id,
+                deleted_at=t.deleted_at,
+                deleted_by_user_id=t.deleted_by_user_id,
+                restored_at=t.restored_at,
+                restored_by_user_id=t.restored_by_user_id,
+                original_snapshot=t.original_snapshot,
+                created_at=t.created_at,
+                updated_at=t.updated_at,
+                usage_count=usage_count,
+                is_default=t.is_default,
+                icon_name=t.icon_name,
+            )
         )
-        for t, usage_count in templates_with_usage
-    ]
 
     return AssistantTemplateAdminListPublic(items=items)

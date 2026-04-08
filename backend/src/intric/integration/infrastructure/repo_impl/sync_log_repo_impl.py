@@ -3,6 +3,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.future import select
+from typing_extensions import override
 
 from intric.database.tables.sync_log_table import SyncLog as SyncLogDBModel
 from intric.integration.domain.entities.sync_log import SyncLog
@@ -21,9 +22,11 @@ class SyncLogRepoImpl(
     def __init__(self, session: "AsyncSession", mapper: SyncLogMapper):
         super().__init__(session=session, model=SyncLogDBModel, mapper=mapper)
 
+    @override
     async def get_by_id(self, sync_log_id: UUID) -> SyncLog | None:
         return await self.one_or_none(id=sync_log_id)
 
+    @override
     async def get_by_integration_knowledge(
         self, integration_knowledge_id: UUID, limit: int = 50, offset: int = 0
     ) -> list[SyncLog]:
@@ -39,6 +42,7 @@ class SyncLogRepoImpl(
         records = result.all()
         return self.mapper.to_entities(records)
 
+    @override
     async def count_by_integration_knowledge(
         self, integration_knowledge_id: UUID
     ) -> int:
@@ -51,6 +55,7 @@ class SyncLogRepoImpl(
         result = await self.session.scalar(query)
         return result or 0
 
+    @override
     async def get_recent_by_integration_knowledge(
         self, integration_knowledge_id: UUID, limit: int = 10
     ) -> list[SyncLog]:

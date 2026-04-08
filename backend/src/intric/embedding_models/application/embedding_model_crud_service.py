@@ -22,7 +22,8 @@ class EmbeddingModelCRUDService:
         user: "UserInDB",
         embedding_model_repo: "EmbeddingModelRepository",
         security_classification_repo: "SecurityClassificationRepoImpl",
-    ):
+    ) -> None:
+        super().__init__()
         self.embedding_model_repo = embedding_model_repo
         self.security_classification_repo = security_classification_repo
         self.user = user

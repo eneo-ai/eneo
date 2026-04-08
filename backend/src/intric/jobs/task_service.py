@@ -10,7 +10,7 @@ from intric.files.file_size_service import FileSizeService
 from intric.files.text import TextMimeTypes
 from intric.jobs.job_models import JobInDb, Task
 from intric.jobs.job_service import JobService
-from intric.jobs.task_models import Transcription, UploadInfoBlob
+from intric.jobs.task_models import TaskParams, Transcription, UploadInfoBlob
 from intric.main.config import get_settings
 from intric.main.exceptions import FileNotSupportedException, FileTooLargeException
 from intric.users.user import UserInDB
@@ -25,7 +25,8 @@ class TaskService:
         file_size_service: FileSizeService,
         job_service: JobService,
         quota_service: QuotaService,
-    ):
+    ) -> None:
+        super().__init__()
         self.user = user
         self.file_size_service = file_size_service
         self.job_service = job_service
@@ -53,7 +54,9 @@ class TaskService:
             case _:
                 return 0, None
 
-    async def validate_file_size(self, file: SpooledTemporaryFile, task: Task):
+    async def validate_file_size(
+        self, file: SpooledTemporaryFile[bytes], task: Task
+    ) -> None:
         max_size, setting_name = self.get_max_size(task)
         file_size = await asyncio.to_thread(self.file_size_service.get_file_size, file)
 
@@ -64,7 +67,7 @@ class TaskService:
                 setting_name=setting_name,
             )
 
-    async def ensure_quota(self, file: SpooledTemporaryFile, task: Task):
+    async def ensure_quota(self, file: SpooledTemporaryFile[bytes], task: Task) -> None:
         if task not in (Task.UPLOAD_FILE, Task.TRANSCRIPTION):
             return
 
@@ -75,7 +78,7 @@ class TaskService:
         self,
         group_id: UUID,
         space_id: UUID,
-        file: SpooledTemporaryFile,
+        file: SpooledTemporaryFile[bytes],
         mimetype: str,
         filename: str,
     ):
@@ -88,7 +91,7 @@ class TaskService:
 
         try:
             if task_type == Task.UPLOAD_FILE:
-                params = UploadInfoBlob(
+                params: TaskParams = UploadInfoBlob(
                     filepath=filepath,
                     filename=filename,
                     user_id=self.user.id,
@@ -96,7 +99,8 @@ class TaskService:
                     space_id=space_id,
                     mimetype=mimetype,
                 )
-            elif task_type == Task.TRANSCRIPTION:
+            else:
+                # task_type == Task.TRANSCRIPTION (get_task_type raises for any other value)
                 params = Transcription(
                     filepath=filepath,
                     filename=filename,
@@ -127,6 +131,8 @@ class TaskService:
         website_id: UUID | None = None,
         enqueue: bool = True,
     ) -> JobInDb:
+        # CrawlTask.website_id is UUID (non-optional); callers always provide a value
+        assert website_id is not None, "website_id is required for crawl tasks"
         params = CrawlTask(
             user_id=self.user.id,
             run_id=run_id,

@@ -69,7 +69,6 @@ from intric.users.user import (
     PropUserInvite,
     UserAdd,
     UserAddSuperAdmin,
-    UserBase,
     UserState,
     UserUpdate,
     UserUpdatePublic,
@@ -152,7 +151,7 @@ def _check_management_permission(
 def _check_method_resource_permission(
     request: Request,
     key: ApiKeyV2InDB,
-    config: dict,
+    config: dict[str, object],
 ) -> None:
     """Check method→permission and fine-grained resource permission.
 
@@ -165,9 +164,9 @@ def _check_method_resource_permission(
     *config* is written by the router-level
     ``require_resource_permission_for_method`` dependency.
     """
-    resource_type: str = config["resource_type"]
-    read_override_endpoints: frozenset[str] | None = config.get(
-        "read_override_endpoints"
+    resource_type = cast(str, config["resource_type"])
+    read_override_endpoints = cast(
+        "frozenset[str] | None", config.get("read_override_endpoints")
     )
 
     required = METHOD_PERMISSION_MAP.get(request.method, "admin")
@@ -219,6 +218,7 @@ class UserService:
         feature_flag_service: Optional["FeatureFlagService"] = None,
         session: Optional["AsyncSession"] = None,
     ):
+        super().__init__()
         self.repo = user_repo
         self.auth_service = auth_service
         self.api_key_auth_resolver = api_key_auth_resolver
@@ -234,19 +234,22 @@ class UserService:
         self.feature_flag_service = feature_flag_service
         self._session = session
 
-    async def _validate_email(self, user: UserBase):
+    async def _validate_email(self, email: str | None):
+        if email is None:
+            return
+
         if (
-            await self.repo.get_user_by_email(email=user.email, with_deleted=True)
+            await self.repo.get_user_by_email(email=email, with_deleted=True)
             is not None
         ):
             raise UniqueUserException("That email is already taken.")
 
-    async def _validate_username(self, user: UserBase):
+    async def _validate_username(self, username: str | None):
+        if username is None:
+            return
+
         if (
-            user.username is not None
-            and await self.repo.get_user_by_username(
-                username=user.username, with_deleted=True
-            )
+            await self.repo.get_user_by_username(username=username, with_deleted=True)
             is not None
         ):
             raise UniqueUserException("That username is already taken.")
@@ -255,8 +258,8 @@ class UserService:
         self,
         email: str,
         password: str,
-        correlation_id: str = None,
-        source_ip: str = None,
+        correlation_id: str | None = None,
+        source_ip: str | None = None,
     ):
         """
         Authenticate user with username/password.
@@ -377,7 +380,7 @@ class UserService:
         access_token: str,
         key: jwt.PyJWK,
         signing_algos: list[str],
-        correlation_id: str = None,
+        correlation_id: str | None = None,
     ):
         # MIT License
         was_federated = False
@@ -394,12 +397,18 @@ class UserService:
         )
 
         try:
+            client_id = get_settings().oidc_client_id
+            if client_id is None:
+                raise AuthenticationException(
+                    "System configuration error: OIDC client ID not configured"
+                )
+
             username, email = self.auth_service.get_username_and_email_from_openid_jwt(
                 id_token=id_token,
                 access_token=access_token,
                 key=key.key,
                 signing_algos=signing_algos,
-                client_id=get_settings().oidc_client_id,
+                client_id=client_id,
                 options={"verify_iat": False},
                 correlation_id=correlation_id,
             )
@@ -611,9 +620,6 @@ class UserService:
 
         # Create access token
         issued_token = self.auth_service.create_access_token_for_user(user=user_in_db)
-        if issued_token is None:
-            raise AuthenticationException("Could not create access token.")
-        issued_token = cast(str, issued_token)
 
         logger.info(
             "OIDC login completed successfully",
@@ -635,8 +641,8 @@ class UserService:
         )
 
     async def register(self, new_user: UserAddSuperAdmin):
-        await self._validate_email(new_user)
-        await self._validate_username(new_user)
+        await self._validate_email(new_user.email)
+        await self._validate_username(new_user.username)
 
         tenant = await self.tenant_repo.get(new_user.tenant_id)
         if tenant is None:
@@ -677,6 +683,8 @@ class UserService:
         username = self.auth_service.get_username_from_token(
             token, get_settings().jwt_secret
         )
+        if username is None:
+            return None
         return await self.repo.get_user_by_username(username)
 
     async def _resolve_space_id_for_scope(
@@ -719,6 +727,10 @@ class UserService:
         from intric.users.user import UserInDB as UserInDBModel
 
         tenant = await self.tenant_repo.get(key.tenant_id)
+        if tenant is None:
+            raise BadRequestException(
+                f"Tenant {key.tenant_id} does not exist for service key {key.id}"
+            )
         synthetic_id = uuid5(NAMESPACE_URL, f"service-key:{key.id}")
 
         key_suffix = key.key_suffix or key.id.hex[:8]
@@ -754,7 +766,14 @@ class UserService:
         if ownership == ApiKeyOwnership.SERVICE:
             user = await self._build_service_user(resolved.key)
         else:
-            user = await self.repo.get_user_by_id(resolved.key.owner_user_id)
+            owner_user_id = resolved.key.owner_user_id
+            if owner_user_id is None:
+                raise ApiKeyValidationError(
+                    status_code=401,
+                    code="invalid_api_key",
+                    message="API key is invalid.",
+                )
+            user = await self.repo.get_user_by_id(owner_user_id)
             if user is None:
                 raise ApiKeyValidationError(
                     status_code=401,
@@ -1317,7 +1336,7 @@ class UserService:
         self,
         request: Request,
         key: ApiKeyV2InDB,
-        scope_config: dict,
+        scope_config: dict[str, object],
         *,
         strict_mode: bool = False,
     ) -> None:
@@ -1326,9 +1345,9 @@ class UserService:
         Called after authentication when scope config is set on the route
         and the key is non-tenant scoped.
         """
-        resource_type: str = scope_config["resource_type"]
-        path_param: str | None = scope_config["path_param"]
-        self_filtering: bool = scope_config.get("self_filtering", False)
+        resource_type = cast(str, scope_config["resource_type"])
+        path_param = cast("str | None", scope_config["path_param"])
+        self_filtering = cast(bool, scope_config.get("self_filtering", False))
         scope_type = ApiKeyScopeType(key.scope_type)
 
         # 1. Tenant-scoped keys always pass (fast path)
@@ -1688,8 +1707,8 @@ class UserService:
         return user_in_db
 
     async def _check_user_and_tenant_state(
-        self, user_in_db, correlation_id: str = None
-    ):
+        self, user_in_db: "UserInDB", correlation_id: str | None = None
+    ) -> None:
         """
         Check if the user or their tenant has restrictions.
         Raises appropriate exceptions if user is inactive or tenant is suspended.
@@ -1749,11 +1768,11 @@ class UserService:
 
     async def authenticate_with_assistant_api_key(
         self,
-        api_key: str,
-        token: str,
-        assistant_id: UUID = None,
+        api_key: str | None,
+        token: str | None,
+        assistant_id: UUID | None = None,
         request: Request | None = None,
-    ):
+    ) -> "UserInDB":
         user_in_db = None
         assistant_space_id: UUID | None = None
         assistant_tenant_id: UUID | None = None
@@ -1818,7 +1837,7 @@ class UserService:
 
     async def get_all_users(
         self,
-        tenant_id: UUID = None,
+        tenant_id: UUID | None = None,
         cursor: Optional[str] = None,
         previous: bool = False,
         limit: Optional[int] = None,
@@ -1838,10 +1857,10 @@ class UserService:
         )
 
     async def invite_user(self, user_invite: PropUserInvite, tenant_id: UUID):
-        await self._validate_email(user_invite)
+        await self._validate_email(user_invite.email)
         username = getattr(user_invite, "username", None)
         if username is not None:
-            await self._validate_username(user_invite)
+            await self._validate_username(username)
 
         tenant = await self.tenant_repo.get(tenant_id)
         if tenant is None:
@@ -1867,8 +1886,8 @@ class UserService:
         return user_in_db
 
     async def update_user(self, user_id: UUID, user_update_public: UserUpdatePublic):
-        await self._validate_email(user_update_public)
-        await self._validate_username(user_update_public)
+        await self._validate_email(user_update_public.email)
+        await self._validate_username(user_update_public.username)
 
         user_update = UserUpdate(
             id=user_id, **user_update_public.model_dump(exclude_unset=True)

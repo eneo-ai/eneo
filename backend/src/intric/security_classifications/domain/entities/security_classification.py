@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import Optional, Union
 from uuid import UUID
 
+from typing_extensions import override
+
 from intric.base.base_entity import Entity
 from intric.database.tables.security_classifications_table import (
     SecurityClassification as SecurityDBModel,
@@ -26,7 +28,7 @@ class SecurityClassification(Entity):
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
         security_enabled: bool = False,
-    ):
+    ) -> None:
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.tenant_id = tenant_id
         self.name = name
@@ -34,8 +36,9 @@ class SecurityClassification(Entity):
         self.security_level = security_level
         self.security_enabled = security_enabled
 
+    @override
     @classmethod
-    def create(
+    def create(  # type: ignore[override]  # narrower fixed params vs Entity.create(*args, **kwargs) — intentional concrete signature
         cls,
         tenant_id: UUID,
         name: str,
@@ -51,17 +54,16 @@ class SecurityClassification(Entity):
             updated_at=None,
         )
 
+    @override
     @classmethod
-    def to_domain(
+    def to_domain(  # type: ignore[override]  # intentionally accepts Optional input and returns Optional — different from Entity.to_domain
         cls, db_security_classification: Optional[SecurityDBModel] = None
     ) -> "SecurityClassification | None":
         if db_security_classification is None:
             return None
 
-        # Get security_enabled from tenant if available, default to False
-        security_enabled = False
-        if db_security_classification.tenant is not None:
-            security_enabled = db_security_classification.tenant.security_enabled
+        # tenant relationship is non-optional per DB schema; always present when loaded
+        security_enabled = db_security_classification.tenant.security_enabled
 
         return cls(
             id=db_security_classification.id,

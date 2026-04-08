@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_serializer, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_serializer, field_validator
 from pydantic.networks import HttpUrl
 
 from intric.embedding_models.presentation.embedding_model_models import (
@@ -33,12 +33,17 @@ class WebsiteBase(BaseModel):
     update_interval: UpdateInterval = UpdateInterval.NEVER
 
 
-class WebsiteCreateRequestDeprecated(WebsiteBase):
+class WebsiteCreateRequestDeprecated(BaseModel):
+    name: Optional[str] = None
     url: HttpUrl
+    space_id: Optional[UUID] = None
+    download_files: bool = False
+    crawl_type: CrawlType = CrawlType.CRAWL
+    update_interval: UpdateInterval = UpdateInterval.NEVER
     embedding_model: ModelId
 
     @field_serializer("url")
-    def serialize_to_string(url: HttpUrl):
+    def serialize_to_string(url: object):
         return str(url)
 
 
@@ -170,7 +175,9 @@ class WebsiteCreate(BaseModel):
 
     @field_validator("http_auth_password")
     @classmethod
-    def validate_auth_fields_together(cls, v, info):
+    def validate_auth_fields_together(
+        cls, v: Optional[str], info: ValidationInfo
+    ) -> Optional[str]:
         """Ensure username and password are provided together."""
         username = info.data.get("http_auth_username")
 
@@ -203,7 +210,9 @@ class WebsiteUpdate(BaseModel):
 
     @field_validator("http_auth_password")
     @classmethod
-    def validate_auth_update_together(cls, v, info):
+    def validate_auth_update_together(
+        cls, v: Union[str, None, NotProvided], info: ValidationInfo
+    ) -> Union[str, None, NotProvided]:
         """Ensure username and password are updated together."""
         username = info.data.get("http_auth_username")
 

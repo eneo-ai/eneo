@@ -1,5 +1,8 @@
+from typing import cast
+
 from intric.database.tables.sync_log_table import SyncLog as SyncLogDBModel
 from intric.integration.domain.entities.sync_log import SyncLog
+from intric.integration.infrastructure.content_service.types import SyncMetadata
 
 
 class SyncLogFactory:
@@ -8,6 +11,11 @@ class SyncLogFactory:
     @staticmethod
     def create_from_db(record: SyncLogDBModel) -> SyncLog:
         """Convert database record to domain entity."""
+        # sync_metadata comes from JSON column — cast to SyncMetadata for type safety
+        raw_metadata = record.sync_metadata
+        metadata: SyncMetadata | None = (
+            cast(SyncMetadata, raw_metadata) if isinstance(raw_metadata, dict) else None
+        )
         return SyncLog(
             id=record.id,
             created_at=record.created_at,
@@ -16,7 +24,7 @@ class SyncLogFactory:
             sync_type=record.sync_type,
             status=record.status,
             error_message=record.error_message,
-            metadata=record.sync_metadata,
+            metadata=metadata,
             started_at=record.started_at,
             completed_at=record.completed_at,
         )

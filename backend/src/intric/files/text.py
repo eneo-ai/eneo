@@ -8,6 +8,7 @@ import pdfplumber
 import pptx
 from docx2python import docx2python
 from pdfminer.pdfparser import PDFSyntaxError
+from pptx.exc import PackageNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -63,12 +64,12 @@ class UnsupportedFormatError(ExtractionError):
 
 class MimeTypesBase(str, Enum):
     @classmethod
-    def has_value(cls, value) -> bool:
+    def has_value(cls, value: str) -> bool:
         base_value = value.split(";")[0].strip()
         return any(base_value == item.value for item in cls)
 
     @classmethod
-    def values(cls):
+    def values(cls) -> list[str]:
         return [item.value for item in cls]
 
 
@@ -183,33 +184,41 @@ class TextExtractor:
         display_name = filename or filepath.name
         try:
             xls = pd.ExcelFile(filepath, engine="calamine")
-            parts = []
+            parts: list[str] = []
 
             # Global file context (helpful for first chunk and direct chat)
             parts.append(f"File: {display_name}")
 
             for sheet_name in xls.sheet_names:
-                df = pd.read_excel(xls, sheet_name=sheet_name, engine="calamine")
+                df: pd.DataFrame = pd.read_excel(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs are incomplete
+                    xls, sheet_name=sheet_name, engine="calamine"
+                )
 
-                if df.empty:
+                if df.empty:  # pyright: ignore[reportUnknownMemberType]  # pandas stubs are incomplete
                     continue
 
                 # Handle merged cells - forward fill values
-                df = df.ffill()
+                df = df.ffill()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs are incomplete
 
                 # Clean column names (ensure strings, remove newlines)
-                df.columns = df.columns.astype(str).str.replace("\n", " ")
+                df.columns = (  # pyright: ignore[reportUnknownMemberType]  # pandas stubs are incomplete
+                    df.columns.astype(str).str.replace("\n", " ")  # pyright: ignore[reportUnknownMemberType]  # pandas stubs are incomplete
+                )
 
                 # Serialize each row as self-contained key-value pairs
                 # This ensures every chunk has full context, even if split
-                def serialize_row(row):
+                def serialize_row(row: pd.Series) -> str:  # type: ignore[type-arg]  # pd.Series generic param unavailable at runtime
                     # Filter out NaN to save tokens
                     pairs = [
-                        f"{col}: {val}" for col, val in row.items() if pd.notna(val)
+                        f"{col}: {val}"
+                        for col, val in row.items()
+                        if pd.notna(val)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]  # pandas stubs are incomplete
                     ]
                     return f"Sheet: {sheet_name} | " + " | ".join(pairs)
 
-                sheet_text = df.apply(serialize_row, axis=1).str.cat(sep="\n")
+                # pandas apply/str.cat return types are unknown due to incomplete stubs
+                raw_sheet_text = df.apply(serialize_row, axis=1).str.cat(sep="\n")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs are incomplete
+                sheet_text: str = str(raw_sheet_text)  # pyright: ignore[reportUnknownArgumentType]  # pandas stubs are incomplete
                 parts.append(sheet_text)
 
             return "\n\n".join(parts)
@@ -227,25 +236,27 @@ class TextExtractor:
         try:
             # Extract text from pptx using python-pptx
             # Use list join instead of string concatenation for O(n) vs O(n^2) complexity
-            presentation = pptx.Presentation(filepath)
-            parts = []
+            # pptx.Presentation accepts str, not Path — convert explicitly
+            presentation = pptx.Presentation(str(filepath))
+            parts: list[str] = []
             for slide in presentation.slides:
-                slide_parts = []
+                slide_parts: list[str] = []
                 for shape in slide.shapes:
                     if shape.has_text_frame:
                         # Collect all text from runs in this shape
+                        # python-pptx stubs are incomplete; member types are partially unknown
                         shape_text = " ".join(
-                            run.text
+                            run.text  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pptx stubs are incomplete
                             for para in shape.text_frame.paragraphs  # type: ignore[attr-defined]
-                            for run in para.runs
-                            if run.text
+                            for run in para.runs  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]  # pptx stubs are incomplete
+                            if run.text  # pyright: ignore[reportUnknownMemberType]  # pptx stubs are incomplete
                         )
                         if shape_text.strip():
                             slide_parts.append(shape_text)
                 if slide_parts:
                     parts.append(" ".join(slide_parts))
             return "\n".join(parts)
-        except zipfile.BadZipFile:
+        except (zipfile.BadZipFile, PackageNotFoundError):
             raise CorruptFileError(
                 display_name,
                 "Invalid ZIP structure - file may be corrupted or in legacy .ppt format",
@@ -263,7 +274,7 @@ class TextExtractor:
     def extract(
         self, filepath: Path, mimetype: str | None = None, filename: str | None = None
     ) -> str:
-        mimetype = mimetype or magic.from_file(filepath, mime=True)
+        mimetype = mimetype or magic.from_file(filepath, mime=True)  # pyright: ignore[reportUnknownMemberType]  # python-magic stubs are incomplete
         # Use original filename for error messages, fallback to temp filepath
         display_name = filename or filepath.name
 

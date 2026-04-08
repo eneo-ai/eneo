@@ -1,3 +1,4 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -13,7 +14,7 @@ router = APIRouter()
 
 @router.get("/", response_model=PaginatedResponse[JobPublic])
 async def get_running_jobs(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     job_service = container.job_service()
     jobs = await job_service.get_running_jobs()
@@ -24,7 +25,7 @@ async def get_running_jobs(
 @router.get("/{id}/", response_model=JobPublic)
 async def get_job(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     job_service = container.job_service()
     return await job_service.get_job(id)

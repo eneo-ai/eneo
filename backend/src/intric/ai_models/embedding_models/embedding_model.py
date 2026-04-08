@@ -1,7 +1,8 @@
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import BaseModel
+from typing_extensions import override
 
 from intric.main.models import InDB, partial_model
 
@@ -31,7 +32,8 @@ class EmbeddingModelBase(BaseModel):
             raise ValueError("max_batch_size must not exceed 256")
         return value
 
-    def model_post_init(self, __context):
+    @override
+    def model_post_init(self, __context: Any) -> None:
         super().model_post_init(__context)
         # Pydantic v2 hook to validate custom constraints
         self.max_batch_size = self._validate_batch_size(self.max_batch_size)

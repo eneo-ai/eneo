@@ -1,6 +1,7 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 from intric.integration.domain.entities.tenant_integration import TenantIntegration
+from intric.integration.domain.factories.integration_factory import IntegrationFactory
 
 if TYPE_CHECKING:
     from intric.database.tables.integration_table import (
@@ -14,9 +15,11 @@ class TenantIntegrationFactory:
         return TenantIntegration(
             id=record.id,
             tenant_id=record.tenant_id,
-            integration=record.integration,
+            integration=IntegrationFactory.create_entity(record.integration),
         )
 
     @staticmethod
-    def create_entities(records: list[dict]) -> list[TenantIntegration]:
+    def create_entities(
+        records: Sequence["TenantIntegrationDBModel"],
+    ) -> list[TenantIntegration]:
         return [TenantIntegrationFactory.create_entity(record) for record in records]

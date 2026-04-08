@@ -23,19 +23,31 @@ def to_metadata(
     assistants: list[Assistant],
     sessions: list[SessionInDB],
     questions: list[Question],
-):
+) -> MetadataStatistics:
     assistants_metadata = [
         AssistantMetadata(
-            id=assistant.id,
-            created_at=assistant.created_at,
+            id=assistant.id,  # type: ignore[arg-type]  # Entity.id is UUID|None; callers guarantee non-None for persisted assistants
+            created_at=assistant.created_at,  # type: ignore[arg-type]  # InDB.created_at is Optional[datetime]; persisted objects always have created_at set
         )
         for assistant in assistants
     ]
     sessions_metadata = [
-        SessionMetadata(**session.model_dump()) for session in sessions
+        SessionMetadata(
+            id=session.id,  # type: ignore[arg-type]  # InDB.id is Optional[UUID]; persisted sessions always have id set
+            created_at=session.created_at,  # type: ignore[arg-type]  # InDB.created_at is Optional[datetime]; persisted sessions always have created_at
+            assistant_id=session.assistant.id if session.assistant else None,  # type: ignore[union-attr]  # assistant.id is UUID|None; if present it's set
+            group_chat_id=session.group_chat_id,
+        )
+        for session in sessions
     ]
     questions_metadata = [
-        QuestionMetadata(**question.model_dump()) for question in questions
+        QuestionMetadata(
+            id=question.id,  # type: ignore[arg-type]  # same Optional[UUID] pattern
+            created_at=question.created_at,  # type: ignore[arg-type]  # same Optional[datetime] pattern
+            assistant_id=question.assistant_id,
+            session_id=question.session_id,  # type: ignore[arg-type]  # session_id is Optional[UUID]; persisted questions always have it
+        )
+        for question in questions
     ]
 
     return MetadataStatistics(

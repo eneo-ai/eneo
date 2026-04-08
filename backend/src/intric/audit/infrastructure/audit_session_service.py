@@ -8,22 +8,32 @@ sensitive information from appearing in URLs, browser history, or server logs.
 import logging
 import secrets
 from datetime import datetime, timezone
-from typing import Optional
+from typing import cast
 from uuid import UUID, uuid4
 
 import orjson
 import redis.exceptions
 from fastapi import HTTPException
+from typing_extensions import TypedDict
 
 from intric.worker.redis import get_redis
 
 logger = logging.getLogger(__name__)
 
 
+class AuditSessionData(TypedDict):
+    user_id: str
+    tenant_id: str
+    category: str
+    description: str
+    created_at: str
+
+
 class AuditSessionService:
     """Manages audit access sessions in Redis with automatic expiration."""
 
     def __init__(self):
+        super().__init__()
         self.redis = get_redis()
         self.ttl_seconds = 3600  # 1 hour session lifetime
 
@@ -79,7 +89,7 @@ class AuditSessionService:
 
         return session_id
 
-    async def get_session(self, session_id: str) -> Optional[dict]:
+    async def get_session(self, session_id: str) -> AuditSessionData | None:
         """
         Retrieve session data from Redis.
 
@@ -106,7 +116,17 @@ class AuditSessionService:
                 )
                 return None
 
-            return parsed
+            if (
+                "user_id" not in parsed
+                or "tenant_id" not in parsed
+                or "category" not in parsed
+                or "description" not in parsed
+                or "created_at" not in parsed
+            ):
+                logger.warning(f"Session {session_id} missing required fields")
+                return None
+
+            return cast(AuditSessionData, parsed)
         except orjson.JSONDecodeError as e:
             # Handle corrupted JSON in Redis (should not happen in normal operation)
             logger.warning(f"Corrupted session JSON for {session_id}: {e}")
@@ -120,7 +140,7 @@ class AuditSessionService:
 
     async def validate_session(
         self, session_id: str, user_id: UUID, tenant_id: UUID
-    ) -> Optional[dict]:
+    ) -> AuditSessionData | None:
         """
         Validate that session belongs to the specified user and tenant.
 
@@ -143,22 +163,15 @@ class AuditSessionService:
 
         try:
             # Verify required keys exist before accessing them
-            session_user_id = session.get("user_id")
-            session_tenant_id = session.get("tenant_id")
-
-            if session_user_id is None or session_tenant_id is None:
-                logger.warning(
-                    f"Session {session_id} missing required keys: "
-                    f"user_id={session_user_id is not None}, tenant_id={session_tenant_id is not None}"
-                )
-                return None
+            session_user_id = session["user_id"]
+            session_tenant_id = session["tenant_id"]
 
             # Verify user owns this session (constant-time comparison for defense-in-depth)
-            if not secrets.compare_digest(str(session_user_id), str(user_id)):
+            if not secrets.compare_digest(session_user_id, str(user_id)):
                 return None
 
             # Verify tenant isolation (constant-time comparison for defense-in-depth)
-            if not secrets.compare_digest(str(session_tenant_id), str(tenant_id)):
+            if not secrets.compare_digest(session_tenant_id, str(tenant_id)):
                 return None
 
             return session

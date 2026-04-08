@@ -8,6 +8,7 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
+from typing_extensions import override
 
 from intric.base.base_repository import BaseRepository
 from intric.database.tables.security_classifications_table import (
@@ -26,11 +27,13 @@ if TYPE_CHECKING:
 class SecurityClassificationRepoImpl(BaseRepository):
     """Implementation of the security classification repository interface."""
 
-    def __init__(self, session: "AsyncSession", user: UserInDB):
+    def __init__(self, session: "AsyncSession", user: UserInDB) -> None:
+        super().__init__()
         self.session = session
         self.user = user
 
-    async def all(self) -> list[SecurityClassification]:
+    @override
+    async def all(self) -> list[SecurityClassification]:  # type: ignore[override]  # covariant narrowing: list[SecurityClassification] ⊄ list[Entity] (invariant list)
         query = (
             select(SecurityClassificationDBModel)
             .where(SecurityClassificationDBModel.tenant_id == self.user.tenant_id)
@@ -40,17 +43,25 @@ class SecurityClassificationRepoImpl(BaseRepository):
         result = await self.session.scalars(query)
         records = result.all()
 
-        return [  # type: ignore[return-value]
-            SecurityClassification.to_domain(db_security_classification=record)
+        return [
+            sc
             for record in records
+            if (
+                sc := SecurityClassification.to_domain(
+                    db_security_classification=record
+                )
+            )
+            is not None
         ]
 
+    @override
     async def one(self, id: UUID) -> SecurityClassification:
         security_classification = await self.one_or_none(id)
         if not security_classification:
             raise NotFoundException(f"Security classification with ID {id} not found")
         return security_classification
 
+    @override
     async def one_or_none(self, id: UUID) -> Optional[SecurityClassification]:
         query = (
             select(SecurityClassificationDBModel)
@@ -69,7 +80,8 @@ class SecurityClassificationRepoImpl(BaseRepository):
 
         return SecurityClassification.to_domain(db_security_classification=result)
 
-    async def add(
+    @override
+    async def add(  # type: ignore[override]  # narrower param name (security_classification vs entity); both accept SecurityClassification
         self, security_classification: SecurityClassification
     ) -> SecurityClassification:
         values = {
@@ -90,7 +102,8 @@ class SecurityClassificationRepoImpl(BaseRepository):
         # After insertion, query for the record with tenant loaded
         return await self.one(record.id)
 
-    async def update(
+    @override
+    async def update(  # type: ignore[override]  # narrower param name (security_classification vs entity); both accept SecurityClassification
         self, security_classification: SecurityClassification
     ) -> SecurityClassification:
         assert security_classification.id is not None, (
@@ -129,6 +142,7 @@ class SecurityClassificationRepoImpl(BaseRepository):
         # Query for the record with tenant loaded
         return await self.one(record.id)
 
+    @override
     async def delete(self, id: UUID) -> None:
         query = (
             sa.delete(SecurityClassificationDBModel)

@@ -53,7 +53,8 @@ class GroupChatService:
         session_service: "SessionService",
         completion_service: "CompletionService",
         icon_repo: "IconRepository",
-    ):
+    ) -> None:
+        super().__init__()
         self.user = user
         self.space_service = space_service
         self.space_repo = space_repo
@@ -123,7 +124,7 @@ class GroupChatService:
         show_response_label: Optional[bool] = None,
         published: Optional[bool] = None,
         insight_enabled: Optional[bool] = None,
-        metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
+        metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union["UUID", None, NotProvided] = NOT_PROVIDED,
     ) -> "GroupChat":
         space = await self.space_service.get_space_by_group_chat(group_chat_id=id)
@@ -221,7 +222,7 @@ class GroupChatService:
     ) -> str:
         """Create a prompt for the model to select the most appropriate assistant"""
 
-        assistant_info = []
+        assistant_info: list[str] = []
         for i, assistant in enumerate(assistants):
             description = (
                 assistant.user_description
@@ -289,6 +290,9 @@ class GroupChatService:
             )
 
         completion_model = await self._find_suitable_completion_model(assistants)
+        assert (
+            completion_model is not None
+        )  # _find_suitable_completion_model raises if no assistants
 
         # create the prompt for assistant selection
         selection_prompt = self._create_assistant_selection_prompt(question, assistants)
@@ -296,7 +300,7 @@ class GroupChatService:
         assistant_selector_tokens = count_tokens(selection_prompt, model_name)
         # get model's response
         response = await self.completion_service.get_response(
-            model=completion_model,
+            model=completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
             prompt=selection_prompt,
             stream=False,
             session=session,
@@ -362,7 +366,7 @@ class GroupChatService:
                     + assistant_selector_tokens,
                     num_tokens_answer=token_count,
                     session=session,
-                    completion_model=completion_model,
+                    completion_model=completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
                     info_blob_chunks=[],
                     files=[],
                     logging_details=None,
@@ -379,7 +383,7 @@ class GroupChatService:
                 num_tokens_question=question_token_count + assistant_selector_tokens,
                 num_tokens_answer=token_count,
                 session=session,
-                completion_model=completion_model,
+                completion_model=completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
                 info_blob_chunks=[],
                 files=[],
                 logging_details=None,
@@ -391,8 +395,8 @@ class GroupChatService:
         self,
         question: str,
         group_chat_id: "UUID",
-        session_id: "UUID" = None,
-        file_ids: list["UUID"] = [],
+        session_id: Optional["UUID"] = None,
+        file_ids: Optional[list["UUID"]] = None,
         stream: bool = False,
         version: int = 1,
         tool_assistant_id: Optional["UUID"] = None,
@@ -450,10 +454,17 @@ class GroupChatService:
 
         if assistant_to_ask is None:
             assert selection_result is not None
+            assert (
+                response_from_selector is not None
+            )  # set above whenever selection_result is set
+            first_completion_model = group_chat.assistants[0].assistant.completion_model
+            assert (
+                first_completion_model is not None
+            )  # assistant must have a model to be usable
             final_response = await self._handle_response(
                 response=response_from_selector,
                 question=question,
-                completion_model=group_chat.assistants[0].assistant.completion_model,
+                completion_model=first_completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
                 session=session,
                 stream=stream,
                 assistant_selector_tokens=selection_result.assistant_selector_tokens,
@@ -464,7 +475,7 @@ class GroupChatService:
                 session=session,
                 answer=final_response,
                 info_blobs=[],
-                completion_model=group_chat.assistants[0].assistant.completion_model,
+                completion_model=first_completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
                 tools=UseTools(assistants=[]),
                 description=None,
                 web_search_results=[],
@@ -475,7 +486,7 @@ class GroupChatService:
                 assistant_id=assistant_to_ask,
                 group_chat_id=group_chat_id,
                 session_id=session_id,
-                file_ids=file_ids,
+                file_ids=file_ids or [],
                 stream=stream,
                 version=version,
                 assistant_selector_tokens=selection_result.assistant_selector_tokens

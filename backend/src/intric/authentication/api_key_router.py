@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 from uuid import UUID
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
@@ -429,8 +438,8 @@ async def _collect_manageable_keys_for_page(
     },
 )
 async def get_creation_constraints(
-    container: Container = Depends(get_container(with_user=True)),
-):
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> ApiKeyCreationConstraints:
     user: UserInDB = container.user()
     policy: dict[str, Any] = getattr(user.tenant, "api_key_policy", None) or {}
     return ApiKeyCreationConstraints(
@@ -452,8 +461,8 @@ async def get_creation_constraints(
     },
 )
 async def get_notification_preferences(
-    container: Container = Depends(get_container(with_user=True)),
-):
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> ApiKeyNotificationPreferencesResponse:
     user: UserInDB = container.user()
     session = cast(AsyncSession, container.session())
     policy = _notification_policy_for_user(user)
@@ -477,13 +486,13 @@ async def get_notification_preferences(
     },
 )
 async def update_notification_preferences(
-    request: ApiKeyNotificationPreferencesUpdate = Body(
-        ...,
-        examples=[{"enabled": True, "days_before_expiry": [30, 14, 7, 3, 1]}],
-    ),
+    request: Annotated[
+        ApiKeyNotificationPreferencesUpdate,
+        Body(examples=[{"enabled": True, "days_before_expiry": [30, 14, 7, 3, 1]}]),
+    ],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
-    container: Container = Depends(get_container(with_user=True)),
-):
+) -> ApiKeyNotificationPreferencesResponse:
     user: UserInDB = container.user()
     session = cast(AsyncSession, container.session())
     policy = _notification_policy_for_user(user)
@@ -535,8 +544,8 @@ async def update_notification_preferences(
     },
 )
 async def list_notification_subscriptions(
-    container: Container = Depends(get_container(with_user=True)),
-):
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> ApiKeyNotificationSubscriptionListResponse:
     user: UserInDB = container.user()
     session = cast(AsyncSession, container.session())
     policy = _notification_policy_for_user(user)
@@ -562,9 +571,9 @@ async def list_notification_subscriptions(
 async def upsert_notification_subscription(
     target_type: ApiKeyNotificationTargetType,
     target_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
-    container: Container = Depends(get_container(with_user=True)),
-):
+) -> ApiKeyNotificationSubscriptionListResponse:
     user: UserInDB = container.user()
     repo: ApiKeysV2Repository = container.api_key_v2_repo()
     policy: ApiKeyPolicyService = container.api_key_policy_service()
@@ -626,9 +635,9 @@ async def upsert_notification_subscription(
 async def delete_notification_subscription(
     target_type: ApiKeyNotificationTargetType,
     target_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
-    container: Container = Depends(get_container(with_user=True)),
-):
+) -> ApiKeyNotificationSubscriptionListResponse:
     user: UserInDB = container.user()
     session = cast(AsyncSession, container.session())
     policy = _notification_policy_for_user(user)
@@ -722,13 +731,17 @@ def _build_expiring_summary(
     },
 )
 async def get_expiring_keys(
-    days: int = Query(30, ge=1, le=90, description="Look-ahead window in days"),
-    mode: Literal["all", "subscribed"] = Query(
-        "all",
-        description="all: tenant-visible expiring keys, subscribed: only followed targets.",
-    ),
-    container: Container = Depends(get_container(with_user=True)),
-):
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    days: Annotated[
+        int, Query(ge=1, le=90, description="Look-ahead window in days")
+    ] = 30,
+    mode: Annotated[
+        Literal["all", "subscribed"],
+        Query(
+            description="all: tenant-visible expiring keys, subscribed: only followed targets.",
+        ),
+    ] = "all",
+) -> ExpiringKeysSummary:
     user: UserInDB = container.user()
     repo: ApiKeysV2Repository = container.api_key_v2_repo()
     authorization_policy: ApiKeyPolicyService = container.api_key_policy_service()
@@ -816,10 +829,10 @@ async def get_expiring_keys(
 )
 async def get_api_key_usage(
     id: UUID,
-    limit: int = Query(50, ge=1, le=200),
-    cursor: datetime | None = Query(None),
-    container: Container = Depends(get_container(with_user=True)),
-):
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    cursor: Annotated[datetime | None, Query()] = None,
+) -> ApiKeyUsageResponse:
     user: UserInDB = container.user()
     repo: ApiKeysV2Repository = container.api_key_v2_repo()
     policy: ApiKeyPolicyService = container.api_key_policy_service()
@@ -874,10 +887,10 @@ async def get_api_key_usage(
 )
 async def create_api_key(
     http_request: Request,
-    payload: ApiKeyCreateRequest = Body(..., examples=[_CREATE_API_KEY_EXAMPLE]),
-    container: Container = Depends(get_container(with_user=True)),
+    payload: Annotated[ApiKeyCreateRequest, Body(examples=[_CREATE_API_KEY_EXAMPLE])],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
-):
+) -> ApiKeyCreatedResponse:
     lifecycle = container.api_key_lifecycle_service()
     ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
@@ -906,16 +919,20 @@ async def create_api_key(
     },
 )
 async def list_api_keys(
-    limit: int | None = Query(None, ge=1, description="Keys per page"),
-    cursor: datetime | None = Query(None, description="Current cursor"),
-    previous: bool = Query(False, description="Show previous page"),
-    scope_type: ApiKeyScopeType | None = Query(None, description="Scope type filter"),
-    scope_id: UUID | None = Query(None, description="Scope id filter"),
-    state: ApiKeyState | None = Query(None, description="State filter"),
-    key_type: ApiKeyType | None = Query(None, description="Key type filter"),
-    ownership: ApiKeyOwnership | None = Query(None, description="Ownership filter"),
-    container: Container = Depends(get_container(with_user=True)),
-):
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    limit: Annotated[int | None, Query(ge=1, description="Keys per page")] = None,
+    cursor: Annotated[datetime | None, Query(description="Current cursor")] = None,
+    previous: Annotated[bool, Query(description="Show previous page")] = False,
+    scope_type: Annotated[
+        ApiKeyScopeType | None, Query(description="Scope type filter")
+    ] = None,
+    scope_id: Annotated[UUID | None, Query(description="Scope id filter")] = None,
+    state: Annotated[ApiKeyState | None, Query(description="State filter")] = None,
+    key_type: Annotated[ApiKeyType | None, Query(description="Key type filter")] = None,
+    ownership: Annotated[
+        ApiKeyOwnership | None, Query(description="Ownership filter")
+    ] = None,
+) -> ApiKeyListResponse:
     user: UserInDB = container.user()
     repo: ApiKeysV2Repository = container.api_key_v2_repo()
     policy: ApiKeyPolicyService = container.api_key_policy_service()
@@ -963,12 +980,14 @@ async def list_api_keys(
             ownership=ownership_value,
         )
 
-    return paginate_keys(
-        filtered_keys,
-        total_count=total_count,
-        limit=limit,
-        cursor=cursor,
-        previous=previous,
+    return ApiKeyListResponse.model_validate(
+        paginate_keys(
+            filtered_keys,
+            total_count=total_count,
+            limit=limit,
+            cursor=cursor,
+            previous=previous,
+        )
     )
 
 
@@ -988,8 +1007,8 @@ async def list_api_keys(
 )
 async def get_api_key(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
-):
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> ApiKeyV2:
     user: UserInDB = container.user()
     repo: ApiKeysV2Repository = container.api_key_v2_repo()
     policy: ApiKeyPolicyService = container.api_key_policy_service()
@@ -1025,15 +1044,17 @@ async def get_api_key(
 async def update_api_key(
     id: UUID,
     http_request: Request,
-    payload: ApiKeyUpdateRequest = Body(
-        ...,
-        examples=[
-            {"name": "Backend Key - Rotated", "expires_at": "2030-01-01T00:00:00Z"}
-        ],
-    ),
-    container: Container = Depends(get_container(with_user=True)),
+    payload: Annotated[
+        ApiKeyUpdateRequest,
+        Body(
+            examples=[
+                {"name": "Backend Key - Rotated", "expires_at": "2030-01-01T00:00:00Z"}
+            ],
+        ),
+    ],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
-):
+) -> ApiKeyV2:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
     ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
@@ -1051,6 +1072,7 @@ async def update_api_key(
 @router.delete(
     "/api-keys/{id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
     tags=["API Keys"],
     summary="Revoke API key (deprecated alias)",
     responses={
@@ -1063,9 +1085,9 @@ async def update_api_key(
 async def revoke_api_key_deprecated(
     id: UUID,
     http_request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
-):
+) -> Response:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
     ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
@@ -1077,7 +1099,7 @@ async def revoke_api_key_deprecated(
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
-    return None
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
@@ -1099,12 +1121,13 @@ async def revoke_api_key_deprecated(
 async def revoke_api_key(
     id: UUID,
     http_request: Request,
-    payload: ApiKeyStateChangeRequest | None = Body(
-        default=None, examples=[_STATE_CHANGE_EXAMPLE]
-    ),
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
-):
+    payload: Annotated[
+        ApiKeyStateChangeRequest | None,
+        Body(examples=[_STATE_CHANGE_EXAMPLE]),
+    ] = None,
+) -> ApiKeyV2:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
     ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
@@ -1136,9 +1159,9 @@ async def revoke_api_key(
 async def rotate_api_key(
     id: UUID,
     http_request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
-):
+) -> ApiKeyCreatedResponse:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
     ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
@@ -1173,12 +1196,13 @@ async def rotate_api_key(
 async def suspend_api_key(
     id: UUID,
     http_request: Request,
-    payload: ApiKeyStateChangeRequest | None = Body(
-        default=None, examples=[_STATE_CHANGE_EXAMPLE]
-    ),
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
-):
+    payload: Annotated[
+        ApiKeyStateChangeRequest | None,
+        Body(examples=[_STATE_CHANGE_EXAMPLE]),
+    ] = None,
+) -> ApiKeyV2:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
     ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
@@ -1210,9 +1234,9 @@ async def suspend_api_key(
 async def reactivate_api_key(
     id: UUID,
     http_request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
-):
+) -> ApiKeyV2:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
     ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:

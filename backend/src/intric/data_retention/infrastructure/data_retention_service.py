@@ -1,10 +1,9 @@
 import logging
-from typing import Any, Type
+from typing import Any, cast
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import DeclarativeBase
 
 from intric.data_retention.constants import ORPHANED_SESSION_CLEANUP_DAYS
 from intric.database.tables.app_table import AppRuns, Apps
@@ -23,7 +22,8 @@ RETENTION_BATCH_SIZE = 5000
 class DataRetentionService:
     """Service for managing data retention and deletion based on hierarchical policies."""
 
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
         self.session = session
 
     def _build_effective_retention_days(
@@ -61,8 +61,8 @@ class DataRetentionService:
 
     async def _delete_old_records(
         self,
-        record_table: Type[DeclarativeBase],
-        entity_table: Type[DeclarativeBase],
+        record_table: type,
+        entity_table: type,
         entity_retention_col: Any,
         entity_fk_col: Any,
         record_fk_col: Any,
@@ -94,7 +94,8 @@ class DataRetentionService:
         )
 
         # Build base subquery to identify records to delete (will be limited per batch)
-        base_subquery = (
+        base_subquery = cast(
+            sa.Select[Any],
             sa.select(record_table.id)  # type: ignore[attr-defined]
             .join(entity_table, record_fk_col == entity_table.id)  # type: ignore[attr-defined]
             .join(Spaces, entity_fk_col == Spaces.id)
@@ -109,7 +110,7 @@ class DataRetentionService:
                     < sa.func.now()
                     - sa.func.make_interval(0, 0, 0, effective_retention_days),
                 )
-            )
+            ),
         )
 
         # Batch deletion to prevent transaction timeouts on large datasets

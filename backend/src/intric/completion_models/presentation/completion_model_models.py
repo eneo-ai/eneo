@@ -6,11 +6,6 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from intric.ai_models.completion_models.completion_model import (
-    CompletionModelPublic,
-    CompletionModelUpdateFlags,
-)
-
 
 class ModelUsageStatistics(BaseModel):
     """Pre-aggregated usage statistics for a completion model."""

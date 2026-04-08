@@ -20,7 +20,7 @@ class UserGroupCreate(UserGroupBase):
     tenant_id: UUID
 
 
-class UserGroupUpdateRequest(UserGroupBase):
+class UserGroupUpdateRequest(BaseModel):
     name: Optional[str] = None
 
     users: list[ModelId] = []

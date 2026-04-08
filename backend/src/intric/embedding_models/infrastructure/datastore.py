@@ -48,7 +48,7 @@ def autocut(y_values: list[float], cutoff: int = 2) -> int:
     if y_values[0] == y_values[-1]:
         return len(y_values)
 
-    diff = []
+    diff: list[float] = []
     step = 1.0 / (len(y_values) - 1)
 
     for i, y in enumerate(y_values):
@@ -78,12 +78,13 @@ class Datastore:
         user: UserInDB,
         info_blob_chunk_repo: InfoBlobChunkRepo,
         create_embeddings_service: "CreateEmbeddingsService",
-    ):
+    ) -> None:
+        super().__init__()
         self.user = user
         self.chunk_repo = info_blob_chunk_repo
         self.create_embeddings_service = create_embeddings_service
 
-    def _chunk_text(self, info_blob: InfoBlobInDB):
+    def _chunk_text(self, info_blob: InfoBlobInDB) -> list[InfoBlobChunk]:
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap,
@@ -105,8 +106,8 @@ class Datastore:
 
     async def _add(
         self, chunk_embedding_list: ChunkEmbeddingList, batch_size: int = 100
-    ):
-        chunks = []
+    ) -> None:
+        chunks: list[InfoBlobChunkWithEmbedding] = []
         for chunk, embedding in chunk_embedding_list:
             chunks.append(
                 InfoBlobChunkWithEmbedding(
@@ -147,15 +148,15 @@ class Datastore:
         self,
         search_string: str,
         embedding_model: "EmbeddingModel",
-        collections: list["Collection"] = [],
-        websites: list["Website"] = [],
-        integration_knowledge_list: list[IntegrationKnowledge] = [],
+        collections: Optional[list["Collection"]] = None,
+        websites: Optional[list["Website"]] = None,
+        integration_knowledge_list: Optional[list[IntegrationKnowledge]] = None,
         num_chunks: Optional[int] = 30,
         autocut_cutoff: Optional[int] = None,
     ) -> list[InfoBlobChunkInDBWithScore]:
-        group_ids = [group.id for group in collections]
-        website_ids = [website.id for website in websites]
-        integration_knowledge_ids = [i.id for i in integration_knowledge_list]
+        group_ids = [group.id for group in (collections or [])]
+        website_ids = [website.id for website in (websites or [])]
+        integration_knowledge_ids = [i.id for i in (integration_knowledge_list or [])]
 
         start = time.time()
         search_string_embedding = (
@@ -169,7 +170,7 @@ class Datastore:
             group_ids=group_ids,
             website_ids=website_ids,
             integration_knowledge_ids=integration_knowledge_ids,
-            limit=num_chunks,
+            limit=num_chunks if num_chunks is not None else 30,
         )
         end = time.time()
 

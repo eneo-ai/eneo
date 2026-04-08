@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from intric.main.exceptions import BadRequestException
@@ -7,9 +8,7 @@ if TYPE_CHECKING:
     from datetime import datetime
     from uuid import UUID
 
-    from intric.ai_models.completion_models.completion_model import (
-        CompletionModelPublic,
-    )
+    from intric.database.tables.ai_models_table import CompletionModels
     from intric.spaces.api.space_models import TemplateCreate
     from intric.templates.app_template.api.app_template_models import AppTemplateWizard
 
@@ -19,26 +18,27 @@ class AppTemplate:
         self,
         id: "UUID",
         name: str,
-        description: str,
+        description: Optional[str],
         category: str,
-        prompt_text: str,
+        prompt_text: Optional[str],
         created_at: "datetime",
         updated_at: "datetime",
-        completion_model: "CompletionModelPublic",
-        completion_model_kwargs: dict,
-        wizard: "AppTemplateWizard",
+        completion_model: Optional["CompletionModels"],
+        completion_model_kwargs: Optional[dict[str, object]],
+        wizard: Optional["AppTemplateWizard"],
         input_description: str | None,
         input_type: str,
         organization: str,
         tenant_id: Optional["UUID"] = None,
         deleted_at: Optional["datetime"] = None,
-        original_snapshot: Optional[dict] = None,
+        original_snapshot: Optional[dict[str, object]] = None,
         deleted_by_user_id: Optional["UUID"] = None,
         restored_by_user_id: Optional["UUID"] = None,
         restored_at: Optional["datetime"] = None,
         is_default: bool = False,
         icon_name: Optional[str] = None,
     ):
+        super().__init__()
         self.id = id
         self.name = name
         self.description = description
@@ -77,7 +77,8 @@ class AppTemplate:
                 raise BadRequestException("Unsupported type")
 
             if (
-                self.wizard.attachments is None
+                self.wizard is None
+                or self.wizard.attachments is None
                 or self.wizard.attachments.required is False
             ):
                 raise BadRequestException(
@@ -100,7 +101,7 @@ class AppTemplate:
         return self.tenant_id is None
 
     @classmethod
-    def create_snapshot(cls, template_data: dict) -> dict:
+    def create_snapshot(cls, template_data: dict[str, object]) -> dict[str, object]:
         """Create original_snapshot from template data for rollback functionality.
 
         Args:
@@ -125,13 +126,10 @@ class AppTemplate:
             else None,
         }
 
-        # Add created_at if available (should be datetime object)
         created_at = template_data.get("created_at")
-        if created_at is not None:
-            # Convert to ISO format string if datetime object
-            if hasattr(created_at, "isoformat"):
-                snapshot["created_at"] = created_at.isoformat()
-            else:
-                snapshot["created_at"] = created_at
+        if isinstance(created_at, datetime):
+            snapshot["created_at"] = created_at.isoformat()
+        elif created_at is not None:
+            snapshot["created_at"] = created_at
 
         return snapshot

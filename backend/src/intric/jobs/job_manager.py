@@ -15,7 +15,8 @@ logger = get_logger(__name__)
 
 
 class JobManager:
-    def __init__(self):
+    def __init__(self) -> None:
+        super().__init__()
         self._redis: ArqRedis | None = None
 
     async def init(self):
@@ -44,6 +45,8 @@ class JobManager:
         await self._redis.enqueue_job(task)
 
     async def get_job_status(self, job_id: UUID):
+        if self._redis is None:
+            raise NotReadyException("Job manager is not initialized!")
         job = Job(job_id=str(job_id), redis=self._redis)
 
         return await job.status()

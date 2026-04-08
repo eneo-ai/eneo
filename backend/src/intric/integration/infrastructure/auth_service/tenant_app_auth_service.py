@@ -14,7 +14,8 @@ DEFAULT_AUTH_TIMEOUT = 30.0
 class TenantAppToken:
     """Token obtained via client credentials flow (application permissions)."""
 
-    def __init__(self, access_token: str, expires_at: datetime):
+    def __init__(self, access_token: str, expires_at: datetime) -> None:
+        super().__init__()
         self.access_token = access_token
         self.expires_at = expires_at
 
@@ -35,7 +36,8 @@ class TenantAppAuthService:
     without user context and eliminating person-dependency.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
+        super().__init__()
         self._token_cache: dict[str, TenantAppToken] = {}
 
     async def get_access_token(

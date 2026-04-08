@@ -1,6 +1,7 @@
+from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import TYPE_CHECKING, AsyncIterator, Optional
+from typing import TYPE_CHECKING, AsyncIterator
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import CompletionModel
@@ -16,7 +17,12 @@ from intric.main.exceptions import (
 )
 from intric.questions.question import QuestionAdd, ToolCallInfo
 from intric.questions.questions_repo import QuestionRepository
-from intric.sessions.session import SessionAdd, SessionFeedback, SessionInDB
+from intric.sessions.session import (
+    SessionAdd,
+    SessionFeedback,
+    SessionInDB,
+    SessionUpdate,
+)
 from intric.sessions.sessions_repo import SessionRepository
 from intric.users.user import UserInDB
 
@@ -30,9 +36,10 @@ class SessionService:
         session_repo: SessionRepository,
         question_repo: QuestionRepository,
         user: UserInDB,
-        assistant_service: AssistantService = None,
-        group_chat_service: GroupChatService = None,
+        assistant_service: AssistantService | None = None,
+        group_chat_service: GroupChatService | None = None,
     ):
+        super().__init__()
         self.session_repo = session_repo
         self.question_repo = question_repo
         self.user = user
@@ -52,10 +59,10 @@ class SessionService:
 
     def _check_exists_and_belongs_to_user(
         self,
-        session: SessionInDB,
-        assistant_id: UUID = None,
-        group_chat_id: UUID = None,
-    ):
+        session: SessionInDB | None,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+    ) -> SessionInDB:
         if session is None:
             raise NotFoundException("Session not found")
 
@@ -79,25 +86,28 @@ class SessionService:
         if group_chat_id is not None and session.group_chat_id != group_chat_id:
             raise NotFoundException("Session belongs to another group chat")
 
+        return session
+
     async def get_session_by_uuid(
-        self, id: UUID, assistant_id: UUID = None, group_chat_id: UUID = None
-    ):
+        self,
+        id: UUID,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+    ) -> SessionInDB:
         session = await self.session_repo.get(id=id)
 
-        self._check_exists_and_belongs_to_user(
+        return self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
-
-        return session
 
     async def get_sessions_by_assistant(
         self,
         assistant_id: UUID,
-        limit: int = None,
-        cursor: datetime = None,
+        limit: int | None = None,
+        cursor: datetime | None = None,
         previous: bool = False,
-        name_filter: str = None,
-    ):
+        name_filter: str | None = None,
+    ) -> tuple[list[SessionInDB], int]:
         return await self.session_repo.get_by_assistant(
             assistant_id=assistant_id,
             user_id=self.user.id,
@@ -107,24 +117,28 @@ class SessionService:
             name_filter=name_filter,
         )
 
-    async def update_session(self, session_update):
+    async def update_session(self, session_update: SessionUpdate) -> SessionInDB:
         session = await self.session_repo.update(session_update)
-        self._check_exists_and_belongs_to_user(session)
-        return session
+        return self._check_exists_and_belongs_to_user(session)
 
     async def delete(
-        self, id: UUID, assistant_id: UUID = None, group_chat_id: UUID = None
-    ):
+        self,
+        id: UUID,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+    ) -> SessionInDB | None:
         session = await self.session_repo.get(id)
-        self._check_exists_and_belongs_to_user(
+        owned_session = self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
-        assert session is not None
-        return await self.session_repo.delete(session.id)
+        return await self.session_repo.delete(owned_session.id)
 
     async def create_session(
-        self, name: str, assistant_id: UUID = None, group_chat_id: UUID = None
-    ):
+        self,
+        name: str,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+    ) -> SessionInDB:
         session_add = SessionAdd(
             name=name,
             user_id=self.user.id,
@@ -142,15 +156,15 @@ class SessionService:
         num_tokens_question: int,
         num_tokens_answer: int,
         session: SessionInDB,
-        completion_model: CompletionModel = None,
+        completion_model: CompletionModel | None = None,
         info_blob_chunks: list[InfoBlobChunkInDBWithScore],
-        files: list[File] = [],
-        generated_files: list[File] = [],
-        logging_details: LoggingDetails = None,
-        assistant_id: Optional[UUID] = None,
-        web_search_results: list["WebSearchResult"] = [],
-        tool_calls: Optional[list[ToolCallInfo]] = None,
-    ):
+        files: Sequence[File] | None = None,
+        generated_files: Sequence[File] | None = None,
+        logging_details: LoggingDetails | None = None,
+        assistant_id: UUID | None = None,
+        web_search_results: Sequence["WebSearchResult"] | None = None,
+        tool_calls: list[ToolCallInfo] | None = None,
+    ) -> object:
         completion_model_id = completion_model.id if completion_model else None
         question_add = QuestionAdd(
             tenant_id=self.user.tenant_id,
@@ -169,33 +183,34 @@ class SessionService:
             return await self.question_repo.add(
                 question_add,
                 info_blob_chunks=info_blob_chunks,
-                files=files,
-                generated_files=generated_files,
-                web_search_results=web_search_results,
+                files=list(files or []),
+                generated_files=list(generated_files or []),
+                web_search_results=list(web_search_results or []),
             )
 
     async def leave_feedback(
         self,
         session_id: UUID,
         feedback: SessionFeedback,
-        assistant_id: UUID = None,
-        group_chat_id: UUID = None,
-    ):
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+    ) -> SessionInDB:
         session = await self.session_repo.get(id=session_id)
-        self._check_exists_and_belongs_to_user(
+        owned_session = self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
-        assert session is not None
-        return await self.session_repo.add_feedback(feedback=feedback, id=session.id)
+        return await self.session_repo.add_feedback(
+            feedback=feedback, id=owned_session.id
+        )
 
     async def get_sessions_by_group_chat(
         self,
         group_chat_id: UUID,
-        limit: int = None,
-        cursor: datetime = None,
+        limit: int | None = None,
+        cursor: datetime | None = None,
         previous: bool = False,
-        name_filter: str = None,
-    ):
+        name_filter: str | None = None,
+    ) -> tuple[list[SessionInDB], int]:
         return await self.session_repo.get_by_group_chat(
             group_chat_id=group_chat_id,
             user_id=self.user.id,

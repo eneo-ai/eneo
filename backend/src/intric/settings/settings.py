@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from intric.ai_models.completion_models.completion_model import CompletionModelPublic
 from intric.ai_models.embedding_models.embedding_model import EmbeddingModelPublicLegacy
@@ -8,7 +8,7 @@ from intric.main.models import InDB
 
 
 class SettingsBase(BaseModel):
-    chatbot_widget: dict = {}
+    chatbot_widget: dict[str, object] = Field(default_factory=dict)
 
 
 class SettingsUpsert(SettingsBase):

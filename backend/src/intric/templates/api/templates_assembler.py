@@ -18,6 +18,7 @@ class TemplateAssembler:
         app_assembler: "AppTemplateAssembler",
         assistant_assembler: "AssistantTemplateAssembler",
     ) -> None:
+        super().__init__()
         self.app_assembler = app_assembler
         self.assistant_assembler = assistant_assembler
 
@@ -25,10 +26,12 @@ class TemplateAssembler:
         self,
         templates: "Templates",
     ) -> TemplateListPublic:
-        apps = self.app_assembler.to_paginated_response(templates.app_templates).items
+        apps = self.app_assembler.to_paginated_response(
+            list(templates.app_templates)
+        ).items
 
         assistants = self.assistant_assembler.to_paginated_response(
-            templates.assistant_templates
+            list(templates.assistant_templates)
         ).items
 
         # Sort items: defaults first, then alphabetically by name (stable & predictable)

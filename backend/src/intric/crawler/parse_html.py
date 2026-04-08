@@ -19,16 +19,14 @@ class CrawledPage:
     content: str
 
 
-def parse_response(response: Response):
+def parse_response(response: Response) -> CrawledPage | None:
     # Guard: Skip non-text responses (images, PDFs, binary data)
     # Scrapy callbacks that return None are silently ignored
     if not isinstance(response, TextResponse):
         return None
 
-    # Handle JSON responses (e.g., API endpoints)
-    content_type = (
-        (response.headers.get(b"Content-Type") or b"").decode("utf-8").lower()
-    )
+    ct_raw = response.headers.get(b"Content-Type")
+    content_type: str = (ct_raw or b"").decode("utf-8").lower()
     if "application/json" in content_type:
         # For JSON responses, use the body as-is with URL as title
         return CrawledPage(url=response.url, title=response.url, content=response.text)
@@ -41,17 +39,18 @@ def parse_response(response: Response):
         url["href"] = urljoin(response.url, url["href"])
 
     content = html2text(str(soup))
-    title = response.css("title::text").get()
+    # response.css() is from untyped Scrapy; its return type is partially unknown.
+    title: str = response.css("title::text").get() or response.url  # pyright: ignore[reportUnknownMemberType]  # Scrapy has no py.typed stubs
     url = response.url
 
     return CrawledPage(url=url, title=title, content=content)
 
 
-def parse_file(response: Response):
-    content_type_header = response.headers.get(b"Content-Type")
-    content_type = ""
-    if content_type_header:
-        content_type = content_type_header.decode("utf-8", errors="ignore").lower()
+def parse_file(response: Response) -> dict[str, list[str]] | None:
+    ct_raw = response.headers.get(b"Content-Type")
+    content_type: str = ""
+    if ct_raw:
+        content_type = ct_raw.decode("utf-8", errors="ignore").lower()
     else:
         guessed_type, _ = mimetypes.guess_type(response.url)
         if guessed_type:

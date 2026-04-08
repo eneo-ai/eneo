@@ -17,6 +17,7 @@ from intric.groups_legacy.api.group_models import Group, GroupCreate, GroupUpdat
 
 class GroupRepository:
     def __init__(self, session: AsyncSession):
+        super().__init__()
         self.delegate: BaseRepositoryDelegate[Group] = BaseRepositoryDelegate(
             session,
             CollectionsTable,

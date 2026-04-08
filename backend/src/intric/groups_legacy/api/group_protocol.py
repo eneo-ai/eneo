@@ -14,9 +14,9 @@ def to_group_public_with_metadata(group: Group, num_info_blobs: int):
     )
 
 
-def to_groups_public_with_metadata(groups: list[Group], counts: list[int]):
+def to_groups_public_with_metadata(groups: list[Group], counts: list[int | None]):
     return [
-        to_group_public_with_metadata(group, count)
+        to_group_public_with_metadata(group, count if count is not None else 0)
         for group, count in zip(groups, counts)
     ]
 

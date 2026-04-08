@@ -469,7 +469,7 @@ class Settings(BaseSettings):
 
     @field_validator("export_dir", mode="before")
     @classmethod
-    def validate_export_dir_not_empty(cls, v):
+    def validate_export_dir_not_empty(cls, v: object) -> object:
         """
         Handle empty EXPORT_DIR env var by falling back to default.
 
@@ -565,7 +565,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    def migrate_legacy_vars(cls, values):
+    def migrate_legacy_vars(cls, values: dict[str, object]) -> dict[str, object]:
         """Auto-migrate legacy env vars with deprecation warnings.
 
         MOBILITYGUARD_* → OIDC_*

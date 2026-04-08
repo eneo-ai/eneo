@@ -7,7 +7,8 @@ from intric.icons.icon import Icon, IconCreate
 
 
 class IconRepository:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
         self._delegate: BaseRepositoryDelegate[Icon] = BaseRepositoryDelegate(
             session=session, table=Icons, in_db_model=Icon
         )

@@ -1,8 +1,16 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+
+def _empty_uuid_list() -> list[UUID]:
+    return []
+
+
+def _empty_failed_list() -> list[dict[str, Any]]:
+    return []
 
 
 class TenantSharePointAppCreate(BaseModel):
@@ -87,14 +95,15 @@ class TenantAppMigrationResult(BaseModel):
     dry_run: bool
     total_integrations_found: int
     migrated: list[UUID] = Field(
-        default_factory=list,
+        default_factory=_empty_uuid_list,
         description="List of integration IDs successfully migrated",
     )
-    failed: list[dict] = Field(
-        default_factory=list, description="List of failed migrations with error details"
+    failed: list[dict[str, Any]] = Field(
+        default_factory=_empty_failed_list,
+        description="List of failed migrations with error details",
     )
-    skipped: list[dict] = Field(
-        default_factory=list,
+    skipped: list[dict[str, Any]] = Field(
+        default_factory=_empty_failed_list,
         description="List of integrations skipped (e.g., already using tenant app)",
     )
 

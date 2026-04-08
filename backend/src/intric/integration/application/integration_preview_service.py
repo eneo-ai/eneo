@@ -33,7 +33,8 @@ class IntegrationPreviewService:
         confluence_preview_service: "ConfluencePreviewService",
         sharepoint_preview_service: "SharePointPreviewService",
         tenant_sharepoint_app_repo: Optional["TenantSharePointAppRepository"] = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.oauth_token_repo = oauth_token_repo
         self.user_integration_repo = user_integration_repo
         self.confluence_preview_service = confluence_preview_service

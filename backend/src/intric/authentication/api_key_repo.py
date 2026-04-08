@@ -1,3 +1,4 @@
+from typing import Protocol, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -8,8 +9,19 @@ from intric.database.repositories.base import BaseRepositoryDelegate
 from intric.database.tables.api_keys_table import ApiKeys
 
 
+class _ApiKeyAddDelegate(Protocol):
+    async def add(
+        self,
+        upsert_entry: ApiKey,
+        *,
+        user_id: UUID | None = None,
+        assistant_id: UUID | None = None,
+    ) -> ApiKeyInDB: ...
+
+
 class ApiKeysRepository:
     def __init__(self, session: AsyncSession):
+        super().__init__()
         self.delegate: BaseRepositoryDelegate[ApiKeyInDB] = BaseRepositoryDelegate(
             session, ApiKeys, ApiKeyInDB
         )
@@ -27,10 +39,11 @@ class ApiKeysRepository:
     async def add(
         self,
         api_key: ApiKey,
-        user_id: UUID = None,
-        assistant_id: int = None,
-    ):
-        return await self.delegate.add(
+        user_id: UUID | None = None,
+        assistant_id: UUID | None = None,
+    ) -> ApiKeyInDB:
+        add_delegate = cast(_ApiKeyAddDelegate, self.delegate)
+        return await add_delegate.add(
             api_key, user_id=user_id, assistant_id=assistant_id
         )
 
@@ -38,6 +51,6 @@ class ApiKeysRepository:
         stmt = sa.delete(ApiKeys).where(ApiKeys.user_id == user_id)
         await self.session.execute(stmt)
 
-    async def delete_by_assistant(self, assistant_id: int):
+    async def delete_by_assistant(self, assistant_id: UUID):
         stmt = sa.delete(ApiKeys).where(ApiKeys.assistant_id == assistant_id)
         await self.session.execute(stmt)

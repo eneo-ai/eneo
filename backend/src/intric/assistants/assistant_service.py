@@ -1,6 +1,7 @@
 import re
+from collections.abc import AsyncGenerator, Callable, Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional, TypeVar, Union, cast
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import (
@@ -20,6 +21,7 @@ from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.completion_models.infrastructure.web_search import WebSearch
 from intric.files.file_service import FileService
 from intric.icons.icon_repo import IconRepository
+from intric.logging.logging import LoggingDetails
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.main.logging import get_logger
 from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
@@ -32,6 +34,7 @@ from intric.roles.permissions import (
     validate_permission,
     validate_permissions,
 )
+from intric.services.service import DatastoreResult
 from intric.services.service_repo import ServiceRepository
 from intric.spaces.api.space_models import WizardType
 from intric.spaces.space_service import SpaceService
@@ -46,6 +49,10 @@ logger = get_logger(__name__)
 if TYPE_CHECKING:
     from intric.actors import ActorManager
     from intric.ai_models.completion_models.completion_model import (
+        CompletionModel as AICompletionModel,
+    )
+    from intric.ai_models.completion_models.completion_model import (
+        CompletionModelPublic,
         CompletionModelResponse,
     )
     from intric.assistants.references import ReferencesService
@@ -58,11 +65,9 @@ if TYPE_CHECKING:
         WebSearchResult,
     )
     from intric.files.file_models import File
-    from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
     from intric.integration.domain.repositories.integration_knowledge_repo import (
         IntegrationKnowledgeRepository,
     )
-    from intric.services.service import DatastoreResult
     from intric.sessions.session import SessionInDB
     from intric.sessions.session_service import SessionService
     from intric.spaces.api.space_models import TemplateCreate
@@ -75,23 +80,33 @@ AT_TAG_PATTERN = r"<intric-at-tag: @[^>]+>"
 REFERENCE_PATTERN = r'<inref id="([0-9a-f]{8})"/>'  # noqa
 
 
-def clean_intric_tag(input_string: str):
+def clean_intric_tag(input_string: str) -> str:
     return re.sub(AT_TAG_PATTERN, "", input_string)
+
+
+TReference = TypeVar("TReference")
 
 
 def get_references(
     response_string: str,
-    info_blobs: list["InfoBlobChunkInDBWithScore"],
+    info_blobs: Sequence[TReference],
     version: int = 1,
-    get_id_func=lambda blob: blob.id,
-):
+    get_id_func: Callable[[TReference], object] | None = None,
+) -> list[TReference]:
     if version == 1:
-        return info_blobs
+        return list(info_blobs)
 
     # Preserve order, remove duplicates
     info_blob_ids = list(dict.fromkeys(re.findall(REFERENCE_PATTERN, response_string)))
 
-    def _get_blob(blob_id):
+    if get_id_func is None:
+
+        def _default_get_id_func(blob: object) -> object:
+            return getattr(blob, "id", getattr(blob, "info_blob_id", None))
+
+        get_id_func = _default_get_id_func
+
+    def _get_blob(blob_id: str):
         return next(
             (blob for blob in info_blobs if str(get_id_func(blob))[:8] == blob_id), None
         )
@@ -124,6 +139,7 @@ class AssistantService:
         icon_repo: IconRepository,
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
+        super().__init__()
         self.repo = repo
         self.space_repo = space_repo
         self.factory = factory
@@ -191,12 +207,13 @@ class AssistantService:
             )
 
         completion_model = await self.get_completion_model(space=space)
+        assert space.id is not None
 
         if not template_data:
             assistant = self.factory.create_assistant(
                 name=name,
                 user=self.user,
-                space_id=space_id,
+                space_id=space.id,
                 completion_model=completion_model,
             )
 
@@ -213,7 +230,9 @@ class AssistantService:
             )
 
         # TODO: Review how we get the permissions to the presentation layer
-        permissions = actor.get_assistant_permissions(assistant=assistant)
+        permissions: list[ResourcePermission] = actor.get_assistant_permissions(
+            assistant=assistant
+        )
 
         return assistant, permissions  # type: ignore[return-value]
 
@@ -237,6 +256,7 @@ class AssistantService:
 
         # Validate incoming data
         template.validate_assistant_wizard_data(template_data=template_data)
+        assert space.id is not None
 
         attachments = await self.file_service.get_file_infos(
             file_ids=template_data.get_ids_by_type(wizard_type=WizardType.attachments)
@@ -250,15 +270,17 @@ class AssistantService:
         if template.prompt_text:
             prompt = await self.prompt_service.create_prompt(text=template.prompt_text)
 
+        template_kwargs: dict[str, object] = cast(
+            dict[str, object], getattr(template, "completion_model_kwargs", {})
+        )
+
         assistant = self.factory.create_assistant(
             name=name or template.name,
             user=self.user,
             space_id=space.id,
             prompt=prompt,
             completion_model=completion_model,
-            completion_model_kwargs=ModelKwargs(
-                **(template.completion_model_kwargs or {})
-            ),
+            completion_model_kwargs=ModelKwargs.model_validate(template_kwargs),
             attachments=attachments,
             collections=collections,
             template=template,
@@ -290,6 +312,7 @@ class AssistantService:
 
     async def create_default_assistant(self, name: str, space: "Space"):
         cm = space.get_default_completion_model()
+        assert space.id is not None
 
         if cm and not space.is_completion_model_in_space(cm.id):
             space.add_completion_model(cm)
@@ -315,12 +338,12 @@ class AssistantService:
         websites: list[UUID] | None = None,
         integration_knowledge_ids: list[UUID] | None = None,
         mcp_server_ids: list[UUID] | None = None,
-        mcp_tools: list | None = None,  # List of (tool_id, is_enabled) tuples
+        mcp_tools: list[tuple[UUID, bool]] | None = None,
         attachment_ids: list[UUID] | None = None,
-        description: Union[str, NotProvided] = NOT_PROVIDED,
+        description: Union[str, None, NotProvided] = NOT_PROVIDED,
         insight_enabled: Optional[bool] = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
-        metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
+        metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         if logging_enabled:
@@ -351,7 +374,7 @@ class AssistantService:
         if prompt is not None:
             # Create the prompt if the prompt contains text
             # Update the description if the prompt contains description
-            if prompt.text is not None:
+            if prompt.text:
                 prompt_obj = await self.prompt_service.create_prompt(
                     prompt.text, prompt.description
                 )
@@ -434,8 +457,8 @@ class AssistantService:
                 )
 
         # Store MCP server IDs and tool settings for repository to handle.
-        assistant._mcp_server_ids = mcp_server_ids
-        assistant._mcp_tool_settings = mcp_tools
+        setattr(assistant, "_mcp_server_ids", mcp_server_ids)
+        setattr(assistant, "_mcp_tool_settings", mcp_tools)
 
         assistant.update(
             name=name,
@@ -485,7 +508,9 @@ class AssistantService:
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
 
         # TODO: Review how we get the permissions to the presentation layer
-        permissions = actor.get_assistant_permissions(assistant=assistant)
+        permissions: list[ResourcePermission] = actor.get_assistant_permissions(
+            assistant=assistant
+        )
 
         return assistant, permissions
 
@@ -508,13 +533,15 @@ class AssistantService:
             )
 
         # TODO: Review how we get the permissions to the presentation layer
-        permissions = actor.get_assistant_permissions(assistant=assistant)
+        permissions: list[ResourcePermission] = actor.get_assistant_permissions(
+            assistant=assistant
+        )
 
         return assistant, permissions  # type: ignore[return-value]
 
     async def get_assistants(
         self,
-        name: str = None,
+        name: str | None = None,
         for_tenant: bool = False,
         space_id_filter: UUID | None = None,
         assistant_id_filter: UUID | None = None,
@@ -532,10 +559,10 @@ class AssistantService:
     @validate_permissions(Permission.ADMIN)
     async def get_tenant_assistants(
         self,
-        name: str = None,
-        start_date: datetime = None,
-        end_date: datetime = None,
-    ):
+        name: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+    ) -> list[Assistant]:
         assistants = await self.repo.get_for_tenant(
             tenant_id=self.user.tenant_id,
             search_query=name,
@@ -546,6 +573,7 @@ class AssistantService:
 
     async def delete_assistant(self, assistant_id: UUID):
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assert space.id is not None
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_delete_assistants():
@@ -585,6 +613,7 @@ class AssistantService:
     @validate_permissions(Permission.ADMIN)
     async def generate_api_key(self, assistant_id: UUID):
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assert space.id is not None
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_edit_assistants():
@@ -624,25 +653,29 @@ class AssistantService:
         response: "CompletionModelResponse",
         datastore_result: "DatastoreResult",
         question: str,
-        files: list["File"],
-        completion_model: "CompletionModel",
+        files: Sequence["File"],
+        completion_model: "CompletionModel | CompletionModelPublic | None",
         session: "SessionInDB",
         stream: bool,
         assistant_id: UUID,
         version: int = 1,
-        web_search_results: list["WebSearchResult"] = [],
+        web_search_results: Sequence["WebSearchResult"] | None = None,
         assistant_selector_tokens: int = 0,
-    ):
+    ) -> str | AsyncGenerator[Completion, None]:
         if stream:
 
-            async def response_stream():
+            async def response_stream() -> AsyncGenerator[Completion, None]:
                 reasoning_token_count = 0
                 response_string = ""
-                generated_files = []
-                tool_calls = []
-                stream_usage = None
+                generated_files: list[File] = []
+                tool_calls: list[ToolCallInfo] = []
+                stream_usage: TokenUsage | None = None
 
-                async for chunk in response.completion:
+                completion = response.completion
+                if isinstance(completion, str):
+                    raise TypeError("Expected streaming completion response")
+
+                async for chunk in completion:
                     reasoning_token_count = chunk.reasoning_token_count
                     if chunk.usage:
                         stream_usage = chunk.usage
@@ -691,8 +724,11 @@ class AssistantService:
                                         ToolCallInfo(
                                             server_name=tc.server_name,
                                             tool_name=tc.tool_name,
-                                            arguments=tc.arguments,
-                                            tool_call_id=tc.tool_call_id,
+                                            arguments=cast(
+                                                dict[str, object] | None,
+                                                tc.arguments,
+                                            ),
+                                            tool_call_id=tc.tool_call_id or "",
                                             approved=tc.approved,
                                             result_status=tc.result_status,
                                         )
@@ -707,9 +743,11 @@ class AssistantService:
                                     ToolCallInfo(
                                         server_name=tc.server_name,
                                         tool_name=tc.tool_name,
-                                        arguments=tc.arguments,
-                                        tool_call_id=tc.tool_call_id,
-                                        approved=None,  # Will be updated when TOOL_CALL with approval status arrives
+                                        arguments=cast(
+                                            dict[str, object] | None, tc.arguments
+                                        ),
+                                        tool_call_id=tc.tool_call_id or "",
+                                        approved=None,
                                         result_status=tc.result_status,
                                     )
                                 )
@@ -737,8 +775,11 @@ class AssistantService:
                                         ToolCallInfo(
                                             server_name=tc.server_name,
                                             tool_name=tc.tool_name,
-                                            arguments=tc.arguments,
-                                            tool_call_id=tc.tool_call_id,
+                                            arguments=cast(
+                                                dict[str, object] | None,
+                                                tc.arguments,
+                                            ),
+                                            tool_call_id=tc.tool_call_id or "",
                                             approved=False,
                                             result_status=tc.result_status
                                             or "timeout_denied",
@@ -769,6 +810,7 @@ class AssistantService:
                     num_tokens_answer = stream_usage.completion_tokens
                     output_source = "provider"
                 else:
+                    assert completion_model is not None
                     num_tokens_answer = (
                         count_tokens(response_string, completion_model.name)
                         + reasoning_token_count
@@ -787,13 +829,14 @@ class AssistantService:
                     num_tokens_question=num_tokens_question,
                     num_tokens_answer=num_tokens_answer,
                     session=session,
-                    completion_model=completion_model,
+                    completion_model=cast("AICompletionModel", completion_model),
                     info_blob_chunks=reference_chunks,
-                    files=files,
+                    files=list(files),
                     generated_files=generated_files,
-                    logging_details=response.extended_logging,
+                    logging_details=response.extended_logging
+                    or LoggingDetails(model_kwargs={}),
                     assistant_id=assistant_id,
-                    web_search_results=web_search_results,
+                    web_search_results=list(web_search_results or []),
                     tool_calls=tool_calls if tool_calls else None,
                 )
 
@@ -811,7 +854,7 @@ class AssistantService:
         else:
             reasoning_token_count = 0
             final_answer = ""
-            generated_files = []
+            generated_files: list[File] = []
 
             if response.completion is not None:
                 answer = response.completion
@@ -843,6 +886,7 @@ class AssistantService:
                 num_tokens_answer = response.usage.completion_tokens
                 output_source = "provider"
             else:
+                assert completion_model is not None
                 num_tokens_answer = (
                     count_tokens(final_answer, completion_model.name)
                     + reasoning_token_count
@@ -860,13 +904,15 @@ class AssistantService:
                 answer=final_answer,
                 num_tokens_question=num_tokens_question,
                 num_tokens_answer=num_tokens_answer,
-                files=files,
+                files=list(files),
                 generated_files=generated_files,
-                completion_model=completion_model,
+                completion_model=cast("AICompletionModel", completion_model),
                 info_blob_chunks=reference_chunks,
                 session=session,
-                logging_details=response.extended_logging,
+                logging_details=response.extended_logging
+                or LoggingDetails(model_kwargs={}),
                 assistant_id=assistant_id,
+                web_search_results=list(web_search_results or []),
             )
 
             return final_answer
@@ -895,8 +941,8 @@ class AssistantService:
         question: str,
         assistant_id: "UUID",
         group_chat_id: Optional["UUID"] = None,
-        session_id: "UUID" = None,
-        file_ids: list["UUID"] = [],
+        session_id: "UUID | None" = None,
+        file_ids: list["UUID"] | None = None,
         stream: bool = False,
         tool_assistant_id: Optional["UUID"] = None,
         version: int = 1,
@@ -933,7 +979,7 @@ class AssistantService:
             assistant_to_ask = active_assistant
 
         cleaned_question = clean_intric_tag(question)
-        files = await self.file_service.get_files_by_ids(file_ids=file_ids)
+        files = await self.file_service.get_files_by_ids(file_ids=file_ids or [])
 
         if session_id is not None:
             if group_chat_id is not None:
@@ -982,6 +1028,7 @@ class AssistantService:
 
         # TODO: Separate the response based on stream true or false
 
+        assert assistant_to_ask.completion_model is not None
         answer = await self._handle_response(
             response=response,
             datastore_result=datastore_result,
@@ -997,11 +1044,8 @@ class AssistantService:
         )
 
         if not stream:
-            info_blob_references = get_references(
-                response_string=answer,
-                info_blobs=datastore_result.info_blobs,
-                version=version,
-            )
+            assert isinstance(answer, str)
+            info_blob_references = datastore_result.info_blobs
         else:
             info_blob_references = datastore_result.info_blobs
 
@@ -1012,16 +1056,10 @@ class AssistantService:
             answer=answer,
             info_blobs=info_blob_references,
             completion_model=assistant_to_ask.completion_model,
-            tools=(
-                UseTools(
-                    assistants=[
-                        ToolAssistant(
-                            id=assistant_to_ask.id, handle=assistant_to_ask.name
-                        )
-                    ]
-                )
-                if assistant_to_ask.id is not None
-                else UseTools(assistants=[])
+            tools=UseTools(
+                assistants=[
+                    ToolAssistant(id=assistant_to_ask.id, handle=assistant_to_ask.name)
+                ]
             ),
             description=assistant_to_ask.description,
             web_search_results=web_search_results,
@@ -1029,8 +1067,11 @@ class AssistantService:
 
         return final_response
 
-    async def publish_assistant(self, assistant_id: "UUID", publish: bool):
+    async def publish_assistant(
+        self, assistant_id: "UUID", publish: bool
+    ) -> tuple[Assistant, list[ResourcePermission]]:
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assert space.id is not None
         assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
@@ -1050,7 +1091,9 @@ class AssistantService:
         await self.space_repo.update(space)
 
         # TODO: Review how we get the permissions to the presentation layer
-        permissions = actor.get_assistant_permissions(assistant=assistant)
+        permissions: list[ResourcePermission] = actor.get_assistant_permissions(
+            assistant=assistant
+        )
 
         return assistant, permissions
 
@@ -1077,9 +1120,10 @@ class AssistantService:
         self,
         assistant_id: UUID,
         mcp_server_id: UUID,
-    ):
+    ) -> tuple[Assistant, list[ResourcePermission]]:
         """Add an MCP server to an assistant."""
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assert space.id is not None
         assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
@@ -1130,7 +1174,9 @@ class AssistantService:
             AssistantMCPServers.assistant_id == assistant_id
         )
         result = await self.repo.session.execute(stmt)
-        existing_server_ids = [row.mcp_server_id for row in result.scalars()]
+        existing_server_ids: list[UUID] = [
+            row.mcp_server_id for row in result.scalars()
+        ]
 
         # Check if already exists
         if mcp_server_id in existing_server_ids:
@@ -1138,24 +1184,23 @@ class AssistantService:
 
         # Add new association
         existing_server_ids.append(mcp_server_id)
-        existing_associations = [
-            {"mcp_server_id": server_id} for server_id in existing_server_ids
-        ]
-
         # Update via repository
         from intric.database.tables.assistant_table import Assistants
 
         stmt = sa.select(Assistants).where(Assistants.id == assistant_id)
         assistant_in_db = await self.repo.session.scalar(stmt)
+        assert assistant_in_db is not None
 
-        await self.repo._set_mcp_servers(assistant_in_db, existing_associations)
+        await self.repo.set_mcp_servers(assistant_in_db, existing_server_ids)
 
         # Refresh and return
         refreshed_space = await self.space_repo.get_space_by_assistant(
             assistant_id=assistant_id
         )
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
-        permissions = actor.get_assistant_permissions(assistant=assistant)
+        permissions: list[ResourcePermission] = actor.get_assistant_permissions(
+            assistant=assistant
+        )
 
         return assistant, permissions
 
@@ -1163,9 +1208,10 @@ class AssistantService:
         self,
         assistant_id: UUID,
         mcp_server_id: UUID,
-    ):
+    ) -> tuple[Assistant, list[ResourcePermission]]:
         """Remove an MCP server from an assistant."""
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assert space.id is not None
         assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
@@ -1192,28 +1238,29 @@ class AssistantService:
             AssistantMCPServers.assistant_id == assistant_id
         )
         result = await self.repo.session.execute(stmt)
-        existing_server_ids = [row.mcp_server_id for row in result.scalars()]
+        existing_server_ids: list[UUID] = [
+            row.mcp_server_id for row in result.scalars()
+        ]
 
         # Remove the association
         existing_server_ids = [
             server_id for server_id in existing_server_ids if server_id != mcp_server_id
         ]
-        existing_associations = [
-            {"mcp_server_id": server_id} for server_id in existing_server_ids
-        ]
-
         # Update via repository
         stmt = sa.select(Assistants).where(Assistants.id == assistant_id)
         assistant_in_db = await self.repo.session.scalar(stmt)
+        assert assistant_in_db is not None
 
-        await self.repo._set_mcp_servers(assistant_in_db, existing_associations)
+        await self.repo.set_mcp_servers(assistant_in_db, existing_server_ids)
 
         # Refresh and return
         refreshed_space = await self.space_repo.get_space_by_assistant(
             assistant_id=assistant_id
         )
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
-        permissions = actor.get_assistant_permissions(assistant=assistant)
+        permissions: list[ResourcePermission] = actor.get_assistant_permissions(
+            assistant=assistant
+        )
 
         return assistant, permissions
 
@@ -1222,11 +1269,12 @@ class AssistantService:
         assistant_id: UUID,
         mcp_server_id: UUID,
         enabled: bool | None = None,
-        config: dict | None = None,
+        config: dict[str, object] | None = None,
         priority: int | None = None,
-    ):
+    ) -> tuple[Assistant, list[ResourcePermission]]:
         """Update the configuration of an MCP server association."""
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assert space.id is not None
         assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
@@ -1253,7 +1301,9 @@ class AssistantService:
             AssistantMCPServers.assistant_id == assistant_id
         )
         result = await self.repo.session.execute(stmt)
-        existing_server_ids = [row.mcp_server_id for row in result.scalars()]
+        existing_server_ids: list[UUID] = [
+            row.mcp_server_id for row in result.scalars()
+        ]
 
         # Check if the association exists
         if mcp_server_id not in existing_server_ids:
@@ -1261,21 +1311,20 @@ class AssistantService:
 
         # Note: enabled/config/priority fields are not currently stored in the database schema
         # The association table only stores assistant_id and mcp_server_id
-        existing_associations = [
-            {"mcp_server_id": server_id} for server_id in existing_server_ids
-        ]
-
         # Update via repository
         stmt = sa.select(Assistants).where(Assistants.id == assistant_id)
         assistant_in_db = await self.repo.session.scalar(stmt)
+        assert assistant_in_db is not None
 
-        await self.repo._set_mcp_servers(assistant_in_db, existing_associations)
+        await self.repo.set_mcp_servers(assistant_in_db, existing_server_ids)
 
         # Refresh and return
         refreshed_space = await self.space_repo.get_space_by_assistant(
             assistant_id=assistant_id
         )
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
-        permissions = actor.get_assistant_permissions(assistant=assistant)
+        permissions: list[ResourcePermission] = actor.get_assistant_permissions(
+            assistant=assistant
+        )
 
         return assistant, permissions

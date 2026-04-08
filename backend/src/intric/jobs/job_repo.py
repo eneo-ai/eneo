@@ -11,7 +11,8 @@ from intric.jobs.job_models import Job, JobInDb, JobUpdate
 
 
 class JobRepository:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
         self.delegate: BaseRepositoryDelegate[JobInDb] = BaseRepositoryDelegate(
             session,
             Jobs,

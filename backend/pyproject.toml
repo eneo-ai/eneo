@@ -60,6 +60,7 @@ dependencies = [
     "aiofiles>=23.0,<24",
     "python-calamine>=0.3.1,<1",  # Fast Excel reader engine for pandas
     "rich>=14.2.0",
+    "typing-extensions>=4.12.0,<5",
 ]
 
 [project.scripts]

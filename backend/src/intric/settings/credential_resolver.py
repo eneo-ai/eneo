@@ -1,5 +1,5 @@
 import os
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, cast
 
 from intric.main.config import (
     Settings,
@@ -38,6 +38,7 @@ class CredentialResolver:
         settings: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
     ):
+        super().__init__()
         self.tenant = tenant
         self.settings = settings or get_settings()
         self.encryption = encryption_service
@@ -49,13 +50,16 @@ class CredentialResolver:
 
         # Check tenant-specific credential first
         if self.tenant and self.tenant.api_credentials:
-            tenant_cred = self.tenant.api_credentials.get(provider_lower)
+            api_credentials = cast(dict[str, object], self.tenant.api_credentials)
+            tenant_cred = api_credentials.get(provider_lower)
             if tenant_cred:
                 # Extract api_key with type validation
+                api_key: Optional[str]
                 if isinstance(tenant_cred, str):
                     api_key = tenant_cred
                 elif isinstance(tenant_cred, dict):
-                    api_key = tenant_cred.get("api_key")
+                    raw = cast(dict[str, object], tenant_cred).get("api_key")
+                    api_key = raw if isinstance(raw, str) else None
                 else:
                     logger.error(
                         f"Invalid credential format for provider {provider}",
@@ -100,7 +104,7 @@ class CredentialResolver:
                         "metric_value": 1,
                     },
                 )
-                return api_key  # type: ignore[return-value]
+                return api_key  # type: ignore[return-value]  # api_key may be None when dict credential lacks api_key field; caller treats missing key as unresolved
 
         # Strict mode: When tenant credentials enabled, each tenant MUST configure their own
         # This prevents billing confusion (tenant thinks they use their own key, but actually use global)
@@ -236,17 +240,22 @@ class CredentialResolver:
 
         # Check if tenant has ANY credential for this provider
         if self.tenant and self.tenant.api_credentials:
-            tenant_cred = self.tenant.api_credentials.get(provider_lower)
+            api_credentials = cast(dict[str, object], self.tenant.api_credentials)
+            tenant_cred = api_credentials.get(provider_lower)
             if tenant_cred:
                 # Tenant HAS credential for provider → get field from it
                 # (NO fallback to global, even if field is missing/invalid)
                 if isinstance(tenant_cred, dict):
-                    value = tenant_cred.get(field)
+                    cred_dict = cast(dict[str, object], tenant_cred)
+                    raw_value = cred_dict.get(field)
+                    value: Optional[str] = (
+                        raw_value if isinstance(raw_value, str) else None
+                    )
                     if value not in (None, ""):
                         # Decrypt if requested
                         if decrypt and self.encryption and self.encryption.is_active():
                             try:
-                                value = self.encryption.decrypt(value)
+                                value = self.encryption.decrypt(value)  # type: ignore[arg-type]  # value is str here (guarded by `not in (None, "")`)
                             except ValueError:
                                 logger.error(
                                     f"Failed to decrypt {field} for {provider}",
@@ -349,7 +358,7 @@ class CredentialResolver:
 
         return None
 
-    def get_federation_config(self) -> dict:
+    def get_federation_config(self) -> dict[str, object]:
         """
         Get federation config with strict resolution based on federation_enabled flag.
 
@@ -413,15 +422,18 @@ class CredentialResolver:
         # MULTI-TENANT MODE (federation_enabled=true):
         # Check tenant-specific federation config in database
         if self.tenant and self.tenant.federation_config:
-            config = self.tenant.federation_config.copy()
+            config: dict[str, object] = cast(
+                dict[str, object], self.tenant.federation_config
+            ).copy()
 
             # Decrypt client_secret if present
-            if (
-                self.encryption
-                and self.encryption.is_active()
-                and config.get("client_secret")
-            ):
-                raw_secret = config["client_secret"]
+            raw_secret_obj = config.get("client_secret")
+            if self.encryption and self.encryption.is_active() and raw_secret_obj:
+                raw_secret = (
+                    raw_secret_obj
+                    if isinstance(raw_secret_obj, str)
+                    else str(raw_secret_obj)
+                )
 
                 if not self.encryption.is_encrypted(raw_secret):
                     logger.error(
@@ -547,7 +559,8 @@ class CredentialResolver:
             ) from e
 
         # Check tenant-specific origin in federation_config
-        origin = federation_config.get("canonical_public_origin")
+        origin_raw = federation_config.get("canonical_public_origin")
+        origin: Optional[str] = origin_raw if isinstance(origin_raw, str) else None
 
         # Fallback to global public_origin (single-tenant mode)
         # Explicit check for None or empty/whitespace strings
@@ -615,9 +628,13 @@ class CredentialResolver:
         origin = origin.rstrip("/")
 
         # Get redirect path (support customization per tenant)
-        redirect_path = validate_redirect_path(
-            federation_config.get("redirect_path", "/login/callback")
+        redirect_path_raw = federation_config.get("redirect_path")
+        redirect_path_str = (
+            redirect_path_raw
+            if isinstance(redirect_path_raw, str)
+            else "/login/callback"
         )
+        redirect_path = validate_redirect_path(redirect_path_str)
         if redirect_path is None:
             raise ValueError("redirect_path must be configured for OIDC redirects")
 
@@ -645,15 +662,19 @@ class CredentialResolver:
         """Return all configured redirect URIs for OIDC callback validation."""
         canonical_redirect_uri = self.get_redirect_uri()
         federation_config = self.get_federation_config()
-        additional_redirect_uris = federation_config.get("additional_redirect_uris", [])
+        additional_raw = federation_config.get("additional_redirect_uris")
+        additional_redirect_uris: list[object] = (
+            cast(list[object], additional_raw)
+            if isinstance(additional_raw, list)
+            else []
+        )
 
         if self.tenant and self.tenant.federation_config:
-            tenant_redirect_uris = self.tenant.federation_config.get(
-                "additional_redirect_uris", []
-            )
-            if isinstance(tenant_redirect_uris, list):
-                additional_redirect_uris = list(additional_redirect_uris) + list(
-                    tenant_redirect_uris
+            tenant_fc = cast(dict[str, object], self.tenant.federation_config)
+            tenant_uris_raw = tenant_fc.get("additional_redirect_uris")
+            if isinstance(tenant_uris_raw, list):
+                additional_redirect_uris = additional_redirect_uris + cast(
+                    list[object], tenant_uris_raw
                 )
 
         valid_redirect_uris = [canonical_redirect_uri]

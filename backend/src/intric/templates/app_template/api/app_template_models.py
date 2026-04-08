@@ -40,7 +40,7 @@ class AppTemplateOrganization(BaseModel):
 class AppInTemplatePublic(BaseModel):
     name: str
     completion_model: Optional[CompletionModelPublicAppTemplate]
-    completion_model_kwargs: dict
+    completion_model_kwargs: dict[str, object]
     prompt: Optional[PromptPublicAppTemplate]
     input_description: Optional[str]
     input_type: str
@@ -76,7 +76,7 @@ class AppTemplateCreate(BaseModel):
     category: str
     prompt: str
     organization: Optional[str] = None
-    completion_model_kwargs: dict = Field(default_factory=dict)
+    completion_model_kwargs: dict[str, object] = Field(default_factory=dict)
     completion_model_id: Optional[UUID] = None
     wizard: AppTemplateWizard
     input_type: str
@@ -96,7 +96,7 @@ class AppTemplateUpdate(BaseModel):
     category: Optional[str] = None
     prompt: Optional[str] = None
     organization: Optional[str] = None
-    completion_model_kwargs: Optional[dict] = None
+    completion_model_kwargs: Optional[dict[str, object]] = None
     completion_model_id: Optional[UUID] = None
     wizard: Optional[AppTemplateWizard] = None
     input_type: Optional[str] = None
@@ -115,7 +115,7 @@ class AppTemplateAdminPublic(BaseModel):
     description: str
     category: str
     prompt_text: Optional[str] = None
-    completion_model_kwargs: dict = Field(default_factory=dict)
+    completion_model_kwargs: dict[str, object] = Field(default_factory=dict)
     completion_model_id: Optional[UUID] = None
     completion_model_name: Optional[str] = None
     wizard: Optional[AppTemplateWizard] = None
@@ -127,7 +127,7 @@ class AppTemplateAdminPublic(BaseModel):
     deleted_by_user_id: Optional[UUID] = None
     restored_at: Optional[datetime] = None
     restored_by_user_id: Optional[UUID] = None
-    original_snapshot: Optional[dict] = None
+    original_snapshot: Optional[dict[str, object]] = None
     created_at: datetime
     updated_at: datetime
     usage_count: int = 0  # Number of apps created from this template
@@ -153,7 +153,7 @@ class AppTemplateAdminCreate(BaseModel):
     description: Optional[str] = None
     category: str
     prompt: Optional[str] = None
-    completion_model_kwargs: dict = Field(default_factory=dict)
+    completion_model_kwargs: dict[str, object] = Field(default_factory=dict)
     completion_model_id: Optional[UUID] = None
     wizard: Optional[AppTemplateWizard] = None
     input_type: str
@@ -168,7 +168,7 @@ class AppTemplateAdminUpdate(BaseModel):
     description: Optional[str] = None
     category: Optional[str] = None
     prompt: Optional[str] = None
-    completion_model_kwargs: Optional[dict] = None
+    completion_model_kwargs: Optional[dict[str, object]] = None
     completion_model_id: Optional[UUID] = None
     wizard: Optional[AppTemplateWizard] = None
     input_type: Optional[str] = None
@@ -177,7 +177,7 @@ class AppTemplateAdminUpdate(BaseModel):
 
     @field_validator("name", "description", "category", "icon_name", mode="before")
     @classmethod
-    def empty_str_to_none(cls, v):
+    def empty_str_to_none(cls, v: object) -> object:
         """Convert empty strings to None to allow clearing optional fields."""
         if isinstance(v, str) and v.strip() == "":
             return None

@@ -24,7 +24,8 @@ class IconService:
         self,
         icon_repo: IconRepository,
         file_size_service: FileSizeService,
-    ):
+    ) -> None:
+        super().__init__()
         self.icon_repo = icon_repo
         self.file_size_service = file_size_service
 
@@ -55,6 +56,10 @@ class IconService:
             )
 
         content = await upload_file.read()
+
+        assert (
+            upload_file.content_type is not None
+        )  # validated above by validate_mimetype
 
         icon_create = IconCreate(
             blob=content,

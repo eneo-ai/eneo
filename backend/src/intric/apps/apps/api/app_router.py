@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing_extensions import TypedDict
 
 from intric.apps.app_runs.api.app_run_models import (
     AppRunPublic,
@@ -20,6 +21,7 @@ from intric.authentication.api_key_notification_auto_follow import (
     auto_follow_on_publish,
 )
 from intric.authentication.auth_models import ApiKeyNotificationTargetType
+from intric.files.file_models import FileInfo
 from intric.main.container.container import Container
 from intric.main.models import NOT_PROVIDED, PaginatedResponse, is_provided
 from intric.prompts.api.prompt_models import PromptSparse
@@ -29,6 +31,13 @@ from intric.server.protocol import responses
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+WITH_USER_CONTAINER = get_container(with_user=True)
+USER_CONTAINER = Depends(WITH_USER_CONTAINER)
+
+
+class AttachmentChange(TypedDict):
+    id: str
+    name: str
 
 
 @router.get(
@@ -38,7 +47,7 @@ logger = logging.getLogger(__name__)
 )
 async def get_app(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     service = container.app_service()
     assembler = container.app_assembler()
@@ -56,7 +65,7 @@ async def get_app(
 async def update_app(
     id: UUID,
     update_service_req: AppUpdateRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     service = container.app_service()
     assembler = container.app_assembler()
@@ -118,23 +127,30 @@ async def update_app(
             space = None
 
     # Helper function to track attachment changes
-    def get_attachment_changes(old_attachments, new_attachments):
+    def get_attachment_changes(
+        old_attachments: list[FileInfo] | None,
+        new_attachments: list[FileInfo] | None,
+    ) -> tuple[list[AttachmentChange], list[AttachmentChange]]:
         """Compare attachment lists and return added/removed items."""
-        old_items = {str(att.id): att.name for att in (old_attachments or [])}
-        new_items = {str(att.id): att.name for att in (new_attachments or [])}
+        old_items: dict[str, str] = {
+            str(att.id): att.name for att in (old_attachments or [])
+        }
+        new_items: dict[str, str] = {
+            str(att.id): att.name for att in (new_attachments or [])
+        }
 
-        added = [
+        added: list[AttachmentChange] = [
             {"id": k, "name": new_items[k]} for k in new_items if k not in old_items
         ]
-        removed = [
+        removed: list[AttachmentChange] = [
             {"id": k, "name": old_items[k]} for k in old_items if k not in new_items
         ]
 
         return added, removed
 
     # Track comprehensive changes
-    changes = {}
-    change_summary = []
+    changes: dict[str, object] = {}
+    change_summary: list[str] = []
 
     # Name change
     if update_service_req.name and update_service_req.name != old_app.name:
@@ -178,35 +194,35 @@ async def update_app(
             change_summary.append("prompt")
 
     # Model changes
-    if completion_model_id and completion_model_id != old_app.completion_model.id:
+    old_completion_model = old_app.completion_model
+    new_completion_model = app.completion_model
+    if (
+        completion_model_id
+        and old_completion_model is not None
+        and completion_model_id != old_completion_model.id
+    ):
         changes["model"] = {
-            "old": old_app.completion_model.nickname
-            if old_app.completion_model
-            else None,
-            "new": app.completion_model.nickname if app.completion_model else None,
-            "old_id": str(old_app.completion_model.id)
-            if old_app.completion_model
-            else None,
+            "old": old_completion_model.nickname,
+            "new": new_completion_model.nickname if new_completion_model else None,
+            "old_id": str(old_completion_model.id),
             "new_id": str(completion_model_id),
         }
         change_summary.append("model")
 
     # Model behavior parameters (temperature, top_p)
     if update_service_req.completion_model_kwargs is not None:
-        old_kwargs = old_app.completion_model_kwargs or {}
-        new_kwargs = update_service_req.completion_model_kwargs or {}
+        old_kwargs = cast(
+            dict[str, object],
+            old_app.completion_model_kwargs or {},
+        )
+        new_kwargs = cast(
+            dict[str, object],
+            update_service_req.completion_model_kwargs or {},
+        )
 
         # Temperature
-        old_temperature = (
-            old_kwargs.get("temperature")
-            if isinstance(old_kwargs, dict)
-            else getattr(old_kwargs, "temperature", None)
-        )
-        new_temperature = (
-            new_kwargs.get("temperature")
-            if isinstance(new_kwargs, dict)
-            else getattr(new_kwargs, "temperature", None)
-        )
+        old_temperature = old_kwargs.get("temperature")
+        new_temperature = new_kwargs.get("temperature")
 
         if old_temperature != new_temperature and new_temperature is not None:
             changes["temperature"] = {"old": old_temperature, "new": new_temperature}
@@ -214,16 +230,8 @@ async def update_app(
                 change_summary.append("parameters")
 
         # Top-p
-        old_top_p = (
-            old_kwargs.get("top_p")
-            if isinstance(old_kwargs, dict)
-            else getattr(old_kwargs, "top_p", None)
-        )
-        new_top_p = (
-            new_kwargs.get("top_p")
-            if isinstance(new_kwargs, dict)
-            else getattr(new_kwargs, "top_p", None)
-        )
+        old_top_p = old_kwargs.get("top_p")
+        new_top_p = new_kwargs.get("top_p")
 
         if old_top_p != new_top_p and new_top_p is not None:
             changes["top_p"] = {"old": old_top_p, "new": new_top_p}
@@ -338,7 +346,7 @@ async def update_app(
 )
 async def delete_app(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     service = container.app_service()
     current_user = container.user()
@@ -393,7 +401,7 @@ async def delete_app(
 async def run_app(
     id: UUID,
     run_app_req: RunAppRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     service = container.app_run_service()
     assembler = container.app_run_assembler()
@@ -449,7 +457,7 @@ async def run_app(
 )
 async def get_app_runs(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     service = container.app_run_service()
     assembler = container.app_run_assembler()
@@ -469,7 +477,7 @@ async def get_app_runs(
 )
 async def get_prompts(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     service = container.app_service()
     assembler = container.prompt_assembler()
@@ -488,7 +496,7 @@ async def get_prompts(
 async def publish_app(
     id: UUID,
     published: bool,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     service = container.app_service()
     assembler = container.app_assembler()

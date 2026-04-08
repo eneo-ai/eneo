@@ -1,22 +1,27 @@
-from typing import Optional, Tuple
+from collections.abc import Mapping
+from typing import Any
 
 import aiohttp
+from aiohttp.typedefs import Query
 
 from intric.main.exceptions import InternalHTTPException
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
 
+RequestHeaders = Mapping[str, str]
+
 
 class WrappedAiohttpClient:
     def __init__(self, base_url: str):
+        super().__init__()
         self.base_url = base_url
         self.client = aiohttp.ClientSession()
 
-    def _create_url(self, endpoint: str):
+    def _create_url(self, endpoint: str) -> str:
         return f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
 
-    async def _handle_response(self, response: aiohttp.ClientResponse):
+    async def _handle_response(self, response: aiohttp.ClientResponse) -> Any:
         try:
             response.raise_for_status()
             return await response.json()
@@ -30,21 +35,36 @@ class WrappedAiohttpClient:
             logger.exception("Unknown error:")
             raise InternalHTTPException from err
 
-    async def get(self, endpoint: str, params=None, headers=None):
+    async def get(
+        self,
+        endpoint: str,
+        params: Query | None = None,
+        headers: RequestHeaders | None = None,
+    ) -> Any:
         url = self._create_url(endpoint=endpoint)
 
         async with self.client.get(url, params=params, headers=headers) as response:
             return await self._handle_response(response)
 
-    async def post(self, endpoint: str, data=None, headers=None):
+    async def post(
+        self,
+        endpoint: str,
+        data: Any | None = None,
+        headers: RequestHeaders | None = None,
+    ) -> Any:
         url = self._create_url(endpoint=endpoint)
 
         async with self.client.post(url, json=data, headers=headers) as response:
             return await self._handle_response(response)
 
     async def request(
-        self, method: str, endpoint: str, data=None, params=None, headers=None
-    ):
+        self,
+        method: str,
+        endpoint: str,
+        data: Any | None = None,
+        params: Query | None = None,
+        headers: RequestHeaders | None = None,
+    ) -> Any:
         url = self._create_url(endpoint=endpoint)
 
         async with self.client.request(
@@ -52,7 +72,11 @@ class WrappedAiohttpClient:
         ) as response:
             return await self._handle_response(response)
 
-    async def download(self, url: str, headers=None) -> Tuple[bytes, Optional[str]]:
+    async def download(
+        self,
+        url: str,
+        headers: RequestHeaders | None = None,
+    ) -> bytes:
         """Download binary content from a URL.
 
         Args:
@@ -60,12 +84,12 @@ class WrappedAiohttpClient:
             headers: Optional headers to send with the request
 
         Returns:
-            Tuple containing (binary_content, content_type)
+            Binary content from the response body
         """
         try:
             async with self.client.get(url, headers=headers) as response:
                 response.raise_for_status()
-                return await response.read()  # type: ignore[return-value]
+                return await response.read()
         except aiohttp.ClientResponseError as http_err:
             logger.exception(f"HTTP error while downloading from {url}:")
             raise http_err
@@ -76,6 +100,6 @@ class WrappedAiohttpClient:
             logger.exception(f"Unknown error while downloading from {url}:")
             raise InternalHTTPException from err
 
-    async def close(self):
+    async def close(self) -> None:
         if self.client and not self.client.closed:
             await self.client.close()

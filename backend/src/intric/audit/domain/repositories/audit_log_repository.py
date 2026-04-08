@@ -3,11 +3,31 @@
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
+
+from typing_extensions import TypedDict
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.audit_log import AuditLog
+
+
+class AuditLogRawRow(TypedDict):
+    id: str
+    tenant_id: str
+    timestamp: str
+    actor_id: str | None
+    actor_type: str
+    action: str
+    entity_type: str
+    entity_id: str
+    description: str
+    outcome: str
+    metadata: dict[str, Any]
+    ip_address: str | None
+    user_agent: str | None
+    request_id: str | None
+    error_message: str | None
 
 
 class AuditLogRepository(ABC):
@@ -86,7 +106,7 @@ class AuditLogRepository(ABC):
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
         batch_size: int = 20000,
-    ) -> AsyncIterator[dict]:
+    ) -> AsyncIterator[AuditLogRawRow]:
         """Stream audit logs as raw dicts for export."""
         pass
 
@@ -98,7 +118,7 @@ class AuditLogRepository(ABC):
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
         batch_size: int = 20000,
-    ) -> AsyncIterator[dict]:
+    ) -> AsyncIterator[AuditLogRawRow]:
         """Stream audit logs for a user (actor or target) as raw dicts."""
         pass
 

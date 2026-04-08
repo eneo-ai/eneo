@@ -1,11 +1,15 @@
 """Export job domain model for tracking async audit log exports."""
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+ExportJobRedisValue = str | int | bool | None
+ExportJobRedisDict = dict[str, ExportJobRedisValue]
 
 
 class ExportJobStatus(str, Enum):
@@ -60,7 +64,7 @@ class ExportJob(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc)
     )  # Updated by manager
 
-    def to_redis_dict(self) -> dict:
+    def to_redis_dict(self) -> ExportJobRedisDict:
         """Convert to dict for Redis storage."""
         return {
             "job_id": str(self.job_id),
@@ -83,28 +87,36 @@ class ExportJob(BaseModel):
         }
 
     @classmethod
-    def from_redis_dict(cls, data: dict) -> "ExportJob":
+    def from_redis_dict(cls, data: Mapping[str, object]) -> "ExportJob":
         """Create from Redis-stored dict."""
         return cls(
-            job_id=UUID(data["job_id"]),
-            tenant_id=UUID(data["tenant_id"]),
-            status=ExportJobStatus(data["status"]),
-            progress=data["progress"],
-            total_records=data["total_records"],
-            processed_records=data["processed_records"],
-            format=data["format"],
-            file_path=data.get("file_path"),
-            file_size_bytes=data.get("file_size_bytes"),
-            error_message=data.get("error_message"),
-            cancelled=data.get("cancelled", False),
-            created_at=datetime.fromisoformat(data["created_at"]),
-            started_at=datetime.fromisoformat(data["started_at"])
+            job_id=UUID(str(data["job_id"])),
+            tenant_id=UUID(str(data["tenant_id"])),
+            status=ExportJobStatus(str(data["status"])),
+            progress=int(str(data["progress"])),
+            total_records=int(str(data["total_records"])),
+            processed_records=int(str(data["processed_records"])),
+            format=str(data["format"]),
+            file_path=None if data.get("file_path") is None else str(data["file_path"]),
+            file_size_bytes=(
+                None
+                if data.get("file_size_bytes") is None
+                else int(str(data["file_size_bytes"]))
+            ),
+            error_message=(
+                None
+                if data.get("error_message") is None
+                else str(data["error_message"])
+            ),
+            cancelled=bool(data.get("cancelled", False)),
+            created_at=datetime.fromisoformat(str(data["created_at"])),
+            started_at=datetime.fromisoformat(str(data["started_at"]))
             if data.get("started_at")
             else None,
-            completed_at=datetime.fromisoformat(data["completed_at"])
+            completed_at=datetime.fromisoformat(str(data["completed_at"]))
             if data.get("completed_at")
             else None,
-            expires_at=datetime.fromisoformat(data["expires_at"]),
+            expires_at=datetime.fromisoformat(str(data["expires_at"])),
         )
 
     def is_terminal(self) -> bool:

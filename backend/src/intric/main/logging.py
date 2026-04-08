@@ -3,7 +3,9 @@ import logging
 import os
 import sys
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Union
+
+from typing_extensions import override
 
 from intric.main.config import get_loglevel
 from intric.main.request_context import get_request_context
@@ -46,6 +48,7 @@ class ContextJSONFormatter(logging.Formatter):
         "status_code",
     )
 
+    @override
     def format(
         self, record: logging.LogRecord
     ) -> str:  # pragma: no cover - formatting logic
@@ -117,12 +120,12 @@ class SimpleLogger(logging.Logger):
 
     def __init__(
         self,
-        name="main",
-        fmt_string=FORMAT_STRING,
-        level=logging.WARNING,
-        console=True,
-        files=None,
-    ):
+        name: str = "main",
+        fmt_string: str = FORMAT_STRING,
+        level: int = logging.WARNING,
+        console: bool = True,
+        files: Union[list[str], str, None] = None,
+    ) -> None:
         logging.Logger.__init__(self, name, level)
         formatter_obj: logging.Formatter
         if JSON_LOGS_ENABLED:
@@ -130,13 +133,16 @@ class SimpleLogger(logging.Logger):
         else:
             formatter_obj = logging.Formatter(fmt_string)
 
+        file_list: list[str]
         if files is None:
-            files = []
+            file_list = []
         elif isinstance(files, str):
-            files = [files]
+            file_list = [files]
+        else:
+            file_list = files
 
-        def _add_stream(handler: logging.Handler, **kwargs):
-            handler = handler(**kwargs)  # type: ignore[call-issue]
+        def _add_stream(handler_cls: type[logging.Handler], **kwargs: object) -> None:
+            handler = handler_cls(**kwargs)  # type: ignore[call-arg]  # dynamic kwargs forwarded to Handler subclass
             handler.setLevel(level)
             handler.setFormatter(formatter_obj)
             self.addHandler(handler)
@@ -144,7 +150,7 @@ class SimpleLogger(logging.Logger):
         if console is True:
             _add_stream(logging.StreamHandler, stream=sys.stdout)
 
-        for filepath in files:
+        for filepath in file_list:
             _add_stream(logging.FileHandler, filename=filepath)
 
 

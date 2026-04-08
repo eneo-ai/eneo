@@ -1,5 +1,6 @@
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Optional, cast
+from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -27,13 +28,14 @@ from intric.sessions.session import (
 
 class SessionRepository:
     def __init__(self, session: AsyncSession):
+        super().__init__()
         self.delegate: BaseRepositoryDelegate[SessionInDB] = BaseRepositoryDelegate(
             session, Sessions, SessionInDB, with_options=self._options()
         )
         self.session = session
 
     @staticmethod
-    def _options():
+    def _options() -> list[Any]:
         return [
             selectinload(Sessions.questions)
             .selectinload(Questions.info_blob_references)
@@ -54,7 +56,9 @@ class SessionRepository:
             selectinload(Sessions.assistant).selectinload(Assistants.user),
         ]
 
-    def _add_options(self, stmt: sa.Select | sa.Insert | sa.Update):
+    def _add_options(
+        self, stmt: sa.Select[Any] | sa.Insert | sa.Update
+    ) -> sa.Select[Any] | sa.Insert | sa.Update:
         for option in self._options():
             stmt = stmt.options(option)
 
@@ -66,7 +70,7 @@ class SessionRepository:
     async def update(self, session: SessionUpdate) -> SessionInDB | None:
         return await self.delegate.update(session)
 
-    async def add_feedback(self, feedback: SessionFeedback, id: UUID):
+    async def add_feedback(self, feedback: SessionFeedback, id: UUID) -> SessionInDB:
         stmt = (
             sa.Update(Sessions)
             .values(feedback_value=feedback.value, feedback_text=feedback.text)
@@ -79,27 +83,19 @@ class SessionRepository:
 
         return SessionInDB.model_validate(session)
 
-    async def get(
-        self, id: Optional[UUID] = None, user_id: UUID = None
-    ) -> SessionInDB | None:
-        if id is None and user_id is None:
-            raise ValueError("One of id and user_id is required")
-
-        if id is not None:
-            return await self.delegate.get(id)
-
-        return await self.delegate.filter_by(conditions={Sessions.user_id: user_id})  # type: ignore[return-value]
+    async def get(self, id: UUID) -> SessionInDB | None:
+        return await self.delegate.get(id)
 
     async def _get_total_count(
         self,
-        assistant_id: UUID = None,
-        user_id: UUID = None,
-        group_chat_id: UUID = None,
-        name_filter: str = None,
-        start_date: datetime = None,
-        end_date: datetime = None,
-        tenant_id: UUID = None,
-    ):
+        assistant_id: UUID | None = None,
+        user_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+        name_filter: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        tenant_id: UUID | None = None,
+    ) -> int:
         query = sa.select(sa.func.count()).select_from(Sessions)
 
         if tenant_id is not None:
@@ -130,15 +126,15 @@ class SessionRepository:
     async def get_by_assistant(
         self,
         assistant_id: UUID,
-        user_id: UUID = None,
-        limit: int = None,
-        cursor: datetime = None,
+        user_id: UUID | None = None,
+        limit: int | None = None,
+        cursor: datetime | None = None,
         previous: bool = False,
-        name_filter: str = None,
-        start_date: datetime = None,
-        end_date: datetime = None,
-        tenant_id: UUID = None,
-    ):
+        name_filter: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        tenant_id: UUID | None = None,
+    ) -> tuple[list[SessionInDB], int]:
         normalized_name_filter = name_filter.strip() if name_filter else None
         query = sa.select(Sessions).where(Sessions.assistant_id == assistant_id)
 
@@ -177,7 +173,6 @@ class SessionRepository:
                 if limit is not None:
                     query = query.limit(limit + 1)
                 items = await self.delegate.get_models_from_query(query)
-                items = cast(list[SessionInDB], items)
                 items.reverse()
                 return (items, total_count)
             else:
@@ -195,13 +190,15 @@ class SessionRepository:
         return sessions, total_count
 
     @staticmethod
-    def _to_session_metadata(items) -> list[SessionMetadataPublic]:
+    def _to_session_metadata(
+        items: Sequence[tuple[UUID, str, datetime | None, datetime | None]],
+    ) -> list[SessionMetadataPublic]:
         return [
             SessionMetadataPublic(
-                id=item.id,
-                name=item.name,
-                created_at=item.created_at,
-                updated_at=item.updated_at,
+                id=item[0],
+                name=item[1],
+                created_at=item[2],
+                updated_at=item[3],
             )
             for item in items
         ]
@@ -209,14 +206,14 @@ class SessionRepository:
     async def get_metadata_by_assistant(
         self,
         assistant_id: UUID,
-        user_id: UUID = None,
-        limit: int = None,
-        cursor: datetime = None,
+        user_id: UUID | None = None,
+        limit: int | None = None,
+        cursor: datetime | None = None,
         previous: bool = False,
-        name_filter: str = None,
-        start_date: datetime = None,
-        end_date: datetime = None,
-        tenant_id: UUID = None,
+        name_filter: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        tenant_id: UUID | None = None,
     ) -> tuple[list[SessionMetadataPublic], int]:
         normalized_name_filter = name_filter.strip() if name_filter else None
         query = sa.select(
@@ -258,7 +255,7 @@ class SessionRepository:
                 if limit is not None:
                     query = query.limit(limit + 1)
                 result = await self.session.execute(query)
-                items = list(result)
+                items = list(result.tuples())
                 items.reverse()
                 return (self._to_session_metadata(items), total_count)
             else:
@@ -273,21 +270,21 @@ class SessionRepository:
             query = query.limit(limit + 1)
 
         result = await self.session.execute(query)
-        items = list(result)
+        items = list(result.tuples())
         return self._to_session_metadata(items), total_count
 
     async def get_by_group_chat(
         self,
         group_chat_id: UUID,
-        user_id: UUID = None,
-        limit: int = None,
-        cursor: datetime = None,
+        user_id: UUID | None = None,
+        limit: int | None = None,
+        cursor: datetime | None = None,
         previous: bool = False,
-        name_filter: str = None,
-        start_date: datetime = None,
-        end_date: datetime = None,
-        tenant_id: UUID = None,
-    ):
+        name_filter: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        tenant_id: UUID | None = None,
+    ) -> tuple[list[SessionInDB], int]:
         normalized_name_filter = name_filter.strip() if name_filter else None
         query = sa.select(Sessions).where(Sessions.group_chat_id == group_chat_id)
 
@@ -326,7 +323,6 @@ class SessionRepository:
                 if limit is not None:
                     query = query.limit(limit + 1)
                 items = await self.delegate.get_models_from_query(query)
-                items = cast(list[SessionInDB], items)
                 items.reverse()
                 return (items, total_count)
             else:
@@ -346,14 +342,14 @@ class SessionRepository:
     async def get_metadata_by_group_chat(
         self,
         group_chat_id: UUID,
-        user_id: UUID = None,
-        limit: int = None,
-        cursor: datetime = None,
+        user_id: UUID | None = None,
+        limit: int | None = None,
+        cursor: datetime | None = None,
         previous: bool = False,
-        name_filter: str = None,
-        start_date: datetime = None,
-        end_date: datetime = None,
-        tenant_id: UUID = None,
+        name_filter: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        tenant_id: UUID | None = None,
     ) -> tuple[list[SessionMetadataPublic], int]:
         normalized_name_filter = name_filter.strip() if name_filter else None
         query = sa.select(
@@ -395,7 +391,7 @@ class SessionRepository:
                 if limit is not None:
                     query = query.limit(limit + 1)
                 result = await self.session.execute(query)
-                items = list(result)
+                items = list(result.tuples())
                 items.reverse()
                 return (self._to_session_metadata(items), total_count)
             else:
@@ -410,12 +406,15 @@ class SessionRepository:
             query = query.limit(limit + 1)
 
         result = await self.session.execute(query)
-        items = list(result)
+        items = list(result.tuples())
         return self._to_session_metadata(items), total_count
 
     async def get_by_tenant(
-        self, tenant_id: UUID, start_date: datetime = None, end_date: datetime = None
-    ):
+        self,
+        tenant_id: UUID,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+    ) -> list[SessionInDB]:
         query = sa.select(Sessions).join(Users).where(Users.tenant_id == tenant_id)
 
         if start_date is not None:
@@ -427,5 +426,5 @@ class SessionRepository:
         sessions = await self.delegate.get_models_from_query(query)
         return sessions
 
-    async def delete(self, id: int) -> SessionInDB:
-        return cast(SessionInDB, await self.delegate.delete(id))
+    async def delete(self, id: UUID) -> SessionInDB | None:
+        return await self.delegate.delete(id)

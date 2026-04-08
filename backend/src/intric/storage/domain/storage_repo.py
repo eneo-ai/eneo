@@ -27,7 +27,8 @@ if TYPE_CHECKING:
 class StorageInfoRepository:
     def __init__(
         self, user: UserInDB, session: AsyncSession, factory: StorageInfoFactory
-    ):
+    ) -> None:
+        super().__init__()
         self.user = user
         self.session = session
         self.factory = factory

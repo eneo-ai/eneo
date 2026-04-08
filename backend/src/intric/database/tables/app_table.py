@@ -20,7 +20,7 @@ from intric.database.tables.users_table import Users
 class Apps(BasePublic):
     name: Mapped[str] = mapped_column()
     description: Mapped[Optional[str]] = mapped_column()
-    completion_model_kwargs: Mapped[Optional[dict]] = mapped_column(JSONB)
+    completion_model_kwargs: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
     published: Mapped[bool] = mapped_column()
     data_retention_days: Mapped[Optional[int]] = mapped_column()
 

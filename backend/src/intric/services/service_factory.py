@@ -1,3 +1,4 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, Path
@@ -10,9 +11,10 @@ from intric.services.service import Service
 
 
 async def get_runner_from_service(
-    id: UUID = Path(), container: Container = Depends(get_container(with_user=True))
+    id: Annotated[UUID, Path()],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    service, _ = await container.service_service().get_service(id)
+    service, _permissions = await container.service_service().get_service(id)
 
     return get_service_runner(container=container, service=service)
 
@@ -20,7 +22,7 @@ async def get_runner_from_service(
 def get_service_runner(
     container: Container,
     service: Service,
-    with_groups: list[Group] = None,
+    with_groups: list[Group] | None = None,
 ):
     if with_groups is not None:
         service.groups = with_groups  # type: ignore[assignment]

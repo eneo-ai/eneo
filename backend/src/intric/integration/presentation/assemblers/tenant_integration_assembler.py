@@ -1,9 +1,12 @@
 from typing import TYPE_CHECKING
 
 from intric.integration.presentation.models import (
+    IntegrationType,
+    TenantIntegrationList,
+)
+from intric.integration.presentation.models import (
     TenantIntegration as TenantIntegrationModel,
 )
-from intric.integration.presentation.models import TenantIntegrationList
 
 if TYPE_CHECKING:
     from intric.integration.domain.entities.tenant_integration import TenantIntegration
@@ -21,7 +24,7 @@ class TenantIntegrationAssembler:
             id=item.id,  # None for not-yet-enabled integrations
             name=item.integration.name,
             description=item.integration.description,
-            integration_type=item.integration.integration_type,
+            integration_type=IntegrationType(item.integration.integration_type),
             integration_id=item.integration.id,
         )
 

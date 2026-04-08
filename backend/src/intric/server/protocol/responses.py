@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -6,9 +6,9 @@ from intric.main.models import GeneralError
 
 
 def streaming_response(
-    model: Optional[BaseModel] = None,
-    response_codes: list[int] = None,
-    models: list[BaseModel] = None,
+    model: type[BaseModel] | None = None,
+    response_codes: list[int] | None = None,
+    models: list[type[BaseModel]] | None = None,
 ) -> dict[int | str, Any]:
     """Define a streaming response with Server-Sent Events.
 

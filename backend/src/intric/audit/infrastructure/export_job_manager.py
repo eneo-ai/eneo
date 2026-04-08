@@ -1,13 +1,17 @@
 """Redis-backed manager for tracking async audit log export jobs."""
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional, cast
 from uuid import UUID
 
 import orjson
 import redis.asyncio as aioredis
 
-from intric.audit.domain.export_job import ExportJob, ExportJobStatus
+from intric.audit.domain.export_job import (
+    ExportJob,
+    ExportJobRedisDict,
+    ExportJobStatus,
+)
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 
@@ -30,6 +34,7 @@ class ExportJobManager:
     KEY_PREFIX = "audit_export"
 
     def __init__(self, redis: aioredis.Redis):
+        super().__init__()
         self.redis = redis
         self._settings = get_settings()
 
@@ -109,7 +114,7 @@ class ExportJobManager:
         if not data:
             return None
 
-        return ExportJob.from_redis_dict(orjson.loads(data))
+        return ExportJob.from_redis_dict(cast(ExportJobRedisDict, orjson.loads(data)))
 
     async def update_progress(
         self,
@@ -419,12 +424,12 @@ class ExportJobManager:
         pattern = self._tenant_jobs_pattern(tenant_id)
         cursor = 0
         active_count = 0
+        redis_client = cast(Any, self.redis)
 
         while True:
-            cursor, keys = await self.redis.scan(
-                cursor=cursor,
-                match=pattern,
-                count=100,
+            cursor, keys = cast(
+                tuple[int, list[str]],
+                await redis_client.scan(cursor=cursor, match=pattern, count=100),
             )
 
             for key in keys:
@@ -465,14 +470,14 @@ class ExportJobManager:
         """
         pattern = f"{self.KEY_PREFIX}:*"
         cursor = 0
-        expired_jobs = []
+        expired_jobs: list[ExportJob] = []
         now = datetime.now(timezone.utc)
+        redis_client = cast(Any, self.redis)
 
         while True:
-            cursor, keys = await self.redis.scan(
-                cursor=cursor,
-                match=pattern,
-                count=100,
+            cursor, keys = cast(
+                tuple[int, list[str]],
+                await redis_client.scan(cursor=cursor, match=pattern, count=100),
             )
 
             for key in keys:

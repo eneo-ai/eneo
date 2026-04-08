@@ -13,7 +13,7 @@ class UserAssembler:
         users: list[UserInDB],
         total_count: int,
         limit: Optional[int] = None,
-        cursor: str = None,
+        cursor: Optional[str] = None,
         previous: bool = False,
     ):
         """
@@ -31,7 +31,7 @@ class UserAssembler:
             if len(users) < limit:
                 paginated_users = [self.from_user_to_model(user) for user in users]
                 return CursorPaginatedResponse(
-                    items=users,
+                    items=paginated_users,
                     total_count=total_count,
                     previous_cursor=cursor,
                     limit=limit,

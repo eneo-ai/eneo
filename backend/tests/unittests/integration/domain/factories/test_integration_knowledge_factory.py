@@ -16,6 +16,24 @@ class TestIntegrationKnowledgeFactory(unittest.TestCase):
         # Create mock user integration and embedding model
         self.user_integration_mock = MagicMock()
         self.user_integration_mock.id = uuid4()
+        self.user_integration_mock.user_id = uuid4()
+        self.user_integration_mock.authenticated = True
+        self.user_integration_mock.auth_type = "user_oauth"
+        self.user_integration_mock.tenant_app_id = None
+        self.user_integration_mock.created_at = None
+        self.user_integration_mock.updated_at = None
+        self.user_integration_mock.tenant_integration.id = uuid4()
+        self.user_integration_mock.tenant_integration.tenant_id = uuid4()
+        self.user_integration_mock.tenant_integration.integration.id = uuid4()
+        self.user_integration_mock.tenant_integration.integration.name = (
+            "Test Integration"
+        )
+        self.user_integration_mock.tenant_integration.integration.description = (
+            "Test Description"
+        )
+        self.user_integration_mock.tenant_integration.integration.integration_type = (
+            "confluence"
+        )
 
         self.embedding_model_mock = MagicMock()
         self.embedding_model_mock.id = uuid4()
@@ -53,7 +71,7 @@ class TestIntegrationKnowledgeFactory(unittest.TestCase):
         self.assertEqual(knowledge.url, "https://example.com/kb")
         self.assertEqual(knowledge.tenant_id, tenant_id)
         self.assertEqual(knowledge.space_id, space_id)
-        self.assertEqual(knowledge.user_integration, self.user_integration_mock)
+        self.assertEqual(knowledge.user_integration.id, self.user_integration_mock.id)
         self.assertEqual(knowledge.embedding_model, self.embedding_model_mock)
         self.assertEqual(knowledge.created_at, created_at)
         self.assertEqual(knowledge.updated_at, updated_at)
@@ -117,7 +135,9 @@ class TestIntegrationKnowledgeFactory(unittest.TestCase):
             self.assertEqual(knowledge.url, db_records[i].url)
             self.assertEqual(knowledge.tenant_id, db_records[i].tenant_id)
             self.assertEqual(knowledge.space_id, db_records[i].space_id)
-            self.assertEqual(knowledge.user_integration, self.user_integration_mock)
+            self.assertEqual(
+                knowledge.user_integration.id, self.user_integration_mock.id
+            )
             self.assertEqual(knowledge.embedding_model, self.embedding_model_mock)
             self.assertEqual(knowledge.created_at, db_records[i].created_at)
             self.assertEqual(knowledge.updated_at, db_records[i].updated_at)

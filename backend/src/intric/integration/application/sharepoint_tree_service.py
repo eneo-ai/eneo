@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 from uuid import UUID
 
 from intric.main.logging import get_logger
@@ -26,7 +26,8 @@ class SharePointTreeService:
         user_integration_repo: "UserIntegrationRepository",
         sharepoint_auth_router: "SharePointAuthRouter",
         space_repo: "SpaceRepository",
-    ):
+    ) -> None:
+        super().__init__()
         self.user_integration_repo = user_integration_repo
         self.sharepoint_auth_router = sharepoint_auth_router
         self.space_repo = space_repo
@@ -39,7 +40,7 @@ class SharePointTreeService:
         drive_id: Optional[str] = None,
         folder_id: Optional[str] = None,
         folder_path: str = "",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Get folder tree from SharePoint site or OneDrive using hybrid authentication.
 
         Args:

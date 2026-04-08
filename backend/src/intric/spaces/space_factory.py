@@ -1,4 +1,6 @@
-from typing import TYPE_CHECKING, Iterable, Optional
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, Optional, cast
+from uuid import UUID
 
 from intric.apps.apps.app_factory import AppFactory
 from intric.collections.domain.collection import Collection
@@ -16,18 +18,27 @@ from intric.security_classifications.domain.entities.security_classification imp
     SecurityClassification,
 )
 from intric.services.service import Service
-from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember
+from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
 from intric.spaces.space import Space
-from intric.users.user import UserInDBBase
+from intric.users.user import UserInDBBase, UserSparse
 from intric.websites.domain.website import Website
 
 if TYPE_CHECKING:
-    from uuid import UUID
-
     from intric.assistants.assistant_factory import AssistantFactory
     from intric.completion_models.domain.completion_model import CompletionModel
+    from intric.database.tables.integration_table import (
+        IntegrationKnowledge as IntegrationKnowledgeDBModel,
+    )
+    from intric.database.tables.security_classifications_table import (
+        SecurityClassification as SecurityClassificationDBModel,
+    )
     from intric.database.tables.websites_table import Websites
     from intric.embedding_models.domain.embedding_model import EmbeddingModel
+    from intric.groups_legacy.api.group_models import GroupInDBBase
+    from intric.integration.domain.entities.sharepoint_subscription import (
+        SharePointSubscription as DomainSharePointSubscription,
+    )
+    from intric.integration.domain.entities.user_integration import UserIntegration
     from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.transcription_models.domain.transcription_model import (
         TranscriptionModel,
@@ -37,6 +48,7 @@ if TYPE_CHECKING:
 
 class SpaceFactory:
     def __init__(self, assistant_factory: "AssistantFactory", app_factory: AppFactory):
+        super().__init__()
         self.assistant_factory = assistant_factory
         self.app_factory = app_factory
 
@@ -44,9 +56,9 @@ class SpaceFactory:
     def create_space(
         name: str,
         tenant_id: "UUID",
-        tenant_space_id: "UUID" = None,
-        description: str = None,
-        user_id: "UUID" = None,
+        tenant_space_id: Optional["UUID"] = None,
+        description: Optional[str] = None,
+        user_id: Optional["UUID"] = None,
     ) -> Space:
         return Space(
             id=None,
@@ -75,19 +87,30 @@ class SpaceFactory:
         self,
         space_in_db: Spaces,
         user: "UserInDB",
-        collections_in_db: list[tuple[CollectionsTable, int]] = [],
-        websites_in_db: list["Websites"] = [],
-        completion_models: list["CompletionModel"] = [],
-        embedding_models: list["EmbeddingModel"] = [],
-        transcription_models: list["TranscriptionModel"] = [],
-        mcp_servers: list["MCPServer"] = [],
-        assistants_in_db: list["Assistants"] = [],
-        group_chats_in_db: list["GroupChatsTable"] = [],
-        apps_in_db: list["Apps"] = [],
-        services_in_db: list[Services] = [],
-        security_classification: Optional[SecurityClassification] = None,
-        integration_knowledge_in_db: Optional[Iterable] = None,
+        collections_in_db: Sequence[tuple[CollectionsTable, int]] | None = None,
+        websites_in_db: Sequence["Websites"] | None = None,
+        completion_models: Sequence["CompletionModel"] | None = None,
+        embedding_models: Sequence["EmbeddingModel"] | None = None,
+        transcription_models: Sequence["TranscriptionModel"] | None = None,
+        mcp_servers: Sequence["MCPServer"] | None = None,
+        assistants_in_db: Sequence["Assistants"] | None = None,
+        group_chats_in_db: Sequence["GroupChatsTable"] | None = None,
+        apps_in_db: Sequence["Apps"] | None = None,
+        services_in_db: Sequence[Services] | None = None,
+        security_classification: Optional["SecurityClassificationDBModel"] = None,
+        integration_knowledge_in_db: Iterable["IntegrationKnowledgeDBModel"]
+        | None = None,
     ) -> Space:
+        collections_in_db = list(collections_in_db or [])
+        websites_in_db = list(websites_in_db or [])
+        completion_models = list(completion_models or [])
+        embedding_models = list(embedding_models or [])
+        transcription_models = list(transcription_models or [])
+        mcp_servers = list(mcp_servers or [])
+        assistants_in_db = list(assistants_in_db or [])
+        group_chats_in_db = list(group_chats_in_db or [])
+        apps_in_db = list(apps_in_db or [])
+        services_in_db = list(services_in_db or [])
         non_deprecated_completion_models = [
             completion_model
             for completion_model in completion_models
@@ -149,62 +172,69 @@ class SpaceFactory:
 
         members = {
             space_user.user_id: SpaceMember(
-                **space_user.user.to_dict(), role=space_user.role
+                **UserSparse.model_validate(space_user.user).model_dump(),
+                role=cast(SpaceRoleValue, space_user.role),
             )
             for space_user in space_in_db.members
             if space_user.user.deleted_at is None
         }
 
         # Build group members from database
-        group_members = {}
+        group_members: dict[UUID, SpaceGroupMember] = {}
         for space_group in getattr(space_in_db, "group_members", []) or []:
             user_group = space_group.user_group
             if user_group:
                 group_members[user_group.id] = SpaceGroupMember(
                     id=user_group.id,
                     name=user_group.name,
-                    role=space_group.role,
+                    role=cast(SpaceRoleValue, space_group.role),
                     user_count=len(user_group.users) if user_group.users else 0,
                 )
 
-        space_collections = [
-            Collection.to_domain(
-                record=collection,
-                embedding_model=next(
-                    (
-                        embedding_model
-                        for embedding_model in embedding_models
-                        if embedding_model.id == collection.embedding_model_id
-                    ),
-                    None,
+        space_collections: list[Collection] = []
+        for collection, info_blob_count in collections_in_db:
+            embedding_model = next(
+                (
+                    embedding_model
+                    for embedding_model in embedding_models
+                    if embedding_model.id == collection.embedding_model_id
                 ),
-                num_info_blobs=info_blob_count,
+                None,
             )
-            for collection, info_blob_count in collections_in_db
-        ]
-        space_websites = [
-            Website.to_domain(
-                record=website,
-                embedding_model=next(
-                    (
-                        embedding_model
-                        for embedding_model in embedding_models
-                        if embedding_model.id == website.embedding_model_id
-                    ),
-                    None,
+            assert embedding_model is not None
+            space_collections.append(
+                Collection.to_domain(
+                    record=collection,
+                    embedding_model=embedding_model,
+                    num_info_blobs=info_blob_count,
+                )
+            )
+        space_websites: list[Website] = []
+        for website in websites_in_db:
+            embedding_model = next(
+                (
+                    embedding_model
+                    for embedding_model in embedding_models
+                    if embedding_model.id == website.embedding_model_id
                 ),
-                http_auth=getattr(website, "_decrypted_http_auth", None),
+                None,
             )
-            for website in websites_in_db
-        ]
+            assert embedding_model is not None
+            space_websites.append(
+                Website.to_domain(
+                    record=website,
+                    embedding_model=embedding_model,
+                    http_auth=getattr(website, "_decrypted_http_auth", None),
+                )
+            )
 
-        ik_source = (
+        ik_source: list["IntegrationKnowledgeDBModel"] = (
             list(integration_knowledge_in_db)
             if integration_knowledge_in_db is not None
             else list(getattr(space_in_db, "integration_knowledge_list", []) or [])
         )
 
-        integration_knowledge_list = []
+        integration_knowledge_list: list[IntegrationKnowledge] = []
         for i in ik_source:
             # Check if sharepoint_subscription was eager loaded via selectinload
             # We need to use sqlalchemy.inspect to check if the attribute was loaded
@@ -214,7 +244,7 @@ class SpaceFactory:
             sharepoint_subscription = None
             try:
                 insp = inspect(i)
-                if "sharepoint_subscription" not in insp.unloaded:
+                if insp is not None and "sharepoint_subscription" not in insp.unloaded:
                     sharepoint_subscription = i.sharepoint_subscription
             except Exception:
                 # If inspection fails (e.g., not a SQLAlchemy model), fall back to None
@@ -222,16 +252,22 @@ class SpaceFactory:
 
             integration_knowledge_list.append(
                 IntegrationKnowledge(
-                    name=i.name,
+                    name=cast(str, i.name),
                     original_name=getattr(i, "original_name", None),
-                    user_integration=getattr(i, "user_integration", None),
-                    embedding_model=next(
-                        (
-                            em
-                            for em in embedding_models
-                            if em.id == i.embedding_model_id
+                    user_integration=cast(
+                        "UserIntegration",
+                        getattr(i, "user_integration", None),
+                    ),
+                    embedding_model=cast(
+                        "EmbeddingModel",
+                        next(
+                            (
+                                em
+                                for em in embedding_models
+                                if em.id == i.embedding_model_id
+                            ),
+                            None,
                         ),
-                        None,
                     ),
                     tenant_id=i.tenant_id,
                     space_id=i.space_id,
@@ -244,7 +280,10 @@ class SpaceFactory:
                     sharepoint_subscription_id=getattr(
                         i, "sharepoint_subscription_id", None
                     ),
-                    sharepoint_subscription=sharepoint_subscription,
+                    sharepoint_subscription=cast(
+                        "Optional[DomainSharePointSubscription]",
+                        sharepoint_subscription,
+                    ),
                     delta_token=getattr(i, "delta_token", None),
                     folder_id=getattr(i, "folder_id", None),
                     folder_path=getattr(i, "folder_path", None),
@@ -297,7 +336,7 @@ class SpaceFactory:
 
         space_services = [
             Service(
-                **service.to_dict(),
+                **service.to_dict(),  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType] -- sqlalchemy_mixins.SerializeMixin lacks type stubs
                 user=UserInDBBase.model_validate(service.user),
                 completion_model=next(
                     (
@@ -307,23 +346,27 @@ class SpaceFactory:
                     ),
                     None,
                 ),
-                groups=[
-                    group
-                    for group in space_collections
-                    if group.id
-                    in [
-                        service_group.group_id
-                        for service_group in service.service_groups
-                    ]
-                ],
+                groups=cast(
+                    "list[GroupInDBBase]",
+                    [
+                        group
+                        for group in space_collections
+                        if group.id
+                        in [
+                            service_group.group_id
+                            for service_group in service.service_groups
+                        ]
+                    ],
+                ),
             )
             for service in services_in_db
         ]
 
-        if security_classification is not None:
-            security_classification = SecurityClassification.to_domain(
-                security_classification
-            )
+        space_security_classification: SecurityClassification | None = (
+            SecurityClassification.to_domain(security_classification)
+            if security_classification is not None
+            else None
+        )
 
         return Space(
             created_at=space_in_db.created_at,
@@ -348,7 +391,7 @@ class SpaceFactory:
             websites=space_websites,
             members=members,
             group_members=group_members,
-            security_classification=security_classification,
+            security_classification=space_security_classification,
             data_retention_days=space_in_db.data_retention_days,
             icon_id=space_in_db.icon_id,
         )

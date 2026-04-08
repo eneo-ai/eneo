@@ -50,6 +50,6 @@ class MCPServerRepository(ABC):
         ...
 
     @abstractmethod
-    async def delete(self, id: UUID) -> None:
+    async def delete(self, id: UUID) -> bool:
         """Delete an MCP server."""
         ...

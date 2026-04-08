@@ -21,6 +21,7 @@ class CollectionCRUDService:
         actor_manager: "ActorManager",
         group_service: "GroupService",
     ):
+        super().__init__()
         self.user = user
         self.space_service = space_service
         self.space_repo = space_repo
@@ -37,6 +38,8 @@ class CollectionCRUDService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
         if not actor.can_create_collections():
             raise UnauthorizedException()
+
+        assert space.id is not None
 
         grp = await self.group_service.create_space_group(
             name=name,

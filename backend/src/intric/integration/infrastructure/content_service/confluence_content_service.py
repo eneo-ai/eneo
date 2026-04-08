@@ -1,11 +1,11 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 import aiohttp
 
 from intric.embedding_models.infrastructure.datastore import Datastore
 from intric.info_blobs.info_blob import InfoBlobAdd
-from intric.integration.domain.entities.oauth_token import ConfluenceToken
+from intric.integration.domain.entities.oauth_token import ConfluenceToken, OauthToken
 from intric.integration.infrastructure.clients.confluence_content_client import (
     ConfluenceContentClient,
 )
@@ -43,7 +43,8 @@ class ConfluenceContentService:
         info_blob_service: "InfoBlobService",
         integration_knowledge_repo: "IntegrationKnowledgeRepository",
         oauth_token_service: "OauthTokenService",
-    ):
+    ) -> None:
+        super().__init__()
         self.job_service = job_service
         self.oauth_token_repo = oauth_token_repo
         self.user_integration_repo = user_integration_repo
@@ -59,17 +60,20 @@ class ConfluenceContentService:
         space_key: str,
         integration_knowledge_id: UUID,
     ):
-        token = await self.oauth_token_repo.one(id=token_id)
+        token = self._require_confluence_token(
+            await self.oauth_token_repo.one(id=token_id)
+        )
 
         async def fetch_space_content(
             token: "ConfluenceToken", start: int, space_key: str
-        ):
+        ) -> dict[str, object]:
             async with ConfluenceContentClient(
                 base_url=token.base_url, api_token=token.access_token
             ) as content_client:
-                return await content_client.get_content(
+                result: dict[str, object] = await content_client.get_content(
                     start=start, space_key=space_key
                 )
+                return result
 
         size = 50
         start = 0
@@ -79,15 +83,22 @@ class ConfluenceContentService:
                     token=token, start=start, space_key=space_key
                 )
             except aiohttp.ClientResponseError:
-                token = await self.oauth_token_service.refresh_and_update_token(
-                    token_id=token.id
+                token = self._require_confluence_token(
+                    await self.oauth_token_service.refresh_and_update_token(
+                        token_id=token.id
+                    )
                 )
                 content = await fetch_space_content(
                     token=token, start=start, space_key=space_key
                 )
 
             logger.info(f"Fetching knowledge, batch {start // 50}")
-            results = content.get("results")
+            raw_results = content.get("results")
+            results: list[dict[str, object]] = (
+                cast(list[dict[str, object]], raw_results)
+                if isinstance(raw_results, list)
+                else []
+            )
             if results:
                 await self._process_data(
                     results=results,
@@ -100,7 +111,7 @@ class ConfluenceContentService:
 
     async def _process_data(
         self,
-        results: list[dict],
+        results: list[dict[str, object]],
         integration_knowledge_id: "UUID",
         token: "ConfluenceToken",
     ) -> None:
@@ -109,12 +120,25 @@ class ConfluenceContentService:
         )
         integration_knowledge_size = integration_knowledge.size
         for item in results:
+            body = item.get("body")
+            body_dict: dict[str, object] = (
+                cast(dict[str, object], body) if isinstance(body, dict) else {}
+            )
+            storage = body_dict.get("storage")
+            storage_dict: dict[str, object] = (
+                cast(dict[str, object], storage) if isinstance(storage, dict) else {}
+            )
+            text = storage_dict.get("value", "")
+            links = item.get("_links")
+            links_dict: dict[str, object] = (
+                cast(dict[str, object], links) if isinstance(links, dict) else {}
+            )
             info_blob_add = InfoBlobAdd(
-                title=item.get("title"),
+                title=str(item.get("title") or ""),
                 user_id=self.user.id,
-                text=item.get("body", {}).get("storage", {}).get("value", ""),
+                text=str(text) if text else "",
                 group_id=None,
-                url=f"{token.base_web_url}{item.get('_links', {}).get('webui')}",
+                url=f"{token.base_web_url}{links_dict.get('webui', '')}",
                 website_id=None,
                 tenant_id=self.user.tenant_id,
                 integration_knowledge_id=integration_knowledge_id,
@@ -132,3 +156,9 @@ class ConfluenceContentService:
 
         integration_knowledge.size = integration_knowledge_size
         await self.integration_knowledge_repo.update(obj=integration_knowledge)
+
+    @staticmethod
+    def _require_confluence_token(token: OauthToken) -> ConfluenceToken:
+        if not isinstance(token, ConfluenceToken):
+            raise ValueError("Expected a Confluence token")
+        return token

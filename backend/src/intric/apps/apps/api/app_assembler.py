@@ -1,4 +1,5 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
+from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import (
     ModelKwargs,
@@ -38,9 +39,12 @@ class AppAssembler:
         self,
         prompt_assembler: PromptAssembler,
     ):
+        super().__init__()
         self.prompt_assembler = prompt_assembler
 
-    def _get_accepted_file_types(self, input_type: InputFieldType):
+    def _get_accepted_file_types(
+        self, input_type: InputFieldType
+    ) -> list[AcceptedFileType]:
         settings = get_settings()
         match input_type:
             case InputFieldType.TEXT_FIELD:
@@ -78,7 +82,7 @@ class AppAssembler:
                     for mimetype in ImageMimeTypes.values()
                 ]
 
-    def _get_limit(self, input_type: InputFieldType):
+    def _get_limit(self, input_type: InputFieldType) -> Limit:
         settings = get_settings()
         match input_type:
             case InputFieldType.TEXT_FIELD:
@@ -105,8 +109,10 @@ class AppAssembler:
                     * settings.upload_image_to_session_max_size,
                 )
 
-    def _get_input_fields(self, input_fields: list[InputField]):
-        def _get_input_field(input_field: InputField):
+    def _get_input_fields(
+        self, input_fields: list[InputField]
+    ) -> list[InputFieldPublic]:
+        def _get_input_field(input_field: InputField) -> InputFieldPublic:
             accepted_file_types = self._get_accepted_file_types(
                 input_type=input_field.type
             )
@@ -121,8 +127,8 @@ class AppAssembler:
         return [_get_input_field(input_field) for input_field in input_fields]
 
     def from_app_to_model(
-        self, app: App, permissions: list["ResourcePermission"] = None
-    ):
+        self, app: App, permissions: list["ResourcePermission"] | None = None
+    ) -> AppPublic:
         permissions = permissions or []
 
         input_fields = self._get_input_fields(app.input_fields)
@@ -170,7 +176,7 @@ class AppAssembler:
         return AppPublic(
             created_at=app.created_at,
             updated_at=app.updated_at,
-            id=app.id,
+            id=cast(UUID, app.id),
             name=app.name,
             description=app.description,
             input_fields=input_fields,

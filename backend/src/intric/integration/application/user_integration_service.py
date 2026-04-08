@@ -1,8 +1,11 @@
 import asyncio
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 from intric.integration.domain.entities.user_integration import (
     UserIntegration,
+)
+from intric.integration.infrastructure.content_service.types import (
+    SharePointTokenProtocol,
 )
 from intric.main.exceptions import UnauthorizedException
 from intric.main.logging import get_logger
@@ -13,6 +16,9 @@ logger = get_logger(__name__)
 if TYPE_CHECKING:
     from uuid import UUID
 
+    from intric.integration.domain.entities.tenant_sharepoint_app import (
+        TenantSharePointApp,
+    )
     from intric.integration.domain.repositories.oauth_token_repo import (
         OauthTokenRepository,
     )
@@ -43,7 +49,8 @@ class UserIntegrationService:
         sharepoint_subscription_service: Optional[
             "SharePointSubscriptionService"
         ] = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.user_integration_repo = user_integration_repo
         self.tenant_integration_repo = tenant_integration_repo
         self.user = user
@@ -89,7 +96,7 @@ class UserIntegrationService:
         tenant_app_result = await self.user_integration_repo.session.execute(  # type: ignore[attr-defined]
             tenant_app_stmt
         )
-        tenant_app_db_models = [row[0] for row in tenant_app_result.all()]
+        tenant_app_db_models: list[Any] = [row[0] for row in tenant_app_result.all()]  # type: ignore[union-attr]
         tenant_app_list = UserIntegrationFactory.create_entities(
             records=tenant_app_db_models
         )
@@ -99,7 +106,7 @@ class UserIntegrationService:
 
         available = await self.tenant_integration_repo.query(tenant_id=tenant_id)
 
-        results = []
+        results: list[UserIntegration] = []
         for a in available:
             if a.id in tenant_app_map:
                 results.append(tenant_app_map[a.id])
@@ -154,7 +161,7 @@ class UserIntegrationService:
             SharePointSubscriptionDB.user_integration_id == integration.id
         )
         result = await self.user_integration_repo.session.execute(stmt)  # type: ignore[attr-defined]
-        graph_subscription_ids = [row[0] for row in result.all()]
+        graph_subscription_ids: list[str] = [row[0] for row in result.all()]  # type: ignore[union-attr]
 
         if not graph_subscription_ids:
             return
@@ -171,16 +178,22 @@ class UserIntegrationService:
             return
 
         # Fire-and-forget Graph API cleanup (DB rows will be cascade-deleted)
+        # token is always a SharePoint token for SharePoint subscriptions
+        sp_token = cast(SharePointTokenProtocol, token)
         for graph_sub_id in graph_subscription_ids:
-            asyncio.create_task(self._delete_graph_subscription(graph_sub_id, token))
+            asyncio.create_task(self._delete_graph_subscription(graph_sub_id, sp_token))
 
     async def _delete_graph_subscription(
-        self, graph_subscription_id: str, token
+        self,
+        graph_subscription_id: str,
+        token: SharePointTokenProtocol,
     ) -> None:
         """Fire-and-forget: delete a single subscription from Microsoft Graph."""
         try:
             assert self.sharepoint_subscription_service is not None
-            await self.sharepoint_subscription_service._delete_graph_subscription(
+            await cast(
+                Any, self.sharepoint_subscription_service
+            )._delete_graph_subscription(
                 subscription_id=graph_subscription_id,
                 token=token,
             )
@@ -208,11 +221,16 @@ class UserIntegrationService:
             tenant_id=self.user.tenant_id,
         )
 
-        tenant_app = None
+        tenant_app: Optional["TenantSharePointApp"] = None
         if self.tenant_sharepoint_app_repo:
             try:
-                tenant_app = await self.tenant_sharepoint_app_repo.one_or_none(  # type: ignore[attr-defined]
+                _raw_app = await self.tenant_sharepoint_app_repo.one_or_none(  # type: ignore[attr-defined]
                     tenant_id=self.user.tenant_id
+                )
+                tenant_app = (
+                    cast("TenantSharePointApp", _raw_app)
+                    if _raw_app is not None
+                    else None
                 )
             except Exception as e:
                 logger.warning(
@@ -223,7 +241,7 @@ class UserIntegrationService:
         is_admin = Permission.ADMIN in self.user.permissions
 
         if space.is_personal():
-            available = []
+            available: list[UserIntegration] = []
             for integration in all_integrations:
                 if integration.auth_type != "user_oauth" and integration.authenticated:
                     continue

@@ -1,6 +1,7 @@
 import logging
+from collections.abc import Sequence
 from datetime import datetime
-from typing import cast
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -67,11 +68,11 @@ _LEGACY_ASSISTANT_API_KEY_EXAMPLE = {
 async def create_assistant(
     request: Request,
     assistant: AssistantCreatePublic,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     # Scope validation: scoped keys cannot create assistants outside their scope
     scope_filter = get_scope_filter(request)
-    if scope_filter.space_id is not None and assistant.space_id is not None:
+    if scope_filter.space_id is not None:
         if scope_filter.space_id != assistant.space_id:
             raise HTTPException(
                 status_code=403,
@@ -123,13 +124,16 @@ async def create_assistant(
         },
     }
 
+    created_assistant_id = created_assistant.id
+    assert created_assistant_id is not None
+
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
         actor_id=current_user.id,
         action=ActionType.ASSISTANT_CREATED,
         entity_type=EntityType.ASSISTANT,
-        entity_id=created_assistant.id,
+        entity_id=created_assistant_id,
         description=f"Created assistant '{created_assistant.name}'",
         metadata=AuditMetadata.standard(
             actor=current_user,
@@ -145,9 +149,9 @@ async def create_assistant(
 @router.get("/", response_model=PaginatedResponse[AssistantPublic])
 async def get_assistants(
     request: Request,
-    name: str = None,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    name: str | None = None,
     for_tenant: bool = False,
-    container: Container = Depends(get_container(with_user=True)),
 ):
     """Requires Admin permission if `for_tenant` is `true`."""
     scope_filter = get_scope_filter(request)
@@ -195,7 +199,7 @@ async def get_assistants(
 )
 async def get_assistant(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.assistant_service()
     assembler = container.assistant_assembler()
@@ -215,7 +219,7 @@ async def get_assistant(
 async def update_assistant(
     id: UUID,
     assistant: AssistantUpdatePublic,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Omitted fields are not updated"""
     service = container.assistant_service()
@@ -243,21 +247,13 @@ async def update_assistant(
     if assistant.attachments is not None:
         attachment_ids = [attachment.id for attachment in assistant.attachments]
 
-    groups = None
-    if assistant.groups is not None:
-        groups = [group.id for group in assistant.groups]
+    groups = list(assistant.groups)
 
-    websites = None
-    if assistant.websites is not None:
-        websites = [website.id for website in assistant.websites]
+    websites = list(assistant.websites)
 
-    integration_knowledge_ids = None
-    if assistant.integration_knowledge_list is not None:
-        integration_knowledge_ids = [i.id for i in assistant.integration_knowledge_list]
+    integration_knowledge_ids = list(assistant.integration_knowledge_list)
 
-    mcp_server_ids = None
-    if assistant.mcp_servers is not None:
-        mcp_server_ids = [mcp.id for mcp in assistant.mcp_servers]
+    mcp_server_ids = list(assistant.mcp_servers)
 
     mcp_tool_settings = None
     if assistant.mcp_tools is not None:
@@ -312,7 +308,7 @@ async def update_assistant(
     )
 
     # Track ALL changes comprehensively
-    changes = {}
+    changes: dict[str, object] = {}
 
     # Name change
     if assistant.name and assistant.name != old_assistant.name:
@@ -406,45 +402,48 @@ async def update_assistant(
 
     # Helper function to track added/removed items
     def get_changes_for_list(
-        old_list,
-        new_list,
-        name_attr="name",
-        is_attachment=False,
-        assistant_space_id=None,
-    ):
+        old_list: Sequence[object] | None,
+        new_list: Sequence[object] | None,
+        name_attr: str = "name",
+        is_attachment: bool = False,
+        assistant_space_id: UUID | None = None,
+    ) -> tuple[list[dict[str, str | None]], list[dict[str, str | None]]]:
         """Compare two lists and return added/removed items with their IDs, names, and scope."""
-        old_items = {}
-        new_items = {}
+        old_items: dict[str, dict[str, str | None]] = {}
+        new_items: dict[str, dict[str, str | None]] = {}
 
-        def get_scope(item, assistant_space_id):
+        def get_scope(item: object, assistant_space_id: UUID | None) -> str | None:
             """Determine if knowledge is 'space' or 'organizational'"""
-            if not assistant_space_id or not hasattr(item, "space_id"):
+            if assistant_space_id is None or not hasattr(item, "space_id"):
                 return None  # Cannot determine scope
 
             # If the item's space_id matches the assistant's, it's space-scoped
             # Otherwise, it's organizational (from parent/org space)
-            if item.space_id == assistant_space_id:
+            if getattr(item, "space_id") == assistant_space_id:
                 return "space"
             else:
                 return "organizational"
 
-        def extract_item_info(item, assistant_space_id):
+        def extract_item_info(
+            item: object, assistant_space_id: UUID | None
+        ) -> tuple[str, str, str | None]:
             """Extract ID, name, and scope from an item, handling attachments specially."""
-            item_id = str(item.id) if hasattr(item, "id") else str(item)
+            item_id = str(getattr(item, "id", item))
 
             # Special handling for FileAttachment objects
             if is_attachment:
                 # For attachments, extract just the filename and optionally blob ID
-                item_name = item.name if hasattr(item, "name") else "unknown_file"
+                item_name = str(getattr(item, "name", "unknown_file"))
                 # Add blob ID if it exists and is not None
-                if hasattr(item, "blob") and item.blob:
-                    item_name = f"{item_name} (blob: {item.blob})"
+                blob = getattr(item, "blob", None)
+                if blob:
+                    item_name = f"{item_name} (blob: {blob})"
             else:
                 # For other types, use the specified attribute or a safe fallback
                 if hasattr(item, name_attr):
-                    item_name = getattr(item, name_attr)
+                    item_name = str(getattr(item, name_attr))
                 elif hasattr(item, "name"):
-                    item_name = item.name
+                    item_name = str(getattr(item, "name"))
                 else:
                     # Only use str() for simple types, not complex objects
                     item_name = f"{item.__class__.__name__}_{item_id}"
@@ -465,18 +464,24 @@ async def update_assistant(
                 new_items[item_id] = {"name": item_name, "scope": scope}
 
         # Build added/removed lists with scope information
-        added = []
+        added: list[dict[str, str | None]] = []
         for k in new_items:
             if k not in old_items:
-                item_data = {"id": k, "name": new_items[k]["name"]}
+                item_data: dict[str, str | None] = {
+                    "id": k,
+                    "name": new_items[k]["name"],
+                }
                 if new_items[k]["scope"]:
                     item_data["scope"] = new_items[k]["scope"]
                 added.append(item_data)
 
-        removed = []
+        removed: list[dict[str, str | None]] = []
         for k in old_items:
             if k not in new_items:
-                item_data = {"id": k, "name": old_items[k]["name"]}
+                item_data: dict[str, str | None] = {
+                    "id": k,
+                    "name": old_items[k]["name"],
+                }
                 if old_items[k]["scope"]:
                     item_data["scope"] = old_items[k]["scope"]
                 removed.append(item_data)
@@ -484,7 +489,7 @@ async def update_assistant(
         return added, removed
 
     # Track knowledge source changes in detail
-    knowledge_changes = {}
+    knowledge_changes: dict[str, dict[str, list[dict[str, str | None]]]] = {}
 
     # Collections
     collections_added, collections_removed = get_changes_for_list(
@@ -561,7 +566,7 @@ async def update_assistant(
     if assistant.mcp_tools is not None and old_mcp_tool_overrides is not None:
         new_tool_map = {str(t.tool_id): t.is_enabled for t in assistant.mcp_tools}
 
-        tool_changes = []
+        tool_changes: list[dict[str, object]] = []
         for tid, is_enabled in new_tool_map.items():
             old_enabled = old_mcp_tool_overrides.get(tid)
             if old_enabled != is_enabled:
@@ -576,7 +581,7 @@ async def update_assistant(
             changes["mcp_tools"] = tool_changes
 
     # Create summary of changes
-    change_summary = []
+    change_summary: list[str] = []
     if "name" in changes:
         change_summary.append("name")
     if "prompt" in changes:
@@ -642,7 +647,7 @@ async def update_assistant(
 )
 async def delete_assistant(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.assistant_service()
     current_user = container.user()
@@ -719,16 +724,17 @@ async def delete_assistant(
 async def ask_assistant(
     id: UUID,
     ask: AskAssistant,
-    version: int = Query(default=1, ge=1, le=2),
-    container: Container = Depends(
-        get_container(with_user_from_assistant_api_key=True)
-    ),
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user_from_assistant_api_key=True)),
+    ],
+    version: Annotated[int, Query(ge=1, le=2)] = 1,
 ):
     """Streams the response as Server-Sent Events if stream == true"""
     service = container.assistant_service()
     user = container.user()
 
-    file_ids = [file.id for file in ask.files]
+    file_ids = list(ask.files)
     tool_assistant_id = None
     if ask.tools is not None and ask.tools.assistants:
         tool_assistant_id = ask.tools.assistants[0].id
@@ -789,10 +795,10 @@ async def ask_assistant(
 )
 async def get_assistant_sessions(
     id: UUID,
-    limit: int = Query(default=None, gt=0),
-    cursor: datetime = None,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    limit: Annotated[int | None, Query(gt=0)] = None,
+    cursor: datetime | None = None,
     previous: bool = False,
-    container: Container = Depends(get_container(with_user=True)),
 ):
     assistant_service = container.assistant_service()
     session_service = container.session_service()
@@ -805,6 +811,9 @@ async def get_assistant_sessions(
         cursor=cursor,
         previous=previous,
     )
+    if cursor is None:
+        cursor = datetime.min
+
     return to_sessions_paginated_response(
         sessions=sessions,
         limit=limit,
@@ -822,11 +831,10 @@ async def get_assistant_sessions(
 async def get_assistant_session(
     id: UUID,
     session_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     session_service = container.session_service()
     session = await session_service.get_session_by_uuid(session_id, assistant_id=id)
-
     return to_session_public(session)
 
 
@@ -838,7 +846,7 @@ async def get_assistant_session(
 async def delete_assistant_session(
     id: UUID,
     session_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     session_service = container.session_service()
     assistant_service = container.assistant_service()
@@ -846,6 +854,8 @@ async def delete_assistant_session(
 
     # Delete session
     session = await session_service.delete(session_id, assistant_id=id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
 
     # Get assistant info for audit log
     assistant, _ = await assistant_service.get_assistant(id)
@@ -892,15 +902,16 @@ async def ask_followup(
     id: UUID,
     session_id: UUID,
     ask: AskAssistant,
-    version: int = Query(default=1, ge=1, le=2),
-    container: Container = Depends(
-        get_container(with_user_from_assistant_api_key=True)
-    ),
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user_from_assistant_api_key=True)),
+    ],
+    version: Annotated[int, Query(ge=1, le=2)] = 1,
 ):
     """Streams the response as Server-Sent Events if stream == true"""
     service = container.assistant_service()
 
-    file_ids = [file.id for file in ask.files]
+    file_ids = list(ask.files)
     tool_assistant_id = None
     if ask.tools is not None and ask.tools.assistants:
         tool_assistant_id = ask.tools.assistants[0].id
@@ -926,9 +937,10 @@ async def leave_feedback(
     id: UUID,
     session_id: UUID,
     feedback: SessionFeedback,
-    container: Container = Depends(
-        get_container(with_user_from_assistant_api_key=True)
-    ),
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user_from_assistant_api_key=True)),
+    ],
 ):
     session_service = container.session_service()
     session = await session_service.leave_feedback(
@@ -971,7 +983,7 @@ async def leave_feedback(
 )
 async def generate_read_only_assistant_key(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Generates a read-only api key for this assistant.
 
@@ -1033,7 +1045,7 @@ async def generate_read_only_assistant_key(
 async def transfer_assistant_to_space(
     id: UUID,
     transfer_req: TransferApplicationRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     # Get assistant info BEFORE transfer to capture source space
     user = container.user()
@@ -1101,7 +1113,7 @@ async def transfer_assistant_to_space(
     include_in_schema=get_settings().dev,
 )
 async def get_prompts(
-    id: UUID, container: Container = Depends(get_container(with_user=True))
+    id: UUID, container: Annotated[Container, Depends(get_container(with_user=True))]
 ):
     service = container.assistant_service()
     assembler = container.prompt_assembler()
@@ -1120,7 +1132,7 @@ async def get_prompts(
 async def publish_assistant(
     id: UUID,
     published: bool,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.assistant_service()
     assembler = container.assistant_assembler()
@@ -1188,7 +1200,7 @@ async def publish_assistant(
 )
 async def get_assistant_mcp_servers(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Get all MCP servers associated with an assistant."""
     service = container.assistant_service()
@@ -1216,7 +1228,7 @@ async def get_assistant_mcp_servers(
 async def add_mcp_to_assistant(
     id: UUID,
     mcp_server_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Add an MCP server to an assistant."""
     service = container.assistant_service()
@@ -1259,7 +1271,7 @@ async def add_mcp_to_assistant(
 async def remove_mcp_from_assistant(
     id: UUID,
     mcp_server_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Remove an MCP server from an assistant."""
     service = container.assistant_service()

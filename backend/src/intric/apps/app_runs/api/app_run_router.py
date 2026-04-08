@@ -13,6 +13,7 @@ from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 
 router = APIRouter()
+_WITH_USER = Depends(get_container(with_user=True))
 
 
 @router.get(
@@ -22,7 +23,7 @@ router = APIRouter()
 )
 async def get_app_run(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     service = container.app_run_service()
     assembler = container.app_run_assembler()
@@ -39,7 +40,7 @@ async def get_app_run(
 )
 async def delete_app_run(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     service = container.app_run_service()
     user = container.user()

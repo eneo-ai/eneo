@@ -1,4 +1,6 @@
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING, Union, cast
 from uuid import UUID
 
@@ -24,6 +26,7 @@ from intric.main.exceptions import (
 )
 from intric.main.logging import get_logger
 from intric.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
+from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
 from intric.spaces.space import Space
 from intric.spaces.space_factory import SpaceFactory
@@ -40,14 +43,24 @@ from intric.users.user_repo import UsersRepository
 
 if TYPE_CHECKING:
     from intric.actors import ActorManager
-    from intric.completion_models.domain import CompletionModel
-    from intric.embedding_models.domain import (
-        EmbeddingModel,  # pyright: ignore[reportAttributeAccessIssue]
-    )
+    from intric.apps import App
+    from intric.assistants.assistant import Assistant
+    from intric.completion_models.domain.completion_model import CompletionModel
+    from intric.embedding_models.domain.embedding_model import EmbeddingModel
+    from intric.group_chat.domain.entities.group_chat import GroupChat
+    from intric.main.models import MCPToolSetting
+    from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.security_classifications.application.security_classification_service import (
         SecurityClassificationService,
     )
-    from intric.transcription_models.domain import TranscriptionModel
+    from intric.services.service import Service
+    from intric.transcription_models.domain.transcription_model import (
+        TranscriptionModel,
+    )
+
+
+def _empty_mcp_server_list() -> list["MCPServer"]:
+    return []
 
 
 @dataclass
@@ -56,7 +69,9 @@ class SpaceSecurityClassificationImpactAnalysis:
     affected_completion_models: list["CompletionModel"]
     affected_embedding_models: list["EmbeddingModel"]
     affected_transcription_models: list["TranscriptionModel"]
-    affected_mcp_servers: list = field(default_factory=list)
+    affected_mcp_servers: list[MCPServer] = field(
+        default_factory=_empty_mcp_server_list
+    )
 
 
 TENANT_SPACE_NAME = "Organization space"
@@ -80,6 +95,7 @@ class SpaceService:
         icon_repo: IconRepository,
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
+        super().__init__()
         self.user = user
         self.factory = factory
         self.repo = repo
@@ -128,9 +144,13 @@ class SpaceService:
             tenant_space_id=getattr(hub, "id", None),
         )
 
-        def _get_latest_model(models):
+        def _get_latest_model(
+            models: Sequence["EmbeddingModel"],
+        ) -> "EmbeddingModel | None":
             for model in sorted(
-                models, key=lambda model: model.created_at, reverse=True
+                models,
+                key=lambda model: model.created_at or datetime.min,
+                reverse=True,
             ):
                 if model.can_access:
                     return model
@@ -228,13 +248,13 @@ class SpaceService:
     async def update_space(
         self,
         id: UUID,
-        name: str = None,
-        description: str = None,
-        embedding_model_ids: list[UUID] = None,
-        completion_model_ids: list[UUID] = None,
-        transcription_model_ids: list[UUID] = None,
-        mcp_server_ids: list[UUID] = None,
-        mcp_tools: list = None,  # List of MCPToolSetting objects from API
+        name: str | None = None,
+        description: str | None = None,
+        embedding_model_ids: list[UUID] | None = None,
+        completion_model_ids: list[UUID] | None = None,
+        transcription_model_ids: list[UUID] | None = None,
+        mcp_server_ids: list[UUID] | None = None,
+        mcp_tools: list["MCPToolSetting"] | None = None,
         security_classification: Union[ModelId, NotProvided, None] = NOT_PROVIDED,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
@@ -250,14 +270,12 @@ class SpaceService:
             if not self.user.tenant.security_enabled:
                 raise BadRequestException("Security is not enabled for this tenant")
             if security_classification is not None:
-                classification_id = cast(ModelId, security_classification).id
+                classification_id = security_classification.id
                 space_security_classification = await self.security_classification_service.get_security_classification(  # noqa: E501
                     classification_id
                 )
-                if space_security_classification is None:
-                    raise BadRequestException("Security classification not found")
 
-        completion_models = None
+        completion_models: list["CompletionModel"] | None = None
         if completion_model_ids is not None:
             completion_models = [
                 await self.completion_model_crud_service.get_completion_model(
@@ -266,17 +284,20 @@ class SpaceService:
                 for model_id in completion_model_ids
             ]
 
-        embedding_models = None
+        embedding_models: list["EmbeddingModel"] | None = None
         if embedding_model_ids is not None:
             embedding_models = []
             for model_id in embedding_model_ids:
-                model = await self.embedding_model_crud_service.get_embedding_model(
-                    model_id
+                model = cast(
+                    "EmbeddingModel | None",
+                    await self.embedding_model_crud_service.get_embedding_model(
+                        model_id
+                    ),
                 )
                 if model:
                     embedding_models.append(model)
 
-        transcription_models = None
+        transcription_models: list["TranscriptionModel"] | None = None
         if transcription_model_ids is not None:
             transcription_models = [
                 await self.transcription_model_crud_service.get_transcription_model(
@@ -285,7 +306,7 @@ class SpaceService:
                 for model_id in transcription_model_ids
             ]
 
-        mcp_servers = None
+        mcp_servers: list["MCPServer"] | None = None
         if mcp_server_ids is not None:
             # Query tenant MCP servers directly from database
             import sqlalchemy as sa
@@ -365,7 +386,7 @@ class SpaceService:
         )
 
         # Convert MCPToolSetting objects to tuples for repository
-        mcp_tool_settings = None
+        mcp_tool_settings: list[tuple[UUID, bool]] | None = None
         if mcp_tools is not None:
             mcp_tool_settings = [(tool.tool_id, tool.is_enabled) for tool in mcp_tools]
 
@@ -385,9 +406,6 @@ class SpaceService:
                 security_classification_id
             )
         )
-        if security_classification is None:
-            raise BadRequestException("Security classification not found")
-
         current_completion_models = space.completion_models
         current_embedding_models = space.embedding_models
         current_transcription_models = space.transcription_models
@@ -402,26 +420,26 @@ class SpaceService:
         remaining_transcription_model_ids = [tm.id for tm in space.transcription_models]
         remaining_mcp_server_ids = [s.id for s in space.mcp_servers]
 
-        affected_completion_models = [
+        affected_completion_models: list["CompletionModel"] = [
             cm
             for cm in current_completion_models
             if cm.id not in remaining_completion_model_ids
         ]
-        affected_embedding_models = [
+        affected_embedding_models: list["EmbeddingModel"] = [
             em
             for em in current_embedding_models
             if em.id not in remaining_embedding_model_ids
         ]
-        affected_transcription_models = [
+        affected_transcription_models: list["TranscriptionModel"] = [
             tm
             for tm in current_transcription_models
             if tm.id not in remaining_transcription_model_ids
         ]
-        affected_mcp_servers = [
+        affected_mcp_servers: list["MCPServer"] = [
             s for s in current_mcp_servers if s.id not in remaining_mcp_server_ids
         ]
 
-        affected_assistants = []
+        affected_assistants: list["Assistant"] = []
         for assistant in space.assistants:
             if (
                 assistant.completion_model is not None
@@ -435,28 +453,30 @@ class SpaceService:
                 if assistant not in affected_assistants:
                     affected_assistants.append(assistant)
 
-        affected_group_chats = []
+        affected_group_chats: list["GroupChat"] = []
         for group_chat in space.group_chats or []:
             for assistant in group_chat.get_assistants():
                 if assistant.id in [a.id for a in affected_assistants]:
                     if group_chat not in affected_group_chats:
                         affected_group_chats.append(group_chat)
 
-        affected_apps = []
+        affected_apps: list["App"] = []
         for app in space.apps:
+            completion_model = cast("CompletionModel | None", app.completion_model)
             if (
-                app.completion_model
-                and app.completion_model.id not in remaining_completion_model_ids
+                completion_model is not None
+                and completion_model.id not in remaining_completion_model_ids
             ):
                 affected_apps.append(app)
+            transcription_model = app.transcription_model
             if (
-                app.transcription_model
-                and app.transcription_model.id not in remaining_transcription_model_ids
+                transcription_model is not None
+                and transcription_model.id not in remaining_transcription_model_ids
             ):
                 if app not in affected_apps:
                     affected_apps.append(app)
 
-        affected_services = []
+        affected_services: list["Service"] = []
         for service in space.services:
             if (
                 service.completion_model is not None
@@ -489,6 +509,7 @@ class SpaceService:
         space = await self.repo.get_personal_space(user.id)
 
         if space is not None:
+            assert space.id is not None
             await self._revoke_space_api_keys(space)
             await self.repo.delete(space.id)
 
@@ -500,6 +521,7 @@ class SpaceService:
             raise UnauthorizedException("User does not have permission to delete space")
 
         icon_id = space.icon_id
+        assert space.id is not None
 
         await self._revoke_space_api_keys(space)
         await self.repo.delete(space.id)
@@ -510,6 +532,8 @@ class SpaceService:
     async def _revoke_space_api_keys(self, space: Space) -> None:
         if self.api_key_scope_revoker is None:
             return
+
+        assert space.id is not None
 
         try:
             await self.api_key_scope_revoker.revoke_scope(
@@ -525,6 +549,7 @@ class SpaceService:
             )
 
         for assistant in space.assistants:
+            assert assistant.id is not None
             try:
                 await self.api_key_scope_revoker.revoke_scope(
                     scope_type=ApiKeyScopeType.ASSISTANT,
@@ -542,6 +567,7 @@ class SpaceService:
                 )
 
         for app in space.apps:
+            assert app.id is not None
             try:
                 await self.api_key_scope_revoker.revoke_scope(
                     scope_type=ApiKeyScopeType.APP,
@@ -564,7 +590,9 @@ class SpaceService:
 
         if include_personal:
             personal_space = await self.get_personal_space()
-            return [personal_space] + spaces  # type: ignore[return-value]
+            if personal_space is not None:
+                return [personal_space] + spaces
+            return spaces
 
         return spaces
 
@@ -610,8 +638,15 @@ class SpaceService:
 
         # Revoke all API keys the removed user owns for this space and its resources
         if self.api_key_scope_revoker is not None:
-            assistant_ids = [a.id for a in space.assistants]
-            app_ids = [a.id for a in space.apps]
+            assistant_ids: list[UUID] = []
+            for assistant in space.assistants:
+                assert assistant.id is not None
+                assistant_ids.append(assistant.id)
+
+            app_ids: list[UUID] = []
+            for app in space.apps:
+                assert app.id is not None
+                app_ids.append(app.id)
             revoked = await self.api_key_scope_revoker.revoke_member_keys(
                 tenant_id=self.user.tenant_id,
                 owner_user_id=user_id,
@@ -804,10 +839,13 @@ class SpaceService:
 
         return space_in_db
 
-    async def get_personal_space(self):
+    async def get_personal_space(self) -> Space | None:
         return await self.repo.get_personal_space(self.user.id)
 
-    async def _get_space_by_resource(self, space: Space) -> Space:
+    async def _get_space_by_resource(self, space: Space | None) -> Space:
+        if space is None:
+            raise NotFoundException("Space not found")
+
         actor = self._get_actor(space)
 
         if not actor.can_read_space():

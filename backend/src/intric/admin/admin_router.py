@@ -1,16 +1,18 @@
 from datetime import datetime, timezone
-from typing import List, cast
+from typing import Annotated, Literal, cast
 from uuid import UUID
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.admin.admin_models import (
+    AdminApiKeysQueryParams,
+    AdminApiKeyUsageQueryParams,
+    AdminExpiringKeysQueryParams,
     AdminUsersQueryParams,
     PaginatedUsersResponse,
     PrivacyPolicy,
-    StateFilter,
     UserDeletedListItem,
     UserStateListItem,
 )
@@ -21,7 +23,6 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
 from intric.authentication.api_key_resolver import ApiKeyValidationError
-from intric.authentication.api_key_router import _build_expiring_summary
 from intric.authentication.api_key_router_helpers import (
     build_api_key_usage_page,
     build_api_key_usage_summary,
@@ -41,17 +42,15 @@ from intric.authentication.auth_models import (
     ApiKeyPermission,
     ApiKeyPolicyResponse,
     ApiKeyPolicyUpdate,
-    ApiKeyScopeType,
     ApiKeySearchMatchReason,
-    ApiKeyState,
     ApiKeyStateChangeRequest,
-    ApiKeyType,
     ApiKeyUpdateRequest,
     ApiKeyUsageResponse,
-    ApiKeyUserRelation,
     ApiKeyUserSnapshot,
     ApiKeyV2,
+    ApiKeyV2InDB,
     ExpiringKeysSummary,
+    ExpiringKeySummaryItem,
     SuperApiKeyStatus,
 )
 from intric.database.tables.users_table import Users
@@ -64,8 +63,6 @@ from intric.predefined_roles.predefined_role import PredefinedRoleInDB
 from intric.server.dependencies.container import get_container
 from intric.tenants.tenant import TenantPublic
 from intric.users.user import (
-    SortField,
-    SortOrder,
     UserAddAdmin,
     UserAdminView,
     UserCreatedAdminView,
@@ -74,6 +71,60 @@ from intric.users.user import (
 
 logger = get_logger(__name__)
 router = APIRouter()
+AdminContainer = Annotated[Container, Depends(get_container(with_user=True))]
+AdminApiKeyGuard = Annotated[
+    None, Depends(require_api_key_permission(ApiKeyPermission.ADMIN))
+]
+
+
+def _classify_severity(
+    expires_at: datetime, now: datetime
+) -> Literal["notice", "warning", "urgent", "expired"]:
+    if expires_at <= now:
+        return "expired"
+    days = (expires_at - now).total_seconds() / 86400
+    if days <= 3:
+        return "urgent"
+    if days <= 14:
+        return "warning"
+    return "notice"
+
+
+def _build_expiring_summary(
+    items: list[ApiKeyV2InDB],
+    total_count: int,
+    now: datetime,
+    cap: int = 10,
+) -> ExpiringKeysSummary:
+    counts: dict[str, int] = {"notice": 0, "warning": 0, "urgent": 0, "expired": 0}
+    summary_items: list[ExpiringKeySummaryItem] = []
+
+    for key in items[:cap]:
+        assert key.expires_at is not None  # noqa: S101 — guaranteed by query
+        sev = _classify_severity(key.expires_at, now)
+        counts[sev] += 1
+        summary_items.append(
+            ExpiringKeySummaryItem(
+                id=key.id,
+                name=key.name,
+                key_suffix=key.key_suffix,
+                scope_type=key.scope_type,
+                scope_id=key.scope_id,
+                expires_at=key.expires_at,
+                suspended_at=key.suspended_at,
+                severity=sev,
+            )
+        )
+
+    earliest = min((i.expires_at for i in summary_items), default=None)
+    return ExpiringKeysSummary(
+        total_count=total_count,
+        counts_by_severity=counts,
+        earliest_expiration=earliest,
+        items=summary_items,
+        truncated=total_count > len(summary_items),
+        generated_at=now,
+    )
 
 
 @router.get(
@@ -209,25 +260,8 @@ GET /api/v1/admin/users/?sort_by=email&sort_order=asc
     },
 )
 async def get_users(
-    page: int = Query(1, ge=1, le=100, description="Page number (1-100)"),
-    page_size: int = Query(100, ge=1, le=100, description="Users per page (1-100)"),
-    search_email: str | None = Query(
-        None, description="Search by email (case-insensitive, partial match)"
-    ),
-    search_name: str | None = Query(
-        None, description="Search by username (case-insensitive, partial match)"
-    ),
-    sort_by: SortField = Query(
-        SortField.EMAIL, description="Sort field (default: alphabetical by email)"
-    ),
-    sort_order: SortOrder = Query(
-        SortOrder.ASC, description="Sort order (default: ascending A-Z)"
-    ),
-    state_filter: StateFilter | None = Query(
-        None,
-        description="Filter by user state (active includes invited, inactive for temporary leave)",
-    ),
-    container: Container = Depends(get_container(with_user=True)),
+    query_params: Annotated[AdminUsersQueryParams, Depends()],
+    container: AdminContainer,
 ):
     """
     List tenant users with pagination, search, and sorting.
@@ -254,17 +288,6 @@ async def get_users(
     ```
     """
     try:
-        # Create query params from FastAPI Query parameters
-        query_params = AdminUsersQueryParams(
-            page=page,
-            page_size=page_size,
-            search_email=search_email,
-            search_name=search_name,
-            sort_by=sort_by,
-            sort_order=sort_order,
-            state_filter=state_filter,
-        )
-
         service = container.admin_service()
         result = await service.list_users_paginated(query_params)
 
@@ -290,7 +313,7 @@ async def get_users(
 )
 async def register_user(
     new_user: UserAddAdmin,
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
 ):
     """
     Create a new user account for your organization.
@@ -320,7 +343,7 @@ async def register_user(
     user, _, api_key = await admin_service.register_tenant_user(new_user)
 
     # Build extra context for user creation
-    extra = {
+    extra: dict[str, object] = {
         "state": user.state.value if hasattr(user, "state") else "active",
         "tenant_id": str(current_user.tenant_id),
         "tenant_name": current_user.tenant.display_name or current_user.tenant.name,
@@ -339,13 +362,13 @@ async def register_user(
         predefined_roles = role_result.scalars().all()
 
         role_names = [role.name for role in predefined_roles]
-        all_permissions = set()
+        all_permissions: set[str] = set()
         for role in predefined_roles:
             all_permissions.update(role.permissions)
 
         if role_names:
             extra["predefined_roles"] = role_names
-            extra["permissions"] = sorted(list(all_permissions))
+            extra["permissions"] = sorted(all_permissions)
 
     # Add custom roles if any
     if new_user.roles:
@@ -418,7 +441,7 @@ async def register_user(
 )
 async def get_user(
     username: str,
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
 ):
     """
     Retrieve a single user's details by username.
@@ -474,7 +497,7 @@ async def get_user(
 async def update_user(
     username: str,
     user: UserUpdatePublic,
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
 ):
     """
     Update an existing user's information.
@@ -510,7 +533,7 @@ async def update_user(
     user_updated = await service.update_tenant_user(username, user)
 
     # Track comprehensive changes
-    changes = {}
+    changes: dict[str, object] = {}
 
     # Basic field changes
     if user.email and user.email != old_user.email:
@@ -570,14 +593,15 @@ async def update_user(
         added_perms = list(set(new_permissions) - set(old_permissions))
         removed_perms = list(set(old_permissions) - set(new_permissions))
         if added_perms or removed_perms:
-            changes["permissions"] = {}
+            permissions_changes: dict[str, list[str]] = {}
             if added_perms:
-                changes["permissions"]["added"] = sorted(added_perms)
+                permissions_changes["added"] = sorted(added_perms)
             if removed_perms:
-                changes["permissions"]["removed"] = sorted(removed_perms)
+                permissions_changes["removed"] = sorted(removed_perms)
+            changes["permissions"] = permissions_changes
 
     # Build extra context for current state
-    extra = {
+    extra: dict[str, object] = {
         "state": user_updated.state.value if hasattr(user_updated, "state") else None,
     }
 
@@ -632,9 +656,7 @@ async def update_user(
         },
     },
 )
-async def delete_user(
-    username: str, container: Container = Depends(get_container(with_user=True))
-):
+async def delete_user(username: str, container: AdminContainer):
     """
     Soft delete a user account.
 
@@ -663,7 +685,7 @@ async def delete_user(
     success = await service.delete_tenant_user(username)
 
     # Build extra context capturing what was deleted
-    extra = {
+    extra: dict[str, object] = {
         "state": user_to_delete.state.value
         if hasattr(user_to_delete, "state")
         else None,
@@ -720,9 +742,7 @@ async def delete_user(
         404: {"description": "User not found in your tenant"},
     },
 )
-async def deactivate_user(
-    username: str, container: Container = Depends(get_container(with_user=True))
-):
+async def deactivate_user(username: str, container: AdminContainer):
     """
     Deactivate a user account for temporary leave.
 
@@ -786,9 +806,7 @@ async def deactivate_user(
         404: {"description": "User not found in your tenant"},
     },
 )
-async def reactivate_user(
-    username: str, container: Container = Depends(get_container(with_user=True))
-):
+async def reactivate_user(username: str, container: AdminContainer):
     """
     Reactivate a user account to restore full access.
 
@@ -853,7 +871,7 @@ async def reactivate_user(
     },
 )
 async def get_inactive_users(
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
 ):
     """
     Get all users currently in INACTIVE state.
@@ -891,7 +909,7 @@ async def get_inactive_users(
     },
 )
 async def get_deleted_users(
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
 ):
     """
     Get all users currently in DELETED state.
@@ -922,7 +940,7 @@ async def get_deleted_users(
 
 @router.get(
     "/predefined-roles/",
-    response_model=List[PredefinedRoleInDB],
+    response_model=list[PredefinedRoleInDB],
     summary="Get predefined roles for tenant",
     description="Retrieves all predefined roles available for the authenticated tenant. Requires tenant admin (owner) permissions. Returns the same structure as the sysadmin endpoint for consistency.",
     responses={
@@ -955,7 +973,7 @@ async def get_deleted_users(
     },
 )
 async def get_predefined_roles(
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
 ):
     """
     Get all predefined roles available for your tenant.
@@ -1017,9 +1035,7 @@ async def get_predefined_roles(
 
 
 @router.post("/privacy-policy/", response_model=TenantPublic)
-async def update_privacy_policy(
-    url: PrivacyPolicy, container: Container = Depends(get_container(with_user=True))
-):
+async def update_privacy_policy(url: PrivacyPolicy, container: AdminContainer):
     service = container.admin_service()
     user = container.user()
 
@@ -1146,7 +1162,8 @@ async def _enrich_api_keys_with_user_snapshots(
 
     user_ids: set[UUID] = set()
     for key in keys:
-        user_ids.add(key.owner_user_id)
+        if key.owner_user_id is not None:
+            user_ids.add(key.owner_user_id)
         if key.created_by_user_id is not None:
             user_ids.add(key.created_by_user_id)
 
@@ -1168,7 +1185,9 @@ async def _enrich_api_keys_with_user_snapshots(
     for key in keys:
         updated = key.model_copy(
             update={
-                "owner_user": snapshot_map.get(key.owner_user_id),
+                "owner_user": snapshot_map.get(key.owner_user_id)
+                if key.owner_user_id is not None
+                else None,
                 "created_by_user": (
                     snapshot_map.get(key.created_by_user_id)
                     if key.created_by_user_id
@@ -1210,7 +1229,7 @@ async def _enrich_api_keys_with_user_snapshots(
     },
 )
 async def get_api_key_policy(
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -1242,18 +1261,21 @@ async def get_api_key_policy(
     },
 )
 async def update_api_key_policy(
-    request: ApiKeyPolicyUpdate = Body(
-        ...,
-        examples=[
-            {
-                "require_expiration": True,
-                "max_expiration_days": 90,
-                "max_delegation_depth": 3,
-                "revocation_cascade_enabled": True,
-            }
-        ],
-    ),
-    container: Container = Depends(get_container(with_user=True)),
+    request: Annotated[
+        ApiKeyPolicyUpdate,
+        Body(
+            ...,
+            examples=[
+                {
+                    "require_expiration": True,
+                    "max_expiration_days": 90,
+                    "max_delegation_depth": 3,
+                    "revocation_cascade_enabled": True,
+                }
+            ],
+        ),
+    ],
+    container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     admin_service = container.admin_service()
@@ -1266,25 +1288,24 @@ async def update_api_key_policy(
         return ApiKeyPolicyResponse.model_validate(user.tenant.api_key_policy or {})
 
     tenant_service = container.tenant_service()
-    before_policy = dict(user.tenant.api_key_policy or {})
+    before_policy: dict[str, object] = dict(user.tenant.api_key_policy or {})
     updated_tenant = await tenant_service.update_api_key_policy(user.tenant_id, updates)
-    after_policy = updated_tenant.api_key_policy or {}
+    after_policy: dict[str, object] = dict(updated_tenant.api_key_policy or {})
 
     audit_service = container.audit_service()
-    if audit_service is not None:
-        await audit_service.log_async(
-            tenant_id=user.tenant_id,
-            actor_id=user.id,
-            action=ActionType.TENANT_POLICY_UPDATED,
-            entity_type=EntityType.TENANT_SETTINGS,
-            entity_id=user.tenant_id,
-            description="Updated tenant API key policy",
-            metadata=AuditMetadata.standard(
-                actor=user,
-                target=updated_tenant,
-                changes={"api_key_policy": {"old": before_policy, "new": after_policy}},
-            ),
-        )
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.TENANT_POLICY_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=user.tenant_id,
+        description="Updated tenant API key policy",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=updated_tenant,
+            changes={"api_key_policy": {"old": before_policy, "new": after_policy}},
+        ),
+    )
 
     return ApiKeyPolicyResponse.model_validate(after_policy)
 
@@ -1301,20 +1322,18 @@ async def update_api_key_policy(
     },
 )
 async def get_api_key_notification_policy(
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
 
     user = container.user()
-    tenant_policy = (
-        user.tenant.api_key_policy
-        if isinstance(user.tenant.api_key_policy, dict)
+    tenant_policy: dict[str, object] = dict(user.tenant.api_key_policy or {})
+    notification_policy_raw = tenant_policy.get("notification_policy")
+    notification_policy: dict[str, object] = (
+        dict(cast(dict[str, object], notification_policy_raw))
+        if isinstance(notification_policy_raw, dict)
         else {}
-    )
-    notification_policy = tenant_policy.get("notification_policy")
-    notification_policy = (
-        notification_policy if isinstance(notification_policy, dict) else {}
     )
     return ApiKeyNotificationPolicyResponse.model_validate(notification_policy)
 
@@ -1331,11 +1350,16 @@ async def get_api_key_notification_policy(
     },
 )
 async def update_api_key_notification_policy(
-    request: ApiKeyNotificationPolicyUpdate = Body(
-        ...,
-        examples=[{"enabled": True, "default_days_before_expiry": [30, 14, 7, 3, 1]}],
-    ),
-    container: Container = Depends(get_container(with_user=True)),
+    request: Annotated[
+        ApiKeyNotificationPolicyUpdate,
+        Body(
+            ...,
+            examples=[
+                {"enabled": True, "default_days_before_expiry": [30, 14, 7, 3, 1]}
+            ],
+        ),
+    ],
+    container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     admin_service = container.admin_service()
@@ -1343,15 +1367,11 @@ async def update_api_key_notification_policy(
     await admin_service.validate_admin_permission()
 
     updates = request.model_dump(exclude_unset=True)
-    tenant_policy = (
-        user.tenant.api_key_policy
-        if isinstance(user.tenant.api_key_policy, dict)
-        else {}
-    )
-    current_notification_policy = tenant_policy.get("notification_policy")
-    current_notification_policy = (
-        current_notification_policy
-        if isinstance(current_notification_policy, dict)
+    tenant_policy: dict[str, object] = dict(user.tenant.api_key_policy or {})
+    current_notification_policy_raw = tenant_policy.get("notification_policy")
+    current_notification_policy: dict[str, object] = (
+        dict(cast(dict[str, object], current_notification_policy_raw))
+        if isinstance(current_notification_policy_raw, dict)
         else {}
     )
 
@@ -1367,36 +1387,33 @@ async def update_api_key_notification_policy(
     )
 
     tenant_service = container.tenant_service()
-    before_policy = dict(tenant_policy)
+    before_policy: dict[str, object] = dict(tenant_policy)
     updated_tenant = await tenant_service.update_api_key_policy(
         user.tenant_id,
         {"notification_policy": normalized_policy.model_dump(mode="json")},
     )
-    after_policy = (
-        updated_tenant.api_key_policy
-        if isinstance(updated_tenant.api_key_policy, dict)
-        else {}
-    )
+    after_policy: dict[str, object] = dict(updated_tenant.api_key_policy or {})
 
     audit_service = container.audit_service()
-    if audit_service is not None:
-        await audit_service.log_async(
-            tenant_id=user.tenant_id,
-            actor_id=user.id,
-            action=ActionType.TENANT_POLICY_UPDATED,
-            entity_type=EntityType.TENANT_SETTINGS,
-            entity_id=user.tenant_id,
-            description="Updated tenant API key notification policy",
-            metadata=AuditMetadata.standard(
-                actor=user,
-                target=updated_tenant,
-                changes={"api_key_policy": {"old": before_policy, "new": after_policy}},
-            ),
-        )
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.TENANT_POLICY_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=user.tenant_id,
+        description="Updated tenant API key notification policy",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=updated_tenant,
+            changes={"api_key_policy": {"old": before_policy, "new": after_policy}},
+        ),
+    )
 
-    after_notification_policy = after_policy.get("notification_policy")
-    after_notification_policy = (
-        after_notification_policy if isinstance(after_notification_policy, dict) else {}
+    after_notification_policy_raw = after_policy.get("notification_policy")
+    after_notification_policy: dict[str, object] = (
+        dict(cast(dict[str, object], after_notification_policy_raw))
+        if isinstance(after_notification_policy_raw, dict)
+        else {}
     )
     return ApiKeyNotificationPolicyResponse.model_validate(after_notification_policy)
 
@@ -1423,7 +1440,7 @@ async def update_api_key_notification_policy(
     },
 )
 async def get_super_api_key_status(
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -1468,72 +1485,50 @@ async def get_super_api_key_status(
     },
 )
 async def list_api_keys_admin(
-    limit: int | None = Query(None, ge=1, description="Keys per page"),
-    cursor: datetime | None = Query(None, description="Current cursor"),
-    previous: bool = Query(False, description="Show previous page"),
-    scope_type: ApiKeyScopeType | None = Query(None, description="Scope type filter"),
-    scope_id: UUID | None = Query(None, description="Scope id filter"),
-    state: ApiKeyState | None = Query(None, description="State filter"),
-    key_type: ApiKeyType | None = Query(None, description="Key type filter"),
-    owner_user_id: UUID | None = Query(None, description="Owner user id filter"),
-    created_by_user_id: UUID | None = Query(None, description="Creator user id filter"),
-    user_relation: ApiKeyUserRelation = Query(
-        ApiKeyUserRelation.OWNER,
-        description="How UI user filter should be interpreted when a single user filter is provided.",
-    ),
-    search: str | None = Query(
-        None,
-        min_length=2,
-        description="Case-insensitive search over key name, suffix, description, owner, and creator identity.",
-    ),
-    expires_within_days: int | None = Query(
-        None,
-        ge=1,
-        description="Filter to keys with expires_at within this many days.",
-    ),
-    container: Container = Depends(get_container(with_user=True)),
+    query: Annotated[AdminApiKeysQueryParams, Depends()],
+    container: AdminContainer,
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
 
     repo: ApiKeysV2Repository = container.api_key_v2_repo()
     tenant_id = admin_service.user.tenant_id
-    normalized_search = search.strip() if search else None
-    owner_filter = owner_user_id
-    creator_filter = created_by_user_id
+    normalized_search = query.search.strip() if query.search else None
+    owner_filter = query.owner_user_id
+    creator_filter = query.created_by_user_id
 
     keys = await repo.list_paginated(
         tenant_id=tenant_id,
-        limit=limit,
-        cursor=cursor,
-        previous=previous,
-        scope_type=scope_type,
-        scope_id=scope_id,
-        state=state,
-        key_type=key_type.value if key_type else None,
+        limit=query.limit,
+        cursor=query.cursor,
+        previous=query.previous,
+        scope_type=query.scope_type,
+        scope_id=query.scope_id,
+        state=query.state,
+        key_type=query.key_type.value if query.key_type else None,
         owner_user_id=owner_filter,
         created_by_user_id=creator_filter,
         search=normalized_search,
-        expires_within_days=expires_within_days,
+        expires_within_days=query.expires_within_days,
     )
     total_count = await repo.count(
         tenant_id=tenant_id,
-        scope_type=scope_type,
-        scope_id=scope_id,
-        state=state,
-        key_type=key_type.value if key_type else None,
+        scope_type=query.scope_type,
+        scope_id=query.scope_id,
+        state=query.state,
+        key_type=query.key_type.value if query.key_type else None,
         owner_user_id=owner_filter,
         created_by_user_id=creator_filter,
         search=normalized_search,
-        expires_within_days=expires_within_days,
+        expires_within_days=query.expires_within_days,
     )
 
     paginated = paginate_keys(
         keys,
         total_count=total_count,
-        limit=limit,
-        cursor=cursor,
-        previous=previous,
+        limit=query.limit,
+        cursor=query.cursor,
+        previous=query.previous,
     )
     session = cast(AsyncSession, container.session())
     items = cast(list[ApiKeyV2], paginated["items"])
@@ -1558,8 +1553,8 @@ async def list_api_keys_admin(
     },
 )
 async def get_expiring_keys_admin(
-    days: int = Query(30, ge=1, le=90, description="Look-ahead window in days"),
-    container: Container = Depends(get_container(with_user=True)),
+    query: Annotated[AdminExpiringKeysQueryParams, Depends()],
+    container: AdminContainer,
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -1569,7 +1564,7 @@ async def get_expiring_keys_admin(
     now = datetime.now(timezone.utc)
 
     items, total_count = await repo.list_expiring_soon(
-        tenant_id=tenant_id, now=now, days=days
+        tenant_id=tenant_id, now=now, days=query.days
     )
 
     return _build_expiring_summary(items, total_count, now)
@@ -1598,7 +1593,7 @@ async def get_expiring_keys_admin(
 )
 async def lookup_api_key_admin(
     payload: ApiKeyExactLookupRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     admin_service = container.admin_service()
@@ -1650,9 +1645,8 @@ async def lookup_api_key_admin(
 )
 async def get_api_key_usage_admin(
     id: UUID,
-    limit: int = Query(50, ge=1, le=200, description="Usage events per page."),
-    cursor: datetime | None = Query(None, description="Usage pagination cursor."),
-    container: Container = Depends(get_container(with_user=True)),
+    query: Annotated[AdminApiKeyUsageQueryParams, Depends()],
+    container: AdminContainer,
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -1676,14 +1670,14 @@ async def get_api_key_usage_admin(
         session=session,
         tenant_id=tenant_id,
         key_id=id,
-        limit=limit,
-        cursor=cursor,
+        limit=query.limit,
+        cursor=query.cursor,
     )
 
     return ApiKeyUsageResponse(
         summary=summary,
         items=usage_events,
-        limit=limit,
+        limit=query.limit,
         next_cursor=next_cursor,
     )
 
@@ -1704,7 +1698,7 @@ async def get_api_key_usage_admin(
 )
 async def get_api_key_admin(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -1745,7 +1739,7 @@ async def update_api_key_admin(
     id: UUID,
     http_request: Request,
     payload: ApiKeyUpdateRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     admin_service = container.admin_service()
@@ -1768,6 +1762,7 @@ async def update_api_key_admin(
 @router.delete(
     "/api-keys/{id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
     tags=["Admin API Keys"],
     summary="Revoke API key (deprecated alias)",
     responses={
@@ -1780,9 +1775,9 @@ async def update_api_key_admin(
 async def revoke_api_key_admin_deprecated(
     id: UUID,
     http_request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
-):
+) -> Response:
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
@@ -1797,7 +1792,7 @@ async def revoke_api_key_admin_deprecated(
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
-    return None
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
@@ -1821,11 +1816,12 @@ async def revoke_api_key_admin_deprecated(
 async def revoke_api_key_admin(
     id: UUID,
     http_request: Request,
-    payload: ApiKeyStateChangeRequest | None = Body(
-        default=None, examples=[_ADMIN_API_KEY_STATE_CHANGE_EXAMPLE]
-    ),
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    payload: Annotated[
+        ApiKeyStateChangeRequest | None,
+        Body(examples=[_ADMIN_API_KEY_STATE_CHANGE_EXAMPLE]),
+    ] = None,
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -1865,11 +1861,12 @@ async def revoke_api_key_admin(
 async def suspend_api_key_admin(
     id: UUID,
     http_request: Request,
-    payload: ApiKeyStateChangeRequest | None = Body(
-        default=None, examples=[_ADMIN_API_KEY_STATE_CHANGE_EXAMPLE]
-    ),
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    payload: Annotated[
+        ApiKeyStateChangeRequest | None,
+        Body(examples=[_ADMIN_API_KEY_STATE_CHANGE_EXAMPLE]),
+    ] = None,
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -1905,7 +1902,7 @@ async def suspend_api_key_admin(
 async def reactivate_api_key_admin(
     id: UUID,
     http_request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     admin_service = container.admin_service()
@@ -1943,7 +1940,7 @@ async def reactivate_api_key_admin(
 async def rotate_api_key_admin(
     id: UUID,
     http_request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     admin_service = container.admin_service()

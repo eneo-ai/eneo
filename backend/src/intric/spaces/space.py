@@ -59,22 +59,23 @@ class Space:
         completion_models: list["CompletionModel"],
         transcription_models: list[TranscriptionModel],
         mcp_servers: list["MCPServer"],
-        default_assistant: "Assistant",
-        assistants: list["Assistant"],
-        apps: list["App"],
-        services: list["Service"],
-        websites: list["Website"],
-        collections: list["Collection"],
-        integration_knowledge_list: list["IntegrationKnowledge"],
-        members: dict[UUID, SpaceMember],
-        created_at: datetime = None,
-        updated_at: datetime = None,
-        group_chats: Optional[list["GroupChat"]] = [],
+        default_assistant: Optional["Assistant"],
+        assistants: Optional[list["Assistant"]],
+        apps: Optional[list["App"]],
+        services: Optional[list["Service"]],
+        websites: Optional[list["Website"]],
+        collections: Optional[list["Collection"]],
+        integration_knowledge_list: Optional[list["IntegrationKnowledge"]],
+        members: dict[UUID, SpaceMember] | None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        group_chats: list["GroupChat"] | None = None,
         security_classification: Optional[SecurityClassification] = None,
         data_retention_days: Optional[int] = None,
         icon_id: Optional[UUID] = None,
-        group_members: Optional[dict[UUID, SpaceGroupMember]] = None,
+        group_members: dict[UUID, SpaceGroupMember] | None = None,
     ):
+        super().__init__()
         self.id = id
         self.tenant_id = tenant_id
         self.tenant_space_id = tenant_space_id
@@ -86,14 +87,14 @@ class Space:
         self._transcription_models = transcription_models
         self._mcp_servers = mcp_servers
         self.default_assistant = default_assistant
-        self.assistants = assistants
-        self.group_chats = group_chats
-        self.apps = apps
-        self.services = services
-        self.websites = websites
-        self.collections = collections
-        self.integration_knowledge_list = integration_knowledge_list
-        self.members = members
+        self.assistants = assistants or []
+        self.group_chats = group_chats or []
+        self.apps = apps or []
+        self.services = services or []
+        self.websites = websites or []
+        self.collections = collections or []
+        self.integration_knowledge_list = integration_knowledge_list or []
+        self.members = members or {}
         self.created_at = created_at
         self.updated_at = updated_at
         self.security_classification = security_classification
@@ -164,13 +165,13 @@ class Space:
         if not self.embedding_models:
             return
 
-        sorted_embedding_models = sorted(  # type: ignore[call-overload]
+        sorted_embedding_models = sorted(
             [
                 embedding_model
                 for embedding_model in self.embedding_models
                 if embedding_model.can_access
             ],
-            key=lambda model: model.created_at,
+            key=lambda model: model.created_at or datetime.min,
             reverse=True,
         )
 
@@ -186,13 +187,13 @@ class Space:
         if not self.completion_models:
             return
 
-        sorted_completion_models = sorted(  # type: ignore[call-overload]
+        sorted_completion_models = sorted(
             [
                 completion_model
                 for completion_model in self.completion_models
                 if completion_model.can_access
             ],
-            key=lambda model: model.created_at,
+            key=lambda model: model.created_at or datetime.min,
             reverse=True,
         )
 
@@ -208,13 +209,13 @@ class Space:
         if not self.transcription_models:
             return None
 
-        sorted_transcription_models = sorted(  # type: ignore[call-overload]
+        sorted_transcription_models = sorted(
             [
                 transcription_model
                 for transcription_model in self.transcription_models
                 if transcription_model.can_access
             ],
-            key=lambda model: model.created_at,
+            key=lambda model: model.created_at or datetime.min,
             reverse=True,
         )
 
@@ -308,12 +309,12 @@ class Space:
 
     def update(
         self,
-        name: str = None,
-        description: str = None,
-        embedding_models: list["EmbeddingModel"] = None,
-        completion_models: list["CompletionModel"] = None,
-        transcription_models: list[TranscriptionModel] = None,
-        mcp_servers: list["MCPServer"] = None,
+        name: str | None = None,
+        description: str | None = None,
+        embedding_models: list["EmbeddingModel"] | None = None,
+        completion_models: list["CompletionModel"] | None = None,
+        transcription_models: list[TranscriptionModel] | None = None,
+        mcp_servers: list["MCPServer"] | None = None,
         security_classification: Union[
             SecurityClassification, NotProvided, None
         ] = NOT_PROVIDED,
@@ -498,8 +499,9 @@ class Space:
 
     def remove_assistant(self, assistant: "Assistant"):
         for group_chat in self.group_chats or []:
-            if assistant.id in [a.assistant.id for a in group_chat.assistants]:
-                group_chat.assistants.remove(assistant)
+            group_chat.assistants = [
+                a for a in group_chat.assistants if a.assistant.id != assistant.id
+            ]
 
         self.assistants.remove(assistant)
 
@@ -565,17 +567,28 @@ class Space:
                 )
 
     def can_run_app(self, app: "App") -> bool:
-        if not self.is_completion_model_available(app.completion_model.id):
+        completion_model = app.completion_model
+        if completion_model is None:
             return False
-        if not self.is_transcription_model_available(app.transcription_model.id):
+        if not self.is_completion_model_available(completion_model.id):
+            return False
+        transcription_model = app.transcription_model
+        if transcription_model is None:
+            return False
+        if not self.is_transcription_model_available(transcription_model.id):
             return False
         if self.security_classification is not None:
+            # App.completion_model is typed as CompletionModel | CompletionModelSparse | None;
+            # domain CompletionModel always has security_classification at this call site.
             if self.security_classification.is_greater_than(
-                app.completion_model.security_classification  # type: ignore[attr-defined]
+                completion_model.security_classification  # pyright: ignore[reportAttributeAccessIssue,reportUnknownMemberType,reportUnknownArgumentType] -- CompletionModelSparse lacks security_classification but domain model always has it at this call site
             ):
                 return False
-            if self.security_classification.is_greater_than(
-                app.transcription_model.security_classification
+            if (
+                transcription_model.security_classification is not None
+                and self.security_classification.is_greater_than(
+                    transcription_model.security_classification
+                )
             ):
                 return False
 
@@ -661,7 +674,7 @@ class Space:
             raise BadRequestException(SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE)
 
     def add_completion_model(self, model: "CompletionModel"):
-        if model is None or getattr(model, "id", None) is None:
+        if getattr(model, "id", None) is None:
             raise BadRequestException("Invalid completion model")
 
         if hasattr(model, "can_access") and not model.can_access:

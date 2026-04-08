@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Annotated, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -31,7 +31,7 @@ router = APIRouter()
     status_code=200,
 )
 async def get_integrations(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_service()
 
@@ -48,8 +48,8 @@ async def get_integrations(
     status_code=200,
 )
 async def get_tenant_integrations(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     filter: Optional[TenantIntegrationFilter] = None,
-    container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.tenant_integration_service()
 
@@ -68,7 +68,7 @@ async def get_tenant_integrations(
 )
 async def add_tenant_integration(
     integration_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.tenant_integration_service()
     user = container.user()
@@ -104,7 +104,7 @@ async def add_tenant_integration(
 )
 async def remove_tenant_integration(
     tenant_integration_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.tenant_integration_service()
     user = container.user()
@@ -142,7 +142,7 @@ async def remove_tenant_integration(
     status_code=200,
 )
 async def get_user_integrations(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Get user's personal integrations.
 
@@ -181,7 +181,7 @@ async def get_user_integrations(
 )
 async def get_available_integrations_for_space(
     space_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Get integrations available for a specific space, filtered by space type and auth type.
 
@@ -212,7 +212,7 @@ async def get_available_integrations_for_space(
 )
 async def disconnect_user_integration(
     user_integration_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.user_integration_service()
     user = container.user()
@@ -251,9 +251,11 @@ async def disconnect_user_integration(
 )
 async def get_sync_logs(
     integration_knowledge_id: UUID,
-    skip: int = Query(0, ge=0, description="Number of items to skip"),
-    limit: int = Query(10, ge=1, le=100, description="Number of items per page"),
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    skip: Annotated[int, Query(ge=0, description="Number of items to skip")] = 0,
+    limit: Annotated[
+        int, Query(ge=1, le=100, description="Number of items per page")
+    ] = 10,
 ):
     """Get paginated sync history for an integration knowledge."""
     sync_log_repo = container.sync_log_repo()
@@ -279,7 +281,7 @@ async def get_sync_logs(
             error_message=log.error_message,
             started_at=log.started_at,
             completed_at=log.completed_at,
-            created_at=log.created_at,
+            created_at=log.created_at or log.started_at,
         )
         for log in sync_logs
     ]
@@ -296,7 +298,7 @@ async def get_sync_logs(
 )
 async def get_integration_preview(
     user_integration_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_preview_service()
     assembler = container.confluence_content_assembler()
@@ -315,16 +317,19 @@ async def get_integration_preview(
 )
 async def get_sharepoint_folder_tree(
     user_integration_id: UUID,
-    space_id: UUID = Query(..., description="Space ID (for auth routing)"),
-    site_id: Optional[str] = Query(
-        None, description="SharePoint site ID (required for SharePoint)"
-    ),
-    drive_id: Optional[str] = Query(
-        None, description="Drive ID (required for OneDrive)"
-    ),
-    folder_id: Optional[str] = Query(None, description="Folder ID (null for root)"),
-    folder_path: str = Query("", description="Current folder path"),
-    container: Container = Depends(get_container(with_user=True)),
+    space_id: Annotated[UUID, Query(description="Space ID (for auth routing)")],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    site_id: Annotated[
+        Optional[str],
+        Query(description="SharePoint site ID (required for SharePoint)"),
+    ] = None,
+    drive_id: Annotated[
+        Optional[str], Query(description="Drive ID (required for OneDrive)")
+    ] = None,
+    folder_id: Annotated[
+        Optional[str], Query(description="Folder ID (null for root)")
+    ] = None,
+    folder_path: Annotated[str, Query(description="Current folder path")] = "",
 ):
     """Get SharePoint/OneDrive folder tree with hybrid authentication support.
 
@@ -405,7 +410,7 @@ async def get_sharepoint_folder_tree(
 )
 async def get_integration_by_id(
     integration_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_service()
 

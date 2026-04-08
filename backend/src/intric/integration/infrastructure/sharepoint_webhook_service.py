@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Set
-from uuid import UUID
+from typing import Optional, cast
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,10 @@ from intric.database.tables.integration_table import (
     UserIntegration as UserIntegrationDBModel,
 )
 from intric.integration.domain.repositories.oauth_token_repo import OauthTokenRepository
+from intric.integration.infrastructure.content_service.types import (
+    SharePointWebhookNotification,
+    SharePointWebhookPayload,
+)
 from intric.integration.infrastructure.office_change_key_service import (
     OfficeChangeKeyService,
 )
@@ -43,7 +47,8 @@ class SharepointWebhookService:
         job_repo: JobRepository,
         user_repo: UsersRepository,
         change_key_service: OfficeChangeKeyService,
-    ):
+    ) -> None:
+        super().__init__()
         self.session = session
         self.oauth_token_repo = oauth_token_repo
         self.job_repo = job_repo
@@ -52,7 +57,9 @@ class SharepointWebhookService:
         settings = get_settings()
         self.expected_client_state = settings.sharepoint_webhook_client_state
 
-    async def handle_notifications(self, notifications: Dict) -> None:
+    async def handle_notifications(
+        self, notifications: SharePointWebhookPayload
+    ) -> None:
         """Handle incoming webhook notifications from Microsoft Graph.
 
         ChangeKey-based deduplication prevents processing of duplicate
@@ -64,7 +71,9 @@ class SharepointWebhookService:
             return
 
         # Group notifications by resource (SharePoint site or OneDrive drive)
-        notifications_by_resource: Dict[tuple[str, str], List[Dict]] = {}
+        notifications_by_resource: dict[
+            tuple[str, str], list[SharePointWebhookNotification]
+        ] = {}
         for notification in values:
             resource_info = self._extract_resource_from_notification(notification)
             if not resource_info:
@@ -101,7 +110,7 @@ class SharepointWebhookService:
         self,
         resource_type: str,
         resource_id: str,
-        notifications: List[Dict],
+        notifications: list[SharePointWebhookNotification],
     ) -> None:
         """Queue refresh jobs for a site/drive based on notifications.
 
@@ -127,17 +136,21 @@ class SharepointWebhookService:
             )
             return
 
-        job_services: Dict[str, JobService] = {}
-        user_cache: Dict[str, UserInDB] = {}
-        queued_knowledge: Set[str] = set()
+        job_services: dict[str, JobService] = {}
+        user_cache: dict[str, UserInDB] = {}
+        queued_knowledge: set[str] = set()
 
         # Filter out duplicate notifications at site level first
         # This prevents the same webhook from being processed multiple times
-        unique_notifications = []
+        unique_notifications: list[SharePointWebhookNotification] = []
         dedupe_key = f"{resource_type}:{resource_id}"
+        dedupe_integration_knowledge_id = uuid5(NAMESPACE_URL, dedupe_key)
         for notification in notifications:
             # Check ChangeKey at site level (not per integration)
-            resource_data = notification.get("resourceData", {})
+            resource_data = cast(
+                dict[str, str],
+                notification.get("resourceData") or {},
+            )
             item_id = resource_data.get("id")
             change_key = notification.get("changeKey") or resource_data.get("changeKey")
 
@@ -149,7 +162,7 @@ class SharepointWebhookService:
             # Check if we've already seen this item+changekey combo in this webhook batch
             # This handles the case where Microsoft sends duplicate notifications
             should_include = await self.change_key_service.should_process(
-                integration_knowledge_id=dedupe_key,  # Use resource-scoped key for webhook-batch deduping
+                integration_knowledge_id=dedupe_integration_knowledge_id,
                 item_id=item_id,
                 change_key=change_key,
             )
@@ -157,7 +170,7 @@ class SharepointWebhookService:
             if should_include:
                 unique_notifications.append(notification)
                 await self.change_key_service.update_change_key(
-                    integration_knowledge_id=dedupe_key,
+                    integration_knowledge_id=dedupe_integration_knowledge_id,
                     item_id=item_id,
                     change_key=change_key,
                 )
@@ -210,7 +223,9 @@ class SharepointWebhookService:
                 continue
 
             # Validate that user_integration_db.id is not None before proceeding
-            if user_integration_db.id is None:
+            # (id is always populated from DB; this guards against unexpected None)
+            ui_id = user_integration_db.id
+            if ui_id is None:  # pyright: ignore[reportUnnecessaryComparison]  # defensive guard: DB id is non-null in practice
                 logger.error(
                     "user_integration_db.id is None for knowledge %s; skipping",
                     knowledge_db.id,
@@ -220,8 +235,8 @@ class SharepointWebhookService:
             # Determine authentication method and fetch appropriate credentials
             # For tenant_app integrations: use tenant_app_id, no OAuth token
             # For user_oauth integrations: use OAuth token, no tenant_app_id
-            token_id: Optional[UUID] = None
-            tenant_app_id: Optional[UUID] = None
+            token_id: UUID | None = None
+            tenant_app_id: UUID | None = None
 
             if user_integration_db.auth_type == "tenant_app":
                 # Tenant app integration - no OAuth token needed
@@ -283,9 +298,14 @@ class SharepointWebhookService:
                 user_id_str = str(user_integration_db.user_id)
                 if user_id_str not in user_cache:
                     try:
-                        user_cache[user_id_str] = await self.user_repo.get_user_by_id(
+                        loaded_user = await self.user_repo.get_user_by_id(
                             id=user_integration_db.user_id
                         )
+                        if loaded_user is None:
+                            raise ValueError(
+                                f"User {user_integration_db.user_id} not found"
+                            )
+                        user_cache[user_id_str] = loaded_user
                     except Exception as exc:
                         logger.warning(
                             "Could not load user %s for SharePoint webhook notification: %s",
@@ -314,7 +334,7 @@ class SharepointWebhookService:
 
             params = SharepointContentTaskParam(
                 user_id=user_id_for_job,
-                id=user_integration_db.id,
+                id=ui_id,
                 token_id=token_id,  # None for tenant_app, UUID for user_oauth
                 tenant_app_id=tenant_app_id,  # UUID for tenant_app, None for user_oauth
                 integration_knowledge_id=knowledge_db.id,
@@ -377,7 +397,7 @@ class SharepointWebhookService:
 
     async def _fetch_knowledge_by_site(
         self, site_id: str
-    ) -> List[tuple[IntegrationKnowledgeDBModel, UserIntegrationDBModel]]:
+    ) -> list[tuple[IntegrationKnowledgeDBModel, UserIntegrationDBModel]]:
         stmt = (
             sa.select(IntegrationKnowledgeDBModel, UserIntegrationDBModel)
             .join(
@@ -393,7 +413,7 @@ class SharepointWebhookService:
 
     async def _fetch_knowledge_by_drive(
         self, drive_id: str
-    ) -> List[tuple[IntegrationKnowledgeDBModel, UserIntegrationDBModel]]:
+    ) -> list[tuple[IntegrationKnowledgeDBModel, UserIntegrationDBModel]]:
         stmt = (
             sa.select(IntegrationKnowledgeDBModel, UserIntegrationDBModel)
             .join(
@@ -413,7 +433,9 @@ class SharepointWebhookService:
         return result.all()  # type: ignore[return-value]
 
     def _is_notification_in_scope(
-        self, notification: Dict, knowledge_db: IntegrationKnowledgeDBModel
+        self,
+        notification: SharePointWebhookNotification,
+        knowledge_db: IntegrationKnowledgeDBModel,
     ) -> bool:
         """Check if a webhook notification is within an integration's scope.
 
@@ -444,7 +466,7 @@ class SharepointWebhookService:
             return True
 
         # Extract the changed item ID from notification
-        resource_data = notification.get("resourceData", {})
+        resource_data = cast(dict[str, str], notification.get("resourceData") or {})
         item_id = resource_data.get("id")
 
         # For file-level integrations: check item_id if available, otherwise queue
@@ -496,7 +518,7 @@ class SharepointWebhookService:
 
     async def should_process_notification(
         self,
-        notification: Dict,
+        notification: SharePointWebhookNotification,
         knowledge_id: UUID,
     ) -> bool:
         """Validate if a webhook notification should be processed.
@@ -513,7 +535,7 @@ class SharepointWebhookService:
         """
         # Extract item ID and ChangeKey from notification
         # Format can vary by resource type (event, file, etc.)
-        resource_data = notification.get("resourceData", {})
+        resource_data = cast(dict[str, str], notification.get("resourceData") or {})
         item_id = resource_data.get("id")
         change_key = notification.get("changeKey") or resource_data.get("changeKey")
 
@@ -547,7 +569,7 @@ class SharepointWebhookService:
 
     def _extract_resource_from_notification(
         self,
-        notification: Dict,
+        notification: SharePointWebhookNotification,
     ) -> Optional[tuple[str, str]]:
         """Extract ('site'|'drive', identifier) from notification."""
         resource: Optional[str] = notification.get("resource")
@@ -557,7 +579,7 @@ class SharepointWebhookService:
                 return parsed
 
         # Fallback for notifications where only resourceData is populated.
-        resource_data = notification.get("resourceData", {})
+        resource_data = cast(dict[str, str], notification.get("resourceData", {}))
         site_id = resource_data.get("siteId")
         if site_id:
             return ("site", site_id)
@@ -566,7 +588,9 @@ class SharepointWebhookService:
             return ("drive", drive_id)
         return None
 
-    def _extract_site_id_from_notification(self, notification: Dict) -> Optional[str]:
+    def _extract_site_id_from_notification(
+        self, notification: SharePointWebhookNotification
+    ) -> Optional[str]:
         """Extract site ID from a single notification."""
         parsed = self._extract_resource_from_notification(notification)
         if not parsed:

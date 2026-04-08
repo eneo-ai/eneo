@@ -18,6 +18,7 @@ class ModelProviderService:
     def __init__(
         self, repository: ModelProviderRepository, encryption: EncryptionService
     ):
+        super().__init__()
         self.repository = repository
         self.encryption = encryption
 
@@ -211,11 +212,14 @@ class ModelProviderService:
         elif provider_type in ("vllm",) or provider.config.get("endpoint"):
             kwargs["api_base"] = provider.config.get("endpoint", "")
 
+        aembedding: Any = getattr(litellm, "aembedding")
+        acompletion: Any = getattr(litellm, "acompletion")
+
         try:
             if model_type == "embedding":
-                await litellm.aembedding(input=["test"], **kwargs)
+                await aembedding(input=["test"], **kwargs)
             else:
-                await litellm.acompletion(
+                await acompletion(
                     messages=[{"role": "user", "content": "hi"}],
                     max_completion_tokens=10,
                     drop_params=True,
@@ -303,6 +307,8 @@ class ModelProviderService:
         """
         import litellm
 
+        acompletion: Any = getattr(litellm, "acompletion")
+
         provider = await self.repository.get_by_id(provider_id)
         decrypted_creds = self._decrypt_credentials(provider.credentials)
         api_key = decrypted_creds.get("api_key", "")
@@ -367,7 +373,7 @@ class ModelProviderService:
         for model in candidates:
             kwargs = {**base_kwargs, "model": model}
             try:
-                await litellm.acompletion(**kwargs)
+                await acompletion(**kwargs)
                 return {"success": True, "message": "Connection successful"}
             except Exception as e:
                 error_name = e.__class__.__name__

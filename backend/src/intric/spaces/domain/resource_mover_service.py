@@ -19,6 +19,7 @@ class ResourceMoverService:
         actor_manager: "ActorManager",
         group_service: "GroupService",
     ):
+        super().__init__()
         self.space_service = space_service
         self.space_repo = space_repo
         self.actor_manager = actor_manager
@@ -139,6 +140,7 @@ class ResourceMoverService:
                         "User cannot import collections into target space"
                     )
 
+                assert target_space.id is not None
                 await self.group_service.import_group_to_space(
                     group_id=collection.id,
                     space_id=target_space.id,

@@ -1,9 +1,15 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from intric.main.models import ModelId
-from intric.spaces.presentation.space_models import (  # type: ignore[import-not-found]
-    AddSpaceMemberRequest,
-)
+from intric.spaces.api.space_models import AddSpaceMemberRequest
+
+
+def _empty_model_id_list() -> list[ModelId]:
+    return []
+
+
+def _empty_member_list() -> list[AddSpaceMemberRequest]:
+    return []
 
 
 class InfoBlobDifference(BaseModel):
@@ -32,7 +38,7 @@ class InfoBlobDifferencePublic(BaseModel):
 class CreateAndImportSpaceRequest(BaseModel):
     name: str
     embedding_model: ModelId
-    assistants: list[ModelId] = []
-    groups: list[ModelId] = []
-    websites: list[ModelId] = []
-    members: list[AddSpaceMemberRequest] = []
+    assistants: list[ModelId] = Field(default_factory=_empty_model_id_list)
+    groups: list[ModelId] = Field(default_factory=_empty_model_id_list)
+    websites: list[ModelId] = Field(default_factory=_empty_model_id_list)
+    members: list[AddSpaceMemberRequest] = Field(default_factory=_empty_member_list)

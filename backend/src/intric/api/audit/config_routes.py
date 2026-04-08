@@ -1,6 +1,7 @@
 """API routes for audit category configuration."""
 
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
@@ -27,7 +28,7 @@ router = APIRouter(prefix="/config")
     description="Retrieve all audit category configurations for the current tenant.",
 )
 async def get_audit_config(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> AuditConfigResponse:
     """
     Get audit category configuration for the current tenant.
@@ -57,7 +58,7 @@ async def get_audit_config(
 )
 async def update_audit_config(
     request: AuditConfigUpdateRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> AuditConfigResponse:
     """
     Update audit category configurations for the current tenant.
@@ -93,7 +94,7 @@ async def update_audit_config(
     )
 
     # Build changes dict for audit log
-    changes = {}
+    changes: dict[str, dict[str, object]] = {}
     for update in request.updates:
         old_value = old_config_dict.get(update.category)
         if old_value != update.enabled:
@@ -126,7 +127,7 @@ async def update_audit_config(
     description="Retrieve all 65 actions with their enabled status for the modal UI.",
 )
 async def get_action_config(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ActionConfigResponse:
     """
     Get all actions with their enabled status (considering category + overrides).
@@ -156,7 +157,7 @@ async def get_action_config(
 )
 async def update_action_config(
     request: ActionConfigUpdateRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ActionConfigResponse:
     """
     Update action overrides for a tenant.

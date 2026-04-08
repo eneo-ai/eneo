@@ -1,9 +1,30 @@
 import uuid
+from typing import Protocol, cast
 
-from tavily import AsyncTavilyClient
+from tavily import (
+    AsyncTavilyClient,  # pyright: ignore[reportMissingTypeStubs]  # tavily ships without type stubs
+)
+from typing_extensions import TypedDict
 
 from intric.main.config import get_settings
 from intric.main.models import InDB
+
+
+class _TavilySearchResult(TypedDict):
+    title: str
+    url: str
+    content: str
+    score: float
+
+
+class _TavilySearchResponse(TypedDict):
+    results: list[_TavilySearchResult]
+
+
+class _TavilyClient(Protocol):
+    async def search(
+        self, query: str, max_results: int = 10
+    ) -> _TavilySearchResponse: ...
 
 
 class WebSearchResult(InDB):
@@ -15,7 +36,10 @@ class WebSearchResult(InDB):
 
 class WebSearch:
     def __init__(self):
-        self.client = AsyncTavilyClient(api_key=get_settings().tavily_api_key)
+        super().__init__()
+        self.client: _TavilyClient = cast(
+            _TavilyClient, AsyncTavilyClient(api_key=get_settings().tavily_api_key)
+        )
 
     async def search(self, search_query: str) -> list[WebSearchResult]:
         # Tavily max char limit is 400

@@ -1,4 +1,6 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, Sequence
+
+from typing_extensions import override
 
 from intric.base.base_entity import EntityMapper
 from intric.database.tables.integration_table import (
@@ -11,6 +13,7 @@ from intric.integration.domain.factories.oauth_token_factory import (
 
 
 class OauthTokenMapper(EntityMapper[OauthToken, OauthTokenDBModel]):
+    @override
     def to_db_dict(self, entity: OauthToken) -> Dict[str, Any]:
         return {
             "access_token": entity.access_token,
@@ -20,10 +23,10 @@ class OauthTokenMapper(EntityMapper[OauthToken, OauthTokenDBModel]):
             "resources": entity.resources,
         }
 
+    @override
     def to_entity(self, db_model: OauthTokenDBModel) -> OauthToken:
         return OauthTokenFactory.create_entity(record=db_model)
 
-    def to_entities(
-        self, db_models: List[OauthTokenDBModel]
-    ) -> List[OauthToken] | None:
-        pass
+    @override
+    def to_entities(self, db_models: Sequence[OauthTokenDBModel]) -> list[OauthToken]:
+        return [self.to_entity(db_model) for db_model in db_models]

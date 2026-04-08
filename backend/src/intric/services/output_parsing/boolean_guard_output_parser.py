@@ -1,3 +1,5 @@
+from typing_extensions import override
+
 from intric.services.output_parsing.output_parser import (
     OutputParserBase,
     ParsedOutput,
@@ -13,19 +15,23 @@ FORMAT_INSTRUCTIONS = (
 
 
 class BooleanOutput(ParsedOutput):
-    def to_string(self):
+    @override
+    def to_string(self) -> str:
         return str(self.parsed_output)
 
 
 class BooleanGuardOutputParser(OutputParserBase):
-    def __init__(self):
+    def __init__(self) -> None:
+        super().__init__()
         self.true_val = "YES"
         self.false_val = "NO"
 
+    @override
     def parse(self, text: str) -> BooleanOutput:
         cleaned_text = text.strip()
 
         return BooleanOutput(cleaned_text.upper() == self.true_val)
 
+    @override
     def get_format_instructions(self) -> str:
         return FORMAT_INSTRUCTIONS

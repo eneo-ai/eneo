@@ -1,8 +1,10 @@
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy import Select
+from sqlalchemy.engine import ScalarResult
 from sqlalchemy.orm import selectinload
 
 from intric.assistants.assistant import Assistant
@@ -38,6 +40,9 @@ if TYPE_CHECKING:
     from intric.completion_models.domain.completion_model_repo import (
         CompletionModelRepository,
     )
+    from intric.integration.domain.entities.integration_knowledge import (
+        IntegrationKnowledge as DomainIntegrationKnowledge,
+    )
     from intric.users.user import UserInDB
     from intric.websites.domain.website import Website
 
@@ -50,6 +55,7 @@ class AssistantRepository:
         completion_model_repo: "CompletionModelRepository",
         user: "UserInDB",
     ):
+        super().__init__()
         self.session = session
         self.factory = factory
         self.completion_model_repo = completion_model_repo
@@ -118,6 +124,7 @@ class AssistantRepository:
         await self.session.execute(stmt)
 
     async def _add_prompt(self, assistant_id: UUID, prompt: Prompt):
+        assert prompt.id is not None, "Prompt must have been persisted before linking"
         await self._set_is_selected_to_false(assistant_id=assistant_id)
 
         prompt_assistant_entry = await self._get_assistant_prompt_entry(
@@ -211,7 +218,7 @@ class AssistantRepository:
     async def _set_integration_knowledge(
         self,
         assistant_in_db: Assistants,
-        integration_knowledge: list[AssistantIntegrationKnowledge],
+        integration_knowledge: list["DomainIntegrationKnowledge"],
     ):
         # Delete all
         stmt = sa.delete(AssistantIntegrationKnowledge).where(
@@ -233,7 +240,7 @@ class AssistantRepository:
 
         await self.session.refresh(assistant_in_db)
 
-    async def _set_mcp_servers(
+    async def set_mcp_servers(
         self,
         assistant_in_db: Assistants,
         mcp_server_ids: list[UUID],
@@ -303,7 +310,7 @@ class AssistantRepository:
                 valid_tool_ids_result = await self.session.execute(valid_tool_ids_stmt)
                 valid_tool_ids = {row[0] for row in valid_tool_ids_result.fetchall()}
             else:
-                valid_tool_ids = set()
+                valid_tool_ids: set[UUID] = set()
 
             invalid_tool_ids = [
                 str(tool_id) for tool_id in tool_ids if tool_id not in valid_tool_ids
@@ -347,13 +354,17 @@ class AssistantRepository:
         res = await self.session.execute(query)
         return res.all()
 
-    async def get_record_with_options(self, query):
+    async def get_record_with_options(
+        self, query: Select[tuple[Assistants]]
+    ) -> Assistants | None:
         for option in self._options():
             query = query.options(option)
 
         return await self.session.scalar(query)
 
-    async def get_records_with_options(self, query):
+    async def get_records_with_options(
+        self, query: Select[tuple[Assistants]]
+    ) -> ScalarResult[Assistants]:
         for option in self._options():
             query = query.options(option)
 
@@ -403,7 +414,7 @@ class AssistantRepository:
     async def get_for_user(
         self,
         user_id: UUID,
-        search_query: str = None,
+        search_query: str | None = None,
         space_id: UUID | None = None,
         assistant_id: UUID | None = None,
     ):
@@ -435,9 +446,9 @@ class AssistantRepository:
     async def get_for_tenant(
         self,
         tenant_id: UUID,
-        search_query: str = None,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        search_query: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ):
         query = (
             sa.select(Assistants)
@@ -509,23 +520,24 @@ class AssistantRepository:
         # Set MCP servers/tool overrides explicitly when provided by caller.
         # Backward-compatible fallback to legacy side-channel attributes.
         effective_mcp_server_ids = mcp_server_ids
-        if (
-            effective_mcp_server_ids is None
-            and hasattr(assistant, "_mcp_server_ids")
-            and assistant._mcp_server_ids is not None
-        ):
-            effective_mcp_server_ids = assistant._mcp_server_ids
+        if effective_mcp_server_ids is None:
+            assistant_mcp_server_ids = cast(
+                list[UUID] | None, getattr(assistant, "_mcp_server_ids", None)
+            )
+            if assistant_mcp_server_ids is not None:
+                effective_mcp_server_ids = assistant_mcp_server_ids
 
         effective_mcp_tool_settings = mcp_tool_settings
-        if (
-            effective_mcp_tool_settings is None
-            and hasattr(assistant, "_mcp_tool_settings")
-            and assistant._mcp_tool_settings is not None
-        ):
-            effective_mcp_tool_settings = assistant._mcp_tool_settings
+        if effective_mcp_tool_settings is None:
+            assistant_mcp_tool_settings = cast(
+                list[tuple[UUID, bool]] | None,
+                getattr(assistant, "_mcp_tool_settings", None),
+            )
+            if assistant_mcp_tool_settings is not None:
+                effective_mcp_tool_settings = assistant_mcp_tool_settings
 
         if effective_mcp_server_ids is not None:
-            await self._set_mcp_servers(entry_in_db, effective_mcp_server_ids)
+            await self.set_mcp_servers(entry_in_db, effective_mcp_server_ids)
         if effective_mcp_tool_settings is not None:
             await self._set_mcp_tools(entry_in_db, effective_mcp_tool_settings)
 

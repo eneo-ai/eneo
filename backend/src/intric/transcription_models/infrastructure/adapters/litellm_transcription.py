@@ -39,7 +39,8 @@ class LiteLLMTranscriptionAdapter:
         model: "TranscriptionModel",
         credential_resolver: "TenantModelCredentialResolver",
         provider_type: str,
-    ):
+    ) -> None:
+        super().__init__()
         self.model = model
         self.credential_resolver = credential_resolver
         self.provider_type = provider_type
@@ -58,11 +59,11 @@ class LiteLLMTranscriptionAdapter:
         """Mask API key for safe logging."""
         return f"...{api_key[-4:]}" if len(api_key) > 4 else "***"
 
-    def _prepare_kwargs(self) -> dict:
+    def _prepare_kwargs(self) -> dict[str, object]:
         """
         Prepare kwargs for LiteLLM transcription call with credentials.
         """
-        kwargs = {}
+        kwargs: dict[str, object] = {}
 
         # Inject API key (required)
         api_key = self.credential_resolver.get_api_key()
@@ -89,7 +90,7 @@ class LiteLLMTranscriptionAdapter:
         text = ""
         five_minutes = 60 * 5
         chunk_index = 0
-        total_duration_seconds = int(audio_file.info.duration)
+        total_duration_seconds = int(audio_file.duration)
 
         async with audio_file.asplit_file(seconds=five_minutes) as files:
             total_chunks = len(files)
@@ -142,10 +143,10 @@ class LiteLLMTranscriptionAdapter:
 
         try:
             with open(file_path, "rb") as audio_file:
-                response = await litellm.atranscription(
+                response = await litellm.atranscription(  # pyright: ignore[reportUnknownMemberType]  # litellm stubs are incomplete
                     model=self.litellm_model,
                     file=audio_file,
-                    **kwargs,
+                    **kwargs,  # pyright: ignore[reportArgumentType]  # dict[str, object] is safe for litellm kwargs
                 )
 
             logger.debug(f"[LiteLLM] {self.litellm_model}: Transcription successful")

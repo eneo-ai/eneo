@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional, Union
 
 from intric.main.exceptions import UnauthorizedException
@@ -11,6 +12,9 @@ if TYPE_CHECKING:
         SecurityClassificationRepoImpl,
     )
     from intric.transcription_models.domain import TranscriptionModelRepository
+    from intric.transcription_models.domain.transcription_model import (
+        TranscriptionModel,
+    )
     from intric.users.user import UserInDB
 
 
@@ -20,7 +24,8 @@ class TranscriptionModelCRUDService:
         user: "UserInDB",
         transcription_model_repo: "TranscriptionModelRepository",
         security_classification_repo: Optional["SecurityClassificationRepoImpl"] = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.transcription_model_repo = transcription_model_repo
         self.user = user
         self.security_classification_repo = security_classification_repo
@@ -41,7 +46,7 @@ class TranscriptionModelCRUDService:
 
         return [model for model in transcription_models if model.can_access]
 
-    async def get_default_transcription_model(self):
+    async def get_default_transcription_model(self) -> Optional["TranscriptionModel"]:
         transcription_models = await self.get_available_transcription_models()
 
         # First try to get the org default model
@@ -50,15 +55,17 @@ class TranscriptionModelCRUDService:
                 return model
 
         # Otherwise get the latest model
-        sorted_models = sorted(  # type: ignore[call-overload]
-            transcription_models, key=lambda model: model.created_at, reverse=True
+        sorted_models = sorted(
+            transcription_models,
+            key=lambda model: model.created_at or datetime.min,
+            reverse=True,
         )
 
         # If no models are available
         if not sorted_models:
             return None
 
-        return sorted_models[0]  # type: ignore
+        return sorted_models[0]
 
     @validate_permissions(Permission.ADMIN)
     async def update_transcription_model(

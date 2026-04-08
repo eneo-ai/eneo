@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING, Optional, Union
 
+from typing_extensions import override
+
 from intric.ai_models.ai_model import AIModel
 from intric.main.models import is_provided
 from intric.security_classifications.domain.entities.security_classification import (
@@ -35,7 +37,7 @@ class EmbeddingModel(AIModel):
         hf_link: Optional[str],
         is_deprecated: bool,
         is_org_enabled: bool,
-        max_input: int,
+        max_input: Optional[int],
         dimensions: Optional[int],
         security_classification: Optional[SecurityClassification],
         max_batch_size: Optional[int] = None,
@@ -64,7 +66,7 @@ class EmbeddingModel(AIModel):
             security_classification=security_classification,
         )
 
-        self.max_input = max_input
+        self.max_input: Optional[int] = max_input
         self.dimensions = dimensions
         self.max_batch_size = max_batch_size
         self.litellm_model_name = litellm_model_name
@@ -73,6 +75,7 @@ class EmbeddingModel(AIModel):
         self.provider_name = provider_name
         self.provider_type = provider_type
 
+    @override
     def get_credential_provider_name(self) -> str:
         """Get the credential provider name for this model."""
         # If litellm_model_name is set, extract provider from prefix (e.g. "azure/gpt-4" → "azure")
@@ -82,14 +85,15 @@ class EmbeddingModel(AIModel):
         # Fall back to base implementation (checks family)
         return super().get_credential_provider_name()
 
+    @override
     @classmethod
-    def to_domain(
+    def to_domain(  # type: ignore[override]  # noqa: PYI019 – parent uses generic DB TypeVar, we specialize
         cls,
         db_model: "EmbeddingModelDB",
         user: "UserInDB",
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
-    ):
+    ) -> "EmbeddingModel":
         # Settings are now directly on the model table
         return cls(
             id=db_model.id,

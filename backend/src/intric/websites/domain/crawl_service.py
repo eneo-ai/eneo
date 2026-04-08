@@ -10,7 +10,7 @@ for normal operations when capacity is available.
 """
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Awaitable, cast
 from uuid import UUID
 
 import redis.asyncio as aioredis
@@ -88,6 +88,7 @@ class CrawlService:
         task_service: "TaskService",
         redis_client: aioredis.Redis,
     ):
+        super().__init__()
         self.repo = repo
         self.task_service = task_service
         self.redis_client = redis_client
@@ -109,12 +110,15 @@ class CrawlService:
         ttl = self.settings.tenant_worker_semaphore_ttl_seconds
 
         try:
-            result = await self.redis_client.eval(
-                self._acquire_slot_lua,
-                1,
-                key,
-                str(max_concurrent),
-                str(ttl),
+            result = await cast(
+                Awaitable[int | bytes | None],
+                self.redis_client.eval(
+                    self._acquire_slot_lua,
+                    1,
+                    key,
+                    str(max_concurrent),
+                    str(ttl),
+                ),
             )
 
             if isinstance(result, bytes):
@@ -166,7 +170,10 @@ class CrawlService:
         ttl = self.settings.tenant_worker_semaphore_ttl_seconds
 
         try:
-            await self.redis_client.eval(self._release_slot_lua, 1, key, str(ttl))
+            await cast(
+                Awaitable[int | bytes | None],
+                self.redis_client.eval(self._release_slot_lua, 1, key, str(ttl)),
+            )
         except Exception as exc:
             logger.warning(
                 "Failed to release slot",
@@ -189,7 +196,10 @@ class CrawlService:
         ttl = self.settings.tenant_worker_semaphore_ttl_seconds
         try:
             # Note: redis_client.eval runs Lua script atomically on Redis server
-            await self.redis_client.eval(self._release_slot_lua, 1, key, str(ttl))
+            await cast(
+                Awaitable[int | bytes | None],
+                self.redis_client.eval(self._release_slot_lua, 1, key, str(ttl)),
+            )
         except Exception as exc:
             logger.warning(
                 "Failed to release slot for preempted job",
@@ -236,7 +246,7 @@ class CrawlService:
 
         try:
             job_json = json.dumps(job_data, default=str, sort_keys=True)
-            await self.redis_client.rpush(key, job_json)
+            await cast(Awaitable[int], self.redis_client.rpush(key, job_json))
             logger.info(
                 "Added crawl to pending queue (at capacity)",
                 extra={

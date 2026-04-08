@@ -1,6 +1,7 @@
 """Background tasks for completion model usage statistics updates."""
 
 import logging
+from typing import Any, cast
 from uuid import UUID
 
 from dependency_injector import providers
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 async def update_model_usage_stats_task(
     *,
     job_id: UUID,
-    params: dict,
+    params: UpdateUsageStatsTaskParams,
     container: Container,
 ):
     """Update pre-aggregated usage statistics for a tenant.
@@ -34,17 +35,9 @@ async def update_model_usage_stats_task(
     task_manager = container.task_manager(job_id=job_id)
 
     async with task_manager.set_status_on_exception():
-        # Validate parameters using Pydantic model
-        try:
-            validated_params = UpdateUsageStatsTaskParams(**params)
-            logger.info(f"Validated params: {validated_params}")
-        except Exception as e:
-            logger.error(f"Failed to validate params {params}: {e}", exc_info=True)
-            raise
-
-        tenant_id = validated_params.tenant_id
-        model_id = validated_params.model_id
-        full_recalc = validated_params.full_recalc
+        tenant_id = params.tenant_id
+        model_id = params.model_id
+        full_recalc = params.full_recalc
 
         logger.info(
             f"Processing tenant_id={tenant_id}, model_id={model_id}, full_recalc={full_recalc}"
@@ -185,26 +178,28 @@ async def recalculate_tenant_usage_stats(container: Container, tenant_id: UUID):
 
     from intric.database.tables.users_table import Users
 
-    result = await session.execute(  # type: ignore[union-attr]
-        select(Users).where(Users.tenant_id == tenant_id).limit(1)
+    user_id = cast(
+        UUID | None,
+        await session.scalar(  # type: ignore[union-attr]
+            select(Users.id).where(Users.tenant_id == tenant_id).limit(1)
+        ),
     )
-    user_row = result.scalar_one_or_none()
 
-    if not user_row:
+    if user_id is None:
         logger.error(
             f"No users found for tenant {tenant_id}, cannot queue usage stats recalculation",
             extra={"tenant_id": str(tenant_id)},
         )
         return False
 
-    user = await user_repo.get_user_by_id(user_row.id)
+    user = await user_repo.get_user_by_id(user_id)
 
     if not user or user.tenant_id != tenant_id:
         logger.error(
             "Resolved user does not belong to target tenant",
             extra={
                 "tenant_id": str(tenant_id),
-                "resolved_user_id": str(user_row.id),
+                "resolved_user_id": str(user_id),
                 "resolved_user_tenant_id": str(user.tenant_id) if user else None,
             },
         )
@@ -212,8 +207,10 @@ async def recalculate_tenant_usage_stats(container: Container, tenant_id: UUID):
 
     from dependency_injector import providers
 
-    container.user.override(providers.Object(user))
-    container.tenant.override(providers.Object(tenant))
+    user_provider: Any = container.user
+    tenant_provider: Any = container.tenant
+    user_provider.override(providers.Object(user))
+    tenant_provider.override(providers.Object(tenant))
 
     # Get job service for queuing tasks
     job_service = container.job_service()
@@ -270,7 +267,8 @@ async def recalculate_tenant_usage_stats_direct(container: Container, tenant_id:
 
     # Use fresh session to avoid nested transaction errors
     async with sessionmanager.session() as session:
-        container.session.override(providers.Object(session))
+        session_provider: Any = container.session
+        session_provider.override(providers.Object(session))
         try:
             async with session.begin():
                 tenant_repo = container.tenant_repo()
@@ -303,10 +301,12 @@ async def recalculate_tenant_usage_stats_direct(container: Container, tenant_id:
                 from intric.database.tables.users_table import Users
 
                 stmt = select(Users).where(Users.tenant_id == tenant_id).limit(1)
-                result = await session.execute(stmt)
-                user_row = result.scalar_one_or_none()
+                user_id = cast(
+                    UUID | None,
+                    await session.scalar(stmt.with_only_columns(Users.id)),  # type: ignore[union-attr]
+                )
 
-                if not user_row:
+                if user_id is None:
                     logger.error(
                         f"No users found for tenant {tenant_id}, cannot perform recalculation",
                         extra={"tenant_id": str(tenant_id)},
@@ -314,11 +314,13 @@ async def recalculate_tenant_usage_stats_direct(container: Container, tenant_id:
                     return False
 
                 # Get the user object
-                user = await user_repo.get_user_by_id(user_row.id)
+                user = await user_repo.get_user_by_id(user_id)
 
                 # Override container context with this user and tenant
-                container.user.override(providers.Object(user))
-                container.tenant.override(providers.Object(tenant))
+                user_provider: Any = container.user
+                tenant_provider: Any = container.tenant
+                user_provider.override(providers.Object(user))
+                tenant_provider.override(providers.Object(tenant))
 
                 # Get the usage service with proper context
                 usage_service = container.completion_model_usage_service()
@@ -359,7 +361,8 @@ async def recalculate_all_tenants_usage_stats(container: Container):
     # nested transaction errors when cron wrapper already has a transaction
     async with sessionmanager.session() as session:
         # Override container's session with our fresh session
-        container.session.override(providers.Object(session))
+        session_provider: Any = container.session
+        session_provider.override(providers.Object(session))
         try:
             async with session.begin():
                 tenant_repo = container.tenant_repo()
@@ -413,7 +416,8 @@ async def recalculate_all_tenants_usage_stats(container: Container):
             # Use fresh session per tenant to isolate failures and avoid nested transactions
             async with sessionmanager.session() as session:
                 # Override container's session with our fresh session
-                container.session.override(providers.Object(session))
+                session_provider: Any = container.session
+                session_provider.override(providers.Object(session))
                 try:
                     async with session.begin():
                         # Get a user from this tenant to set the context
@@ -424,10 +428,14 @@ async def recalculate_all_tenants_usage_stats(container: Container):
                         stmt = (
                             select(Users).where(Users.tenant_id == tenant.id).limit(1)
                         )
-                        result = await session.execute(stmt)
-                        user_row = result.scalar_one_or_none()
+                        user_id = cast(
+                            UUID | None,
+                            await session.scalar(  # type: ignore[union-attr]
+                                stmt.with_only_columns(Users.id)
+                            ),
+                        )
 
-                        if not user_row:
+                        if user_id is None:
                             logger.warning(
                                 f"No users found for tenant {tenant.id}, skipping usage stats recalculation",
                                 extra={
@@ -439,11 +447,13 @@ async def recalculate_all_tenants_usage_stats(container: Container):
 
                         # Get the user repo with fresh session context
                         user_repo = container.user_repo()
-                        user = await user_repo.get_user_by_id(user_row.id)
+                        user = await user_repo.get_user_by_id(user_id)
 
                         # Override container context with this user and tenant
-                        container.user.override(providers.Object(user))
-                        container.tenant.override(providers.Object(tenant))
+                        user_provider: Any = container.user
+                        tenant_provider: Any = container.tenant
+                        user_provider.override(providers.Object(user))
+                        tenant_provider.override(providers.Object(tenant))
 
                         # Get the usage service with proper context
                         usage_service = container.completion_model_usage_service()

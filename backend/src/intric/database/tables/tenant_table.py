@@ -59,7 +59,7 @@ class Tenants(BasePublic):
 
 tenants_modules_table = Table(
     "tenants_modules",
-    Base.metadata,  # pyright: ignore[reportAttributeAccessIssue]
-    Column("tenant_id", ForeignKey(Tenants.id, ondelete="CASCADE"), primary_key=True),
-    Column("module_id", ForeignKey(Modules.id, ondelete="CASCADE"), primary_key=True),
+    Base.metadata,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]  # SQLAlchemy declarative metadata
+    Column("tenant_id", ForeignKey(Tenants.id, ondelete="CASCADE"), primary_key=True),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
+    Column("module_id", ForeignKey(Modules.id, ondelete="CASCADE"), primary_key=True),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
 )

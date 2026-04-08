@@ -1,5 +1,6 @@
 # MIT License
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -13,11 +14,13 @@ from intric.questions.questions_repo import QuestionRepository
 
 router = APIRouter(dependencies=[Depends(get_current_active_user)])
 
+_QuestionRepo = Annotated[QuestionRepository, Depends(get_questions_repo)]
+
 
 @router.get("/{message_id}/", response_model=MessageLogging)
 async def get_logging_details(
-    message_id: UUID, question_repo: QuestionRepository = Depends(get_questions_repo)
-):
+    message_id: UUID, question_repo: _QuestionRepo
+) -> MessageLogging:
     question = await question_repo.get(message_id)
     if question is None:
         raise NotFoundException("Question not found")

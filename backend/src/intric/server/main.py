@@ -4,13 +4,14 @@ import time
 import traceback
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional, Protocol, cast
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing_extensions import TypedDict
 
 from intric.allowed_origins.get_origin_callback import get_origin
 from intric.main.config import get_settings
@@ -56,19 +57,21 @@ class HealthThresholds(BaseModel):
 class CrawlerActivity(BaseModel):
     """Real-time crawler activity from multiple sources."""
 
-    db_in_progress: Optional[int] = (
-        None  # Jobs with status=IN_PROGRESS, None if query failed
+    db_in_progress: Optional[int] = Field(
+        default=None,  # Jobs with status=IN_PROGRESS, None if query failed
     )
     db_query_ok: bool = True  # False if DB query timed out or failed
     arq_ongoing: int = 0  # From ARQ health string (j_ongoing)
-    delta: Optional[int] = None  # Discrepancy between DB and ARQ, None if can't compute
+    delta: Optional[int] = Field(
+        default=None,  # Discrepancy between DB and ARQ, None if can't compute
+    )
 
 
 class ARQHealth(BaseModel):
     """Parsed ARQ health metrics (clean view)."""
 
-    heartbeat_ttl_seconds: Optional[int] = None  # TTL-based liveness signal
-    age_seconds: Optional[float] = None  # For debugging only, not used for status
+    heartbeat_ttl_seconds: Optional[int] = Field(default=None)
+    age_seconds: Optional[float] = Field(default=None)
     j_complete: int = 0
     j_failed: int = 0
     j_retried: int = 0
@@ -79,7 +82,7 @@ class ARQHealth(BaseModel):
 class WatchdogMetrics(BaseModel):
     """Watchdog activity metrics."""
 
-    age_seconds: Optional[float] = None
+    age_seconds: Optional[float] = Field(default=None)
     zombies_reconciled: int = 0
     expired_killed: int = 0
     rescued: int = 0
@@ -91,8 +94,8 @@ class WatchdogMetrics(BaseModel):
 class FeederLeader(BaseModel):
     """Feeder leader election status."""
 
-    leader_id: Optional[str] = None
-    leader_ttl_seconds: Optional[int] = None
+    leader_id: Optional[str] = Field(default=None)
+    leader_ttl_seconds: Optional[int] = Field(default=None)
     status: str = "UNKNOWN"  # LEADER_OK, LEADER_STALE, NO_LEADER
 
 
@@ -101,17 +104,44 @@ class PendingQueueSummary(BaseModel):
 
     total: int = 0
     tenant_count: int = 0
-    top_tenants: dict[str, int] = {}
+    top_tenants: dict[str, int] = Field(default_factory=dict)
 
 
 class DebugInfo(BaseModel):
     """Raw data for debugging - noisy, not for quick reads."""
 
     arq_raw: str = ""
-    arq_timestamp: Optional[str] = None
-    watchdog_timestamp: Optional[str] = None
-    redis_db: Optional[int] = None
+    arq_timestamp: Optional[str] = Field(default=None)
+    watchdog_timestamp: Optional[str] = Field(default=None)
+    redis_db: Optional[int] = Field(default=None)
     queue_name: str = "arq:queue"
+
+
+class ArqHealthData(TypedDict, total=False):
+    raw: str
+    timestamp: str
+    arq_health_age_seconds: float
+    heartbeat_ttl_seconds: int
+    age_seconds: float
+    j_complete: int
+    j_failed: int
+    j_retried: int
+    j_ongoing: int
+    queued: int
+
+
+class WatchdogMetricsData(TypedDict, total=False):
+    timestamp: str
+    zombies_reconciled: int
+    expired_killed: int
+    rescued: int
+    early_zombies_failed: int
+    long_running_failed: int
+    slots_released: int
+
+
+class _ArqHealthParser(Protocol):
+    def parse_arq_health_string(self, raw: str) -> ArqHealthData: ...
 
 
 class CrawlerHealthResponse(BaseModel):
@@ -119,47 +149,58 @@ class CrawlerHealthResponse(BaseModel):
 
     # Quick status overview
     status: str  # HEALTHY, DEGRADED, UNHEALTHY, or UNKNOWN
-    status_flags: list[str] = []  # ["ARQ_HEARTBEAT_OK", "WATCHDOG_OK", "DB_QUERY_OK"]
+    status_flags: list[str] = Field(
+        default_factory=list
+    )  # ["ARQ_HEARTBEAT_OK", "WATCHDOG_OK", "DB_QUERY_OK"]
     status_reason: str = ""  # Human-readable explanation
     response_timestamp_utc: str  # For log correlation
 
     # Core metrics (clean view)
-    crawler_activity: CrawlerActivity = CrawlerActivity()
-    arq: ARQHealth = ARQHealth()
-    watchdog: WatchdogMetrics = WatchdogMetrics()
-    feeder: FeederLeader = FeederLeader()
-    pending: PendingQueueSummary = PendingQueueSummary()
+    crawler_activity: CrawlerActivity = Field(default_factory=CrawlerActivity)
+    arq: ARQHealth = Field(default_factory=ARQHealth)
+    watchdog: WatchdogMetrics = Field(default_factory=WatchdogMetrics)
+    feeder: FeederLeader = Field(default_factory=FeederLeader)
+    pending: PendingQueueSummary = Field(default_factory=PendingQueueSummary)
 
     # Configuration used for decisions
     thresholds: HealthThresholds
 
     # Raw data for deep debugging
-    debug: DebugInfo = DebugInfo()
+    debug: DebugInfo = Field(default_factory=DebugInfo)
 
 
-def _remove_invalid_defaults(schema: dict) -> None:
+def _parse_arq_health_string(raw: str) -> ArqHealthData:
+    from intric.worker.redis import client as redis_client
+
+    return cast(_ArqHealthParser, redis_client).parse_arq_health_string(raw)
+
+
+def _parse_watchdog_metrics(raw: str) -> WatchdogMetricsData:
+    return cast(WatchdogMetricsData, json.loads(raw))
+
+
+def _remove_invalid_defaults(schema: dict[str, Any]) -> None:
     """Remove invalid 'NOT_PROVIDED' defaults from OpenAPI schema recursively."""
-    if not isinstance(schema, dict):
-        return
-
     if schema.get("default") == "NOT_PROVIDED":
         del schema["default"]
 
-    if "properties" in schema and isinstance(schema["properties"], dict):
-        for prop_schema in schema["properties"].values():
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        for prop_schema in cast(dict[str, dict[str, Any]], properties).values():
             _remove_invalid_defaults(prop_schema)
 
-    if "items" in schema and isinstance(schema["items"], dict):
-        _remove_invalid_defaults(schema["items"])
+    items = schema.get("items")
+    if isinstance(items, dict):
+        _remove_invalid_defaults(cast(dict[str, Any], items))
 
-    if "additionalProperties" in schema and isinstance(
-        schema["additionalProperties"], dict
-    ):
-        _remove_invalid_defaults(schema["additionalProperties"])
+    additional_properties = schema.get("additionalProperties")
+    if isinstance(additional_properties, dict):
+        _remove_invalid_defaults(cast(dict[str, Any], additional_properties))
 
     for key in ("anyOf", "oneOf", "allOf"):
-        if key in schema and isinstance(schema[key], list):
-            for sub_schema in schema[key]:
+        variants = schema.get(key)
+        if isinstance(variants, list):
+            for sub_schema in cast(list[dict[str, Any]], variants):
                 _remove_invalid_defaults(sub_schema)
 
 
@@ -187,17 +228,19 @@ def get_application():
     add_exception_handlers(app)
 
     @app.exception_handler(HTTPException)
-    async def http_exception_handler(request, exc: HTTPException):
+    async def http_exception_handler(
+        request: Request, exc: HTTPException
+    ) -> JSONResponse:
         detail = exc.detail
         headers = exc.headers or None
         request_id = request.headers.get("x-correlation-id") or request.headers.get(
             "x-request-id"
         )
         if not request_id:
-            request_id = get_request_context().get("correlation_id")
+            request_id = cast(str | None, get_request_context().get("correlation_id"))
 
         if isinstance(detail, dict) and "code" in detail and "message" in detail:
-            normalized_detail = dict(detail)
+            normalized_detail: dict[str, Any] = cast(dict[str, Any], detail)
             if request_id and "request_id" not in normalized_detail:
                 normalized_detail["request_id"] = request_id
             return JSONResponse(
@@ -231,12 +274,13 @@ def get_application():
                 schemes["APIKeyAuth"] = schemes.pop("default")
 
         # Update all security references from "default" to "APIKeyAuth"
-        for path in openapi_schema.get("paths", {}).values():
-            for operation in path.values():
+        for path in cast(dict[str, Any], openapi_schema.get("paths", {})).values():
+            for operation in cast(dict[str, Any], path).values():
                 if isinstance(operation, dict) and "security" in operation:
+                    security = cast(list[dict[str, list[Any]]], operation["security"])
                     operation["security"] = [
                         {"APIKeyAuth" if k == "default" else k: v}
-                        for sec in operation["security"]
+                        for sec in security
                         for k, v in sec.items()
                     ]
 
@@ -282,7 +326,9 @@ def get_application():
     app.openapi = custom_openapi
 
     @app.exception_handler(500)
-    async def custom_http_500_exception_handler(request, exc):
+    async def custom_http_500_exception_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
         # Generate unique error ID for tracing
         error_id = str(uuid.uuid4())[:8]
 
@@ -303,7 +349,7 @@ def get_application():
         settings = get_settings()
         is_dev = settings.environment in ("development", "local", "dev")
 
-        error_content = {
+        error_content: dict[str, Any] = {
             "error": "Internal server error",
             "error_id": error_id,
             "message": "An unexpected error occurred. Please try again or contact support with the error_id.",
@@ -354,7 +400,9 @@ def get_application():
         return response
 
     @app.exception_handler(Exception)
-    async def unhandled_exception_handler(request, exc):
+    async def unhandled_exception_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
         """Catch-all handler for unhandled exceptions"""
         # Generate unique error ID for tracing
         error_id = str(uuid.uuid4())[:8]
@@ -376,7 +424,7 @@ def get_application():
         settings = get_settings()
         is_dev = settings.environment in ("development", "local", "dev")
 
-        error_content = {
+        error_content: dict[str, Any] = {
             "error": "Internal server error",
             "error_id": error_id,
             "message": "An unexpected error occurred. Please try again or contact support with the error_id.",
@@ -464,7 +512,7 @@ def get_application():
         return response_data
 
     @app.get("/api/healthz/crawler", response_model=CrawlerHealthResponse)
-    async def crawler_health(include_all: bool = False):
+    async def crawler_health(include_all: bool = False) -> CrawlerHealthResponse:
         """Detailed crawler diagnostics. NOT for K8s probes.
 
         Public endpoint - no auth required. Shows only job counts and tenant IDs.
@@ -472,19 +520,19 @@ def get_application():
         Args:
             include_all: If True, return all tenant queue lengths instead of top-10.
         """
-        from intric.worker.redis.client import get_redis, parse_arq_health_string
+        from intric.worker.redis.client import get_redis
 
-        redis_client = get_redis()
+        redis_client = cast(Any, get_redis())
         settings = get_settings()
         feeder_interval = settings.crawl_feeder_interval_seconds
 
         # Initialize defaults for graceful degradation on Redis errors
-        arq_health: dict = {}
-        watchdog_metrics: dict = {}
+        arq_health: ArqHealthData = {}
+        watchdog_metrics: WatchdogMetricsData = {}
         watchdog_age: float | None = None
         leader_id: str | None = None
         leader_ttl: int = -2
-        pending_total = 0
+        pending_total: int = 0
         tenant_queues: dict[str, int] = {}
         redis_error: str | None = None
 
@@ -496,7 +544,7 @@ def get_application():
             arq_raw = await redis_client.get("arq:queue:health-check") or ""
             if isinstance(arq_raw, bytes):
                 arq_raw = arq_raw.decode()
-            arq_health = parse_arq_health_string(arq_raw)
+            arq_health = _parse_arq_health_string(arq_raw)
             arq_heartbeat_ttl = await redis_client.ttl("arq:queue:health-check")
 
             # 2. Get watchdog metrics
@@ -505,7 +553,7 @@ def get_application():
                 try:
                     if isinstance(watchdog_raw, bytes):
                         watchdog_raw = watchdog_raw.decode()
-                    watchdog_metrics = json.loads(watchdog_raw)
+                    watchdog_metrics = _parse_watchdog_metrics(watchdog_raw)
                 except json.JSONDecodeError:
                     pass
 
@@ -536,7 +584,7 @@ def get_application():
                     parts = key_str.split(":")
                     if len(parts) >= 2:
                         tenant_id = parts[1]
-                        length = await redis_client.llen(key)
+                        length = int(await redis_client.llen(key))
                         pending_total += length
                         tenant_queues[tenant_id] = length
                 if cursor == 0:
@@ -592,7 +640,7 @@ def get_application():
             )
 
         # Calculate delta if both values available
-        arq_ongoing = arq_health.get("j_ongoing", 0)
+        arq_ongoing = int(arq_health.get("j_ongoing", 0))
         activity_delta: int | None = None
         if db_in_progress is not None:
             activity_delta = abs(db_in_progress - arq_ongoing)
@@ -641,11 +689,10 @@ def get_application():
             status_flags.append("DB_QUERY_OK")
 
         # Check for stuck worker (queued but not processing)
-        if arq_health.get("queued", 0) > 0 and arq_ongoing == 0:
+        queued_jobs = int(arq_health.get("queued", 0))
+        if queued_jobs > 0 and arq_ongoing == 0:
             status_flags.append("WORKER_STUCK")
-            status_reasons.append(
-                f"Jobs queued ({arq_health.get('queued', 0)}) but none processing"
-            )
+            status_reasons.append(f"Jobs queued ({queued_jobs}) but none processing")
 
         # Check activity delta
         if activity_delta is not None and activity_delta > 0:
@@ -691,7 +738,7 @@ def get_application():
         )
 
         # Get redis_db for debug info
-        redis_db = getattr(settings, "redis_db", None)
+        redis_db = cast(int | None, getattr(settings, "redis_db", None))
 
         return CrawlerHealthResponse(
             status=status,
@@ -717,12 +764,14 @@ def get_application():
             ),
             watchdog=WatchdogMetrics(
                 age_seconds=watchdog_age,
-                zombies_reconciled=watchdog_metrics.get("zombies_reconciled", 0),
-                expired_killed=watchdog_metrics.get("expired_killed", 0),
-                rescued=watchdog_metrics.get("rescued", 0),
-                early_zombies_failed=watchdog_metrics.get("early_zombies_failed", 0),
-                long_running_failed=watchdog_metrics.get("long_running_failed", 0),
-                slots_released=watchdog_metrics.get("slots_released", 0),
+                zombies_reconciled=int(watchdog_metrics.get("zombies_reconciled", 0)),
+                expired_killed=int(watchdog_metrics.get("expired_killed", 0)),
+                rescued=int(watchdog_metrics.get("rescued", 0)),
+                early_zombies_failed=int(
+                    watchdog_metrics.get("early_zombies_failed", 0)
+                ),
+                long_running_failed=int(watchdog_metrics.get("long_running_failed", 0)),
+                slots_released=int(watchdog_metrics.get("slots_released", 0)),
             ),
             feeder=FeederLeader(
                 leader_id=leader_id,
@@ -751,6 +800,16 @@ def get_application():
     @app.get("/version")
     async def get_version():
         return VersionResponse(version=get_settings().app_version)
+
+    _registered_endpoints = (
+        http_exception_handler,
+        custom_http_500_exception_handler,
+        unhandled_exception_handler,
+        get_healthz,
+        crawler_health,
+        get_version,
+    )
+    del _registered_endpoints
 
     return app
 

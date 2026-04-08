@@ -230,7 +230,7 @@ class TestAskAssistant:
         assistant_id = uuid.uuid4()
         ask = AskAssistant(
             question="Analyze this file",
-            files=[file1],
+            files=[file1.id],
         )
 
         await ask_assistant(

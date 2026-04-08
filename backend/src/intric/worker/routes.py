@@ -1,8 +1,19 @@
+from typing import cast
+from uuid import UUID
+
+from typing_extensions import TypedDict
+
+from intric.audit.application.audit_task_params import (
+    AuditExportTaskParams,
+    AuditLogTaskParams,
+)
 from intric.audit.application.audit_worker_task import log_audit_event_task
 from intric.audit.application.export_worker_task import export_audit_logs_task
+from intric.database.database import AsyncSession
 from intric.jobs.task_models import (
     AnalyzeConversationInsightsTask,
     Transcription,
+    UpdateUsageStatsTaskParams,
     UploadInfoBlob,
 )
 from intric.main.container.container import Container
@@ -20,16 +31,53 @@ from intric.worker.worker import Worker
 worker = Worker()
 
 
+class ExportCleanupJobError(TypedDict, total=False):
+    job_id: str
+    tenant_id: str
+    error: str
+    file_path: str
+
+
+class ExportCleanupResult(TypedDict):
+    files_deleted: int
+    bytes_freed: int
+    jobs_cleaned: int
+    errors: list[ExportCleanupJobError]
+    success: bool
+
+
+class TenantPurgeStat(TypedDict):
+    retention_days: int
+    purged_count: int
+
+
+class AuditPurgeError(TypedDict):
+    tenant_id: str
+    error: str
+
+
+class AuditPurgeResult(TypedDict):
+    purge_stats: dict[str, TenantPurgeStat]
+    errors: list[AuditPurgeError]
+    total_tenants: int
+    successful_tenants: int
+    total_purged: int
+    success: bool
+
+
 @worker.function()
 async def upload_info_blob(job_id: str, params: UploadInfoBlob, container: Container):
+    job_uuid = UUID(job_id)
     return await upload_info_blob_task(
-        job_id=job_id, params=params, container=container
+        job_id=job_uuid, params=params, container=container
     )
 
 
 @worker.function()
 async def transcription(job_id: str, params: Transcription, container: Container):
-    return await transcription_task(job_id=job_id, params=params, container=container)
+    return await transcription_task(
+        job_id=UUID(job_id), params=params, container=container
+    )
 
 
 @worker.long_running_function()
@@ -43,13 +91,13 @@ async def crawl(job_id: str, params: CrawlTask, container: Container):
 
     This prevents holding a DB connection for the entire crawl (5-30 minutes).
     """
-    return await crawl_task(job_id=job_id, params=params, container=container)
+    return await crawl_task(job_id=UUID(job_id), params=params, container=container)
 
 
 @worker.cron_job(
     minute=0
 )  # Hourly at :00 - enables true ~24h scheduling for DAILY websites
-async def crawl_all_websites(container: Container):
+async def crawl_all_websites(container: Container) -> bool:
     """Hourly cron job to check and queue websites based on their update intervals.
 
     Why: Hourly checks ensure DAILY websites are scheduled ~24 hours after last crawl,
@@ -65,20 +113,24 @@ async def crawl_all_websites(container: Container):
 
 
 @worker.function()
-async def update_model_usage_stats(job_id: str, params: dict, container: Container):
+async def update_model_usage_stats(
+    job_id: str, params: dict[str, object], container: Container
+):
     """Worker function for updating model usage statistics.
 
     Note: params is a dict here because it comes from ARQ, but we validate it
     by creating UpdateUsageStatsTaskParams inside the task function.
     """
     return await update_model_usage_stats_task(
-        job_id=job_id, params=params, container=container
+        job_id=UUID(job_id),
+        params=UpdateUsageStatsTaskParams.model_validate(params),
+        container=container,
     )
 
 
 @worker.function(with_user=False)
 async def recalculate_tenant_usage_stats_job(
-    job_id: str, params: dict, container: Container
+    job_id: str, params: dict[str, object], container: Container
 ):
     """Worker function for recalculating usage statistics for a specific tenant.
 
@@ -90,7 +142,7 @@ async def recalculate_tenant_usage_stats_job(
     from uuid import UUID
 
     # Extract tenant_id from params
-    tenant_id = UUID(params["tenant_id"])
+    tenant_id = UUID(str(params["tenant_id"]))
 
     return await recalculate_tenant_usage_stats(
         container=container, tenant_id=tenant_id
@@ -98,13 +150,13 @@ async def recalculate_tenant_usage_stats_job(
 
 
 @worker.cron_job(hour=19, minute=00)  # Daily at 02:00 UTC
-async def recalculate_usage_stats(container: Container):
+async def recalculate_usage_stats(container: Container) -> bool:
     """Nightly recalculation of all tenant usage statistics"""
     return await recalculate_all_tenants_usage_stats(container=container)
 
 
 @worker.function(with_user=False)
-async def log_audit_event(job_id: str, params: dict, container: Container):
+async def log_audit_event(job_id: str, params: dict[str, object], container: Container):
     """Worker function for async audit logging.
 
     Args:
@@ -115,12 +167,18 @@ async def log_audit_event(job_id: str, params: dict, container: Container):
     Returns:
         Dictionary with audit_log_id
     """
-    session = container.session()
-    return await log_audit_event_task(job_id=job_id, params=params, session=session)
+    session = cast(AsyncSession, container.session())
+    return await log_audit_event_task(
+        job_id=UUID(job_id),
+        params=AuditLogTaskParams.model_validate(params),
+        session=session,
+    )
 
 
 @worker.function(with_user=False)
-async def export_audit_logs(job_id: str, params: dict, container: Container):
+async def export_audit_logs(
+    job_id: str, params: dict[str, object], container: Container
+):
     """Worker function for async audit log export.
 
     Exports audit logs to file with progress tracking and cancellation support.
@@ -134,10 +192,13 @@ async def export_audit_logs(job_id: str, params: dict, container: Container):
     Returns:
         Dictionary with export result (job_id, status, file_path, etc.)
     """
-    session = container.session()
+    session = cast(AsyncSession, container.session())
     redis = container.redis_client()
     return await export_audit_logs_task(
-        job_id=job_id, params=params, session=session, redis=redis
+        job_id=UUID(job_id),
+        params=AuditExportTaskParams.model_validate(params),
+        session=session,
+        redis=redis,
     )
 
 
@@ -148,12 +209,12 @@ async def analyze_conversation_insights(
     container: Container,
 ):
     return await analyze_conversation_insights_task(
-        job_id=job_id, params=params, container=container
+        job_id=UUID(job_id), params=params, container=container
     )
 
 
 @worker.cron_job(hour=3, minute=0)  # Daily at 03:00 UTC
-async def cleanup_old_exports(container: Container):
+async def cleanup_old_exports(container: Container) -> ExportCleanupResult:
     """Daily cron job to clean up old export files.
 
     Runs at 03:00 UTC (4:00 AM Swedish winter, 5:00 AM summer) to minimize user impact.
@@ -187,7 +248,7 @@ async def cleanup_old_exports(container: Container):
     files_deleted = 0
     bytes_freed = 0
     jobs_cleaned = 0
-    errors = []
+    errors: list[ExportCleanupJobError] = []
 
     for job in expired_jobs:
         try:
@@ -290,7 +351,7 @@ async def cleanup_old_exports(container: Container):
 
 
 @worker.cron_job(hour=1, minute=0)  # Daily at 01:00 UTC
-async def api_key_maintenance(container: Container):
+async def api_key_maintenance(container: Container) -> dict[str, object]:
     """Daily maintenance for API keys (expiration and rotation cleanup)."""
     from intric.main.logging import get_logger
 
@@ -307,7 +368,7 @@ async def api_key_maintenance(container: Container):
 
 
 @worker.cron_job(hour=2, minute=0)  # Daily at 02:00 UTC
-async def purge_old_audit_logs(container: Container):
+async def purge_old_audit_logs(container: Container) -> AuditPurgeResult:
     """
     Daily cron job to purge old audit logs based on retention policies.
 
@@ -366,8 +427,8 @@ async def purge_old_audit_logs(container: Container):
     # Step 2: Process each tenant in its own ISOLATED session/transaction
     # CRITICAL: Using sessionmanager.session() creates a NEW session per tenant
     # This ensures true transaction isolation - one tenant's failure won't affect others
-    purge_stats: dict[str, dict] = {}
-    errors: list[dict] = []
+    purge_stats: dict[str, TenantPurgeStat] = {}
+    errors: list[AuditPurgeError] = []
 
     for tenant_id in tenant_ids:
         tenant_id_str = str(tenant_id)
@@ -439,7 +500,7 @@ async def purge_old_audit_logs(container: Container):
 
         except Exception as e:
             # This tenant's transaction rolled back, but others continue
-            error_info = {
+            error_info: AuditPurgeError = {
                 "tenant_id": tenant_id_str,
                 "error": str(e),
             }
@@ -491,7 +552,7 @@ async def purge_old_audit_logs(container: Container):
 
 
 @worker.cron_job(hour=4, minute=0)  # Daily at 04:00 UTC
-async def purge_old_conversations(container: Container):
+async def purge_old_conversations(container: Container) -> dict[str, object]:
     """
     Daily cron job to purge old conversation data based on retention policies.
 
@@ -521,7 +582,7 @@ async def purge_old_conversations(container: Container):
 
     logger.info("Starting conversation data retention purge")
 
-    session = container.session()
+    session = cast(AsyncSession, container.session())
     retention_service = DataRetentionService(session)
 
     # Delete old questions based on hierarchical retention policies

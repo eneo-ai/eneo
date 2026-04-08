@@ -1,13 +1,13 @@
-from typing import TYPE_CHECKING, Optional, cast
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Optional, Protocol
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased, selectinload
+from sqlalchemy.sql.dml import ReturningInsert, ReturningUpdate
 
-from intric.ai_models.completion_models.completion_model import CompletionModelSparse
-from intric.ai_models.embedding_models.embedding_model import EmbeddingModelSparse
 from intric.database.database import AsyncSession
 from intric.database.tables.ai_models_table import (
     CompletionModels,
@@ -76,9 +76,15 @@ from intric.main.logging import get_logger
 from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember
 from intric.spaces.space import Space
 from intric.spaces.space_factory import SpaceFactory
-from intric.spaces.utils.space_utils import effective_space_ids
 
 logger = get_logger(__name__)
+
+
+class _HasId(Protocol):
+    """Minimal protocol for objects that carry an `.id` UUID (used by _set_*_models helpers)."""
+
+    id: UUID
+
 
 if TYPE_CHECKING:
     from intric.apps import AppRepository
@@ -93,10 +99,14 @@ if TYPE_CHECKING:
     )
     from intric.group_chat.domain.entities.group_chat import GroupChat
     from intric.mcp_servers.domain.entities.mcp_server import MCPServer
+    from intric.transcription_models.domain.transcription_model import (
+        TranscriptionModel,
+    )
     from intric.transcription_models.domain.transcription_model_repo import (
         TranscriptionModelRepository,
     )
     from intric.users.user import UserInDB
+    from intric.websites.domain.http_auth_credentials import HttpAuthCredentials
     from intric.websites.domain.website import Website
     from intric.websites.infrastructure.http_auth_encryption import (
         HttpAuthEncryptionService,
@@ -116,6 +126,7 @@ class SpaceRepository:
         embedding_model_repo: "EmbeddingModelRepository",
         http_auth_encryption: "HttpAuthEncryptionService",
     ):
+        super().__init__()
         self.session = session
         self.user = user
         self.factory = factory
@@ -126,7 +137,7 @@ class SpaceRepository:
         self.assistant_repo = assistant_repo
         self.http_auth_encryption = http_auth_encryption
 
-    def _options(self):
+    def _options(self) -> list[Any]:
         return [
             selectinload(Spaces.members).selectinload(SpacesUsers.user),
             selectinload(Spaces.group_members)
@@ -196,7 +207,9 @@ class SpaceRepository:
             scope_type=scope_type, resource_id=scope_id
         )
 
-    async def _get_collections(self, space_ids: list[UUID]):
+    async def _get_collections(
+        self, space_ids: list[UUID]
+    ) -> Sequence[tuple[CollectionsTable, int]]:
         c = CollectionsTable
         ib = InfoBlobs
         gs = GroupsSpaces
@@ -229,9 +242,14 @@ class SpaceRepository:
         )
 
         res = await self.session.execute(stmt)
-        return res.all()
+        rows = res.all()
+        # Row[Tuple[CollectionsTable, int]] is structurally a tuple but not a subtype;
+        # unpack explicitly so pyright sees tuple[CollectionsTable, int].
+        return [(row[0], row[1]) for row in rows]
 
-    async def _get_completion_models(self, space_in_db: Spaces):
+    async def _get_completion_models(
+        self, space_in_db: Spaces
+    ) -> Sequence[CompletionModels]:
         space_id = space_in_db.id
 
         cm = aliased(CompletionModels)
@@ -248,7 +266,9 @@ class SpaceRepository:
         res = await self.session.execute(stmt)
         return res.scalars().all()
 
-    async def _get_embedding_models(self, space_in_db: Spaces):
+    async def _get_embedding_models(
+        self, space_in_db: Spaces
+    ) -> Sequence[EmbeddingModels]:
         space_id = space_in_db.id
 
         em = aliased(EmbeddingModels)
@@ -264,7 +284,9 @@ class SpaceRepository:
         res = await self.session.execute(stmt)
         return res.scalars().all()
 
-    async def _get_transcription_models(self, space_in_db: Spaces):
+    async def _get_transcription_models(
+        self, space_in_db: Spaces
+    ) -> Sequence[TranscriptionModels]:
         space_id = space_in_db.id
 
         tm = aliased(TranscriptionModels)
@@ -281,7 +303,7 @@ class SpaceRepository:
         return res.scalars().all()
 
     async def _set_embedding_models(
-        self, space_in_db: Spaces, embedding_models: list[EmbeddingModelSparse]
+        self, space_in_db: Spaces, embedding_models: Sequence[_HasId]
     ):
         # Delete all
         stmt = sa.delete(SpacesEmbeddingModels).where(
@@ -299,7 +321,7 @@ class SpaceRepository:
             await self.session.execute(stmt)
 
     async def _set_completion_models(
-        self, space_in_db: Spaces, completion_models: list[CompletionModelSparse]
+        self, space_in_db: Spaces, completion_models: Sequence[_HasId]
     ):
         # Delete all
         stmt = sa.delete(SpacesCompletionModels).where(
@@ -319,7 +341,9 @@ class SpaceRepository:
             await self.session.execute(stmt)
 
     async def _set_transcription_models(
-        self, space_in_db: Spaces, transcription_models: list[TranscriptionModels]
+        self,
+        space_in_db: Spaces,
+        transcription_models: "Sequence[TranscriptionModel]",
     ):
         # Delete all
         stmt = sa.delete(SpacesTranscriptionModels).where(
@@ -666,7 +690,7 @@ class SpaceRepository:
                 .scalar_subquery()
             )
 
-        def _prepare_auth_fields(website: "Website") -> dict:
+        def _prepare_auth_fields(website: "Website") -> dict[str, str | None]:
             """Encrypt HTTP auth credentials if present."""
             if website.http_auth:
                 username, encrypted_password, auth_domain = (
@@ -688,7 +712,7 @@ class SpaceRepository:
         existing_websites = [website for website in websites if not website.is_new]
 
         if new_websites:
-            values = []
+            values: list[dict[str, object]] = []
             for website in new_websites:
                 auth_fields = _prepare_auth_fields(website)
                 values.append(
@@ -762,8 +786,11 @@ class SpaceRepository:
             )
 
     async def _load_assistant_mcp_server_tools_with_overrides(
-        self, space_id: UUID, assistant_id: UUID, mcp_servers: list
-    ) -> list:
+        self,
+        space_id: UUID,
+        assistant_id: UUID,
+        mcp_servers: list["MCPServer"],
+    ) -> list["MCPServer"]:
         """Load tools for assistant's MCP servers and apply space + assistant-level overrides.
 
         Hierarchy:
@@ -846,7 +873,7 @@ class SpaceRepository:
             # Determine effective is_enabled status
             # Priority: assistant override > space override > tenant override > tool default
             tenant_enabled = tenant_tool_settings.get(
-                cast(UUID, tool_db.id), tool_db.is_enabled_by_default
+                tool_db.id, tool_db.is_enabled_by_default
             )
 
             # If tenant disabled this tool, skip it entirely (don't show in space/assistant)
@@ -891,7 +918,7 @@ class SpaceRepository:
 
         return mcp_servers
 
-    async def _get_assistants(self, space_id: UUID):
+    async def _get_assistants(self, space_id: UUID) -> Sequence[Assistants]:
         stmt = (
             sa.select(Assistants)
             .where(Assistants.space_id == space_id)
@@ -956,7 +983,7 @@ class SpaceRepository:
 
         return assistants
 
-    async def _get_services(self, space_id: UUID):
+    async def _get_services(self, space_id: UUID) -> Sequence[Services]:
         # Fetch all services for the space
         stmt = (
             sa.select(Services)
@@ -973,7 +1000,7 @@ class SpaceRepository:
 
         return services_db
 
-    async def _get_group_chats(self, space_id: UUID):
+    async def _get_group_chats(self, space_id: UUID) -> Sequence[GroupChatsTable]:
         # Fetch all group chats for the space
         stmt = (
             sa.select(GroupChatsTable)
@@ -986,7 +1013,9 @@ class SpaceRepository:
 
         return group_chats_db
 
-    def _decrypt_website_auth(self, website_record: WebsitesTable) -> Optional:  # type: ignore[valid-type]
+    def _decrypt_website_auth(
+        self, website_record: WebsitesTable
+    ) -> "Optional[HttpAuthCredentials]":
         """Decrypt HTTP auth credentials from database record.
 
         Why: Repository is the encryption boundary - domain gets clean objects.
@@ -1023,7 +1052,7 @@ class SpaceRepository:
             website_record._auth_decrypt_failed = True  # type: ignore[attr-defined]
             return None
 
-    async def _get_websites(self, space_ids: list[UUID] | UUID):
+    async def _get_websites(self, space_ids: list[UUID] | UUID) -> list[WebsitesTable]:
         """Fetch websites and decrypt their auth credentials.
 
         Why: Repository is the encryption boundary. We decrypt here and attach
@@ -1133,7 +1162,7 @@ class SpaceRepository:
             # Determine effective is_enabled status
             # Priority: space override > tenant override > tool default
             tenant_enabled = tenant_tool_settings.get(
-                cast(UUID, tool_db.id), tool_db.is_enabled_by_default
+                tool_db.id, tool_db.is_enabled_by_default
             )
 
             # If tenant disabled this tool, skip it entirely (don't show in space)
@@ -1167,7 +1196,7 @@ class SpaceRepository:
 
         return mcp_servers
 
-    async def _get_apps(self, space_id: UUID):
+    async def _get_apps(self, space_id: UUID) -> Sequence[Apps]:
         stmt = (
             sa.select(Apps)
             .where(Apps.space_id == space_id)
@@ -1204,12 +1233,18 @@ class SpaceRepository:
 
         return apps_db
 
-    async def _get_from_query(self, query: sa.Select):
+    async def _get_from_query(self, query: sa.Select[tuple[Spaces]]) -> Space | None:
         entry_in_db = await self._get_record_with_options(query)
         if not entry_in_db:
             return
 
-        space_ids = effective_space_ids(entry_in_db)
+        # Build effective_space_ids inline to avoid passing Spaces (DB type) where
+        # Space (domain type) is expected — cross-file change would be needed otherwise.
+        space_ids: list[UUID] = (
+            [entry_in_db.id, entry_in_db.tenant_space_id]
+            if entry_in_db.tenant_space_id
+            else [entry_in_db.id]
+        )
 
         collections = await self._get_collections(space_ids)
         websites = await self._get_websites(space_ids)
@@ -1300,17 +1335,25 @@ class SpaceRepository:
             security_classification=entry_in_db.security_classification,
         )
 
-    async def _get_record_with_options(self, query):
+    async def _get_record_with_options(
+        self,
+        query: sa.Select[tuple[Spaces]]
+        | ReturningInsert[tuple[Spaces]]
+        | ReturningUpdate[tuple[Spaces]],
+    ) -> Spaces | None:
         for option in self._options():
             query = query.options(option)
 
         return await self.session.scalar(query)
 
-    async def _get_records_with_options(self, query):
+    async def _get_records_with_options(
+        self, query: sa.Select[tuple[Spaces]]
+    ) -> Sequence[Spaces]:
         for option in self._options():
             query = query.options(option)
 
-        return await self.session.scalars(query)
+        result = await self.session.scalars(query)
+        return result.all()
 
     async def add(self, space: Space) -> Space:
         query = (
@@ -1357,7 +1400,7 @@ class SpaceRepository:
         return space
 
     async def update(
-        self, space: Space, mcp_tool_settings: list[tuple[UUID, bool]] = None
+        self, space: Space, mcp_tool_settings: list[tuple[UUID, bool]] | None = None
     ) -> Space:
         query = (
             sa.update(Spaces)
@@ -1406,7 +1449,7 @@ class SpaceRepository:
         query = sa.delete(Spaces).where(Spaces.id == id)
         await self.session.execute(query)
 
-    async def query(self, **filters):
+    async def query(self, **filters: object) -> None:
         raise NotImplementedError()
 
     async def get_spaces_for_member(
@@ -1446,16 +1489,16 @@ class SpaceRepository:
 
         records = await self._get_records_with_options(query)
 
-        spaces = []
+        spaces: list[Space] = []
         for record in records:
             if include_applications:
                 assistants = await self._get_assistants(space_id=record.id)
                 apps = await self._get_apps(space_id=record.id)
                 group_chats = await self._get_group_chats(space_id=record.id)
             else:
-                assistants = []
-                apps = []
-                group_chats = []
+                assistants: Sequence[Assistants] = []
+                apps: Sequence[Apps] = []
+                group_chats: Sequence[GroupChatsTable] = []
 
             spaces.append(
                 self.factory.create_space_from_db(
@@ -1576,7 +1619,9 @@ class SpaceRepository:
                 group_chat_id=session.group_chat_id
             )
 
-    async def _get_integration_knowledge_union(self, space_ids: list[UUID]):
+    async def _get_integration_knowledge_union(
+        self, space_ids: list[UUID]
+    ) -> list[IntegrationKnowledge]:
         """Fetch integration knowledge both directly owned and distributed via org space.
 
         A space can access integration knowledge in two ways:

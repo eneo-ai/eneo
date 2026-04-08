@@ -33,7 +33,8 @@ class Oauth2Service:
         user_integration_repo: "UserIntegrationRepository",
         oauth_token_repo: "OauthTokenRepository",
         sharepoint_auth_service: "SharepointAuthService",
-    ):
+    ) -> None:
+        super().__init__()
         self.confluence_auth_service = confluence_auth_service
         self.tenant_integration_repo = tenant_integration_repo
         self.user_integration_repo = user_integration_repo
@@ -49,7 +50,7 @@ class Oauth2Service:
         self,
         tenant_integration_id: "UUID",
         state: str | None = None,
-    ) -> dict:
+    ) -> dict[str, str]:
         tenant_integration = await self.tenant_integration_repo.one(
             id=tenant_integration_id
         )
@@ -58,13 +59,14 @@ class Oauth2Service:
         if integration_type not in self._auth_mapper:
             raise BadRequestException("Invalid integration type")
 
-        auth_service = self._auth_mapper[integration_type]
         if integration_type == IntegrationType.Sharepoint.value:
-            return await auth_service.gen_auth_url(
+            return await self.sharepoint_auth_service.gen_auth_url(
                 state, tenant_id=tenant_integration.tenant_id
             )
-        else:
-            return getattr(auth_service, "gen_auth_url")(state)
+        if integration_type == IntegrationType.Confluence.value:
+            return await self.confluence_auth_service.gen_auth_url(state)
+
+        raise BadRequestException("Invalid integration type")
 
     async def auth_integration(
         self,
@@ -104,21 +106,27 @@ class Oauth2Service:
         authenticated_integration: "UserIntegration",
     ) -> None:
         integration_type = authenticated_integration.integration_type
-        if integration_type not in self._auth_mapper:
-            raise BadRequestException("Invalid integration type")
-        service = self._auth_mapper[integration_type]
-
-        # Pass tenant_id for SharePoint to use tenant-specific configuration
         if integration_type == IntegrationType.Sharepoint.value:
-            token_result = await service.exchange_token(
+            token_result = await self.sharepoint_auth_service.exchange_token(
                 auth_code,
                 tenant_id=authenticated_integration.tenant_integration.tenant_id,
             )
+            if token_result is None:
+                raise BadRequestException("Failed to exchange SharePoint auth code")
+            access_token = token_result["access_token"]
+            resource_data = await self.sharepoint_auth_service.get_resources(
+                access_token
+            )
+        elif integration_type == IntegrationType.Confluence.value:
+            token_result = await self.confluence_auth_service.exchange_token(auth_code)
+            if token_result is None:
+                raise BadRequestException("Failed to exchange Confluence auth code")
+            access_token = token_result["access_token"]
+            resource_data = await self.confluence_auth_service.get_resources(
+                access_token
+            )
         else:
-            token_result = await getattr(service, "exchange_token")(auth_code)
-
-        access_token = token_result.get("access_token")
-        resource_data = await getattr(service, "get_resources")(access_token)
+            raise BadRequestException("Invalid integration type")
 
         # NOTE: build unified factory interface to construct a new entity
         # so that we do not need to manually handle the creation of entities in

@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
+from typing_extensions import override
 
 from intric.database.tables.tenant_sharepoint_app_table import (
     TenantSharePointApp as TenantSharePointAppDBModel,
@@ -32,6 +33,7 @@ class TenantSharePointAppRepositoryImpl(
             session=session, model=TenantSharePointAppDBModel, mapper=mapper
         )
 
+    @override
     async def get_by_tenant(self, tenant_id: UUID) -> Optional[TenantSharePointApp]:
         """Get the SharePoint app configuration for a tenant."""
         stmt = sa.select(TenantSharePointAppDBModel).where(
@@ -45,6 +47,7 @@ class TenantSharePointAppRepositoryImpl(
 
         return self.mapper.to_entity(db_obj)
 
+    @override
     async def get_by_id(self, app_id: UUID) -> Optional[TenantSharePointApp]:
         """Get SharePoint app by ID."""
         stmt = sa.select(TenantSharePointAppDBModel).where(
@@ -58,6 +61,7 @@ class TenantSharePointAppRepositoryImpl(
 
         return self.mapper.to_entity(db_obj)
 
+    @override
     async def create(self, app: TenantSharePointApp) -> TenantSharePointApp:
         """Create a new tenant SharePoint app configuration."""
         existing = await self.get_by_tenant(app.tenant_id)
@@ -68,20 +72,17 @@ class TenantSharePointAppRepositoryImpl(
 
         return await self.add(app)
 
-    async def update(self, app: TenantSharePointApp) -> TenantSharePointApp:
+    @override
+    async def update(self, obj: TenantSharePointApp) -> TenantSharePointApp:
         """Update an existing tenant SharePoint app configuration."""
-        return await super().update(app)
+        return await super().update(obj)
 
-    async def delete(self, app_id: UUID) -> bool:
+    @override
+    async def delete(self, id: UUID) -> bool:
         """Delete a tenant SharePoint app configuration."""
-        stmt = sa.delete(TenantSharePointAppDBModel).where(
-            TenantSharePointAppDBModel.id == app_id
-        )
-        result = await self.session.execute(stmt)
-        await self.session.commit()
+        return await super().delete(id=id)
 
-        return result.rowcount > 0
-
+    @override
     async def deactivate(self, tenant_id: UUID) -> bool:
         """Deactivate the SharePoint app for a tenant (emergency shutoff)."""
         stmt = (

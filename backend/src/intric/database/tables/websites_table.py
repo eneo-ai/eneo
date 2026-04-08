@@ -21,7 +21,7 @@ class CrawlRuns(BasePublic):
     files_downloaded: Mapped[Optional[int]] = mapped_column()
     pages_failed: Mapped[Optional[int]] = mapped_column()
     files_failed: Mapped[Optional[int]] = mapped_column()
-    failure_summary: Mapped[Optional[dict]] = mapped_column(
+    failure_summary: Mapped[Optional[dict[str, int]]] = mapped_column(
         JSONB,
         nullable=True,
         comment="JSONB dict mapping failure reason codes to counts",
@@ -89,8 +89,8 @@ class Websites(BasePublic):
     group: Mapped[CollectionsTable] = relationship()
     embedding_model: Mapped[EmbeddingModels] = relationship()
 
-    @declared_attr
-    def __mapper_args__(cls):
+    @declared_attr  # pyright: ignore[reportArgumentType]  # dict return is valid for __mapper_args__ declared_attr
+    def __mapper_args__(cls):  # type: ignore[override]
         most_recent_crawl = (
             select(CrawlRuns.id)
             .where(CrawlRuns.website_id == cls.id)

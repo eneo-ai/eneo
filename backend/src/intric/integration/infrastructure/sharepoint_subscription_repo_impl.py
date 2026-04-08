@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, List, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
+from typing_extensions import override
 
 from intric.database.tables.integration_table import (
     IntegrationKnowledge as IntegrationKnowledgeDBModel,
@@ -43,6 +44,7 @@ class SharePointSubscriptionRepositoryImpl(
             session=session, model=SharePointSubscriptionDBModel, mapper=mapper
         )
 
+    @override
     async def get_by_user_and_site(
         self, user_integration_id: UUID, site_id: str
     ) -> Optional[SharePointSubscription]:
@@ -62,6 +64,7 @@ class SharePointSubscriptionRepositoryImpl(
 
         return self.mapper.to_entity(db_obj)
 
+    @override
     async def get_by_subscription_id(
         self, subscription_id: str
     ) -> Optional[SharePointSubscription]:
@@ -77,6 +80,7 @@ class SharePointSubscriptionRepositoryImpl(
 
         return self.mapper.to_entity(db_obj)
 
+    @override
     async def list_expiring_before(
         self, expires_before: datetime
     ) -> List[SharePointSubscription]:
@@ -92,6 +96,7 @@ class SharePointSubscriptionRepositoryImpl(
 
         return self.mapper.to_entities(db_objs)
 
+    @override
     async def list_all(self) -> List[SharePointSubscription]:
         """List all active subscriptions."""
         stmt = sa.select(SharePointSubscriptionDBModel).order_by(
@@ -103,6 +108,7 @@ class SharePointSubscriptionRepositoryImpl(
 
         return self.mapper.to_entities(db_objs)
 
+    @override
     async def list_by_tenant(
         self,
         tenant_id: UUID,
@@ -123,6 +129,7 @@ class SharePointSubscriptionRepositoryImpl(
         db_objs = result.scalars().all()
         return self.mapper.to_entities(db_objs)
 
+    @override
     async def one_by_tenant(
         self,
         subscription_id: UUID,
@@ -150,6 +157,7 @@ class SharePointSubscriptionRepositoryImpl(
             return None
         return self.mapper.to_entity(db_obj)
 
+    @override
     async def count_references(self, subscription_id: UUID) -> int:
         """Count how many integration_knowledge records reference this subscription."""
         stmt = (

@@ -1,6 +1,7 @@
 import io
 import re
 import time
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, UploadFile
@@ -38,7 +39,7 @@ router = APIRouter()
 )
 async def upload_file(
     upload_file: UploadFile,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.file_service()
     current_user = container.user()
@@ -80,7 +81,7 @@ async def upload_file(
     status_code=200,
 )
 async def get_files(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.file_service()
     files = await service.get_files()
@@ -97,7 +98,7 @@ async def get_files(
 )
 async def get_file(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.file_service()
     return await service.get_file_by_id(file_id=id)
@@ -106,7 +107,7 @@ async def get_file(
 @router.delete("/{id}/", status_code=204)
 async def delete_file(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.file_service()
     current_user = container.user()
@@ -162,7 +163,7 @@ async def generate_signed_url(
     id: UUID,
     request: Request,
     signed_url_req: SignedURLRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     # Verify the file exists and the user has access to it
     service = container.file_service()
@@ -211,9 +212,9 @@ async def generate_signed_url(
 )
 async def download_file_signed(
     id: UUID,
-    token: str = Query(..., description="The signed token for file access"),
-    range: str = Header(None),
-    container: Container = Depends(get_container()),
+    token: Annotated[str, Query(description="The signed token for file access")],
+    container: Annotated[Container, Depends(get_container())],
+    range: Annotated[str | None, Header()] = None,
 ):
     payload = verify_signed_token(token)
     if not payload:

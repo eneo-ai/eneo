@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from intric.main.logging import get_logger
@@ -18,7 +20,7 @@ router = APIRouter()
 @router.websocket("/ws")
 async def connect(
     websocket: WebSocket,
-    user: UserInDB = Depends(get_user_from_websocket),
+    user: Annotated[UserInDB, Depends(get_user_from_websocket)],
 ):
     await websocket.accept(subprotocol=INTRIC_SUBPROTOCOL)
     logger.debug(f"User {user.email} connected to websocket.")

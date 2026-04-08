@@ -64,7 +64,7 @@ class ToolCallInfo(BaseModel):
 
     server_name: str
     tool_name: str
-    arguments: Optional[dict] = None
+    arguments: Optional[dict[str, object]] = None
     tool_call_id: Optional[str] = None  # For tool approval flow
     approved: Optional[bool] = (
         None  # True=approved, False=denied, None=auto-approved or pending
@@ -93,7 +93,7 @@ class QuestionAdd(QuestionBase):
 
 
 class Question(QuestionAdd, InDB):
-    logging_details: Optional[LoggingDetailsInDB] = None
+    logging_details: Optional[LoggingDetailsInDB] = None  # pyright: ignore[reportIncompatibleVariableOverride]  # Pydantic narrows type from LoggingDetails to LoggingDetailsInDB
     info_blobs: list[InfoBlobInDB] = []
     session_id: Optional[UUID] = None
     completion_model: Optional[CompletionModel] = None
@@ -122,7 +122,7 @@ class Question(QuestionAdd, InDB):
 
 
 class Message(QuestionBase, InDB):
-    id: Optional[UUID] = None
+    id: Optional[UUID] = None  # pyright: ignore[reportIncompatibleVariableOverride]  # Pydantic allows None override of required UUID in InDB
     completion_model: Optional[CompletionModel] = None
     references: list[InfoBlobPublicNoText]
     files: list[FilePublic]
@@ -133,7 +133,9 @@ class Message(QuestionBase, InDB):
 
     @field_validator("tool_calls", mode="before")
     @classmethod
-    def convert_none_to_empty_list(cls, v):
+    def convert_none_to_empty_list(
+        cls, v: list[ToolCallInfo] | None
+    ) -> list[ToolCallInfo]:
         return v if v is not None else []
 
 

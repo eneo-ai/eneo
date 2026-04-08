@@ -5,6 +5,8 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 
+from typing_extensions import override
+
 from intric.events.model_events import DomainEvent
 
 
@@ -21,8 +23,10 @@ class LoggingEventHandler(EventHandler):
     """Event handler that logs events for observability."""
 
     def __init__(self, logger: Optional[logging.Logger] = None):
+        super().__init__()
         self.logger = logger or logging.getLogger(__name__)
 
+    @override
     async def handle(self, event: DomainEvent) -> None:
         """Log the event details."""
         self.logger.info(
@@ -38,6 +42,7 @@ class EventPublisher:
     """Simple in-memory event publisher for domain events."""
 
     def __init__(self):
+        super().__init__()
         self._handlers: Dict[str, List[EventHandler]] = {}
         self.logger = logging.getLogger(__name__)
         # Add default logging handler

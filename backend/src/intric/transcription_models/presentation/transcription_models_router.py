@@ -1,3 +1,4 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -18,6 +19,8 @@ from intric.transcription_models.presentation.transcription_model_models import 
 )
 from intric.users.user import UserInDB
 
+CurrentUser = Annotated[UserInDB, Depends(get_current_active_user)]
+
 router = APIRouter()
 
 
@@ -26,8 +29,8 @@ router = APIRouter()
     response_model=PaginatedResponse[TranscriptionModelPublic],
 )
 async def get_transcription_models(
-    user: UserInDB = Depends(get_current_active_user),
-    container: Container = Depends(get_container(with_user=True)),
+    user: CurrentUser,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     validate_permission(user, Permission.ADMIN)
 
@@ -48,7 +51,7 @@ async def get_transcription_models(
 async def update_transcription_model(
     id: UUID,
     update_flags: TranscriptionModelUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.transcription_model_crud_service()
     user = container.user()
@@ -69,7 +72,7 @@ async def update_transcription_model(
     )
 
     # Build consolidated changes dict (one API call = one audit log)
-    changes = {}
+    changes: dict[str, object] = {}
 
     # Track is_org_enabled changes
     if is_provided(update_flags.is_org_enabled):
