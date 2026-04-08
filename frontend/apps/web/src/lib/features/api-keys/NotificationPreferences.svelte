@@ -2,8 +2,12 @@
   import { onMount } from "svelte";
   import { getIntric } from "$lib/core/Intric";
   import { getExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
-  import { Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import { Switch } from "$lib/components/ui/switch/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import {
     extractFollowedKeyIds,
     getAdminNotificationPolicy,
@@ -306,24 +310,24 @@
       </h3>
     </div>
     <div class="shrink-0">
-      <Input.Switch
-        bind:value={notificationsEnabled}
-        sideEffect={handleNotificationsToggle}
+      <Switch
+        checked={notificationsEnabled}
+        onCheckedChange={(next) =>
+          handleNotificationsToggle({ current: notificationsEnabled, next })}
         disabled={notificationSettingsLoading || notificationSettingsSaving || isPolicyBlocked}
+        aria-label={m.api_keys_notifications_settings_title()}
       />
     </div>
   </div>
 
   <!-- Policy-blocked banner -->
   {#if isPolicyBlocked}
-    <div
-      class="border-negative-default/20 bg-negative-dimmer/50 mx-5 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3"
-    >
-      <ShieldAlert class="text-negative-default h-4 w-4 shrink-0" />
-      <p class="text-negative-default text-xs">
+    <Alert.Root variant="destructive" class="mx-5 mb-4">
+      <ShieldAlert />
+      <Alert.Description>
         {m.api_keys_notifications_policy_header_hint()}
-      </p>
-    </div>
+      </Alert.Description>
+    </Alert.Root>
   {/if}
 
   <!-- Disabled hint -->
@@ -369,22 +373,28 @@
         <!-- Custom days disclosure -->
         {#if showCustomInput}
           <div class="max-w-[280px]" transition:slide={{ duration: 150 }}>
-            <Input.Text
-              bind:value={notificationDaysInput}
-              label={m.api_keys_notifications_days_label()}
-              placeholder="30, 14, 7, 3, 1"
-              disabled={notificationSettingsSaving}
-              on:blur={debouncedSaveDays}
-            />
+            <Field.Field>
+              <Field.Label for="notification-days-input">
+                {m.api_keys_notifications_days_label()}
+              </Field.Label>
+              <Input
+                id="notification-days-input"
+                bind:value={notificationDaysInput}
+                placeholder="30, 14, 7, 3, 1"
+                disabled={notificationSettingsSaving}
+                onblur={debouncedSaveDays}
+              />
+            </Field.Field>
           </div>
         {:else}
-          <button
-            type="button"
-            class="text-accent-default text-xs hover:underline"
+          <Button
+            variant="link"
+            size="sm"
+            class="text-accent-default h-auto p-0"
             onclick={() => (showCustomInput = true)}
           >
             {m.api_keys_notifications_customize_days()}
-          </button>
+          </Button>
         {/if}
 
         <p class="text-muted text-xs leading-relaxed">
@@ -417,10 +427,15 @@
             {/if}
           </div>
           <div class="shrink-0 pt-0.5">
-            <Input.Switch
-              bind:value={autoFollowPublishedAssistants}
-              sideEffect={handleAutoFollowAssistantsToggle}
+            <Switch
+              checked={autoFollowPublishedAssistants}
+              onCheckedChange={(next) =>
+                handleAutoFollowAssistantsToggle({
+                  current: autoFollowPublishedAssistants,
+                  next
+                })}
               disabled={notificationSettingsSaving || allowAutoFollowAssistants === false}
+              aria-label={m.api_keys_notifications_auto_follow_assistants_title()}
             />
           </div>
         </div>
@@ -441,10 +456,15 @@
             {/if}
           </div>
           <div class="shrink-0 pt-0.5">
-            <Input.Switch
-              bind:value={autoFollowPublishedApps}
-              sideEffect={handleAutoFollowAppsToggle}
+            <Switch
+              checked={autoFollowPublishedApps}
+              onCheckedChange={(next) =>
+                handleAutoFollowAppsToggle({
+                  current: autoFollowPublishedApps,
+                  next
+                })}
               disabled={notificationSettingsSaving || allowAutoFollowApps === false}
+              aria-label={m.api_keys_notifications_auto_follow_apps_title()}
             />
           </div>
         </div>

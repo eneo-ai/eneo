@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { writable } from "svelte/store";
   import { SvelteMap } from "svelte/reactivity";
   import type {
     ApiKeyCreatedResponse,
@@ -11,7 +10,12 @@
     ResourcePermissionLevel,
     SpaceSparse
   } from "@intric/intric-js";
-  import { Button, Dialog, Input } from "@intric/ui";
+  import { toast } from "svelte-sonner";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { getIntric } from "$lib/core/Intric";
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
@@ -64,7 +68,7 @@
 
   const scopeLocked = $derived(!!lockedScopeType && !!lockedScopeId);
 
-  const showDialog = writable(false);
+  let showDialog = $state(false);
   let isSubmitting = $state(false);
   let errorMessage = $state<string | null>(null);
   let createdSecret = $state<string | null>(null);
@@ -409,11 +413,15 @@
     }
   }
 
-  function copySecret() {
-    if (createdSecret) {
-      navigator.clipboard.writeText(createdSecret);
+  async function copySecret() {
+    if (!createdSecret) return;
+    try {
+      await navigator.clipboard.writeText(createdSecret);
       secretCopied = true;
+      toast.success(m.api_keys_copied_message());
       setTimeout(() => (secretCopied = false), 2000);
+    } catch {
+      toast.error(m.something_went_wrong());
     }
   }
 
@@ -423,7 +431,7 @@
       // Prevent duplicate callback when the dialog emits on:close next.
       createdResponse = null;
     }
-    $showDialog = false;
+    showDialog = false;
     resetForm();
   }
 
@@ -560,17 +568,23 @@
   }
 </script>
 
-<Dialog.Root openController={showDialog} on:close={() => handleOpenChange(false)}>
-  <Dialog.Trigger asFragment let:trigger>
-    <Button is={trigger} variant={triggerVariant} class="gap-2">
-      <Key class="h-4 w-4" />
-      {m.generate_api_key()}
-    </Button>
+<Dialog.Root
+  bind:open={showDialog}
+  onOpenChange={(open) => {
+    if (!open) handleOpenChange(false);
+  }}
+>
+  <Dialog.Trigger>
+    {#snippet child({ props })}
+      <Button {...props} variant={triggerVariant === "outlined" ? "outline" : "default"}>
+        <Key />
+        {m.generate_api_key()}
+      </Button>
+    {/snippet}
   </Dialog.Trigger>
 
   <Dialog.Content
-    width="large"
-    class="!bg-primary flex max-h-[90vh] flex-col overflow-hidden !rounded-2xl !p-0"
+    class="bg-primary !flex max-h-[90vh] !max-w-4xl flex-col overflow-hidden !rounded-2xl !p-0"
   >
     {#if currentStep <= totalSteps}
       <!-- Header with subtle gradient -->
@@ -683,17 +697,13 @@
       <!-- Error message - sticky outside scrollable area -->
       {#if errorMessage}
         <div
-          role="alert"
-          aria-live="assertive"
-          class="border-negative-default/30 bg-negative-dimmer mx-6 mt-4 mb-3 flex flex-shrink-0 items-center gap-3 rounded-xl border px-4 py-3"
+          class="mx-6 mt-4 mb-3 flex-shrink-0"
           transition:fly={{ y: -8, duration: 180, easing: cubicOut }}
         >
-          <div
-            class="bg-negative-default/15 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg"
-          >
-            <AlertCircle class="text-negative-default h-4 w-4" aria-hidden="true" />
-          </div>
-          <p class="text-negative-default text-sm font-medium">{errorMessage}</p>
+          <Alert.Root variant="destructive" aria-live="assertive">
+            <AlertCircle />
+            <Alert.Description>{errorMessage}</Alert.Description>
+          </Alert.Root>
         </div>
       {/if}
 
@@ -728,11 +738,11 @@
                       >
                         {m.name()} <span class="text-negative">*</span>
                       </label>
-                      <Input.Text
+                      <Input
                         id="api-key-name"
                         bind:value={name}
                         placeholder={m.api_keys_name_placeholder()}
-                        class="!h-12 !text-base"
+                        class="h-12 text-base"
                       />
                       <p class="text-muted mt-2 text-xs">
                         {m.api_keys_name_help()}
@@ -746,7 +756,7 @@
                       >
                         {m.description()}
                       </label>
-                      <Input.TextArea
+                      <Textarea
                         id="api-key-description"
                         bind:value={description}
                         placeholder={m.api_keys_description_placeholder()}
@@ -865,46 +875,45 @@
                 <!-- Step 2: Scope & Permissions -->
                 <div class="space-y-6">
                   <h3 class="sr-only">{m.api_keys_step_scope_sr()}</h3>
-                  <!-- Permission Mode Toggle -->
-                  <div class="border-default flex items-center justify-between border-b pb-4">
-                    <div>
-                      <span
-                        id="permission-type-label"
-                        class="text-default text-sm font-semibold tracking-wide"
-                        >{m.api_keys_permission_type()}</span
+                  <!-- Permission Mode Toggle (hidden for public keys: only simple mode is supported) -->
+                  {#if keyType !== "pk_"}
+                    <div class="border-default flex items-center justify-between border-b pb-4">
+                      <div>
+                        <span
+                          id="permission-type-label"
+                          class="text-default text-sm font-semibold tracking-wide"
+                          >{m.api_keys_permission_type()}</span
+                        >
+                        <p class="text-muted mt-0.5 text-xs">{m.api_keys_permission_choose()}</p>
+                      </div>
+                      <div
+                        role="group"
+                        aria-labelledby="permission-type-label"
+                        class="border-default bg-subtle flex items-center gap-1 rounded-lg border p-1"
                       >
-                      <p class="text-muted mt-0.5 text-xs">{m.api_keys_permission_choose()}</p>
-                    </div>
-                    <div
-                      role="group"
-                      aria-labelledby="permission-type-label"
-                      class="border-default bg-subtle flex items-center gap-1 rounded-lg border p-1"
-                    >
-                      <button
-                        type="button"
-                        onclick={() => (permissionMode = "simple")}
-                        class="rounded-md px-4 py-2 text-sm font-medium transition-all
-                             {permissionMode === 'simple'
-                          ? 'bg-primary text-default shadow-sm'
-                          : 'text-muted hover:text-secondary'}"
-                      >
-                        {m.api_keys_simple()}
-                      </button>
-                      <button
-                        type="button"
-                        onclick={() => (permissionMode = "fine-grained")}
-                        disabled={keyType === "pk_"}
-                        class="rounded-md px-4 py-2 text-sm font-medium transition-all
-                             {permissionMode === 'fine-grained'
-                          ? 'bg-primary text-default shadow-sm'
-                          : keyType === 'pk_'
-                            ? 'text-muted cursor-not-allowed opacity-50'
+                        <button
+                          type="button"
+                          onclick={() => (permissionMode = "simple")}
+                          class="rounded-md px-4 py-2 text-sm font-medium transition-all
+                               {permissionMode === 'simple'
+                            ? 'bg-primary text-default shadow-sm'
                             : 'text-muted hover:text-secondary'}"
-                      >
-                        {m.api_keys_fine_grained()}
-                      </button>
+                        >
+                          {m.api_keys_simple()}
+                        </button>
+                        <button
+                          type="button"
+                          onclick={() => (permissionMode = "fine-grained")}
+                          class="rounded-md px-4 py-2 text-sm font-medium transition-all
+                               {permissionMode === 'fine-grained'
+                            ? 'bg-primary text-default shadow-sm'
+                            : 'text-muted hover:text-secondary'}"
+                        >
+                          {m.api_keys_fine_grained()}
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  {/if}
 
                   <!-- Key Ownership Toggle (admin only) -->
                   {#if isAdmin}
@@ -1080,10 +1089,10 @@
                                   <Info class="h-3.5 w-3.5" />
                                   {m.api_keys_enter_id_manually({ scopeType })}
                                 </button>
-                                <Input.Text
+                                <Input
                                   bind:value={manualScopeId}
                                   placeholder={m.api_keys_enter_uuid()}
-                                  class="!font-mono !text-sm"
+                                  class="font-mono text-sm"
                                 />
                               </div>
                             {/if}
@@ -1145,9 +1154,9 @@
                                 !isDisabled && (permission = opt.value as ApiKeyPermission)}
                               disabled={isDisabled}
                               class="focus-visible:ring-accent-default relative rounded-xl border-2 p-4 text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 {levelClasses}
-                                   {isDisabled ? 'cursor-not-allowed opacity-50' : ''}"
+                                   {isDisabled ? 'cursor-not-allowed' : ''}"
                             >
-                              <div class="flex items-center gap-3">
+                              <div class="flex items-center gap-3 {isDisabled ? 'opacity-50' : ''}">
                                 <div
                                   class="flex h-10 w-10 items-center justify-center rounded-lg transition-colors {iconClasses}"
                                 >
@@ -1170,7 +1179,7 @@
                                 </div>
                               {/if}
                               {#if isDisabled}
-                                <p class="mt-2 text-xs text-yellow-600 dark:text-yellow-400">
+                                <p class="text-warning-stronger mt-2 text-xs font-medium">
                                   {m.api_keys_not_available_public()}
                                 </p>
                               {/if}
@@ -1629,14 +1638,14 @@
                     >
                       {m.api_keys_rate_limit()}
                     </label>
-                    <Input.Text
+                    <Input
                       id="api-key-rate-limit"
                       bind:value={rateLimit}
                       placeholder={m.api_keys_rate_limit_placeholder()}
                       type="number"
                       min="1"
                       max={maxRateLimit ?? undefined}
-                      class="!h-11"
+                      class="h-11"
                     />
                     <p class="text-muted mt-2 text-xs">
                       {m.api_keys_rate_limit_help()}
@@ -1660,8 +1669,8 @@
       >
         <div class="flex-shrink-0">
           {#if currentStep > 1 && currentStep <= totalSteps}
-            <Button variant="simple" on:click={prevStep} class="gap-2">
-              <ChevronLeft class="h-4 w-4" />
+            <Button variant="ghost" onclick={prevStep}>
+              <ChevronLeft />
               {m.api_keys_back()}
             </Button>
           {/if}
@@ -1670,9 +1679,9 @@
         <div class="flex flex-wrap items-center gap-2 sm:gap-3">
           {#if currentStep <= totalSteps}
             <Button
-              variant="outlined"
-              on:click={() => {
-                $showDialog = false;
+              variant="outline"
+              onclick={() => {
+                showDialog = false;
                 resetForm();
               }}
             >
@@ -1681,28 +1690,25 @@
           {/if}
 
           {#if currentStep < totalSteps}
-            <Button
-              variant="primary"
-              on:click={nextStep}
-              class="min-w-[80px] gap-2 sm:min-w-[100px]"
-            >
+            <Button variant="default" onclick={nextStep} class="min-w-[80px] sm:min-w-[100px]">
               {m.api_keys_next()}
-              <ChevronRight class="h-4 w-4" />
+              <ChevronRight />
             </Button>
           {:else if currentStep === totalSteps}
             <Button
-              variant="primary"
-              on:click={createKey}
+              variant="default"
+              onclick={createKey}
               disabled={isSubmitting}
-              class="min-w-[100px] gap-2 sm:min-w-[140px] {isSubmitting ? 'submit-pulse' : ''}"
+              class="min-w-[100px] sm:min-w-[140px] {isSubmitting ? 'submit-pulse' : ''}"
             >
               {#if isSubmitting}
                 <div
                   class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+                  aria-hidden="true"
                 ></div>
                 <span class="hidden sm:inline">{m.api_keys_creating()}</span>
               {:else}
-                <Key class="h-4 w-4" />
+                <Key />
                 <span class="hidden sm:inline">{m.api_keys_create()}</span>
                 <span class="sm:hidden">{m.api_keys_create_short()}</span>
               {/if}
@@ -1744,52 +1750,42 @@
           </div>
 
           <!-- Warning banner -->
-          <div
-            class="border-caution/40 bg-caution/8 dark:bg-caution/12 mt-5 flex items-start gap-3 rounded-xl border px-4 py-3"
-            in:fly={{ y: 10, duration: 300, delay: 100, easing: cubicOut }}
-          >
-            <AlertCircle class="text-caution mt-0.5 h-4 w-4 flex-shrink-0" />
-            <p class="text-default/80 dark:text-muted text-sm leading-relaxed">
-              <strong class="text-caution font-semibold">{m.api_keys_important()}</strong>
-              {m.api_keys_copy_warning()}
-            </p>
+          <div class="mt-5" in:fly={{ y: 10, duration: 300, delay: 100, easing: cubicOut }}>
+            <Alert.Root class="border-caution/40 bg-caution/8 dark:bg-caution/12">
+              <AlertCircle class="text-caution" />
+              <Alert.Title class="text-caution">{m.api_keys_important()}</Alert.Title>
+              <Alert.Description>{m.api_keys_copy_warning()}</Alert.Description>
+            </Alert.Root>
           </div>
 
           <!-- Secret display -->
           <div class="mt-5" in:fly={{ y: 10, duration: 300, delay: 160, easing: cubicOut }}>
-            <p class="text-muted mb-2 text-xs font-semibold tracking-wider uppercase">
+            <p
+              id="created-secret-label"
+              class="text-muted mb-2 text-xs font-semibold tracking-wider uppercase"
+            >
               {m.api_keys_your_new_key()}
             </p>
             <div class="border-default bg-subtle overflow-hidden rounded-xl border">
               <pre
+                aria-labelledby="created-secret-label"
                 class="text-default overflow-x-auto px-4 py-3.5 font-mono text-[13px] leading-relaxed break-all whitespace-pre-wrap select-all">{createdSecret}</pre>
             </div>
 
             <div class="mt-3 flex items-center gap-3">
               <Button
-                variant={secretCopied ? "outlined" : "primary"}
-                on:click={copySecret}
-                class="gap-2 transition-all duration-200 {secretCopied
-                  ? '!bg-positive/10 !border-positive/30 !text-positive'
-                  : ''}"
+                variant={secretCopied ? "outline" : "default"}
+                onclick={copySecret}
+                aria-label={m.api_keys_copy_to_clipboard()}
               >
                 {#if secretCopied}
-                  <Check class="h-4 w-4" />
+                  <Check class="text-positive" />
                   {m.api_keys_copied()}
                 {:else}
-                  <Copy class="h-4 w-4" />
+                  <Copy />
                   {m.api_keys_copy_to_clipboard()}
                 {/if}
               </Button>
-              {#if secretCopied}
-                <span
-                  class="text-positive text-sm font-medium"
-                  in:fade={{ duration: 150 }}
-                  out:fade={{ duration: 150 }}
-                >
-                  {m.api_keys_copied_message()}
-                </span>
-              {/if}
             </div>
           </div>
         </div>
@@ -1799,8 +1795,8 @@
       <div
         class="border-default bg-subtle flex flex-shrink-0 items-center justify-end gap-3 rounded-b-2xl border-t px-6 py-4"
       >
-        <Button variant="primary" on:click={finishAndClose} class="gap-2">
-          <Check class="h-4 w-4" />
+        <Button variant="default" onclick={finishAndClose}>
+          <Check />
           {m.done()}
         </Button>
       </div>

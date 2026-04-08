@@ -17,6 +17,45 @@
   --color-muted-foreground: var(--text-secondary);
   --color-border: var(--border-default);
   --color-ring: var(--border-stronger);
+
+  /* Popover (dropdown menu, command palette, popover, tooltip surfaces) */
+  --color-popover: var(--background-primary);
+  --color-popover-foreground: var(--text-primary);
+
+  /* Primary action (maps to eneo's accent so primary buttons keep brand color) */
+  --color-primary: var(--accent-default);
+  --color-primary-foreground: var(--text-on-fill);
+
+  /* Secondary surfaces (used by ghost/secondary buttons, badges) */
+  --color-secondary: var(--background-secondary);
+  --color-secondary-foreground: var(--text-primary);
+
+  /* Accent (hover/highlight, used by dropdown items, command items) */
+  --color-accent: var(--background-hover-default);
+  --color-accent-foreground: var(--text-primary);
+
+  /* Destructive (revoke/delete actions) */
+  --color-destructive: var(--negative-default);
+  --color-destructive-foreground: var(--text-on-fill);
+
+  /* Input border (shadcn input/textarea use border-input) */
+  --color-input: var(--border-default);
+
+  /* ---------------------------------------------------------------- */
+  /* Aliases for legacy class names used across the app                */
+  /* ---------------------------------------------------------------- */
+  /* Several features (api-keys, audit-logs, ...) were written with    */
+  /* alternative token names that were never defined in the design     */
+  /* system, so the corresponding utilities silently no-op'd. These    */
+  /* aliases bridge those names to existing eneo tokens so the         */
+  /* intended colours actually render in both light and dark mode.     */
+  --background-color-subtle: var(--background-secondary);
+  --background-color-default: var(--background-primary);
+  --background-color-caution: var(--warning-dimmer);
+  --text-color-default: var(--text-primary);
+  --text-color-tertiary: var(--text-muted);
+  --text-color-caution: var(--warning-stronger);
+  --border-color-caution: var(--warning-default);
 }
 
 @font-face {

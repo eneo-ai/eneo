@@ -4,7 +4,6 @@
   import { Page, Settings } from "$lib/components/layout";
   import { getAppContext } from "$lib/core/AppContext.js";
   import { getIntric } from "$lib/core/Intric";
-  import { Button, Dialog, Input } from "@intric/ui";
   import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@intric/intric-js";
   import { m } from "$lib/paraglide/messages";
   import ApiKeyTable from "./ApiKeyTable.svelte";
@@ -15,6 +14,10 @@
   import NotificationPreferences from "$lib/features/api-keys/NotificationPreferences.svelte";
   import type { ExpiringKeyDisplayItem } from "$lib/features/api-keys/expirationUtils";
   import { getExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
 
   const {
     user,
@@ -135,8 +138,8 @@
   <Page.Header>
     <Page.Title title={m.my_api_keys()} />
     <div class="flex items-center gap-3">
-      <Button variant="simple" on:click={loadKeys} class="gap-2">
-        <RefreshCw class="h-4 w-4 {loading ? 'animate-spin' : ''}" />
+      <Button variant="ghost" onclick={loadKeys}>
+        <RefreshCw class={loading ? "animate-spin" : ""} />
         {m.api_keys_refresh()}
       </Button>
       <div class="hidden lg:block">
@@ -168,47 +171,32 @@
 
         <!-- Error Message -->
         {#if errorMessage}
-          <div
-            role="alert"
-            class="border-negative/30 bg-negative/5 flex items-center gap-3 rounded-xl border px-5 py-4"
-          >
-            <AlertCircle class="text-negative h-5 w-5 shrink-0" />
-            <p class="text-negative text-sm">{errorMessage}</p>
-          </div>
+          <Alert.Root variant="destructive">
+            <AlertCircle />
+            <Alert.Description>{errorMessage}</Alert.Description>
+          </Alert.Root>
         {/if}
 
         <!-- Legacy key notice -->
         {#if legacySuffix && !loading}
-          <div class="border-caution/30 bg-caution/5 dark:bg-caution/10 rounded-xl border p-5">
-            <div class="flex items-start gap-4">
-              <div
-                class="bg-caution/15 dark:bg-caution/20 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
-              >
-                <ShieldAlert class="text-caution h-5 w-5" />
+          <Alert.Root class="border-caution/30 bg-caution/5 dark:bg-caution/10">
+            <ShieldAlert class="text-caution" />
+            <Alert.Title class="text-caution">{m.api_keys_legacy_detected()}</Alert.Title>
+            <Alert.Description>
+              {m.api_keys_legacy_ending_in()}
+              <code
+                class="bg-caution/15 dark:bg-caution/20 text-caution rounded px-1.5 py-0.5 font-mono"
+                >****{legacySuffix}</code
+              >.
+              {m.api_keys_legacy_recommend()}
+              <div class="mt-3 flex flex-wrap items-center gap-2">
+                <Button variant="destructive" size="sm" onclick={() => showRevokeDialog.set(true)}>
+                  {m.api_keys_legacy_revoke()}
+                </Button>
+                <CreateApiKeyDialog onCreated={handleCreated} />
               </div>
-              <div class="flex-1">
-                <h3 class="text-caution font-semibold">{m.api_keys_legacy_detected()}</h3>
-                <p class="text-muted mt-1 text-sm">
-                  {m.api_keys_legacy_ending_in()}
-                  <code
-                    class="bg-caution/15 dark:bg-caution/20 text-caution rounded px-1.5 py-0.5 font-mono"
-                    >****{legacySuffix}</code
-                  >.
-                  {m.api_keys_legacy_recommend()}
-                </p>
-                <div class="mt-3 flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="simple"
-                    class="text-negative hover:text-negative"
-                    on:click={() => showRevokeDialog.set(true)}
-                  >
-                    {m.api_keys_legacy_revoke()}
-                  </Button>
-                  <CreateApiKeyDialog onCreated={handleCreated} />
-                </div>
-              </div>
-            </div>
-          </div>
+            </Alert.Description>
+          </Alert.Root>
         {/if}
 
         <!-- Notification preferences -->
@@ -247,22 +235,26 @@
               {#if keys.length > 3}
                 <div class="relative max-w-xs flex-1">
                   <Search
-                    class="text-muted pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2"
+                    class="text-muted pointer-events-none absolute top-1/2 left-3 z-10 h-4 w-4 -translate-y-1/2"
+                    aria-hidden="true"
                   />
-                  <Input.Text
+                  <Input
                     bind:value={searchQuery}
                     placeholder={m.api_keys_search_placeholder()}
-                    class="!bg-primary !border-default/60 focus:!border-accent-default !h-9 !rounded-lg !pl-9 !text-sm"
+                    aria-label={m.api_keys_search_placeholder()}
+                    class="h-9 pr-9 pl-9 text-sm"
                   />
                   {#if searchQuery}
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="icon-xs"
                       onclick={() => (searchQuery = "")}
                       aria-label={m.api_keys_search_clear_button_aria_label()}
-                      class="hover:bg-hover text-muted hover:text-default absolute top-1/2 right-3 -translate-y-1/2 rounded-md p-1 transition-colors"
+                      class="absolute top-1/2 right-1.5 -translate-y-1/2"
                     >
-                      <X class="h-3.5 w-3.5" />
-                    </button>
+                      <X />
+                    </Button>
                   {/if}
                 </div>
               {/if}
@@ -285,15 +277,14 @@
 
           {#if nextCursor}
             <div class="border-default flex justify-center border-t px-6 py-3">
-              <button
-                type="button"
+              <Button
+                variant="link"
                 onclick={loadMoreKeys}
                 disabled={loadingMore}
-                class="text-accent-default hover:text-accent-default/80 text-sm font-medium
-                       transition-colors disabled:opacity-50"
+                class="text-accent-default"
               >
                 {loadingMore ? m.api_keys_loading_more() : m.api_keys_load_more()}
-              </button>
+              </Button>
             </div>
           {/if}
         </div>
@@ -302,19 +293,21 @@
   </Page.Main>
 </Page.Root>
 
-<Dialog.Root alert openController={showRevokeDialog}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.api_keys_legacy_revoke_title()}</Dialog.Title>
-    <Dialog.Description>
-      {m.api_keys_legacy_revoke_description()}
-    </Dialog.Description>
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={revokeLegacyKey} disabled={revoking}>
+<AlertDialog.Root bind:open={$showRevokeDialog}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.api_keys_legacy_revoke_title()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {m.api_keys_legacy_revoke_description()}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action variant="destructive" onclick={revokeLegacyKey} disabled={revoking}>
         {revoking ? "..." : m.api_keys_legacy_revoke()}
-      </Button>
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
 
 <ApiKeySecretDialog openController={secretDialogOpen} secret={latestSecret} source={secretSource} />

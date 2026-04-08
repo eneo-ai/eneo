@@ -1,17 +1,11 @@
 <script lang="ts">
-  import { createCombobox } from "@melt-ui/svelte";
   import type { SpaceSparse } from "@intric/intric-js";
-  import {
-    Search,
-    Check,
-    ChevronDown,
-    Building2,
-    MessageSquare,
-    AppWindow,
-    X
-  } from "lucide-svelte";
-  import { fly } from "svelte/transition";
+  import { Check, ChevronsUpDown, Building2, MessageSquare, AppWindow, X } from "lucide-svelte";
+  import { tick } from "svelte";
   import { m } from "$lib/paraglide/messages";
+  import * as Popover from "$lib/components/ui/popover/index.js";
+  import * as Command from "$lib/components/ui/command/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
 
   type ResourceType = "space" | "assistant" | "app";
   type Resource = {
@@ -38,6 +32,9 @@
     apps?: ResourceOption[];
     disabled?: boolean;
   }>();
+
+  let open = $state(false);
+  let triggerRef = $state<HTMLButtonElement | null>(null);
 
   // Build resource list based on scope type
   const resources = $derived.by((): Resource[] => {
@@ -69,46 +66,19 @@
     }
   });
 
-  // Find selected resource
   const selectedResource = $derived(resources.find((r: Resource) => r.id === value));
 
-  const {
-    elements: { menu, input, option, label },
-    states: { open, inputValue, touchedInput },
-    helpers: { isSelected }
-  } = createCombobox<Resource>({
-    forceVisible: true,
-    portal: null
-  });
-
-  // Filter resources based on search input
-  const filteredResources = $derived.by((): Resource[] => {
-    if (!$touchedInput || !$inputValue) {
-      return resources;
-    }
-    const query = $inputValue.toLowerCase();
-    return resources.filter(
-      (r: Resource) =>
-        r.name.toLowerCase().includes(query) ||
-        r.id.toLowerCase().includes(query) ||
-        r.spaceName?.toLowerCase().includes(query)
-    );
-  });
-
-  // Handle selection
   function handleSelect(resource: Resource) {
     value = resource.id;
-    $inputValue = resource.name;
-    $open = false;
+    open = false;
+    void tick().then(() => triggerRef?.focus());
   }
 
-  // Clear selection
-  function clearSelection() {
+  function clearSelection(event: MouseEvent) {
+    event.stopPropagation();
     value = null;
-    $inputValue = "";
   }
 
-  // Get icon for resource type
   function getIcon(type: ResourceType) {
     switch (type) {
       case "space":
@@ -120,144 +90,100 @@
     }
   }
 
-  // Sync inputValue when selection changes externally
-  $effect(() => {
-    if (selectedResource && !$touchedInput) {
-      $inputValue = selectedResource.name;
-    }
-  });
-
   // Reset when scope type changes
   $effect(() => {
     if (scopeType) {
       value = null;
-      $inputValue = "";
     }
   });
 
   const Icon = $derived(getIcon(scopeType));
+  const triggerLabel = $derived(
+    selectedResource?.name ?? m.api_keys_search_resource({ scopeType })
+  );
 </script>
 
-<div class="relative w-full">
-  <span {...$label} class="text-default mb-1.5 block text-sm font-medium">
+<div class="w-full">
+  <span id="scope-resource-label" class="text-default mb-1.5 block text-sm font-medium">
     {m.api_keys_select_resource({ scopeType })}
   </span>
 
-  <div class="relative">
-    <!-- Search Icon -->
-    <Search
-      class="text-muted pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2"
-    />
-
-    <!-- Input -->
-    <input
-      {...$input}
-      use:input
-      class="border-default bg-primary placeholder:text-muted hover:border-dimmer focus:border-accent-default focus:ring-accent-default/20 h-11 w-full rounded-lg
-             border pr-16 pl-10
-             text-sm transition-all duration-150 focus:ring-2
-             disabled:cursor-not-allowed disabled:opacity-50"
-      placeholder={m.api_keys_search_resource({ scopeType })}
-      {disabled}
-    />
-
-    <!-- Right side icons -->
-    <div class="absolute top-1/2 right-3 flex -translate-y-1/2 items-center gap-1">
-      {#if value}
-        <button
-          type="button"
-          onclick={clearSelection}
-          class="text-muted hover:bg-hover-default hover:text-default rounded p-1 transition-colors"
-          aria-label="Clear selection"
+  <Popover.Root bind:open>
+    <Popover.Trigger>
+      {#snippet child({ props })}
+        <Button
+          {...props}
+          bind:ref={triggerRef}
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          aria-labelledby="scope-resource-label"
+          {disabled}
+          class="h-11 w-full justify-between"
         >
-          <X class="h-4 w-4" />
-        </button>
-      {/if}
-      <ChevronDown
-        class="text-muted h-4 w-4 transition-transform duration-200 {$open ? 'rotate-180' : ''}"
-      />
-    </div>
-  </div>
-
-  <!-- Selected resource badge -->
-  {#if selectedResource}
-    <div class="mt-2 flex items-center gap-2">
-      <div
-        class="border-accent-default/30 bg-accent-default/5 inline-flex items-center gap-2 rounded-lg border px-3 py-1.5"
-      >
-        <Icon class="text-accent-default h-4 w-4" />
-        <span class="text-default text-sm font-medium">{selectedResource.name}</span>
-        {#if selectedResource.spaceName}
-          <span class="text-muted text-xs">· {selectedResource.spaceName}</span>
-        {/if}
-      </div>
-    </div>
-  {/if}
-
-  <!-- Dropdown menu -->
-  {#if $open}
-    <div
-      {...$menu}
-      use:menu
-      class="border-default bg-primary absolute z-50 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border shadow-lg"
-      transition:fly={{ y: -4, duration: 150 }}
-    >
-      {#if filteredResources.length === 0}
-        <div class="px-4 py-8 text-center">
-          <div
-            class="bg-secondary mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full"
-          >
-            <Search class="text-muted h-5 w-5" />
-          </div>
-          <p class="text-muted text-sm">{m.api_keys_no_resource_found({ scopeType })}</p>
-          {#if $inputValue}
-            <p class="text-muted mt-1 text-xs">{m.api_keys_try_different_search()}</p>
-          {/if}
-        </div>
-      {:else}
-        <div class="p-1">
-          {#each filteredResources as resource (resource.id)}
-            {@const selected = $isSelected(resource)}
-            <button
-              {...$option({ value: resource, label: resource.name })}
-              use:option
-              type="button"
-              class="hover:bg-hover-default data-[highlighted]:bg-hover-default flex w-full items-center gap-3 rounded-lg px-3 py-2.5
-                     text-left
-                     transition-colors
-                     {selected ? 'bg-accent-default/5' : ''}"
-              onclick={() => handleSelect(resource)}
-            >
-              <!-- Resource type icon -->
-              <div
-                class="flex h-8 w-8 items-center justify-center rounded-lg
-                       {selected
-                  ? 'bg-accent-default/15 text-accent-default'
-                  : 'bg-secondary text-muted'}"
+          <span class="flex min-w-0 items-center gap-2">
+            <Icon class="text-muted h-4 w-4 shrink-0" />
+            <span class="truncate {selectedResource ? 'text-default' : 'text-muted'}">
+              {triggerLabel}
+            </span>
+          </span>
+          <span class="flex shrink-0 items-center gap-1">
+            {#if value}
+              <span
+                role="button"
+                tabindex="0"
+                aria-label="Clear selection"
+                class="hover:bg-hover-default text-muted hover:text-default rounded p-1 transition-colors"
+                onclick={clearSelection}
+                onkeydown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    value = null;
+                  }
+                }}
               >
-                <Icon class="h-4 w-4" />
-              </div>
-
-              <!-- Resource info -->
-              <div class="min-w-0 flex-1">
-                <p class="text-default truncate text-sm font-medium">{resource.name}</p>
-                {#if resource.spaceName}
-                  <p class="text-muted truncate text-xs">
-                    {m.api_keys_in_space({ spaceName: resource.spaceName })}
-                  </p>
-                {:else}
-                  <p class="text-muted truncate font-mono text-xs">{resource.id.slice(0, 8)}...</p>
+                <X class="h-3.5 w-3.5" />
+              </span>
+            {/if}
+            <ChevronsUpDown class="text-muted h-4 w-4 opacity-60" />
+          </span>
+        </Button>
+      {/snippet}
+    </Popover.Trigger>
+    <Popover.Content class="w-(--bits-popover-anchor-width) min-w-[280px] p-0" align="start">
+      <Command.Root>
+        <Command.Input placeholder={m.api_keys_search_resource({ scopeType })} />
+        <Command.List>
+          <Command.Empty>{m.api_keys_no_resource_found({ scopeType })}</Command.Empty>
+          <Command.Group>
+            {#each resources as resource (resource.id)}
+              {@const selected = resource.id === value}
+              <Command.Item
+                value={`${resource.name} ${resource.id} ${resource.spaceName ?? ""}`}
+                onSelect={() => handleSelect(resource)}
+              >
+                <Icon class="text-muted h-4 w-4 shrink-0" />
+                <div class="min-w-0 flex-1">
+                  <p class="text-default truncate text-sm font-medium">{resource.name}</p>
+                  {#if resource.spaceName}
+                    <p class="text-muted truncate text-xs">
+                      {m.api_keys_in_space({ spaceName: resource.spaceName })}
+                    </p>
+                  {:else}
+                    <p class="text-muted truncate font-mono text-xs">
+                      {resource.id.slice(0, 8)}...
+                    </p>
+                  {/if}
+                </div>
+                {#if selected}
+                  <Check class="text-accent-default h-4 w-4 shrink-0" />
                 {/if}
-              </div>
-
-              <!-- Selected check -->
-              {#if selected}
-                <Check class="text-accent-default h-4 w-4 flex-shrink-0" />
-              {/if}
-            </button>
-          {/each}
-        </div>
-      {/if}
-    </div>
-  {/if}
+              </Command.Item>
+            {/each}
+          </Command.Group>
+        </Command.List>
+      </Command.Root>
+    </Popover.Content>
+  </Popover.Root>
 </div>

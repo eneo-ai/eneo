@@ -1,15 +1,19 @@
 <script lang="ts">
   import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@intric/intric-js";
-  import { Button, Dialog, Dropdown, Input } from "@intric/ui";
   import { Ban, Bell, BellOff, MoreVertical, RefreshCw, RotateCcw } from "lucide-svelte";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
-  import { writable } from "svelte/store";
+  import { toast } from "svelte-sonner";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import {
     followApiKeyNotifications,
     unfollowApiKeyNotifications
   } from "$lib/features/api-keys/notificationPreferences";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
 
   const intric = getIntric();
 
@@ -29,10 +33,10 @@
     onFollowChanged?: () => void | Promise<void>;
   }>();
 
-  const showRevokeDialog = writable(false);
-  const showSuspendDialog = writable(false);
-  let errorMessage = $state<string | null>(null);
+  let showRevokeDialog = $state(false);
+  let showSuspendDialog = $state(false);
   let followLoading = $state(false);
+  let actionPending = $state(false);
   let reasonText = $state("");
 
   const isActive = $derived(apiKey.state === "active");
@@ -40,7 +44,6 @@
   const canRotate = $derived(apiKey.state === "active");
 
   async function rotateKey() {
-    errorMessage = null;
     try {
       const response = await intric.apiKeys.rotate({ id: apiKey.id });
       if (!response?.secret) {
@@ -49,12 +52,12 @@
       onSecret(response);
     } catch (error) {
       console.error(error);
-      errorMessage = getErrorMessage(error);
+      toast.error(getErrorMessage(error));
     }
   }
 
   async function revokeKey() {
-    errorMessage = null;
+    actionPending = true;
     try {
       await intric.apiKeys.revoke({
         id: apiKey.id,
@@ -64,16 +67,19 @@
         }
       });
       onChanged();
-      $showRevokeDialog = false;
+      showRevokeDialog = false;
       reasonText = "";
+      toast.success(m.api_keys_action_revoke());
     } catch (error) {
       console.error(error);
-      errorMessage = getErrorMessage(error);
+      toast.error(getErrorMessage(error));
+    } finally {
+      actionPending = false;
     }
   }
 
   async function suspendKey() {
-    errorMessage = null;
+    actionPending = true;
     try {
       await intric.apiKeys.suspend({
         id: apiKey.id,
@@ -83,27 +89,29 @@
         }
       });
       onChanged();
-      $showSuspendDialog = false;
+      showSuspendDialog = false;
       reasonText = "";
+      toast.success(m.api_keys_action_suspend());
     } catch (error) {
       console.error(error);
-      errorMessage = getErrorMessage(error);
+      toast.error(getErrorMessage(error));
+    } finally {
+      actionPending = false;
     }
   }
 
   async function reactivateKey() {
-    errorMessage = null;
     try {
       await intric.apiKeys.reactivate({ id: apiKey.id });
       onChanged();
+      toast.success(m.api_keys_action_reactivate());
     } catch (error) {
       console.error(error);
-      errorMessage = getErrorMessage(error);
+      toast.error(getErrorMessage(error));
     }
   }
 
   async function toggleFollow() {
-    errorMessage = null;
     followLoading = true;
     try {
       if (isFollowed) {
@@ -114,7 +122,7 @@
       await onFollowChanged?.();
     } catch (error) {
       console.error(error);
-      errorMessage = getErrorMessage(error);
+      toast.error(getErrorMessage(error));
     } finally {
       followLoading = false;
     }
@@ -122,103 +130,119 @@
 </script>
 
 {#if apiKey.state !== "revoked"}
-  <Dropdown.Root>
-    <Dropdown.Trigger asFragment let:trigger>
-      <Button is={trigger} padding="icon" aria-label={m.actions()}>
-        <MoreVertical size={16} />
-      </Button>
-    </Dropdown.Trigger>
-
-    <Dropdown.Menu let:item>
-      {#if canRotate}
-        <Button is={item} padding="icon-leading" on:click={rotateKey}>
-          <RotateCcw size={16} />
-          {m.api_keys_action_rotate()}
+  <DropdownMenu.Root>
+    <DropdownMenu.Trigger>
+      {#snippet child({ props })}
+        <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
+          <MoreVertical />
         </Button>
+      {/snippet}
+    </DropdownMenu.Trigger>
+
+    <DropdownMenu.Content align="end">
+      {#if canRotate}
+        <DropdownMenu.Item onclick={rotateKey}>
+          <RotateCcw />
+          {m.api_keys_action_rotate()}
+        </DropdownMenu.Item>
       {/if}
 
       {#if isFollowedViaScope}
-        <Button is={item} padding="icon-leading" disabled>
-          <Bell size={16} />
+        <DropdownMenu.Item disabled>
+          <Bell />
           {m.api_keys_notifications_followed_via_scope()}
-        </Button>
+        </DropdownMenu.Item>
       {:else if apiKey.state !== "revoked" && apiKey.state !== "expired"}
-        <Button is={item} padding="icon-leading" on:click={toggleFollow} disabled={followLoading}>
+        <DropdownMenu.Item onclick={toggleFollow} disabled={followLoading}>
           {#if isFollowed}
-            <BellOff size={16} />
+            <BellOff />
             {m.api_keys_notifications_unfollow_action()}
           {:else}
-            <Bell size={16} />
+            <Bell />
             {m.api_keys_notifications_follow_action()}
           {/if}
-        </Button>
+        </DropdownMenu.Item>
       {/if}
 
       {#if isActive}
-        <Button
-          is={item}
-          padding="icon-leading"
-          on:click={() => {
-            $showSuspendDialog = true;
+        <DropdownMenu.Item
+          onclick={() => {
+            showSuspendDialog = true;
           }}
         >
-          <Ban size={16} />
+          <Ban />
           {m.api_keys_action_suspend()}
-        </Button>
+        </DropdownMenu.Item>
       {/if}
 
       {#if isSuspended}
-        <Button is={item} padding="icon-leading" on:click={reactivateKey}>
-          <RefreshCw size={16} />
+        <DropdownMenu.Item onclick={reactivateKey}>
+          <RefreshCw />
           {m.api_keys_action_reactivate()}
-        </Button>
+        </DropdownMenu.Item>
       {/if}
 
-      {#if apiKey.state !== "revoked"}
-        <Button
-          is={item}
-          variant="destructive"
-          padding="icon-leading"
-          on:click={() => {
-            $showRevokeDialog = true;
-          }}
-        >
-          <Ban size={16} />
-          {m.api_keys_action_revoke()}
-        </Button>
-      {/if}
-    </Dropdown.Menu>
-  </Dropdown.Root>
+      <DropdownMenu.Separator />
+
+      <DropdownMenu.Item
+        variant="destructive"
+        onclick={() => {
+          showRevokeDialog = true;
+        }}
+      >
+        <Ban />
+        {m.api_keys_action_revoke()}
+      </DropdownMenu.Item>
+    </DropdownMenu.Content>
+  </DropdownMenu.Root>
 {/if}
 
-{#if errorMessage}
-  <div class="text-negative text-xs">{errorMessage}</div>
-{/if}
+<Dialog.Root bind:open={showSuspendDialog}>
+  <Dialog.Content class="sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>{m.api_keys_action_suspend_title()}</Dialog.Title>
+      <Dialog.Description>{m.api_keys_action_suspend_description()}</Dialog.Description>
+    </Dialog.Header>
 
-<Dialog.Root alert openController={showSuspendDialog}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.api_keys_action_suspend_title()}</Dialog.Title>
-    <Dialog.Description>
-      {m.api_keys_action_suspend_description()}
-    </Dialog.Description>
-    <Input.Text bind:value={reasonText} label={m.api_keys_action_reason_optional()} />
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={suspendKey}>{m.api_keys_action_suspend()}</Button>
-    </Dialog.Controls>
+    <Field.Field>
+      <Field.Label for="suspend-reason">{m.api_keys_action_reason_optional()}</Field.Label>
+      <Input id="suspend-reason" bind:value={reasonText} />
+    </Field.Field>
+
+    <Dialog.Footer>
+      <Dialog.Close>
+        {#snippet child({ props })}
+          <Button variant="outline" {...props}>{m.cancel()}</Button>
+        {/snippet}
+      </Dialog.Close>
+      <Button variant="destructive" onclick={suspendKey} disabled={actionPending}>
+        {m.api_keys_action_suspend()}
+      </Button>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root alert openController={showRevokeDialog}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.api_keys_action_revoke_title()}</Dialog.Title>
-    <Dialog.Description>
-      {m.api_keys_action_revoke_description()}
-    </Dialog.Description>
-    <Input.Text bind:value={reasonText} label={m.api_keys_action_reason_optional()} />
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={revokeKey}>{m.api_keys_action_revoke()}</Button>
-    </Dialog.Controls>
+<Dialog.Root bind:open={showRevokeDialog}>
+  <Dialog.Content class="sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>{m.api_keys_action_revoke_title()}</Dialog.Title>
+      <Dialog.Description>{m.api_keys_action_revoke_description()}</Dialog.Description>
+    </Dialog.Header>
+
+    <Field.Field>
+      <Field.Label for="revoke-reason">{m.api_keys_action_reason_optional()}</Field.Label>
+      <Input id="revoke-reason" bind:value={reasonText} />
+    </Field.Field>
+
+    <Dialog.Footer>
+      <Dialog.Close>
+        {#snippet child({ props })}
+          <Button variant="outline" {...props}>{m.cancel()}</Button>
+        {/snippet}
+      </Dialog.Close>
+      <Button variant="destructive" onclick={revokeKey} disabled={actionPending}>
+        {m.api_keys_action_revoke()}
+      </Button>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

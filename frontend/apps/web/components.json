@@ -1,6 +1,6 @@
 {
   "$schema": "https://shadcn-svelte.com/schema/registry-item.json",
-  "style": "default",
+  "style": "nova",
   "tailwind": {
     "css": "src/app.css",
     "baseColor": "neutral"
