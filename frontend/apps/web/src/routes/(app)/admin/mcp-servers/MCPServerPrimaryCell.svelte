@@ -45,6 +45,7 @@
   }
 
   const authConfig = $derived(getAuthConfig(mcpServer.http_auth_type));
+  const AuthIcon = $derived(authConfig.icon);
 </script>
 
 <div class="flex min-w-0 flex-col gap-1 py-0.5">
@@ -55,7 +56,7 @@
       role="status"
       aria-label="Autentiseringstyp: {authConfig.label}"
     >
-      <svelte:component this={authConfig.icon} class="h-3 w-3" aria-hidden="true" />
+      <AuthIcon class="h-3 w-3" aria-hidden="true" />
       {authConfig.label}
     </span>
     {#if mcpServer.security_classification}

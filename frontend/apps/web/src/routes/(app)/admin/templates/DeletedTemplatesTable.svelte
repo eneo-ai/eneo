@@ -5,6 +5,7 @@
 -->
 
 <script lang="ts">
+  import { untrack } from "svelte";
   import type { components } from "@intric/intric-js";
   import { Table } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
@@ -19,7 +20,7 @@
 
   let { templates }: { templates: Template[] } = $props();
 
-  const table = Table.createWithResource(templates);
+  const table = Table.createWithResource(untrack(() => templates));
 
   function isAppTemplate(template: Template): template is AppTemplate {
     return "input_type" in template;

@@ -8,6 +8,7 @@
   import { page } from "$app/stores";
   import ServerPagination from "$lib/components/ServerPagination.svelte";
   import { SvelteURLSearchParams } from "svelte/reactivity";
+  import { untrack } from "svelte";
 
   // Svelte 5 runes mode: use $props() instead of export let
   let { data } = $props();
@@ -22,11 +23,13 @@
   // Swedish number formatting for counts (e.g., 2828 → "2 828", 50000 → "50 000")
   const numberFormatter = new Intl.NumberFormat("sv-SE");
 
-  setAdminUserCtx({
-    customRoles: data.customRoles,
-    defaultRoles: data.defaultRoles,
-    userGroups: data.userGroups
-  });
+  untrack(() =>
+    setAdminUserCtx({
+      customRoles: data.customRoles,
+      defaultRoles: data.defaultRoles,
+      userGroups: data.userGroups
+    })
+  );
 
   // Reference to UserTable component to access filterValue
   let userTableRef: UserTable;

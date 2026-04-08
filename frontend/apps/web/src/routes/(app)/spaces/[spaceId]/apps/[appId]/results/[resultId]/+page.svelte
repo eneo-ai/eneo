@@ -22,6 +22,7 @@
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import { untrack } from "svelte";
   dayjs.extend(utc);
 
   const { data } = $props();
@@ -35,7 +36,7 @@
 
   const attachmentUrlService = getAttachmentUrlService();
 
-  let result = $state(data.result);
+  let result = $state(untrack(() => data.result));
   const resultTitle = $derived(getResultTitle(result));
 
   async function downloadAsText(text?: string | null) {

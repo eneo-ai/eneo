@@ -26,11 +26,12 @@
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
   import { fade } from "svelte/transition";
+  import { untrack } from "svelte";
 
   const intric = getIntric();
 
   let { data } = $props();
-  let models = $state(data.models);
+  let models = $state(untrack(() => data.models));
   let completionModels = $derived(models.completionModels.filter((model) => model.is_org_enabled));
   let embeddingModels = $derived(models.embeddingModels.filter((model) => model.is_org_enabled));
   let transcriptionModels = $derived(

@@ -27,7 +27,7 @@
     Trash2
   } from "lucide-svelte";
   import { fade, slide, scale } from "svelte/transition";
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import { getIntric } from "$lib/core/Intric";
   import { getLocale } from "$lib/paraglide/runtime";
   import AuditConfigTab from "./AuditConfigTab.svelte";
@@ -41,12 +41,12 @@
   const intric = getIntric();
 
   // Local state for audit logs (shadows data from load function to allow client-side updates)
-  let logs = $state<AuditLogResponse[]>(data.logs || []);
-  let totalCount = $state(data.total_count || 0);
-  let currentPage = $state(data.page || 1);
-  let pageSize = $state(data.page_size || 100);
-  let totalPages = $state(data.total_pages || 0);
-  let hasSessionState = $state(data.hasSession);
+  let logs = $state<AuditLogResponse[]>(untrack(() => data.logs || []));
+  let totalCount = $state(untrack(() => data.total_count || 0));
+  let currentPage = $state(untrack(() => data.page || 1));
+  let pageSize = $state(untrack(() => data.page_size || 100));
+  let totalPages = $state(untrack(() => data.total_pages || 0));
+  let hasSessionState = $state(untrack(() => data.hasSession));
   let isFiltering = $state(false);
 
   // Track if we're using client-side filtering (to avoid $effect overwriting state)
@@ -156,9 +156,11 @@
   let _isInitializingFromUrl = false; // Flag to prevent auto-apply during URL initialization
 
   // Retention policy state - initialize from server data
-  let retentionDays = $state<number>(data.retentionPolicy?.retention_days ?? 365);
+  let retentionDays = $state<number>(untrack(() => data.retentionPolicy?.retention_days ?? 365));
   let isEditingRetention = $state(false);
-  let retentionInputValue = $state<string>(String(data.retentionPolicy?.retention_days ?? 365));
+  let retentionInputValue = $state<string>(
+    untrack(() => String(data.retentionPolicy?.retention_days ?? 365))
+  );
   let retentionInputNum = $derived(parseInt(retentionInputValue) || 0);
   let isSavingRetention = $state(false);
   let retentionError = $state<string | null>(null);

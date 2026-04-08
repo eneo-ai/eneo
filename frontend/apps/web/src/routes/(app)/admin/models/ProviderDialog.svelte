@@ -319,7 +319,7 @@
 
         <!-- Provider Type -->
         <div class="flex flex-col gap-2">
-          <label class="text-secondary text-sm font-medium">{m.provider_type()}</label>
+          <span class="text-secondary text-sm font-medium">{m.provider_type()}</span>
 
           {#if isEditMode}
             <!-- Read-only display in edit mode -->

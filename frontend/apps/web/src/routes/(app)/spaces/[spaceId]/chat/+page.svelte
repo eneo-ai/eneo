@@ -29,7 +29,7 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  const chat = initChatService(data);
+  const chat = untrack(() => initChatService(data));
 
   let currentTab = writable("chat");
 

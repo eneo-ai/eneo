@@ -66,6 +66,8 @@
 
 <div
   class="fixed inset-0 z-[100] h-3"
+  role="presentation"
+  aria-hidden="true"
   on:pointerenter={() => {
     $showHeader = true;
   }}

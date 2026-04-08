@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { SvelteMap } from "svelte/reactivity";
   import type {
     ApiKeyCreatedResponse,
@@ -67,6 +67,7 @@
   } = $props();
 
   const scopeLocked = $derived(!!lockedScopeType && !!lockedScopeId);
+  const LockedScopeIcon = $derived(getScopeIcon(lockedScopeType));
 
   let showDialog = $state(false);
   let isSubmitting = $state(false);
@@ -88,8 +89,8 @@
   // Step 2: Scope & permissions
   let ownership = $state<"user" | "service">("user");
   let permission = $state<ApiKeyPermission>("read");
-  let scopeType = $state<ApiKeyScopeType>(lockedScopeType ?? "tenant");
-  let scopeId = $state<string | null>(lockedScopeId ?? null);
+  let scopeType = $state<ApiKeyScopeType>(untrack(() => lockedScopeType ?? "tenant"));
+  let scopeId = $state<string | null>(untrack(() => lockedScopeId ?? null));
   let manualScopeId = $state("");
 
   // Fine-grained permissions (HuggingFace-style)
@@ -992,10 +993,7 @@
                             <div
                               class="bg-accent-default/15 flex h-10 w-10 items-center justify-center rounded-lg"
                             >
-                              <svelte:component
-                                this={getScopeIcon(lockedScopeType)}
-                                class="text-accent-default h-5 w-5"
-                              />
+                              <LockedScopeIcon class="text-accent-default h-5 w-5" />
                             </div>
                             <div>
                               <p class="text-default text-sm font-semibold">{lockedScopeName}</p>

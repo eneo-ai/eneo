@@ -17,6 +17,7 @@
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
+  import { untrack } from "svelte";
 
   type GroupMember = Space["group_members"]["items"][number];
   type RoleOption = { label: string; value: SpaceRole["value"] };
@@ -45,7 +46,7 @@
       fitViewport: true,
       sameWidth: false
     },
-    defaultSelected: { value: groupMember.role }
+    defaultSelected: untrack(() => ({ value: groupMember.role }))
   });
 
   // After changing the role we update with the passed prop as source of truth

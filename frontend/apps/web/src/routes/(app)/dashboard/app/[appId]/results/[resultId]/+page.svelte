@@ -20,6 +20,7 @@
   import { localizeHref } from "$lib/paraglide/runtime";
   import { fade, fly } from "svelte/transition";
   import { quadInOut } from "svelte/easing";
+  import { untrack } from "svelte";
 
   dayjs.extend(utc);
 
@@ -30,7 +31,7 @@
 
   const attachmentUrlService = getAttachmentUrlService();
 
-  let result = $state(data.result);
+  let result = $state(untrack(() => data.result));
   const resultTitle = $derived(getResultTitle(result));
 
   async function downloadAsText(text?: string | null) {

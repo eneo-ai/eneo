@@ -5,6 +5,7 @@
 -->
 
 <script lang="ts">
+  import { untrack } from "svelte";
   import { createSelect } from "@melt-ui/svelte";
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { IconCheck } from "@intric/icons/check";
@@ -20,23 +21,26 @@
     type: "assistant" | "app";
   } = $props();
 
-  const predefinedCategories: Record<string, { title: string; description: string }> =
-    type === "assistant" ? assistantTemplateCategories : appTemplateCategories;
-  const categoryKeys = Object.keys(predefinedCategories);
+  const predefinedCategories: Record<string, { title: string; description: string }> = $derived(
+    type === "assistant" ? assistantTemplateCategories : appTemplateCategories
+  );
+  const categoryKeys = $derived(Object.keys(predefinedCategories));
 
   // Check if current value is a custom category
-  let isCustom = $state(!categoryKeys.includes(value));
-  let customValue = $state(isCustom ? value : "");
+  let isCustom = $state(untrack(() => !categoryKeys.includes(value)));
+  let customValue = $state(untrack(() => (!categoryKeys.includes(value) ? value : "")));
 
   // Create options array with predefined categories plus "custom" option
-  const categoryOptions = [...categoryKeys, "custom"];
+  const categoryOptions = $derived([...categoryKeys, "custom"]);
 
   const {
     elements: { trigger, menu, option },
     helpers: { isSelected },
     states: { selected }
   } = createSelect<string>({
-    defaultSelected: { value: isCustom ? "custom" : value || categoryKeys[0] },
+    defaultSelected: {
+      value: untrack(() => (isCustom ? "custom" : value || categoryKeys[0]))
+    },
     positioning: {
       placement: "bottom",
       fitViewport: true,
@@ -79,11 +83,14 @@
 </script>
 
 <div class="flex flex-col gap-2">
-  <label class="text-default text-sm font-medium">{m.category()}</label>
+  <span id="select-template-category-label" class="text-default text-sm font-medium"
+    >{m.category()}</span
+  >
 
   <button
     {...$trigger}
     use:trigger
+    aria-labelledby="select-template-category-label"
     aria-label={m.select_category()}
     class="border-default hover:bg-hover-default flex h-10 items-center justify-between rounded-lg border px-3"
   >

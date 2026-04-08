@@ -504,13 +504,14 @@
 
             {#if requiresWrapperName}
               <div class="mx-4 mb-1">
-                <label class="text-secondary mb-1 block text-xs">
+                <label for="sharepoint-wrapper-name" class="text-secondary mb-1 block text-xs">
                   {m.sharepoint_wrapper_name_label()} <span class="text-label-stronger">*</span>
                 </label>
                 <p class="text-secondary mb-1 text-xs">
                   {m.sharepoint_wrapper_name_required_hint()}
                 </p>
                 <input
+                  id="sharepoint-wrapper-name"
                   class="border-default bg-primary w-full rounded border px-2 py-1 text-sm"
                   class:border-label-default={wrapperNameMissing}
                   value={wrapperName}

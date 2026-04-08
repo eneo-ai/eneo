@@ -19,6 +19,7 @@
   import { toastError } from "$lib/core/errors";
   import type { IntegrationKnowledge } from "@intric/intric-js";
   import { jobCompletionEvents } from "$lib/features/jobs/JobManager";
+  import { untrack } from "svelte";
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- page data type inferred from layout chain
   let { data } = $props<{ data: any }>();
@@ -39,17 +40,21 @@
   });
 
   let selectedTab = writable<string>();
-  let showIntegrationsNotice = data.environment.integrationRequestFormUrl !== undefined;
+  let showIntegrationsNotice = $state(
+    untrack(() => data.environment.integrationRequestFormUrl !== undefined)
+  );
   let selectedIntegrationForSyncHistory: IntegrationKnowledge | null = $state(null);
   let showSyncHistoryDialog = $state(false);
   let isOrgSpace = $currentSpace.organization;
   let isPersonalSpace = $currentSpace.personal;
 
   // Check if user has admin permission
-  let isAdmin =
-    data.user?.predefined_roles?.some((role: { permissions?: string[] }) =>
-      role.permissions?.includes("admin")
-    ) ?? false;
+  let isAdmin = untrack(
+    () =>
+      data.user?.predefined_roles?.some((role: { permissions?: string[] }) =>
+        role.permissions?.includes("admin")
+      ) ?? false
+  );
 
   function handleSelectIntegration(integration: IntegrationKnowledge) {
     selectedIntegrationForSyncHistory = integration;
@@ -57,8 +62,8 @@
   }
 
   // Website selection state (shared with WebsiteTable)
-  let selectedWebsiteIds = writable<Set<string>>(new Set());
-  let isBulkRecrawling = false;
+  let selectedWebsiteIds = $state.raw(writable<Set<string>>(new Set()));
+  let isBulkRecrawling = $state(false);
 
   // Bulk recrawl handler
   async function bulkRecrawl() {

@@ -12,7 +12,7 @@
 
   export let provider: ModelProviderPublic;
   /** Pass this to open AddCompletionModelDialog with this provider pre-selected */
-  export let onAddModel: ((providerId: string) => void) | undefined = undefined;
+  export const onAddModel: ((providerId: string) => void) | undefined = undefined;
   export let onEditProvider: ((provider: ModelProviderPublic) => void) | undefined = undefined;
 
   const intric = getIntric();
