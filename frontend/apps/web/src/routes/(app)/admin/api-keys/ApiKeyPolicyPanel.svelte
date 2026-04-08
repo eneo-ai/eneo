@@ -1,6 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Button, Input } from "@intric/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
+  import { Skeleton } from "$lib/components/ui/skeleton/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import type { ApiKeyPolicy } from "@intric/intric-js";
@@ -196,12 +201,11 @@
 <div class="space-y-4">
   <!-- Messages -->
   {#if errorMessage}
-    <div
-      class="border-negative-default/40 bg-negative-default/10 flex items-center gap-3 rounded-lg border px-4 py-3"
-      transition:fly={{ y: -8, duration: 150 }}
-    >
-      <AlertCircle class="text-negative-stronger h-4 w-4 flex-shrink-0" />
-      <p class="text-negative-stronger text-sm">{errorMessage}</p>
+    <div transition:fly={{ y: -8, duration: 150 }}>
+      <Alert.Root variant="destructive">
+        <AlertCircle />
+        <Alert.Description>{errorMessage}</Alert.Description>
+      </Alert.Root>
     </div>
   {/if}
 
@@ -216,16 +220,16 @@
   {/if}
 
   {#if loading}
-    <div class="animate-pulse space-y-4">
+    <div class="space-y-4">
       {#each Array(6) as _, i (i)}
         <div class="border-default bg-subtle/50 rounded-lg border p-4">
           <div class="flex items-center gap-4">
-            <div class="bg-subtle h-10 w-10 rounded-lg"></div>
+            <Skeleton class="h-10 w-10 rounded-lg" />
             <div class="flex-1 space-y-2">
-              <div class="bg-subtle h-4 w-32 rounded"></div>
-              <div class="bg-subtle h-3 w-48 rounded"></div>
+              <Skeleton class="h-4 w-32" />
+              <Skeleton class="h-3 w-48" />
             </div>
-            <div class="bg-subtle h-6 w-12 rounded"></div>
+            <Skeleton class="h-6 w-12" />
           </div>
         </div>
       {/each}
@@ -254,44 +258,76 @@
             <div class="flex-shrink-0">
               {#if item.type === "toggle"}
                 {#if item.id === "requireExpiration"}
-                  <Input.Switch bind:value={requireExpiration} />
+                  <Switch
+                    checked={requireExpiration}
+                    onCheckedChange={(next) => (requireExpiration = next)}
+                    aria-label={item.title}
+                  />
                 {:else if item.id === "revocationCascadeEnabled"}
-                  <Input.Switch bind:value={revocationCascadeEnabled} />
+                  <Switch
+                    checked={revocationCascadeEnabled}
+                    onCheckedChange={(next) => (revocationCascadeEnabled = next)}
+                    aria-label={item.title}
+                  />
                 {/if}
               {:else if item.type === "number"}
                 <div class="flex items-center gap-2">
                   {#if item.id === "maxExpirationDays"}
-                    <Input.Text
-                      bind:value={maxExpirationDays}
-                      placeholder={item.placeholder}
-                      type="number"
-                      min="1"
-                      class="!h-9 !w-24 text-right text-sm"
-                    />
+                    <Field.Field>
+                      <Field.Label class="sr-only" for={`policy-${item.id}`}>
+                        {item.title}
+                      </Field.Label>
+                      <Input
+                        id={`policy-${item.id}`}
+                        type="number"
+                        min="1"
+                        bind:value={maxExpirationDays}
+                        placeholder={item.placeholder}
+                        class="h-9 w-24 text-right text-sm"
+                      />
+                    </Field.Field>
                   {:else if item.id === "autoExpireUnusedDays"}
-                    <Input.Text
-                      bind:value={autoExpireUnusedDays}
-                      placeholder={item.placeholder}
-                      type="number"
-                      min="1"
-                      class="!h-9 !w-24 text-right text-sm"
-                    />
+                    <Field.Field>
+                      <Field.Label class="sr-only" for={`policy-${item.id}`}>
+                        {item.title}
+                      </Field.Label>
+                      <Input
+                        id={`policy-${item.id}`}
+                        type="number"
+                        min="1"
+                        bind:value={autoExpireUnusedDays}
+                        placeholder={item.placeholder}
+                        class="h-9 w-24 text-right text-sm"
+                      />
+                    </Field.Field>
                   {:else if item.id === "maxRateLimitOverride"}
-                    <Input.Text
-                      bind:value={maxRateLimitOverride}
-                      placeholder={item.placeholder}
-                      type="number"
-                      min="1"
-                      class="!h-9 !w-24 text-right text-sm"
-                    />
+                    <Field.Field>
+                      <Field.Label class="sr-only" for={`policy-${item.id}`}>
+                        {item.title}
+                      </Field.Label>
+                      <Input
+                        id={`policy-${item.id}`}
+                        type="number"
+                        min="1"
+                        bind:value={maxRateLimitOverride}
+                        placeholder={item.placeholder}
+                        class="h-9 w-24 text-right text-sm"
+                      />
+                    </Field.Field>
                   {:else if item.id === "maxDelegationDepth"}
-                    <Input.Text
-                      bind:value={maxDelegationDepth}
-                      placeholder={item.placeholder}
-                      type="number"
-                      min="1"
-                      class="!h-9 !w-24 text-right text-sm"
-                    />
+                    <Field.Field>
+                      <Field.Label class="sr-only" for={`policy-${item.id}`}>
+                        {item.title}
+                      </Field.Label>
+                      <Input
+                        id={`policy-${item.id}`}
+                        type="number"
+                        min="1"
+                        bind:value={maxDelegationDepth}
+                        placeholder={item.placeholder}
+                        class="h-9 w-24 text-right text-sm"
+                      />
+                    </Field.Field>
                   {/if}
                   {#if item.suffix}
                     <span class="text-muted text-xs whitespace-nowrap">{item.suffix}</span>
@@ -321,11 +357,11 @@
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <Button variant="simple" on:click={resetPolicy} disabled={saving} class="gap-2">
+            <Button variant="ghost" onclick={resetPolicy} disabled={saving}>
               <RotateCcw class="h-4 w-4" />
               {m.api_keys_admin_discard()}
             </Button>
-            <Button variant="primary" on:click={savePolicy} disabled={saving} class="gap-2">
+            <Button onclick={savePolicy} disabled={saving}>
               {#if saving}
                 <div
                   class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
