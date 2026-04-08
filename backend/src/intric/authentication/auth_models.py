@@ -517,6 +517,7 @@ class ApiKeyUsageResponse(BaseModel):
 
 
 class ApiKeyPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     truncated_key: str
 
 

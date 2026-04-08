@@ -263,9 +263,7 @@ class SharePointAuthRouter:
         return SharePointToken(
             access_token=access_token,
             refresh_token="",
-            token_type=IntegrationType(
-                user_integration.tenant_integration.integration.integration_type
-            ),
+            token_type=IntegrationType.Sharepoint,
             user_integration=user_integration,
             resources=[],
             id=None,

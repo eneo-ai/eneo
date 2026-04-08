@@ -1,5 +1,6 @@
 """Audit logging worker task."""
 
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy.exc import IntegrityError
@@ -22,7 +23,7 @@ class AuditLogTaskResult(TypedDict, total=False):
 
 async def log_audit_event_task(
     job_id: UUID,
-    params: AuditLogTaskParams,
+    params: AuditLogTaskParams | dict[str, Any],
     session: AsyncSession,
 ) -> AuditLogTaskResult:
     """
@@ -36,7 +37,7 @@ async def log_audit_event_task(
     Returns:
         Dictionary with job result (audit_log_id)
     """
-    task_params = params
+    task_params = AuditLogTaskParams.model_validate(params)
 
     # Create audit log
     audit_log = AuditLog(

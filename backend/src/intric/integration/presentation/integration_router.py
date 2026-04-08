@@ -252,9 +252,9 @@ async def disconnect_user_integration(
 async def get_sync_logs(
     integration_knowledge_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    skip: Annotated[int, Query(0, ge=0, description="Number of items to skip")] = 0,
+    skip: Annotated[int, Query(ge=0, description="Number of items to skip")] = 0,
     limit: Annotated[
-        int, Query(10, ge=1, le=100, description="Number of items per page")
+        int, Query(ge=1, le=100, description="Number of items per page")
     ] = 10,
 ):
     """Get paginated sync history for an integration knowledge."""
@@ -317,19 +317,19 @@ async def get_integration_preview(
 )
 async def get_sharepoint_folder_tree(
     user_integration_id: UUID,
-    space_id: Annotated[UUID, Query(..., description="Space ID (for auth routing)")],
+    space_id: Annotated[UUID, Query(description="Space ID (for auth routing)")],
     container: Annotated[Container, Depends(get_container(with_user=True))],
     site_id: Annotated[
         Optional[str],
-        Query(None, description="SharePoint site ID (required for SharePoint)"),
+        Query(description="SharePoint site ID (required for SharePoint)"),
     ] = None,
     drive_id: Annotated[
-        Optional[str], Query(None, description="Drive ID (required for OneDrive)")
+        Optional[str], Query(description="Drive ID (required for OneDrive)")
     ] = None,
     folder_id: Annotated[
-        Optional[str], Query(None, description="Folder ID (null for root)")
+        Optional[str], Query(description="Folder ID (null for root)")
     ] = None,
-    folder_path: Annotated[str, Query("", description="Current folder path")] = "",
+    folder_path: Annotated[str, Query(description="Current folder path")] = "",
 ):
     """Get SharePoint/OneDrive folder tree with hybrid authentication support.
 

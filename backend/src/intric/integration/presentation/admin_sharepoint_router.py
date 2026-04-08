@@ -438,7 +438,7 @@ async def get_sharepoint_app(
     },
 )
 async def test_sharepoint_app_credentials(
-    app_config: Annotated[TenantSharePointAppCreate, Body(...)],
+    app_config: Annotated[TenantSharePointAppCreate, Body()],
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> TenantAppTestResult:
     """Test SharePoint app credentials without saving them."""

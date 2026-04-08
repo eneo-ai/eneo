@@ -39,18 +39,12 @@ async def test_can_create_access_token_successfully(auth_service: AuthService):
 
 
 async def test_token_missing_user_is_invalid(auth_service: AuthService):
-    access_token = auth_service.create_access_token_for_user(
-        user=None,
-        secret_key=str(JWT_SECRET),
-        audience=JWT_AUDIENCE,
-        expires_in=JWT_EXPIRY_TIME_MINUTES,
-    )
-    with pytest.raises(jwt.PyJWTError):
-        jwt.decode(
-            access_token,
-            str(JWT_SECRET),
+    with pytest.raises(ValueError, match="user is required"):
+        auth_service.create_access_token_for_user(
+            user=None,
+            secret_key=str(JWT_SECRET),
             audience=JWT_AUDIENCE,
-            algorithms=[JWT_ALGORITHM],
+            expires_in=JWT_EXPIRY_TIME_MINUTES,
         )
 
 

@@ -8,6 +8,7 @@ import pdfplumber
 import pptx
 from docx2python import docx2python
 from pdfminer.pdfparser import PDFSyntaxError
+from pptx.exc import PackageNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +256,7 @@ class TextExtractor:
                 if slide_parts:
                     parts.append(" ".join(slide_parts))
             return "\n".join(parts)
-        except zipfile.BadZipFile:
+        except (zipfile.BadZipFile, PackageNotFoundError):
             raise CorruptFileError(
                 display_name,
                 "Invalid ZIP structure - file may be corrupted or in legacy .ppt format",

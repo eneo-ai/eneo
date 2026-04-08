@@ -51,10 +51,9 @@ def parse_action_list(
     actions: Annotated[
         Optional[list[str]],
         Query(
-            None,
             description="Filter by multiple action types (comma-separated or repeated)",
         ),
-    ],
+    ] = None,
 ) -> Optional[list[ActionType]]:
     """
     Parse query parameters that could be:
@@ -93,7 +92,7 @@ router.include_router(config_router)
 
 async def _enrich_logs_with_actor_info(
     logs: Sequence[AuditLog], session: AsyncSession
-) -> list[AuditLogResponse]:
+) -> list[dict[str, object]]:
     """
     Enrich audit logs with actor information (name/email).
 
@@ -128,7 +127,7 @@ async def _enrich_logs_with_actor_info(
             }
 
     # Convert logs to response models and enrich with actor info
-    enriched_logs: list[AuditLogResponse] = []
+    enriched_logs: list[dict[str, object]] = []
     for log in logs:
         log_model = AuditLogResponse.model_validate(log)
         metadata = dict(log_model.metadata)
@@ -138,7 +137,11 @@ async def _enrich_logs_with_actor_info(
         if actor_id is not None and actor_id in user_map:
             metadata["actor"] = user_map[actor_id]
 
-        enriched_logs.append(log_model.model_copy(update={"metadata": metadata}))
+        enriched_logs.append(
+            log_model.model_copy(update={"metadata": metadata}).model_dump(
+                mode="python"
+            )
+        )
 
     return enriched_logs
 
@@ -330,30 +333,27 @@ async def create_access_session(
 @router.get("/logs", response_model=AuditLogListResponse)
 async def list_audit_logs(
     request: Request,
-    actor_id: Annotated[Optional[UUID], Query(None, description="Filter by actor")],
+    actions: Annotated[Optional[list[ActionType]], Depends(parse_action_list)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    actor_id: Annotated[Optional[UUID], Query(description="Filter by actor")] = None,
     action: Annotated[
         Optional[ActionType],
-        Query(
-            None, description="Filter by single action type (deprecated, use actions)"
-        ),
-    ],
-    actions: Annotated[Optional[list[ActionType]], Depends(parse_action_list)],
+        Query(description="Filter by single action type (deprecated, use actions)"),
+    ] = None,
     from_date: Annotated[
-        Optional[datetime], Query(None, description="Filter from date")
-    ],
-    to_date: Annotated[Optional[datetime], Query(None, description="Filter to date")],
+        Optional[datetime], Query(description="Filter from date")
+    ] = None,
+    to_date: Annotated[Optional[datetime], Query(description="Filter to date")] = None,
     search: Annotated[
         Optional[str],
         Query(
-            None,
             min_length=3,
             max_length=100,
             description="Search entity names in log descriptions (min 3 chars)",
         ),
-    ],
-    page: Annotated[int, Query(1, ge=1, description="Page number")],
-    page_size: Annotated[int, Query(100, ge=1, le=1000, description="Page size")],
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    ] = None,
+    page: Annotated[int, Query(ge=1, description="Page number")] = 1,
+    page_size: Annotated[int, Query(ge=1, le=1000, description="Page size")] = 100,
 ):
     """
     List audit logs for the authenticated user's tenant.
@@ -518,12 +518,14 @@ async def list_audit_logs(
     enriched_logs = await _enrich_logs_with_actor_info(logs, session)
 
     # Create response object
-    response_data = AuditLogListResponse(
-        logs=enriched_logs,
-        total_count=total_count,
-        page=page,
-        page_size=page_size,
-        total_pages=total_pages,
+    response_data = AuditLogListResponse.model_validate(
+        {
+            "logs": enriched_logs,
+            "total_count": total_count,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+        }
     )
 
     # Convert to JSON response so we can set cookie
@@ -553,13 +555,13 @@ async def list_audit_logs(
 @router.get("/logs/user/{user_id}", response_model=AuditLogListResponse)
 async def get_user_logs(
     user_id: Annotated[UUID, Path(..., description="User ID for GDPR export")],
-    from_date: Annotated[
-        Optional[datetime], Query(None, description="Filter from date")
-    ],
-    to_date: Annotated[Optional[datetime], Query(None, description="Filter to date")],
-    page: Annotated[int, Query(1, ge=1, description="Page number")],
-    page_size: Annotated[int, Query(100, ge=1, le=1000, description="Page size")],
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    from_date: Annotated[
+        Optional[datetime], Query(description="Filter from date")
+    ] = None,
+    to_date: Annotated[Optional[datetime], Query(description="Filter to date")] = None,
+    page: Annotated[int, Query(ge=1, description="Page number")] = 1,
+    page_size: Annotated[int, Query(ge=1, le=1000, description="Page size")] = 100,
 ):
     """
     Get all logs where user is actor OR target (GDPR Article 15 export).
@@ -637,39 +639,40 @@ async def get_user_logs(
     # Enrich logs with actor information for UI display
     enriched_logs = await _enrich_logs_with_actor_info(logs, session)
 
-    return AuditLogListResponse(
-        logs=enriched_logs,
-        total_count=total_count,
-        page=page,
-        page_size=page_size,
-        total_pages=total_pages,
+    return AuditLogListResponse.model_validate(
+        {
+            "logs": enriched_logs,
+            "total_count": total_count,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+        }
     )
 
 
 @router.get("/logs/export")
 async def export_audit_logs(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     user_id: Annotated[
-        Optional[UUID], Query(None, description="User ID for GDPR export")
-    ],
-    actor_id: Annotated[Optional[UUID], Query(None, description="Filter by actor")],
+        Optional[UUID], Query(description="User ID for GDPR export")
+    ] = None,
+    actor_id: Annotated[Optional[UUID], Query(description="Filter by actor")] = None,
     action: Annotated[
-        Optional[ActionType], Query(None, description="Filter by action type")
-    ],
+        Optional[ActionType], Query(description="Filter by action type")
+    ] = None,
     from_date: Annotated[
-        Optional[datetime], Query(None, description="Filter from date")
-    ],
-    to_date: Annotated[Optional[datetime], Query(None, description="Filter to date")],
-    format: Annotated[str, Query("csv", description="Export format: csv or json")],
+        Optional[datetime], Query(description="Filter from date")
+    ] = None,
+    to_date: Annotated[Optional[datetime], Query(description="Filter to date")] = None,
+    format: Annotated[str, Query(description="Export format: csv or json")] = "csv",
     max_records: Annotated[
         Optional[int],
         Query(
-            None,
             ge=1,
             le=100000,
             description="Maximum records to export (default: 50000, max: 100000)",
         ),
-    ],
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    ] = None,
 ):
     """
     Export audit logs to CSV or JSON Lines format.

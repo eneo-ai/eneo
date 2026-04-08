@@ -24,6 +24,7 @@ from intric.mcp_servers.infrastructure.proxy import (
 )
 from intric.mcp_servers.infrastructure.tool_approval import get_approval_manager
 from intric.sessions.session import SessionInDB
+from intric.settings.encryption_service import EncryptionService
 from intric.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
@@ -59,11 +60,16 @@ class CompletionService:
         self.context_builder = context_builder
         self.tenant = tenant
         self.config = config or SETTINGS
+        if encryption_service is None:
+            encryption_settings: Settings | None = (
+                None if self.config.testing else self.config
+            )
+            encryption_service = EncryptionService(encryption_settings)
         self.encryption_service = encryption_service
         self.session = session
         self.redis_client = redis_client
         self._mcp_proxy_factory = MCPProxySessionFactory(
-            encryption_service=encryption_service
+            encryption_service=self.encryption_service
         )
         super().__init__()
 
@@ -127,18 +133,12 @@ class CompletionService:
         # Create credential resolver
         provider_id = provider_db.id
 
-        encryption_service = self.encryption_service
-        if encryption_service is None:
-            raise ValueError(
-                "CompletionService requires an encryption service to resolve model credentials."
-            )
-
         credential_resolver = TenantModelCredentialResolver(
             provider_id=provider_id,
             provider_type=provider_db.provider_type,
             credentials=provider_db.credentials,
             config=provider_db.config,
-            encryption_service=encryption_service,
+            encryption_service=self.encryption_service,
         )
 
         logger.info(

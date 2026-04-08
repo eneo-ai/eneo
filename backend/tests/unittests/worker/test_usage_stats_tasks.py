@@ -74,6 +74,14 @@ class FakeSession:
         self._calls += 1
         return FakeResult(row)
 
+    async def scalar(self, statement):  # noqa: ARG002
+        if self._calls < len(self._rows):
+            row = self._rows[self._calls]
+        else:
+            row = None
+        self._calls += 1
+        return getattr(row, "id", row)
+
     def begin(self):  # noqa: D401
         return FakeTransaction()
 

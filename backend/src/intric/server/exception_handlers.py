@@ -23,7 +23,7 @@ def _default_message_for_status(status_code: int) -> str:
     if status_code == 403:
         return "Forbidden: you do not have permission to perform this action."
     if status_code == 404:
-        return "Not found."
+        return "Not found"
     if status_code == 409:
         return "Conflict."
     if status_code >= 500:
@@ -46,9 +46,12 @@ def _exception_context(
     exc: Exception,
 ) -> dict[str, object] | None:
     typed_exc = cast(ExceptionContext, exc)
-    context = typed_exc.context
-    if isinstance(context, dict):
-        result = dict(context)
+    raw_context = getattr(typed_exc, "context", None)
+    if isinstance(raw_context, dict):
+        context_dict = cast(dict[object, object], raw_context)
+        result: dict[str, object] = {
+            str(key): value for key, value in context_dict.items()
+        }
     else:
         result = {}
 
@@ -79,8 +82,12 @@ def add_exception_handlers(app: FastAPI):
                 message = _default_message_for_status(status_code)
             request_id = _extract_request_id(request)
             context = _exception_context(status_code=status_code, exc=exc)
-            details = cast(ExceptionContext, exc).details
-            if not isinstance(details, dict) or len(details) == 0:
+            raw_details = getattr(exc, "details", None)
+            details: dict[str, object] | None
+            if isinstance(raw_details, dict) and raw_details:
+                detail_dict = cast(dict[object, object], raw_details)
+                details = {str(key): value for key, value in detail_dict.items()}
+            else:
                 details = None
 
             if status_code >= 400:

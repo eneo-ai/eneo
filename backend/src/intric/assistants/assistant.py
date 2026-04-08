@@ -100,7 +100,7 @@ class Assistant(Entity):
         self.type = (
             AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
         )
-        self._metadata_json = metadata_json or {}
+        self._metadata_json = metadata_json
         self.icon_id = icon_id
 
         # Temporary attributes for update flow - not persisted directly
@@ -220,7 +220,7 @@ class Assistant(Entity):
 
     @metadata_json.setter
     def metadata_json(self, metadata_json: dict[str, object] | None):
-        self._metadata_json = metadata_json or {}
+        self._metadata_json = metadata_json
 
     def has_knowledge(self) -> bool:
         return self.collections or self.websites or self.integration_knowledge_list  # type: ignore[return-value]

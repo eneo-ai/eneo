@@ -23,6 +23,13 @@ Pyright is the source of truth for backend type checking. We do not run `mypy` i
 
 ## Local Commands
 
+When running from the host, prefer the repo script so pyright uses the backend
+devcontainer and its isolated `.venv`:
+
+```bash
+bash backend/scripts/run_pyright_in_devcontainer.sh
+```
+
 ### Full backend run
 
 ```bash
@@ -35,6 +42,12 @@ uv run pyright
 ```bash
 cd backend
 uv run pyright --stats
+```
+
+Host equivalent:
+
+```bash
+bash backend/scripts/run_pyright_in_devcontainer.sh --stats
 ```
 
 ### Single file

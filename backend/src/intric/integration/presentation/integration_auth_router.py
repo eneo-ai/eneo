@@ -26,7 +26,7 @@ router = APIRouter()
 async def gen_url(
     tenant_integration_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    state: Annotated[Optional[str], Query(None)] = None,
+    state: Annotated[Optional[str], Query()] = None,
 ):
     oauth2_service = container.oauth2_service()
 

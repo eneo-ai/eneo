@@ -973,7 +973,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                     logger.debug(f"[DEBUG] Raw chunk: {chunk}")
 
                     # Capture usage from final chunk (when stream_options include_usage is set)
-                    if chunk.usage:
+                    chunk_usage_obj = getattr(chunk, "usage", None)
+                    if chunk_usage_obj:
                         chunk_usage = self._extract_usage(chunk)
                         if chunk_usage:
                             res.usage = (

@@ -563,7 +563,10 @@ class AnalysisService:
             active_user_count=active_users,
         )
 
-    async def _check_space_permissions(self, space_id: UUID):
+    async def _check_space_permissions(self, space_id: UUID | None):
+        if space_id is None:
+            return
+
         space = await self.space_service.get_space(space_id)
         if space.is_personal() and Permission.INSIGHTS not in self.user.permissions:
             raise UnauthorizedException(

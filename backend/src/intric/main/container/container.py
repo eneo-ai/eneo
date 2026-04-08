@@ -1092,7 +1092,7 @@ class Container(containers.DeclarativeContainer):
         TemplateService,
         app_service=app_template_service,
         assistant_service=assistant_template_service,
-        tenant_id=user.tenant_id,
+        tenant_id=user.provided.tenant_id,
     )
 
     space_init_service = providers.Factory(

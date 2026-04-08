@@ -23,7 +23,7 @@ repos:
     hooks:
       - id: pyright
         name: pyright
-        entry: docker exec -u vscode -i eneo_devcontainer-eneo-1 bash -i -c 'cd /workspace/backend && uv run pyright'
+        entry: bash backend/scripts/run_pyright_in_devcontainer.sh
         language: system
         types: [python]
         files: ^backend/src/intric/

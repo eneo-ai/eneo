@@ -116,14 +116,11 @@ async def check_rate_limit(
         # Redis EVAL is the standard, safe way to run atomic Lua scripts
         count = cast(
             int,
-            await cast(
-                Any,
-                redis_client.eval(
-                    RATE_LIMIT_SCRIPT,
-                    1,  # number of keys
-                    key,  # KEYS[1]
-                    str(config.window_seconds),  # ARGV[1] - TTL in seconds
-                ),
+            await cast(Any, redis_client).eval(
+                RATE_LIMIT_SCRIPT,
+                1,  # number of keys
+                key,  # KEYS[1]
+                config.window_seconds,  # ARGV[1] - TTL in seconds
             ),
         )
 

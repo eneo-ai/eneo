@@ -47,7 +47,7 @@ class AssistantAssembler:
 
     def _get_completion_model_sparse(
         self, model: "CompletionModel | None"
-    ) -> CompletionModelSparse | None:
+    ) -> "CompletionModelSparse | None":
         """
         Convert any completion model type to a CompletionModelSparse.
         Returns None if no model is provided.

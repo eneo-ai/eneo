@@ -6,14 +6,14 @@ import json
 import secrets
 import time
 from datetime import datetime, timezone
-from typing import Annotated, Any, NotRequired, Optional, Protocol, cast
+from typing import Annotated, Any, Optional, Protocol, cast
 from uuid import UUID
 
 import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from jwt import PyJWKClient as _PyJWKClient
 from pydantic import BaseModel
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 # JIT provisioning imports
 from intric.audit.application.audit_service import AuditService
@@ -539,17 +539,15 @@ async def initiate_auth(
     tenant: Annotated[
         Optional[str],
         Query(
-            None,
             description="Tenant slug (required for multi-tenant, optional for single-tenant)",
         ),
     ] = None,
     state: Annotated[
-        Optional[str], Query(None, description="Optional frontend-generated CSRF state")
+        Optional[str], Query(description="Optional frontend-generated CSRF state")
     ] = None,
     redirect_uri_param: Annotated[
         Optional[str],
         Query(
-            None,
             alias="redirect_uri",
             description=(
                 "Optional redirect URI override. Must exactly match a configured "

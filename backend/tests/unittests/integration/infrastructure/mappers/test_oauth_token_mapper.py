@@ -84,16 +84,20 @@ class TestOauthTokenMapper(unittest.TestCase):
         # Assert returned entity is what we expect
         self.assertEqual(entity, mock_entity)
 
-    def test_to_entities_not_implemented(self):
-        """Test that to_entities is not implemented (returns None)."""
-        # Note: In the implementation, this method is simply defined as 'pass'
+    def test_to_entities_maps_each_db_model(self):
+        """Test mapping a list of DB models to domain entities."""
         db_models = [MagicMock() for _ in range(3)]
+        mapped_entities = [MagicMock() for _ in range(3)]
 
-        # Call the method
-        result = self.mapper.to_entities(db_models)
+        with patch.object(
+            self.mapper, "to_entity", side_effect=mapped_entities
+        ) as mock_to_entity:
+            result = self.mapper.to_entities(db_models)
 
-        # Assert it returns None (as it's not implemented)
-        self.assertIsNone(result)
+        self.assertEqual(result, mapped_entities)
+        self.assertEqual(mock_to_entity.call_count, len(db_models))
+        for db_model in db_models:
+            mock_to_entity.assert_any_call(db_model)
 
 
 if __name__ == "__main__":

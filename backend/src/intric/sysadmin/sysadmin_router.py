@@ -281,8 +281,8 @@ async def get_access_token(
 
 @router.get("/tenants/", response_model=PaginatedResponse[TenantWithMaskedCredentials])
 async def get_tenants(
-    domain: Annotated[str | None, Query(None)],
     container: Annotated[Container, Depends(get_container())],
+    domain: Annotated[str | None, Query()] = None,
 ):
     """Get all tenants with masked API credentials.
 
@@ -710,7 +710,7 @@ async def add_origin(
 @router.get("/allowed-origins/", response_model=PaginatedResponse[AllowedOriginInDB])
 async def get_origins(
     container: Annotated[Container, Depends(get_container())],
-    tenant_id: Annotated[UUID | None, Query(None)],
+    tenant_id: Annotated[UUID | None, Query()] = None,
 ):
     allowed_origin_repo = container.allowed_origin_repo()
 
@@ -1278,8 +1278,8 @@ async def update_completion_model_metadata(
 )
 async def delete_completion_model(
     id: UUID,
-    force: Annotated[bool, Query(False, description="Force delete even if in use")],
     container: Annotated[Container, Depends(get_container_for_sysadmin())],
+    force: Annotated[bool, Query(description="Force delete even if in use")] = False,
 ):
     """
     Delete a completion model (system-wide operation).
@@ -1366,8 +1366,8 @@ async def update_embedding_model_metadata(
 )
 async def delete_embedding_model(
     id: UUID,
-    force: Annotated[bool, Query(False, description="Force delete even if in use")],
     container: Annotated[Container, Depends(get_container_for_sysadmin())],
+    force: Annotated[bool, Query(description="Force delete even if in use")] = False,
 ):
     """
     Delete an embedding model (system-wide operation).

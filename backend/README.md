@@ -6,10 +6,17 @@
 
 ## Type Checking
 
-Run Pyright for audit focus and new changes:
+Run Pyright against the canonical backend devcontainer:
 
 ```bash
-./scripts/typecheck_changed.sh
+./scripts/run_pyright_in_devcontainer.sh
+```
+
+Useful variants:
+
+```bash
+./scripts/run_pyright_in_devcontainer.sh --stats
+./scripts/run_pyright_in_devcontainer.sh src/intric/files/file_router.py
 ```
 
 ## Environment variables

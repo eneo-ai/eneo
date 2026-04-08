@@ -97,11 +97,14 @@ class AuthService:
 
     def create_access_token_for_user(
         self,
-        user: UserInDB,
+        user: UserInDB | None,
         secret_key: str | None = None,
         audience: str = JWT_AUDIENCE,
         expires_in: int = JWT_EXPIRY_TIME_MINUTES,
     ) -> str:
+        if user is None:
+            raise ValueError("user is required to create an access token")
+
         secret_key = secret_key or str(JWT_SECRET)
 
         jwt_meta = JWTMeta(

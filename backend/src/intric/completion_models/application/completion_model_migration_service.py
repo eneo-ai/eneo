@@ -57,7 +57,7 @@ class CompletionModelMigrationService:
         self,
         from_model_id: UUID,
         to_model_id: UUID,
-        entity_types: list[str] | None = None,
+        entity_types: list[str] | str | None = None,
         *,
         user: "UserInDB",
         confirm_migration: bool = False,
@@ -78,20 +78,28 @@ class CompletionModelMigrationService:
             },
         )
 
+        normalized_entity_types: list[str] | None
+        if isinstance(entity_types, str):
+            normalized_entity_types = [entity_types]
+        else:
+            normalized_entity_types = entity_types
+
         # Validate and normalize entity_types
-        if entity_types is not None:
+        if normalized_entity_types is not None:
             # Check for invalid entity types
             invalid_types = [
-                t for t in entity_types if t not in ENTITY_TYPES and t != "spaces"
+                t
+                for t in normalized_entity_types
+                if t not in ENTITY_TYPES and t != "spaces"
             ]
             if invalid_types:
                 raise ValidationException(
                     f"Invalid entity types: {invalid_types}. Valid types are: {ENTITY_TYPES + ['spaces']}"
                 )
 
-            self.logger.debug(f"Validated entity_types: {entity_types}")
+            self.logger.debug(f"Validated entity_types: {normalized_entity_types}")
 
-        final_entity_types: list[str] = entity_types or list(ENTITY_TYPES)
+        final_entity_types: list[str] = normalized_entity_types or list(ENTITY_TYPES)
         self.logger.debug(f"Final entity_types for migration: {final_entity_types}")
 
         # Validate models exist and belong to tenant
@@ -188,7 +196,7 @@ class CompletionModelMigrationService:
             to_model_id=to_model_id,
             initiated_by=user.id,
             status="in_progress",
-            entity_types=entity_types,
+            entity_types=normalized_entity_types,
             affected_count=affected_count,
             started_at=start_time,
         )

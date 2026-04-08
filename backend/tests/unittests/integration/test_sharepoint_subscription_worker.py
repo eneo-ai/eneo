@@ -15,8 +15,8 @@ from intric.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
 from intric.integration.infrastructure.sharepoint_subscription_worker import (
-    get_token_for_subscription,
     cleanup_orphaned_subscriptions,
+    get_token_for_subscription,
     renew_expiring_subscriptions,
 )
 
@@ -271,7 +271,7 @@ class TestCleanupOrphanedSubscriptions:
                 "intric.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
-                result = await cleanup_orphaned_subscriptions()
+                result = await cleanup_orphaned_subscriptions({})
 
         assert result["skipped"] == 1
         assert result["deleted"] == 0
@@ -329,7 +329,7 @@ class TestCleanupOrphanedSubscriptions:
                 "intric.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
-                result = await cleanup_orphaned_subscriptions()
+                result = await cleanup_orphaned_subscriptions({})
 
         assert result["deleted"] == 1
         assert result["failed"] == 0
@@ -390,7 +390,7 @@ class TestRenewExpiringSubscriptions:
                 "intric.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
-                result = await renew_expiring_subscriptions()
+                result = await renew_expiring_subscriptions({})
 
         assert result["renewed"] == 1
         assert result["failed"] == 0
@@ -413,7 +413,7 @@ class TestRenewExpiringSubscriptions:
                 "intric.worker.worker.sessionmanager.session",
                 return_value=mock_session_context(),
             ):
-                result = await renew_expiring_subscriptions()
+                result = await renew_expiring_subscriptions({})
 
         assert result["renewed"] == 0
         assert result["failed"] == 0
