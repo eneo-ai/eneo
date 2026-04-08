@@ -4,7 +4,7 @@
   import type { ApiKeyCreatedResponse, ApiKeyScopeType, ApiKeyV2 } from "@intric/intric-js";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
-  import { Button } from "@intric/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import {
     Key,
     ChevronDown,
@@ -158,8 +158,8 @@
     >
       <AlertCircle class="text-negative-default h-4 w-4 flex-shrink-0" />
       <p class="text-negative-default flex-1 text-sm">{errorMessage}</p>
-      <Button variant="simple" on:click={loadKeys} class="gap-1.5 text-xs">
-        <RefreshCw class="h-3.5 w-3.5" />
+      <Button variant="ghost" size="sm" onclick={loadKeys}>
+        <RefreshCw />
         {m.retry()}
       </Button>
     </div>
