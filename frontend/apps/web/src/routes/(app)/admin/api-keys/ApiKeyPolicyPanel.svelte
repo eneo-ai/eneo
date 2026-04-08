@@ -31,34 +31,28 @@
 
   let originalPolicy = $state<ApiKeyPolicy>({});
 
-  let maxDelegationDepth = $state("");
-  let maxExpirationDays = $state("");
-  let autoExpireUnusedDays = $state("");
-  let maxRateLimitOverride = $state("");
+  let maxDelegationDepth = $state<number | null>(null);
+  let maxExpirationDays = $state<number | null>(null);
+  let autoExpireUnusedDays = $state<number | null>(null);
+  let maxRateLimitOverride = $state<number | null>(null);
   let requireExpiration = $state(false);
   let revocationCascadeEnabled = $state(false);
 
-  function toNumber(value: string) {
-    if (!value.trim()) return null;
-    const parsed = Number(value);
-    return Number.isNaN(parsed) ? null : parsed;
-  }
-
   function syncFromPolicy(policy: ApiKeyPolicy) {
-    maxDelegationDepth = policy.max_delegation_depth?.toString() ?? "";
-    maxExpirationDays = policy.max_expiration_days?.toString() ?? "";
-    autoExpireUnusedDays = policy.auto_expire_unused_days?.toString() ?? "";
-    maxRateLimitOverride = policy.max_rate_limit_override?.toString() ?? "";
+    maxDelegationDepth = policy.max_delegation_depth ?? null;
+    maxExpirationDays = policy.max_expiration_days ?? null;
+    autoExpireUnusedDays = policy.auto_expire_unused_days ?? null;
+    maxRateLimitOverride = policy.max_rate_limit_override ?? null;
     requireExpiration = policy.require_expiration ?? false;
     revocationCascadeEnabled = policy.revocation_cascade_enabled ?? false;
   }
 
   function snapshot() {
     return {
-      max_delegation_depth: toNumber(maxDelegationDepth),
-      max_expiration_days: toNumber(maxExpirationDays),
-      auto_expire_unused_days: toNumber(autoExpireUnusedDays),
-      max_rate_limit_override: toNumber(maxRateLimitOverride),
+      max_delegation_depth: maxDelegationDepth,
+      max_expiration_days: maxExpirationDays,
+      auto_expire_unused_days: autoExpireUnusedDays,
+      max_rate_limit_override: maxRateLimitOverride,
       require_expiration: requireExpiration,
       revocation_cascade_enabled: revocationCascadeEnabled
     };

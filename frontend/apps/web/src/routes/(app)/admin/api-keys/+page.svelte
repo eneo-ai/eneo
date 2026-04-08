@@ -60,7 +60,7 @@
   let scopeType = $state("");
   let stateFilter = $state("");
   let keyType = $state("");
-  let scopeId = $state("");
+  let scopeId = $state<string | null>(null);
   let createdByUserId = $state("");
   let expiresWithinDays = $state("");
   let userRelation = $state<"owner" | "creator">("owner");
@@ -178,7 +178,7 @@
 
   // Active filter count
   const activeFilterCount = $derived.by(() => {
-    let count = [scopeType, stateFilter, keyType, scopeId.trim()].filter(Boolean).length;
+    let count = [scopeType, stateFilter, keyType, scopeId?.trim()].filter(Boolean).length;
     if (expiresWithinDays.trim()) {
       count += 1;
     }
@@ -204,7 +204,7 @@
     if (scopeType) params.scope_type = scopeType;
     if (stateFilter) params.state = stateFilter;
     if (keyType) params.key_type = keyType;
-    if (scopeId.trim()) params.scope_id = scopeId.trim();
+    if (scopeId?.trim()) params.scope_id = scopeId.trim();
     if (expiresWithinDays.trim()) {
       const parsed = Number(expiresWithinDays.trim());
       if (Number.isFinite(parsed) && parsed > 0) {
@@ -481,7 +481,7 @@
     scopeType = "";
     stateFilter = "";
     keyType = "";
-    scopeId = "";
+    scopeId = null;
     expiresWithinDays = "";
     limit = "100";
     userRelation = "owner";
@@ -1360,24 +1360,22 @@
 
         <!-- Policy Section -->
         <Settings.Group title={m.api_keys_admin_tenant_policy()}>
-          <Settings.Row
-            title={m.api_keys_admin_tenant_policy()}
-            description={m.api_keys_admin_policy_description()}
-            fullWidth
-          >
+          <div class="flex flex-col gap-2 px-4 lg:pr-6 lg:pl-2">
+            <p class="text-secondary text-sm whitespace-pre-wrap">
+              {m.api_keys_admin_policy_description()}
+            </p>
             <ApiKeyPolicyPanel />
-          </Settings.Row>
+          </div>
         </Settings.Group>
 
         <!-- Super Key Status Section -->
         <Settings.Group title={m.api_keys_admin_super_key_status()}>
-          <Settings.Row
-            title={m.api_keys_admin_super_key_status()}
-            description={m.api_keys_admin_super_key_description()}
-            fullWidth
-          >
+          <div class="flex flex-col gap-2 px-4 lg:pr-6 lg:pl-2">
+            <p class="text-secondary text-sm whitespace-pre-wrap">
+              {m.api_keys_admin_super_key_description()}
+            </p>
             <SuperKeyStatusPanel />
-          </Settings.Row>
+          </div>
         </Settings.Group>
       </div>
     </Settings.Page>
