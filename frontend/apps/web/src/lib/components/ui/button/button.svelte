@@ -10,6 +10,8 @@
         // NOTE: uses eneo's accent tokens directly instead of `bg-primary`/`text-primary-foreground`
         // because eneo defines `--background-color-primary` (page bg) which shadows shadcn's
         // `--color-primary` in Tailwind v4 — making the button blend into the page background.
+        // See app.css `--color-primary` namespace conflict comment for the full rationale and
+        // the steps required to remove this workaround once eneo's "primary" tokens are renamed.
         default:
           "bg-accent-default text-on-fill hover:bg-accent-stronger aria-expanded:bg-accent-stronger",
         outline:

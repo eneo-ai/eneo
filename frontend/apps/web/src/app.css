@@ -22,7 +22,61 @@
   --color-popover: var(--background-primary);
   --color-popover-foreground: var(--text-primary);
 
-  /* Primary action (maps to eneo's accent so primary buttons keep brand color) */
+  /* ---------------------------------------------------------------- */
+  /* `--color-primary` namespace conflict (shadcn vs eneo)             */
+  /* ---------------------------------------------------------------- */
+  /* eneo and shadcn both use the word "primary" but for OPPOSITE      */
+  /* concepts:                                                         */
+  /*                                                                   */
+  /*   - eneo:    "primary" = page background + body text (the         */
+  /*              fundamental surface, declared as                     */
+  /*              `--background-color-primary` and `--text-color-      */
+  /*              primary` in packages/ui/src/styles/main.css).        */
+  /*   - shadcn:  "primary" = brand action color (filled button bg,    */
+  /*              checked switch track, etc.).                         */
+  /*                                                                   */
+  /* The `--color-primary` declaration below maps shadcn's token to    */
+  /* eneo's accent so the *intent* matches. But Tailwind v4 picks the  */
+  /* MORE SPECIFIC variable when generating utilities — so for the     */
+  /* `bg-primary` utility, eneo's `--background-color-primary` (page   */
+  /* bg) wins over shadcn's generic `--color-primary` (accent). The    */
+  /* same is true for `text-primary` vs `--text-color-primary`. The    */
+  /* end result is that any vendored shadcn component using            */
+  /* `bg-primary` / `text-primary-foreground` paints itself with the   */
+  /* page background and disappears.                                   */
+  /*                                                                   */
+  /* WORKAROUND (per-component, applied today):                        */
+  /*   We vendor the affected shadcn-svelte components and replace     */
+  /*   `bg-primary` → `bg-accent-default` and `text-primary-foreground`*/
+  /*   → `text-on-fill` directly. This bypasses the shadowed utility   */
+  /*   and paints with eneo's accent tokens. Currently applied in:     */
+  /*     - lib/components/ui/button/button.svelte (default variant)    */
+  /*     - lib/components/ui/switch/switch.svelte                      */
+  /*     - lib/components/ui/checkbox/checkbox.svelte                  */
+  /*     - lib/components/ui/radio-group/radio-group-item.svelte       */
+  /*     - lib/components/ui/field/field-label.svelte                  */
+  /*   Any future shadcn component that uses bg-primary / text-primary-*/
+  /*   foreground in its checked/active state needs the same patch.    */
+  /*                                                                   */
+  /* HOW TO REMOVE THE WORKAROUND (when migrating fully to shadcn):    */
+  /*   1. In packages/ui/src/styles/main.css, rename eneo's            */
+  /*      `--background-color-primary` → `--background-color-page` and */
+  /*      `--text-color-primary` → `--text-color-body` (or equivalent  */
+  /*      non-conflicting names). This frees the "primary" namespace.  */
+  /*   2. Search-and-replace every `bg-primary` / `text-primary` usage */
+  /*      across apps/web AND packages/ui internals that meant "page   */
+  /*      bg" or "body text" — point them at the new tokens.           */
+  /*   3. Drop the two `--color-primary` / `--color-primary-foreground`*/
+  /*      overrides below. Tailwind will then resolve `bg-primary` /   */
+  /*      `text-primary-foreground` against shadcn's canonical defs    */
+  /*      (which we don't redeclare, so they fall back to upstream).   */
+  /*   4. Revert the `bg-accent-default` / `text-on-fill` workaround   */
+  /*      in the four files listed above back to upstream shadcn's     */
+  /*      `bg-primary` / `text-primary-foreground`.                    */
+  /*                                                                   */
+  /*   After step 4 the vendored shadcn components match upstream byte-*/
+  /*   for-byte, so future shadcn updates can be pulled cleanly.       */
+  /* ---------------------------------------------------------------- */
   --color-primary: var(--accent-default);
   --color-primary-foreground: var(--text-on-fill);
 
