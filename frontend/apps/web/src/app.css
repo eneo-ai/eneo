@@ -38,8 +38,18 @@
   --color-destructive: var(--negative-default);
   --color-destructive-foreground: var(--text-on-fill);
 
-  /* Input border (shadcn input/textarea use border-input) */
-  --color-input: var(--border-default);
+  /* Input border + Switch unchecked track (shadcn references the `--input` */
+  /* token for both input/textarea borders AND the Switch's unchecked       */
+  /* track background). The original mapping to `--border-default` (15%     */
+  /* opacity ≈ 1.37:1) was invisible for the Switch and far below WCAG      */
+  /* 1.4.11 (≥3:1 for non-text UI components). The literal value below is   */
+  /* eneo's `--color-ui-grey-300`, which renders at ~3.67:1 against the     */
+  /* page background in both light and dark modes — visible enough that     */
+  /* switches are findable without tabbing, and input borders meet the      */
+  /* non-text contrast requirement. (Inlined as a literal because Tailwind  */
+  /* v4 `@theme inline` doesn't resolve `var()` references against other    */
+  /* CSS variables defined outside its own @theme block.)                   */
+  --color-input: oklch(61.87% 0.005 56.33);
 
   /* ---------------------------------------------------------------- */
   /* Aliases for legacy class names used across the app                */
@@ -53,9 +63,29 @@
   --background-color-default: var(--background-primary);
   --background-color-caution: var(--warning-dimmer);
   --text-color-default: var(--text-primary);
-  --text-color-tertiary: var(--text-muted);
   --text-color-caution: var(--warning-stronger);
   --border-color-caution: var(--warning-default);
+
+  /* ---------------------------------------------------------------- */
+  /* WCAG AA contrast remediation for `text-muted`                     */
+  /* ---------------------------------------------------------------- */
+  /* eneo's raw `--text-muted` token (from packages/ui themes) is      */
+  /* intended for placeholders only — its light grey value renders at  */
+  /* about 2.7:1 contrast on the page background, far below WCAG AA    */
+  /* (4.5:1 for normal text, 3:1 for non-text and large text). But the */
+  /* web app has 500+ usages of the `text-muted` utility for ordinary  */
+  /* secondary content (labels, captions, helper text, meaningful      */
+  /* icons), so the convention has clearly drifted from the design     */
+  /* system's intent.                                                  */
+  /*                                                                   */
+  /* Re-point the `text-muted` Tailwind utility at `--text-secondary`  */
+  /* (≈6:1, AA-compliant). The raw `--text-muted` CSS variable is left */
+  /* untouched so any internal eneo component that genuinely needs the */
+  /* placeholder shade can still reference it directly. Code that      */
+  /* legitimately wants the very-dim decoration colour should use the  */
+  /* `text-tertiary` utility, which is mapped to it below.             */
+  --text-color-muted: var(--text-secondary);
+  --text-color-tertiary: var(--text-muted);
 }
 
 @font-face {
