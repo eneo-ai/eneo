@@ -154,7 +154,7 @@
     <span id="tag-input-label" class="text-default block text-sm font-medium">
       {label}
       {#if required}
-        <span class="text-negative">*</span>
+        <span class="text-negative-stronger">*</span>
       {/if}
     </span>
   {/if}
@@ -169,7 +169,7 @@
            duration-150 ease-out focus-within:ring-2
            {disabled ? 'cursor-not-allowed opacity-50' : ''}
            {validationError
-      ? 'border-negative focus-within:border-negative focus-within:ring-negative/20'
+      ? 'border-negative-default focus-within:border-negative-default focus-within:ring-negative-default/20'
       : ''}"
   >
     <div class="flex flex-wrap items-center gap-1.5">
@@ -194,7 +194,7 @@
                 variant="ghost"
                 size="icon-xs"
                 onclick={() => removeTag(tag)}
-                class="hover:bg-negative/10 hover:text-negative text-muted size-4 rounded p-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+                class="hover:bg-negative-default/10 hover:text-negative-stronger text-muted size-4 rounded p-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
                 aria-label="Remove {tag}"
               >
                 <X />
@@ -236,7 +236,7 @@
   <!-- Validation error -->
   {#if validationError}
     <p
-      class="text-negative flex items-center gap-1.5 text-xs"
+      class="text-negative-stronger flex items-center gap-1.5 text-xs"
       transition:fly={{ y: -4, duration: 150 }}
     >
       <AlertCircle class="h-3.5 w-3.5 flex-shrink-0" />

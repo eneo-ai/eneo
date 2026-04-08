@@ -39,7 +39,7 @@
 
 <div class="flex flex-col gap-4">
   {#if errorMessage}
-    <div class="text-sm text-red-600">{errorMessage}</div>
+    <div class="text-negative-stronger text-sm">{errorMessage}</div>
   {/if}
   {#if loading}
     <div class="text-muted text-sm">{m.loading()}</div>

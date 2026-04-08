@@ -274,7 +274,7 @@
 </Dropdown.Root>
 
 {#if errorMessage}
-  <div class="text-xs text-red-600">{errorMessage}</div>
+  <div class="text-negative-stronger text-xs">{errorMessage}</div>
 {/if}
 
 <Dialog.Root openController={showEditDialog}>

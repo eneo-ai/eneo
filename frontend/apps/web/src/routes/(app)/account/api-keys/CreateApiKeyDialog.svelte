@@ -478,7 +478,12 @@
     knowledgePermission = level;
   }
 
-  // Permission level display config using Tailwind classes for dark mode support
+  // Permission level display config — uses eneo's semantic state tokens
+  // (warning = elevated write access, negative = destructive admin) so the
+  // colours match ApiKeyTable's permission badges and render identically
+  // across browsers (raw `purple-*`/`red-*` palettes go through Tailwind v4
+  // oklch() + color-mix() opacity which Chrome and Firefox gamut-map
+  // differently).
   function getLevelClasses(level: ResourcePermission, isSelected: boolean): string {
     if (!isSelected)
       return "border-default bg-primary text-muted hover:border-dimmer hover:bg-subtle";
@@ -488,9 +493,9 @@
       case "read":
         return "border-accent-default bg-accent-default/10 text-accent-default";
       case "write":
-        return "border-purple-500 bg-purple-500/10 text-purple-600 dark:text-purple-400";
+        return "border-warning-default bg-warning-default/10 text-warning-stronger";
       case "admin":
-        return "border-red-500 bg-red-500/10 text-red-600 dark:text-red-400";
+        return "border-negative-default bg-negative-default/10 text-negative-stronger";
     }
   }
 
@@ -501,9 +506,9 @@
       case "read":
         return "bg-accent-default/15 text-accent-default";
       case "write":
-        return "bg-purple-500/15 text-purple-600 dark:text-purple-400";
+        return "bg-warning-default/15 text-warning-stronger";
       case "admin":
-        return "bg-red-500/15 text-red-600 dark:text-red-400";
+        return "bg-negative-default/15 text-negative-stronger";
     }
   }
 
@@ -633,7 +638,9 @@
                     {isActive
                       ? 'border-accent-default bg-accent-default text-on-fill shadow-accent-default/40 step-bounce shadow-lg'
                       : ''}
-                    {isCompleted ? 'border-positive bg-positive/10 text-positive' : ''}
+                    {isCompleted
+                      ? 'border-positive-default bg-positive-default/10 text-positive-stronger'
+                      : ''}
                     {!isActive && !isCompleted ? 'border-dimmer bg-primary text-secondary' : ''}"
                     aria-hidden="true"
                   >
@@ -649,7 +656,7 @@
                     <p
                       class="text-sm font-semibold
                       {isActive ? 'text-accent-default' : ''}
-                      {isCompleted ? 'text-positive' : ''}
+                      {isCompleted ? 'text-positive-stronger' : ''}
                       {!isActive && !isCompleted ? 'text-default' : ''}"
                     >
                       {step.title}
@@ -662,7 +669,7 @@
                   <div class="mx-3 flex-1" aria-hidden="true">
                     <div
                       class="h-1 w-full rounded-full transition-all duration-300
-                      {isCompleted ? 'bg-positive' : 'bg-tertiary'}"
+                      {isCompleted ? 'bg-positive-default' : 'bg-tertiary'}"
                     ></div>
                   </div>
                 {/if}
@@ -682,7 +689,7 @@
               disabled={step.number > currentStep + 1}
               class="h-2.5 w-2.5 rounded-full transition-all duration-200
               {isActive ? 'bg-accent-default scale-125' : ''}
-              {isCompleted ? 'bg-positive' : ''}
+              {isCompleted ? 'bg-positive-default' : ''}
               {!isActive && !isCompleted ? 'bg-tertiary' : ''}
               disabled:opacity-40"
               aria-label="Step {step.number}"
@@ -736,7 +743,7 @@
                         for="api-key-name"
                         class="text-default mb-2 block text-sm font-semibold tracking-wide"
                       >
-                        {m.name()} <span class="text-negative">*</span>
+                        {m.name()} <span class="text-negative-stronger">*</span>
                       </label>
                       <Input
                         id="api-key-name"
@@ -824,21 +831,25 @@
                       </button>
 
                       <!-- Public Key -->
+                      <!-- Wraps in `label-amethyst` so the inner `*-label-*`
+                           utilities resolve to eneo's amethyst palette,
+                           matching ApiKeyTable's public-key avatar without
+                           introducing new tokens. -->
                       <button
                         type="button"
                         onclick={() => (keyType = "pk_")}
                         aria-pressed={keyType === "pk_"}
-                        class="group focus-visible:ring-accent-default relative rounded-xl border-2 p-5 text-left transition-all duration-200 hover:scale-[1.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 active:scale-[0.98]
+                        class="label-amethyst group focus-visible:ring-accent-default relative rounded-xl border-2 p-5 text-left transition-all duration-200 hover:scale-[1.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 active:scale-[0.98]
                         {keyType === 'pk_'
-                          ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30'
+                          ? 'border-label-default bg-label-default/10 ring-label-default/30 ring-2'
                           : 'border-default bg-primary hover:border-dimmer'}"
                       >
                         <div class="flex items-start gap-4">
                           <div
                             class="flex h-12 w-12 items-center justify-center rounded-lg transition-all duration-200
                             {keyType === 'pk_'
-                              ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/30'
-                              : 'bg-orange-500/15 text-orange-600 dark:text-orange-400'}"
+                              ? 'bg-label-default text-on-fill shadow-label-default/30 shadow-lg'
+                              : 'bg-label-dimmer text-label-stronger'}"
                           >
                             <Globe class="h-5 w-5" />
                           </div>
@@ -848,7 +859,7 @@
                                 >{m.api_keys_public_key()}</span
                               >
                               <span
-                                class="rounded-md bg-orange-500/15 px-2 py-0.5 font-mono text-xs font-bold text-orange-600 dark:text-orange-400"
+                                class="bg-label-dimmer text-label-stronger rounded-md px-2 py-0.5 font-mono text-xs font-bold"
                               >
                                 pk_
                               </span>
@@ -861,9 +872,9 @@
                         {#if keyType === "pk_"}
                           <div class="absolute -top-2 -right-2">
                             <div
-                              class="flex h-6 w-6 items-center justify-center rounded-full bg-orange-500 shadow-lg shadow-orange-500/40"
+                              class="bg-label-default shadow-label-default/40 flex h-6 w-6 items-center justify-center rounded-full shadow-lg"
                             >
-                              <Check class="h-4 w-4 text-white" strokeWidth={3} />
+                              <Check class="text-on-fill h-4 w-4" strokeWidth={3} />
                             </div>
                           </div>
                         {/if}
@@ -959,7 +970,7 @@
                     </div>
                     {#if ownership === "service" && scopeType === "tenant" && (permission === "write" || permission === "admin")}
                       <div
-                        class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-900/20 dark:text-amber-300"
+                        class="border-warning-default/40 bg-warning-dimmer/40 text-warning-stronger dark:bg-warning-dimmer/20 rounded-lg border p-3 text-xs"
                       >
                         <span class="inline-flex items-center gap-1.5">
                           <AlertCircle class="h-3.5 w-3.5" />
@@ -1123,29 +1134,29 @@
                                   : "border-default bg-primary hover:border-dimmer"
                                 : opt.value === "write"
                                   ? isSelected
-                                    ? "border-purple-500 bg-purple-500/10"
+                                    ? "border-warning-default bg-warning-default/10"
                                     : "border-default bg-primary hover:border-dimmer"
                                   : isSelected
-                                    ? "border-red-500 bg-red-500/10"
+                                    ? "border-negative-default bg-negative-default/10"
                                     : "border-default bg-primary hover:border-dimmer"}
                             {@const iconClasses =
                               opt.value === "read"
                                 ? isSelected
-                                  ? "bg-accent-default text-white"
+                                  ? "bg-accent-default text-on-fill"
                                   : "bg-accent-default/15 text-accent-default"
                                 : opt.value === "write"
                                   ? isSelected
-                                    ? "bg-purple-500 text-white"
-                                    : "bg-purple-500/15 text-purple-600 dark:text-purple-400"
+                                    ? "bg-warning-default text-on-fill"
+                                    : "bg-warning-default/15 text-warning-stronger"
                                   : isSelected
-                                    ? "bg-red-500 text-white"
-                                    : "bg-red-500/15 text-red-600 dark:text-red-400"}
+                                    ? "bg-negative-default text-on-fill"
+                                    : "bg-negative-default/15 text-negative-stronger"}
                             {@const checkBgClass =
                               opt.value === "read"
                                 ? "bg-accent-default shadow-accent-default/30"
                                 : opt.value === "write"
-                                  ? "bg-purple-500 shadow-purple-500/30"
-                                  : "bg-red-500 shadow-red-500/30"}
+                                  ? "bg-warning-default shadow-warning-default/30"
+                                  : "bg-negative-default shadow-negative-default/30"}
                             <button
                               type="button"
                               role="radio"
@@ -1174,7 +1185,7 @@
                                   <div
                                     class="flex h-5 w-5 items-center justify-center rounded-full shadow-lg {checkBgClass}"
                                   >
-                                    <Check class="h-3 w-3 text-white" strokeWidth={3} />
+                                    <Check class="text-on-fill h-3 w-3" strokeWidth={3} />
                                   </div>
                                 </div>
                               {/if}
@@ -1197,12 +1208,9 @@
                           {#if permission === "read"}
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15"
+                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Check
-                                  class="h-3 w-3 text-emerald-600 dark:text-emerald-400"
-                                  strokeWidth={3}
-                                />
+                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
                               </div>
                               <span class="text-default text-sm"
                                 >{m.api_keys_capability_read_resources()}</span
@@ -1210,12 +1218,9 @@
                             </div>
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/10"
+                                class="bg-negative-default/10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Ban
-                                  class="h-3 w-3 text-red-400 dark:text-red-500"
-                                  strokeWidth={2.5}
-                                />
+                                <Ban class="text-negative-stronger h-3 w-3" strokeWidth={2.5} />
                               </div>
                               <span class="text-muted text-sm"
                                 >{m.api_keys_capability_no_create()}</span
@@ -1223,12 +1228,9 @@
                             </div>
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/10"
+                                class="bg-negative-default/10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Ban
-                                  class="h-3 w-3 text-red-400 dark:text-red-500"
-                                  strokeWidth={2.5}
-                                />
+                                <Ban class="text-negative-stronger h-3 w-3" strokeWidth={2.5} />
                               </div>
                               <span class="text-muted text-sm"
                                 >{m.api_keys_capability_no_space_settings()}</span
@@ -1237,12 +1239,9 @@
                           {:else if permission === "write"}
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15"
+                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Check
-                                  class="h-3 w-3 text-emerald-600 dark:text-emerald-400"
-                                  strokeWidth={3}
-                                />
+                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
                               </div>
                               <span class="text-default text-sm"
                                 >{m.api_keys_capability_read_resources()}</span
@@ -1250,12 +1249,9 @@
                             </div>
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15"
+                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Check
-                                  class="h-3 w-3 text-emerald-600 dark:text-emerald-400"
-                                  strokeWidth={3}
-                                />
+                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
                               </div>
                               <span class="text-default text-sm"
                                 >{m.api_keys_capability_write_resources()}</span
@@ -1263,12 +1259,9 @@
                             </div>
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/10"
+                                class="bg-negative-default/10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Ban
-                                  class="h-3 w-3 text-red-400 dark:text-red-500"
-                                  strokeWidth={2.5}
-                                />
+                                <Ban class="text-negative-stronger h-3 w-3" strokeWidth={2.5} />
                               </div>
                               <span class="text-muted text-sm"
                                 >{m.api_keys_capability_no_space_settings()}</span
@@ -1277,12 +1270,9 @@
                           {:else if permission === "admin"}
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15"
+                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Check
-                                  class="h-3 w-3 text-emerald-600 dark:text-emerald-400"
-                                  strokeWidth={3}
-                                />
+                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
                               </div>
                               <span class="text-default text-sm"
                                 >{m.api_keys_capability_read_resources()}</span
@@ -1290,12 +1280,9 @@
                             </div>
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15"
+                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Check
-                                  class="h-3 w-3 text-emerald-600 dark:text-emerald-400"
-                                  strokeWidth={3}
-                                />
+                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
                               </div>
                               <span class="text-default text-sm"
                                 >{m.api_keys_capability_write_resources()}</span
@@ -1303,12 +1290,9 @@
                             </div>
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15"
+                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                               >
-                                <Check
-                                  class="h-3 w-3 text-emerald-600 dark:text-emerald-400"
-                                  strokeWidth={3}
-                                />
+                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
                               </div>
                               <span class="text-default text-sm"
                                 >{m.api_keys_capability_admin_space()}</span
@@ -1321,13 +1305,13 @@
                               <div
                                 class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full {ownership ===
                                 'service'
-                                  ? 'bg-cyan-500/15'
-                                  : 'bg-amber-500/15'}"
+                                  ? 'bg-accent-default/15'
+                                  : 'bg-tertiary'}"
                               >
                                 <Link2
                                   class="h-3 w-3 {ownership === 'service'
-                                    ? 'text-cyan-600 dark:text-cyan-400'
-                                    : 'text-amber-600 dark:text-amber-400'}"
+                                    ? 'text-accent-default'
+                                    : 'text-muted'}"
                                   strokeWidth={2.5}
                                 />
                               </div>
@@ -1726,11 +1710,13 @@
             in:fly={{ y: 12, duration: 350, easing: cubicOut }}
           >
             <div class="relative">
-              <div class="bg-positive/8 secret-ring-pulse absolute -inset-2 rounded-full"></div>
               <div
-                class="bg-positive/15 ring-positive/10 relative flex h-14 w-14 items-center justify-center rounded-full ring-4"
+                class="bg-positive-default/10 secret-ring-pulse absolute -inset-2 rounded-full"
+              ></div>
+              <div
+                class="bg-positive-default/15 ring-positive-default/10 relative flex h-14 w-14 items-center justify-center rounded-full ring-4"
               >
-                <CheckCircle2 class="text-positive h-7 w-7" strokeWidth={2.5} />
+                <CheckCircle2 class="text-positive-stronger h-7 w-7" strokeWidth={2.5} />
               </div>
             </div>
 
@@ -1779,7 +1765,7 @@
                 aria-label={m.api_keys_copy_to_clipboard()}
               >
                 {#if secretCopied}
-                  <Check class="text-positive" />
+                  <Check class="text-positive-stronger" />
                   {m.api_keys_copied()}
                 {:else}
                   <Copy />

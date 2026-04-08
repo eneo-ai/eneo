@@ -41,10 +41,10 @@
     <Dialog.Header>
       <Dialog.Title class="flex items-center gap-3">
         <span
-          class="bg-positive/10 dark:bg-positive/15 flex h-10 w-10 items-center justify-center rounded-xl"
+          class="bg-positive-default/10 dark:bg-positive-default/15 flex h-10 w-10 items-center justify-center rounded-xl"
           aria-hidden="true"
         >
-          <Key class="text-positive h-5 w-5" />
+          <Key class="text-positive-stronger h-5 w-5" />
         </span>
         <span class="text-default text-base font-semibold">
           {source === "rotated" ? m.api_keys_rotated_title() : m.api_keys_created_title()}
@@ -79,7 +79,7 @@
             aria-label={m.api_keys_copy_to_clipboard()}
           >
             {#if copied}
-              <Check class="text-positive" />
+              <Check class="text-positive-stronger" />
               {m.api_keys_copied()}
             {:else}
               <Copy />

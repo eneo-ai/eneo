@@ -142,7 +142,7 @@
   <span id="expiration-label" class="text-default block text-sm font-medium">
     {m.api_keys_expiration()}
     {#if requireExpiration}
-      <span class="text-negative">*</span>
+      <span class="text-negative-stronger">*</span>
     {/if}
   </span>
 

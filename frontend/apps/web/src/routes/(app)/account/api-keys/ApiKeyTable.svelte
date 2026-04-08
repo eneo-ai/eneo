@@ -271,23 +271,28 @@
   }
 
   function getStateStyle(state: string) {
+    // Use eneo's semantic state tokens. The raw `emerald/amber/red/gray-*`
+    // utilities resolve to Tailwind v4 oklch() values that Chrome and
+    // Firefox gamut-map differently; the `*-default` tokens below are
+    // single CSS variable lookups that render identically across browsers
+    // and switch automatically between light and dark themes.
     switch (state) {
       case "active":
         return {
           label: m.api_keys_status_active(),
-          dotClasses: "bg-emerald-500 dark:bg-emerald-400"
+          dotClasses: "bg-positive-default"
         };
       case "suspended":
         return {
           label: m.api_keys_status_suspended(),
-          dotClasses: "bg-amber-500 dark:bg-amber-400"
+          dotClasses: "bg-warning-default"
         };
       case "revoked":
-        return { label: m.api_keys_status_revoked(), dotClasses: "bg-red-500 dark:bg-red-400" };
+        return { label: m.api_keys_status_revoked(), dotClasses: "bg-negative-default" };
       case "expired":
-        return { label: m.api_keys_status_expired(), dotClasses: "bg-gray-400 dark:bg-gray-500" };
+        return { label: m.api_keys_status_expired(), dotClasses: "bg-tertiary" };
       default:
-        return { label: m.api_keys_unknown(), dotClasses: "bg-gray-400 dark:bg-gray-500" };
+        return { label: m.api_keys_unknown(), dotClasses: "bg-tertiary" };
     }
   }
 
@@ -331,17 +336,27 @@
   }
 
   function getKeyTypeStyle(keyType: string) {
-    // Using theme-aware classes that work in both light and dark mode
+    // Route through eneo's `label-*` token scopes instead of raw Tailwind
+    // palette utilities. The raw `amber-*` / `indigo-*` classes resolve to
+    // Tailwind v4 oklch() values combined with `/30` color-mix() opacity,
+    // which Chrome (Skia) and Firefox (WebRender) gamut-map slightly
+    // differently — producing visibly different shades per browser. The
+    // label scope sets `--color-label-stronger/dimmer` to a flat CSS
+    // variable, so `bg-label-dimmer` / `text-label-stronger` render as a
+    // single resolved color in both browsers. Theme-aware via the .label-*
+    // classes defined in packages/ui/src/styles/themes/{light,dark}.css.
     return keyType === "pk_"
       ? {
           label: m.api_keys_public_key(),
-          iconClass: "text-amber-600 dark:text-amber-400",
-          bgClass: "bg-amber-50 dark:bg-amber-900/30"
+          // Amethyst (purple) — distinct from the warning-yellow `write`
+          // permission badge that may appear on the same row.
+          scopeClass: "label-amethyst"
         }
       : {
           label: m.api_keys_secret_key(),
-          iconClass: "text-indigo-600 dark:text-indigo-400",
-          bgClass: "bg-indigo-50 dark:bg-indigo-900/30"
+          // Blue (info) — matches the original indigo intent and aligns
+          // with eneo's brand accent.
+          scopeClass: "label-blue"
         };
   }
 </script>
@@ -424,9 +439,9 @@
             >
               <!-- Key type icon avatar -->
               <div
-                class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl {keyTypeStyle.bgClass}"
+                class="bg-label-dimmer flex h-11 w-11 shrink-0 items-center justify-center rounded-xl {keyTypeStyle.scopeClass}"
               >
-                <KeyIcon class="h-5 w-5 {keyTypeStyle.iconClass}" />
+                <KeyIcon class="text-label-stronger h-5 w-5" />
               </div>
 
               <!-- Key info -->
@@ -587,7 +602,7 @@
                     {#if usageLoadingByKey[key.id]}
                       <div class="text-muted text-sm">{m.api_keys_admin_usage_loading()}</div>
                     {:else if usageErrorByKey[key.id]}
-                      <div class="text-negative text-sm">{usageErrorByKey[key.id]}</div>
+                      <div class="text-negative-stronger text-sm">{usageErrorByKey[key.id]}</div>
                     {:else}
                       <div class="grid gap-3 md:grid-cols-4">
                         <div class="bg-primary/50 border-default rounded-lg border p-3">
@@ -605,7 +620,7 @@
                           </p>
                           <p
                             class="{(usage?.summary?.used_events ?? 0) > 0
-                              ? 'text-emerald-600 dark:text-emerald-400'
+                              ? 'text-positive-stronger'
                               : 'text-default'} mt-1 text-lg font-semibold tabular-nums"
                             title={fullNumberFormatter.format(usage?.summary?.used_events ?? 0)}
                           >
@@ -616,7 +631,7 @@
                           <p class="text-muted text-xs">{m.api_keys_admin_usage_failed_events()}</p>
                           <p
                             class="{(usage?.summary?.auth_failed_events ?? 0) > 0
-                              ? 'text-red-600 dark:text-red-400'
+                              ? 'text-negative-stronger'
                               : 'text-default'} mt-1 text-lg font-semibold tabular-nums"
                             title={fullNumberFormatter.format(
                               usage?.summary?.auth_failed_events ?? 0
@@ -637,7 +652,7 @@
 
                       {#if usage?.summary?.sampled_used_events}
                         <div
-                          class="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-800 dark:border-yellow-900 dark:bg-yellow-900/20 dark:text-yellow-300"
+                          class="border-warning-default/40 bg-warning-dimmer/40 text-warning-stronger dark:bg-warning-dimmer/20 rounded-lg border p-3 text-xs"
                         >
                           <span class="inline-flex items-center gap-1.5">
                             <AlertTriangle class="h-3.5 w-3.5" />
@@ -898,27 +913,31 @@
                     {@const revokedReasonLabel = getReasonCodeLabel(key.revoked_reason_code)}
                     <div class="border-dimmer mt-5 border-t pt-4">
                       <div
-                        class="border-negative/40 bg-negative/10 dark:border-negative/30 dark:bg-negative/5 rounded-lg
+                        class="border-negative-default/40 bg-negative-default/10 dark:border-negative-default/30 dark:bg-negative-default/5 rounded-lg
                            border p-4"
                       >
                         <div class="flex items-start gap-3">
                           <div
-                            class="bg-negative/20 flex h-8 w-8 items-center justify-center rounded-lg"
+                            class="bg-negative-default/20 flex h-8 w-8 items-center justify-center rounded-lg"
                           >
-                            <Lock class="text-negative h-4 w-4" />
+                            <Lock class="text-negative-stronger h-4 w-4" />
                           </div>
                           <div class="min-w-0 flex-1">
-                            <p class="text-negative text-sm font-semibold">
+                            <p class="text-negative-stronger text-sm font-semibold">
                               {m.api_keys_key_revoked()}
                             </p>
-                            <p class="text-negative/80 mt-1 text-sm">
+                            <p class="text-negative-stronger/80 mt-1 text-sm">
                               {formatter.format(new Date(key.revoked_at))}
                             </p>
                             {#if revokedReasonLabel}
-                              <p class="text-negative/70 mt-2 text-sm">{revokedReasonLabel}</p>
+                              <p class="text-negative-stronger/70 mt-2 text-sm">
+                                {revokedReasonLabel}
+                              </p>
                             {/if}
                             {#if key.revoked_reason_text}
-                              <p class="text-negative/60 mt-1 text-xs">{key.revoked_reason_text}</p>
+                              <p class="text-negative-stronger/60 mt-1 text-xs">
+                                {key.revoked_reason_text}
+                              </p>
                             {/if}
                           </div>
                         </div>

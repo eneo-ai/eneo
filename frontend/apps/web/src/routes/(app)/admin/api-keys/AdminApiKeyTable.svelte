@@ -259,76 +259,100 @@
     return formatter.format(d);
   }
 
-  // Scope display helpers
+  // Scope/state/permission/key-type configs use eneo's semantic tokens.
+  // Raw `blue/green/purple/orange/red/yellow-*` palette utilities resolve
+  // to Tailwind v4 oklch() values that Chrome and Firefox gamut-map
+  // differently; the `*-default`/`*-stronger`/`*-dimmer` tokens below are
+  // single CSS variable lookups that render identically across browsers
+  // and switch automatically between light and dark themes. Scope badges
+  // use neutral outline styling (matching ApiKeyTable) so the icon — not
+  // colour — conveys the scope type, freeing the colour palette for
+  // status / permission semantics that benefit more from saturation.
   const scopeConfig = $derived<
     Record<string, { label: string; icon: typeof Building2; color: string }>
   >({
     tenant: {
       label: m.api_keys_admin_scope_tenant(),
       icon: Building2,
-      color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+      color: "border border-default text-muted"
     },
     space: {
       label: m.api_keys_admin_scope_space(),
       icon: Building2,
-      color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
+      color: "border border-default text-muted"
     },
     assistant: {
       label: m.api_keys_admin_scope_assistant(),
       icon: MessageSquare,
-      color: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
+      color: "border border-default text-muted"
     },
     app: {
       label: m.api_keys_admin_scope_app(),
       icon: AppWindow,
-      color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300"
+      color: "border border-default text-muted"
     }
   });
 
   const stateConfig = $derived<
     Record<string, { label: string; color: Label.LabelColor; dotColor: string }>
   >({
-    active: { label: m.api_keys_admin_state_active(), color: "green", dotColor: "bg-green-500" },
+    active: {
+      label: m.api_keys_admin_state_active(),
+      color: "green",
+      dotColor: "bg-positive-default"
+    },
     suspended: {
       label: m.api_keys_admin_state_suspended(),
       color: "yellow",
-      dotColor: "bg-yellow-500"
+      dotColor: "bg-warning-default"
     },
-    revoked: { label: m.api_keys_admin_state_revoked(), color: "gray", dotColor: "bg-red-500" },
-    expired: { label: m.api_keys_admin_state_expired(), color: "gray", dotColor: "bg-gray-500" }
+    revoked: {
+      label: m.api_keys_admin_state_revoked(),
+      color: "gray",
+      dotColor: "bg-negative-default"
+    },
+    expired: {
+      label: m.api_keys_admin_state_expired(),
+      color: "gray",
+      dotColor: "bg-tertiary"
+    }
   });
 
   const permissionConfig: Record<string, { label: string; color: string; icon: typeof Eye }> = {
     read: {
       label: m.api_keys_permission_read(),
-      color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+      color: "bg-secondary/60 text-muted border border-default",
       icon: Eye
     },
     write: {
       label: m.api_keys_permission_write(),
-      color: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300",
+      color:
+        "text-warning-stronger border border-warning-default/40 bg-warning-dimmer/40 dark:bg-warning-dimmer/20",
       icon: Pencil
     },
     admin: {
       label: m.api_keys_permission_admin(),
-      color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300",
+      color: "text-negative-stronger border border-negative-default/40 bg-negative-default/10",
       icon: ShieldCheck
     }
   };
 
+  // Key-type avatar uses eneo's `label-*` scope system so colours match
+  // ApiKeyTable: amethyst for `pk_`, blue for `sk_`. The parent scope class
+  // sets `--color-label-stronger/dimmer`, which the inner `bg-label-dimmer`
+  // / `text-label-stronger` utilities resolve against — flat CSS variable
+  // lookups, no color-mix() opacity expansion.
   function getKeyTypeConfig(keyType: string) {
     return keyType === "pk_"
       ? {
           label: m.api_keys_admin_key_type_public_label(),
           icon: Globe,
-          color: "text-orange-600 dark:text-orange-400",
-          bgColor: "bg-orange-100 dark:bg-orange-900/30"
+          scopeClass: "label-amethyst"
         }
       : {
           label: m.api_keys_admin_key_type_secret_label(),
           icon: Lock,
-          color: "text-blue-600 dark:text-blue-400",
-          bgColor: "bg-blue-100 dark:bg-blue-900/30"
+          scopeClass: "label-blue"
         };
   }
 
@@ -403,9 +427,9 @@
           <div class="flex items-center gap-4">
             <!-- Key type icon -->
             <div
-              class="flex h-11 w-11 items-center justify-center rounded-xl {keyTypeConf.bgColor}"
+              class="bg-label-dimmer flex h-11 w-11 items-center justify-center rounded-xl {keyTypeConf.scopeClass}"
             >
-              <KeyTypeIcon class="h-5 w-5 {keyTypeConf.color}" />
+              <KeyTypeIcon class="text-label-stronger h-5 w-5" />
             </div>
 
             <!-- Key info -->
@@ -495,17 +519,17 @@
                   class="border-default/50 flex items-center gap-1.5 border-l px-4 text-right first:border-l-0 first:pl-0"
                 >
                   {#if expiryLevel === "urgent" || expiryLevel === "expired"}
-                    <span class="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-red-500"></span>
+                    <span class="bg-negative-default h-1.5 w-1.5 flex-shrink-0 rounded-full"></span>
                   {:else if expiryLevel === "warning"}
-                    <span class="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-yellow-500"></span>
+                    <span class="bg-warning-default h-1.5 w-1.5 flex-shrink-0 rounded-full"></span>
                   {/if}
                   <div>
                     <p class="text-muted text-xs">{m.api_keys_expires()}</p>
                     <p
                       class="font-medium {expiryLevel === 'expired' || expiryLevel === 'urgent'
-                        ? 'text-red-600 dark:text-red-400'
+                        ? 'text-negative-stronger'
                         : expiryLevel === 'warning' || expiryLevel === 'notice'
-                          ? 'text-yellow-600 dark:text-yellow-400'
+                          ? 'text-warning-stronger'
                           : 'text-default'}"
                     >
                       {daysUntil < 0
@@ -585,7 +609,7 @@
                 {#if usageLoadingByKey[key.id]}
                   <div class="text-muted text-sm">{m.api_keys_admin_usage_loading()}</div>
                 {:else if usageErrorByKey[key.id]}
-                  <div class="text-sm text-red-600">{usageErrorByKey[key.id]}</div>
+                  <div class="text-negative-stronger text-sm">{usageErrorByKey[key.id]}</div>
                 {:else}
                   <div class="grid gap-3 md:grid-cols-4">
                     <div class="bg-primary border-default rounded-lg border p-3">
@@ -627,7 +651,7 @@
 
                   {#if usage?.summary?.sampled_used_events}
                     <div
-                      class="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-800 dark:border-yellow-900 dark:bg-yellow-900/20 dark:text-yellow-300"
+                      class="border-warning-default/40 bg-warning-dimmer/40 text-warning-stronger dark:bg-warning-dimmer/20 rounded-lg border p-3 text-xs"
                     >
                       <span class="inline-flex items-center gap-1.5">
                         <AlertTriangle class="h-3.5 w-3.5" />
@@ -664,8 +688,8 @@
                                   <span
                                     class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium {event.action ===
                                     'api_key_auth_failed'
-                                      ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                                      : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'}"
+                                      ? 'bg-negative-default/15 text-negative-stronger'
+                                      : 'bg-positive-default/15 text-positive-stronger'}"
                                   >
                                     {event.action}
                                   </span>

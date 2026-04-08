@@ -977,12 +977,12 @@
                     {:else}
                       <span
                         class="h-2 w-2 rounded-full
-                             {qf.color === 'green' ? 'bg-green-500' : ''}
-                             {qf.color === 'yellow' ? 'bg-yellow-500' : ''}
-                             {qf.color === 'gray' ? 'bg-gray-500' : ''}
-                             {qf.color === 'red' ? 'bg-red-500' : ''}
-                             {qf.color === 'blue' ? 'bg-blue-500' : ''}
-                             {qf.color === 'orange' ? 'bg-orange-500' : ''}"
+                             {qf.color === 'green' ? 'bg-positive-default' : ''}
+                             {qf.color === 'yellow' ? 'bg-warning-default' : ''}
+                             {qf.color === 'gray' ? 'bg-tertiary' : ''}
+                             {qf.color === 'red' ? 'bg-negative-default' : ''}
+                             {qf.color === 'blue' ? 'bg-accent-default' : ''}
+                             {qf.color === 'orange' ? 'bg-warning-default' : ''}"
                       ></span>
                     {/if}
                     {qf.label}
@@ -1071,11 +1071,11 @@
         <!-- Error Message -->
         {#if errorMessage}
           <div
-            class="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-5 py-4 dark:border-red-900 dark:bg-red-950/50"
+            class="border-negative-default/40 bg-negative-default/10 flex items-center gap-3 rounded-xl border px-5 py-4"
             transition:fly={{ y: -8, duration: 150 }}
           >
-            <AlertCircle class="h-5 w-5 flex-shrink-0 text-red-600 dark:text-red-400" />
-            <p class="text-sm text-red-700 dark:text-red-300">{errorMessage}</p>
+            <AlertCircle class="text-negative-stronger h-5 w-5 flex-shrink-0" />
+            <p class="text-negative-stronger text-sm">{errorMessage}</p>
           </div>
         {/if}
 
