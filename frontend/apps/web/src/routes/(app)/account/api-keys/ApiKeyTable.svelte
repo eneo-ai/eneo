@@ -19,7 +19,9 @@
     Shield,
     Lock,
     Bell,
-    AlertTriangle
+    AlertTriangle,
+    Eye,
+    Pencil
   } from "lucide-svelte";
   import { slide } from "svelte/transition";
   import ApiKeyActions from "./ApiKeyActions.svelte";
@@ -33,6 +35,8 @@
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
+  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
 
@@ -234,31 +238,20 @@
     return formatter.format(d);
   }
 
-  // Scope display helpers with theme-aware Tailwind classes
-  function getScopeStyle(scopeType: string) {
+  // Scope display helper — returns just a label. Visual identity comes from
+  // the scope icon (getScopeIcon) inside an outline Badge, no saturated background.
+  function getScopeStyle(scopeType: string): { label: string } {
     switch (scopeType) {
       case "tenant":
-        return {
-          label: m.api_keys_scope_tenant(),
-          classes: "bg-gray-700 dark:bg-gray-600 text-white"
-        };
+        return { label: m.api_keys_scope_tenant() };
       case "space":
-        return {
-          label: m.api_keys_scope_space(),
-          classes: "bg-emerald-600 dark:bg-emerald-500 text-white"
-        };
+        return { label: m.api_keys_scope_space() };
       case "assistant":
-        return {
-          label: m.api_keys_scope_assistant(),
-          classes: "bg-violet-600 dark:bg-violet-500 text-white"
-        };
+        return { label: m.api_keys_scope_assistant() };
       case "app":
-        return {
-          label: m.api_keys_scope_app(),
-          classes: "bg-orange-600 dark:bg-orange-500 text-white"
-        };
+        return { label: m.api_keys_scope_app() };
       default:
-        return { label: m.api_keys_unknown(), classes: "bg-gray-500 dark:bg-gray-400 text-white" };
+        return { label: m.api_keys_unknown() };
     }
   }
 
@@ -298,25 +291,42 @@
     }
   }
 
-  function getPermissionStyle(permission: string) {
+  // Permission level display helper — uses semantic eneo tokens via Badge
+  // overrides instead of saturated text-on-color backgrounds (which failed
+  // WCAG AA at 3.4:1 for purple-500/white). The accompanying icon makes the
+  // permission level visually distinguishable without relying on color alone.
+  type PermissionStyle = {
+    label: string;
+    icon: typeof Eye;
+    badgeClass: string;
+  };
+  function getPermissionStyle(permission: string): PermissionStyle {
     switch (permission) {
       case "read":
         return {
           label: m.api_keys_permission_read(),
-          classes: "bg-sky-600 dark:bg-sky-500 text-white"
+          icon: Eye,
+          badgeClass: "border-border text-muted bg-secondary/60"
         };
       case "write":
         return {
           label: m.api_keys_permission_write(),
-          classes: "bg-purple-500 dark:bg-purple-400 text-white"
+          icon: Pencil,
+          badgeClass:
+            "text-warning-stronger border-warning-default/40 bg-warning-dimmer/40 dark:bg-warning-dimmer/20"
         };
       case "admin":
         return {
           label: m.api_keys_permission_admin(),
-          classes: "bg-rose-600 dark:bg-rose-500 text-white"
+          icon: Shield,
+          badgeClass: "text-destructive border-destructive/40 bg-destructive/10"
         };
       default:
-        return { label: permission, classes: "bg-gray-500 dark:bg-gray-400 text-white" };
+        return {
+          label: permission,
+          icon: Eye,
+          badgeClass: "border-border text-muted bg-secondary/60"
+        };
     }
   }
 
@@ -387,542 +397,540 @@
       {@const effectiveState = getEffectiveState(key)}
       {@const state = getStateStyle(effectiveState)}
       {@const permission = getPermissionStyle(key.permission)}
+      {@const PermissionIcon = permission.icon}
       {@const keyTypeStyle = getKeyTypeStyle(key.key_type)}
       {@const KeyIcon = key.key_type === "pk_" ? Globe : Lock}
       {@const daysUntil = getDaysUntilExpiration(key.expires_at)}
+      {@const isInactive = effectiveState === "revoked" || effectiveState === "expired"}
 
-      <div
-        class="group border-default bg-primary hover:border-dimmer overflow-hidden rounded-xl border transition-all
-               duration-200 hover:-translate-y-px hover:shadow-md
-               {isExpanded
-          ? 'ring-accent-default/20 border-accent-default/30 shadow-sm ring-2'
-          : ''}
-               {recentlyExpandedId === key.id ? 'animate-expand-pulse' : ''}"
+      <Collapsible.Root
+        open={isExpanded}
+        onOpenChange={(open) => {
+          if (open !== isExpanded) toggleExpanded(key.id);
+        }}
       >
-        <!-- Main row -->
-        <button
-          type="button"
-          onclick={() => toggleExpanded(key.id)}
-          aria-expanded={isExpanded}
-          aria-controls="details-{key.id}"
-          class="focus-visible:ring-accent-default/50 w-full rounded-t-xl px-5 py-4 text-left focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none
-                 {effectiveState === 'revoked' || effectiveState === 'expired' ? 'opacity-60' : ''}"
+        <Card.Root
+          class="gap-0 py-0 transition-all duration-200 hover:-translate-y-px hover:shadow-md
+                 {isExpanded
+            ? 'ring-accent-default/40 shadow-sm ring-2'
+            : 'hover:ring-foreground/20'}
+                 {recentlyExpandedId === key.id ? 'animate-expand-pulse' : ''}"
         >
-          <div class="flex items-center gap-4">
-            <!-- Key type icon -->
-            <div
-              class="flex h-11 w-11 items-center justify-center rounded-xl {keyTypeStyle.bgClass}"
+          <!-- Header row: Trigger and ApiKeyActions are siblings (no nested buttons) -->
+          <div class="flex items-stretch">
+            <Collapsible.Trigger
+              class="hover:bg-secondary/30 focus-visible:ring-accent-default/50 group/trigger flex flex-1 items-center gap-4 px-5 py-4 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset
+                     {isInactive ? 'opacity-60' : ''}"
             >
-              <KeyIcon class="h-5 w-5 {keyTypeStyle.iconClass}" />
-            </div>
-
-            <!-- Key info -->
-            <div class="min-w-0 flex-1">
-              <div class="flex flex-wrap items-center gap-3">
-                <span class="flex items-center gap-1.5">
-                  <h4 class="text-default truncate font-semibold">{key.name}</h4>
-                  {#if followedKeyIds.has(key.id)}
-                    <Bell class="text-accent-default h-3.5 w-3.5 shrink-0" />
-                  {/if}
-                </span>
-
-                <!-- Status dot + label with accessible tooltip -->
-                <Tooltip.Provider delayDuration={150}>
-                  <Tooltip.Root>
-                    <Tooltip.Trigger>
-                      {#snippet child({ props })}
-                        <span {...props} class="flex items-center gap-1.5">
-                          <span
-                            class="h-2.5 w-2.5 rounded-full {state.dotClasses}"
-                            aria-hidden="true"
-                          ></span>
-                          <span class="text-muted text-xs">{state.label}</span>
-                          <span class="sr-only">{getStatusTooltip(effectiveState)}</span>
-                        </span>
-                      {/snippet}
-                    </Tooltip.Trigger>
-                    <Tooltip.Content>
-                      {getStatusTooltip(effectiveState)}
-                    </Tooltip.Content>
-                  </Tooltip.Root>
-                </Tooltip.Provider>
+              <!-- Key type icon avatar -->
+              <div
+                class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl {keyTypeStyle.bgClass}"
+              >
+                <KeyIcon class="h-5 w-5 {keyTypeStyle.iconClass}" />
               </div>
 
-              <!-- Key preview with copy hint -->
-              <div class="mt-1.5 flex flex-wrap items-center gap-2.5 text-sm">
-                <code
-                  class="text-muted bg-subtle inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-xs"
-                >
-                  {key.key_type}<span class="opacity-30">····</span>{key.key_suffix}
-                </code>
-
-                <!-- Scope badge - theme-aware with Tailwind classes -->
-                <span
-                  class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold ring-1 ring-white/20 ring-inset {scope.classes}"
-                >
-                  <ScopeIcon class="h-3 w-3" />
-                  {scope.label}
-                  {#if key.scope_id}
-                    <span class="opacity-80">· {key.scope_id.slice(0, 8)}</span>
-                  {/if}
-                </span>
-
-                <!-- Permission badge - theme-aware with shadow for depth -->
-                <span
-                  class="rounded-md px-2.5 py-1 text-xs font-bold tracking-wide uppercase {permission.classes}"
-                >
-                  {permission.label}
-                </span>
-
-                <!-- Service key badge -->
-                {#if key.ownership === "service"}
-                  <span
-                    class="inline-flex items-center gap-1 rounded-md bg-cyan-600 px-2.5 py-1 text-xs font-semibold text-white ring-1 ring-white/20 ring-inset dark:bg-cyan-500"
-                  >
-                    <Server class="h-3 w-3" />
-                    {m.api_keys_ownership_service_badge()}
+              <!-- Key info -->
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span class="flex items-center gap-1.5">
+                    <h4 class="text-default truncate font-semibold">{key.name}</h4>
+                    {#if followedKeyIds.has(key.id)}
+                      <Bell class="text-accent-default h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    {/if}
                   </span>
-                {/if}
-              </div>
-            </div>
 
-            <!-- Right side info -->
-            <div
-              class="hidden items-center gap-6 text-sm sm:flex"
-              style="font-variant-numeric: tabular-nums"
-            >
-              <!-- Expiration -->
-              {#if daysUntil !== null}
-                {@const expiryLevel = getExpiryLevel(daysUntil)}
-                <div class="flex items-center gap-1.5 text-right">
-                  {#if expiryLevel === "urgent" || expiryLevel === "expired"}
-                    <span class="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-red-500"></span>
-                  {:else if expiryLevel === "warning"}
-                    <span class="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-yellow-500"></span>
-                  {/if}
-                  <div>
-                    <p class="text-muted text-xs">{m.api_keys_expires()}</p>
-                    <p
-                      class="font-medium {expiryLevel === 'expired' || expiryLevel === 'urgent'
-                        ? 'text-red-600 dark:text-red-400'
-                        : expiryLevel === 'warning' || expiryLevel === 'notice'
-                          ? 'text-yellow-600 dark:text-yellow-400'
-                          : 'text-default'}"
-                    >
-                      {daysUntil < 0
-                        ? m.api_keys_status_expired()
-                        : daysUntil === 0
-                          ? m.api_keys_today()
-                          : daysUntil === 1
-                            ? m.api_keys_tomorrow()
-                            : m.api_keys_days({ count: daysUntil })}
-                    </p>
-                  </div>
+                  <!-- Status dot + label with accessible tooltip -->
+                  <Tooltip.Provider delayDuration={150}>
+                    <Tooltip.Root>
+                      <Tooltip.Trigger>
+                        {#snippet child({ props })}
+                          <span {...props} class="flex items-center gap-1.5">
+                            <span
+                              class="h-2.5 w-2.5 rounded-full {state.dotClasses}"
+                              aria-hidden="true"
+                            ></span>
+                            <span class="text-muted text-xs">{state.label}</span>
+                            <span class="sr-only">{getStatusTooltip(effectiveState)}</span>
+                          </span>
+                        {/snippet}
+                      </Tooltip.Trigger>
+                      <Tooltip.Content>
+                        {getStatusTooltip(effectiveState)}
+                      </Tooltip.Content>
+                    </Tooltip.Root>
+                  </Tooltip.Provider>
                 </div>
-              {/if}
 
-              <!-- Last used -->
-              <div class="text-right">
-                <p class="text-muted text-xs">{m.api_keys_last_used()}</p>
-                <p class="text-default font-medium">{formatRelativeDate(key.last_used_at)}</p>
+                <!-- Key preview + scope/permission/service badges -->
+                <div class="mt-1.5 flex flex-wrap items-center gap-2 text-sm">
+                  <code
+                    class="text-muted bg-secondary inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-xs"
+                  >
+                    {key.key_type}<span class="opacity-30">····</span>{key.key_suffix}
+                  </code>
+
+                  <!-- Scope badge: outline + icon, no saturated background -->
+                  <Badge variant="outline" class="text-muted h-auto gap-1.5 px-2 py-0.5">
+                    <ScopeIcon class="h-3 w-3" />
+                    {scope.label}
+                    {#if key.scope_id}
+                      <span class="text-muted/70" aria-hidden="true">·</span>
+                      <span class="font-mono">{key.scope_id.slice(0, 8)}</span>
+                    {/if}
+                  </Badge>
+
+                  <!-- Permission badge: semantic color tint per level (read=neutral, write=warning, admin=danger) -->
+                  <Badge
+                    variant="outline"
+                    class="h-auto gap-1.5 px-2 py-0.5 font-semibold {permission.badgeClass}"
+                  >
+                    <PermissionIcon class="h-3 w-3" />
+                    {permission.label}
+                  </Badge>
+
+                  <!-- Service key badge -->
+                  {#if key.ownership === "service"}
+                    <Badge variant="outline" class="text-muted h-auto gap-1.5 px-2 py-0.5">
+                      <Server class="h-3 w-3" />
+                      {m.api_keys_ownership_service_badge()}
+                    </Badge>
+                  {/if}
+                </div>
               </div>
-            </div>
 
-            <!-- Actions and expand -->
-            <div class="flex items-center gap-2">
-              <!-- Stop propagation so action menu doesn't toggle the row -->
+              <!-- Right side info (hidden on mobile) -->
               <div
-                role="presentation"
-                onclick={(e) => e.stopPropagation()}
-                onkeydown={(e) => e.stopPropagation()}
+                class="hidden items-center gap-6 text-sm sm:flex"
+                style="font-variant-numeric: tabular-nums"
               >
-                <ApiKeyActions
-                  apiKey={key}
-                  {onChanged}
-                  {onSecret}
-                  isFollowed={followedKeyIds?.has(key.id) ?? false}
-                  isFollowedViaScope={scopeFollowed && !(followedKeyIds?.has(key.id) ?? false)}
-                  {onFollowChanged}
-                />
+                <!-- Expiration -->
+                {#if daysUntil !== null}
+                  {@const expiryLevel = getExpiryLevel(daysUntil)}
+                  <div class="flex items-center gap-1.5 text-right">
+                    {#if expiryLevel === "urgent" || expiryLevel === "expired"}
+                      <span
+                        class="bg-destructive h-1.5 w-1.5 flex-shrink-0 rounded-full"
+                        aria-hidden="true"
+                      ></span>
+                    {:else if expiryLevel === "warning"}
+                      <span
+                        class="bg-warning-default h-1.5 w-1.5 flex-shrink-0 rounded-full"
+                        aria-hidden="true"
+                      ></span>
+                    {/if}
+                    <div>
+                      <p class="text-muted text-xs">{m.api_keys_expires()}</p>
+                      <p
+                        class="font-medium {expiryLevel === 'expired' || expiryLevel === 'urgent'
+                          ? 'text-destructive'
+                          : expiryLevel === 'warning' || expiryLevel === 'notice'
+                            ? 'text-warning-stronger'
+                            : 'text-default'}"
+                      >
+                        {daysUntil < 0
+                          ? m.api_keys_status_expired()
+                          : daysUntil === 0
+                            ? m.api_keys_today()
+                            : daysUntil === 1
+                              ? m.api_keys_tomorrow()
+                              : m.api_keys_days({ count: daysUntil })}
+                      </p>
+                    </div>
+                  </div>
+                {/if}
+
+                <!-- Last used -->
+                <div class="text-right">
+                  <p class="text-muted text-xs">{m.api_keys_last_used()}</p>
+                  <p class="text-default font-medium">{formatRelativeDate(key.last_used_at)}</p>
+                </div>
               </div>
 
-              <div
-                class="text-muted bg-subtle/40 group-hover:bg-subtle flex h-8 w-8 items-center
-                       justify-center rounded-lg transition-colors"
-              >
-                <ChevronDown
-                  class="h-4 w-4 transition-transform duration-200 {isExpanded ? 'rotate-180' : ''}"
-                />
-              </div>
+              <!-- Chevron rotates with collapsible state -->
+              <ChevronDown
+                class="text-muted size-4 shrink-0 transition-transform duration-200 group-data-[state=open]/trigger:rotate-180"
+              />
+            </Collapsible.Trigger>
+
+            <!-- Action menu sits OUTSIDE the trigger as a sibling — no nested buttons -->
+            <div class="flex items-center pr-3">
+              <ApiKeyActions
+                apiKey={key}
+                {onChanged}
+                {onSecret}
+                isFollowed={followedKeyIds?.has(key.id) ?? false}
+                isFollowedViaScope={scopeFollowed && !(followedKeyIds?.has(key.id) ?? false)}
+                {onFollowChanged}
+              />
             </div>
           </div>
-        </button>
 
-        <!-- Expanded details -->
-        {#if isExpanded}
-          <div
-            id="details-{key.id}"
-            class="border-default from-secondary/40 to-secondary/20 border-t bg-gradient-to-b px-5 py-5"
-            transition:slide={{ duration: 200 }}
-          >
-            <Tabs.Root
-              value={activeTabByKey[key.id] ?? "overview"}
-              onValueChange={(v) => setActiveTab(key.id, v as "overview" | "usage")}
+          <!-- Expanded details -->
+          <Collapsible.Content>
+            <div
+              id="details-{key.id}"
+              class="border-border from-secondary/40 to-secondary/20 border-t bg-gradient-to-b px-5 py-5"
+              transition:slide={{ duration: 200 }}
             >
-              <Tabs.List class="mb-4">
-                <Tabs.Trigger value="overview">{m.api_keys_admin_tab_overview()}</Tabs.Trigger>
-                <Tabs.Trigger value="usage">{m.api_keys_admin_tab_usage()}</Tabs.Trigger>
-              </Tabs.List>
+              <Tabs.Root
+                value={activeTabByKey[key.id] ?? "overview"}
+                onValueChange={(v) => setActiveTab(key.id, v as "overview" | "usage")}
+              >
+                <Tabs.List class="mb-4">
+                  <Tabs.Trigger value="overview">{m.api_keys_admin_tab_overview()}</Tabs.Trigger>
+                  <Tabs.Trigger value="usage">{m.api_keys_admin_tab_usage()}</Tabs.Trigger>
+                </Tabs.List>
 
-              <Tabs.Content value="usage">
-                {@const usage = usageByKey[key.id]}
-                <div class="space-y-4">
-                  {#if usageLoadingByKey[key.id]}
-                    <div class="text-muted text-sm">{m.api_keys_admin_usage_loading()}</div>
-                  {:else if usageErrorByKey[key.id]}
-                    <div class="text-negative text-sm">{usageErrorByKey[key.id]}</div>
-                  {:else}
-                    <div class="grid gap-3 md:grid-cols-4">
-                      <div class="bg-primary/50 border-default rounded-lg border p-3">
-                        <p class="text-muted text-xs">{m.api_keys_admin_usage_total_events()}</p>
-                        <p
-                          class="text-default mt-1 text-lg font-semibold tabular-nums"
-                          title={fullNumberFormatter.format(usage?.summary?.total_events ?? 0)}
+                <Tabs.Content value="usage">
+                  {@const usage = usageByKey[key.id]}
+                  <div class="space-y-4">
+                    {#if usageLoadingByKey[key.id]}
+                      <div class="text-muted text-sm">{m.api_keys_admin_usage_loading()}</div>
+                    {:else if usageErrorByKey[key.id]}
+                      <div class="text-negative text-sm">{usageErrorByKey[key.id]}</div>
+                    {:else}
+                      <div class="grid gap-3 md:grid-cols-4">
+                        <div class="bg-primary/50 border-default rounded-lg border p-3">
+                          <p class="text-muted text-xs">{m.api_keys_admin_usage_total_events()}</p>
+                          <p
+                            class="text-default mt-1 text-lg font-semibold tabular-nums"
+                            title={fullNumberFormatter.format(usage?.summary?.total_events ?? 0)}
+                          >
+                            {formatUsageMetric(usage?.summary?.total_events)}
+                          </p>
+                        </div>
+                        <div class="bg-primary/50 border-default rounded-lg border p-3">
+                          <p class="text-muted text-xs">
+                            {m.api_keys_admin_usage_success_events()}
+                          </p>
+                          <p
+                            class="{(usage?.summary?.used_events ?? 0) > 0
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : 'text-default'} mt-1 text-lg font-semibold tabular-nums"
+                            title={fullNumberFormatter.format(usage?.summary?.used_events ?? 0)}
+                          >
+                            {formatUsageMetric(usage?.summary?.used_events)}
+                          </p>
+                        </div>
+                        <div class="bg-primary/50 border-default rounded-lg border p-3">
+                          <p class="text-muted text-xs">{m.api_keys_admin_usage_failed_events()}</p>
+                          <p
+                            class="{(usage?.summary?.auth_failed_events ?? 0) > 0
+                              ? 'text-red-600 dark:text-red-400'
+                              : 'text-default'} mt-1 text-lg font-semibold tabular-nums"
+                            title={fullNumberFormatter.format(
+                              usage?.summary?.auth_failed_events ?? 0
+                            )}
+                          >
+                            {formatUsageMetric(usage?.summary?.auth_failed_events)}
+                          </p>
+                        </div>
+                        <div class="bg-primary/50 border-default rounded-lg border p-3">
+                          <p class="text-muted text-xs">{m.api_keys_last_used()}</p>
+                          <p class="text-default mt-1 text-sm font-semibold">
+                            {usage?.summary?.last_seen_at
+                              ? formatter.format(new Date(usage.summary.last_seen_at))
+                              : m.api_keys_never()}
+                          </p>
+                        </div>
+                      </div>
+
+                      {#if usage?.summary?.sampled_used_events}
+                        <div
+                          class="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-800 dark:border-yellow-900 dark:bg-yellow-900/20 dark:text-yellow-300"
                         >
-                          {formatUsageMetric(usage?.summary?.total_events)}
+                          <span class="inline-flex items-center gap-1.5">
+                            <AlertTriangle class="h-3.5 w-3.5" />
+                            {m.api_keys_admin_usage_sampled_notice()}
+                          </span>
+                        </div>
+                      {/if}
+
+                      {#if usage?.items?.length}
+                        <div class="border-default overflow-hidden rounded-lg border">
+                          <div class="max-h-[26rem] overflow-auto">
+                            <Table.Root>
+                              <Table.Caption class="sr-only">
+                                {m.api_keys_admin_tab_usage()}
+                              </Table.Caption>
+                              <Table.Header class="bg-subtle/80 sticky top-0 z-10">
+                                <Table.Row>
+                                  <Table.Head>{m.audit_timestamp()}</Table.Head>
+                                  <Table.Head>{m.audit_action()}</Table.Head>
+                                  <Table.Head>{m.api_keys_admin_usage_request()}</Table.Head>
+                                  <Table.Head>{m.api_keys_admin_usage_ip_origin()}</Table.Head>
+                                </Table.Row>
+                              </Table.Header>
+                              <Table.Body>
+                                {#each usage.items as event (event.id)}
+                                  <Table.Row>
+                                    <Table.Cell
+                                      class="text-muted text-xs whitespace-nowrap tabular-nums"
+                                    >
+                                      {formatter.format(new Date(event.timestamp))}
+                                    </Table.Cell>
+                                    <Table.Cell>
+                                      <Badge
+                                        variant={event.action === "api_key_auth_failed"
+                                          ? "destructive"
+                                          : "secondary"}
+                                      >
+                                        {event.action}
+                                      </Badge>
+                                    </Table.Cell>
+                                    <Table.Cell class="text-muted text-xs">
+                                      <div class="flex items-center gap-1.5">
+                                        <span class="shrink-0 font-medium">
+                                          {event.method ?? "—"}
+                                        </span>
+                                        {#if event.request_path}
+                                          <span class="text-muted/60" aria-hidden="true">·</span>
+                                          <span
+                                            class="max-w-[24rem] truncate font-mono"
+                                            title={event.request_path}
+                                          >
+                                            {event.request_path}
+                                          </span>
+                                        {/if}
+                                      </div>
+                                    </Table.Cell>
+                                    <Table.Cell class="text-muted text-xs">
+                                      <div class="flex items-center gap-1.5">
+                                        <span class="shrink-0 font-mono">
+                                          {event.ip_address ?? "—"}
+                                        </span>
+                                        {#if event.origin}
+                                          <span class="text-muted/60" aria-hidden="true">·</span>
+                                          <span class="max-w-[18rem] truncate" title={event.origin}>
+                                            {event.origin}
+                                          </span>
+                                        {/if}
+                                      </div>
+                                    </Table.Cell>
+                                  </Table.Row>
+                                {/each}
+                              </Table.Body>
+                            </Table.Root>
+                          </div>
+                        </div>
+                      {:else}
+                        <div class="text-muted text-sm">{m.api_keys_admin_usage_empty()}</div>
+                      {/if}
+
+                      {#if usageCursorByKey[key.id]}
+                        <Button variant="outline" size="sm" onclick={() => loadMoreUsage(key.id)}>
+                          {m.api_keys_admin_usage_load_more()}
+                        </Button>
+                      {/if}
+                    {/if}
+                  </div>
+                </Tabs.Content>
+
+                <Tabs.Content value="overview">
+                  <!-- Overview tab (original details) -->
+                  <!-- Description section -->
+                  {#if key.description}
+                    <div class="border-dimmer mb-5 border-b pb-4">
+                      <p class="text-default text-sm leading-relaxed">{key.description}</p>
+                    </div>
+                  {/if}
+
+                  <!-- Details grid with visual separation -->
+                  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <!-- Created -->
+                    <div
+                      class="bg-primary/50 border-default flex items-start gap-3 rounded-lg border p-3
+                         transition-colors duration-200"
+                    >
+                      <div class="bg-subtle flex h-8 w-8 items-center justify-center rounded-lg">
+                        <Calendar class="text-muted h-4 w-4" />
+                      </div>
+                      <div class="min-w-0 flex-1">
+                        <p class="text-muted text-[11px] font-medium tracking-wider uppercase">
+                          {m.api_keys_created()}
+                        </p>
+                        <p class="text-default mt-0.5 truncate text-sm font-medium">
+                          {key.created_at ? formatter.format(new Date(key.created_at)) : "—"}
                         </p>
                       </div>
-                      <div class="bg-primary/50 border-default rounded-lg border p-3">
-                        <p class="text-muted text-xs">
-                          {m.api_keys_admin_usage_success_events()}
-                        </p>
-                        <p
-                          class="{(usage?.summary?.used_events ?? 0) > 0
-                            ? 'text-emerald-600 dark:text-emerald-400'
-                            : 'text-default'} mt-1 text-lg font-semibold tabular-nums"
-                          title={fullNumberFormatter.format(usage?.summary?.used_events ?? 0)}
-                        >
-                          {formatUsageMetric(usage?.summary?.used_events)}
-                        </p>
+                    </div>
+
+                    <!-- Last used -->
+                    <div
+                      class="bg-primary/50 border-default flex items-start gap-3 rounded-lg border p-3
+                         transition-colors duration-200"
+                    >
+                      <div class="bg-subtle flex h-8 w-8 items-center justify-center rounded-lg">
+                        <Activity class="text-muted h-4 w-4" />
                       </div>
-                      <div class="bg-primary/50 border-default rounded-lg border p-3">
-                        <p class="text-muted text-xs">{m.api_keys_admin_usage_failed_events()}</p>
-                        <p
-                          class="{(usage?.summary?.auth_failed_events ?? 0) > 0
-                            ? 'text-red-600 dark:text-red-400'
-                            : 'text-default'} mt-1 text-lg font-semibold tabular-nums"
-                          title={fullNumberFormatter.format(
-                            usage?.summary?.auth_failed_events ?? 0
-                          )}
-                        >
-                          {formatUsageMetric(usage?.summary?.auth_failed_events)}
+                      <div class="min-w-0 flex-1">
+                        <p class="text-muted text-[11px] font-medium tracking-wider uppercase">
+                          {m.api_keys_last_used()}
                         </p>
-                      </div>
-                      <div class="bg-primary/50 border-default rounded-lg border p-3">
-                        <p class="text-muted text-xs">{m.api_keys_last_used()}</p>
-                        <p class="text-default mt-1 text-sm font-semibold">
-                          {usage?.summary?.last_seen_at
-                            ? formatter.format(new Date(usage.summary.last_seen_at))
+                        <p class="text-default mt-0.5 truncate text-sm font-medium">
+                          {key.last_used_at
+                            ? formatter.format(new Date(key.last_used_at))
                             : m.api_keys_never()}
                         </p>
                       </div>
                     </div>
 
-                    {#if usage?.summary?.sampled_used_events}
-                      <div
-                        class="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-800 dark:border-yellow-900 dark:bg-yellow-900/20 dark:text-yellow-300"
-                      >
-                        <span class="inline-flex items-center gap-1.5">
-                          <AlertTriangle class="h-3.5 w-3.5" />
-                          {m.api_keys_admin_usage_sampled_notice()}
-                        </span>
+                    <!-- Expires -->
+                    <div
+                      class="bg-primary/50 border-default flex items-start gap-3 rounded-lg border p-3
+                         transition-colors duration-200"
+                    >
+                      <div class="bg-subtle flex h-8 w-8 items-center justify-center rounded-lg">
+                        <Clock class="text-muted h-4 w-4" />
                       </div>
-                    {/if}
-
-                    {#if usage?.items?.length}
-                      <div class="border-default overflow-hidden rounded-lg border">
-                        <div class="max-h-[26rem] overflow-auto">
-                          <Table.Root>
-                            <Table.Caption class="sr-only">
-                              {m.api_keys_admin_tab_usage()}
-                            </Table.Caption>
-                            <Table.Header class="bg-subtle/80 sticky top-0 z-10">
-                              <Table.Row>
-                                <Table.Head>{m.audit_timestamp()}</Table.Head>
-                                <Table.Head>{m.audit_action()}</Table.Head>
-                                <Table.Head>{m.api_keys_admin_usage_request()}</Table.Head>
-                                <Table.Head>{m.api_keys_admin_usage_ip_origin()}</Table.Head>
-                              </Table.Row>
-                            </Table.Header>
-                            <Table.Body>
-                              {#each usage.items as event (event.id)}
-                                <Table.Row>
-                                  <Table.Cell
-                                    class="text-muted text-xs whitespace-nowrap tabular-nums"
-                                  >
-                                    {formatter.format(new Date(event.timestamp))}
-                                  </Table.Cell>
-                                  <Table.Cell>
-                                    <Badge
-                                      variant={event.action === "api_key_auth_failed"
-                                        ? "destructive"
-                                        : "secondary"}
-                                    >
-                                      {event.action}
-                                    </Badge>
-                                  </Table.Cell>
-                                  <Table.Cell class="text-muted text-xs">
-                                    <div class="flex items-center gap-1.5">
-                                      <span class="shrink-0 font-medium">
-                                        {event.method ?? "—"}
-                                      </span>
-                                      {#if event.request_path}
-                                        <span class="text-muted/60" aria-hidden="true">·</span>
-                                        <span
-                                          class="max-w-[24rem] truncate font-mono"
-                                          title={event.request_path}
-                                        >
-                                          {event.request_path}
-                                        </span>
-                                      {/if}
-                                    </div>
-                                  </Table.Cell>
-                                  <Table.Cell class="text-muted text-xs">
-                                    <div class="flex items-center gap-1.5">
-                                      <span class="shrink-0 font-mono">
-                                        {event.ip_address ?? "—"}
-                                      </span>
-                                      {#if event.origin}
-                                        <span class="text-muted/60" aria-hidden="true">·</span>
-                                        <span class="max-w-[18rem] truncate" title={event.origin}>
-                                          {event.origin}
-                                        </span>
-                                      {/if}
-                                    </div>
-                                  </Table.Cell>
-                                </Table.Row>
-                              {/each}
-                            </Table.Body>
-                          </Table.Root>
-                        </div>
+                      <div class="min-w-0 flex-1">
+                        <p class="text-muted text-[11px] font-medium tracking-wider uppercase">
+                          {m.api_keys_expires()}
+                        </p>
+                        <p class="text-default mt-0.5 truncate text-sm font-medium">
+                          {key.expires_at
+                            ? formatter.format(new Date(key.expires_at))
+                            : m.api_keys_never()}
+                        </p>
                       </div>
-                    {:else}
-                      <div class="text-muted text-sm">{m.api_keys_admin_usage_empty()}</div>
-                    {/if}
+                    </div>
 
-                    {#if usageCursorByKey[key.id]}
-                      <Button variant="outline" size="sm" onclick={() => loadMoreUsage(key.id)}>
-                        {m.api_keys_admin_usage_load_more()}
-                      </Button>
-                    {/if}
+                    <!-- Rate limit -->
+                    <div
+                      class="bg-primary/50 border-default flex items-start gap-3 rounded-lg border p-3
+                         transition-colors duration-200"
+                    >
+                      <div class="bg-subtle flex h-8 w-8 items-center justify-center rounded-lg">
+                        <Shield class="text-muted h-4 w-4" />
+                      </div>
+                      <div class="min-w-0 flex-1">
+                        <p class="text-muted text-[11px] font-medium tracking-wider uppercase">
+                          {m.api_keys_rate_limit_label()}
+                        </p>
+                        <p class="text-default mt-0.5 truncate text-sm font-medium">
+                          {key.rate_limit
+                            ? m.api_keys_rate_limit_value({ count: key.rate_limit })
+                            : m.api_keys_default()}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Allowed Origins (for pk_ keys) -->
+                  {#if key.key_type === "pk_" && key.allowed_origins?.length}
+                    <div class="border-dimmer mt-5 border-t pt-4">
+                      <p class="text-muted mb-2.5 text-[11px] font-medium tracking-wider uppercase">
+                        {m.api_keys_allowed_origins()}
+                      </p>
+                      <div class="flex flex-wrap gap-2">
+                        {#each key.allowed_origins as origin (origin)}
+                          <span
+                            class="bg-primary border-default text-default hover:border-dimmer hover:bg-subtle inline-flex items-center
+                               gap-1.5 rounded-lg border px-3 py-1.5
+                               font-mono text-xs transition-all duration-200"
+                          >
+                            <Globe class="text-muted h-3.5 w-3.5" />
+                            {origin}
+                          </span>
+                        {/each}
+                      </div>
+                    </div>
                   {/if}
-                </div>
-              </Tabs.Content>
 
-              <Tabs.Content value="overview">
-                <!-- Overview tab (original details) -->
-                <!-- Description section -->
-                {#if key.description}
-                  <div class="border-dimmer mb-5 border-b pb-4">
-                    <p class="text-default text-sm leading-relaxed">{key.description}</p>
-                  </div>
-                {/if}
-
-                <!-- Details grid with visual separation -->
-                <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  <!-- Created -->
-                  <div
-                    class="bg-primary/50 border-default flex items-start gap-3 rounded-lg border p-3
-                         transition-colors duration-200"
-                  >
-                    <div class="bg-subtle flex h-8 w-8 items-center justify-center rounded-lg">
-                      <Calendar class="text-muted h-4 w-4" />
-                    </div>
-                    <div class="min-w-0 flex-1">
-                      <p class="text-muted text-[11px] font-medium tracking-wider uppercase">
-                        {m.api_keys_created()}
+                  <!-- Allowed IPs (for sk_ keys) -->
+                  {#if key.key_type === "sk_" && key.allowed_ips?.length}
+                    <div class="border-dimmer mt-5 border-t pt-4">
+                      <p class="text-muted mb-2.5 text-[11px] font-medium tracking-wider uppercase">
+                        {m.api_keys_allowed_ips()}
                       </p>
-                      <p class="text-default mt-0.5 truncate text-sm font-medium">
-                        {key.created_at ? formatter.format(new Date(key.created_at)) : "—"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <!-- Last used -->
-                  <div
-                    class="bg-primary/50 border-default flex items-start gap-3 rounded-lg border p-3
-                         transition-colors duration-200"
-                  >
-                    <div class="bg-subtle flex h-8 w-8 items-center justify-center rounded-lg">
-                      <Activity class="text-muted h-4 w-4" />
-                    </div>
-                    <div class="min-w-0 flex-1">
-                      <p class="text-muted text-[11px] font-medium tracking-wider uppercase">
-                        {m.api_keys_last_used()}
-                      </p>
-                      <p class="text-default mt-0.5 truncate text-sm font-medium">
-                        {key.last_used_at
-                          ? formatter.format(new Date(key.last_used_at))
-                          : m.api_keys_never()}
-                      </p>
-                    </div>
-                  </div>
-
-                  <!-- Expires -->
-                  <div
-                    class="bg-primary/50 border-default flex items-start gap-3 rounded-lg border p-3
-                         transition-colors duration-200"
-                  >
-                    <div class="bg-subtle flex h-8 w-8 items-center justify-center rounded-lg">
-                      <Clock class="text-muted h-4 w-4" />
-                    </div>
-                    <div class="min-w-0 flex-1">
-                      <p class="text-muted text-[11px] font-medium tracking-wider uppercase">
-                        {m.api_keys_expires()}
-                      </p>
-                      <p class="text-default mt-0.5 truncate text-sm font-medium">
-                        {key.expires_at
-                          ? formatter.format(new Date(key.expires_at))
-                          : m.api_keys_never()}
-                      </p>
-                    </div>
-                  </div>
-
-                  <!-- Rate limit -->
-                  <div
-                    class="bg-primary/50 border-default flex items-start gap-3 rounded-lg border p-3
-                         transition-colors duration-200"
-                  >
-                    <div class="bg-subtle flex h-8 w-8 items-center justify-center rounded-lg">
-                      <Shield class="text-muted h-4 w-4" />
-                    </div>
-                    <div class="min-w-0 flex-1">
-                      <p class="text-muted text-[11px] font-medium tracking-wider uppercase">
-                        {m.api_keys_rate_limit_label()}
-                      </p>
-                      <p class="text-default mt-0.5 truncate text-sm font-medium">
-                        {key.rate_limit
-                          ? m.api_keys_rate_limit_value({ count: key.rate_limit })
-                          : m.api_keys_default()}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Allowed Origins (for pk_ keys) -->
-                {#if key.key_type === "pk_" && key.allowed_origins?.length}
-                  <div class="border-dimmer mt-5 border-t pt-4">
-                    <p class="text-muted mb-2.5 text-[11px] font-medium tracking-wider uppercase">
-                      {m.api_keys_allowed_origins()}
-                    </p>
-                    <div class="flex flex-wrap gap-2">
-                      {#each key.allowed_origins as origin (origin)}
-                        <span
-                          class="bg-primary border-default text-default hover:border-dimmer hover:bg-subtle inline-flex items-center
+                      <div class="flex flex-wrap gap-2">
+                        {#each key.allowed_ips as ip (ip)}
+                          <span
+                            class="bg-primary border-default text-default hover:border-dimmer hover:bg-subtle inline-flex items-center
                                gap-1.5 rounded-lg border px-3 py-1.5
                                font-mono text-xs transition-all duration-200"
-                        >
-                          <Globe class="text-muted h-3.5 w-3.5" />
-                          {origin}
-                        </span>
-                      {/each}
+                          >
+                            <Server class="text-muted h-3.5 w-3.5" />
+                            {ip}
+                          </span>
+                        {/each}
+                      </div>
                     </div>
-                  </div>
-                {/if}
+                  {/if}
 
-                <!-- Allowed IPs (for sk_ keys) -->
-                {#if key.key_type === "sk_" && key.allowed_ips?.length}
-                  <div class="border-dimmer mt-5 border-t pt-4">
-                    <p class="text-muted mb-2.5 text-[11px] font-medium tracking-wider uppercase">
-                      {m.api_keys_allowed_ips()}
-                    </p>
-                    <div class="flex flex-wrap gap-2">
-                      {#each key.allowed_ips as ip (ip)}
-                        <span
-                          class="bg-primary border-default text-default hover:border-dimmer hover:bg-subtle inline-flex items-center
-                               gap-1.5 rounded-lg border px-3 py-1.5
-                               font-mono text-xs transition-all duration-200"
-                        >
-                          <Server class="text-muted h-3.5 w-3.5" />
-                          {ip}
-                        </span>
-                      {/each}
-                    </div>
-                  </div>
-                {/if}
-
-                <!-- Suspension info -->
-                {#if key.state === "suspended" && key.suspended_at}
-                  {@const suspendedReasonLabel = getReasonCodeLabel(key.suspended_reason_code)}
-                  <div class="border-dimmer mt-5 border-t pt-4">
-                    <div
-                      class="border-caution/40 bg-caution/10 dark:border-caution/30 dark:bg-caution/5 rounded-lg
+                  <!-- Suspension info -->
+                  {#if key.state === "suspended" && key.suspended_at}
+                    {@const suspendedReasonLabel = getReasonCodeLabel(key.suspended_reason_code)}
+                    <div class="border-dimmer mt-5 border-t pt-4">
+                      <div
+                        class="border-caution/40 bg-caution/10 dark:border-caution/30 dark:bg-caution/5 rounded-lg
                            border p-4"
-                    >
-                      <div class="flex items-start gap-3">
-                        <div
-                          class="bg-caution/20 flex h-8 w-8 items-center justify-center rounded-lg"
-                        >
-                          <Shield class="text-caution h-4 w-4" />
-                        </div>
-                        <div class="min-w-0 flex-1">
-                          <p class="text-caution text-sm font-semibold">
-                            {m.api_keys_key_suspended()}
-                          </p>
-                          <p class="text-caution/80 mt-1 text-sm">
-                            {formatter.format(new Date(key.suspended_at))}
-                          </p>
-                          {#if suspendedReasonLabel}
-                            <p class="text-caution/70 mt-2 text-sm">{suspendedReasonLabel}</p>
-                          {/if}
-                          {#if key.suspended_reason_text}
-                            <p class="text-caution/60 mt-1 text-xs">
-                              {key.suspended_reason_text}
+                      >
+                        <div class="flex items-start gap-3">
+                          <div
+                            class="bg-caution/20 flex h-8 w-8 items-center justify-center rounded-lg"
+                          >
+                            <Shield class="text-caution h-4 w-4" />
+                          </div>
+                          <div class="min-w-0 flex-1">
+                            <p class="text-caution text-sm font-semibold">
+                              {m.api_keys_key_suspended()}
                             </p>
-                          {/if}
+                            <p class="text-caution/80 mt-1 text-sm">
+                              {formatter.format(new Date(key.suspended_at))}
+                            </p>
+                            {#if suspendedReasonLabel}
+                              <p class="text-caution/70 mt-2 text-sm">{suspendedReasonLabel}</p>
+                            {/if}
+                            {#if key.suspended_reason_text}
+                              <p class="text-caution/60 mt-1 text-xs">
+                                {key.suspended_reason_text}
+                              </p>
+                            {/if}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                {/if}
+                  {/if}
 
-                <!-- Revocation info -->
-                {#if key.state === "revoked" && key.revoked_at}
-                  {@const revokedReasonLabel = getReasonCodeLabel(key.revoked_reason_code)}
-                  <div class="border-dimmer mt-5 border-t pt-4">
-                    <div
-                      class="border-negative/40 bg-negative/10 dark:border-negative/30 dark:bg-negative/5 rounded-lg
+                  <!-- Revocation info -->
+                  {#if key.state === "revoked" && key.revoked_at}
+                    {@const revokedReasonLabel = getReasonCodeLabel(key.revoked_reason_code)}
+                    <div class="border-dimmer mt-5 border-t pt-4">
+                      <div
+                        class="border-negative/40 bg-negative/10 dark:border-negative/30 dark:bg-negative/5 rounded-lg
                            border p-4"
-                    >
-                      <div class="flex items-start gap-3">
-                        <div
-                          class="bg-negative/20 flex h-8 w-8 items-center justify-center rounded-lg"
-                        >
-                          <Lock class="text-negative h-4 w-4" />
-                        </div>
-                        <div class="min-w-0 flex-1">
-                          <p class="text-negative text-sm font-semibold">
-                            {m.api_keys_key_revoked()}
-                          </p>
-                          <p class="text-negative/80 mt-1 text-sm">
-                            {formatter.format(new Date(key.revoked_at))}
-                          </p>
-                          {#if revokedReasonLabel}
-                            <p class="text-negative/70 mt-2 text-sm">{revokedReasonLabel}</p>
-                          {/if}
-                          {#if key.revoked_reason_text}
-                            <p class="text-negative/60 mt-1 text-xs">{key.revoked_reason_text}</p>
-                          {/if}
+                      >
+                        <div class="flex items-start gap-3">
+                          <div
+                            class="bg-negative/20 flex h-8 w-8 items-center justify-center rounded-lg"
+                          >
+                            <Lock class="text-negative h-4 w-4" />
+                          </div>
+                          <div class="min-w-0 flex-1">
+                            <p class="text-negative text-sm font-semibold">
+                              {m.api_keys_key_revoked()}
+                            </p>
+                            <p class="text-negative/80 mt-1 text-sm">
+                              {formatter.format(new Date(key.revoked_at))}
+                            </p>
+                            {#if revokedReasonLabel}
+                              <p class="text-negative/70 mt-2 text-sm">{revokedReasonLabel}</p>
+                            {/if}
+                            {#if key.revoked_reason_text}
+                              <p class="text-negative/60 mt-1 text-xs">{key.revoked_reason_text}</p>
+                            {/if}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                {/if}
-              </Tabs.Content>
-            </Tabs.Root>
-          </div>
-        {/if}
-      </div>
+                  {/if}
+                </Tabs.Content>
+              </Tabs.Root>
+            </div>
+          </Collapsible.Content>
+        </Card.Root>
+      </Collapsible.Root>
     {/each}
   </div>
 {/if}
