@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from uuid import uuid4
 
 import pytest
 
 from intric.authentication.api_key_notification_auto_follow import (
     _normalize_preferences,
-    _normalize_subscriptions,
     _should_auto_follow,
 )
 from intric.authentication.auth_models import (
@@ -21,7 +19,7 @@ def _policy(
 ) -> ApiKeyNotificationPolicyResponse:
     payload = {
         "enabled": True,
-        "default_days_before_expiry": [30, 14, 7, 3, 1],
+        "default_days_before_expiry": 30,
         "max_days_before_expiry": 90,
         "allow_auto_follow_published_assistants": True,
         "allow_auto_follow_published_apps": True,
@@ -46,36 +44,20 @@ def test_normalize_preferences_applies_policy_bounds_and_flags():
     normalized = _normalize_preferences(raw, policy)
 
     assert normalized.enabled is True
-    assert normalized.days_before_expiry == [30, 14, 1]
+    assert normalized.days_before_expiry == 30
     assert normalized.auto_follow_published_assistants is True
     assert normalized.auto_follow_published_apps is False
 
 
 def test_normalize_preferences_defaults_to_opt_out_when_missing():
-    policy = _policy(default_days_before_expiry=[45, 20], max_days_before_expiry=40)
+    policy = _policy(default_days_before_expiry=45, max_days_before_expiry=40)
 
     normalized = _normalize_preferences(None, policy)
 
     assert normalized.enabled is False
-    assert normalized.days_before_expiry == [20]
+    assert normalized.days_before_expiry == 40
     assert normalized.auto_follow_published_assistants is False
     assert normalized.auto_follow_published_apps is False
-
-
-def test_normalize_subscriptions_dedupes_invalid_and_duplicate_items():
-    assistant_id = uuid4()
-    raw = [
-        {"target_type": "assistant", "target_id": str(assistant_id)},
-        {"target_type": "assistant", "target_id": str(assistant_id)},
-        {"target_type": "invalid", "target_id": "not-a-uuid"},
-        {"target_type": "app", "target_id": str(uuid4())},
-    ]
-
-    items = _normalize_subscriptions(raw)
-
-    assert len(items) == 2
-    assert items[0].target_type.value in {"app", "assistant"}
-    assert items[1].target_type.value in {"app", "assistant"}
 
 
 @pytest.mark.parametrize(

@@ -3,6 +3,7 @@ from importlib import import_module
 _TABLE_MODULES = (
     "intric.database.tables.ai_models_table",
     "intric.database.tables.allowed_origins_table",
+    "intric.database.tables.api_key_notification_tables",
     "intric.database.tables.api_keys_table",
     "intric.database.tables.api_keys_v2_table",
     "intric.database.tables.audit_action_config_table",

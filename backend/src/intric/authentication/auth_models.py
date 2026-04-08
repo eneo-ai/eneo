@@ -1,15 +1,15 @@
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Literal, Optional
+from typing import Any, Literal, Optional, cast
 from uuid import UUID
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     EmailStr,
-    Field,
     ValidationInfo,
     field_validator,
+    model_validator,
 )
 
 from intric.main.config import get_settings
@@ -123,6 +123,11 @@ class ApiKeyNotificationTargetType(str, Enum):
     ASSISTANT = "assistant"
     APP = "app"
     SPACE = "space"
+
+
+class ApiKeyNotificationSubscriptionSource(str, Enum):
+    MANUAL = "manual"
+    AUTO_FOLLOW = "auto_follow"
 
 
 class ApiKeyState(str, Enum):
@@ -306,19 +311,76 @@ class ApiKeyPolicyResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
-def _validate_day_values(days: list[int], field_name: str) -> list[int]:
-    if not days:
-        raise ValueError(f"{field_name} must contain at least one day value.")
-    normalized = sorted(set(days), reverse=True)
-    for day in normalized:
-        if day <= 0:
-            raise ValueError(f"{field_name} values must be positive integers.")
-    return normalized
+def _coerce_legacy_notification_day_value(raw: Any) -> int | None:
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw if raw > 0 else None
+    if isinstance(raw, float):
+        if raw.is_integer() and raw > 0:
+            return int(raw)
+        return None
+    if isinstance(raw, str):
+        try:
+            parsed = int(raw.strip())
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
+    if isinstance(raw, list):
+        candidates: list[int] = []
+        raw_items = cast(list[object], raw)
+        for raw_item in raw_items:
+            item: Any = raw_item
+            value = _coerce_legacy_notification_day_value(item)
+            if value is not None:
+                candidates.append(value)
+        return max(candidates) if candidates else None
+    return None
+
+
+def normalize_notification_day_value(
+    raw: Any, *, default: int | None = None
+) -> int | None:
+    value = _coerce_legacy_notification_day_value(raw)
+    if value is not None:
+        return value
+    return default
+
+
+def normalize_notification_policy_payload(raw_policy: Any) -> dict[str, Any]:
+    if not isinstance(raw_policy, dict):
+        return {}
+
+    normalized_policy: dict[str, Any] = dict(cast(dict[str, Any], raw_policy))
+    max_days = normalize_notification_day_value(
+        normalized_policy.get("max_days_before_expiry")
+    )
+    if max_days is None:
+        normalized_policy.pop("max_days_before_expiry", None)
+    else:
+        normalized_policy["max_days_before_expiry"] = max_days
+
+    default_days = normalize_notification_day_value(
+        normalized_policy.get("default_days_before_expiry"),
+        default=30,
+    )
+    if default_days is None:
+        default_days = 30
+    if max_days is not None:
+        default_days = min(default_days, max_days)
+    normalized_policy["default_days_before_expiry"] = default_days
+    return normalized_policy
+
+
+def _validate_day_value(day: int, field_name: str) -> int:
+    if day <= 0:
+        raise ValueError(f"{field_name} must be a positive integer.")
+    return day
 
 
 class ApiKeyNotificationPreferencesResponse(BaseModel):
     enabled: bool = False
-    days_before_expiry: list[int] = Field(default_factory=lambda: [30, 14, 7, 3, 1])
+    days_before_expiry: int = 30
     auto_follow_published_assistants: bool = False
     auto_follow_published_apps: bool = False
 
@@ -326,13 +388,13 @@ class ApiKeyNotificationPreferencesResponse(BaseModel):
 
     @field_validator("days_before_expiry")
     @classmethod
-    def _validate_days_before_expiry(cls, value: list[int]) -> list[int]:
-        return _validate_day_values(value, "days_before_expiry")
+    def _validate_days_before_expiry(cls, value: int) -> int:
+        return _validate_day_value(value, "days_before_expiry")
 
 
 class ApiKeyNotificationPreferencesUpdate(BaseModel):
     enabled: Optional[bool] = None
-    days_before_expiry: Optional[list[int]] = None
+    days_before_expiry: Optional[int] = None
     auto_follow_published_assistants: Optional[bool] = None
     auto_follow_published_apps: Optional[bool] = None
 
@@ -340,12 +402,10 @@ class ApiKeyNotificationPreferencesUpdate(BaseModel):
 
     @field_validator("days_before_expiry")
     @classmethod
-    def _validate_days_before_expiry(
-        cls, value: Optional[list[int]]
-    ) -> Optional[list[int]]:
+    def _validate_days_before_expiry(cls, value: Optional[int]) -> Optional[int]:
         if value is None:
             return value
-        return _validate_day_values(value, "days_before_expiry")
+        return _validate_day_value(value, "days_before_expiry")
 
 
 class ApiKeyNotificationSubscription(BaseModel):
@@ -363,9 +423,7 @@ class ApiKeyNotificationSubscriptionListResponse(BaseModel):
 
 class ApiKeyNotificationPolicyResponse(BaseModel):
     enabled: bool = True
-    default_days_before_expiry: list[int] = Field(
-        default_factory=lambda: [30, 14, 7, 3, 1]
-    )
+    default_days_before_expiry: int = 30
     max_days_before_expiry: Optional[int] = 365
     allow_auto_follow_published_assistants: bool = False
     allow_auto_follow_published_apps: bool = False
@@ -374,8 +432,8 @@ class ApiKeyNotificationPolicyResponse(BaseModel):
 
     @field_validator("default_days_before_expiry")
     @classmethod
-    def _validate_default_days_before_expiry(cls, value: list[int]) -> list[int]:
-        return _validate_day_values(value, "default_days_before_expiry")
+    def _validate_default_days_before_expiry(cls, value: int) -> int:
+        return _validate_day_value(value, "default_days_before_expiry")
 
     @field_validator("max_days_before_expiry")
     @classmethod
@@ -388,10 +446,21 @@ class ApiKeyNotificationPolicyResponse(BaseModel):
             raise ValueError(f"{info.field_name} must be a positive integer.")
         return value
 
+    @model_validator(mode="after")
+    def _validate_day_bounds(self) -> "ApiKeyNotificationPolicyResponse":
+        if (
+            self.max_days_before_expiry is not None
+            and self.default_days_before_expiry > self.max_days_before_expiry
+        ):
+            raise ValueError(
+                "default_days_before_expiry must be less than or equal to max_days_before_expiry."
+            )
+        return self
+
 
 class ApiKeyNotificationPolicyUpdate(BaseModel):
     enabled: Optional[bool] = None
-    default_days_before_expiry: Optional[list[int]] = None
+    default_days_before_expiry: Optional[int] = None
     max_days_before_expiry: Optional[int] = None
     allow_auto_follow_published_assistants: Optional[bool] = None
     allow_auto_follow_published_apps: Optional[bool] = None
@@ -401,11 +470,11 @@ class ApiKeyNotificationPolicyUpdate(BaseModel):
     @field_validator("default_days_before_expiry")
     @classmethod
     def _validate_default_days_before_expiry(
-        cls, value: Optional[list[int]]
-    ) -> Optional[list[int]]:
+        cls, value: Optional[int]
+    ) -> Optional[int]:
         if value is None:
             return value
-        return _validate_day_values(value, "default_days_before_expiry")
+        return _validate_day_value(value, "default_days_before_expiry")
 
     @field_validator("max_days_before_expiry")
     @classmethod
@@ -417,6 +486,18 @@ class ApiKeyNotificationPolicyUpdate(BaseModel):
         if value <= 0:
             raise ValueError(f"{info.field_name} must be a positive integer.")
         return value
+
+    @model_validator(mode="after")
+    def _validate_day_bounds(self) -> "ApiKeyNotificationPolicyUpdate":
+        if (
+            self.max_days_before_expiry is not None
+            and self.default_days_before_expiry is not None
+            and self.default_days_before_expiry > self.max_days_before_expiry
+        ):
+            raise ValueError(
+                "default_days_before_expiry must be less than or equal to max_days_before_expiry."
+            )
+        return self
 
 
 class SuperApiKeyStatus(BaseModel):

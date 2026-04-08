@@ -45,6 +45,9 @@ from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryIm
 from intric.audit.infrastructure.audit_session_service import AuditSessionService
 from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
 from intric.authentication.api_key_maintenance import ApiKeyMaintenanceService
+from intric.authentication.api_key_notification_repo import (
+    ApiKeyNotificationRepository,
+)
 from intric.authentication.api_key_policy import ApiKeyPolicyService
 from intric.authentication.api_key_rate_limiter import ApiKeyRateLimiter
 from intric.authentication.api_key_repo import ApiKeysRepository
@@ -580,6 +583,10 @@ class Container(containers.DeclarativeContainer):
     )
 
     api_key_repo = providers.Factory(ApiKeysRepository, session=session)
+    api_key_notification_repo = providers.Factory(
+        ApiKeyNotificationRepository,
+        session=session,
+    )
     api_key_v2_repo = providers.Factory(ApiKeysV2Repository, session=session)
     group_repo = providers.Factory(GroupRepository, session=session)
     info_blob_repo = providers.Factory(InfoBlobRepository, session=session)

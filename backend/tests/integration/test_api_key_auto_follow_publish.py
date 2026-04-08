@@ -101,7 +101,7 @@ async def test_publish_assistant_auto_follows_when_user_and_policy_allow(
         "/api/v1/api-keys/notification-preferences",
         json={
             "enabled": True,
-            "days_before_expiry": [14, 7, 1],
+            "days_before_expiry": 14,
             "auto_follow_published_assistants": True,
             "auto_follow_published_apps": False,
         },
@@ -144,7 +144,7 @@ async def test_notification_preferences_apply_policy_gates_and_persist(
         "/api/v1/api-keys/notification-preferences",
         json={
             "enabled": True,
-            "days_before_expiry": [14, 7, 1],
+            "days_before_expiry": 14,
             "auto_follow_published_assistants": True,
             "auto_follow_published_apps": True,
         },
@@ -186,7 +186,7 @@ async def test_publish_assistant_does_not_auto_follow_when_opt_out(
         "/api/v1/api-keys/notification-preferences",
         json={
             "enabled": True,
-            "days_before_expiry": [14, 7, 1],
+            "days_before_expiry": 14,
             "auto_follow_published_assistants": False,
             "auto_follow_published_apps": False,
         },
@@ -229,7 +229,7 @@ async def test_publish_assistant_auto_follow_is_idempotent_for_same_target(
         "/api/v1/api-keys/notification-preferences",
         json={
             "enabled": True,
-            "days_before_expiry": [14, 7, 1],
+            "days_before_expiry": 14,
             "auto_follow_published_assistants": True,
             "auto_follow_published_apps": False,
         },
@@ -282,7 +282,7 @@ async def test_publish_app_auto_follows_when_user_and_policy_allow(
         "/api/v1/api-keys/notification-preferences",
         json={
             "enabled": True,
-            "days_before_expiry": [21, 14, 7],
+            "days_before_expiry": 21,
             "auto_follow_published_assistants": False,
             "auto_follow_published_apps": True,
         },

@@ -4,14 +4,14 @@ export type ApiKeyNotificationTargetType = "key" | "assistant" | "app" | "space"
 
 export interface ApiKeyNotificationPreferences {
   enabled: boolean;
-  days_before_expiry: number[];
+  days_before_expiry: number;
   auto_follow_published_assistants: boolean;
   auto_follow_published_apps: boolean;
 }
 
 export interface ApiKeyNotificationPolicy {
   enabled: boolean;
-  default_days_before_expiry: number[];
+  default_days_before_expiry: number;
   max_days_before_expiry: number | null;
   allow_auto_follow_published_assistants: boolean;
   allow_auto_follow_published_apps: boolean;
@@ -26,24 +26,25 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object";
 }
 
-function normalizeDayValues(raw: unknown): number[] {
-  if (!Array.isArray(raw)) return [];
-  return Array.from(
-    new Set(
-      raw
-        .map((value) => Number(value))
-        .filter((value) => Number.isFinite(value) && value > 0)
-        .map((value) => Math.floor(value))
-    )
-  ).sort((a, b) => b - a);
+function normalizeDayValue(raw: unknown, fallback: number): number {
+  if (Array.isArray(raw)) {
+    const values = raw.map((value) => normalizeDayValue(value, -1)).filter((value) => value > 0);
+    return values.length > 0 ? Math.max(...values) : fallback;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return Math.floor(parsed);
 }
 
 export function normalizePreferences(raw: unknown): ApiKeyNotificationPreferences {
   const data = isObject(raw) ? raw : {};
-  const days = normalizeDayValues(data.days_before_expiry);
   return {
     enabled: Boolean(data.enabled),
-    days_before_expiry: days.length > 0 ? days : [30, 14, 7, 3, 1],
+    days_before_expiry: normalizeDayValue(data.days_before_expiry, 30),
     auto_follow_published_assistants: Boolean(data.auto_follow_published_assistants),
     auto_follow_published_apps: Boolean(data.auto_follow_published_apps)
   };
@@ -51,13 +52,13 @@ export function normalizePreferences(raw: unknown): ApiKeyNotificationPreference
 
 export function normalizePolicy(raw: unknown): ApiKeyNotificationPolicy {
   const data = isObject(raw) ? raw : {};
-  const defaultDays = normalizeDayValues(data.default_days_before_expiry);
   const parsedMax = Number(data.max_days_before_expiry);
+  const maxDays = Number.isFinite(parsedMax) && parsedMax > 0 ? Math.floor(parsedMax) : null;
+  const defaultDays = normalizeDayValue(data.default_days_before_expiry, 30);
   return {
     enabled: data.enabled !== false,
-    default_days_before_expiry: defaultDays.length > 0 ? defaultDays : [30, 14, 7, 3, 1],
-    max_days_before_expiry:
-      Number.isFinite(parsedMax) && parsedMax > 0 ? Math.floor(parsedMax) : null,
+    default_days_before_expiry: maxDays ? Math.min(defaultDays, maxDays) : defaultDays,
+    max_days_before_expiry: maxDays,
     allow_auto_follow_published_assistants: Boolean(data.allow_auto_follow_published_assistants),
     allow_auto_follow_published_apps: Boolean(data.allow_auto_follow_published_apps)
   };

@@ -15,7 +15,6 @@
   import type { ExpiringKeyDisplayItem } from "$lib/features/api-keys/expirationUtils";
   import { Bell, BellOff, ShieldAlert } from "lucide-svelte";
   import { slide } from "svelte/transition";
-  import { SvelteSet } from "svelte/reactivity";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
 
   let { onExpiringItemsChanged, onError, onFollowedKeysChanged, onNotificationsEnabledChanged } =
@@ -29,26 +28,22 @@
   const intric = getIntric();
   const { forceRefresh: forceRefreshExpiringStore } = getExpiringKeysStore();
 
-  // Notification state
   let notificationsEnabled = $state(false);
-  let notificationDaysInput = $state("");
+  let notificationDays = $state(30);
+  let notificationDaysInput = $state("30");
   let autoFollowPublishedAssistants = $state(false);
   let autoFollowPublishedApps = $state(false);
   let notificationSettingsLoading = $state(true);
   let notificationSettingsSaving = $state(false);
-  let showCustomInput = $state(false);
 
-  // Policy state
   let notificationPolicyEnabled = $state<boolean | null>(null);
   let notificationPolicyMaxDays = $state<number | null>(null);
   let allowAutoFollowAssistants = $state<boolean | null>(null);
   let allowAutoFollowApps = $state<boolean | null>(null);
 
-  // Derived
   const reminderDayDefaults = [1, 3, 7, 14, 30];
-  const selectedReminderDays = $derived.by(() => parseDayValues(notificationDaysInput));
   const reminderDayOptions = $derived.by(() => {
-    const combined = Array.from(new Set([...reminderDayDefaults, ...selectedReminderDays]));
+    const combined = Array.from(new Set([...reminderDayDefaults, notificationDays]));
     const limited =
       notificationPolicyMaxDays != null && notificationPolicyMaxDays > 0
         ? combined.filter((day) => day <= notificationPolicyMaxDays!)
@@ -58,41 +53,40 @@
 
   const isPolicyBlocked = $derived(notificationPolicyEnabled === false);
 
-  function parseDayValues(value: string): number[] {
-    return Array.from(
-      new Set(
-        value
-          .split(/[,\s]+/)
-          .map((item) => Number(item))
-          .filter((item) => Number.isFinite(item) && item > 0)
-          .map((item) => Math.floor(item))
-      )
-    ).sort((a, b) => b - a);
+  function parseDayValue(value: string): number | null {
+    const parsed = Number(value.trim());
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return null;
+    }
+    return Math.floor(parsed);
+  }
+
+  function syncDayState(value: number) {
+    notificationDays = value;
+    notificationDaysInput = String(value);
   }
 
   async function loadExpiring({
     enabled = notificationsEnabled,
     hasSubscriptions,
-    days = notificationDaysInput
+    days = notificationDays
   }: {
     enabled?: boolean;
     hasSubscriptions: boolean;
-    days?: string;
+    days?: number;
   }) {
     if (!enabled || !hasSubscriptions) {
       onExpiringItemsChanged([]);
       return;
     }
-    const parsedDays = parseDayValues(days);
-    const windowDays = parsedDays.length > 0 ? Math.max(...parsedDays) : 30;
     try {
       const summary = await intric.apiKeys.expiringSoon({
-        days: windowDays,
+        days,
         mode: "subscribed"
       });
       onExpiringItemsChanged(summaryToDisplayItems(summary.items));
     } catch {
-      // Non-critical — silent fail
+      // Non-critical
     }
   }
 
@@ -105,7 +99,7 @@
         getAdminNotificationPolicy(intric).catch(() => null)
       ]);
       notificationsEnabled = preferences.enabled;
-      notificationDaysInput = preferences.days_before_expiry.join(", ");
+      syncDayState(preferences.days_before_expiry);
       autoFollowPublishedAssistants = preferences.auto_follow_published_assistants;
       autoFollowPublishedApps = preferences.auto_follow_published_apps;
       notificationPolicyEnabled = policy?.enabled ?? null;
@@ -119,7 +113,7 @@
       await loadExpiring({
         enabled: preferences.enabled,
         hasSubscriptions,
-        days: preferences.days_before_expiry.join(", ")
+        days: preferences.days_before_expiry
       });
     } catch (error) {
       console.error(error);
@@ -136,7 +130,7 @@
     try {
       const updated = await updateNotificationPreferences(intric, { enabled: next });
       notificationsEnabled = updated.enabled;
-      notificationDaysInput = updated.days_before_expiry.join(", ");
+      syncDayState(updated.days_before_expiry);
       autoFollowPublishedAssistants = updated.auto_follow_published_assistants;
       autoFollowPublishedApps = updated.auto_follow_published_apps;
       onNotificationsEnabledChanged(updated.enabled);
@@ -155,43 +149,21 @@
     }
   }
 
-  let saveTimer: ReturnType<typeof setTimeout> | undefined;
-
-  function debouncedSaveDays() {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void saveNotificationDays(), 400);
-  }
-
-  function toggleReminderDay(day: number) {
-    if (notificationSettingsSaving) return;
-    const next = new SvelteSet(selectedReminderDays);
-    if (next.has(day)) {
-      next.delete(day);
-    } else {
-      next.add(day);
-    }
-    if (next.size === 0) {
-      next.add(day);
-    }
-    notificationDaysInput = Array.from(next)
-      .sort((a, b) => b - a)
-      .join(", ");
-    debouncedSaveDays();
-  }
-
-  async function saveNotificationDays() {
-    const parsed = parseDayValues(notificationDaysInput);
-    if (parsed.length === 0) {
+  async function saveNotificationDays(value?: number) {
+    const parsed = value ?? parseDayValue(notificationDaysInput);
+    if (!parsed) {
       onError(m.api_keys_notifications_days_validation());
+      notificationDaysInput = String(notificationDays);
       return;
     }
+
     notificationSettingsSaving = true;
     try {
       const updated = await updateNotificationPreferences(intric, {
         days_before_expiry: parsed
       });
       notificationsEnabled = updated.enabled;
-      notificationDaysInput = updated.days_before_expiry.join(", ");
+      syncDayState(updated.days_before_expiry);
       autoFollowPublishedAssistants = updated.auto_follow_published_assistants;
       autoFollowPublishedApps = updated.auto_follow_published_apps;
       if (!updated.enabled) {
@@ -201,6 +173,7 @@
     } catch (error: unknown) {
       console.error(error);
       onError(getErrorMessage(error));
+      notificationDaysInput = String(notificationDays);
     } finally {
       notificationSettingsSaving = false;
     }
@@ -220,7 +193,7 @@
         auto_follow_published_assistants: next
       });
       notificationsEnabled = updated.enabled;
-      notificationDaysInput = updated.days_before_expiry.join(", ");
+      syncDayState(updated.days_before_expiry);
       autoFollowPublishedAssistants = updated.auto_follow_published_assistants;
       autoFollowPublishedApps = updated.auto_follow_published_apps;
       if (next && !updated.auto_follow_published_assistants) {
@@ -250,7 +223,7 @@
         auto_follow_published_apps: next
       });
       notificationsEnabled = updated.enabled;
-      notificationDaysInput = updated.days_before_expiry.join(", ");
+      syncDayState(updated.days_before_expiry);
       autoFollowPublishedAssistants = updated.auto_follow_published_assistants;
       autoFollowPublishedApps = updated.auto_follow_published_apps;
       if (next && !updated.auto_follow_published_apps) {
@@ -266,7 +239,6 @@
     }
   }
 
-  // Expose a method for parent to trigger follow-change refresh
   export async function refreshSubscriptions() {
     try {
       const subscriptions = await listNotificationSubscriptions(intric);
@@ -289,7 +261,6 @@
 </script>
 
 <div class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm">
-  <!-- Header -->
   <div class="flex items-center justify-between gap-4 px-5 py-3.5">
     <div class="flex min-w-0 items-center gap-3">
       <div
@@ -314,7 +285,6 @@
     </div>
   </div>
 
-  <!-- Policy-blocked banner -->
   {#if isPolicyBlocked}
     <div
       class="border-negative-default/20 bg-negative-dimmer/50 mx-5 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3"
@@ -326,66 +296,51 @@
     </div>
   {/if}
 
-  <!-- Disabled hint -->
   {#if !notificationsEnabled && !isPolicyBlocked && !notificationSettingsLoading}
     <p class="text-muted px-5 pb-4 text-xs">
       {m.api_keys_notifications_enable_to_edit_hint()}
     </p>
   {/if}
 
-  <!-- Expanded body (only when enabled) -->
   {#if notificationsEnabled && !isPolicyBlocked}
     <div class="border-default space-y-4 border-t px-5 py-4" transition:slide={{ duration: 200 }}>
       <p class="text-secondary text-xs">
         {m.api_keys_notifications_settings_description()}
       </p>
 
-      <!-- Reminder schedule -->
       <div
         class="space-y-3"
         class:opacity-50={notificationSettingsSaving}
         class:pointer-events-none={notificationSettingsSaving}
       >
-        <!-- Quick day chips -->
         <div class="flex flex-wrap gap-1.5">
           {#each reminderDayOptions as day (day)}
-            {@const isSelected = selectedReminderDays.includes(day)}
             <button
               type="button"
               style="font-variant-numeric: tabular-nums"
-              class="focus-visible:ring-accent-default/50 inline-flex h-8 min-w-[42px] items-center justify-center rounded-lg px-3 text-xs font-medium transition-all focus-visible:ring-2 focus-visible:outline-none {isSelected
+              class="focus-visible:ring-accent-default/50 inline-flex h-8 min-w-[42px] items-center justify-center rounded-lg px-3 text-xs font-medium transition-all focus-visible:ring-2 focus-visible:outline-none {notificationDays ===
+              day
                 ? 'bg-accent-default text-on-fill shadow-sm'
                 : 'border-default bg-primary text-secondary hover:text-primary hover:border-stronger border'}"
-              aria-pressed={isSelected}
+              aria-pressed={notificationDays === day}
               aria-label={m.api_keys_notifications_day_chip_aria_label({ day })}
               disabled={notificationSettingsSaving}
-              onclick={() => toggleReminderDay(day)}
+              onclick={() => void saveNotificationDays(day)}
             >
               {day}d
             </button>
           {/each}
         </div>
 
-        <!-- Custom days disclosure -->
-        {#if showCustomInput}
-          <div class="max-w-[280px]" transition:slide={{ duration: 150 }}>
-            <Input.Text
-              bind:value={notificationDaysInput}
-              label={m.api_keys_notifications_days_label()}
-              placeholder="30, 14, 7, 3, 1"
-              disabled={notificationSettingsSaving}
-              on:blur={debouncedSaveDays}
-            />
-          </div>
-        {:else}
-          <button
-            type="button"
-            class="text-accent-default text-xs hover:underline"
-            onclick={() => (showCustomInput = true)}
-          >
-            {m.api_keys_notifications_customize_days()}
-          </button>
-        {/if}
+        <div class="max-w-[280px]">
+          <Input.Text
+            bind:value={notificationDaysInput}
+            label={m.api_keys_notifications_days_label()}
+            placeholder="30"
+            disabled={notificationSettingsSaving}
+            on:blur={() => void saveNotificationDays()}
+          />
+        </div>
 
         <p class="text-muted text-xs leading-relaxed">
           {m.api_keys_notifications_days_help()}
@@ -395,13 +350,11 @@
         </p>
       </div>
 
-      <!-- Auto-follow settings -->
       <div
         class="border-default space-y-3 border-t pt-4"
         class:opacity-50={notificationSettingsSaving}
         class:pointer-events-none={notificationSettingsSaving}
       >
-        <!-- Assistants -->
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
             <p class="text-primary text-sm font-medium">
@@ -425,7 +378,6 @@
           </div>
         </div>
 
-        <!-- Apps -->
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
             <p class="text-primary text-sm font-medium">
@@ -452,7 +404,6 @@
     </div>
   {/if}
 
-  <!-- SR-only live region -->
   <div class="sr-only" aria-live="polite">
     {notificationsEnabled
       ? m.api_keys_notifications_aria_enabled()

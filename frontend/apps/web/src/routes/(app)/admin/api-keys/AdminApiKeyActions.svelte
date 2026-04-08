@@ -1,14 +1,28 @@
 <script lang="ts">
-  import type { ApiKeyCreatedResponse, ApiKeyUpdateRequest, ApiKeyV2 } from "@intric/intric-js";
+  import type {
+    ApiKeyCreatedResponse,
+    ApiKeyUpdateRequest,
+    ApiKeyV2,
+    ResourcePermissionLevel
+  } from "@intric/intric-js";
   import { Button, Dialog, Dropdown, Input, Select } from "@intric/ui";
   import { Ban, ChevronDown, MoreVertical, Pencil, RefreshCw, RotateCcw } from "lucide-svelte";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { writable } from "svelte/store";
   import TagInput from "../../account/api-keys/TagInput.svelte";
+  import ExpirationPicker from "../../account/api-keys/ExpirationPicker.svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
 
   const intric = getIntric();
+
+  type ResourcePermission = "none" | "read" | "write" | "admin";
+  type ResourcePermissionsPayload = {
+    assistants: ResourcePermission;
+    apps: ResourcePermission;
+    spaces: ResourcePermission;
+    knowledge: ResourcePermission;
+  };
 
   let { apiKey, onChanged, onSecret } = $props<{
     apiKey: ApiKeyV2;
@@ -19,6 +33,7 @@
   const showRevokeDialog = writable(false);
   const showSuspendDialog = writable(false);
   const showEditDialog = writable(false);
+
   let errorMessage = $state<string | null>(null);
   let reasonText = $state("");
   let editName = $state("");
@@ -27,13 +42,27 @@
   let editRateLimit = $state("");
   let editAllowedOrigins = $state<string[]>([]);
   let editAllowedIps = $state<string[]>([]);
+  let editExpiresAt = $state<string | null>(null);
+  let permissionMode = $state<"simple" | "fine-grained">("simple");
+  let assistantsPermission = $state<ResourcePermission>("none");
+  let appsPermission = $state<ResourcePermission>("none");
+  let spacesPermission = $state<ResourcePermission>("none");
+  let knowledgePermission = $state<ResourcePermission>("none");
   let showAdvanced = $state(false);
+
+  const permissionOrder: Record<ResourcePermission, number> = {
+    none: 0,
+    read: 1,
+    write: 2,
+    admin: 3
+  };
 
   const isActive = $derived(apiKey.state === "active");
   const isSuspended = $derived(apiKey.state === "suspended");
   const canRotate = $derived(apiKey.state === "active");
   const canEditPermission = $derived(apiKey.state === "active" || apiKey.state === "suspended");
   const canEditGuardrails = $derived(apiKey.state === "active" || apiKey.state === "suspended");
+  const canEditResourcePermissions = $derived(canEditPermission && apiKey.key_type === "sk_");
   const scopeLabel = $derived.by(() => {
     switch (apiKey.scope_type) {
       case "space":
@@ -56,6 +85,22 @@
     { value: "write", label: m.api_keys_permission_write() },
     { value: "admin", label: m.api_keys_permission_admin() }
   ]);
+  const resourcePermissionOptions = $derived([
+    { value: "none", label: m.api_keys_permission_no_access() },
+    { value: "read", label: m.api_keys_permission_read() },
+    { value: "write", label: m.api_keys_permission_write() },
+    { value: "admin", label: m.api_keys_permission_admin() }
+  ]);
+
+  $effect(() => {
+    if (permissionMode !== "fine-grained") {
+      return;
+    }
+    assistantsPermission = clampToPermission(assistantsPermission);
+    appsPermission = clampToPermission(appsPermission);
+    spacesPermission = clampToPermission(spacesPermission);
+    knowledgePermission = clampToPermission(knowledgePermission);
+  });
 
   function normalizeTags(values: string[] | null | undefined): string[] {
     return (values ?? []).map((value) => value.trim()).filter(Boolean);
@@ -66,6 +111,76 @@
     return a.every((value, index) => value === b[index]);
   }
 
+  function normalizeResourcePermission(value: unknown): ResourcePermission {
+    if (value === "read" || value === "write" || value === "admin") {
+      return value;
+    }
+    return "none";
+  }
+
+  function normalizeResourcePermissions(
+    resourcePermissions:
+      | ApiKeyV2["resource_permissions"]
+      | ApiKeyUpdateRequest["resource_permissions"]
+  ): ResourcePermissionsPayload {
+    return {
+      assistants: normalizeResourcePermission(resourcePermissions?.assistants),
+      apps: normalizeResourcePermission(resourcePermissions?.apps),
+      spaces: normalizeResourcePermission(resourcePermissions?.spaces),
+      knowledge: normalizeResourcePermission(resourcePermissions?.knowledge)
+    };
+  }
+
+  function toApiResourcePermissions(
+    resourcePermissions: ResourcePermissionsPayload | null
+  ): ApiKeyUpdateRequest["resource_permissions"] {
+    if (resourcePermissions === null) {
+      return null;
+    }
+    return {
+      assistants: resourcePermissions.assistants as ResourcePermissionLevel,
+      apps: resourcePermissions.apps as ResourcePermissionLevel,
+      spaces: resourcePermissions.spaces as ResourcePermissionLevel,
+      knowledge: resourcePermissions.knowledge as ResourcePermissionLevel
+    };
+  }
+
+  function compactResourcePermissions(
+    resourcePermissions: ResourcePermissionsPayload
+  ): ResourcePermissionsPayload | null {
+    const values = Object.values(resourcePermissions);
+    return values.some((value) => value !== "none") ? resourcePermissions : null;
+  }
+
+  function resourcePermissionsEqual(
+    a: ResourcePermissionsPayload | null,
+    b: ResourcePermissionsPayload | null
+  ): boolean {
+    if (a === null || b === null) {
+      return a === b;
+    }
+    return (
+      a.assistants === b.assistants &&
+      a.apps === b.apps &&
+      a.spaces === b.spaces &&
+      a.knowledge === b.knowledge
+    );
+  }
+
+  function clampToPermission(level: ResourcePermission): ResourcePermission {
+    if (permissionOrder[level] > permissionOrder[editPermission]) {
+      return editPermission;
+    }
+    return level;
+  }
+
+  function formatExpiration(value: string | null | undefined): string {
+    if (!value) {
+      return m.api_keys_exp_no_expiration();
+    }
+    return new Date(value).toLocaleString();
+  }
+
   function openEditDialog() {
     editName = apiKey.name;
     editDescription = apiKey.description ?? "";
@@ -73,8 +188,23 @@
     editRateLimit = apiKey.rate_limit?.toString() ?? "";
     editAllowedOrigins = normalizeTags(apiKey.allowed_origins);
     editAllowedIps = normalizeTags(apiKey.allowed_ips);
+    editExpiresAt = apiKey.expires_at ?? null;
+
+    const resourcePermissions = normalizeResourcePermissions(apiKey.resource_permissions);
+    assistantsPermission = resourcePermissions.assistants;
+    appsPermission = resourcePermissions.apps;
+    spacesPermission = resourcePermissions.spaces;
+    knowledgePermission = resourcePermissions.knowledge;
+    permissionMode =
+      apiKey.key_type === "sk_" && compactResourcePermissions(resourcePermissions)
+        ? "fine-grained"
+        : "simple";
+
     showAdvanced = Boolean(
-      apiKey.rate_limit || editAllowedOrigins.length > 0 || editAllowedIps.length > 0
+      apiKey.rate_limit ||
+        editAllowedOrigins.length > 0 ||
+        editAllowedIps.length > 0 ||
+        editExpiresAt
     );
     $showEditDialog = true;
   }
@@ -103,6 +233,24 @@
       updates.permission = editPermission;
     }
 
+    if (canEditResourcePermissions) {
+      const nextResourcePermissions =
+        permissionMode === "fine-grained"
+          ? compactResourcePermissions({
+              assistants: assistantsPermission,
+              apps: appsPermission,
+              spaces: spacesPermission,
+              knowledge: knowledgePermission
+            })
+          : null;
+      const currentResourcePermissions = compactResourcePermissions(
+        normalizeResourcePermissions(apiKey.resource_permissions)
+      );
+      if (!resourcePermissionsEqual(nextResourcePermissions, currentResourcePermissions)) {
+        updates.resource_permissions = toApiResourcePermissions(nextResourcePermissions);
+      }
+    }
+
     if (canEditGuardrails) {
       const normalizedRateLimit = editRateLimit.trim();
       const parsedRateLimit = normalizedRateLimit ? Number(normalizedRateLimit) : null;
@@ -116,6 +264,10 @@
       const currentRateLimit = apiKey.rate_limit ?? null;
       if (parsedRateLimit !== currentRateLimit) {
         updates.rate_limit = parsedRateLimit;
+      }
+
+      if ((editExpiresAt ?? null) !== (apiKey.expires_at ?? null)) {
+        updates.expires_at = editExpiresAt;
       }
 
       if (apiKey.key_type === "pk_") {
@@ -283,9 +435,10 @@
     <Dialog.Description>
       {m.api_keys_admin_edit_description()}
     </Dialog.Description>
-    <div class="mt-3 space-y-3">
+    <div class="mt-3 space-y-4">
       <Input.Text bind:value={editName} label={m.name()} />
       <Input.TextArea bind:value={editDescription} label={m.description()} rows={3} />
+
       {#if canEditPermission}
         <Select.Simple
           bind:value={editPermission}
@@ -303,6 +456,120 @@
         </div>
         <p class="text-muted text-xs">{m.api_keys_admin_edit_permission_disabled_hint()}</p>
       {/if}
+
+      {#if apiKey.key_type === "sk_"}
+        <div class="space-y-3 rounded-lg border border-slate-200/70 p-3">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-default text-sm font-medium">{m.api_keys_fine_grained()}</p>
+              <p class="text-muted text-xs">{m.api_keys_fine_grained_info()}</p>
+            </div>
+            {#if canEditResourcePermissions}
+              <div class="bg-subtle flex rounded-lg p-1">
+                <button
+                  type="button"
+                  class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors {permissionMode ===
+                  'simple'
+                    ? 'bg-primary text-default shadow-sm'
+                    : 'text-muted hover:text-default'}"
+                  onclick={() => (permissionMode = "simple")}
+                >
+                  {m.api_keys_simple()}
+                </button>
+                <button
+                  type="button"
+                  class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors {permissionMode ===
+                  'fine-grained'
+                    ? 'bg-primary text-default shadow-sm'
+                    : 'text-muted hover:text-default'}"
+                  onclick={() => (permissionMode = "fine-grained")}
+                >
+                  {m.api_keys_fine_grained()}
+                </button>
+              </div>
+            {/if}
+          </div>
+
+          {#if permissionMode === "fine-grained"}
+            <div class="grid gap-3 sm:grid-cols-2">
+              {#if canEditResourcePermissions}
+                <Select.Simple
+                  bind:value={assistantsPermission}
+                  options={resourcePermissionOptions}
+                  resourceName="assistants"
+                >
+                  {m.api_keys_resource_assistants()}
+                </Select.Simple>
+                <Select.Simple
+                  bind:value={appsPermission}
+                  options={resourcePermissionOptions}
+                  resourceName="apps"
+                >
+                  {m.api_keys_resource_applications()}
+                </Select.Simple>
+                <Select.Simple
+                  bind:value={spacesPermission}
+                  options={resourcePermissionOptions}
+                  resourceName="spaces"
+                >
+                  {m.api_keys_resource_spaces()}
+                </Select.Simple>
+                <Select.Simple
+                  bind:value={knowledgePermission}
+                  options={resourcePermissionOptions}
+                  resourceName="knowledge"
+                >
+                  {m.api_keys_resource_knowledge()}
+                </Select.Simple>
+              {:else}
+                <div>
+                  <p class="text-muted mb-1 text-xs">{m.api_keys_resource_assistants()}</p>
+                  <div
+                    class="border-default bg-subtle text-default rounded-md border px-3 py-2 text-sm"
+                  >
+                    {assistantsPermission}
+                  </div>
+                </div>
+                <div>
+                  <p class="text-muted mb-1 text-xs">{m.api_keys_resource_applications()}</p>
+                  <div
+                    class="border-default bg-subtle text-default rounded-md border px-3 py-2 text-sm"
+                  >
+                    {appsPermission}
+                  </div>
+                </div>
+                <div>
+                  <p class="text-muted mb-1 text-xs">{m.api_keys_resource_spaces()}</p>
+                  <div
+                    class="border-default bg-subtle text-default rounded-md border px-3 py-2 text-sm"
+                  >
+                    {spacesPermission}
+                  </div>
+                </div>
+                <div>
+                  <p class="text-muted mb-1 text-xs">{m.api_keys_resource_knowledge()}</p>
+                  <div
+                    class="border-default bg-subtle text-default rounded-md border px-3 py-2 text-sm"
+                  >
+                    {knowledgePermission}
+                  </div>
+                </div>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {/if}
+
+      <div>
+        <p class="text-muted mb-1 text-xs">{m.api_keys_expiration()}</p>
+        {#if canEditGuardrails}
+          <ExpirationPicker bind:value={editExpiresAt} disabled={!canEditGuardrails} />
+        {:else}
+          <div class="border-default bg-subtle text-default rounded-md border px-3 py-2 text-sm">
+            {formatExpiration(apiKey.expires_at)}
+          </div>
+        {/if}
+      </div>
 
       <div class="grid gap-3 sm:grid-cols-2">
         <div>

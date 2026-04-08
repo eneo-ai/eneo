@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Literal, cast
 from uuid import UUID
 
-import sqlalchemy as sa
 from fastapi import (
     APIRouter,
     Body,
@@ -18,6 +17,9 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.authentication.api_key_lifecycle import ApiKeyLifecycleService
+from intric.authentication.api_key_notification_repo import (
+    ApiKeyNotificationRepository,
+)
 from intric.authentication.api_key_policy import ApiKeyPolicyService
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.api_key_router_helpers import (
@@ -40,6 +42,7 @@ from intric.authentication.auth_models import (
     ApiKeyNotificationPreferencesUpdate,
     ApiKeyNotificationSubscription,
     ApiKeyNotificationSubscriptionListResponse,
+    ApiKeyNotificationSubscriptionSource,
     ApiKeyNotificationTargetType,
     ApiKeyOwnership,
     ApiKeyPermission,
@@ -53,8 +56,9 @@ from intric.authentication.auth_models import (
     ApiKeyV2InDB,
     ExpiringKeysSummary,
     ExpiringKeySummaryItem,
+    normalize_notification_day_value,
+    normalize_notification_policy_payload,
 )
-from intric.database.tables.settings_table import Settings
 from intric.main.container.container import Container
 from intric.roles.permissions import Permission
 from intric.server.dependencies.container import get_container
@@ -113,11 +117,6 @@ _STATE_CHANGE_EXAMPLE = {
     "reason_text": "Suspicious traffic detected from blocked IP range.",
 }
 
-_API_KEY_NOTIFICATIONS_BUCKET = "api_key_notifications"
-_SETTINGS_ID_COL: Any = getattr(Settings, "id")
-_SETTINGS_USER_ID_COL: Any = getattr(Settings, "user_id")
-_SETTINGS_CHATBOT_WIDGET_COL: Any = getattr(Settings, "chatbot_widget")
-
 
 def _as_json_object(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
@@ -125,35 +124,27 @@ def _as_json_object(value: Any) -> dict[str, Any]:
     return {}
 
 
-def _as_json_list(value: Any) -> list[Any]:
-    if isinstance(value, list):
-        return cast(list[Any], value)
-    return []
-
-
 def _notification_policy_for_user(user: UserInDB) -> ApiKeyNotificationPolicyResponse:
     tenant = getattr(user, "tenant", None)
     tenant_api_key_policy = getattr(tenant, "api_key_policy", None)
     tenant_policy = _as_json_object(tenant_api_key_policy)
     raw_policy = _as_json_object(tenant_policy.get("notification_policy"))
-    return ApiKeyNotificationPolicyResponse.model_validate(raw_policy)
+    return ApiKeyNotificationPolicyResponse.model_validate(
+        normalize_notification_policy_payload(raw_policy)
+    )
 
 
 def _normalize_days_against_policy(
-    days: list[int], policy: ApiKeyNotificationPolicyResponse
-) -> list[int]:
-    max_days = policy.max_days_before_expiry
-    normalized = sorted(set(days), reverse=True)
-    if max_days is not None:
-        normalized = [day for day in normalized if day <= max_days]
-
-    if normalized:
-        return normalized
-
-    fallback = sorted(set(policy.default_days_before_expiry), reverse=True)
-    if max_days is not None:
-        fallback = [day for day in fallback if day <= max_days]
-    return fallback or [1]
+    days: object, policy: ApiKeyNotificationPolicyResponse
+) -> int:
+    normalized = normalize_notification_day_value(
+        days, default=policy.default_days_before_expiry
+    )
+    if normalized is None:
+        normalized = policy.default_days_before_expiry
+    if policy.max_days_before_expiry is not None:
+        normalized = min(normalized, policy.max_days_before_expiry)
+    return normalized
 
 
 def _default_preferences_from_policy(
@@ -162,149 +153,67 @@ def _default_preferences_from_policy(
     return ApiKeyNotificationPreferencesResponse(
         enabled=False,
         days_before_expiry=_normalize_days_against_policy(
-            policy.default_days_before_expiry,
-            policy,
+            policy.default_days_before_expiry, policy
         ),
         auto_follow_published_assistants=False,
         auto_follow_published_apps=False,
     )
 
 
-def _normalize_notification_preferences(
-    raw_preferences: Any,
+def _apply_notification_policy(
+    preferences: ApiKeyNotificationPreferencesResponse,
     policy: ApiKeyNotificationPolicyResponse,
 ) -> ApiKeyNotificationPreferencesResponse:
-    fallback = _default_preferences_from_policy(policy)
-    if not isinstance(raw_preferences, dict):
-        return fallback
-
-    try:
-        parsed = ApiKeyNotificationPreferencesResponse.model_validate(raw_preferences)
-    except ValueError:
-        return fallback
-
     return ApiKeyNotificationPreferencesResponse(
-        enabled=parsed.enabled and policy.enabled,
+        enabled=preferences.enabled and policy.enabled,
         days_before_expiry=_normalize_days_against_policy(
-            parsed.days_before_expiry,
+            preferences.days_before_expiry,
             policy,
         ),
         auto_follow_published_assistants=(
-            parsed.auto_follow_published_assistants
+            preferences.auto_follow_published_assistants
             and policy.allow_auto_follow_published_assistants
         ),
         auto_follow_published_apps=(
-            parsed.auto_follow_published_apps
+            preferences.auto_follow_published_apps
             and policy.allow_auto_follow_published_apps
-        ),
-    )
-
-
-def _normalize_notification_subscriptions(
-    raw_subscriptions: Any,
-) -> list[ApiKeyNotificationSubscription]:
-    raw_items = _as_json_list(raw_subscriptions)
-    if not raw_items:
-        return []
-
-    deduped: dict[tuple[str, UUID], ApiKeyNotificationSubscription] = {}
-    for raw_item in raw_items:
-        item = _as_json_object(raw_item)
-        if not item:
-            continue
-        raw_target_type = item.get("target_type")
-        raw_target_id = item.get("target_id")
-        if not isinstance(raw_target_type, str):
-            continue
-        if isinstance(raw_target_id, UUID):
-            target_id = raw_target_id
-        elif isinstance(raw_target_id, str):
-            try:
-                target_id = UUID(raw_target_id)
-            except ValueError:
-                continue
-        else:
-            continue
-
-        try:
-            target_type = ApiKeyNotificationTargetType(raw_target_type)
-        except ValueError:
-            continue
-        subscription = ApiKeyNotificationSubscription(
-            target_type=target_type,
-            target_id=target_id,
-        )
-        deduped[(subscription.target_type.value, subscription.target_id)] = subscription
-
-    return sorted(
-        deduped.values(),
-        key=lambda subscription: (
-            subscription.target_type.value,
-            str(subscription.target_id),
         ),
     )
 
 
 async def _load_api_key_notification_settings(
     *,
-    session: AsyncSession,
+    repo: ApiKeyNotificationRepository,
     user_id: UUID,
     policy: ApiKeyNotificationPolicyResponse,
 ) -> tuple[ApiKeyNotificationPreferencesResponse, list[ApiKeyNotificationSubscription]]:
-    query = (
-        sa.select(_SETTINGS_CHATBOT_WIDGET_COL)
-        .where(_SETTINGS_USER_ID_COL == user_id)
-        .order_by(Settings.updated_at.desc())
-        .limit(1)
-    )
-    raw_widget = await session.scalar(query)
-    chatbot_widget = _as_json_object(raw_widget)
-
-    bucket = _as_json_object(chatbot_widget.get(_API_KEY_NOTIFICATIONS_BUCKET))
-    preferences = _normalize_notification_preferences(bucket.get("preferences"), policy)
-    subscriptions = _normalize_notification_subscriptions(bucket.get("subscriptions"))
+    preferences = await repo.get_preferences(user_id)
+    if preferences is None:
+        preferences = _default_preferences_from_policy(policy)
+    else:
+        preferences = _apply_notification_policy(preferences, policy)
+    subscriptions = await repo.list_subscriptions(user_id)
     return preferences, subscriptions
 
 
-async def _save_api_key_notification_settings(
+async def _save_notification_preferences(
     *,
-    session: AsyncSession,
+    repo: ApiKeyNotificationRepository,
     user_id: UUID,
     preferences: ApiKeyNotificationPreferencesResponse,
+) -> ApiKeyNotificationPreferencesResponse:
+    return await repo.upsert_preferences(user_id=user_id, preferences=preferences)
+
+
+def _sorted_subscriptions(
     subscriptions: list[ApiKeyNotificationSubscription],
-) -> None:
-    bucket_payload = {
-        "preferences": preferences.model_dump(mode="json"),
-        "subscriptions": [
-            subscription.model_dump(mode="json") for subscription in subscriptions
-        ],
-    }
-
-    row_query = (
-        sa.select(_SETTINGS_ID_COL, _SETTINGS_CHATBOT_WIDGET_COL)
-        .where(_SETTINGS_USER_ID_COL == user_id)
-        .order_by(Settings.updated_at.desc())
-        .limit(1)
-    )
-    row = (await session.execute(row_query)).first()
-    if row is None:
-        await session.execute(
-            sa.insert(Settings).values(
-                user_id=user_id,
-                chatbot_widget={_API_KEY_NOTIFICATIONS_BUCKET: bucket_payload},
-            )
-        )
-        return
-
-    settings_id = cast(UUID, row[0])
-    existing_widget = _as_json_object(row[1])
-    updated_widget: dict[str, Any] = dict(existing_widget)
-    updated_widget[_API_KEY_NOTIFICATIONS_BUCKET] = bucket_payload
-
-    await session.execute(
-        sa.update(Settings)
-        .where(_SETTINGS_ID_COL == settings_id)
-        .values(chatbot_widget=updated_widget)
+) -> list[ApiKeyNotificationSubscription]:
+    return sorted(
+        subscriptions,
+        key=lambda subscription: (
+            subscription.target_type.value,
+            str(subscription.target_id),
+        ),
     )
 
 
@@ -464,10 +373,10 @@ async def get_notification_preferences(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ApiKeyNotificationPreferencesResponse:
     user: UserInDB = container.user()
-    session = cast(AsyncSession, container.session())
+    repo: ApiKeyNotificationRepository = container.api_key_notification_repo()
     policy = _notification_policy_for_user(user)
     preferences, _subscriptions = await _load_api_key_notification_settings(
-        session=session,
+        repo=repo,
         user_id=user.id,
         policy=policy,
     )
@@ -488,16 +397,16 @@ async def get_notification_preferences(
 async def update_notification_preferences(
     request: Annotated[
         ApiKeyNotificationPreferencesUpdate,
-        Body(examples=[{"enabled": True, "days_before_expiry": [30, 14, 7, 3, 1]}]),
+        Body(examples=[{"enabled": True, "days_before_expiry": 30}]),
     ],
     container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
 ) -> ApiKeyNotificationPreferencesResponse:
     user: UserInDB = container.user()
-    session = cast(AsyncSession, container.session())
+    repo: ApiKeyNotificationRepository = container.api_key_notification_repo()
     policy = _notification_policy_for_user(user)
-    current_preferences, subscriptions = await _load_api_key_notification_settings(
-        session=session,
+    current_preferences, _subscriptions = await _load_api_key_notification_settings(
+        repo=repo,
         user_id=user.id,
         policy=policy,
     )
@@ -523,11 +432,10 @@ async def update_notification_preferences(
         ),
     )
 
-    await _save_api_key_notification_settings(
-        session=session,
+    await _save_notification_preferences(
+        repo=repo,
         user_id=user.id,
         preferences=updated_preferences,
-        subscriptions=subscriptions,
     )
     return updated_preferences
 
@@ -547,10 +455,10 @@ async def list_notification_subscriptions(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ApiKeyNotificationSubscriptionListResponse:
     user: UserInDB = container.user()
-    session = cast(AsyncSession, container.session())
+    repo: ApiKeyNotificationRepository = container.api_key_notification_repo()
     policy = _notification_policy_for_user(user)
     _preferences, subscriptions = await _load_api_key_notification_settings(
-        session=session,
+        repo=repo,
         user_id=user.id,
         policy=policy,
     )
@@ -576,9 +484,10 @@ async def upsert_notification_subscription(
 ) -> ApiKeyNotificationSubscriptionListResponse:
     user: UserInDB = container.user()
     repo: ApiKeysV2Repository = container.api_key_v2_repo()
+    notification_repo: ApiKeyNotificationRepository = (
+        container.api_key_notification_repo()
+    )
     policy: ApiKeyPolicyService = container.api_key_policy_service()
-    session = cast(AsyncSession, container.session())
-    notification_policy = _notification_policy_for_user(user)
 
     await _validate_notification_follow_target(
         target_type=target_type,
@@ -588,35 +497,17 @@ async def upsert_notification_subscription(
         policy=policy,
     )
 
-    preferences, current_subscriptions = await _load_api_key_notification_settings(
-        session=session,
-        user_id=user.id,
-        policy=notification_policy,
-    )
-    updated = {
-        (subscription.target_type.value, subscription.target_id): subscription
-        for subscription in current_subscriptions
-    }
     new_subscription = ApiKeyNotificationSubscription(
         target_type=target_type,
         target_id=target_id,
     )
-    updated[(new_subscription.target_type.value, new_subscription.target_id)] = (
-        new_subscription
-    )
-    subscriptions = sorted(
-        updated.values(),
-        key=lambda subscription: (
-            subscription.target_type.value,
-            str(subscription.target_id),
-        ),
-    )
-
-    await _save_api_key_notification_settings(
-        session=session,
+    await notification_repo.add_subscription(
         user_id=user.id,
-        preferences=preferences,
-        subscriptions=subscriptions,
+        subscription=new_subscription,
+        source=ApiKeyNotificationSubscriptionSource.MANUAL,
+    )
+    subscriptions = _sorted_subscriptions(
+        await notification_repo.list_subscriptions(user.id)
     )
     return ApiKeyNotificationSubscriptionListResponse(items=subscriptions)
 
@@ -639,28 +530,13 @@ async def delete_notification_subscription(
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
 ) -> ApiKeyNotificationSubscriptionListResponse:
     user: UserInDB = container.user()
-    session = cast(AsyncSession, container.session())
-    policy = _notification_policy_for_user(user)
-    preferences, current_subscriptions = await _load_api_key_notification_settings(
-        session=session,
+    repo: ApiKeyNotificationRepository = container.api_key_notification_repo()
+    await repo.delete_subscription(
         user_id=user.id,
-        policy=policy,
+        target_type=target_type.value,
+        target_id=target_id,
     )
-    subscriptions = [
-        subscription
-        for subscription in current_subscriptions
-        if not (
-            subscription.target_type == target_type
-            and subscription.target_id == target_id
-        )
-    ]
-
-    await _save_api_key_notification_settings(
-        session=session,
-        user_id=user.id,
-        preferences=preferences,
-        subscriptions=subscriptions,
-    )
+    subscriptions = _sorted_subscriptions(await repo.list_subscriptions(user.id))
     return ApiKeyNotificationSubscriptionListResponse(items=subscriptions)
 
 
@@ -754,9 +630,11 @@ async def get_expiring_keys(
     followed_space_scope_ids: list[UUID] | None = None
 
     if mode == "subscribed":
-        session = cast(AsyncSession, container.session())
+        notification_repo: ApiKeyNotificationRepository = (
+            container.api_key_notification_repo()
+        )
         preferences, subscriptions = await _load_api_key_notification_settings(
-            session=session,
+            repo=notification_repo,
             user_id=user.id,
             policy=notification_policy,
         )

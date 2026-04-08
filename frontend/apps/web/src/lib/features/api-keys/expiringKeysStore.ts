@@ -83,7 +83,7 @@ function createExpiringKeysStore(data: {
       listNotificationSubscriptions(intric)
     ]);
     preferencesEnabled = preferences.enabled;
-    daysWindow = Math.max(...preferences.days_before_expiry, 1);
+    daysWindow = Math.max(preferences.days_before_expiry, 1);
     hasSubscriptions = subscriptions.length > 0;
     contextLoadedAt = Date.now();
   }

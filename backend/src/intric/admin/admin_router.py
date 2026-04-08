@@ -4,6 +4,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.admin.admin_models import (
@@ -52,6 +53,7 @@ from intric.authentication.auth_models import (
     ExpiringKeysSummary,
     ExpiringKeySummaryItem,
     SuperApiKeyStatus,
+    normalize_notification_policy_payload,
 )
 from intric.database.tables.users_table import Users
 from intric.main.config import get_settings
@@ -1335,7 +1337,9 @@ async def get_api_key_notification_policy(
         if isinstance(notification_policy_raw, dict)
         else {}
     )
-    return ApiKeyNotificationPolicyResponse.model_validate(notification_policy)
+    return ApiKeyNotificationPolicyResponse.model_validate(
+        normalize_notification_policy_payload(notification_policy)
+    )
 
 
 @router.put(
@@ -1354,9 +1358,7 @@ async def update_api_key_notification_policy(
         ApiKeyNotificationPolicyUpdate,
         Body(
             ...,
-            examples=[
-                {"enabled": True, "default_days_before_expiry": [30, 14, 7, 3, 1]}
-            ],
+            examples=[{"enabled": True, "default_days_before_expiry": 30}],
         ),
     ],
     container: AdminContainer,
@@ -1377,14 +1379,33 @@ async def update_api_key_notification_policy(
 
     if not updates:
         return ApiKeyNotificationPolicyResponse.model_validate(
-            current_notification_policy
+            normalize_notification_policy_payload(current_notification_policy)
         )
 
-    merged_notification_policy = dict(current_notification_policy)
-    merged_notification_policy.update(updates)
-    normalized_policy = ApiKeyNotificationPolicyResponse.model_validate(
-        merged_notification_policy
+    merged_notification_policy = normalize_notification_policy_payload(
+        current_notification_policy
     )
+    merged_notification_policy.update(updates)
+    if (
+        "max_days_before_expiry" in updates
+        and "default_days_before_expiry" not in updates
+    ):
+        merged_notification_policy = normalize_notification_policy_payload(
+            merged_notification_policy
+        )
+
+    try:
+        normalized_policy = ApiKeyNotificationPolicyResponse.model_validate(
+            merged_notification_policy
+        )
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_request",
+                "message": str(exc),
+            },
+        ) from exc
 
     tenant_service = container.tenant_service()
     before_policy: dict[str, object] = dict(tenant_policy)
@@ -1415,7 +1436,9 @@ async def update_api_key_notification_policy(
         if isinstance(after_notification_policy_raw, dict)
         else {}
     )
-    return ApiKeyNotificationPolicyResponse.model_validate(after_notification_policy)
+    return ApiKeyNotificationPolicyResponse.model_validate(
+        normalize_notification_policy_payload(after_notification_policy)
+    )
 
 
 @router.get(

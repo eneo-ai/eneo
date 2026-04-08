@@ -7056,7 +7056,7 @@ export interface components {
        */
       enabled?: boolean;
       /** Default Days Before Expiry */
-      default_days_before_expiry?: number[];
+      default_days_before_expiry?: number;
       /**
        * Max Days Before Expiry
        * @default 365
@@ -7078,7 +7078,7 @@ export interface components {
       /** Enabled */
       enabled?: boolean | null;
       /** Default Days Before Expiry */
-      default_days_before_expiry?: number[] | null;
+      default_days_before_expiry?: number | null;
       /** Max Days Before Expiry */
       max_days_before_expiry?: number | null;
       /** Allow Auto Follow Published Assistants */
@@ -7094,7 +7094,7 @@ export interface components {
        */
       enabled?: boolean;
       /** Days Before Expiry */
-      days_before_expiry?: number[];
+      days_before_expiry?: number;
       /**
        * Auto Follow Published Assistants
        * @default false
@@ -7111,7 +7111,7 @@ export interface components {
       /** Enabled */
       enabled?: boolean | null;
       /** Days Before Expiry */
-      days_before_expiry?: number[] | null;
+      days_before_expiry?: number | null;
       /** Auto Follow Published Assistants */
       auto_follow_published_assistants?: boolean | null;
       /** Auto Follow Published Apps */
