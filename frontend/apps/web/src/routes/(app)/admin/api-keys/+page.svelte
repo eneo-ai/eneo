@@ -87,12 +87,12 @@
   let notificationPolicySaving = $state(false);
   let notificationPolicy = $state<ApiKeyNotificationPolicy>({
     enabled: true,
-    default_days_before_expiry: [30, 14, 7, 3, 1],
+    default_days_before_expiry: [30],
     max_days_before_expiry: 365,
     allow_auto_follow_published_assistants: false,
     allow_auto_follow_published_apps: false
   });
-  let notificationPolicyDaysInput = $state("30, 14, 7, 3, 1");
+  let notificationPolicyDaysInput = $state("30");
   let notificationPolicyMaxDaysInput = $state("365");
 
   // Quick filter chips
@@ -566,16 +566,16 @@
     }
   }
 
-  function parseDayValues(value: string): number[] {
-    return Array.from(
-      new Set(
-        value
-          .split(/[,\s]+/)
-          .map((item) => Number(item))
-          .filter((item) => Number.isFinite(item) && item > 0)
-          .map((item) => Math.floor(item))
-      )
-    ).sort((a, b) => b - a);
+  function parsePositiveInt(value: string): number | null {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return Math.floor(parsed);
+  }
+
+  function pickPolicyDefaultDay(raw: number[] | undefined): number {
+    if (!raw || raw.length === 0) return 30;
+    const max = Math.max(...raw);
+    return Number.isFinite(max) && max > 0 ? Math.floor(max) : 30;
   }
 
   async function loadNotificationPolicy() {
@@ -583,7 +583,7 @@
     try {
       const policy = await getAdminNotificationPolicy(intric);
       notificationPolicy = policy;
-      notificationPolicyDaysInput = policy.default_days_before_expiry.join(", ");
+      notificationPolicyDaysInput = String(pickPolicyDefaultDay(policy.default_days_before_expiry));
       notificationPolicyMaxDaysInput = policy.max_days_before_expiry
         ? String(policy.max_days_before_expiry)
         : "";
@@ -632,26 +632,27 @@
   }
 
   async function saveNotificationPolicy() {
-    const parsedDefaultDays = parseDayValues(notificationPolicyDaysInput);
-    if (parsedDefaultDays.length === 0) {
+    const defaultDay = parsePositiveInt(notificationPolicyDaysInput);
+    if (defaultDay === null) {
       errorMessage = m.api_keys_notifications_policy_days_validation();
       return;
     }
-    const parsedMax = Number(notificationPolicyMaxDaysInput);
-    const maxDays = Number.isFinite(parsedMax) && parsedMax > 0 ? Math.floor(parsedMax) : null;
+    const maxDays = parsePositiveInt(notificationPolicyMaxDaysInput);
 
     notificationPolicySaving = true;
     try {
       const updated = await updateAdminNotificationPolicy(intric, {
         enabled: notificationPolicy.enabled,
-        default_days_before_expiry: parsedDefaultDays,
+        default_days_before_expiry: [defaultDay],
         max_days_before_expiry: maxDays,
         allow_auto_follow_published_assistants:
           notificationPolicy.allow_auto_follow_published_assistants,
         allow_auto_follow_published_apps: notificationPolicy.allow_auto_follow_published_apps
       });
       notificationPolicy = updated;
-      notificationPolicyDaysInput = updated.default_days_before_expiry.join(", ");
+      notificationPolicyDaysInput = String(
+        pickPolicyDefaultDay(updated.default_days_before_expiry)
+      );
       notificationPolicyMaxDaysInput = updated.max_days_before_expiry
         ? String(updated.max_days_before_expiry)
         : "";
@@ -1190,7 +1191,7 @@
           >
             <Input.Text
               bind:value={notificationPolicyDaysInput}
-              placeholder="30, 14, 7, 3, 1"
+              placeholder="30"
               disabled={notificationPolicyLoading || notificationPolicySaving}
               hiddenLabel
             />
