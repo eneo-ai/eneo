@@ -111,11 +111,11 @@ class ApiKeyPolicyService:
                     )
 
         if request.key_type == ApiKeyType.PK:
-            if request.permission == ApiKeyPermission.ADMIN:
+            if request.permission != ApiKeyPermission.READ:
                 raise ApiKeyValidationError(
                     status_code=400,
                     code="invalid_request",
-                    message="pk_ keys cannot have admin permission.",
+                    message="pk_ keys can only have read permission.",
                 )
             if request.allowed_origins is None:
                 raise ApiKeyValidationError(
@@ -303,12 +303,12 @@ class ApiKeyPolicyService:
                 )
                 if (
                     key_type == ApiKeyType.PK
-                    and new_permission == ApiKeyPermission.ADMIN
+                    and new_permission != ApiKeyPermission.READ
                 ):
                     raise ApiKeyValidationError(
                         status_code=400,
                         code="invalid_request",
-                        message="pk_ keys cannot have admin permission.",
+                        message="pk_ keys can only have read permission.",
                     )
 
         if "allowed_origins" in updates:
